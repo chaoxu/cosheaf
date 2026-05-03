@@ -48,6 +48,7 @@ import { DecorationBuilder } from "../plugins/decoration-builder";
 import { fenceProtectionExtension } from "../plugins/fence-protection";
 import { fenceCountMirrorExtension } from "../plugins/fence-count-mirror";
 import { fenceAncestorUpgradeExtension } from "../plugins/fence-ancestor-upgrade";
+import { openerTrailingProtection } from "../plugins/opener-trailing-protection";
 import { getPluginOrFallback } from "../state/plugin-registry-core";
 import {
   addAttributeTitleDecoration,
@@ -357,4 +358,5 @@ export const blockRenderPlugin: Extension = [
   fenceProtectionExtension,
   fenceAncestorUpgradeExtension,
   fenceCountMirrorExtension,
+  openerTrailingProtection,
 ];
