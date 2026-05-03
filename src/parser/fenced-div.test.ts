@@ -135,6 +135,18 @@ describe("fenced div parser", () => {
       expect(divCount).toBe(2);
     });
 
+    it("requires the closing fence to use the same colon count as the opener", () => {
+      // ::: opener with a :::: closer must NOT close the div; the closer's
+      // colon count has to match the opener exactly.
+      const text = "::: {.theorem}\nContent.\n::::";
+      const infos = nodeInfos(text);
+      const divs = infos.filter((n) => n.name === "FencedDiv");
+      expect(divs).toHaveLength(1);
+      // Unclosed at EOF: the outer div should span the whole input, not stop
+      // at the over-long ":::: " line.
+      expect(divs[0].text).toBe(text);
+    });
+
     it("inner div has its own attributes", () => {
       const text = ":::: {.theorem}\n::: {.proof}\nContent.\n:::\n::::";
       const infos = nodeInfos(text);

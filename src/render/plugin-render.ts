@@ -25,7 +25,7 @@ import {
   isFencedStructureSourceEditActive,
 } from "../state/cm-structure-edit";
 import { createChangeChecker } from "../state/change-detection";
-import { collectFencedDivs, docChangeTouchesFencedDivStructure } from "../fenced-block/model";
+import { collectFencedDivs } from "../fenced-block/model";
 import { mathMacrosField } from "../state/math-macros";
 import {
   addSingleLineClosingFence,
@@ -46,6 +46,8 @@ import { type BlockCounterState, blockCounterField } from "../state/block-counte
 import { pluginRegistryField } from "../state/plugin-registry";
 import { DecorationBuilder } from "../plugins/decoration-builder";
 import { fenceProtectionExtension } from "../plugins/fence-protection";
+import { fenceCountMirrorExtension } from "../plugins/fence-count-mirror";
+import { fenceAncestorUpgradeExtension } from "../plugins/fence-ancestor-upgrade";
 import { getPluginOrFallback } from "../state/plugin-registry-core";
 import {
   addAttributeTitleDecoration,
@@ -156,6 +158,7 @@ function buildBlockDecorations(state: EditorState): DecorationSet {
       activeShell && CSS.activeShell,
       activeShell && openerLineVisible && CSS.activeShellTop,
       openerIsBottom && openerLineVisible && CSS.activeShellBottom,
+      openerSourceActive && openerLineVisible && CSS.blockSource,
     );
     if (openerLineVisible) {
       builder.addLine(div.from, headerClass);
@@ -322,10 +325,7 @@ const blockDecorationDependencyChanged = createChangeChecker(
 
 function blockDecorationInputsChanged(tr: Transaction): boolean {
   return hasStructureEditEffect(tr)
-    || (
-      fencedDivRenderRevisionChanged(tr)
-      && (!tr.docChanged || docChangeTouchesFencedDivStructure(tr))
-    )
+    || fencedDivRenderRevisionChanged(tr)
     || blockDecorationDependencyChanged(tr);
 }
 
@@ -355,4 +355,6 @@ export const blockRenderPlugin: Extension = [
   focusTracker,
   blockDecorationField,
   fenceProtectionExtension,
+  fenceAncestorUpgradeExtension,
+  fenceCountMirrorExtension,
 ];

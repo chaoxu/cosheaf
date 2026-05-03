@@ -278,7 +278,7 @@ function fencedDivComposite(
     readFencePrefix(line.text, line.pos),
   );
   fencedDivLog(`composite line="${line.text.slice(0, 40)}" closing=${closingColons} need=${colonCount} lineStart=${cx.lineStart} depth=${cx.depth}`);
-  if (closingColons >= colonCount) {
+  if (closingColons === colonCount) {
     fencedDivLog(`CLOSING at lineStart=${cx.lineStart} depth=${cx.depth}`);
     line.addMarker(
       cx.elt(

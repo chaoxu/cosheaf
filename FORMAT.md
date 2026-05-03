@@ -246,7 +246,9 @@ Proof content.
 ::::
 ```
 
-The inner block must use fewer colons than the outer.
+The opening and closing fence of a single div must use the same number of colons. A closer with a different colon count is not a valid match for that opener.
+
+The inner block must use **fewer** colons than the outer. Each level of nesting must use a strictly smaller colon count than the level enclosing it; reusing the same count at any nested level is not supported.
 
 Same-colon nesting is not supported. For example, this is invalid and will parse incorrectly:
 

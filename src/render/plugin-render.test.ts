@@ -272,7 +272,7 @@ describe("blockDecorationField", () => {
     ).toContain("Satz");
   });
 
-  it("does not rebuild for plain prose edits that only remap fenced-div positions", () => {
+  it("rebuilds when fenced-div positions remap (prose edit before a div)", () => {
     const doc = [
       "# Intro",
       "",
@@ -289,7 +289,7 @@ describe("blockDecorationField", () => {
       selection: { anchor: prosePos + 1 },
     });
 
-    expect(blockDecorationInputsChanged(tr)).toBe(false);
+    expect(blockDecorationInputsChanged(tr)).toBe(true);
   });
 
   it("rebuilds when fenced-div render content changes", () => {
@@ -331,7 +331,7 @@ describe("blockDecorationField", () => {
     // Titled theorem opener stays stable; explicit structure edit does not unmount it.
     const openLine = state.doc.line(1);
     expect(hasLineClassAt(specs, openLine.from, CSS.blockHeader)).toBe(true);
-    expect(hasLineClassAt(specs, openLine.from, CSS.blockSource)).toBe(false);
+    expect(hasLineClassAt(specs, openLine.from, CSS.blockSource)).toBe(true);
     expect(specs.some((spec) =>
       spec.widgetClass === "BlockHeaderWidget" &&
       spec.from === openLine.from
