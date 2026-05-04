@@ -8,6 +8,7 @@ import {
   createStructureEditTargetAt,
   getActiveStructureEditTarget,
 } from "../state/cm-structure-edit";
+import { getClosingFenceRanges } from "../plugins/fence-protection";
 import { dispatchWidgetKeyboardEntry } from "../state/widget-keyboard-entry";
 import { type HiddenWidgetStop } from "./widget-stop-index";
 import { requestSelectionVisibility } from "./vertical-motion-scroll";
@@ -154,9 +155,30 @@ export function activateHiddenWidgetStop(
   }
 
   if (stop.kind === "block-image" && landedHead !== undefined) {
-    const targetLineNumber = forward
-      ? Math.min(view.state.doc.lines, stop.endLine + 1)
+    // For images inside a fenced block (figures/tables), the line directly
+    // adjacent to the image is the closing fence line; the cursor must skip
+    // past those because they are atomic and not user-editable.
+    const closingFenceRanges = getClosingFenceRanges(view.state);
+    const isClosingFenceLine = (lineNumber: number): boolean => {
+      const line = view.state.doc.line(lineNumber);
+      return closingFenceRanges.some(
+        (range) => range.from === line.from || range.to === line.to,
+      );
+    };
+    const totalLines = view.state.doc.lines;
+    let targetLineNumber = forward
+      ? Math.min(totalLines, stop.endLine + 1)
       : Math.max(1, stop.startLine - 1);
+    while (
+      targetLineNumber >= 1
+      && targetLineNumber <= totalLines
+      && isClosingFenceLine(targetLineNumber)
+    ) {
+      targetLineNumber = forward
+        ? Math.min(totalLines, targetLineNumber + 1)
+        : Math.max(1, targetLineNumber - 1);
+      if (targetLineNumber === 1 || targetLineNumber === totalLines) break;
+    }
     const targetLine = view.state.doc.line(targetLineNumber);
     const imageExitPos = forward ? targetLine.from : targetLine.to;
     view.dispatch({

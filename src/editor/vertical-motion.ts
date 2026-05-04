@@ -27,7 +27,11 @@ import {
   snapshotVerticalMotion,
 } from "./vertical-motion-scroll";
 import { type VerticalMotionSnapshot } from "./vertical-motion-scroll-model";
-import { getWidgetStopIndex, hiddenWidgetStopAtPos } from "./widget-stop-index";
+import {
+  firstHiddenWidgetStopBetweenLines,
+  getWidgetStopIndex,
+  hiddenWidgetStopAtPos,
+} from "./widget-stop-index";
 
 export {
   boundedDirectionalScrollTop,
@@ -120,6 +124,36 @@ function handleActiveStructureMotion(
   );
 
   if (!nextInsideActiveStructure) {
+    // Before exiting the active structure, check whether the natural motion
+    // would skip over a hidden widget stop (e.g. a block image inside a
+    // figure). If so, land the cursor on that stop instead of past it so the
+    // user can reach the inner source line by ArrowDown — symmetric with
+    // ArrowUp, which already enters the image source from below.
+    const motionStartLine = view.state.doc.line(Math.min(before.line, nextTargetLine));
+    const motionEndLine = view.state.doc.line(Math.max(before.line, nextTargetLine));
+    const stopsBetween = getWidgetStopIndex(view, [{
+      from: motionStartLine.from,
+      to: motionEndLine.to,
+    }]);
+    const crossedStop = firstHiddenWidgetStopBetweenLines(
+      stopsBetween,
+      before.line,
+      nextTargetLine,
+      forward,
+    );
+    const currentStop = hiddenWidgetStopAtPos(stopsBetween, before.head);
+    if (crossedStop && crossedStop !== currentStop) {
+      clearStructureEditTarget(view);
+      const correctedTargetLine = activateHiddenWidgetStop(view, crossedStop, forward);
+      if (correctedTargetLine !== null) {
+        if (correctedTargetLine !== nextTargetLine) {
+          recordCorrectedLineJump(view, before, nextTargetLine, correctedTargetLine, forward);
+        }
+        finishHandledMotion(view, before, forward);
+        return true;
+      }
+    }
+
     clearStructureEditTarget(view);
     const exitRange = activeStructure.kind === "display-math"
       ? shouldCorrectExit
