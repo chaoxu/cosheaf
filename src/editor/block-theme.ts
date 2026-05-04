@@ -51,7 +51,11 @@ export const blockThemeStyles: Record<string, Record<string, string>> = {
   },
   ".cf-block-caption": {
     display: "block",
-    marginTop: "var(--cf-spacing-xs)",
+    // Use padding instead of margin so CM6's getBoundingClientRect-based
+    // height measurement on the block widget includes this spacing — margins
+    // sit outside the box and would not be reported back to CM6's height map,
+    // shifting click targets on every line below the figure.
+    paddingTop: "var(--cf-spacing-xs)",
     textAlign: "center",
   },
   ".cf-block-caption .cf-block-header-rendered::after": {
@@ -138,6 +142,14 @@ export const blockThemeStyles: Record<string, Record<string, string>> = {
     display: "inline-block",
     verticalAlign: "middle",
     maxWidth: "100%",
+  },
+  // When the image widget is used as a block-level widget (createDOM emits
+  // <div>, e.g. inside .figure), inline-block layout creates an inline
+  // line-box around the image whose height is line-height (not the image
+  // height). CM6 measures only the wrapper, so the extra line-box space
+  // shifts subsequent click targets. Force block layout for the div form.
+  "div.cf-image-wrapper": {
+    display: "block",
   },
   ".cf-image-loading, .cf-image-placeholder": {
     display: "flex",

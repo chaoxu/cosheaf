@@ -22,6 +22,11 @@ class CollapsedStructureLineWidget extends WidgetType {
     const el = document.createElement("div");
     el.className = this.className;
     el.setAttribute("aria-hidden", "true");
+    // The .cf-block:not(.cm-line) rule in editor-theme.css adds vertical
+    // margins for block-wrapper divs in the preview surface. CM6 reports
+    // estimatedHeight = 0 for this widget, so any visual margin here is
+    // unaccounted for in the height map and shifts subsequent line clicks.
+    el.style.margin = "0";
     return el;
   }
 

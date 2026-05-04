@@ -6,6 +6,7 @@ import {
   isCursorOnCloseFence,
   getFencedBlockRenderContext,
   findFencedBlockAt,
+  addCollapsedStructureLine,
   addSingleLineClosingFence,
   addCollapsedClosingFence,
   hideMultiLineClosingFence,
@@ -344,5 +345,24 @@ describe("addCollapsedClosingFence", () => {
     const items: Range<Decoration>[] = [];
     addCollapsedClosingFence(state, 10, 10, items);
     expect(items).toHaveLength(0);
+  });
+});
+
+describe("addCollapsedStructureLine widget", () => {
+  it("renders a div with margin: 0 so the .cf-block:not(.cm-line) rule cannot push subsequent block widgets out of CM6's height map", () => {
+    const state = createEditorState("::: {.figure}\nbody\n:::\n");
+    const items: Range<Decoration>[] = [];
+    const openLine = state.doc.line(1);
+    addCollapsedStructureLine(
+      state,
+      openLine,
+      "cf-doc-block cf-block cf-block-figure",
+      items,
+    );
+    expect(items).toHaveLength(1);
+    const widget = items[0].value.spec.widget;
+    expect(widget.estimatedHeight).toBe(0);
+    const dom = widget.toDOM();
+    expect(dom.style.margin).toBe("0px");
   });
 });

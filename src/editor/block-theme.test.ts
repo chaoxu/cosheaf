@@ -28,7 +28,7 @@ describe("blockThemeStyles", () => {
   it("keeps proof and caption styling on their token-driven structural selectors", () => {
     expect(blockThemeStyles[".cf-block-caption"]).toMatchObject({
       display: "block",
-      marginTop: "var(--cf-spacing-xs)",
+      paddingTop: "var(--cf-spacing-xs)",
       textAlign: "center",
     });
 
