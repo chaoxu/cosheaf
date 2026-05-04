@@ -311,17 +311,14 @@ export class MathWidget extends LazyMacroAwareWidget {
     this.syncLazyWidgetAttrs(el, view, true);
 
     if (this.sourceFrom >= 0 && view) {
-      const content = el.querySelector<HTMLElement>(`.${CSS.mathDisplayContent}`);
-      if (content) {
-        this.bindSourceReveal(content, view);
-        el.addEventListener("mousedown", (event) => {
-          if (event.target instanceof Node && content.contains(event.target)) return;
-          event.preventDefault();
-          view.focus();
-        });
-      } else {
-        this.bindSourceReveal(el, view);
-      }
+      // Bind on the outer wrapper so the whole row activates source-reveal.
+      // The previous version bound only the centered `.cf-math-display-content`,
+      // which left the empty whitespace on either side of the centered KaTeX
+      // unresponsive — users could not click into a multi-line block whose
+      // closing `$$` shared a line with content unless they hit the centered
+      // band, since that is the only place where any visible source line still
+      // exists when the widget is rendered.
+      this.bindSourceReveal(el, view);
       this.observeDisplayHeight(el, view);
     }
 

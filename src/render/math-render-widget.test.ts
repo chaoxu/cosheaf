@@ -164,7 +164,7 @@ describe("MathWidget (display)", () => {
     expect(a.eq(b)).toBe(false);
   });
 
-  it("only reveals source when clicking the rendered display math content", () => {
+  it("reveals source when clicking the rendered display math content", () => {
     const focus = vi.fn();
     const dispatch = vi.fn();
     const view = createMockEditorView({ focus, dispatch });
@@ -185,7 +185,7 @@ describe("MathWidget (display)", () => {
     });
   });
 
-  it("does not reveal source when clicking display-math row whitespace", () => {
+  it("reveals source when clicking display-math row whitespace", () => {
     const focus = vi.fn();
     const dispatch = vi.fn();
     const view = createMockEditorView({ focus, dispatch });
@@ -197,7 +197,10 @@ describe("MathWidget (display)", () => {
     el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
 
     expect(focus).toHaveBeenCalledTimes(1);
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({
+      selection: { anchor: 8 },
+      scrollIntoView: false,
+    });
   });
 
   it("re-attaches display-math click handlers when the DOM is cloned from cache", () => {
