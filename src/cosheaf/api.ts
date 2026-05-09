@@ -52,61 +52,61 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => jsonFetch<{ user: User | null }>("/api/me"),
+  me: () => jsonFetch<{ user: User | null }>("/api/v1/me"),
   login: (username: string, password: string) =>
-    jsonFetch<User>("/api/login", {
+    jsonFetch<User>("/api/v1/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
-  logout: () => jsonFetch<{ ok: true }>("/api/logout", { method: "POST" }),
+  logout: () => jsonFetch<{ ok: true }>("/api/v1/logout", { method: "POST" }),
 
   listWorkspaces: () =>
-    jsonFetch<{ workspaces: Workspace[] }>("/api/workspaces").then((r) => r.workspaces),
+    jsonFetch<{ workspaces: Workspace[] }>("/api/v1/workspaces").then((r) => r.workspaces),
   createWorkspace: (slug: string, name: string) =>
-    jsonFetch<Workspace>("/api/workspaces", {
+    jsonFetch<Workspace>("/api/v1/workspaces", {
       method: "POST",
       body: JSON.stringify({ slug, name }),
     }),
 
   tree: (slug: string) =>
-    jsonFetch<{ files: FileEntry[] }>(`/api/w/${encodeURIComponent(slug)}/tree`).then((r) => r.files),
+    jsonFetch<{ files: FileEntry[] }>(`/api/v1/w/${encodeURIComponent(slug)}/tree`).then((r) => r.files),
   getNote: (slug: string, path: string) =>
     jsonFetch<NoteContent>(
-      `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
+      `/api/v1/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
     ),
   putNote: (slug: string, path: string, content: string, expected_mtime?: number) =>
     jsonFetch<{ ok: true; mtime: number; meta: DocumentMeta; content?: string }>(
-      `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
+      `/api/v1/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
       { method: "PUT", body: JSON.stringify({ content, expected_mtime }) },
     ),
   deleteNote: (slug: string, path: string) =>
     jsonFetch<{ ok: true }>(
-      `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
+      `/api/v1/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
     ),
 
   backlinks: (slug: string, id: string) =>
     jsonFetch<{ backlinks: Backlink[] }>(
-      `/api/w/${encodeURIComponent(slug)}/backlinks?id=${encodeURIComponent(id)}`,
+      `/api/v1/w/${encodeURIComponent(slug)}/backlinks?id=${encodeURIComponent(id)}`,
     ).then((r) => r.backlinks),
 
   search: (slug: string, q: string) =>
     jsonFetch<{ results: SearchResult[] }>(
-      `/api/w/${encodeURIComponent(slug)}/search?q=${encodeURIComponent(q)}`,
+      `/api/v1/w/${encodeURIComponent(slug)}/search?q=${encodeURIComponent(q)}`,
     ).then((r) => r.results),
 
   queue: (slug: string) =>
-    jsonFetch<{ queue: QueueEntry[] }>(`/api/w/${encodeURIComponent(slug)}/queue`).then(
+    jsonFetch<{ queue: QueueEntry[] }>(`/api/v1/w/${encodeURIComponent(slug)}/queue`).then(
       (r) => r.queue,
     ),
   submit: (slug: string, id: string) =>
     jsonFetch<{ status: string }>(
-      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/submit`,
+      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/submit`,
       { method: "POST" },
     ),
   approve: (slug: string, id: string, comment?: string, reviewDocId?: string) =>
     jsonFetch<DecisionResult>(
-      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approve`,
+      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approve`,
       {
         method: "POST",
         body: JSON.stringify({ comment: comment ?? null, review_doc_id: reviewDocId ?? null }),
@@ -114,7 +114,7 @@ export const api = {
     ),
   reject: (slug: string, id: string, comment?: string, reviewDocId?: string) =>
     jsonFetch<DecisionResult>(
-      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/reject`,
+      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/reject`,
       {
         method: "POST",
         body: JSON.stringify({ comment: comment ?? null, review_doc_id: reviewDocId ?? null }),
@@ -122,32 +122,32 @@ export const api = {
     ),
   approvals: (slug: string, id: string) =>
     jsonFetch<{ approvals: ApprovalRecord[] }>(
-      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approvals`,
+      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approvals`,
     ).then((r) => r.approvals),
   proposalTarget: (slug: string, id: string) =>
     jsonFetch<ProposalTarget>(
-      `/api/w/${encodeURIComponent(slug)}/proposal/${encodeURIComponent(id)}/target`,
+      `/api/v1/w/${encodeURIComponent(slug)}/proposal/${encodeURIComponent(id)}/target`,
     ),
   createReview: (slug: string, target_id: string, body = "") =>
     jsonFetch<{ path: string; meta: DocumentMeta }>(
-      `/api/w/${encodeURIComponent(slug)}/review`,
+      `/api/v1/w/${encodeURIComponent(slug)}/review`,
       { method: "POST", body: JSON.stringify({ target_id, body }) },
     ),
   createProposal: (slug: string, target_id: string, body: string) =>
     jsonFetch<{ path: string; meta: DocumentMeta }>(
-      `/api/w/${encodeURIComponent(slug)}/proposal`,
+      `/api/v1/w/${encodeURIComponent(slug)}/proposal`,
       { method: "POST", body: JSON.stringify({ target_id, body }) },
     ),
 
   listTokens: () =>
-    jsonFetch<{ tokens: TokenInfo[] }>("/api/tokens").then((r) => r.tokens),
+    jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),
   createToken: (name: string) =>
-    jsonFetch<{ id: number; name: string; token: string }>("/api/tokens", {
+    jsonFetch<{ id: number; name: string; token: string }>("/api/v1/tokens", {
       method: "POST",
       body: JSON.stringify({ name }),
     }),
   revokeToken: (id: number) =>
-    jsonFetch<{ ok: true }>(`/api/tokens/${id}`, { method: "DELETE" }),
+    jsonFetch<{ ok: true }>(`/api/v1/tokens/${id}`, { method: "DELETE" }),
 };
 
 export interface TokenInfo {

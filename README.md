@@ -59,6 +59,7 @@ server/        Hono API, SQLite indexer, workflow state machine, fs watcher
 src/cosheaf/   React UI (login, workspace, file tree, editor, review surfaces)
 scripts/       dev:all spawner, lefthook checks, Gitea issue + worker-branch tools
 FORMAT.md      Coflat document format reference
+API.md         HTTP API contract (v1) — endpoints, error codes, SSE shape
 AGENTS.md      Repository conventions, commands, debug helpers
 DESIGN.md      Product philosophy and trust model
 ```

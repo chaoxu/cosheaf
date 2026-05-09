@@ -24,7 +24,8 @@ workflow.use("*", requireAuth);
 workflow.use("/:slug/*", requireMembership());
 
 function workflowError(c: Context<AppEnv>, err: unknown): Response {
-  if (err instanceof WorkflowError) return c.json({ error: err.message }, err.status as ContentfulStatusCode);
+  if (err instanceof WorkflowError)
+    return c.json({ error: err.message, code: err.code }, err.status as ContentfulStatusCode);
   throw err;
 }
 
@@ -39,9 +40,11 @@ workflow.get("/:slug/settings", (c) => {
 });
 
 workflow.put("/:slug/settings", async (c) => {
-  if (c.get("workspace").role !== "owner") return c.json({ error: "owner only" }, 403);
+  if (c.get("workspace").role !== "owner")
+    return c.json({ error: "owner only", code: "forbidden" }, 403);
   const body = (await c.req.json().catch(() => null)) as { min_approvals?: number } | null;
-  if (!body || body.min_approvals == null) return c.json({ error: "min_approvals required" }, 400);
+  if (!body || body.min_approvals == null)
+    return c.json({ error: "min_approvals required", code: "validation" }, 400);
   try {
     setMinApprovals(c.get("db"), c.get("workspace").id, body.min_approvals);
   } catch (err) {
@@ -56,7 +59,7 @@ workflow.post("/:slug/proposal", async (c) => {
     | { target_id?: string; body?: string }
     | null;
   if (!body?.target_id || body.body == null) {
-    return c.json({ error: "target_id and body required" }, 400);
+    return c.json({ error: "target_id and body required", code: "validation" }, 400);
   }
   const root = workspaceDir(c.get("config"), ws.slug);
   try {
@@ -70,13 +73,13 @@ workflow.post("/:slug/proposal", async (c) => {
 workflow.post("/:slug/review", async (c) => {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier") {
-    return c.json({ error: "verifier role required" }, 403);
+    return c.json({ error: "verifier role required", code: "forbidden" }, 403);
   }
   const body = (await c.req.json().catch(() => null)) as
     | { target_id?: string; body?: string }
     | null;
   if (!body?.target_id) {
-    return c.json({ error: "target_id required" }, 400);
+    return c.json({ error: "target_id required", code: "validation" }, 400);
   }
   const root = workspaceDir(c.get("config"), ws.slug);
   try {
@@ -107,7 +110,7 @@ workflow.post("/:slug/document/:id/submit", async (c) => {
 async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promise<Response> {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier") {
-    return c.json({ error: "verifier role required" }, 403);
+    return c.json({ error: "verifier role required", code: "forbidden" }, 403);
   }
   const body = (await c.req.json().catch(() => ({}))) as
     | { comment?: string; review_doc_id?: string }
@@ -154,7 +157,7 @@ workflow.get("/:slug/proposal/:id/target", async (c) => {
   try {
     const proposal = getDocument(db, ws.id, c.req.param("id") ?? "");
     if (proposal.type !== "proposal" || !proposal.target_id) {
-      return c.json({ error: "not a proposal with a target" }, 400);
+      return c.json({ error: "not a proposal with a target", code: "validation" }, 400);
     }
     const target = getDocument(db, ws.id, proposal.target_id);
     const full = path.join(workspaceDir(c.get("config"), ws.slug), target.path);

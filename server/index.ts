@@ -19,13 +19,13 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.get("/api/health", (c) => c.json({ ok: true }));
+app.get("/api/v1/health", (c) => c.json({ ok: true }));
 
-app.route("/api", auth);
-app.route("/api/tokens", tokens);
-app.route("/api/workspaces", workspaces);
-app.route("/api/w", notes);
-app.route("/api/w", workflow);
+app.route("/api/v1", auth);
+app.route("/api/v1/tokens", tokens);
+app.route("/api/v1/workspaces", workspaces);
+app.route("/api/v1/w", notes);
+app.route("/api/v1/w", workflow);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`cosheaf server listening on http://localhost:${info.port}`);

@@ -646,7 +646,7 @@ function WorkspaceView({
   }, [dirty]);
 
   useEffect(() => {
-    const url = `/api/w/${encodeURIComponent(workspace.slug)}/events`;
+    const url = `/api/v1/w/${encodeURIComponent(workspace.slug)}/events`;
     const es = new EventSource(url, { withCredentials: true });
     es.onmessage = (msg) => {
       let event: { type: string; path?: string };

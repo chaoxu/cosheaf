@@ -23,8 +23,10 @@ workspaces.get("/", (c) => {
 
 workspaces.post("/", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { slug?: string; name?: string } | null;
-  if (!body?.slug || !body.name) return c.json({ error: "slug and name required" }, 400);
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(body.slug)) return c.json({ error: "invalid slug" }, 400);
+  if (!body?.slug || !body.name)
+    return c.json({ error: "slug and name required", code: "validation" }, 400);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(body.slug))
+    return c.json({ error: "invalid slug", code: "validation" }, 400);
 
   const db = c.get("db");
   const user = c.get("user");
@@ -43,7 +45,8 @@ workspaces.post("/", async (c) => {
   try {
     ws = tx();
   } catch (err) {
-    if ((err as Error).message.includes("UNIQUE")) return c.json({ error: "slug already taken" }, 409);
+    if ((err as Error).message.includes("UNIQUE"))
+      return c.json({ error: "slug already taken", code: "conflict" }, 409);
     throw err;
   }
 

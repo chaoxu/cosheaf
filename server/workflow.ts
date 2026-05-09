@@ -9,9 +9,17 @@ import {
   indexDocument,
 } from "./indexer.js";
 
+export type ErrorCode =
+  | "validation"
+  | "unauthorized"
+  | "forbidden"
+  | "not_found"
+  | "conflict";
+
 export class WorkflowError extends Error {
   constructor(
     public status: number,
+    public code: ErrorCode,
     message: string,
   ) {
     super(message);
@@ -33,7 +41,7 @@ export function getDocument(db: Database.Database, workspaceId: number, docId: s
       "SELECT id, path, type, status, target_id, title FROM documents WHERE workspace_id = ? AND id = ?",
     )
     .get(workspaceId, docId) as DocumentRow | undefined;
-  if (!row) throw new WorkflowError(404, `document '${docId}' not found`);
+  if (!row) throw new WorkflowError(404, "not_found", `document '${docId}' not found`);
   return row;
 }
 
@@ -45,7 +53,8 @@ export function getMinApprovals(db: Database.Database, workspaceId: number): num
 }
 
 export function setMinApprovals(db: Database.Database, workspaceId: number, n: number): void {
-  if (!Number.isInteger(n) || n < 1) throw new WorkflowError(400, "min_approvals must be >= 1");
+  if (!Number.isInteger(n) || n < 1)
+    throw new WorkflowError(400, "validation", "min_approvals must be >= 1");
   db.prepare(
     `INSERT INTO workspace_settings (workspace_id, min_approvals) VALUES (?, ?)
      ON CONFLICT(workspace_id) DO UPDATE SET min_approvals = excluded.min_approvals`,
@@ -83,7 +92,8 @@ export async function submitDocument(
   docId: string,
 ): Promise<{ status: DocumentStatus }> {
   const doc = getDocument(db, workspaceId, docId);
-  if (doc.status !== "draft") throw new WorkflowError(409, `cannot submit (status=${doc.status})`);
+  if (doc.status !== "draft")
+    throw new WorkflowError(409, "conflict", `cannot submit (status=${doc.status})`);
   await applyStatus(db, workspaceId, workspaceRoot, doc, "unreviewed");
   return { status: "unreviewed" };
 }
@@ -164,15 +174,15 @@ export async function decideOnDocument(
 ): Promise<DecisionResult> {
   const doc = getDocument(db, workspaceId, docId);
   if (doc.status !== "unreviewed") {
-    throw new WorkflowError(409, `cannot decide on document with status=${doc.status}`);
+    throw new WorkflowError(409, "conflict", `cannot decide on document with status=${doc.status}`);
   }
   if (reviewDocId) {
     const review = getDocument(db, workspaceId, reviewDocId);
     if (review.type !== "review") {
-      throw new WorkflowError(400, `document ${reviewDocId} is not a review`);
+      throw new WorkflowError(400, "validation", `document ${reviewDocId} is not a review`);
     }
     if (review.target_id !== docId) {
-      throw new WorkflowError(400, `review ${reviewDocId} does not target ${docId}`);
+      throw new WorkflowError(400, "validation", `review ${reviewDocId} does not target ${docId}`);
     }
   }
   db.prepare(

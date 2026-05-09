@@ -74,43 +74,45 @@ notes.get("/:slug/tree", async (c) => {
 
 notes.get("/:slug/note", async (c) => {
   const rel = c.req.query("path");
-  if (!rel) return c.json({ error: "path required" }, 400);
+  if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
   const config = c.get("config");
   const ws = c.get("workspace");
   const root = workspaceDir(config, ws.slug);
   const full = safeJoin(root, rel);
-  if (!full) return c.json({ error: "invalid path" }, 400);
+  if (!full) return c.json({ error: "invalid path", code: "validation" }, 400);
 
   try {
     const [content, stat] = await Promise.all([fs.readFile(full, "utf8"), fs.stat(full)]);
     return c.json({ content, mtime: stat.mtimeMs });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return c.json({ error: "not found" }, 404);
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return c.json({ error: "not found", code: "not_found" }, 404);
     throw err;
   }
 });
 
 notes.put("/:slug/note", async (c) => {
   const rel = c.req.query("path");
-  if (!rel) return c.json({ error: "path required" }, 400);
-  if (!rel.endsWith(".md")) return c.json({ error: "only .md files" }, 400);
+  if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
+  if (!rel.endsWith(".md"))
+    return c.json({ error: "only .md files", code: "validation" }, 400);
 
   const body = (await c.req.json().catch(() => null)) as
     | { content?: string; expected_mtime?: number }
     | null;
-  if (body?.content === undefined) return c.json({ error: "content required" }, 400);
+  if (body?.content === undefined)
+    return c.json({ error: "content required", code: "validation" }, 400);
 
   const config = c.get("config");
   const ws = c.get("workspace");
   const root = workspaceDir(config, ws.slug);
   const full = safeJoin(root, rel);
-  if (!full) return c.json({ error: "invalid path" }, 400);
+  if (!full) return c.json({ error: "invalid path", code: "validation" }, 400);
 
   if (body.expected_mtime !== undefined) {
     try {
       const stat = await fs.stat(full);
       if (Math.floor(stat.mtimeMs) !== Math.floor(body.expected_mtime)) {
-        return c.json({ error: "stale", actual_mtime: stat.mtimeMs }, 409);
+        return c.json({ error: "stale", code: "conflict", actual_mtime: stat.mtimeMs }, 409);
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -122,7 +124,10 @@ notes.put("/:slug/note", async (c) => {
     indexed = indexDocument(c.get("db"), ws.id, rel, body.content);
   } catch (err) {
     if (err instanceof IdConflictError) {
-      return c.json({ error: err.message, conflicting_path: err.existingPath }, 409);
+      return c.json(
+        { error: err.message, code: "conflict", conflicting_path: err.existingPath },
+        409,
+      );
     }
     throw err;
   }
@@ -139,17 +144,17 @@ notes.put("/:slug/note", async (c) => {
 
 notes.delete("/:slug/note", async (c) => {
   const rel = c.req.query("path");
-  if (!rel) return c.json({ error: "path required" }, 400);
+  if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
   const config = c.get("config");
   const ws = c.get("workspace");
   const root = workspaceDir(config, ws.slug);
   const full = safeJoin(root, rel);
-  if (!full) return c.json({ error: "invalid path" }, 400);
+  if (!full) return c.json({ error: "invalid path", code: "validation" }, 400);
 
   try {
     await fs.unlink(full);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return c.json({ error: "not found" }, 404);
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return c.json({ error: "not found", code: "not_found" }, 404);
     throw err;
   }
   markSelfWrite(ws.id, rel);
@@ -211,14 +216,14 @@ notes.get("/:slug/search", (c) => {
       )
       .all(ws.id, ftsQuery, limit) as typeof rows;
   } catch (err) {
-    return c.json({ error: `search failed: ${(err as Error).message}` }, 400);
+    return c.json({ error: `search failed: ${(err as Error).message}`, code: "validation" }, 400);
   }
   return c.json({ results: rows });
 });
 
 notes.get("/:slug/backlinks", (c) => {
   const id = c.req.query("id");
-  if (!id) return c.json({ error: "id required" }, 400);
+  if (!id) return c.json({ error: "id required", code: "validation" }, 400);
   const ws = c.get("workspace");
   return c.json({ backlinks: getBacklinks(c.get("db"), ws.id, id) });
 });

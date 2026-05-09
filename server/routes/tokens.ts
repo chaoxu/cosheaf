@@ -15,7 +15,7 @@ tokens.get("/", (c) => {
 tokens.post("/", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { name?: string } | null;
   const name = body?.name?.trim();
-  if (!name) return c.json({ error: "name required" }, 400);
+  if (!name) return c.json({ error: "name required", code: "validation" }, 400);
   const user = c.get("user");
   const created = createToken(c.get("db"), user.id, name);
   return c.json({ id: created.id, name, token: created.token }, 201);
@@ -23,9 +23,9 @@ tokens.post("/", async (c) => {
 
 tokens.delete("/:id", (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "invalid id" }, 400);
+  if (!Number.isFinite(id)) return c.json({ error: "invalid id", code: "validation" }, 400);
   const user = c.get("user");
   const ok = revokeToken(c.get("db"), user.id, id);
-  if (!ok) return c.json({ error: "not found" }, 404);
+  if (!ok) return c.json({ error: "not found", code: "not_found" }, 404);
   return c.json({ ok: true });
 });

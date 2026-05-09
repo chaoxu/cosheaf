@@ -13,12 +13,13 @@ export const auth = new Hono<AppEnv>();
 
 auth.post("/login", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { username?: string; password?: string } | null;
-  if (!body?.username || !body.password) return c.json({ error: "missing credentials" }, 400);
+  if (!body?.username || !body.password)
+    return c.json({ error: "missing credentials", code: "validation" }, 400);
 
   const db = c.get("db");
   const user = findUserByUsername(db, body.username);
   if (!user || !(await verifyPassword(body.password, user.password_hash))) {
-    return c.json({ error: "invalid credentials" }, 401);
+    return c.json({ error: "invalid credentials", code: "unauthorized" }, 401);
   }
 
   const sessionId = createSession(db, user.id);
