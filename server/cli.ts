@@ -186,6 +186,73 @@ async function workspaceReindex(slug: string): Promise<void> {
   console.log(`done — ${files.length} files indexed, ${updated} rewritten`);
 }
 
+interface SeedOptions {
+  user: string;
+  password: string;
+  workspace: string;
+  workspaceName: string;
+}
+
+function parseSeedFlags(rest: string[]): SeedOptions {
+  const out: SeedOptions = {
+    user: "admin",
+    password: "admin",
+    workspace: "notes",
+    workspaceName: "Notes",
+  };
+  for (let i = 0; i < rest.length; i += 2) {
+    const flag = rest[i];
+    const value = rest[i + 1];
+    if (!value) {
+      console.error(`missing value for ${flag}`);
+      process.exit(1);
+    }
+    if (flag === "--user") out.user = value;
+    else if (flag === "--password") out.password = value;
+    else if (flag === "--workspace") out.workspace = value;
+    else if (flag === "--workspace-name") out.workspaceName = value;
+    else {
+      console.error(`unknown flag: ${flag}`);
+      process.exit(1);
+    }
+  }
+  return out;
+}
+
+async function seed(rest: string[]): Promise<void> {
+  const opts = parseSeedFlags(rest);
+  const config = loadConfig();
+  const db = getDb(config);
+
+  const existingUser = findUserByUsername(db, opts.user);
+  if (existingUser) {
+    console.log(`user ${opts.user} already exists (id=${existingUser.id})`);
+  } else {
+    const hash = await hashPassword(opts.password);
+    const u = createUser(db, opts.user, hash);
+    console.log(`created user ${u.username} (id=${u.id})`);
+  }
+
+  const owner = findUserByUsername(db, opts.user);
+  if (!owner) {
+    console.error("user creation failed");
+    process.exit(1);
+  }
+
+  const existingWs = db
+    .prepare("SELECT id FROM workspaces WHERE slug = ?")
+    .get(opts.workspace) as { id: number } | undefined;
+  if (existingWs) {
+    db.prepare(
+      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner') " +
+        "ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = 'owner'",
+    ).run(existingWs.id, owner.id);
+    console.log(`workspace ${opts.workspace} already exists (id=${existingWs.id})`);
+  } else {
+    workspaceAdd(opts.workspace, opts.workspaceName, opts.user);
+  }
+}
+
 function help(): void {
   console.log(`Usage:
   cosheaf user add <username>
@@ -195,6 +262,7 @@ function help(): void {
   cosheaf workspace add <slug> <name> --owner <username>
   cosheaf workspace member <slug> <username> <role>
   cosheaf workspace reindex <slug>
+  cosheaf seed [--user X] [--password X] [--workspace X] [--workspace-name X]
 `);
 }
 
@@ -222,6 +290,8 @@ async function main(): Promise<void> {
     return workspaceMember(rest[0], rest[1], rest[2]);
   }
   if (cmd === "workspace" && sub === "reindex" && rest[0]) return workspaceReindex(rest[0]);
+
+  if (cmd === "seed") return seed(sub ? [sub, ...rest] : rest);
 
   help();
   process.exit(cmd ? 1 : 0);

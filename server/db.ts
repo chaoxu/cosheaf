@@ -14,7 +14,7 @@ export interface Config {
 
 export function loadConfig(): Config {
   const dataDir = process.env.COSHEAF_DATA_DIR ?? path.resolve(process.cwd(), "data");
-  const port = Number(process.env.COSHEAF_PORT ?? 3000);
+  const port = Number(process.env.COSHEAF_PORT ?? 3030);
   const sessionSecret = process.env.COSHEAF_SESSION_SECRET ?? "dev-secret-change-me";
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(path.join(dataDir, "workspaces"), { recursive: true });
