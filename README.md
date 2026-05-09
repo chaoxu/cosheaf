@@ -1,102 +1,86 @@
-# Coflat
+# Cosheaf
 
-Coflat is a semantic document editor for mathematical writing. It targets papers,
-notes, books, and lecture-style documents that need equations, theorem-like
-blocks, citations, cross-references, figures, tables, and Pandoc export.
+A multi-user mathematical knowledge base built on Coflat-format markdown
+files. Cosheaf is the substrate for trustworthy mathematical writing: pages,
+proposed edits, reviews, approvals, and a "golden" trusted state — all backed
+by plain markdown on disk and a SQLite index.
 
-The app has one shared markdown boundary format and two editor surfaces:
-CM6 rich mode and CM6 source mode.
+The substrate is fully usable by humans alone. Automated agents
+(an `autoprover` layer, planned separately) participate as additional users
+through the same HTTP API.
 
-## Quick Start
+## What it gives you
+
+- **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
+  math, `[@id]` cross-references and citations — see [`FORMAT.md`](./FORMAT.md)).
+- **Workflow lifecycle** — every document is in one of `draft`, `unreviewed`,
+  `golden`, `rejected`, or `archived`. Submit a draft to request review;
+  `min_approvals` approvals from `verifier` users promote it to `golden`.
+- **Proposals** — suggested replacement bodies for an existing page. On
+  approval, the proposal body is merged onto the target and the proposal is
+  archived. The diff is rendered side-by-side at review time.
+- **Reviews as documents** — a verifier can write a long-form review as a
+  first-class markdown document targeting the page under review. The review
+  appears in backlinks, full-text search, and is consumable by other agents.
+  A row in `approvals` tallies the decision and links to the review document.
+- **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the
+  body is full-text searchable.
+- **External-edit safe** — the server watches the workspace directory; edits
+  made in another editor reindex live and stream over SSE to open browsers.
+- **Personal API tokens** — humans and bots authenticate via cookie session
+  or `Authorization: Bearer cs_…` token.
+
+## Quick start
 
 ```bash
 pnpm install
-pnpm dev        # browser app at localhost:5173
-pnpm tauri:dev  # desktop app
+pnpm cli seed --user me --password <pw> --workspace notes --workspace-name Notes
+pnpm dev:all
+# → http://localhost:5173
 ```
 
-Useful verification commands:
-
-```bash
-pnpm typecheck
-pnpm test
-pnpm test:browser
-pnpm build
-```
-
-## Documentation
-
-Start here:
-
-- [docs/authoring.md](./docs/authoring.md) - user guide for writing math,
-  theorem blocks, references, citations, media, tables, and exporting.
-- [FORMAT.md](./FORMAT.md) - canonical Pandoc-flavored markdown format.
-- [docs/editor-surfaces.md](./docs/editor-surfaces.md) - CM6 rich and
-  source-mode behavior over that format.
-- [DESIGN.md](./DESIGN.md) - product philosophy and high-level architecture.
-- [docs/getting-started.md](./docs/getting-started.md) - development workflow
-  and reading order.
-- [docs/feature-inventory.md](./docs/feature-inventory.md) - product surface
-  checklist for compatibility and rebuild work.
-- [AGENTS.md](./AGENTS.md) - repository commands, conventions, debug helpers,
-  and local automation guidance.
-
-Implementation details live under [docs/architecture](./docs/architecture).
-
-## Document Model
-
-Coflat documents are Pandoc-flavored markdown. The format uses Pandoc-native
-constructs wherever possible:
-
-- YAML frontmatter for document metadata and editor/export settings.
-- Fenced divs for theorem-like blocks, proofs, figures, tables, and custom
-  semantic blocks.
-- `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` for math.
-- pandoc-crossref-style labels such as `{#eq:einstein}`.
-- `[@id]` syntax for citations and cross-references.
-
-Pandoc owns export. The editor does not run Pandoc in the live editing loop.
-
-## Editor Surfaces
-
-- **CM6 rich mode** keeps markdown as the live source of truth and renders rich
-  widgets over it.
-- **CM6 source mode** edits the raw markdown.
-
-The app shell, file IO, semantic services, document format, and Tauri backend
-are shared across surfaces.
+`dev:all` runs the API server (`:3030`) and Vite (`:5173`) together with
+prefixed logs. Vite proxies `/api/*` to the server.
 
 ## Stack
 
-- TypeScript, React, Vite
-- CodeMirror 6
-- Lezer markdown parsing with Coflat extensions
-- KaTeX
-- Tauri v2 desktop shell
-- Rust backend for filesystem/native commands
+- TypeScript end-to-end. Hono on the server, React 19 + Tailwind v4 +
+  shadcn primitives in the browser, CodeMirror 6 inside `@chaoxu/coflat-editor`
+  (consumed as a published package; not built here).
+- SQLite via `better-sqlite3`. WAL mode. Plain markdown on disk is the source
+  of truth; the DB is a rebuildable index.
+- File watcher (`fs.watch` recursive) reconciles external edits; SSE pushes
+  changes to connected clients.
 
-## Development
+## Project layout
 
-The common local loop is:
-
-```bash
-pnpm dev
-pnpm test:focused -- <test-file>
-pnpm check:pre-push
+```
+server/        Hono API, SQLite indexer, workflow state machine, fs watcher
+src/cosheaf/   React UI (login, workspace, file tree, editor, review surfaces)
+scripts/       dev:all spawner, lefthook checks, Gitea issue + worker-branch tools
+FORMAT.md      Coflat document format reference
+AGENTS.md      Repository conventions, commands, debug helpers
+DESIGN.md      Product philosophy and trust model
 ```
 
-For browser-driven checks:
+## Commands
 
 ```bash
-pnpm dev
-pnpm test:browser
+pnpm dev:all          # API + Vite together (recommended)
+pnpm server           # API only (port 3030)
+pnpm dev              # Vite only
+pnpm build            # Vite production build
+pnpm preview          # Serve the built bundle on 0.0.0.0
+pnpm test             # vitest run
+pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
+pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```
 
-For a stable manual review server:
+See [AGENTS.md](./AGENTS.md) for full conventions and debug helpers.
 
-```bash
-pnpm dev:show
-```
+## Status
 
-See [docs/verification-workflows.md](./docs/verification-workflows.md) for the
-full verification map.
+Early. The substrate (auth, workflow, indexing, search, proposals, reviews
+as documents) is in place and end-to-end smoke-tested. The autoprover layer
+is not yet built — it lives in a separate repo and talks to Cosheaf over the
+HTTP API.

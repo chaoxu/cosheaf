@@ -1,203 +1,129 @@
-# Coflat — Design Document
+# Cosheaf — Design Document
 
 ## What is it
 
-A desktop/browser semantic document editor optimized for mathematical writing.
-The app switches at runtime between CM6 rich mode and CM6 source mode. Both
-modes share the same document format, app shell, file IO, semantic services,
-and Tauri backend.
+A multi-user mathematical knowledge base. Pages are Coflat-flavored markdown
+files on disk; the workflow that turns drafts into trusted "golden" content
+is a first-class part of the substrate, not bolted on.
+
+Cosheaf is meant to be useful with only human users. It is also meant to be
+usable by autonomous agents over the same HTTP API. Both kinds of participants
+read the same files, file the same proposals, write the same reviews, and
+count toward the same approval thresholds.
 
 ## Core philosophy
 
-- Semantics first, presentation derived.
-- CM6 edits Pandoc-flavored markdown directly; rendered widgets are layered on
-  top of the markdown source.
-- Every block type is a plugin. The core knows nothing about "theorem" or "proof."
-- Pandoc-free editing loop. Pandoc is an export tool, not part of the core.
-- Git-friendly: plain text files, meaningful diffs.
+- **Plain files are the source of truth.** Everything visible in the app is
+  derivable from the markdown files in `data/workspaces/<slug>/`. The SQLite
+  index can be rebuilt by reindexing the directory.
+- **Workflow is trust, not automation.** Approval, review, and golden status
+  exist because a math wiki needs human review of changes to theorems and
+  proofs. Agents are one kind of reviewer, not a separate concept.
+- **Substrate, not platform.** Cosheaf does not know how to prove theorems,
+  run mechanical checkers, schedule exploration, or repair rejected proposals.
+  Those concerns belong in an autoprover layer that participates as a user.
+- **No hidden semantics.** Frontmatter fields (`id`, `type`, `status`,
+  `target`, `title`) are the only structured metadata. Everything else lives
+  in the body, where humans and agents read and write the same way.
+- **Author-friendly.** Editing a markdown file in any editor is a first-class
+  operation. The watcher reconciles external edits into the index; the SSE
+  stream pushes changes to open browsers; an external edit never silently
+  loses status or causes data loss.
 
-## Stack
+## Document model
 
-- **Language**: TypeScript (frontend) + Rust (Tauri backend)
-- **Editors**: CodeMirror 6 for rich/source markdown editing
-- **Parser**: Lezer (extending `@lezer/markdown`)
-- **Math**: KaTeX
-- **Desktop**: Tauri v2 (~5MB binary, native OS webview)
-- **Build**: Vite (frontend), Cargo (backend)
-- **Future CRDT**: Yjs (text-level for v2, AST-level for v3)
-
-## Document format
-
-Pandoc-flavored markdown with these modifications:
-
-- **No indented code blocks.** Fenced code blocks (```) only. Tab/4-space indentation is purely cosmetic.
-- **Math**: Both `$...$` / `$$...$$` and `\(\)` / `\[\]` supported. User chooses.
-- **Equation labels**: Pandoc-crossref style: `$$ Ax = b $$ {#eq:foo}`
-- **Semantic blocks**: Pandoc fenced divs.
-- **References**: `[@id]` for parenthetical, `@id` for narrative. Same syntax for both cross-references and citations. The editor resolves which is which by checking if the id matches a block label or a bib entry.
-- **Nesting**: More colons on outer fences.
-- **Prefer fenced divs over line-prefix syntax for multi-line blocks.** Line-prefix syntax (like `>` for blockquotes) requires a marker on every line, breaks with text reflow, and is a visual convention rather than a semantic one. Fenced divs have clear start/end boundaries, no per-line markers, and named semantics. `>` is still parsed for compatibility when importing existing markdown, but the canonical Coflat way is `::: Quote`. This extends to any block-level construct: `::: Note`, `::: Warning`, `::: Aside`, etc. — all are just plugins.
-
-### Semantic blocks
-
-```markdown
-::: {.theorem #label title="Optional Title with $math$"}
-Content here, parsed as full markdown.
-:::
-
-::: {.proof}
-Content here. ∎
-:::
-```
-
-Blocks are fenced divs with a class (`.theorem`) and optional id (`#label`) and title (text after `}`).
-
-Nesting uses more colons:
-
-```markdown
-:::::: {.theorem #big}
-Setup.
-
-::: {.proof}
-Proof. ∎
-:::
-::::::
-```
-
-### Block plugin system
-
-The core editor only understands "fenced div with attributes." Plugins register:
-
-- **Class name** they handle (e.g., `theorem`, `proof`, `algorithm`)
-- **Parser** for the block body (most reuse the markdown parser; an algorithm plugin could use a pseudocode parser)
-- **Renderer** (how to display in the editor)
-- **Numbering** (counter group, whether to auto-number)
-- **Defaults** (QED symbol, styling, etc.)
-
-A default plugin pack ships with common math environments:
-
-```
-theorem, lemma, corollary, proposition, conjecture,
-definition, proof, remark, example, algorithm
-```
-
-Numbering defaults:
-- theorem, lemma, corollary, proposition, conjecture share one counter
-- definition has its own counter
-- proof, remark, example are unnumbered
-
-Users enable plugins and can override defaults in frontmatter:
+Every document has YAML frontmatter:
 
 ```yaml
 ---
-blocks:
-  theorem: true
-  lemma: true
-  proof: true
-  # custom block
-  claim:
-    counter: theorem  # shares counter with theorem
-    numbered: true
+id: ksh1jyxe         # stable, generated once on first index
+type: page           # page | proposal | review
+status: golden       # draft | unreviewed | golden | rejected | archived
+target: <id>         # only for proposals and reviews; the page they refer to
+title: …             # derived from first heading if absent
 ---
 ```
 
-## Architecture
+The body is Coflat-flavored markdown (see `FORMAT.md`).
+
+### Types
+
+- **`page`** — primary content. Theorems, proofs, definitions, prose. Pages
+  hold the long-lived knowledge.
+- **`proposal`** — a suggested replacement body for a target `page`. Approving
+  a proposal rewrites the target body in place and archives the proposal. The
+  diff between proposal and target is shown to reviewers.
+- **`review`** — a verifier's long-form report on a target. The verifier's
+  reasoning lives in the body; the same document is FTS5-indexed, backlinked
+  from the target, and citable as `[@id]`. An approval row points at the
+  review via `review_doc_id`, so the row remains the unit of tally and the
+  document remains the unit of reasoning.
+
+### Lifecycle
 
 ```
-┌─────────────────────────────────────────────┐
-│  Tauri Window (WebView)                      │
-│  ┌─────────────────────────────────────────┐ │
-│  │            Shared App Shell             │ │
-│  │                                         │ │
-│  │  File IO ←→ markdown boundary ←→ editor │ │
-│  │                                  adapter│ │
-│  │       │                          │      │ │
-│  │       │           ┌──────────────┴────┐ │ │
-│  │       │           │ CM6 markdown      │ │
-│  │       │           │ (rich + source)   │ │
-│  │       │           └──────────────┬────┘ │ │
-│  │       ↓                          ↓      │ │
-│  │  Lezer semantics        KaTeX, blocks,  │ │
-│  │  index/export           references      │ │
-│  └──────────────┬──────────────────────────┘ │
-│                 │ invoke()                    │
-│  ┌──────────────▼──────────────────────────┐ │
-│  │  Rust Backend                           │ │
-│  │  - fs commands (read/write/list/create) │ │
-│  │  - open_folder dialog                   │ │
-│  │  - path security (no traversal)         │ │
-│  └─────────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
-           ↓ save                ↑ load
-     .md files on disk (git-tracked)
-           ↓ export (optional)
-        Pandoc → PDF, LaTeX, DOCX
+draft ──submit──▶ unreviewed ──approve (≥ min)──▶ golden
+                       │
+                       └────reject──▶ rejected
+                                          │
+                                          └──(edit, submit again)──▶ unreviewed
+
+unreviewed proposal ──approve (≥ min)──▶ archived
+                                              └──merges body onto target page
 ```
 
-### Source positions
+`min_approvals` is per-workspace (default 1).
 
-Markdown-derived semantic nodes track source positions whenever they come from
-the boundary document. This enables:
+## Trust model
 
-- Precise source <-> rendered mapping for CM6 Typora-style editing
-- Structural edits in v3 that patch only affected source regions
-- Semantic indexing for search
+- **`memberships`** define what a user can do in a workspace:
+  `owner` (full), `verifier` (can approve/reject), `member` (can author and
+  propose).
+- **Approvals are rows in `approvals`** keyed by `(workspace_id, document_id,
+  verifier_user_id)`. The row records the decision, an optional one-line
+  comment, and an optional pointer to a review document.
+- **Reviews are documents** because reasoning should be reusable mathematical
+  memory: searchable, linkable, citable, agent-readable. A short "lgtm" stays
+  in the row's `comment`; a counterexample or a verification report belongs
+  in a review document.
 
-### Parser
+This split — **rows for the count, documents for the content** — keeps the
+threshold logic simple while letting reviewers' reasoning accumulate as
+first-class content over time.
 
-Extends `@lezer/markdown` with:
+## Autoprover boundary
 
-1. **Remove**: `IndentedCode` block parser
-2. **Add**: `\(\)` and `\[\]` math syntax (InlineParser + BlockParser)
-3. **Add**: Fenced div parser as composite blocks (content parsed as markdown)
-4. **Add**: Equation label parser (`{#eq:foo}` after `$$`)
-5. **Add**: Cross-reference resolver (distinguish `[@id]` as block ref vs citation)
+The autoprover layer is intentionally out of this repo. It will:
 
-Block plugins register additional Lezer extensions for custom body parsers.
+- Authenticate as a user (or many users) via personal API tokens.
+- Subscribe to SSE events to react to changes.
+- Read pages, search by FTS, walk backlinks via the same HTTP API a human uses.
+- Propose new pages or proposals, write reviews, post approvals/rejections.
 
-### Editor rendering surfaces
+Cosheaf will not import or call agent code. If autoprover ever needs
+something cosheaf does not expose, that is a cosheaf API addition, not a
+shared library. This keeps the substrate honest: it has to be usable by a
+person before it is usable by a bot.
 
-- **CM6 rich**: ViewPlugins and decorations render markdown syntax in place. Source reveals on cursor focus.
-- **CM6 source**: Raw markdown without rich rendering.
-- **Math**: KaTeX renders `$...$` and `$$...$$` inline.
-- **Semantic blocks**: Rendered with type label, number, optional title.
-- **Cross-references**: Rendered as "Theorem 1" / "Eq. (3)" etc.
-- **Citations**: Rendered as "(Karger, 2000)" or "Karger (2000)". Bibliography loaded from `.bib` file specified in frontmatter.
+## Stack
 
-### Indexer
+- **Server**: Node, TypeScript, Hono, `better-sqlite3` (WAL mode), `fs.watch`
+  for the workspace directory, Hono SSE for change events, argon2 for
+  password hashing.
+- **Client**: React 19, Vite, Tailwind v4, shadcn primitives themed against
+  the editor's `--cf-*` CSS tokens for a uniform black-and-white look.
+- **Editor**: `@chaoxu/coflat-editor` consumed as a published package. The
+  editor is mounted via `mountEditor`; the cosheaf shell wraps it in a
+  React component and lazy-loads it on first file open.
+- **Format**: Coflat-flavored Pandoc markdown, parsed by Lezer (inside the
+  editor package). KaTeX for math. See `FORMAT.md`.
 
-A background process (or web worker) that:
+## What is not in scope here
 
-- Parses all `.md` files in the project
-- Builds an index of all labeled blocks, equations, citations
-- Resolves cross-references across files
-- Enables semantic search: "find all theorems," "find all blocks referencing $\lambda(M)$"
-- Updates incrementally on file change
-
-## Versioning roadmap
-
-### Current App
-
-- CM6 rich/source editor with Lezer markdown parser extensions
-- Shared Pandoc-flavored markdown format
-- Block plugin system with default math environments
-- KaTeX math rendering
-- Cross-references and citations
-- Semantic search/indexing
-- Desktop app via Tauri v2 (replaced Electron)
-- Git integration: none (use externally)
-- Export: Pandoc CLI (manual)
-
-### v3 (future)
-
-- Full structural editing (AST as source of truth, bidirectional)
-- Real-time collaboration via Yjs (text-level CRDT initially, AST-level later)
-- Integrated export pipeline
-- Git-aware UI (optional)
-
-## Non-goals
-
-- Not a general-purpose note-taking app (no daily notes, no graph view)
-- Not a LaTeX replacement (no fine-grained typographic control)
-- Not a computation notebook (no code execution)
-- Graph view: computable from the index, but not a core UI feature
+- The editor itself (rendering rules, plugins, parser). Lives in
+  `@chaoxu/coflat-editor`.
+- A desktop app. The previous Tauri shell was for the standalone editor;
+  cosheaf is a server-backed web app.
+- Pandoc export. Cosheaf reads and writes markdown; export is a downstream
+  concern.
+- Theorem proving, exploration, mechanical verification. Autoprover layer.

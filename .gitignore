@@ -3,29 +3,13 @@ dist/
 dist-server/
 .vite/
 data/
-src-tauri/target/
-src-tauri/gen/schemas/
 .DS_Store
 *.tsbuildinfo
 .worktrees/
 .claude/state/
 .claude/settings.local.json
-
-.playwright-mcp/
-~/
 .claude/worktrees/
+.playwright-mcp/
 .playwright-cli/
 output/
-# Public showcase only. Non-generated or regression content belongs in fixtures/.
-demo/*
-!demo/index.md
-!demo/coflat.yaml
-!demo/reference.bib
-!demo/showcase/
-!demo/showcase/**
-# Local-only heavy/regression fixtures. Keep the policy note tracked.
-fixtures/*
-!fixtures/README.md
-!fixtures/visual-baselines/
-!fixtures/visual-baselines/**
 __pycache__/
