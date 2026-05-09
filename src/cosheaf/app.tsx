@@ -387,6 +387,7 @@ function WorkspaceView({
   const [queue, setQueue] = useState<QueueEntry[] | null>(null);
   const [proposeOpen, setProposeOpen] = useState(false);
   const [proposalBody, setProposalBody] = useState("");
+  const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
 
   const reloadTree = useCallback(() => {
     api
@@ -726,6 +727,12 @@ function WorkspaceView({
                 {dirty && <span className="dirty">●</span>}
                 <span className="spacer" />
                 <span className="muted small">{status ?? ""}</span>
+                <button
+                  onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
+                  title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
+                >
+                  {editorMode === "rich" ? "Source" : "Rich"}
+                </button>
                 {openDoc?.status === "draft" && (
                   <button onClick={submitDoc} disabled={dirty || busy}>
                     Submit
@@ -771,6 +778,7 @@ function WorkspaceView({
               )}
               <MarkdownEditor
                 value={content}
+                mode={editorMode}
                 onChange={(next) => {
                   setContent(next);
                   setDirty(true);

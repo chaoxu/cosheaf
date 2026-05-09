@@ -75,18 +75,30 @@ console.log("golden badge present:", await goldenBadge.textContent());
 console.log("opening primes.md (golden)");
 await page.click('.ws-file-row:has-text("Primes")');
 await page.waitForSelector(".cm-editor");
-const primesContent = await page.evaluate(() => {
-  const el = document.querySelector(".cm-content");
-  return el?.textContent ?? "";
-});
-console.log("primes content snippet:", JSON.stringify(primesContent.slice(0, 80)));
-if (!primesContent.includes("status: golden")) {
-  throw new Error("primes.md doesn't show frontmatter status: golden");
+// Verify rich-mode rendering: the typora-style ViewPlugins replace the
+// markdown source with a rendered title widget and inline heading. The
+// stub @codemirror/lang-markdown editor never produced these classes.
+await page.waitForSelector(".cm-content .cf-doc-title", { timeout: 5000 });
+const docTitle = await page.textContent(".cm-content .cf-doc-title");
+console.log("rich doc-title widget:", docTitle);
+if (!docTitle?.toLowerCase().includes("prime")) {
+  throw new Error(`expected rich title 'Primes', got '${docTitle}'`);
 }
+// Switch to source mode and verify frontmatter is now visible.
+await page.click('button:has-text("Source")');
+await page.waitForFunction(
+  () => document.querySelector(".cm-content")?.textContent?.includes("status: golden") ?? false,
+  null,
+  { timeout: 5000 },
+);
+console.log("source mode shows frontmatter");
+await page.click('button:has-text("Rich")');
 
 console.log("editing groups.md, save, expect status badge to remain draft");
 await page.click('.ws-file-row:has-text("Theorem on Groups")');
 await page.waitForSelector(".cm-editor");
+// Switch to source mode for deterministic keyboard editing.
+await page.click('button:has-text("Source")');
 await page.click(".cm-content");
 await page.keyboard.press("End");
 await page.keyboard.type("\n\nAnother line.");
