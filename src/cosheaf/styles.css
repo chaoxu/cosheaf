@@ -156,11 +156,9 @@ input:focus, textarea:focus { border-color: var(--c-accent); }
 }
 .dirty { color: var(--c-accent); }
 
-.note-editor {
-  flex: 1; width: 100%;
-  border: none; border-radius: 0;
-  padding: 16px 24px;
-  font: 14px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  resize: none;
+.cm-host {
+  flex: 1; min-height: 0;
+  display: flex;
 }
-.note-editor:focus { border: none; }
+.cm-host .cm-editor { flex: 1; }
+.cm-host .cm-editor.cm-focused { outline: none; }

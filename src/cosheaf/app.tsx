@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, type FileEntry, type User, type Workspace } from "./api";
+import { MarkdownEditor } from "./editor";
 
 type View =
   | { kind: "loading" }
@@ -369,15 +370,16 @@ function WorkspaceView({
                   Save
                 </button>
               </div>
-              <textarea
-                className="note-editor"
+              <MarkdownEditor
                 value={content}
-                onChange={(e) => {
-                  setContent(e.target.value);
+                onChange={(next) => {
+                  setContent(next);
                   setDirty(true);
                   setStatus(null);
                 }}
-                spellCheck={false}
+                onSave={() => {
+                  if (dirty && !busy) save();
+                }}
               />
             </>
           )}

@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 
-const APP_URL = "http://localhost:5180";
+const APP_URL = process.env.APP_URL ?? "http://localhost:5180";
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -13,33 +13,33 @@ page.on("console", (msg) => {
 
 console.log("loading", APP_URL);
 await page.goto(APP_URL);
-await page.waitForSelector("h1", { timeout: 5000 });
-console.log("title:", await page.title());
-console.log("h1:", await page.textContent("h1"));
+await page.waitForSelector("h1");
 
 console.log("logging in as alice");
 await page.fill('input[autocomplete="username"]', "alice");
 await page.fill('input[autocomplete="current-password"]', "secret123");
 await page.click('button[type="submit"]');
 
-await page.waitForSelector("h2", { timeout: 5000 });
-console.log("h2:", await page.textContent("h2"));
+await page.waitForSelector("h2");
 
 console.log("opening demo workspace");
 await page.click(".ws-row");
-await page.waitForSelector(".ws-files", { timeout: 5000 });
-
+await page.waitForSelector(".ws-files");
+await page.waitForFunction(() => document.querySelectorAll(".ws-file-row").length > 0);
 const fileTexts = await page.$$eval(".ws-file-row", (els) => els.map((e) => e.textContent));
-console.log("files in tree:", fileTexts);
+console.log("files:", fileTexts);
 
 console.log("opening hello.md");
 await page.click('.ws-file-row:has-text("hello.md")');
-await page.waitForSelector("textarea.note-editor", { timeout: 5000 });
-const initial = await page.inputValue("textarea.note-editor");
-console.log("loaded length:", initial.length);
+await page.waitForSelector(".cm-editor");
 
-const newContent = `# Edited via Playwright\n\nTimestamp: ${Date.now()}\n`;
-await page.fill("textarea.note-editor", newContent);
+const newContent = `# Edited via Playwright + CM6\n\nTimestamp: ${Date.now()}\n`;
+
+await page.click(".cm-content");
+await page.keyboard.press("Meta+A");
+await page.keyboard.press("Delete");
+await page.keyboard.type(newContent);
+
 await page.click('button:has-text("Save")');
 
 await page.waitForFunction(
@@ -49,11 +49,18 @@ await page.waitForFunction(
 );
 console.log("save status:", await page.textContent(".muted.small"));
 
+const cookies = await page.context().cookies();
+const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 const reloaded = await fetch(`${APP_URL}/api/w/demo/note?path=hello.md`, {
-  headers: { Cookie: (await page.context().cookies()).map((c) => `${c.name}=${c.value}`).join("; ") },
+  headers: { Cookie: cookieHeader },
 });
-const reloadedJson = await reloaded.json();
-console.log("server now has length:", reloadedJson.content.length, "starts:", JSON.stringify(reloadedJson.content.slice(0, 40)));
+const json = await reloaded.json();
+console.log("server length:", json.content.length, "starts:", JSON.stringify(json.content.slice(0, 50)));
+
+if (!json.content.includes("CM6")) {
+  console.error("FAIL: server content missing 'CM6'");
+  process.exit(1);
+}
 
 if (errors.length > 0) {
   console.error("ERRORS:", errors);
