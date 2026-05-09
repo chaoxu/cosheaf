@@ -134,6 +134,19 @@ input:focus, textarea:focus { border-color: var(--c-accent); }
   list-style: none; padding: 0; margin: 0;
   overflow-y: auto; flex: 1;
 }
+
+.search-row { padding: 8px; border-bottom: 1px solid var(--c-border); }
+.search-input { width: 100%; }
+.search-results {
+  display: flex; flex-direction: column; min-height: 0;
+  border-bottom: 1px solid var(--c-border);
+}
+.search-results .ws-files { max-height: 50vh; }
+.search-results mark {
+  background: rgba(255, 235, 59, 0.5);
+  color: inherit;
+  padding: 0 1px;
+}
 .ws-file-row {
   display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
   background: none; border: none; border-radius: 0;

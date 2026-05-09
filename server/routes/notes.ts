@@ -156,6 +156,44 @@ notes.delete("/:slug/note", async (c) => {
   return c.json({ ok: true });
 });
 
+notes.get("/:slug/search", (c) => {
+  const q = c.req.query("q")?.trim();
+  if (!q) return c.json({ results: [] });
+  const limit = Math.min(50, Number(c.req.query("limit") ?? 25));
+  const ws = c.get("workspace");
+  // Wrap loose query in FTS5 prefix-token form, OR-joined.
+  const ftsQuery = q
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => `${t.replace(/["]/g, "")}*`)
+    .join(" OR ");
+  if (!ftsQuery) return c.json({ results: [] });
+
+  let rows: Array<{
+    doc_id: string;
+    path: string;
+    title: string;
+    snippet: string;
+    rank: number;
+  }>;
+  try {
+    rows = c
+      .get("db")
+      .prepare(
+        `SELECT doc_id, path, title,
+                snippet(notes_fts, 4, '<mark>', '</mark>', '...', 16) AS snippet,
+                bm25(notes_fts) AS rank
+           FROM notes_fts
+          WHERE workspace_id = ? AND notes_fts MATCH ?
+          ORDER BY rank LIMIT ?`,
+      )
+      .all(ws.id, ftsQuery, limit) as typeof rows;
+  } catch (err) {
+    return c.json({ error: `search failed: ${(err as Error).message}` }, 400);
+  }
+  return c.json({ results: rows });
+});
+
 notes.get("/:slug/backlinks", (c) => {
   const id = c.req.query("id");
   if (!id) return c.json({ error: "id required" }, 400);

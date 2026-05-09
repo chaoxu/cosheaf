@@ -70,3 +70,12 @@ CREATE TABLE IF NOT EXISTS links (
 
 CREATE INDEX IF NOT EXISTS links_target ON links(workspace_id, target_id);
 CREATE INDEX IF NOT EXISTS links_src ON links(workspace_id, src_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  workspace_id UNINDEXED,
+  doc_id UNINDEXED,
+  path UNINDEXED,
+  title,
+  body,
+  tokenize = 'porter unicode61'
+);

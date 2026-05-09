@@ -114,6 +114,12 @@ export function indexDocument(
          mtime = excluded.mtime`,
     ).run(workspaceId, id, filePath, type, status, target, title, Date.now());
     reindexLinks(db, workspaceId, id, filePath, parsed.body);
+    db.prepare(
+      "DELETE FROM notes_fts WHERE workspace_id = ? AND doc_id = ?",
+    ).run(workspaceId, id);
+    db.prepare(
+      "INSERT INTO notes_fts (workspace_id, doc_id, path, title, body) VALUES (?, ?, ?, ?, ?)",
+    ).run(workspaceId, id, filePath, title ?? "", parsed.body);
   });
   upsert();
 
@@ -133,8 +139,20 @@ export function deleteDocument(
   workspaceId: number,
   filePath: string,
 ): void {
-  db.prepare("DELETE FROM documents WHERE workspace_id = ? AND path = ?").run(
-    workspaceId,
-    filePath,
-  );
+  const tx = db.transaction(() => {
+    const row = db
+      .prepare("SELECT id FROM documents WHERE workspace_id = ? AND path = ?")
+      .get(workspaceId, filePath) as { id: string } | undefined;
+    if (row) {
+      db.prepare("DELETE FROM notes_fts WHERE workspace_id = ? AND doc_id = ?").run(
+        workspaceId,
+        row.id,
+      );
+    }
+    db.prepare("DELETE FROM documents WHERE workspace_id = ? AND path = ?").run(
+      workspaceId,
+      filePath,
+    );
+  });
+  tx();
 }

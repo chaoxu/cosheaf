@@ -5,6 +5,7 @@ import {
   api,
   type Backlink,
   type FileEntry,
+  type SearchResult,
   type TokenInfo,
   type User,
   type Workspace,
@@ -380,6 +381,8 @@ function WorkspaceView({
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [creating, setCreating] = useState(false);
   const [newPath, setNewPath] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
 
   const reloadTree = useCallback(() => {
     api
@@ -509,6 +512,66 @@ function WorkspaceView({
       </header>
       <div className="ws-layout">
         <aside className="ws-sidebar">
+          <div className="search-row">
+            <input
+              className="search-input"
+              placeholder="Search…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  api
+                    .search(workspace.slug, searchQuery)
+                    .then(setSearchResults)
+                    .catch(() => setSearchResults([]));
+                }
+                if (e.key === "Escape") {
+                  setSearchQuery("");
+                  setSearchResults(null);
+                }
+              }}
+            />
+          </div>
+          {searchResults !== null && (
+            <div className="search-results">
+              <div className="header-row tight">
+                <strong className="small muted">{searchResults.length} results</strong>
+                <button
+                  className="link-btn"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSearchResults(null);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <ul className="ws-files">
+                {searchResults.map((r) => (
+                  <li key={r.doc_id}>
+                    <button
+                      className="ws-file-row"
+                      onClick={() => {
+                        const entry = files?.find((f) => f.path === r.path);
+                        if (entry) open(entry);
+                      }}
+                    >
+                      <span className="file-label">
+                        <strong>{r.title ?? r.path}</strong>
+                        <span
+                          className="muted small"
+                          // biome-ignore lint/security/noDangerouslySetInnerHtml: snippet from FTS5 — server-emitted, safe markup
+                          dangerouslySetInnerHTML={{ __html: ` ${r.snippet}` }}
+                        />
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {searchResults === null && (
+          <>
           <div className="header-row tight">
             <strong>Files</strong>
             <button onClick={() => setCreating((v) => !v)}>{creating ? "−" : "+"}</button>
@@ -542,6 +605,8 @@ function WorkspaceView({
               </li>
             ))}
           </ul>
+          </>
+          )}
         </aside>
         <main className="ws-main">
           {!openPath && (

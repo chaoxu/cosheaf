@@ -121,6 +121,18 @@ if (backlinkLabels.length < 2) {
   throw new Error(`expected 2 backlinks (wiki + path), got ${backlinkLabels.length}`);
 }
 
+// Search
+console.log("searching for 'prime'");
+await page.fill(".search-input", "prime");
+await page.keyboard.press("Enter");
+await page.waitForSelector(".search-results");
+const searchTitles = await page.$$eval(".search-results .ws-file-row .file-label strong", (els) =>
+  els.map((e) => e.textContent),
+);
+console.log("search results:", searchTitles);
+if (!searchTitles.includes("Primes")) throw new Error("expected Primes in search results");
+await page.click('button:has-text("Clear")');
+
 // Tokens
 console.log("opening tokens screen");
 await page.click('button:has-text("← Workspaces")');

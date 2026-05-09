@@ -90,6 +90,11 @@ export const api = {
       `/api/w/${encodeURIComponent(slug)}/backlinks?id=${encodeURIComponent(id)}`,
     ).then((r) => r.backlinks),
 
+  search: (slug: string, q: string) =>
+    jsonFetch<{ results: SearchResult[] }>(
+      `/api/w/${encodeURIComponent(slug)}/search?q=${encodeURIComponent(q)}`,
+    ).then((r) => r.results),
+
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/tokens").then((r) => r.tokens),
   createToken: (name: string) =>
@@ -105,6 +110,14 @@ export interface TokenInfo {
   id: number;
   name: string;
   created_at: number;
+}
+
+export interface SearchResult {
+  doc_id: string;
+  path: string;
+  title: string | null;
+  snippet: string;
+  rank: number;
 }
 
 export interface Backlink {
