@@ -10,7 +10,9 @@ import { indexDocument } from "./indexer.js";
 import {
   WorkflowError,
   createProposal,
+  createReview,
   decideOnDocument,
+  getApprovalsForDocument,
   getReviewQueue,
   setMinApprovals,
   submitDocument,
@@ -179,6 +181,64 @@ describe("createProposal + promote", () => {
     expect(parsed.frontmatter.status).toBe("golden");
     expect(parsed.body).toContain("New body.");
     expect(parsed.body).not.toContain("Old body.");
+  });
+});
+
+describe("createReview + attach to approval", () => {
+  it("links review_doc_id on the approval row and surfaces it via getApprovalsForDocument", async () => {
+    const id = await makeDraft(ctx, "page.md", "# T\n");
+    await submitDocument(ctx.db, ctx.workspaceId, ctx.root, id);
+    const review = await createReview(
+      ctx.db,
+      ctx.workspaceId,
+      ctx.root,
+      id,
+      "## Verdict\nLooks correct because…",
+      "alice",
+    );
+    expect(review.meta.type).toBe("review");
+    await decideOnDocument(
+      ctx.db,
+      ctx.workspaceId,
+      ctx.root,
+      id,
+      ctx.alice,
+      "approve",
+      null,
+      review.meta.id,
+    );
+    const rows = getApprovalsForDocument(ctx.db, ctx.workspaceId, id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].review_doc_id).toBe(review.meta.id);
+    expect(rows[0].review_path).toBe(review.reviewPath);
+    expect(rows[0].review_title).toBe("Review of T");
+  });
+
+  it("rejects a review_doc_id whose target doesn't match", async () => {
+    const a = await makeDraft(ctx, "a.md", "# A\n");
+    const b = await makeDraft(ctx, "b.md", "# B\n");
+    await submitDocument(ctx.db, ctx.workspaceId, ctx.root, a);
+    await submitDocument(ctx.db, ctx.workspaceId, ctx.root, b);
+    const wrongReview = await createReview(
+      ctx.db,
+      ctx.workspaceId,
+      ctx.root,
+      b,
+      "x",
+      "alice",
+    );
+    await expect(
+      decideOnDocument(
+        ctx.db,
+        ctx.workspaceId,
+        ctx.root,
+        a,
+        ctx.alice,
+        "approve",
+        null,
+        wrongReview.meta.id,
+      ),
+    ).rejects.toBeInstanceOf(WorkflowError);
   });
 });
 

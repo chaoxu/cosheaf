@@ -160,17 +160,30 @@ export async function decideOnDocument(
   verifierUserId: number,
   decision: "approve" | "reject",
   comment: string | null = null,
+  reviewDocId: string | null = null,
 ): Promise<DecisionResult> {
   const doc = getDocument(db, workspaceId, docId);
   if (doc.status !== "unreviewed") {
     throw new WorkflowError(409, `cannot decide on document with status=${doc.status}`);
   }
+  if (reviewDocId) {
+    const review = getDocument(db, workspaceId, reviewDocId);
+    if (review.type !== "review") {
+      throw new WorkflowError(400, `document ${reviewDocId} is not a review`);
+    }
+    if (review.target_id !== docId) {
+      throw new WorkflowError(400, `review ${reviewDocId} does not target ${docId}`);
+    }
+  }
   db.prepare(
-    `INSERT INTO approvals (workspace_id, document_id, verifier_user_id, decision, comment, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO approvals (workspace_id, document_id, verifier_user_id, decision, comment, review_doc_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(workspace_id, document_id, verifier_user_id) DO UPDATE SET
-       decision = excluded.decision, comment = excluded.comment, created_at = excluded.created_at`,
-  ).run(workspaceId, docId, verifierUserId, decision, comment, Date.now());
+       decision = excluded.decision,
+       comment = excluded.comment,
+       review_doc_id = excluded.review_doc_id,
+       created_at = excluded.created_at`,
+  ).run(workspaceId, docId, verifierUserId, decision, comment, reviewDocId, Date.now());
 
   const counts = getApprovalCounts(db, workspaceId, docId);
 
@@ -226,6 +239,9 @@ export interface ApprovalRecord {
   decision: "approve" | "reject";
   comment: string | null;
   created_at: number;
+  review_doc_id: string | null;
+  review_path: string | null;
+  review_title: string | null;
 }
 
 export function getApprovalsForDocument(
@@ -239,9 +255,15 @@ export function getApprovalsForDocument(
               users.username AS username,
               approvals.decision AS decision,
               approvals.comment AS comment,
-              approvals.created_at AS created_at
+              approvals.created_at AS created_at,
+              approvals.review_doc_id AS review_doc_id,
+              review.path AS review_path,
+              review.title AS review_title
          FROM approvals
          JOIN users ON users.id = approvals.verifier_user_id
+         LEFT JOIN documents AS review
+           ON review.workspace_id = approvals.workspace_id
+          AND review.id = approvals.review_doc_id
         WHERE approvals.workspace_id = ? AND approvals.document_id = ?
         ORDER BY approvals.created_at DESC`,
     )
@@ -269,4 +291,27 @@ export async function createProposal(
   const indexed = indexDocument(db, workspaceId, proposalPath, candidate);
   await writeAtomic(workspaceId, workspaceRoot, proposalPath, indexed.content);
   return { proposalPath, meta: indexed.meta };
+}
+
+export async function createReview(
+  db: Database.Database,
+  workspaceId: number,
+  workspaceRoot: string,
+  targetId: string,
+  body: string,
+  authorUsername: string,
+): Promise<{ reviewPath: string; meta: DocumentMeta }> {
+  const target = getDocument(db, workspaceId, targetId);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const reviewPath = `reviews/${target.id}-${stamp}-${authorUsername}.md`;
+  const fm: Frontmatter = {
+    type: "review",
+    status: "draft",
+    target: target.id,
+    title: `Review of ${target.title ?? target.path}`,
+  };
+  const candidate = serializeDocument(fm, body);
+  const indexed = indexDocument(db, workspaceId, reviewPath, candidate);
+  await writeAtomic(workspaceId, workspaceRoot, reviewPath, indexed.content);
+  return { reviewPath, meta: indexed.meta };
 }

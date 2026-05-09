@@ -38,9 +38,10 @@ function migrate(db: Database.Database): void {
   const cols = db
     .prepare("PRAGMA table_info(approvals)")
     .all() as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === "comment")) {
-    db.exec("ALTER TABLE approvals ADD COLUMN comment TEXT");
-  }
+  const has = (name: string) => cols.some((c) => c.name === name);
+  if (!has("comment")) db.exec("ALTER TABLE approvals ADD COLUMN comment TEXT");
+  if (!has("review_doc_id"))
+    db.exec("ALTER TABLE approvals ADD COLUMN review_doc_id TEXT");
 }
 
 export function workspaceDir(config: Config, slug: string): string {

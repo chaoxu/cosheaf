@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS approvals (
   verifier_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   decision TEXT NOT NULL CHECK (decision IN ('approve', 'reject')),
   comment TEXT,
+  review_doc_id TEXT,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, document_id, verifier_user_id),
   FOREIGN KEY (workspace_id, document_id) REFERENCES documents(workspace_id, id) ON DELETE CASCADE

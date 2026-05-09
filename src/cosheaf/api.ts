@@ -104,15 +104,21 @@ export const api = {
       `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/submit`,
       { method: "POST" },
     ),
-  approve: (slug: string, id: string, comment?: string) =>
+  approve: (slug: string, id: string, comment?: string, reviewDocId?: string) =>
     jsonFetch<DecisionResult>(
       `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approve`,
-      { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ comment: comment ?? null, review_doc_id: reviewDocId ?? null }),
+      },
     ),
-  reject: (slug: string, id: string, comment?: string) =>
+  reject: (slug: string, id: string, comment?: string, reviewDocId?: string) =>
     jsonFetch<DecisionResult>(
       `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/reject`,
-      { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ comment: comment ?? null, review_doc_id: reviewDocId ?? null }),
+      },
     ),
   approvals: (slug: string, id: string) =>
     jsonFetch<{ approvals: ApprovalRecord[] }>(
@@ -121,6 +127,11 @@ export const api = {
   proposalTarget: (slug: string, id: string) =>
     jsonFetch<ProposalTarget>(
       `/api/w/${encodeURIComponent(slug)}/proposal/${encodeURIComponent(id)}/target`,
+    ),
+  createReview: (slug: string, target_id: string, body = "") =>
+    jsonFetch<{ path: string; meta: DocumentMeta }>(
+      `/api/w/${encodeURIComponent(slug)}/review`,
+      { method: "POST", body: JSON.stringify({ target_id, body }) },
     ),
   createProposal: (slug: string, target_id: string, body: string) =>
     jsonFetch<{ path: string; meta: DocumentMeta }>(
@@ -184,6 +195,9 @@ export interface ApprovalRecord {
   decision: "approve" | "reject";
   comment: string | null;
   created_at: number;
+  review_doc_id: string | null;
+  review_path: string | null;
+  review_title: string | null;
 }
 
 export interface ProposalTarget {

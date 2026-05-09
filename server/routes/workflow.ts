@@ -8,6 +8,7 @@ import { requireAuth, requireMembership } from "../middleware.js";
 import {
   WorkflowError,
   createProposal,
+  createReview,
   decideOnDocument,
   getApprovalsForDocument,
   getDocument,
@@ -66,6 +67,33 @@ workflow.post("/:slug/proposal", async (c) => {
   }
 });
 
+workflow.post("/:slug/review", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner" && ws.role !== "verifier") {
+    return c.json({ error: "verifier role required" }, 403);
+  }
+  const body = (await c.req.json().catch(() => null)) as
+    | { target_id?: string; body?: string }
+    | null;
+  if (!body?.target_id) {
+    return c.json({ error: "target_id required" }, 400);
+  }
+  const root = workspaceDir(c.get("config"), ws.slug);
+  try {
+    const r = await createReview(
+      c.get("db"),
+      ws.id,
+      root,
+      body.target_id,
+      body.body ?? "",
+      c.get("user").username,
+    );
+    return c.json({ path: r.reviewPath, meta: r.meta }, 201);
+  } catch (err) {
+    return workflowError(c, err);
+  }
+});
+
 workflow.post("/:slug/document/:id/submit", async (c) => {
   const ws = c.get("workspace");
   const root = workspaceDir(c.get("config"), ws.slug);
@@ -81,10 +109,16 @@ async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promi
   if (ws.role !== "owner" && ws.role !== "verifier") {
     return c.json({ error: "verifier role required" }, 403);
   }
-  const body = (await c.req.json().catch(() => ({}))) as { comment?: string } | null;
+  const body = (await c.req.json().catch(() => ({}))) as
+    | { comment?: string; review_doc_id?: string }
+    | null;
   const comment =
     typeof body?.comment === "string" && body.comment.trim().length > 0
       ? body.comment.trim()
+      : null;
+  const reviewDocId =
+    typeof body?.review_doc_id === "string" && body.review_doc_id.trim().length > 0
+      ? body.review_doc_id.trim()
       : null;
   const root = workspaceDir(c.get("config"), ws.slug);
   try {
@@ -96,6 +130,7 @@ async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promi
       c.get("user").id,
       decision,
       comment,
+      reviewDocId,
     );
     return c.json(r);
   } catch (err) {

@@ -515,7 +515,13 @@ function ProposalDiffPanel({
   );
 }
 
-function ApprovalsPanel({ approvals }: { approvals: ApprovalRecord[] }): ReactElement {
+function ApprovalsPanel({
+  approvals,
+  onOpenReview,
+}: {
+  approvals: ApprovalRecord[];
+  onOpenReview: (path: string) => void;
+}): ReactElement {
   return (
     <SidePanel title={`Reviews${approvals.length > 0 ? ` (${approvals.length})` : ""}`}>
       {approvals.length === 0 && (
@@ -529,6 +535,18 @@ function ApprovalsPanel({ approvals }: { approvals: ApprovalRecord[] }): ReactEl
                 {a.decision}
               </Badge>{" "}
               <strong>{a.username}</strong>
+              {a.review_path && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    onClick={() => a.review_path && onOpenReview(a.review_path)}
+                    className="underline-offset-2 hover:underline"
+                  >
+                    {a.review_title ?? a.review_path}
+                  </button>
+                </>
+              )}
               {a.comment && <div className={cn("text-xs", muted)}>{a.comment}</div>}
             </li>
           ))}
@@ -602,6 +620,10 @@ function WorkspaceView({
   const [reviewComment, setReviewComment] = useState("");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [proposalTarget, setProposalTarget] = useState<ProposalTarget | null>(null);
+  const [pendingReview, setPendingReview] = useState<{
+    targetId: string;
+    reviewId: string;
+  } | null>(null);
 
   const reloadTree = useCallback(() => {
     api
@@ -766,11 +788,14 @@ function WorkspaceView({
       const fn = decision === "approve" ? api.approve : api.reject;
       const comment = reviewComment.trim() || undefined;
       const docId = openDoc.id;
-      fn(workspace.slug, docId, comment)
+      const reviewId =
+        pendingReview && pendingReview.targetId === docId ? pendingReview.reviewId : undefined;
+      fn(workspace.slug, docId, comment, reviewId)
         .then((r) => {
           setStatus(`${decision}d (status: ${r.doc_status})`);
           setOpenDoc((d) => (d ? { ...d, status: r.doc_status } : d));
           setReviewComment("");
+          if (reviewId) setPendingReview(null);
           loadApprovals(docId);
           reloadTree();
           if (r.promoted_meta && r.promoted_meta.id !== docId) {
@@ -782,8 +807,31 @@ function WorkspaceView({
           setStatus(err instanceof ApiError ? err.message : `${decision} failed`),
         );
     },
-    [openDoc, workspace.slug, files, open, reloadTree, reviewComment, loadApprovals],
+    [openDoc, workspace.slug, files, open, reloadTree, reviewComment, loadApprovals, pendingReview],
   );
+
+  const writeReview = useCallback(() => {
+    if (!openDoc?.id) return;
+    const targetId = openDoc.id;
+    api
+      .createReview(workspace.slug, targetId, "")
+      .then((r) => {
+        setPendingReview({ targetId, reviewId: r.meta.id });
+        reloadTree();
+        const newPath = r.path;
+        api
+          .tree(workspace.slug)
+          .then((files) => {
+            const entry = files.find((f) => f.path === newPath);
+            if (entry) open(entry);
+            setFiles(files);
+          })
+          .catch(() => undefined);
+      })
+      .catch((err: unknown) =>
+        setStatus(err instanceof ApiError ? err.message : "Failed to create review"),
+      );
+  }, [openDoc, workspace.slug, open, reloadTree]);
 
   const submitProposal = useCallback(() => {
     if (!openDoc?.id || !proposalBody.trim()) return;
@@ -1047,6 +1095,12 @@ function WorkspaceView({
                         onChange={(e) => setReviewComment(e.target.value)}
                         className="h-8 max-w-[16rem]"
                       />
+                      <Button variant="outline" size="sm" onClick={writeReview} disabled={busy}>
+                        Write review
+                      </Button>
+                      {pendingReview?.targetId === openDoc?.id && (
+                        <span className={cn("text-xs", muted)}>review attached</span>
+                      )}
                       <Button size="sm" onClick={() => decideDoc("approve")} disabled={busy}>
                         Approve
                       </Button>
@@ -1132,7 +1186,13 @@ function WorkspaceView({
                 />
               )}
               {openDoc?.id && approvals.length > 0 && (
-                <ApprovalsPanel approvals={approvals} />
+                <ApprovalsPanel
+                  approvals={approvals}
+                  onOpenReview={(reviewPath) => {
+                    const entry = files?.find((f) => f.path === reviewPath);
+                    if (entry) open(entry);
+                  }}
+                />
               )}
             </>
           )}
