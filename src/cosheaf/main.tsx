@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { CosheafApp } from "./app";
-import "./styles.css";
+import "./globals.css";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("missing #app");

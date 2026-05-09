@@ -13,8 +13,13 @@ import {
   type User,
   type Workspace,
 } from "./api";
+import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Textarea } from "./components/ui/textarea";
 import { lineDiff, stripFrontmatter } from "./diff";
 import { MarkdownEditor } from "./editor";
+import { cn } from "./lib/utils";
 
 type View =
   | { kind: "loading" }
@@ -22,6 +27,11 @@ type View =
   | { kind: "workspaces"; user: User }
   | { kind: "tokens"; user: User }
   | { kind: "workspace"; user: User; workspace: Workspace };
+
+type DocStatus = NonNullable<FileEntry["doc"]>["status"];
+
+const muted = "text-[var(--cf-muted)]";
+const borderColor = "border-[var(--cf-border)]";
 
 export function CosheafApp(): ReactElement {
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -33,7 +43,9 @@ export function CosheafApp(): ReactElement {
       .catch(() => setView({ kind: "login" }));
   }, []);
 
-  if (view.kind === "loading") return <div className="status-page">Loading...</div>;
+  if (view.kind === "loading") {
+    return <div className="h-full" />;
+  }
   if (view.kind === "login") {
     return <LoginScreen onLoggedIn={(user) => setView({ kind: "workspaces", user })} />;
   }
@@ -66,6 +78,24 @@ export function CosheafApp(): ReactElement {
   );
 }
 
+function Topbar({ children }: { children: React.ReactNode }): ReactElement {
+  return (
+    <header
+      className={cn("flex items-center gap-3 px-4 py-2 border-b", borderColor)}
+    >
+      {children}
+    </header>
+  );
+}
+
+function Screen({ children }: { children: React.ReactNode }): ReactElement {
+  return <div className="flex h-full flex-col">{children}</div>;
+}
+
+function ContentPane({ children }: { children: React.ReactNode }): ReactElement {
+  return <main className="mx-auto w-full max-w-3xl px-8 py-6">{children}</main>;
+}
+
 function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): ReactElement {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -86,31 +116,34 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
   };
 
   return (
-    <div className="login-screen">
-      <form className="login-card" onSubmit={submit}>
-        <h1>cosheaf</h1>
-        <label>
+    <div className="flex h-full items-center justify-center">
+      <form
+        onSubmit={submit}
+        className={cn("flex w-80 flex-col gap-3 rounded-lg border p-7", borderColor)}
+      >
+        <h1 className="mb-2 text-[22px] font-semibold">cosheaf</h1>
+        <label className={cn("flex flex-col gap-1 text-xs", muted)}>
           <span>username</span>
-          <input
+          <Input
             autoFocus
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
           />
         </label>
-        <label>
+        <label className={cn("flex flex-col gap-1 text-xs", muted)}>
           <span>password</span>
-          <input
+          <Input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
           />
         </label>
-        {error && <div className="error">{error}</div>}
-        <button type="submit" disabled={busy || !username || !password}>
+        {error && <div className="py-2 text-red-600">{error}</div>}
+        <Button type="submit" disabled={busy || !username || !password}>
           {busy ? "..." : "Sign in"}
-        </button>
+        </Button>
       </form>
     </div>
   );
@@ -159,68 +192,80 @@ function WorkspaceList({
       );
   };
 
-  const handleLogout = () => {
-    api.logout().then(onLogout);
-  };
-
   return (
-    <div className="screen">
-      <header className="topbar">
+    <Screen>
+      <Topbar>
         <strong>cosheaf</strong>
-        <span className="spacer" />
-        <span className="muted">{user.username}</span>
-        <button className="link-btn" onClick={onTokens}>
+        <span className="flex-1" />
+        <span className={muted}>{user.username}</span>
+        <Button variant="ghost" size="sm" onClick={onTokens}>
           Tokens
-        </button>
-        <button className="link-btn" onClick={handleLogout}>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => api.logout().then(onLogout)}
+        >
           Sign out
-        </button>
-      </header>
-      <main className="content">
-        <div className="header-row">
-          <h2>Workspaces</h2>
-          <button onClick={() => setCreating((v) => !v)}>{creating ? "Cancel" : "+ New"}</button>
+        </Button>
+      </Topbar>
+      <ContentPane>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Workspaces</h2>
+          <Button variant="outline" size="sm" onClick={() => setCreating((v) => !v)}>
+            {creating ? "Cancel" : "+ New"}
+          </Button>
         </div>
 
         {creating && (
-          <form className="inline-form" onSubmit={handleCreate}>
-            <input
+          <form onSubmit={handleCreate} className="mb-3 flex gap-2">
+            <Input
               placeholder="slug (lowercase, dashes)"
               value={newSlug}
               onChange={(e) => setNewSlug(e.target.value)}
               autoFocus
             />
-            <input
+            <Input
               placeholder="display name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
-            <button type="submit" disabled={!newSlug || !newName}>
+            <Button type="submit" disabled={!newSlug || !newName}>
               Create
-            </button>
+            </Button>
           </form>
         )}
 
-        {error && <div className="error">{error}</div>}
-        {workspaces === null && <div className="muted">Loading...</div>}
+        {error && <div className="py-2 text-red-600">{error}</div>}
         {workspaces && workspaces.length === 0 && (
-          <div className="muted">No workspaces yet. Create one to get started.</div>
+          <div className={muted}>No workspaces yet. Create one to get started.</div>
         )}
         {workspaces && workspaces.length > 0 && (
-          <ul className="ws-list">
+          <ul className="mt-3 space-y-1.5">
             {workspaces.map((ws) => (
               <li key={ws.id}>
-                <button className="ws-row" onClick={() => onPick(ws)}>
+                <button
+                  type="button"
+                  onClick={() => onPick(ws)}
+                  className="flex w-full items-center gap-2.5 rounded-md px-4 py-3 text-left hover:bg-[var(--cf-hover)]"
+                >
                   <strong>{ws.name}</strong>
-                  <span className="muted">/{ws.slug}</span>
-                  <span className="role">{ws.role}</span>
+                  <span className={muted}>/{ws.slug}</span>
+                  <span
+                    className={cn(
+                      "ml-auto text-[10px] uppercase tracking-wider",
+                      muted,
+                    )}
+                  >
+                    {ws.role}
+                  </span>
                 </button>
               </li>
             ))}
           </ul>
         )}
-      </main>
-    </div>
+      </ContentPane>
+    </Screen>
   );
 }
 
@@ -273,65 +318,101 @@ function TokensScreen({
   };
 
   return (
-    <div className="screen">
-      <header className="topbar">
-        <button className="link-btn" onClick={onBack}>
+    <Screen>
+      <Topbar>
+        <Button variant="ghost" size="sm" onClick={onBack}>
           ← Workspaces
-        </button>
+        </Button>
         <strong>Tokens</strong>
-        <span className="spacer" />
-        <span className="muted">{user.username}</span>
-        <button className="link-btn" onClick={() => api.logout().then(onLogout)}>
+        <span className="flex-1" />
+        <span className={muted}>{user.username}</span>
+        <Button variant="ghost" size="sm" onClick={() => api.logout().then(onLogout)}>
           Sign out
-        </button>
-      </header>
-      <main className="content">
-        <p className="muted small">
+        </Button>
+      </Topbar>
+      <ContentPane>
+        <p className={cn("text-xs", muted)}>
           Personal access tokens authenticate as you (humans or agents) via{" "}
           <code>Authorization: Bearer &lt;token&gt;</code>. The token value is shown once at
           creation; copy it now.
         </p>
-        <form className="inline-form" onSubmit={create}>
-          <input
+        <form onSubmit={create} className="mt-3 flex gap-2">
+          <Input
             placeholder="token name (e.g., 'my-agent')"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <button type="submit" disabled={!name.trim()}>
+          <Button type="submit" disabled={!name.trim()}>
             Create token
-          </button>
+          </Button>
         </form>
 
         {created && (
-          <div className="token-card">
-            <div className="muted small">{created.name} — copy this now, it won't be shown again:</div>
-            <code className="token-value">{created.token}</code>
-            <button className="link-btn" onClick={() => setCreated(null)}>
+          <div
+            className={cn(
+              "my-3 flex flex-col gap-2 rounded-md border border-[var(--cf-fg)] p-3",
+            )}
+          >
+            <div className={cn("text-xs", muted)}>
+              {created.name} — copy this now, it won't be shown again:
+            </div>
+            <code className="select-all break-all rounded border border-[var(--cf-border)] p-2 font-mono">
+              {created.token}
+            </code>
+            <Button variant="ghost" size="sm" onClick={() => setCreated(null)}>
               Dismiss
-            </button>
+            </Button>
           </div>
         )}
 
-        {error && <div className="error">{error}</div>}
-        {tokens === null && <div className="muted">Loading...</div>}
-        {tokens && tokens.length === 0 && <div className="muted">No tokens yet.</div>}
+        {error && <div className="py-2 text-red-600">{error}</div>}
+        {tokens && tokens.length === 0 && <div className={muted}>No tokens yet.</div>}
         {tokens && tokens.length > 0 && (
-          <ul className="ws-list">
+          <ul className="mt-3 space-y-1.5">
             {tokens.map((t) => (
               <li key={t.id}>
-                <div className="ws-row" style={{ pointerEvents: "auto", cursor: "default" }}>
+                <div className="flex w-full items-center gap-2.5 rounded-md px-4 py-3">
                   <strong>{t.name}</strong>
-                  <span className="muted small">
+                  <span className={cn("text-xs", muted)}>
                     created {new Date(t.created_at).toISOString().slice(0, 10)}
                   </span>
-                  <span className="spacer" />
-                  <button onClick={() => revoke(t.id)}>Revoke</button>
+                  <span className="flex-1" />
+                  <Button variant="outline" size="sm" onClick={() => revoke(t.id)}>
+                    Revoke
+                  </Button>
                 </div>
               </li>
             ))}
           </ul>
         )}
-      </main>
+      </ContentPane>
+    </Screen>
+  );
+}
+
+function SidePanel({
+  title,
+  children,
+}: {
+  title: ReactElement | string;
+  children: React.ReactNode;
+}): ReactElement {
+  return (
+    <div
+      className={cn(
+        "max-h-[30%] overflow-y-auto border-t px-4 pb-3 pt-2",
+        borderColor,
+      )}
+    >
+      <div
+        className={cn(
+          "mb-1 text-[11px] uppercase tracking-wider",
+          muted,
+        )}
+      >
+        {title}
+      </div>
+      {children}
     </div>
   );
 }
@@ -344,22 +425,27 @@ function BacklinksPanel({
   onPick: (srcPath: string) => void;
 }): ReactElement {
   return (
-    <div className="backlinks">
-      <div className="backlinks-header">Backlinks {links.length > 0 && `(${links.length})`}</div>
-      {links.length === 0 && <div className="muted small padded">None.</div>}
+    <SidePanel title={`Backlinks${links.length > 0 ? ` (${links.length})` : ""}`}>
+      {links.length === 0 && <div className={cn("text-xs px-2 py-1", muted)}>None.</div>}
       {links.length > 0 && (
-        <ul>
+        <ul className="flex flex-col gap-0.5">
           {links.map((bl) => (
             <li key={`${bl.src_id}-${bl.target_label}`}>
-              <button className="link-btn" onClick={() => onPick(bl.src_path)}>
-                <strong>{bl.src_title ?? bl.src_path}</strong>
-                <span className="muted small"> {bl.target_label}</span>
+              <button
+                type="button"
+                onClick={() => onPick(bl.src_path)}
+                className={cn(
+                  "rounded px-1 py-0.5 text-left hover:bg-[var(--cf-hover)]",
+                )}
+              >
+                <strong>{bl.src_title ?? bl.src_path}</strong>{" "}
+                <span className={cn("text-xs", muted)}>{bl.target_label}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </SidePanel>
   );
 }
 
@@ -380,63 +466,105 @@ function ProposalDiffPanel({
     if (d.kind === "add") adds++;
     else if (d.kind === "del") dels++;
   }
-  const header = (
-    <div className="backlinks-header">
+  const title = (
+    <>
       Diff vs{" "}
-      <button className="link-btn" onClick={() => onOpenTarget(target.target_path)}>
+      <button
+        type="button"
+        onClick={() => onOpenTarget(target.target_path)}
+        className="underline-offset-2 hover:underline"
+      >
         {target.target_title ?? target.target_path}
       </button>{" "}
-      <span className="muted small">
+      <span className={cn("text-xs normal-case tracking-normal", muted)}>
         +{adds} −{dels}
       </span>
-    </div>
+    </>
   );
   if (adds === 0 && dels === 0) {
     return (
-      <div className="backlinks">
-        {header}
-        <div className="muted small padded">No changes.</div>
-      </div>
+      <SidePanel title={title}>
+        <div className={cn("px-2 py-1 text-xs", muted)}>No changes.</div>
+      </SidePanel>
     );
   }
   return (
-    <div className="backlinks">
-      {header}
-      <div className="diff-block">
+    <SidePanel title={title}>
+      <div className="whitespace-pre-wrap break-words font-mono text-xs leading-snug">
         {diff.map((line, idx) => (
-          <div key={idx} className={`diff-line diff-${line.kind}`}>
-            <span className="diff-marker">
+          <div
+            key={idx}
+            className={cn(
+              "px-1.5",
+              line.kind === "eq" && muted,
+              line.kind === "add" && "bg-green-500/15",
+              line.kind === "del" && "bg-red-500/15",
+            )}
+          >
+            <span className="inline-block w-5 select-none opacity-60">
               {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
             </span>
             {line.text || " "}
           </div>
         ))}
       </div>
-    </div>
+    </SidePanel>
   );
 }
 
 function ApprovalsPanel({ approvals }: { approvals: ApprovalRecord[] }): ReactElement {
   return (
-    <div className="backlinks">
-      <div className="backlinks-header">
-        Reviews {approvals.length > 0 && `(${approvals.length})`}
-      </div>
-      {approvals.length === 0 && <div className="muted small padded">No reviews yet.</div>}
+    <SidePanel title={`Reviews${approvals.length > 0 ? ` (${approvals.length})` : ""}`}>
+      {approvals.length === 0 && (
+        <div className={cn("px-2 py-1 text-xs", muted)}>No reviews yet.</div>
+      )}
       {approvals.length > 0 && (
-        <ul>
+        <ul className="flex flex-col gap-1">
           {approvals.map((a) => (
             <li key={a.verifier_user_id}>
-              <span className={`badge badge-${a.decision === "approve" ? "golden" : "rejected"}`}>
+              <Badge variant={a.decision === "approve" ? "golden" : "rejected"}>
                 {a.decision}
-              </span>{" "}
+              </Badge>{" "}
               <strong>{a.username}</strong>
-              {a.comment && <div className="muted small">{a.comment}</div>}
+              {a.comment && <div className={cn("text-xs", muted)}>{a.comment}</div>}
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </SidePanel>
+  );
+}
+
+function statusBadge(status: DocStatus): ReactElement {
+  return <Badge variant={status}>{status}</Badge>;
+}
+
+function FileRow({
+  active,
+  title,
+  doc,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  title?: string;
+  doc?: FileEntry["doc"];
+  onClick: () => void;
+  children: React.ReactNode;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={cn(
+        "flex w-full items-center gap-1.5 px-3 py-1 text-left text-[13px] text-[var(--cf-fg)] hover:bg-[var(--cf-hover)]",
+        active && "bg-[var(--cf-active)] font-medium",
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {doc && statusBadge(doc.status)}
+    </button>
   );
 }
 
@@ -606,7 +734,7 @@ function WorkspaceView({
         }
       })
       .finally(() => setBusy(false));
-  }, [openPath, content, mtime, workspace.slug, reloadTree]);
+  }, [openPath, content, mtime, workspace.slug, reloadTree, loadBacklinks]);
 
   const openQueue = useCallback(() => {
     api
@@ -669,7 +797,6 @@ function WorkspaceView({
       );
   }, [openDoc, proposalBody, workspace.slug, reloadTree]);
 
-  // Cmd/Ctrl+S to save.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
@@ -704,43 +831,49 @@ function WorkspaceView({
       .finally(() => setBusy(false));
   };
 
-  const handleLogout = () => {
-    api.logout().then(onLogout);
-  };
-
   return (
-    <div className="screen">
-      <header className="topbar">
-        <button className="link-btn" onClick={onBack}>
+    <Screen>
+      <Topbar>
+        <Button variant="ghost" size="sm" onClick={onBack}>
           ← Workspaces
-        </button>
+        </Button>
         <strong>{workspace.name}</strong>
-        <span className="muted">/{workspace.slug}</span>
-        <span className="spacer" />
-        <button className="link-btn" onClick={() => (queue === null ? openQueue() : setQueue(null))}>
+        <span className={muted}>/{workspace.slug}</span>
+        <span className="flex-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => (queue === null ? openQueue() : setQueue(null))}
+        >
           {queue === null ? "Queue" : "Files"}
-        </button>
-        <span className="muted">{user.username}</span>
-        <button className="link-btn" onClick={handleLogout}>
+        </Button>
+        <span className={muted}>{user.username}</span>
+        <Button variant="ghost" size="sm" onClick={() => api.logout().then(onLogout)}>
           Sign out
-        </button>
-      </header>
-      <div className="ws-layout">
-        <aside className="ws-sidebar">
-          {queue !== null && (
-            <div className="queue-panel">
-              <div className="header-row tight">
+        </Button>
+      </Topbar>
+      <div className="flex min-h-0 flex-1">
+        <aside
+          className={cn(
+            "flex w-60 shrink-0 flex-col border-r min-h-0",
+            borderColor,
+          )}
+        >
+          {queue !== null ? (
+            <div className="flex min-h-0 flex-col">
+              <div className="flex items-center justify-between gap-3 px-2 py-1">
                 <strong>Review queue</strong>
-                <button className="link-btn" onClick={openQueue}>
+                <Button variant="ghost" size="icon" onClick={openQueue} aria-label="Refresh">
                   ↻
-                </button>
+                </Button>
               </div>
-              {queue.length === 0 && <div className="muted padded small">Nothing to review.</div>}
-              <ul className="ws-files">
+              {queue.length === 0 && (
+                <div className={cn("px-3 py-2 text-xs", muted)}>Nothing to review.</div>
+              )}
+              <ul className="m-0 flex-1 overflow-y-auto p-0">
                 {queue.map((entry) => (
                   <li key={entry.id}>
-                    <button
-                      className="ws-file-row"
+                    <FileRow
                       onClick={() => {
                         const f = files?.find((x) => x.path === entry.path);
                         if (f) {
@@ -749,186 +882,216 @@ function WorkspaceView({
                         }
                       }}
                     >
-                      <span className="file-label">
-                        <strong>{entry.title ?? entry.path}</strong>
-                        <span className="muted small">
-                          {" "}
-                          {entry.type}
-                          {entry.target_id && ` → ${entry.target_id}`}
-                          {entry.approvals > 0 && ` ✓${entry.approvals}`}
-                          {entry.rejections > 0 && ` ✗${entry.rejections}`}
-                        </span>
+                      <strong>{entry.title ?? entry.path}</strong>
+                      <span className={cn("text-xs", muted)}>
+                        {" "}
+                        {entry.type}
+                        {entry.target_id && ` → ${entry.target_id}`}
+                        {entry.approvals > 0 && ` ✓${entry.approvals}`}
+                        {entry.rejections > 0 && ` ✗${entry.rejections}`}
                       </span>
-                    </button>
+                    </FileRow>
                   </li>
                 ))}
               </ul>
             </div>
-          )}
-          {queue === null && (
-          <>
-          <div className="search-row">
-            <input
-              className="search-input"
-              placeholder="Search…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  api
-                    .search(workspace.slug, searchQuery)
-                    .then(setSearchResults)
-                    .catch(() => setSearchResults([]));
-                }
-                if (e.key === "Escape") {
-                  setSearchQuery("");
-                  setSearchResults(null);
-                }
-              }}
-            />
-          </div>
-          {searchResults !== null && (
-            <div className="search-results">
-              <div className="header-row tight">
-                <strong className="small muted">{searchResults.length} results</strong>
-                <button
-                  className="link-btn"
-                  onClick={() => {
-                    setSearchQuery("");
-                    setSearchResults(null);
+          ) : (
+            <>
+              <div className={cn("border-b p-2", borderColor)}>
+                <Input
+                  placeholder="Search…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      api
+                        .search(workspace.slug, searchQuery)
+                        .then(setSearchResults)
+                        .catch(() => setSearchResults([]));
+                    }
+                    if (e.key === "Escape") {
+                      setSearchQuery("");
+                      setSearchResults(null);
+                    }
                   }}
-                >
-                  Clear
-                </button>
+                />
               </div>
-              <ul className="ws-files">
-                {searchResults.map((r) => (
-                  <li key={r.doc_id}>
-                    <button
-                      className="ws-file-row"
+              {searchResults !== null ? (
+                <div className={cn("flex min-h-0 flex-col border-b", borderColor)}>
+                  <div className="flex items-center justify-between gap-3 px-2 py-1">
+                    <span className={cn("text-xs", muted)}>
+                      {searchResults.length} results
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => {
-                        const entry = files?.find((f) => f.path === r.path);
-                        if (entry) open(entry);
+                        setSearchQuery("");
+                        setSearchResults(null);
                       }}
                     >
-                      <span className="file-label">
-                        <strong>{r.title ?? r.path}</strong>
-                        <span
-                          className="muted small"
-                          // biome-ignore lint/security/noDangerouslySetInnerHtml: snippet from FTS5 — server-emitted, safe markup
-                          dangerouslySetInnerHTML={{ __html: ` ${r.snippet}` }}
-                        />
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {searchResults === null && (
-          <>
-          <div className="header-row tight">
-            <strong>Files</strong>
-            <button onClick={() => setCreating((v) => !v)}>{creating ? "−" : "+"}</button>
-          </div>
-          {creating && (
-            <form className="inline-form tight" onSubmit={create}>
-              <input
-                placeholder="path/to/note.md"
-                value={newPath}
-                onChange={(e) => setNewPath(e.target.value)}
-                autoFocus
-              />
-              <button type="submit">Add</button>
-            </form>
-          )}
-          {files === null && <div className="muted padded">Loading...</div>}
-          {files && files.length === 0 && <div className="muted padded">No files yet.</div>}
-          <ul className="ws-files">
-            {files?.map((f) => (
-              <li key={f.path}>
-                <button
-                  className={`ws-file-row ${f.path === openPath ? "active" : ""}`}
-                  onClick={() => open(f)}
-                  title={f.doc?.id ? `id: ${f.doc.id}` : "unindexed"}
-                >
-                  <span className="file-label">{f.doc?.title ?? f.path}</span>
-                  {f.doc && (
-                    <span className={`badge badge-${f.doc.status}`}>{f.doc.status}</span>
+                      Clear
+                    </Button>
+                  </div>
+                  <ul className="m-0 max-h-[50vh] overflow-y-auto p-0">
+                    {searchResults.map((r) => (
+                      <li key={r.doc_id}>
+                        <FileRow
+                          onClick={() => {
+                            const entry = files?.find((f) => f.path === r.path);
+                            if (entry) open(entry);
+                          }}
+                        >
+                          <strong>{r.title ?? r.path}</strong>
+                          <span
+                            className={cn(
+                              "text-xs [&_mark]:bg-yellow-300/40 [&_mark]:text-inherit",
+                              muted,
+                            )}
+                            dangerouslySetInnerHTML={{ __html: ` ${r.snippet}` }}
+                          />
+                        </FileRow>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3 px-2 py-1">
+                    <strong>Files</strong>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setCreating((v) => !v)}
+                      aria-label={creating ? "Cancel" : "New file"}
+                    >
+                      {creating ? "−" : "+"}
+                    </Button>
+                  </div>
+                  {creating && (
+                    <form onSubmit={create} className="flex gap-2 px-2 pb-2">
+                      <Input
+                        placeholder="path/to/note.md"
+                        value={newPath}
+                        onChange={(e) => setNewPath(e.target.value)}
+                        autoFocus
+                      />
+                      <Button type="submit" size="sm">
+                        Add
+                      </Button>
+                    </form>
                   )}
-                </button>
-              </li>
-            ))}
-          </ul>
-          </>
-          )}
-          </>
+                  {files && files.length === 0 && (
+                    <div className={cn("px-3 py-2", muted)}>No files yet.</div>
+                  )}
+                  <ul className="m-0 flex-1 overflow-y-auto p-0">
+                    {files?.map((f) => (
+                      <li key={f.path}>
+                        <FileRow
+                          active={f.path === openPath}
+                          title={f.doc?.id ? `id: ${f.doc.id}` : "unindexed"}
+                          doc={f.doc}
+                          onClick={() => open(f)}
+                        >
+                          {f.doc?.title ?? f.path}
+                        </FileRow>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </>
           )}
         </aside>
-        <main className="ws-main">
+        <main className="flex min-w-0 flex-1 flex-col">
           {!openPath && (
-            <div className="empty-state muted">Select a file from the sidebar, or create one.</div>
+            <div className={cn("flex flex-1 items-center justify-center", muted)}>
+              Select a file from the sidebar, or create one.
+            </div>
           )}
           {openPath && (
             <>
-              <div className="editor-bar">
+              <div
+                className={cn(
+                  "flex items-center gap-2.5 border-b px-4 py-1.5",
+                  borderColor,
+                )}
+              >
                 <strong>{openPath}</strong>
-                {openDoc && <span className={`badge badge-${openDoc.status}`}>{openDoc.status}</span>}
-                {dirty && <span className="dirty">●</span>}
-                <span className="spacer" />
-                <span className="muted small">{status ?? ""}</span>
-                <button
+                {openDoc && statusBadge(openDoc.status)}
+                {dirty && <span className="text-[var(--cf-accent)]">●</span>}
+                <span className="flex-1" />
+                <span className={cn("text-xs", muted)}>{status ?? ""}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
                   title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
                 >
                   {editorMode === "rich" ? "Source" : "Rich"}
-                </button>
+                </Button>
                 {openDoc?.status === "draft" && (
-                  <button onClick={submitDoc} disabled={dirty || busy}>
+                  <Button size="sm" onClick={submitDoc} disabled={dirty || busy}>
                     Submit
-                  </button>
+                  </Button>
                 )}
                 {openDoc?.status === "unreviewed" &&
                   (workspace.role === "owner" || workspace.role === "verifier") && (
                     <>
-                      <input
-                        className="text-input"
+                      <Input
                         placeholder="Comment (optional)"
                         value={reviewComment}
                         onChange={(e) => setReviewComment(e.target.value)}
+                        className="h-8 max-w-[16rem]"
                       />
-                      <button onClick={() => decideDoc("approve")} disabled={busy}>
+                      <Button size="sm" onClick={() => decideDoc("approve")} disabled={busy}>
                         Approve
-                      </button>
-                      <button onClick={() => decideDoc("reject")} disabled={busy}>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => decideDoc("reject")}
+                        disabled={busy}
+                      >
                         Reject
-                      </button>
+                      </Button>
                     </>
                   )}
                 {openDoc?.status === "golden" && openDoc.type === "page" && (
-                  <button onClick={() => setProposeOpen((v) => !v)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setProposeOpen((v) => !v)}
+                  >
                     {proposeOpen ? "Cancel proposal" : "Propose update"}
-                  </button>
+                  </Button>
                 )}
-                <button onClick={save} disabled={!dirty || busy}>
+                <Button size="sm" onClick={save} disabled={!dirty || busy}>
                   Save
-                </button>
+                </Button>
               </div>
               {proposeOpen && (
-                <div className="propose-form">
-                  <div className="muted small">
-                    Propose a replacement body for <strong>{openDoc?.title ?? openPath}</strong>.
-                    Don't include frontmatter — only the body.
+                <div
+                  className={cn(
+                    "flex flex-col gap-1.5 border-t px-4 py-2",
+                    borderColor,
+                  )}
+                >
+                  <div className={cn("text-xs", muted)}>
+                    Propose a replacement body for{" "}
+                    <strong>{openDoc?.title ?? openPath}</strong>. Don't include frontmatter —
+                    only the body.
                   </div>
-                  <textarea
+                  <Textarea
                     value={proposalBody}
                     onChange={(e) => setProposalBody(e.target.value)}
                     placeholder="# Updated title\n\nNew content..."
+                    className="min-h-[120px] resize-y font-mono"
                   />
-                  <div className="header-row tight">
-                    <button onClick={submitProposal} disabled={!proposalBody.trim()}>
+                  <div>
+                    <Button size="sm" onClick={submitProposal} disabled={!proposalBody.trim()}>
                       Create proposal
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -970,6 +1133,6 @@ function WorkspaceView({
           )}
         </main>
       </div>
-    </div>
+    </Screen>
   );
 }

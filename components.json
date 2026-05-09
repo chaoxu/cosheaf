@@ -5,17 +5,17 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/globals.css",
+    "css": "src/cosheaf/globals.css",
     "baseColor": "zinc",
     "cssVariables": true,
     "prefix": ""
   },
   "aliases": {
-    "components": "@/app/components",
-    "utils": "@/app/lib/utils",
-    "ui": "@/app/components/ui",
-    "hooks": "@/app/hooks",
-    "lib": "@/app/lib"
+    "components": "@/cosheaf/components",
+    "utils": "@/cosheaf/lib/utils",
+    "ui": "@/cosheaf/components/ui",
+    "hooks": "@/cosheaf/hooks",
+    "lib": "@/cosheaf/lib"
   },
   "iconLibrary": "lucide"
 }
