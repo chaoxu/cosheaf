@@ -5,8 +5,8 @@ import {
   type MountedEditor,
   type StandaloneEditorMode,
   mountEditor,
-} from "cosheaf/editor";
-import "cosheaf/editor/style.css";
+} from "@chaoxu/coflat-editor";
+import "@chaoxu/coflat-editor/style.css";
 
 interface Props {
   value: string;
