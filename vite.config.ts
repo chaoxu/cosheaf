@@ -425,6 +425,12 @@ export default defineConfig(({ mode }) => {
       fs: {
         allow: [__dirname, linkedNodeModulesRoot],
       },
+      proxy: {
+        "/api": {
+          target: process.env.COSHEAF_SERVER_URL ?? "http://localhost:3030",
+          changeOrigin: true,
+        },
+      },
     },
   };
 });
