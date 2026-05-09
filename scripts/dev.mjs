@@ -5,8 +5,13 @@
 import { spawn } from "node:child_process";
 
 const procs = [
-  { name: "server", cmd: "pnpm", args: ["server"], color: "\x1b[36m" }, // cyan
-  { name: "vite", cmd: "pnpm", args: ["dev"], color: "\x1b[35m" }, // magenta
+  {
+    name: "server",
+    cmd: "pnpm",
+    args: ["exec", "tsx", "watch", "server/index.ts"],
+    color: "\x1b[36m",
+  },
+  { name: "vite", cmd: "pnpm", args: ["exec", "vite"], color: "\x1b[35m" },
 ];
 const reset = "\x1b[0m";
 
