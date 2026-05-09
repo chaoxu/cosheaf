@@ -14,16 +14,18 @@ page.on("console", (msg) => {
 // Seed data via direct API calls so the test is self-contained.
 async function seed(loginCookie) {
   const headers = { "content-type": "application/json", Cookie: loginCookie };
-  await fetch(`${APP_URL}/api/w/demo/note?path=algebra/groups.md`, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify({ content: "# Theorem on Groups\n\nA simple statement." }),
-  });
   await fetch(`${APP_URL}/api/w/demo/note?path=primes.md`, {
     method: "PUT",
     headers,
     body: JSON.stringify({
       content: "---\nid: thm-prime\ntype: page\nstatus: golden\n---\n# Primes\n",
+    }),
+  });
+  await fetch(`${APP_URL}/api/w/demo/note?path=algebra/groups.md`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      content: "# Theorem on Groups\n\nReferences [[thm-prime]] and also [primes](../primes.md).",
     }),
   });
 }
@@ -99,6 +101,25 @@ await page.waitForFunction(() => document.querySelectorAll(".ws-file-row").lengt
 const draftBadge = await page.$(".badge-draft");
 if (!draftBadge) throw new Error("expected a draft badge after save");
 console.log("draft badge present:", await draftBadge.textContent());
+
+console.log("opening primes.md, expecting backlinks from groups");
+await page.click('.ws-file-row:has-text("Primes")');
+await page.waitForSelector(".cm-editor");
+await page.waitForFunction(
+  () => document.querySelector(".backlinks-header")?.textContent?.includes("(") ?? false,
+  null,
+  { timeout: 5000 },
+);
+const backlinkLabels = await page.$$eval(".backlinks li button", (els) =>
+  els.map((e) => e.textContent),
+);
+console.log("backlinks shown:", backlinkLabels);
+if (!backlinkLabels.some((t) => t?.includes("Theorem on Groups"))) {
+  throw new Error("expected backlinks to include Theorem on Groups");
+}
+if (backlinkLabels.length < 2) {
+  throw new Error(`expected 2 backlinks (wiki + path), got ${backlinkLabels.length}`);
+}
 
 if (errors.length > 0) {
   console.error("ERRORS:", errors);

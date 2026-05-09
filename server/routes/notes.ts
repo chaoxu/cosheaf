@@ -5,6 +5,7 @@ import type { AppEnv } from "../types.js";
 import { workspaceDir } from "../db.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { IdConflictError, deleteDocument, indexDocument } from "../indexer.js";
+import { getBacklinks } from "../links.js";
 
 export const notes = new Hono<AppEnv>();
 
@@ -153,6 +154,13 @@ notes.delete("/:slug/note", async (c) => {
   }
   deleteDocument(c.get("db"), ws.id, rel);
   return c.json({ ok: true });
+});
+
+notes.get("/:slug/backlinks", (c) => {
+  const id = c.req.query("id");
+  if (!id) return c.json({ error: "id required" }, 400);
+  const ws = c.get("workspace");
+  return c.json({ backlinks: getBacklinks(c.get("db"), ws.id, id) });
 });
 
 notes.get("/:slug/documents", (c) => {

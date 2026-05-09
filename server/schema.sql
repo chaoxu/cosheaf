@@ -48,3 +48,15 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX IF NOT EXISTS documents_status ON documents(workspace_id, status);
 CREATE INDEX IF NOT EXISTS documents_target ON documents(workspace_id, target_id);
+
+CREATE TABLE IF NOT EXISTS links (
+  workspace_id INTEGER NOT NULL,
+  src_id TEXT NOT NULL,
+  target_id TEXT,
+  target_label TEXT NOT NULL,
+  FOREIGN KEY (workspace_id, src_id)
+    REFERENCES documents(workspace_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS links_target ON links(workspace_id, target_id);
+CREATE INDEX IF NOT EXISTS links_src ON links(workspace_id, src_id);

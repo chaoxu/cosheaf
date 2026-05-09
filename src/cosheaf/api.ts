@@ -84,4 +84,16 @@ export const api = {
       `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
     ),
+
+  backlinks: (slug: string, id: string) =>
+    jsonFetch<{ backlinks: Backlink[] }>(
+      `/api/w/${encodeURIComponent(slug)}/backlinks?id=${encodeURIComponent(id)}`,
+    ).then((r) => r.backlinks),
 };
+
+export interface Backlink {
+  src_id: string;
+  src_path: string;
+  src_title: string | null;
+  target_label: string;
+}

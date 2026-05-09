@@ -1,6 +1,13 @@
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, api, type FileEntry, type User, type Workspace } from "./api";
+import {
+  ApiError,
+  api,
+  type Backlink,
+  type FileEntry,
+  type User,
+  type Workspace,
+} from "./api";
 import { MarkdownEditor } from "./editor";
 
 type View =
@@ -195,6 +202,33 @@ function WorkspaceList({
   );
 }
 
+function BacklinksPanel({
+  links,
+  onPick,
+}: {
+  links: Backlink[];
+  onPick: (srcPath: string) => void;
+}): ReactElement {
+  return (
+    <div className="backlinks">
+      <div className="backlinks-header">Backlinks {links.length > 0 && `(${links.length})`}</div>
+      {links.length === 0 && <div className="muted small padded">None.</div>}
+      {links.length > 0 && (
+        <ul>
+          {links.map((bl) => (
+            <li key={`${bl.src_id}-${bl.target_label}`}>
+              <button className="link-btn" onClick={() => onPick(bl.src_path)}>
+                <strong>{bl.src_title ?? bl.src_path}</strong>
+                <span className="muted small"> {bl.target_label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function WorkspaceView({
   user,
   workspace,
@@ -208,11 +242,13 @@ function WorkspaceView({
 }): ReactElement {
   const [files, setFiles] = useState<FileEntry[] | null>(null);
   const [openPath, setOpenPath] = useState<string | null>(null);
+  const [openDoc, setOpenDoc] = useState<FileEntry["doc"] | undefined>(undefined);
   const [content, setContent] = useState("");
   const [mtime, setMtime] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [creating, setCreating] = useState(false);
   const [newPath, setNewPath] = useState("");
 
@@ -227,25 +263,41 @@ function WorkspaceView({
 
   useEffect(reloadTree, [reloadTree]);
 
+  const loadBacklinks = useCallback(
+    (id: string | undefined) => {
+      if (!id) {
+        setBacklinks([]);
+        return;
+      }
+      api
+        .backlinks(workspace.slug, id)
+        .then(setBacklinks)
+        .catch(() => setBacklinks([]));
+    },
+    [workspace.slug],
+  );
+
   const open = useCallback(
-    (path: string) => {
+    (entry: FileEntry) => {
       if (dirty && !confirm("Discard unsaved changes?")) return;
       setBusy(true);
       setStatus(null);
       api
-        .getNote(workspace.slug, path)
+        .getNote(workspace.slug, entry.path)
         .then((r) => {
-          setOpenPath(path);
+          setOpenPath(entry.path);
+          setOpenDoc(entry.doc);
           setContent(r.content);
           setMtime(r.mtime);
           setDirty(false);
+          loadBacklinks(entry.doc?.id);
         })
         .catch((err: unknown) =>
           setStatus(err instanceof ApiError ? err.message : "Failed to open"),
         )
         .finally(() => setBusy(false));
     },
-    [dirty, workspace.slug],
+    [dirty, workspace.slug, loadBacklinks],
   );
 
   const save = useCallback(() => {
@@ -259,6 +311,8 @@ function WorkspaceView({
         if (r.content !== undefined) setContent(r.content);
         setDirty(false);
         setStatus("saved");
+        setOpenDoc(r.meta);
+        loadBacklinks(r.meta.id);
         reloadTree();
       })
       .catch((err: unknown) => {
@@ -348,7 +402,7 @@ function WorkspaceView({
               <li key={f.path}>
                 <button
                   className={`ws-file-row ${f.path === openPath ? "active" : ""}`}
-                  onClick={() => open(f.path)}
+                  onClick={() => open(f)}
                   title={f.doc?.id ? `id: ${f.doc.id}` : "unindexed"}
                 >
                   <span className="file-label">{f.doc?.title ?? f.path}</span>
@@ -386,6 +440,15 @@ function WorkspaceView({
                   if (dirty && !busy) save();
                 }}
               />
+              {openDoc?.id && (
+                <BacklinksPanel
+                  links={backlinks}
+                  onPick={(srcPath) => {
+                    const entry = files?.find((f) => f.path === srcPath);
+                    if (entry) open(entry);
+                  }}
+                />
+              )}
             </>
           )}
         </main>
