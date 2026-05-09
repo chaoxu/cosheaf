@@ -21,7 +21,6 @@ export default defineConfig({
       "@codemirror/search",
       "@lezer/common",
       "@lezer/highlight",
-      "@lezer/markdown",
     ],
   },
   build: {
@@ -44,16 +43,15 @@ export default defineConfig({
       "@codemirror/commands",
       "@codemirror/autocomplete",
       "@codemirror/search",
-      "@codemirror/lang-markdown",
       "@lezer/common",
       "@lezer/highlight",
-      "@lezer/markdown",
     ],
     // The editor package is already a single bundled .mjs; Vite's optimizer
     // chokes on its `import("pdfjs-dist/.../pdf.worker.min.mjs?url")` line.
     exclude: ["@chaoxu/coflat-editor"],
   },
   server: {
+    hmr: false,
     proxy: {
       "/api": {
         target: process.env.COSHEAF_SERVER_URL ?? "http://localhost:3030",

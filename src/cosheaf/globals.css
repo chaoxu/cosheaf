@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "katex/dist/katex.min.css";
 @import "@chaoxu/coflat-editor/style.css";
 
 html,

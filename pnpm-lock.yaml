@@ -4,63 +4,19 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@lezer/markdown@1.6.3':
-    hash: db5f9c7fdc1372e8f0176043cb5fd402a7c63e4592699a20611606690fa8ee46
-    path: patches/@lezer__markdown@1.6.3.patch
-  katex@0.16.38:
-    hash: 803df0b4b4e1809179417a58b26839e80f2dee2847a6cb2434e98657f788465f
-    path: patches/katex@0.16.38.patch
-
 importers:
 
   .:
     dependencies:
       '@chaoxu/coflat-editor':
         specifier: ^0.1.1
-        version: 0.1.1(75e9501c95c757ce79cebeba6dad2a71)
-      '@citation-js/core':
-        specifier: ^0.7.21
-        version: 0.7.21
-      '@citation-js/plugin-bibtex':
-        specifier: ^0.7.21
-        version: 0.7.21(@citation-js/core@0.7.21)
-      '@citation-js/plugin-csl':
-        specifier: ^0.7.22
-        version: 0.7.22(@citation-js/core@0.7.21)
+        version: 0.1.1(49cd44b3a9d61f6a1f825e91450ca4a3)
       '@codemirror/autocomplete':
         specifier: ^6.20.1
         version: 6.20.2
       '@codemirror/commands':
         specifier: ^6.10.3
         version: 6.10.3
-      '@codemirror/lang-cpp':
-        specifier: ^6.0.3
-        version: 6.0.3
-      '@codemirror/lang-css':
-        specifier: ^6.3.1
-        version: 6.3.1
-      '@codemirror/lang-html':
-        specifier: ^6.4.11
-        version: 6.4.11
-      '@codemirror/lang-java':
-        specifier: ^6.0.2
-        version: 6.0.2
-      '@codemirror/lang-javascript':
-        specifier: ^6.2.5
-        version: 6.2.5
-      '@codemirror/lang-json':
-        specifier: ^6.0.2
-        version: 6.0.2
-      '@codemirror/lang-markdown':
-        specifier: ^6.5.0
-        version: 6.5.0
-      '@codemirror/lang-python':
-        specifier: ^6.2.1
-        version: 6.2.1
-      '@codemirror/lang-rust':
-        specifier: ^6.0.2
-        version: 6.0.2
       '@codemirror/language':
         specifier: ^6.12.2
         version: 6.12.3
@@ -73,9 +29,6 @@ importers:
       '@codemirror/view':
         specifier: ^6.40.0
         version: 6.42.1
-      '@floating-ui/dom':
-        specifier: ^1.7.6
-        version: 1.7.6
       '@hono/node-server':
         specifier: ^2.0.2
         version: 2.0.2(hono@4.12.18)
@@ -85,15 +38,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
-      '@lezer/markdown':
-        specifier: ^1.6.3
-        version: 1.6.3(patch_hash=db5f9c7fdc1372e8f0176043cb5fd402a7c63e4592699a20611606690fa8ee46)
       '@node-rs/argon2':
         specifier: ^2.0.2
         version: 2.0.2
-      '@radix-ui/react-context-menu':
-        specifier: ^2.2.16
-        version: 2.2.16(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       '@radix-ui/react-slot':
         specifier: ^1.2.4
         version: 1.2.4(@types/react@19.2.14)(react@19.2.6)
@@ -106,27 +53,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      cmdk:
-        specifier: ^1.1.1
-        version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      dompurify:
-        specifier: ^3.4.1
-        version: 3.4.2
       hono:
         specifier: ^4.12.18
         version: 4.12.18
-      katex:
-        specifier: 0.16.38
-        version: 0.16.38(patch_hash=803df0b4b4e1809179417a58b26839e80f2dee2847a6cb2434e98657f788465f)
-      lucide-react:
-        specifier: ^0.577.0
-        version: 0.577.0(react@19.2.6)
-      pathe:
-        specifier: ^2.0.3
-        version: 2.0.3
-      pdfjs-dist:
-        specifier: ^5.5.207
-        version: 5.7.284
       react:
         specifier: ^19.2.4
         version: 19.2.6
@@ -2418,7 +2347,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.14':
     optional: true
 
-  '@chaoxu/coflat-editor@0.1.1(75e9501c95c757ce79cebeba6dad2a71)':
+  '@chaoxu/coflat-editor@0.1.1(49cd44b3a9d61f6a1f825e91450ca4a3)':
     dependencies:
       '@citation-js/core': 0.7.21
       '@citation-js/plugin-bibtex': 0.7.21(@citation-js/core@0.7.21)
@@ -2441,13 +2370,13 @@ snapshots:
       '@floating-ui/dom': 1.7.6
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
-      '@lezer/markdown': 1.6.3(patch_hash=db5f9c7fdc1372e8f0176043cb5fd402a7c63e4592699a20611606690fa8ee46)
+      '@lezer/markdown': 1.6.3
       '@overleaf/codemirror-tree-view': 0.1.3(@codemirror/language@6.12.3)(@codemirror/state@6.6.0)(@codemirror/view@6.42.1)
       '@radix-ui/react-context-menu': 2.2.16(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       clsx: 2.1.1
       cmdk: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       dompurify: 3.4.2
-      katex: 0.16.38(patch_hash=803df0b4b4e1809179417a58b26839e80f2dee2847a6cb2434e98657f788465f)
+      katex: 0.16.38
       lucide-react: 0.577.0(react@19.2.6)
       pathe: 2.0.3
       pdfjs-dist: 5.7.284
@@ -2549,7 +2478,7 @@ snapshots:
       '@codemirror/state': 6.6.0
       '@codemirror/view': 6.42.1
       '@lezer/common': 1.5.2
-      '@lezer/markdown': 1.6.3(patch_hash=db5f9c7fdc1372e8f0176043cb5fd402a7c63e4592699a20611606690fa8ee46)
+      '@lezer/markdown': 1.6.3
 
   '@codemirror/lang-python@6.2.1':
     dependencies:
@@ -2776,7 +2705,7 @@ snapshots:
     dependencies:
       '@lezer/common': 1.5.2
 
-  '@lezer/markdown@1.6.3(patch_hash=db5f9c7fdc1372e8f0176043cb5fd402a7c63e4592699a20611606690fa8ee46)':
+  '@lezer/markdown@1.6.3':
     dependencies:
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
@@ -3767,7 +3696,7 @@ snapshots:
 
   jiti@2.7.0: {}
 
-  katex@0.16.38(patch_hash=803df0b4b4e1809179417a58b26839e80f2dee2847a6cb2434e98657f788465f):
+  katex@0.16.38:
     dependencies:
       commander: 8.3.0
 

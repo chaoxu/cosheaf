@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   api,
@@ -18,8 +18,11 @@ import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 import { lineDiff, stripFrontmatter } from "./diff";
-import { MarkdownEditor } from "./editor";
 import { cn } from "./lib/utils";
+
+const MarkdownEditor = lazy(() =>
+  import("./editor").then((m) => ({ default: m.MarkdownEditor })),
+);
 
 type View =
   | { kind: "loading" }
@@ -1095,18 +1098,20 @@ function WorkspaceView({
                   </div>
                 </div>
               )}
-              <MarkdownEditor
-                value={content}
-                mode={editorMode}
-                onChange={(next) => {
-                  setContent(next);
-                  setDirty(true);
-                  setStatus(null);
-                }}
-                onSave={() => {
-                  if (dirty && !busy) save();
-                }}
-              />
+              <Suspense fallback={<div className="flex-1" />}>
+                <MarkdownEditor
+                  value={content}
+                  mode={editorMode}
+                  onChange={(next) => {
+                    setContent(next);
+                    setDirty(true);
+                    setStatus(null);
+                  }}
+                  onSave={() => {
+                    if (dirty && !busy) save();
+                  }}
+                />
+              </Suspense>
               {openDoc?.id && (
                 <BacklinksPanel
                   links={backlinks}
