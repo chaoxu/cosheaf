@@ -5,6 +5,7 @@ import {
   api,
   type Backlink,
   type FileEntry,
+  type TokenInfo,
   type User,
   type Workspace,
 } from "./api";
@@ -14,6 +15,7 @@ type View =
   | { kind: "loading" }
   | { kind: "login" }
   | { kind: "workspaces"; user: User }
+  | { kind: "tokens"; user: User }
   | { kind: "workspace"; user: User; workspace: Workspace };
 
 export function CosheafApp(): ReactElement {
@@ -35,6 +37,16 @@ export function CosheafApp(): ReactElement {
       <WorkspaceList
         user={view.user}
         onPick={(workspace) => setView({ kind: "workspace", user: view.user, workspace })}
+        onTokens={() => setView({ kind: "tokens", user: view.user })}
+        onLogout={() => setView({ kind: "login" })}
+      />
+    );
+  }
+  if (view.kind === "tokens") {
+    return (
+      <TokensScreen
+        user={view.user}
+        onBack={() => setView({ kind: "workspaces", user: view.user })}
         onLogout={() => setView({ kind: "login" })}
       />
     );
@@ -102,10 +114,12 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
 function WorkspaceList({
   user,
   onPick,
+  onTokens,
   onLogout,
 }: {
   user: User;
   onPick: (workspace: Workspace) => void;
+  onTokens: () => void;
   onLogout: () => void;
 }): ReactElement {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
@@ -150,6 +164,9 @@ function WorkspaceList({
         <strong>cosheaf</strong>
         <span className="spacer" />
         <span className="muted">{user.username}</span>
+        <button className="link-btn" onClick={onTokens}>
+          Tokens
+        </button>
         <button className="link-btn" onClick={handleLogout}>
           Sign out
         </button>
@@ -193,6 +210,118 @@ function WorkspaceList({
                   <span className="muted">/{ws.slug}</span>
                   <span className="role">{ws.role}</span>
                 </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function TokensScreen({
+  user,
+  onBack,
+  onLogout,
+}: {
+  user: User;
+  onBack: () => void;
+  onLogout: () => void;
+}): ReactElement {
+  const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
+  const [name, setName] = useState("");
+  const [created, setCreated] = useState<{ id: number; name: string; token: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(() => {
+    api
+      .listTokens()
+      .then(setTokens)
+      .catch((err: unknown) =>
+        setError(err instanceof ApiError ? err.message : "Failed to load"),
+      );
+  }, []);
+  useEffect(reload, [reload]);
+
+  const create = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    api
+      .createToken(name.trim())
+      .then((t) => {
+        setCreated(t);
+        setName("");
+        reload();
+      })
+      .catch((err: unknown) =>
+        setError(err instanceof ApiError ? err.message : "Create failed"),
+      );
+  };
+
+  const revoke = (id: number) => {
+    api
+      .revokeToken(id)
+      .then(reload)
+      .catch((err: unknown) =>
+        setError(err instanceof ApiError ? err.message : "Revoke failed"),
+      );
+  };
+
+  return (
+    <div className="screen">
+      <header className="topbar">
+        <button className="link-btn" onClick={onBack}>
+          ← Workspaces
+        </button>
+        <strong>Tokens</strong>
+        <span className="spacer" />
+        <span className="muted">{user.username}</span>
+        <button className="link-btn" onClick={() => api.logout().then(onLogout)}>
+          Sign out
+        </button>
+      </header>
+      <main className="content">
+        <p className="muted small">
+          Personal access tokens authenticate as you (humans or agents) via{" "}
+          <code>Authorization: Bearer &lt;token&gt;</code>. The token value is shown once at
+          creation; copy it now.
+        </p>
+        <form className="inline-form" onSubmit={create}>
+          <input
+            placeholder="token name (e.g., 'my-agent')"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button type="submit" disabled={!name.trim()}>
+            Create token
+          </button>
+        </form>
+
+        {created && (
+          <div className="token-card">
+            <div className="muted small">{created.name} — copy this now, it won't be shown again:</div>
+            <code className="token-value">{created.token}</code>
+            <button className="link-btn" onClick={() => setCreated(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {error && <div className="error">{error}</div>}
+        {tokens === null && <div className="muted">Loading...</div>}
+        {tokens && tokens.length === 0 && <div className="muted">No tokens yet.</div>}
+        {tokens && tokens.length > 0 && (
+          <ul className="ws-list">
+            {tokens.map((t) => (
+              <li key={t.id}>
+                <div className="ws-row" style={{ pointerEvents: "auto", cursor: "default" }}>
+                  <strong>{t.name}</strong>
+                  <span className="muted small">
+                    created {new Date(t.created_at).toISOString().slice(0, 10)}
+                  </span>
+                  <span className="spacer" />
+                  <button onClick={() => revoke(t.id)}>Revoke</button>
+                </div>
               </li>
             ))}
           </ul>

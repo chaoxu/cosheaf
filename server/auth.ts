@@ -1,8 +1,13 @@
 import { hash, verify } from "@node-rs/argon2";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TOKEN_PREFIX = "cs_";
+
+function sha256Hex(input: string): string {
+  return createHash("sha256").update(input).digest("hex");
+}
 
 export async function hashPassword(password: string): Promise<string> {
   return hash(password);
@@ -65,4 +70,55 @@ export function userFromSession(db: Database.Database, sessionId: string): User 
     return null;
   }
   return { id: row.id, username: row.username };
+}
+
+export interface TokenRow {
+  id: number;
+  name: string;
+  created_at: number;
+}
+
+/** Returns the cleartext token (only chance to see it) and its row id. */
+export function createToken(
+  db: Database.Database,
+  userId: number,
+  name: string,
+): { token: string; id: number } {
+  const secret = randomBytes(24).toString("base64url");
+  const token = `${TOKEN_PREFIX}${secret}`;
+  const tokenHash = sha256Hex(token);
+  const result = db
+    .prepare(
+      "INSERT INTO tokens (user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+    )
+    .get(userId, name, tokenHash, Date.now()) as { id: number };
+  return { token, id: result.id };
+}
+
+export function listTokens(db: Database.Database, userId: number): TokenRow[] {
+  return db
+    .prepare("SELECT id, name, created_at FROM tokens WHERE user_id = ? ORDER BY created_at DESC")
+    .all(userId) as TokenRow[];
+}
+
+export function revokeToken(
+  db: Database.Database,
+  userId: number,
+  tokenId: number,
+): boolean {
+  return (
+    db.prepare("DELETE FROM tokens WHERE id = ? AND user_id = ?").run(tokenId, userId).changes > 0
+  );
+}
+
+export function userFromToken(db: Database.Database, token: string): User | null {
+  if (!token.startsWith(TOKEN_PREFIX)) return null;
+  const tokenHash = sha256Hex(token);
+  const row = db
+    .prepare(
+      "SELECT users.id AS id, users.username AS username " +
+        "FROM tokens JOIN users ON users.id = tokens.user_id WHERE tokens.token_hash = ?",
+    )
+    .get(tokenHash) as User | undefined;
+  return row ?? null;
 }

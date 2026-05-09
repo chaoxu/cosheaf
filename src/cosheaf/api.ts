@@ -89,7 +89,23 @@ export const api = {
     jsonFetch<{ backlinks: Backlink[] }>(
       `/api/w/${encodeURIComponent(slug)}/backlinks?id=${encodeURIComponent(id)}`,
     ).then((r) => r.backlinks),
+
+  listTokens: () =>
+    jsonFetch<{ tokens: TokenInfo[] }>("/api/tokens").then((r) => r.tokens),
+  createToken: (name: string) =>
+    jsonFetch<{ id: number; name: string; token: string }>("/api/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  revokeToken: (id: number) =>
+    jsonFetch<{ ok: true }>(`/api/tokens/${id}`, { method: "DELETE" }),
 };
+
+export interface TokenInfo {
+  id: number;
+  name: string;
+  created_at: number;
+}
 
 export interface Backlink {
   src_id: string;

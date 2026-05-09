@@ -17,6 +17,16 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 
+CREATE TABLE IF NOT EXISTS tokens (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS tokens_user ON tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS workspaces (
   id INTEGER PRIMARY KEY,
   slug TEXT UNIQUE NOT NULL,

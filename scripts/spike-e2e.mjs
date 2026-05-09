@@ -121,6 +121,29 @@ if (backlinkLabels.length < 2) {
   throw new Error(`expected 2 backlinks (wiki + path), got ${backlinkLabels.length}`);
 }
 
+// Tokens
+console.log("opening tokens screen");
+await page.click('button:has-text("← Workspaces")');
+await page.waitForSelector("h2");
+await page.click('button:has-text("Tokens")');
+await page.waitForSelector('input[placeholder^="token name"]');
+await page.fill('input[placeholder^="token name"]', "test-agent");
+await page.click('button:has-text("Create token")');
+await page.waitForSelector(".token-value");
+const tokenValue = await page.textContent(".token-value");
+console.log("created token:", tokenValue?.slice(0, 12), "…");
+if (!tokenValue?.startsWith("cs_")) throw new Error("token doesn't start with cs_");
+
+// Use the token from a fresh fetch (no cookie) to verify it grants access.
+const r = await fetch(`${APP_URL}/api/workspaces`, {
+  headers: { Authorization: `Bearer ${tokenValue}` },
+});
+const wsViaToken = await r.json();
+console.log("workspaces via token:", wsViaToken);
+if (!wsViaToken.workspaces?.some((w) => w.slug === "demo")) {
+  throw new Error("token didn't grant workspace access");
+}
+
 if (errors.length > 0) {
   console.error("ERRORS:", errors);
   process.exit(1);

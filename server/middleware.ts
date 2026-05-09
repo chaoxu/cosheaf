@@ -1,12 +1,22 @@
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
-import { userFromSession } from "./auth.js";
+import { userFromSession, userFromToken } from "./auth.js";
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const db = c.get("db");
+  const auth = c.req.header("authorization");
+  if (auth?.startsWith("Bearer ")) {
+    const user = userFromToken(db, auth.slice("Bearer ".length).trim());
+    if (user) {
+      c.set("user", user);
+      await next();
+      return;
+    }
+  }
   const sessionId = getCookie(c, "session");
   if (!sessionId) return c.json({ error: "not authenticated" }, 401);
-  const user = userFromSession(c.get("db"), sessionId);
+  const user = userFromSession(db, sessionId);
   if (!user) return c.json({ error: "not authenticated" }, 401);
   c.set("user", user);
   await next();

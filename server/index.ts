@@ -5,6 +5,7 @@ import { getDb, loadConfig } from "./db.js";
 import { auth } from "./routes/auth.js";
 import { workspaces } from "./routes/workspaces.js";
 import { notes } from "./routes/notes.js";
+import { tokens } from "./routes/tokens.js";
 
 const config = loadConfig();
 const db = getDb(config);
@@ -20,6 +21,7 @@ app.use("*", async (c, next) => {
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.route("/api", auth);
+app.route("/api/tokens", tokens);
 app.route("/api/workspaces", workspaces);
 app.route("/api/w", notes);
 

@@ -198,3 +198,20 @@ input:focus, textarea:focus { border-color: var(--c-accent); }
 }
 .backlinks ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
 .backlinks li button { padding: 2px 0; }
+
+.token-card {
+  border: 1px solid var(--c-accent);
+  border-radius: 6px;
+  background: var(--c-subtle);
+  padding: 12px;
+  margin: 12px 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.token-value {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: var(--c-bg);
+  padding: 8px;
+  border-radius: 4px;
+  word-break: break-all;
+  user-select: all;
+}
