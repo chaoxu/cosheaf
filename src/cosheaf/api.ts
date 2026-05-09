@@ -12,7 +12,7 @@ export interface Workspace {
 
 export interface DocumentMeta {
   id: string;
-  type: "page" | "review" | "proposal" | "task";
+  type: "page" | "review" | "proposal";
   status: "golden" | "unreviewed" | "rejected" | "draft" | "archived";
   title: string | null;
 }
@@ -104,15 +104,23 @@ export const api = {
       `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/submit`,
       { method: "POST" },
     ),
-  approve: (slug: string, id: string) =>
+  approve: (slug: string, id: string, comment?: string) =>
     jsonFetch<DecisionResult>(
       `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approve`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
     ),
-  reject: (slug: string, id: string) =>
+  reject: (slug: string, id: string, comment?: string) =>
     jsonFetch<DecisionResult>(
       `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/reject`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
+    ),
+  approvals: (slug: string, id: string) =>
+    jsonFetch<{ approvals: ApprovalRecord[] }>(
+      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approvals`,
+    ).then((r) => r.approvals),
+  proposalTarget: (slug: string, id: string) =>
+    jsonFetch<ProposalTarget>(
+      `/api/w/${encodeURIComponent(slug)}/proposal/${encodeURIComponent(id)}/target`,
     ),
   createProposal: (slug: string, target_id: string, body: string) =>
     jsonFetch<{ path: string; meta: DocumentMeta }>(
@@ -168,4 +176,19 @@ export interface Backlink {
   src_path: string;
   src_title: string | null;
   target_label: string;
+}
+
+export interface ApprovalRecord {
+  verifier_user_id: number;
+  username: string;
+  decision: "approve" | "reject";
+  comment: string | null;
+  created_at: number;
+}
+
+export interface ProposalTarget {
+  target_id: string;
+  target_path: string;
+  target_title: string | null;
+  target_content: string;
 }

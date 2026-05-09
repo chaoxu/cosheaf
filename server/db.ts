@@ -29,8 +29,18 @@ export function getDb(config: Config): Database.Database {
   const db = new Database(dbPath);
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  migrate(db);
   dbInstance = db;
   return db;
+}
+
+function migrate(db: Database.Database): void {
+  const cols = db
+    .prepare("PRAGMA table_info(approvals)")
+    .all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "comment")) {
+    db.exec("ALTER TABLE approvals ADD COLUMN comment TEXT");
+  }
 }
 
 export function workspaceDir(config: Config, slug: string): string {

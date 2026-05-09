@@ -1,358 +1,184 @@
-# Coflat
+# Cosheaf
 
-Semantic document editor for mathematical writing. The app can switch at
-runtime between CM6 rich mode and CM6 source mode. The document format, file
-IO, semantic services, and Tauri backend are shared.
+Human-usable mathematical knowledge base. Plain markdown files on disk are the
+source of truth; SQLite is a derived, rebuildable index over them. Cosheaf
+also owns the document **lifecycle**: pages, proposed edits, reviews,
+approvals, and trusted ("golden") status.
+
+Agents (autoprover and friends) are out of scope here. They will live in a
+separate layer and participate as ordinary verifier/member users over the same
+HTTP API. Keep cosheaf's surface usable without any automation.
 
 ## Shared file
 
-`AGENTS.md` is the canonical shared instructions file for both `AGENTS.md` and `CLAUDE.md`.
-Keep them as one source of truth. If the shared guidance changes, update the canonical file and keep the other path synced in the same change.
+`AGENTS.md` is the canonical shared instructions file for both `AGENTS.md` and
+`CLAUDE.md` (the latter is a symlink). Update one and the other follows.
 
-## Repo / tooling assumptions
+## Core principles
 
-- This repo is hosted on a local Gitea instance at `http://localhost:3001`; see the Gitea / issue tracking section below for `tea` usage.
-- For terminal agents that support it, prefix repo-local shell commands with `rtk`.
-- For browser inspection, use the managed Playwright harness (`pnpm browser:inspect`, `pnpm test:browser`, `pnpm doctor:browser`). The CDP lane on port 9322 (`pnpm chrome`) is reserved for human-in-the-loop visual debugging — agents must not drive it unless the user explicitly asks. See "Manual CDP lane" below for the full rule.
+- **Plain files are source of truth.** Every page, proposal, and review is a
+  `.md` file under `data/workspaces/<slug>/`. Humans can edit them directly
+  with any editor; cosheaf will reconcile.
+- **No hidden database-only knowledge.** SQLite stores document metadata,
+  links, FTS index, approvals, and sessions/tokens — all rebuildable from the
+  files (except auth state). `pnpm cli workspace reindex <slug>` rebuilds from
+  disk.
+- **Stable identity via frontmatter.** Every page has an `id` in its YAML
+  frontmatter. The indexer auto-fills missing ids and rewrites the file
+  canonically.
+- **Workflow as trust, not automation.** `proposal → review → approve/reject
+  → promote` is the same whether the proposer is a human or a bot.
+- **One concept, one owner.** A document's status lives in its frontmatter and
+  is mirrored to SQLite by `indexDocument`. Approvals live only in SQLite
+  (they're per-user records, not document content).
 
 ## Stack
 
-- **Language**: TypeScript (strict mode) + Rust (Tauri backend)
-- **Editors**: CodeMirror 6 for rich/source markdown editing
-- **Parser**: Lezer (`@lezer/markdown` with custom extensions)
-- **Math**: KaTeX
-- **Desktop**: Tauri v2 (smaller bundles, native webview)
-- **Build**: Vite (frontend), Cargo (Rust backend)
-- **Package manager**: pnpm
-- **UI**: @radix-ui/dialog, @dnd-kit, lucide-react, cmdk
+- **Server**: Hono on `@hono/node-server`, TypeScript, `better-sqlite3`,
+  `@node-rs/argon2` for password hashing.
+- **Client**: React 19 + Vite, single-page app in `src/cosheaf/app.tsx`.
+- **Editor**: `@chaoxu/coflat-editor` (published package; do not vendor it
+  back into this repo).
+- **Document format**: Pandoc-flavored markdown per `FORMAT.md`. YAML
+  frontmatter for `id`, `title`, `type`, `status`, `target`.
+- **Package manager**: pnpm.
 
-## Project structure
+## Project layout
 
 ```
-src/
-  editor/        # CM6 setup, keybindings, theme, debug-helpers
-  parser/        # Lezer markdown extensions (fenced-div, math, footnotes, etc.)
-  plugins/       # Block plugin system (theorem, proof, definition, embed, etc.)
-  render/        # CM6 ViewPlugins for Typora-style rendering
-  index/         # Semantic indexer (Lezer tree-based extraction)
-  citations/     # BibTeX/CSL citation system
-  app/           # React shell (hooks, components, file management)
-demo/            # Public showcase project loaded in browser dev mode
-fixtures/        # Private/regression fixtures for heavy docs and script-driven tests
-src-tauri/       # Rust backend (filesystem commands, Tauri config)
-scripts/         # browser harness, CDP helpers, blog import tools
+server/
+  index.ts        # Hono entrypoint, routes mounted under /api
+  db.ts           # config + better-sqlite3 instance + workspaceDir()
+  schema.sql      # full DB schema (executed on every startup; CREATE IF NOT EXISTS)
+  auth.ts         # users, sessions, tokens, argon2 hashing
+  middleware.ts   # requireAuth, requireMembership(slug)
+  frontmatter.ts  # parse/serialize YAML frontmatter
+  indexer.ts      # indexDocument(): parse → upsert → reindex links + FTS
+  links.ts        # extract [[id]], [@id], [text](path.md) → links table; getBacklinks()
+  workflow.ts     # submit, approve, reject, createProposal, getReviewQueue, promote
+  cli.ts          # `pnpm cli` user/workspace/reindex commands
+  routes/
+    auth.ts        # login/logout/me
+    tokens.ts      # personal API tokens
+    workspaces.ts  # list/create workspaces
+    notes.ts       # tree/note get/put/delete, search, backlinks, documents list
+    workflow.ts    # queue, settings, proposal, submit, approve, reject
+src/cosheaf/
+  main.tsx        # React entry
+  app.tsx         # full single-file UI (sidebar, editor, queue, propose, backlinks)
+  editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat-editor
+  api.ts          # typed fetch client mirroring server routes
+data/             # default COSHEAF_DATA_DIR; db.sqlite + workspaces/<slug>/...
 ```
 
 ## Commands
 
 ```bash
-pnpm install         # install dependencies
-pnpm dev             # start Coflat dev server (Vite)
-pnpm dev:browser     # start/reuse Vite and launch Chrome for Testing
-pnpm dev:show        # start stable no-HMR dev server on localhost:5173 for demos / shared review
-pnpm preview         # serve the production build on 0.0.0.0 for IPv4 access
-pnpm dev:worktree -- perf-444 --base origin/main --fetch
-                     # create an isolated worktree under .worktrees/ from a committed base ref
-pnpm build           # production build (frontend + editor package)
-pnpm build:app       # production app bundle only; does not typecheck
-pnpm build:coflat    # alias for pnpm build
-pnpm check:static    # lint + root/server typecheck + unused-code/deps
-pnpm check:pre-push  # fast local gate: root/server typecheck + architectural lints
-pnpm check:merge     # full merge gate: check:static + unit tests
-pnpm check:lint      # bare-catch + import-boundary + Biome lint
-pnpm check:types     # root TypeScript + server TypeScript
-pnpm check:unit      # Vitest unit tests
-pnpm check:package   # build editor package + publint + size + package smoke
-pnpm lint            # alias for check:lint
-pnpm lint:fix        # Biome lint autofix
-pnpm test            # alias for Vitest unit tests
-pnpm test:focused -- src/render/reference-render.test.ts
-                     # automation-safe single-worker render/state verification
-pnpm test:repeat -- --count 5 src/render/reference-render.test.ts
-                     # repeat focused tests for flake/order investigations
-pnpm verify:changed  # plan the smallest useful checks from changed files
-pnpm issue -- list    # tea-safe wrapper for local Gitea issues
-pnpm merge-task -- --branch worker-branch
-                     # print a repeatable rtk-prefixed worker-branch merge plan
-pnpm typecheck       # root TypeScript only
-pnpm tauri:dev       # launch Coflat Tauri desktop app
-pnpm tauri:build     # build Coflat production desktop app bundle
-pnpm tauri:build:dmg # build Coflat macOS DMG installer
-pnpm test:browser    # stable managed-browser regression harness
-pnpm test:browser:quick
-                     # named quick browser lanes: smoke/cm6-rich/media/navigation/scroll/render/all/one
-pnpm test:browser:cm6-rich
-pnpm test:browser:media
-pnpm test:browser:navigation
-pnpm test:browser:scroll
-pnpm browser:inspect -- --fixture index.md --mode cm6-rich --text "Local PDF figure"
-                     # JSON runtime inspection snapshot for browser failures
-pnpm doctor:browser  # verify browser harness readiness and emit failure artifacts
-pnpm perf:quick --scenario local-edit-index
-                     # one-sample local perf sniff, not PR-quality evidence
-pnpm perf:capture:heavy -- --scenario typing-rich-burst
-                     # heavy-doc perf lane with longer open/debug budgets
-pnpm perf:dashboard  # flat JSON dashboard snapshot (typing-rich-burst, heavy if available)
-pnpm perf:gate       # compare fresh capture against perf-baseline.json (1.5x threshold)
-pnpm chrome          # launch Playwright Chromium with CDP on port 9322 (manual debug lane)
+pnpm install
+pnpm dev                  # Vite dev server (frontend) on :5173
+pnpm server               # tsx watch on server/index.ts (port 3000 by default)
+pnpm cli user add <name>  # create a user (interactive password prompt)
+pnpm cli workspace add <slug> <name> --owner <user>
+pnpm cli workspace member <slug> <user> <owner|verifier|member>
+pnpm cli workspace reindex <slug>   # rebuild SQLite index from disk
+pnpm typecheck            # tsc --noEmit (root)
+pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
+pnpm check:types          # both
+pnpm check:lint           # bare-catch + boundary lints + biome
+pnpm check:static         # lint + types + knip (unused)
+pnpm check:pre-push       # fast local gate (run by lefthook)
+pnpm test                 # vitest
+pnpm build                # vite build
 ```
 
-## Tooling
+`pnpm dev` and `pnpm server` are separate; in development run both. Vite
+proxies `/api/*` to the server (see `vite.config.ts`).
 
-```bash
-# Dead code / unused exports
-pnpm knip                           # find unused files, exports, dependencies
+## Data model
 
-# Standalone package validation
-pnpm publint                        # validate package.json exports (run after build:editor)
-pnpm size                           # check embed bundle size against limits (run after build:editor)
+- `users(id, username, password_hash, created_at)`
+- `sessions(id, user_id, expires_at)` — cookie sessions
+- `tokens(id, user_id, name, token_hash)` — personal API tokens (`Bearer cs_…`)
+- `workspaces(id, slug, name)` — one filesystem root per workspace
+- `memberships(workspace_id, user_id, role)` — role ∈ `owner | verifier | member`
+- `documents(workspace_id, id, path, type, status, target_id, title, mtime)`
+  - `type ∈ {page, proposal, review}`
+  - `status ∈ {draft, unreviewed, golden, rejected, archived}`
+  - `target_id` points to the page a proposal/review targets
+- `links(workspace_id, src_id, target_id, target_label)` — drives backlinks
+- `notes_fts` — FTS5 virtual table over title + body
+- `workspace_settings(workspace_id, min_approvals)` — promotion threshold
+- `approvals(workspace_id, document_id, verifier_user_id, decision, comment, created_at)`
 
-# Bundle analysis
-pnpm build:analyze                  # build editor bundle + open dist/stats.html treemap
-
-# Rust tests (faster than cargo test)
-cargo nextest run                   # run all Rust tests in parallel
-cargo nextest run --test-threads 4  # with explicit concurrency
-```
-
-### What each tool does
-
-- **knip** — detects unused files, exports, and dependencies. Run after refactors. Config: `knip.config.ts`. The expected unused UI component re-exports are component-library noise; focus on unused files and unlisted deps.
-- **publint** — validates `package.json` exports point to real built files with correct types. Run after `build:editor` before publishing.
-- **size-limit** — enforces generous bundle guardrails for the standalone editor (`dist/editor.mjs` ≤ 10 MB, `dist/editor.css` ≤ 100 kB). Runtime latency is the primary performance budget. Config lives in `package.json`.
-- **smoke:editor-package** — packs the standalone editor, checks the generated type/CSS/JS contract, and enforces `scripts/editor-package-manifest.mjs` so only declared editor externals are exposed and app-only dependencies do not leak into `coflat/editor`.
-- **rollup-plugin-visualizer** — generates `dist/stats.html` treemap of what is actually in the bundle. Activated by `pnpm build:analyze`.
-- **@testing-library/react** (`renderHook`) — for hook-level tests. Setup file: `src/test-setup.ts`.
-- **cargo-nextest** — parallel Rust test runner for the Tauri backend. Faster and cleaner than `cargo test`.
-
-### Hooks (lefthook)
-
-Configured in `lefthook.yml`, installed automatically on `pnpm install` via the `prepare` script.
-
-| Hook | Runs | Commands |
-|---|---|---|
-| `pre-commit` | on every commit | `pnpm check:staged-lint {staged_files}` for staged TS/JS/JSON files |
-| `pre-push` | on every push | `pnpm check:pre-push` (fast local type/boundary gate) |
-
-Skip hooks when needed: `git commit --no-verify` / `git push --no-verify`. Only do that intentionally.
-
-### CI (Gitea Actions)
-
-Workflow at `.gitea/workflows/ci.yml`. Runs on push/PR to `main`.
-
-| Job | What it checks |
-|---|---|
-| `static` | `check:static` |
-| `test` | `check:unit` with Pandoc required |
-| `merged-app-browser` | `check:app-build` + required browser/perf subset |
-| `package` | `check:package` |
-| `rust` | `cargo nextest run` on the Tauri backend |
-
-## Debug helpers
-
-Debug globals are exposed on `window` for console and Playwright testing:
-
-Use `__editor` for surface-neutral document and selection access. Use
-`__cmView` / `__cmDebug` for CM6-specific rendering, parser, geometry, and
-scroll investigations.
+## Workflow lifecycle
 
 ```
-__cmView                                        — CM6 EditorView (dispatch, state, focus)
-__cmDebug.tree()                                — FencedDiv nodes from the Lezer syntax tree
-__cmDebug.treeString()                          — full syntax tree as readable string
-__cmDebug.fences()                              — closing fence visibility for all blocks
-__cmDebug.line(73)                              — DOM state of a specific line
-__cmDebug.selection()                           — current selection (anchor, head, from, to, line, col)
-__cmDebug.history()                             — undo/redo depth
-__cmDebug.structure()                           — active explicit structure-edit target (or null)
-__cmDebug.geometry()                            — measured visible-line + shell-surface geometry snapshot
-__cmDebug.renderState()                         — compact visible rich-render snapshot (raw fenced openers, rendered headers, rich-widget counts)
-__cmDebug.motionGuards()                        — recent vertical-motion guard events
-__cmDebug.dump()                                — combined snapshot (tree + fences + cursor + focus)
-__cmDebug.activateStructureAtCursor()           — open structure editing at the current cursor
-__cmDebug.clearStructure()                      — clear the active structure-edit target
-__cmDebug.clearMotionGuards()                   — clear recorded vertical-motion guard events
-__cmDebug.moveVertically("up")                  — rich-mode vertical move with reverse-scroll guard
-__cmDebug.toggleTreeView()                      — toggle live Lezer tree panel (@overleaf/codemirror-tree-view)
-__app.openFile("posts/x.md")                    — open any file by path (app's real function)
-__app.hasFile("posts/x.md")                     — whether a project file exists
-__app.openFileWithContent(name, content)        — open generated content as an editor document
-__app.loadFixtureProject(files, initialPath)    — load an in-memory fixture project for tests
-__app.closeFile({ discard })                    — close the active document
-__app.setSearchOpen(true)                       — open or close app search
-__app.setMode("source")                         — switch editor mode (cm6-rich/source)
-__app.showSidebarPanel("diagnostics")           — open a specific sidebar panel
-__app.getSidebarState()                         — current sidebar { collapsed, tab }
-__app.saveFile()                                — save current file
-__app.getProjectRoot()                          — current project root path (or null)
-__app.getCurrentDocument()                      — current doc {path, name, dirty} (or null)
-__app.isDirty()                                 — whether any open document has unsaved changes
-__app.ready                                     — resolves after the app debug bridge is connected
-__editor.ready                                  — resolves after the product-neutral editor bridge is connected
-__editor.focus()                                — focus the active editor surface
-__editor.getDoc()                               — current document text
-__editor.setDoc(text)                           — replace current document text through the active editor
-__editor.peekDoc()                              — current document text without forcing editor focus
-__editor.getSelection()                         — current active editor selection
-__editor.peekSelection()                        — current editor selection without forcing editor focus
-__editor.insertText(text)                       — insert text through the active editor
-__editor.setSelection(a, f)                     — set active editor selection
-__editor.formatSelection(detail)                — format current selection through the active editor
-__cfDebug.ready                                 — resolves after performance/debug helpers are connected
-__cfDebug.perfSummary()                         — current frontend performance span summary
-__cfDebug.printPerfSummary()                    — print frontend performance summary to the console
-__cfDebug.clearPerf()                           — clear frontend performance spans
-__cfDebug.toggleFps()                           — toggle the status-bar FPS meter
-__cfDebug.togglePerfPanel()                     — toggle the floating perf debug panel
-__cfDebug.scrollGuards()                        — recent scroll guard events
-__cfDebug.clearScrollGuards()                   — clear recent scroll guard events
-__cfDebug.watcherStatus()                       — latest frontend native watcher health status
-__cfDebug.runtimeContract()                     — computed editor runtime contract snapshot with drift issues
-__cfDebug.recorderStatus()                      — debug recorder queue/connectivity/capture-mode snapshot
-__cfDebug.captureState("label")                 — combined selection/render/raw-fence/structure snapshot + recorder event
-__cfDebug.exportSession()                       — export locally recorded debug session events
-__cfDebug.clearSession()                        — clear locally recorded debug session events
-__cfDebug.captureFullSession()                  — combined debug export with session events, perf, and current capture
-__cfDebug.clearAllDebugBuffers()                — clear session events and frontend/backend perf spans
-__tauriSmoke.openProject("/abs/path")           — dev-only Tauri helper to switch project roots deterministically
-__tauriSmoke.openFile("/abs/path")              — dev-only Tauri helper to open a file
-__tauriSmoke.requestNativeClose()               — dev-only Tauri helper to request native close handling
-__tauriSmoke.listWindows()                      — dev-only Tauri helper to list app windows
-__tauriSmoke.getWindowState()                   — dev-only Tauri snapshot: project root, current doc, dirty, backend root, watcher health
-__tauriSmoke.simulateExternalChange("notes.md") — dev-only Tauri helper to emit a file-changed event
-__fencedDivDebug = true                         — toggle fenced div parser tracing
+draft  ──submit──▶  unreviewed  ──approve (×min_approvals)──▶  golden
+                     │  ──reject──▶  rejected
+proposal targeting page P:
+  unreviewed ──approve──▶ promote: P.body := proposal.body, P.status := golden,
+                                   proposal.status := archived
 ```
 
-Playwright helpers: `scripts/test-helpers.mjs` — `connectEditor()`, `waitForDebugBridge()`, `readEditorText()`, `formatSelection()`, `openFile()`, `getTreeDivs()`, `checkFences()`, `getGeometrySnapshot()`, `getRenderState()`, `captureDebugState()`, `dump()`, `setCursor()`, `jumpToTextAnchor()`, `scrollTo()`.
-
-## Dev mode
-
-`pnpm dev` runs Vite in dev mode (`import.meta.env.DEV === true`). Dev mode differences:
-- **No dirty-file confirmation** — switching files with unsaved changes skips the `window.confirm` dialog for faster testing. Controlled by `Settings.skipDirtyConfirm` (defaults to `true` in dev, `false` in production).
-
-When asked to start the preview server, prefer `pnpm build && pnpm preview`. The preview script binds `0.0.0.0` so it is reachable over IPv4.
-
-## Browser testing
-
-**Rule**: Do NOT use the CDP lane (port 9322, `pnpm chrome`, `chromium.connectOverCDP`) unless the user explicitly asks for it or is already driving the shared app window visually. The CDP lane is for human-in-the-loop visual debugging, not for automated inspection by agents. It has known pitfalls (headed `page.screenshot` hangs, stuck WebSocket connections, state lost on fallback) that the managed harness avoids.
-
-For any automated CM6 inspection — DOM audits, screenshots, mode switches, reference/render checks — use the managed Playwright harness.
-
-Managed harness (the default):
-1. Run `pnpm doctor:browser` when the harness itself looks suspect, or scripts like `pnpm test:browser`, `pnpm test:browser:quick -- cm6-rich`, `pnpm browser:inspect -- --fixture index.md --mode cm6-rich --text "..."`, `node scripts/perf-regression.mjs ...`, `node scripts/cursor-scroll-regression.mjs ...`, or `node scripts/browser-repro.mjs capture --fixture index.md --line 40`.
-2. Managed localhost runs auto-start Vite when needed. Use `--no-start-server` only when you intentionally manage the app server yourself.
-3. Default mode is Playwright-owned Chromium. Use `--browser cdp` only when the user explicitly asks for the manual shared app window.
-4. Browser setup and regression failures write artifacts under `/tmp/coflat-browser-artifacts` by default. Use `--artifacts-dir /tmp/coflat-*` to force a specific output directory for a run.
-
-Manual CDP lane (user-driven only):
-1. Start `pnpm dev`, then `pnpm chrome` (CDP on port 9322).
-2. Connect: `chromium.connectOverCDP("http://localhost:9322")`
-3. Use `page.evaluate()` + `__editor`/`__app` for surface-neutral actions. Use `__cmView`/`__cmDebug` only when investigating the CM6 surface. **Never use `locator.click()` on CM6 content.** Use `__app.openFile()` to open files. Set `page.setDefaultTimeout()` from the `default` runtime budget profile unless a repro needs a custom timeout.
-4. Screenshots: use the `screenshot()` helper from `scripts/test-helpers.mjs`, or `node scripts/screenshot.mjs [file] --output path.png`. **Do not call `page.screenshot()` directly** — headed Chrome CDP can hang there.
-5. Kill: `kill $(lsof -ti:5173 -ti:5174 -ti:5175) 2>/dev/null; pkill -f "launch-chrome" 2>/dev/null`
-
-When launching `Google Chrome for Testing` directly in app mode (for example `open -na ... --args --app=URL`), always pass `--disable-infobars` so the Chrome for Testing warning banner does not cover the app UI.
-
-Do NOT use the Playwright MCP plugin — connect directly via CDP.
-
-### Perf benchmarking
-
-- Use the shared perf harness in `scripts/perf-regression.mjs` and the guidance in `docs/perf-regression.md`.
-- For changed-area render/state verification, prefer `pnpm test:focused -- <tests...>` over ad hoc Vitest invocations. It pins Vitest to one deterministic worker process for all listed files and cleans up the child process on exit. Pass `--isolate-files` only when you intentionally need the older one-file-per-process behavior.
-- For fixture-heavy perf scenarios, prefer `pnpm perf:capture:heavy -- --scenario typing-rich-burst ...` or `pnpm perf:compare:heavy -- ...`.
-- Browser/perf automation budgets are named in `scripts/runtime-budget-profiles.mjs`; use `default` for normal lanes and `heavy-doc` for private heavy-fixture lanes.
-- When local private fixtures are available, `fixtures/cogirth/main2.md` is the preferred heavy fixture for open/edit/scroll performance work. Otherwise use `demo/index.md` and note the limitation.
-- Scripted browser/perf fixtures resolve from repo-local `demo/` and `fixtures/` by default. For private fixture trees outside the checkout, set `COFLAT_DEMO_ROOT` or `COFLAT_FIXTURE_ROOT`; do not hard-code user-home fixture roots in scripts.
-
-### Runtime regression debugging
-
-- Prefer `scripts/test-helpers.mjs` helpers such as `connectEditor()`, `waitForAppUrl()`, `waitForDebugBridge()`, and `assertEditorHealth()` before writing ad hoc browser snippets.
-- Always target the real localhost app page, not merely “the first page” in the browser context.
-- For bug-specific runtime verification, do a general smoke check on `index.md`. When local private fixtures are available, also run the affected heavy fixture such as `fixtures/rankdecrease/main.md` or `fixtures/cogirth/main2.md`.
-- For cursor/scroll regressions like `#964`, verify with a real long-document runtime repro. Prefer the managed harness first. If `page.keyboard.press()` is unreliable in the manual app-mode CDP lane, it is acceptable to drive CM6 movement inside `page.evaluate()` and document the exact command/script used.
-- For rich scroll-jump work, use `rtk proxy node scripts/scroll-jump-lab.mjs --fixture rankdecrease/main.md --url http://localhost:5173 --simulate-wheel --step-px 90 --step-count 24` as the primary investigation probe. It also reports `window.__cfDebug.scrollGuards()` so guard activations are quantified, not guessed.
-- If `@codemirror/view` is patched in a worktree, clear that worktree's `node_modules/.vite` cache and restart Vite with `pnpm dev -- --force`; otherwise the browser can keep serving the stale pre-patch bundle.
+- `submitDocument` rewrites the file's frontmatter `status` to `unreviewed`.
+- `decideOnDocument` records an `approvals` row, then either applies
+  `rejected` (on reject) or — if approvals reach `min_approvals` — promotes.
+- Promotion of a `proposal` overwrites the target page body. Promotion of a
+  plain `page` flips its status to `golden` in place.
+- All status transitions write canonical frontmatter to disk via atomic rename.
 
 ## Conventions
 
-- ES modules (`import`/`export`), not CommonJS
-- `const` over `let`; no `any` types (use `unknown`)
-- kebab-case files, PascalCase types, camelCase functions
-- Export types from their module, re-export from `index.ts` barrel files
-- One concept per file; tests next to source (`foo.ts` → `foo.test.ts`)
-- Vitest for testing
+- ES modules, TypeScript strict. No CommonJS. No `any` (use `unknown`).
+- Files: kebab-case. Types: PascalCase. Functions: camelCase.
+- Tests next to source (`foo.ts` → `foo.test.ts`); Vitest.
+- Server code uses `.js` import suffixes (NodeNext resolution).
+- Don't add bare `catch {}` — `scripts/check-bare-catch.mjs` will fail.
+- Don't bypass `requireAuth` / `requireMembership` on workspace routes.
+- Atomic file writes: write to `<file>.tmp-<pid>-<ts>` then rename. See
+  `notes.put` and `workflow.writeAtomic`.
+- Path safety: every filesystem-touching route must `safeJoin(root, rel)` to
+  block traversal.
 
-## Code quality priorities
+## When changing the document model
 
-This codebase values **architectural cleanliness**. When making changes:
+If you change document types, statuses, link extraction, or workflow
+transitions, you usually need to touch in lockstep:
 
-- **No circular dependencies.** Modules must form a clean DAG. If an import would create a cycle, fix the layering — don't work around it with barrel file exclusions or lazy imports.
-- **No duplication.** If the same logic exists in two places, extract it. Don't copy-paste helpers, tree-walking patterns, or state management idioms across files.
-- **One owner per concept.** A state field, a tree traversal, a lifecycle transition — each should have exactly one canonical location. Other modules consume it, not reimplement it.
-- **Explicit over implicit.** Prefer explicit state machines over coordinating through scattered refs and effects. Prefer typed discriminated unions over `Record<string, unknown>`. Prefer context or direct imports over prop drilling through intermediate components.
-- **Small, focused modules.** Split files that mix unrelated concerns. A 1200-line file doing 6 things should be 6 files doing 1 thing each.
+1. `server/schema.sql` (CHECK constraints)
+2. `server/indexer.ts` (`DOCUMENT_TYPES`, `DOCUMENT_STATUSES`)
+3. `server/workflow.ts` (`DocumentRow.type`)
+4. `src/cosheaf/api.ts` (mirrored `DocumentMeta` type unions)
+5. UI in `src/cosheaf/app.tsx` if a status gates a new affordance
+
+Add a test under `server/*.test.ts` (or `tests/`) for any new transition.
+
+## Reindexing and external edits
+
+The on-disk file is authoritative. The server runs a filesystem watcher per
+workspace: external `.md` edits are re-indexed automatically and the client
+is notified via the per-workspace SSE stream at `/api/w/:slug/events`. After
+bulk external changes (or if the server was offline), run `pnpm cli workspace
+reindex <slug>` to force a full rebuild.
 
 ## Document format
 
-Pandoc-flavored markdown: no indented code blocks, `$`/`$$` and `\(\)`/`\[\]` for math, fenced divs (`::: {.class #id} Title`), `[@id]` for cross-refs/citations, equation labels `$$ ... $$ {#eq:foo}`. See `FORMAT.md` for the canonical document-format spec. All markdown files in this repo must follow `FORMAT.md`.
+See `FORMAT.md` for the canonical Pandoc-flavored markdown spec. Cosheaf
+links recognized by the indexer:
 
-Coflat does NOT implement every CommonMark feature. Raw inline HTML, HTML comments, reference-style links, bare-URL autolink, `>` blockquotes, indented code blocks, and Pandoc definition lists are intentionally out of scope. Before filing a "missing markdown feature" bug, check **`FORMAT.md` § Removed Features**.
+- `[[id]]` — wiki link by document id
+- `[@id]` — Pandoc cross-ref / citation
+- `[text](relative/path.md)` — markdown link to another page
 
-## Gitea / issue tracking
+Bare URLs, raw HTML, and indented code blocks are intentionally out of scope.
 
-This repo is hosted on a local Gitea instance at `http://localhost:3001`. Use the repo issue wrapper for issues; it calls **`tea`** with the command order required by the local install. Use raw `tea` only for pulls, PRs, and login inspection. Do not use `gh` or raw curl for forge work.
+## Things this repo is NOT
 
-```bash
-pnpm issue -- list                                          # list open issues
-pnpm issue -- list --state closed --limit 30
-pnpm issue -- create --title "..." --description "..."
-pnpm issue -- comment <number> "Verification: ..."
-pnpm issue -- close <number>
-pnpm issue -- verify-close <number...> --commit <sha> --verify "rtk pnpm test"
-tea pulls --repo chaoxu/coflat                              # list pull requests
-tea pr --repo chaoxu/coflat create --title "..." --base main --head <branch>
-tea logins                                                  # show configured logins (default: coflat / chaoxu)
-```
-
-`tea` is already logged in. The default login points to `http://localhost:3001` as user `chaoxu`.
-
-See `docs/devx-workflow.md` for verification records, worker-agent handoff metadata, and `pnpm merge-task` usage.
-
-## Workspace hygiene
-
-- Temporary files go in `/tmp/coflat-*` — never in the project directory.
-- `demo/` is public showcase content only. Unless a file is intentionally generated for the public showcase, do not put it under `demo/`; use `fixtures/` for regression, heavy, or private documents instead.
-- Unit tests must own inline/helper-built inputs; `demo/` is for showcase smoke checks, not low-level assertions.
-- For isolated local work, prefer `pnpm dev:worktree -- <name>`.
-  - It creates a new branch + worktree under `.worktrees/<sanitized-name>`.
-  - It links the repo's `node_modules` into the new worktree when available, so verification commands usually work immediately.
-  - It is dirty-tree tolerant: uncommitted changes in the current worktree are NOT copied; only committed history from the chosen base ref is used.
-  - `--base origin/main --fetch` refreshes the requested remote base ref before creating the worktree.
-  - A custom relative `--path` is resolved from the repo root, not the caller's current subdirectory.
-
-## Performance issue standard
-
-Every performance issue and PR must include a **before/after measurement** on a large real document. When local private fixtures are available, `fixtures/cogirth/main2.md` is preferred; otherwise use `demo/index.md` and note the limitation. Without numbers the change is unverifiable.
-
-- Run the perf harness: `node scripts/perf-regression.mjs` — or use the relevant `perf.*` span from the in-app telemetry.
-- For targeted micro-optimizations (for example a single function), a focused microbenchmark or Vitest perf test is acceptable instead, but must still report both numbers.
-- The PR description must include the before and after figures. A PR that claims a perf improvement without measurements will not be merged.
-- The local private fixture `fixtures/cogirth/main2.md` is the preferred heavy document for local-edit, scroll, and open benchmarks when available. Otherwise use `demo/index.md` or another documented public fixture and note the limitation.
-- Bundle size is only a packaging guardrail; anything under the configured 10 MB standalone JS limit is acceptable unless it creates a measured runtime latency regression.
-
-## Maintenance triggers
-
-- **Large file trigger**: if a change touches a file above roughly 600 lines, or a file that already mixes multiple concerns, explicitly evaluate extraction/splitting before adding more logic.
-- **Neutral owner rule**: if a selector/type/model is used by more than one subsystem, move it into a neutral owner. Do not let renderers depend on protection/event modules for core document selectors. See [Subsystem pattern: Neutral owner for cross-subsystem state](docs/architecture/subsystem-pattern.md#neutral-owner-for-cross-subsystem-state).
-- **Debug-bridge sync rule**: if a change touches the browser/debug harness, update `scripts/test-helpers.mjs`, `src/types/window.d.ts`, and this shared file together.
-
-## Development rules & architecture
-
-Detailed rules and architecture decisions are in reference files -- loaded on demand, not always in context:
-
-- **[Development rules](docs/architecture/development-rules.md)** — rigor mode, dual-editor ownership, CM6 Typora-style rules, Lezer parser rules, testing policy, workflow gates, shell safety. Error handling policy: Never use bare `catch {}` without an explicit reason.
-- **[Devx workflow](docs/devx-workflow.md)** — issue wrapper, verification records, worker branch integration, and check lanes
-- **[Architecture decisions](docs/architecture/architecture-decisions.md)** — Pandoc-free editing, plugin system, FileSystem abstraction, Lezer-everywhere philosophy, library preferences
-- **[Subsystem pattern](docs/architecture/subsystem-pattern.md)** — model/controller/render-adapter seam pattern for non-trivial features. One concept should have one clear owner.
-- **[Inline rendering policy](docs/design/inline-rendering-policy.md)** — how inline math, bold, italic rendering works
-- **[Theme contract](docs/architecture/theme-contract.md)** — CSS variable contract between editor and theme
+- It is not the coflat editor. The editor is a published package
+  (`@chaoxu/coflat-editor`); see its own repo for editor-internal debug
+  helpers, browser harness, perf scripts, etc. None of `__cmView`,
+  `__cmDebug`, `pnpm test:browser`, `pnpm chrome`, `scripts/perf-*` apply
+  here.
+- It is not an agent system. No proving, exploration, or verifier-bot logic
+  belongs in this repo. That goes in `autoprover` later, talking to cosheaf
+  over the same HTTP API a human uses.

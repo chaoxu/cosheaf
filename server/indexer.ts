@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { type Frontmatter, parseDocument, serializeDocument } from "./frontmatter.js";
 import { reindexLinks } from "./links.js";
 
-const DOCUMENT_TYPES = ["page", "review", "proposal", "task"] as const;
+const DOCUMENT_TYPES = ["page", "review", "proposal"] as const;
 const DOCUMENT_STATUSES = [
   "golden",
   "unreviewed",

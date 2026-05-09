@@ -1,16 +1,19 @@
 import type { ReactElement } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   api,
+  type ApprovalRecord,
   type Backlink,
   type FileEntry,
+  type ProposalTarget,
   type QueueEntry,
   type SearchResult,
   type TokenInfo,
   type User,
   type Workspace,
 } from "./api";
+import { lineDiff, stripFrontmatter } from "./diff";
 import { MarkdownEditor } from "./editor";
 
 type View =
@@ -360,6 +363,83 @@ function BacklinksPanel({
   );
 }
 
+function ProposalDiffPanel({
+  proposalBody,
+  target,
+  onOpenTarget,
+}: {
+  proposalBody: string;
+  target: ProposalTarget;
+  onOpenTarget: (path: string) => void;
+}): ReactElement {
+  const targetBody = stripFrontmatter(target.target_content);
+  const diff = lineDiff(targetBody, stripFrontmatter(proposalBody));
+  let adds = 0;
+  let dels = 0;
+  for (const d of diff) {
+    if (d.kind === "add") adds++;
+    else if (d.kind === "del") dels++;
+  }
+  const header = (
+    <div className="backlinks-header">
+      Diff vs{" "}
+      <button className="link-btn" onClick={() => onOpenTarget(target.target_path)}>
+        {target.target_title ?? target.target_path}
+      </button>{" "}
+      <span className="muted small">
+        +{adds} −{dels}
+      </span>
+    </div>
+  );
+  if (adds === 0 && dels === 0) {
+    return (
+      <div className="backlinks">
+        {header}
+        <div className="muted small padded">No changes.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="backlinks">
+      {header}
+      <div className="diff-block">
+        {diff.map((line, idx) => (
+          <div key={idx} className={`diff-line diff-${line.kind}`}>
+            <span className="diff-marker">
+              {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
+            </span>
+            {line.text || " "}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalsPanel({ approvals }: { approvals: ApprovalRecord[] }): ReactElement {
+  return (
+    <div className="backlinks">
+      <div className="backlinks-header">
+        Reviews {approvals.length > 0 && `(${approvals.length})`}
+      </div>
+      {approvals.length === 0 && <div className="muted small padded">No reviews yet.</div>}
+      {approvals.length > 0 && (
+        <ul>
+          {approvals.map((a) => (
+            <li key={a.verifier_user_id}>
+              <span className={`badge badge-${a.decision === "approve" ? "golden" : "rejected"}`}>
+                {a.decision}
+              </span>{" "}
+              <strong>{a.username}</strong>
+              {a.comment && <div className="muted small">{a.comment}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function WorkspaceView({
   user,
   workspace,
@@ -388,6 +468,9 @@ function WorkspaceView({
   const [proposeOpen, setProposeOpen] = useState(false);
   const [proposalBody, setProposalBody] = useState("");
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
+  const [reviewComment, setReviewComment] = useState("");
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [proposalTarget, setProposalTarget] = useState<ProposalTarget | null>(null);
 
   const reloadTree = useCallback(() => {
     api
@@ -400,6 +483,45 @@ function WorkspaceView({
 
   useEffect(reloadTree, [reloadTree]);
 
+  const openPathRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    openPathRef.current = openPath;
+  }, [openPath]);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  useEffect(() => {
+    const url = `/api/w/${encodeURIComponent(workspace.slug)}/events`;
+    const es = new EventSource(url, { withCredentials: true });
+    es.onmessage = (msg) => {
+      let event: { type: string; path?: string };
+      try {
+        event = JSON.parse(msg.data);
+      } catch (_err) {
+        return;
+      }
+      if (event.type !== "change" && event.type !== "remove") return;
+      reloadTree();
+      if (
+        event.type === "change" &&
+        event.path &&
+        event.path === openPathRef.current &&
+        !dirtyRef.current
+      ) {
+        api
+          .getNote(workspace.slug, event.path)
+          .then((r) => {
+            setContent(r.content);
+            setMtime(r.mtime);
+          })
+          .catch(() => undefined);
+      }
+    };
+    return () => es.close();
+  }, [workspace.slug, reloadTree]);
+
   const loadBacklinks = useCallback(
     (id: string | undefined) => {
       if (!id) {
@@ -410,6 +532,20 @@ function WorkspaceView({
         .backlinks(workspace.slug, id)
         .then(setBacklinks)
         .catch(() => setBacklinks([]));
+    },
+    [workspace.slug],
+  );
+
+  const loadApprovals = useCallback(
+    (id: string | undefined) => {
+      if (!id) {
+        setApprovals([]);
+        return;
+      }
+      api
+        .approvals(workspace.slug, id)
+        .then(setApprovals)
+        .catch(() => setApprovals([]));
     },
     [workspace.slug],
   );
@@ -428,13 +564,23 @@ function WorkspaceView({
           setMtime(r.mtime);
           setDirty(false);
           loadBacklinks(entry.doc?.id);
+          loadApprovals(entry.doc?.id);
+          setReviewComment("");
+          if (entry.doc?.type === "proposal" && entry.doc?.id) {
+            api
+              .proposalTarget(workspace.slug, entry.doc.id)
+              .then(setProposalTarget)
+              .catch(() => setProposalTarget(null));
+          } else {
+            setProposalTarget(null);
+          }
         })
         .catch((err: unknown) =>
           setStatus(err instanceof ApiError ? err.message : "Failed to open"),
         )
         .finally(() => setBusy(false));
     },
-    [dirty, workspace.slug, loadBacklinks],
+    [dirty, workspace.slug, loadBacklinks, loadApprovals],
   );
 
   const save = useCallback(() => {
@@ -487,12 +633,16 @@ function WorkspaceView({
     (decision: "approve" | "reject") => {
       if (!openDoc?.id) return;
       const fn = decision === "approve" ? api.approve : api.reject;
-      fn(workspace.slug, openDoc.id)
+      const comment = reviewComment.trim() || undefined;
+      const docId = openDoc.id;
+      fn(workspace.slug, docId, comment)
         .then((r) => {
           setStatus(`${decision}d (status: ${r.doc_status})`);
           setOpenDoc((d) => (d ? { ...d, status: r.doc_status } : d));
+          setReviewComment("");
+          loadApprovals(docId);
           reloadTree();
-          if (r.promoted_meta && r.promoted_meta.id !== openDoc.id) {
+          if (r.promoted_meta && r.promoted_meta.id !== docId) {
             const targetEntry = files?.find((f) => f.doc?.id === r.promoted_meta?.id);
             if (targetEntry) open(targetEntry);
           }
@@ -501,7 +651,7 @@ function WorkspaceView({
           setStatus(err instanceof ApiError ? err.message : `${decision} failed`),
         );
     },
-    [openDoc, workspace.slug, files, open, reloadTree],
+    [openDoc, workspace.slug, files, open, reloadTree, reviewComment, loadApprovals],
   );
 
   const submitProposal = useCallback(() => {
@@ -741,6 +891,12 @@ function WorkspaceView({
                 {openDoc?.status === "unreviewed" &&
                   (workspace.role === "owner" || workspace.role === "verifier") && (
                     <>
+                      <input
+                        className="text-input"
+                        placeholder="Comment (optional)"
+                        value={reviewComment}
+                        onChange={(e) => setReviewComment(e.target.value)}
+                      />
                       <button onClick={() => decideDoc("approve")} disabled={busy}>
                         Approve
                       </button>
@@ -796,6 +952,19 @@ function WorkspaceView({
                     if (entry) open(entry);
                   }}
                 />
+              )}
+              {openDoc?.type === "proposal" && proposalTarget && (
+                <ProposalDiffPanel
+                  proposalBody={content}
+                  target={proposalTarget}
+                  onOpenTarget={(targetPath) => {
+                    const entry = files?.find((f) => f.path === targetPath);
+                    if (entry) open(entry);
+                  }}
+                />
+              )}
+              {openDoc?.id && approvals.length > 0 && (
+                <ApprovalsPanel approvals={approvals} />
               )}
             </>
           )}

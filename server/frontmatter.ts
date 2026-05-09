@@ -24,7 +24,7 @@ export function parseDocument(content: string): ParsedDocument {
   try {
     const parsed = YAML.parse(match[1]);
     if (parsed && typeof parsed === "object") frontmatter = parsed as Frontmatter;
-  } catch {
+  } catch (_err) {
     // Malformed frontmatter is treated as no frontmatter.
     return { frontmatter: {}, body: content, hadFrontmatter: false };
   }

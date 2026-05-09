@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { writeAtomic } from "./atomic.js";
 import { type Frontmatter, parseDocument, serializeDocument } from "./frontmatter.js";
 import {
   type DocumentStatus,
@@ -17,16 +18,16 @@ export class WorkflowError extends Error {
   }
 }
 
-interface DocumentRow {
+export interface DocumentRow {
   id: string;
   path: string;
-  type: "page" | "review" | "proposal" | "task";
+  type: "page" | "review" | "proposal";
   status: DocumentStatus;
   target_id: string | null;
   title: string | null;
 }
 
-function getDocument(db: Database.Database, workspaceId: number, docId: string): DocumentRow {
+export function getDocument(db: Database.Database, workspaceId: number, docId: string): DocumentRow {
   const row = db
     .prepare(
       "SELECT id, path, type, status, target_id, title FROM documents WHERE workspace_id = ? AND id = ?",
@@ -63,14 +64,6 @@ async function rewriteFileWithStatus(
   return serializeDocument(fm, parsed.body);
 }
 
-async function writeAtomic(workspaceRoot: string, filePath: string, content: string): Promise<void> {
-  const full = path.join(workspaceRoot, filePath);
-  await fs.mkdir(path.dirname(full), { recursive: true });
-  const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(tmp, content, "utf8");
-  await fs.rename(tmp, full);
-}
-
 async function applyStatus(
   db: Database.Database,
   workspaceId: number,
@@ -80,7 +73,7 @@ async function applyStatus(
 ): Promise<void> {
   const candidate = await rewriteFileWithStatus(workspaceRoot, doc.path, newStatus);
   const indexed = indexDocument(db, workspaceId, doc.path, candidate);
-  await writeAtomic(workspaceRoot, doc.path, indexed.content);
+  await writeAtomic(workspaceId, workspaceRoot, doc.path, indexed.content);
 }
 
 export async function submitDocument(
@@ -135,7 +128,7 @@ async function promote(
       proposalParsed.body,
     );
     const targetIndexed = indexDocument(db, workspaceId, target.path, candidate);
-    await writeAtomic(workspaceRoot, target.path, targetIndexed.content);
+    await writeAtomic(workspaceId, workspaceRoot, target.path, targetIndexed.content);
     await applyStatus(db, workspaceId, workspaceRoot, doc, "archived");
     return targetIndexed.meta;
   }
@@ -166,17 +159,18 @@ export async function decideOnDocument(
   docId: string,
   verifierUserId: number,
   decision: "approve" | "reject",
+  comment: string | null = null,
 ): Promise<DecisionResult> {
   const doc = getDocument(db, workspaceId, docId);
   if (doc.status !== "unreviewed") {
     throw new WorkflowError(409, `cannot decide on document with status=${doc.status}`);
   }
   db.prepare(
-    `INSERT INTO approvals (workspace_id, document_id, verifier_user_id, decision, created_at)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO approvals (workspace_id, document_id, verifier_user_id, decision, comment, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(workspace_id, document_id, verifier_user_id) DO UPDATE SET
-       decision = excluded.decision, created_at = excluded.created_at`,
-  ).run(workspaceId, docId, verifierUserId, decision, Date.now());
+       decision = excluded.decision, comment = excluded.comment, created_at = excluded.created_at`,
+  ).run(workspaceId, docId, verifierUserId, decision, comment, Date.now());
 
   const counts = getApprovalCounts(db, workspaceId, docId);
 
@@ -226,6 +220,34 @@ export function getReviewQueue(db: Database.Database, workspaceId: number): Queu
     .all(workspaceId) as QueueEntry[];
 }
 
+export interface ApprovalRecord {
+  verifier_user_id: number;
+  username: string;
+  decision: "approve" | "reject";
+  comment: string | null;
+  created_at: number;
+}
+
+export function getApprovalsForDocument(
+  db: Database.Database,
+  workspaceId: number,
+  docId: string,
+): ApprovalRecord[] {
+  return db
+    .prepare(
+      `SELECT approvals.verifier_user_id AS verifier_user_id,
+              users.username AS username,
+              approvals.decision AS decision,
+              approvals.comment AS comment,
+              approvals.created_at AS created_at
+         FROM approvals
+         JOIN users ON users.id = approvals.verifier_user_id
+        WHERE approvals.workspace_id = ? AND approvals.document_id = ?
+        ORDER BY approvals.created_at DESC`,
+    )
+    .all(workspaceId, docId) as ApprovalRecord[];
+}
+
 export async function createProposal(
   db: Database.Database,
   workspaceId: number,
@@ -245,6 +267,6 @@ export async function createProposal(
   };
   const candidate = serializeDocument(fm, body);
   const indexed = indexDocument(db, workspaceId, proposalPath, candidate);
-  await writeAtomic(workspaceRoot, proposalPath, indexed.content);
+  await writeAtomic(workspaceId, workspaceRoot, proposalPath, indexed.content);
   return { proposalPath, meta: indexed.meta };
 }

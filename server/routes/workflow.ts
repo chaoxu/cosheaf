@@ -1,5 +1,7 @@
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { AppEnv } from "../types.js";
 import { workspaceDir } from "../db.js";
 import { requireAuth, requireMembership } from "../middleware.js";
@@ -7,6 +9,8 @@ import {
   WorkflowError,
   createProposal,
   decideOnDocument,
+  getApprovalsForDocument,
+  getDocument,
   getMinApprovals,
   getReviewQueue,
   setMinApprovals,
@@ -77,6 +81,11 @@ async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promi
   if (ws.role !== "owner" && ws.role !== "verifier") {
     return c.json({ error: "verifier role required" }, 403);
   }
+  const body = (await c.req.json().catch(() => ({}))) as { comment?: string } | null;
+  const comment =
+    typeof body?.comment === "string" && body.comment.trim().length > 0
+      ? body.comment.trim()
+      : null;
   const root = workspaceDir(c.get("config"), ws.slug);
   try {
     const r = await decideOnDocument(
@@ -86,6 +95,7 @@ async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promi
       c.req.param("id") ?? "",
       c.get("user").id,
       decision,
+      comment,
     );
     return c.json(r);
   } catch (err) {
@@ -95,3 +105,32 @@ async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promi
 
 workflow.post("/:slug/document/:id/approve", (c) => decide(c, "approve"));
 workflow.post("/:slug/document/:id/reject", (c) => decide(c, "reject"));
+
+workflow.get("/:slug/document/:id/approvals", (c) => {
+  const ws = c.get("workspace");
+  return c.json({
+    approvals: getApprovalsForDocument(c.get("db"), ws.id, c.req.param("id") ?? ""),
+  });
+});
+
+workflow.get("/:slug/proposal/:id/target", async (c) => {
+  const ws = c.get("workspace");
+  const db = c.get("db");
+  try {
+    const proposal = getDocument(db, ws.id, c.req.param("id") ?? "");
+    if (proposal.type !== "proposal" || !proposal.target_id) {
+      return c.json({ error: "not a proposal with a target" }, 400);
+    }
+    const target = getDocument(db, ws.id, proposal.target_id);
+    const full = path.join(workspaceDir(c.get("config"), ws.slug), target.path);
+    const content = await fs.readFile(full, "utf8").catch(() => "");
+    return c.json({
+      target_id: target.id,
+      target_path: target.path,
+      target_title: target.title,
+      target_content: content,
+    });
+  } catch (err) {
+    return workflowError(c, err);
+  }
+});

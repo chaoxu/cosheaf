@@ -4,8 +4,11 @@ import path from "node:path";
 import type { AppEnv } from "../types.js";
 import { workspaceDir } from "../db.js";
 import { requireAuth, requireMembership } from "../middleware.js";
+import { writeAtomic } from "../atomic.js";
 import { IdConflictError, deleteDocument, indexDocument } from "../indexer.js";
 import { getBacklinks } from "../links.js";
+import { markSelfWrite, subscribe } from "../watcher.js";
+import { streamSSE } from "hono/streaming";
 
 export const notes = new Hono<AppEnv>();
 
@@ -124,10 +127,7 @@ notes.put("/:slug/note", async (c) => {
     throw err;
   }
 
-  await fs.mkdir(path.dirname(full), { recursive: true });
-  const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(tmp, indexed.content, "utf8");
-  await fs.rename(tmp, full);
+  await writeAtomic(ws.id, root, rel, indexed.content);
   const stat = await fs.stat(full);
   return c.json({
     ok: true,
@@ -152,8 +152,30 @@ notes.delete("/:slug/note", async (c) => {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return c.json({ error: "not found" }, 404);
     throw err;
   }
+  markSelfWrite(ws.id, rel);
   deleteDocument(c.get("db"), ws.id, rel);
   return c.json({ ok: true });
+});
+
+notes.get("/:slug/events", (c) => {
+  const ws = c.get("workspace");
+  const config = c.get("config");
+  const db = c.get("db");
+  return streamSSE(c, async (stream) => {
+    const unsubscribe = subscribe(db, config, ws.slug, ws.id, (e) => {
+      void stream.writeSSE({ data: JSON.stringify(e) });
+    });
+    try {
+      await stream.writeSSE({ data: JSON.stringify({ type: "ready" }), event: "ready" });
+      while (!stream.aborted && !stream.closed) {
+        await stream.sleep(30000);
+        if (stream.aborted || stream.closed) break;
+        await stream.writeSSE({ data: "{}", event: "ping" });
+      }
+    } finally {
+      unsubscribe();
+    }
+  });
 });
 
 notes.get("/:slug/search", (c) => {

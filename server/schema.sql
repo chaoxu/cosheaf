@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS documents (
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   id TEXT NOT NULL,
   path TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('page', 'review', 'proposal', 'task')),
+  type TEXT NOT NULL CHECK (type IN ('page', 'review', 'proposal')),
   status TEXT NOT NULL CHECK (status IN ('golden', 'unreviewed', 'rejected', 'draft', 'archived')),
   target_id TEXT,
   title TEXT,
@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS approvals (
   document_id TEXT NOT NULL,
   verifier_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   decision TEXT NOT NULL CHECK (decision IN ('approve', 'reject')),
+  comment TEXT,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, document_id, verifier_user_id),
   FOREIGN KEY (workspace_id, document_id) REFERENCES documents(workspace_id, id) ON DELETE CASCADE
