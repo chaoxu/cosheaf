@@ -11,6 +11,33 @@ page.on("console", (msg) => {
   if (msg.type() === "error") errors.push(`console.error: ${msg.text()}`);
 });
 
+// Seed data via direct API calls so the test is self-contained.
+async function seed(loginCookie) {
+  const headers = { "content-type": "application/json", Cookie: loginCookie };
+  await fetch(`${APP_URL}/api/w/demo/note?path=algebra/groups.md`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ content: "# Theorem on Groups\n\nA simple statement." }),
+  });
+  await fetch(`${APP_URL}/api/w/demo/note?path=primes.md`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      content: "---\nid: thm-prime\ntype: page\nstatus: golden\n---\n# Primes\n",
+    }),
+  });
+}
+
+const loginRes = await fetch(`${APP_URL}/api/login`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ username: "alice", password: "secret123" }),
+});
+if (!loginRes.ok) throw new Error(`seed login failed: ${loginRes.status}`);
+const setCookie = loginRes.headers.get("set-cookie") ?? "";
+const seedCookie = setCookie.split(";")[0];
+await seed(seedCookie);
+
 console.log("loading", APP_URL);
 await page.goto(APP_URL);
 await page.waitForSelector("h1");
@@ -25,42 +52,53 @@ await page.waitForSelector("h2");
 console.log("opening demo workspace");
 await page.click(".ws-row");
 await page.waitForSelector(".ws-files");
+
 await page.waitForFunction(() => document.querySelectorAll(".ws-file-row").length > 0);
-const fileTexts = await page.$$eval(".ws-file-row", (els) => els.map((e) => e.textContent));
-console.log("files:", fileTexts);
+const labels = await page.$$eval(".ws-file-row", (els) =>
+  els.map((e) => ({
+    text: e.textContent,
+    title: e.getAttribute("title"),
+  })),
+);
+console.log("file rows:", labels);
 
-console.log("opening hello.md");
-await page.click('.ws-file-row:has-text("hello.md")');
+if (!labels.some((l) => l.title?.startsWith("id: "))) {
+  throw new Error("expected at least one file row with an id title attr");
+}
+
+const goldenBadge = await page.$(".badge-golden");
+if (!goldenBadge) throw new Error("expected a golden badge in tree");
+console.log("golden badge present:", await goldenBadge.textContent());
+
+console.log("opening primes.md (golden)");
+await page.click('.ws-file-row:has-text("Primes")');
 await page.waitForSelector(".cm-editor");
+const primesContent = await page.evaluate(() => {
+  const el = document.querySelector(".cm-content");
+  return el?.textContent ?? "";
+});
+console.log("primes content snippet:", JSON.stringify(primesContent.slice(0, 80)));
+if (!primesContent.includes("status: golden")) {
+  throw new Error("primes.md doesn't show frontmatter status: golden");
+}
 
-const newContent = `# Edited via Playwright + CM6\n\nTimestamp: ${Date.now()}\n`;
-
+console.log("editing groups.md, save, expect status badge to remain draft");
+await page.click('.ws-file-row:has-text("Theorem on Groups")');
+await page.waitForSelector(".cm-editor");
 await page.click(".cm-content");
-await page.keyboard.press("Meta+A");
-await page.keyboard.press("Delete");
-await page.keyboard.type(newContent);
-
+await page.keyboard.press("End");
+await page.keyboard.type("\n\nAnother line.");
 await page.click('button:has-text("Save")');
-
 await page.waitForFunction(
   () => document.querySelector(".muted.small")?.textContent?.includes("saved"),
   null,
   { timeout: 5000 },
 );
-console.log("save status:", await page.textContent(".muted.small"));
 
-const cookies = await page.context().cookies();
-const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-const reloaded = await fetch(`${APP_URL}/api/w/demo/note?path=hello.md`, {
-  headers: { Cookie: cookieHeader },
-});
-const json = await reloaded.json();
-console.log("server length:", json.content.length, "starts:", JSON.stringify(json.content.slice(0, 50)));
-
-if (!json.content.includes("CM6")) {
-  console.error("FAIL: server content missing 'CM6'");
-  process.exit(1);
-}
+await page.waitForFunction(() => document.querySelectorAll(".ws-file-row").length > 0);
+const draftBadge = await page.$(".badge-draft");
+if (!draftBadge) throw new Error("expected a draft badge after save");
+console.log("draft badge present:", await draftBadge.textContent());
 
 if (errors.length > 0) {
   console.error("ERRORS:", errors);
@@ -68,4 +106,4 @@ if (errors.length > 0) {
 }
 
 await browser.close();
-console.log("E2E PASSED");
+console.log("E2E PASSED (phase 2)");

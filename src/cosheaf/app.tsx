@@ -256,6 +256,7 @@ function WorkspaceView({
       .putNote(workspace.slug, openPath, content, mtime ?? undefined)
       .then((r) => {
         setMtime(r.mtime);
+        if (r.content !== undefined) setContent(r.content);
         setDirty(false);
         setStatus("saved");
         reloadTree();
@@ -292,7 +293,7 @@ function WorkspaceView({
       .putNote(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`)
       .then((r) => {
         setOpenPath(path);
-        setContent(`# ${path.replace(/\.md$/, "")}\n`);
+        setContent(r.content ?? `# ${path.replace(/\.md$/, "")}\n`);
         setMtime(r.mtime);
         setDirty(false);
         setNewPath("");
@@ -348,8 +349,12 @@ function WorkspaceView({
                 <button
                   className={`ws-file-row ${f.path === openPath ? "active" : ""}`}
                   onClick={() => open(f.path)}
+                  title={f.doc?.id ? `id: ${f.doc.id}` : "unindexed"}
                 >
-                  {f.path}
+                  <span className="file-label">{f.doc?.title ?? f.path}</span>
+                  {f.doc && (
+                    <span className={`badge badge-${f.doc.status}`}>{f.doc.status}</span>
+                  )}
                 </button>
               </li>
             ))}

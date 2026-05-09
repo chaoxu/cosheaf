@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, promises as fs } from "node:fs";
+import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { workspaceDir, getDb, loadConfig } from "./db.js";
@@ -8,6 +9,7 @@ import {
   hashPassword,
   setUserPassword,
 } from "./auth.js";
+import { indexDocument } from "./indexer.js";
 
 async function readPassword(prompt: string): Promise<string> {
   const rl = createInterface({ input: stdin, output: stdout });
@@ -138,6 +140,52 @@ function workspaceMember(slug: string, username: string, role: string): void {
   console.log(`added ${username} as ${role} of ${slug}`);
 }
 
+async function workspaceReindex(slug: string): Promise<void> {
+  const config = loadConfig();
+  const db = getDb(config);
+  const ws = db.prepare("SELECT id FROM workspaces WHERE slug = ?").get(slug) as
+    | { id: number }
+    | undefined;
+  if (!ws) {
+    console.error(`workspace '${slug}' not found`);
+    process.exit(1);
+  }
+  const root = workspaceDir(config, slug);
+
+  async function walk(dir: string): Promise<string[]> {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
+    const acc: string[] = [];
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) acc.push(...(await walk(full)));
+      else if (entry.isFile() && entry.name.endsWith(".md")) acc.push(full);
+    }
+    return acc;
+  }
+
+  const files = await walk(root);
+  let updated = 0;
+  for (const full of files) {
+    const rel = path.relative(root, full);
+    const content = await fs.readFile(full, "utf8");
+    const result = indexDocument(db, ws.id, rel, content);
+    if (result.rewrote) {
+      const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
+      await fs.writeFile(tmp, result.content, "utf8");
+      await fs.rename(tmp, full);
+      updated++;
+    }
+    console.log(`indexed ${rel} (${result.meta.id} ${result.meta.type}/${result.meta.status})`);
+  }
+  console.log(`done — ${files.length} files indexed, ${updated} rewritten`);
+}
+
 function help(): void {
   console.log(`Usage:
   cosheaf user add <username>
@@ -146,6 +194,7 @@ function help(): void {
   cosheaf user rm <username>
   cosheaf workspace add <slug> <name> --owner <username>
   cosheaf workspace member <slug> <username> <role>
+  cosheaf workspace reindex <slug>
 `);
 }
 
@@ -172,6 +221,7 @@ async function main(): Promise<void> {
   if (cmd === "workspace" && sub === "member" && rest.length === 3) {
     return workspaceMember(rest[0], rest[1], rest[2]);
   }
+  if (cmd === "workspace" && sub === "reindex" && rest[0]) return workspaceReindex(rest[0]);
 
   help();
   process.exit(cmd ? 1 : 0);

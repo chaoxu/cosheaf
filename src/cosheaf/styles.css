@@ -135,13 +135,35 @@ input:focus, textarea:focus { border-color: var(--c-accent); }
   overflow-y: auto; flex: 1;
 }
 .ws-file-row {
-  display: block; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
   background: none; border: none; border-radius: 0;
   padding: 4px 12px; font-size: 13px;
   color: var(--c-fg); cursor: pointer;
 }
 .ws-file-row:hover { background: var(--c-hover); }
 .ws-file-row.active { background: var(--c-active); font-weight: 500; }
+.file-label {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.badge {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 1px 6px; border-radius: 10px;
+  border: 1px solid var(--c-border);
+  color: var(--c-muted); background: var(--c-bg);
+  font-weight: normal;
+}
+.badge-golden { color: #166534; background: #dcfce7; border-color: #86efac; }
+.badge-unreviewed { color: #854d0e; background: #fef9c3; border-color: #fde047; }
+.badge-rejected { color: #991b1b; background: #fee2e2; border-color: #fca5a5; }
+.badge-draft { color: var(--c-muted); }
+.badge-archived { color: var(--c-muted); opacity: 0.6; }
+@media (prefers-color-scheme: dark) {
+  .badge-golden { color: #86efac; background: #14532d; border-color: #166534; }
+  .badge-unreviewed { color: #fde047; background: #422006; border-color: #854d0e; }
+  .badge-rejected { color: #fca5a5; background: #450a0a; border-color: #991b1b; }
+}
 
 .ws-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .empty-state {

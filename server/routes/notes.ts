@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AppEnv } from "../types.js";
 import { workspaceDir } from "../db.js";
 import { requireAuth, requireMembership } from "../middleware.js";
+import { IdConflictError, deleteDocument, indexDocument } from "../indexer.js";
 
 export const notes = new Hono<AppEnv>();
 
@@ -21,7 +22,12 @@ notes.get("/:slug/tree", async (c) => {
   const config = c.get("config");
   const ws = c.get("workspace");
   const root = workspaceDir(config, ws.slug);
-  const out: Array<{ path: string; size: number; mtime: number }> = [];
+  const out: Array<{
+    path: string;
+    size: number;
+    mtime: number;
+    doc?: { id: string; type: string; status: string; title: string | null };
+  }> = [];
 
   async function walk(dir: string): Promise<void> {
     let entries: import("node:fs").Dirent[];
@@ -48,6 +54,17 @@ notes.get("/:slug/tree", async (c) => {
 
   await walk(root);
   out.sort((a, b) => a.path.localeCompare(b.path));
+
+  const docs = c
+    .get("db")
+    .prepare("SELECT id, path, type, status, title FROM documents WHERE workspace_id = ?")
+    .all(ws.id) as Array<{ id: string; path: string; type: string; status: string; title: string | null }>;
+  const byPath = new Map(docs.map((d) => [d.path, d]));
+  for (const file of out) {
+    const meta = byPath.get(file.path);
+    if (meta) file.doc = meta;
+  }
+
   return c.json({ files: out });
 });
 
@@ -96,10 +113,56 @@ notes.put("/:slug/note", async (c) => {
     }
   }
 
+  let indexed;
+  try {
+    indexed = indexDocument(c.get("db"), ws.id, rel, body.content);
+  } catch (err) {
+    if (err instanceof IdConflictError) {
+      return c.json({ error: err.message, conflicting_path: err.existingPath }, 409);
+    }
+    throw err;
+  }
+
   await fs.mkdir(path.dirname(full), { recursive: true });
   const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(tmp, body.content, "utf8");
+  await fs.writeFile(tmp, indexed.content, "utf8");
   await fs.rename(tmp, full);
   const stat = await fs.stat(full);
-  return c.json({ ok: true, mtime: stat.mtimeMs });
+  return c.json({
+    ok: true,
+    mtime: stat.mtimeMs,
+    meta: indexed.meta,
+    content: indexed.rewrote ? indexed.content : undefined,
+  });
+});
+
+notes.delete("/:slug/note", async (c) => {
+  const rel = c.req.query("path");
+  if (!rel) return c.json({ error: "path required" }, 400);
+  const config = c.get("config");
+  const ws = c.get("workspace");
+  const root = workspaceDir(config, ws.slug);
+  const full = safeJoin(root, rel);
+  if (!full) return c.json({ error: "invalid path" }, 400);
+
+  try {
+    await fs.unlink(full);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return c.json({ error: "not found" }, 404);
+    throw err;
+  }
+  deleteDocument(c.get("db"), ws.id, rel);
+  return c.json({ ok: true });
+});
+
+notes.get("/:slug/documents", (c) => {
+  const ws = c.get("workspace");
+  const rows = c
+    .get("db")
+    .prepare(
+      "SELECT id, path, type, status, target_id, title, mtime " +
+        "FROM documents WHERE workspace_id = ? ORDER BY path",
+    )
+    .all(ws.id);
+  return c.json({ documents: rows });
 });

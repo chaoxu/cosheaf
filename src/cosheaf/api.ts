@@ -10,10 +10,18 @@ export interface Workspace {
   role: "owner" | "verifier" | "member";
 }
 
+export interface DocumentMeta {
+  id: string;
+  type: "page" | "review" | "proposal" | "task";
+  status: "golden" | "unreviewed" | "rejected" | "draft" | "archived";
+  title: string | null;
+}
+
 export interface FileEntry {
   path: string;
   size: number;
   mtime: number;
+  doc?: DocumentMeta;
 }
 
 export interface NoteContent {
@@ -67,8 +75,13 @@ export const api = {
       `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
     ),
   putNote: (slug: string, path: string, content: string, expected_mtime?: number) =>
-    jsonFetch<{ ok: true; mtime: number }>(
+    jsonFetch<{ ok: true; mtime: number; meta: DocumentMeta; content?: string }>(
       `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
       { method: "PUT", body: JSON.stringify({ content, expected_mtime }) },
+    ),
+  deleteNote: (slug: string, path: string) =>
+    jsonFetch<{ ok: true }>(
+      `/api/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
     ),
 };
