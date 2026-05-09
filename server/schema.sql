@@ -79,3 +79,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   body,
   tokenize = 'porter unicode61'
 );
+
+CREATE TABLE IF NOT EXISTS workspace_settings (
+  workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  min_approvals INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS approvals (
+  workspace_id INTEGER NOT NULL,
+  document_id TEXT NOT NULL,
+  verifier_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  decision TEXT NOT NULL CHECK (decision IN ('approve', 'reject')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, document_id, verifier_user_id),
+  FOREIGN KEY (workspace_id, document_id) REFERENCES documents(workspace_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS approvals_doc ON approvals(workspace_id, document_id);

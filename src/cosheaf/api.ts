@@ -95,6 +95,31 @@ export const api = {
       `/api/w/${encodeURIComponent(slug)}/search?q=${encodeURIComponent(q)}`,
     ).then((r) => r.results),
 
+  queue: (slug: string) =>
+    jsonFetch<{ queue: QueueEntry[] }>(`/api/w/${encodeURIComponent(slug)}/queue`).then(
+      (r) => r.queue,
+    ),
+  submit: (slug: string, id: string) =>
+    jsonFetch<{ status: string }>(
+      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/submit`,
+      { method: "POST" },
+    ),
+  approve: (slug: string, id: string) =>
+    jsonFetch<DecisionResult>(
+      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approve`,
+      { method: "POST" },
+    ),
+  reject: (slug: string, id: string) =>
+    jsonFetch<DecisionResult>(
+      `/api/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/reject`,
+      { method: "POST" },
+    ),
+  createProposal: (slug: string, target_id: string, body: string) =>
+    jsonFetch<{ path: string; meta: DocumentMeta }>(
+      `/api/w/${encodeURIComponent(slug)}/proposal`,
+      { method: "POST", body: JSON.stringify({ target_id, body }) },
+    ),
+
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/tokens").then((r) => r.tokens),
   createToken: (name: string) =>
@@ -118,6 +143,24 @@ export interface SearchResult {
   title: string | null;
   snippet: string;
   rank: number;
+}
+
+export interface QueueEntry {
+  id: string;
+  path: string;
+  type: string;
+  title: string | null;
+  target_id: string | null;
+  approvals: number;
+  rejections: number;
+}
+
+export interface DecisionResult {
+  decision: "approve" | "reject";
+  approvals: number;
+  rejections: number;
+  doc_status: DocumentMeta["status"];
+  promoted_meta?: DocumentMeta;
 }
 
 export interface Backlink {

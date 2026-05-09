@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { markdown } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, defaultHighlightStyle, indentOnInput } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
-import { EditorState } from "@codemirror/state";
+import { Annotation, EditorState } from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -12,6 +12,8 @@ import {
 } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
+
+const PROGRAMMATIC = Annotation.define<boolean>();
 
 interface Props {
   value: string;
@@ -57,9 +59,12 @@ export function MarkdownEditor({ value, onChange, onSave }: Props): ReactElement
           },
         ]),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onChangeRef.current(update.state.doc.toString());
-          }
+          if (!update.docChanged) return;
+          const programmatic = update.transactions.some((tr) =>
+            tr.annotation(PROGRAMMATIC),
+          );
+          if (programmatic) return;
+          onChangeRef.current(update.state.doc.toString());
         }),
         EditorView.theme({
           "&": { height: "100%", fontSize: "14px" },
@@ -88,6 +93,7 @@ export function MarkdownEditor({ value, onChange, onSave }: Props): ReactElement
     if (current === value) return;
     view.dispatch({
       changes: { from: 0, to: current.length, insert: value },
+      annotations: PROGRAMMATIC.of(true),
     });
   }, [value]);
 

@@ -5,6 +5,7 @@ import {
   api,
   type Backlink,
   type FileEntry,
+  type QueueEntry,
   type SearchResult,
   type TokenInfo,
   type User,
@@ -383,6 +384,9 @@ function WorkspaceView({
   const [newPath, setNewPath] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [queue, setQueue] = useState<QueueEntry[] | null>(null);
+  const [proposeOpen, setProposeOpen] = useState(false);
+  const [proposalBody, setProposalBody] = useState("");
 
   const reloadTree = useCallback(() => {
     api
@@ -457,6 +461,63 @@ function WorkspaceView({
       .finally(() => setBusy(false));
   }, [openPath, content, mtime, workspace.slug, reloadTree]);
 
+  const openQueue = useCallback(() => {
+    api
+      .queue(workspace.slug)
+      .then(setQueue)
+      .catch(() => setQueue([]));
+  }, [workspace.slug]);
+
+  const submitDoc = useCallback(() => {
+    if (!openDoc?.id) return;
+    api
+      .submit(workspace.slug, openDoc.id)
+      .then((r) => {
+        setStatus("submitted");
+        setOpenDoc((d) => (d ? { ...d, status: r.status as typeof d.status } : d));
+        reloadTree();
+      })
+      .catch((err: unknown) =>
+        setStatus(err instanceof ApiError ? err.message : "Submit failed"),
+      );
+  }, [openDoc, workspace.slug, reloadTree]);
+
+  const decideDoc = useCallback(
+    (decision: "approve" | "reject") => {
+      if (!openDoc?.id) return;
+      const fn = decision === "approve" ? api.approve : api.reject;
+      fn(workspace.slug, openDoc.id)
+        .then((r) => {
+          setStatus(`${decision}d (status: ${r.doc_status})`);
+          setOpenDoc((d) => (d ? { ...d, status: r.doc_status } : d));
+          reloadTree();
+          if (r.promoted_meta && r.promoted_meta.id !== openDoc.id) {
+            const targetEntry = files?.find((f) => f.doc?.id === r.promoted_meta?.id);
+            if (targetEntry) open(targetEntry);
+          }
+        })
+        .catch((err: unknown) =>
+          setStatus(err instanceof ApiError ? err.message : `${decision} failed`),
+        );
+    },
+    [openDoc, workspace.slug, files, open, reloadTree],
+  );
+
+  const submitProposal = useCallback(() => {
+    if (!openDoc?.id || !proposalBody.trim()) return;
+    api
+      .createProposal(workspace.slug, openDoc.id, proposalBody.trim())
+      .then(() => {
+        setProposeOpen(false);
+        setProposalBody("");
+        setStatus("proposal created");
+        reloadTree();
+      })
+      .catch((err: unknown) =>
+        setStatus(err instanceof ApiError ? err.message : "Proposal failed"),
+      );
+  }, [openDoc, proposalBody, workspace.slug, reloadTree]);
+
   // Cmd/Ctrl+S to save.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -505,6 +566,9 @@ function WorkspaceView({
         <strong>{workspace.name}</strong>
         <span className="muted">/{workspace.slug}</span>
         <span className="spacer" />
+        <button className="link-btn" onClick={() => (queue === null ? openQueue() : setQueue(null))}>
+          {queue === null ? "Queue" : "Files"}
+        </button>
         <span className="muted">{user.username}</span>
         <button className="link-btn" onClick={handleLogout}>
           Sign out
@@ -512,6 +576,46 @@ function WorkspaceView({
       </header>
       <div className="ws-layout">
         <aside className="ws-sidebar">
+          {queue !== null && (
+            <div className="queue-panel">
+              <div className="header-row tight">
+                <strong>Review queue</strong>
+                <button className="link-btn" onClick={openQueue}>
+                  ↻
+                </button>
+              </div>
+              {queue.length === 0 && <div className="muted padded small">Nothing to review.</div>}
+              <ul className="ws-files">
+                {queue.map((entry) => (
+                  <li key={entry.id}>
+                    <button
+                      className="ws-file-row"
+                      onClick={() => {
+                        const f = files?.find((x) => x.path === entry.path);
+                        if (f) {
+                          setQueue(null);
+                          open(f);
+                        }
+                      }}
+                    >
+                      <span className="file-label">
+                        <strong>{entry.title ?? entry.path}</strong>
+                        <span className="muted small">
+                          {" "}
+                          {entry.type}
+                          {entry.target_id && ` → ${entry.target_id}`}
+                          {entry.approvals > 0 && ` ✓${entry.approvals}`}
+                          {entry.rejections > 0 && ` ✗${entry.rejections}`}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {queue === null && (
+          <>
           <div className="search-row">
             <input
               className="search-input"
@@ -607,6 +711,8 @@ function WorkspaceView({
           </ul>
           </>
           )}
+          </>
+          )}
         </aside>
         <main className="ws-main">
           {!openPath && (
@@ -616,13 +722,53 @@ function WorkspaceView({
             <>
               <div className="editor-bar">
                 <strong>{openPath}</strong>
+                {openDoc && <span className={`badge badge-${openDoc.status}`}>{openDoc.status}</span>}
                 {dirty && <span className="dirty">●</span>}
                 <span className="spacer" />
                 <span className="muted small">{status ?? ""}</span>
+                {openDoc?.status === "draft" && (
+                  <button onClick={submitDoc} disabled={dirty || busy}>
+                    Submit
+                  </button>
+                )}
+                {openDoc?.status === "unreviewed" &&
+                  (workspace.role === "owner" || workspace.role === "verifier") && (
+                    <>
+                      <button onClick={() => decideDoc("approve")} disabled={busy}>
+                        Approve
+                      </button>
+                      <button onClick={() => decideDoc("reject")} disabled={busy}>
+                        Reject
+                      </button>
+                    </>
+                  )}
+                {openDoc?.status === "golden" && openDoc.type === "page" && (
+                  <button onClick={() => setProposeOpen((v) => !v)}>
+                    {proposeOpen ? "Cancel proposal" : "Propose update"}
+                  </button>
+                )}
                 <button onClick={save} disabled={!dirty || busy}>
                   Save
                 </button>
               </div>
+              {proposeOpen && (
+                <div className="propose-form">
+                  <div className="muted small">
+                    Propose a replacement body for <strong>{openDoc?.title ?? openPath}</strong>.
+                    Don't include frontmatter — only the body.
+                  </div>
+                  <textarea
+                    value={proposalBody}
+                    onChange={(e) => setProposalBody(e.target.value)}
+                    placeholder="# Updated title\n\nNew content..."
+                  />
+                  <div className="header-row tight">
+                    <button onClick={submitProposal} disabled={!proposalBody.trim()}>
+                      Create proposal
+                    </button>
+                  </div>
+                </div>
+              )}
               <MarkdownEditor
                 value={content}
                 onChange={(next) => {

@@ -121,6 +121,104 @@ if (backlinkLabels.length < 2) {
   throw new Error(`expected 2 backlinks (wiki + path), got ${backlinkLabels.length}`);
 }
 
+// Workflow: submit groups (currently draft) and approve as alice (owner can approve)
+console.log("opening Theorem on Groups, submitting, approving");
+await page.click('.ws-file-row:has-text("Theorem on Groups")');
+await page.waitForFunction(
+  () => {
+    const el = document.querySelector(".editor-bar");
+    return el?.textContent?.includes("groups.md");
+  },
+  null,
+  { timeout: 5000 },
+);
+const ebHtml = await page.$eval(".editor-bar", (el) => el.innerHTML);
+console.log("editor-bar:", ebHtml.replace(/\s+/g, " ").slice(0, 280));
+await page.click('button:has-text("Submit")');
+await page.waitForFunction(
+  () => document.querySelector(".badge-unreviewed") !== null,
+  null,
+  { timeout: 5000 },
+);
+await page.click('button:has-text("Approve")');
+await page.waitForFunction(
+  () =>
+    document
+      .querySelector(".editor-bar .badge")
+      ?.classList.contains("badge-golden") ?? false,
+  null,
+  { timeout: 5000 },
+);
+console.log("groups promoted to golden");
+
+// Propose update on the now-golden Groups page.
+console.log("creating a proposal");
+await page.click('button:has-text("Propose update")');
+await page.fill(".propose-form textarea", "# Theorem on Groups (revised)\n\nNew sketch of proof.");
+await page.click('button:has-text("Create proposal")');
+await page.waitForFunction(
+  () => document.querySelector(".muted.small")?.textContent?.includes("proposal created"),
+  null,
+  { timeout: 5000 },
+);
+
+// Open queue, click the proposal, submit + approve
+console.log("opening queue");
+await page.click('button:has-text("Queue")');
+await page.waitForSelector(".queue-panel");
+const queueText = await page.textContent(".queue-panel");
+console.log("queue text:", queueText?.replace(/\s+/g, " ").slice(0, 120));
+if (!queueText?.includes("Proposal for")) {
+  console.log("proposal not in queue yet (probably still draft); submitting it");
+  await page.click('button:has-text("Files")');
+  await page.click('.ws-file-row:has-text("Proposal")');
+  await page.waitForFunction(
+    () => document.querySelector(".editor-bar")?.textContent?.toLowerCase().includes("proposal"),
+    null,
+    { timeout: 5000 },
+  );
+  console.log("opened proposal:", (await page.$eval(".editor-bar", (el) => el.textContent)).slice(0, 80));
+  await page.click('button:has-text("Submit")');
+  await page.waitForFunction(
+    () => document.querySelector(".editor-bar .badge-unreviewed") !== null,
+    null,
+    { timeout: 5000 },
+  );
+  console.log("submitted; reopening queue");
+  await page.click('button:has-text("Queue")');
+  await page.waitForSelector(".queue-panel");
+}
+await page.click('.queue-panel .ws-file-row:has-text("Proposal")');
+await page.waitForFunction(
+  () => document.querySelector(".editor-bar")?.textContent?.toLowerCase().includes("proposal"),
+  null,
+  { timeout: 5000 },
+);
+const beforeApprove = await page.$eval(".editor-bar", (el) => el.outerHTML);
+console.log("editor-bar before approve:", beforeApprove.replace(/\s+/g, " ").slice(0, 300));
+await page.click('button:has-text("Approve")');
+// Verify via the API that the proposal got archived and target is golden
+const cookies2 = await page.context().cookies();
+const cookieHeader2 = cookies2.map((c) => `${c.name}=${c.value}`).join("; ");
+async function readDocs() {
+  const r = await fetch(`${APP_URL}/api/w/demo/documents`, {
+    headers: { Cookie: cookieHeader2 },
+  });
+  return (await r.json()).documents;
+}
+let docs = [];
+for (let i = 0; i < 25; i++) {
+  docs = await readDocs();
+  const proposal = docs.find((d) => d.type === "proposal" && d.status === "archived");
+  if (proposal) break;
+  await new Promise((r) => setTimeout(r, 200));
+}
+const archivedProposal = docs.find((d) => d.type === "proposal" && d.status === "archived");
+const goldenGroups = docs.find((d) => d.path.endsWith("groups.md") && d.status === "golden");
+if (!archivedProposal) throw new Error("proposal not archived after approval");
+if (!goldenGroups) throw new Error("groups page not golden after promotion");
+console.log("archived proposal:", archivedProposal.id, "golden target:", goldenGroups.id);
+
 // Search
 console.log("searching for 'prime'");
 await page.fill(".search-input", "prime");

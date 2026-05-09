@@ -6,6 +6,7 @@ import { auth } from "./routes/auth.js";
 import { workspaces } from "./routes/workspaces.js";
 import { notes } from "./routes/notes.js";
 import { tokens } from "./routes/tokens.js";
+import { workflow } from "./routes/workflow.js";
 
 const config = loadConfig();
 const db = getDb(config);
@@ -24,6 +25,7 @@ app.route("/api", auth);
 app.route("/api/tokens", tokens);
 app.route("/api/workspaces", workspaces);
 app.route("/api/w", notes);
+app.route("/api/w", workflow);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`cosheaf server listening on http://localhost:${info.port}`);
