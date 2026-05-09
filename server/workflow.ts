@@ -124,15 +124,16 @@ async function promote(
 ): Promise<DocumentMeta> {
   if (doc.type === "proposal" && doc.target_id) {
     const target = getDocument(db, workspaceId, doc.target_id);
-    const proposalContent = await fs.readFile(path.join(workspaceRoot, doc.path), "utf8");
-    const proposalParsed = parseDocument(proposalContent);
-    const targetContent = await fs.readFile(path.join(workspaceRoot, target.path), "utf8");
-    const targetParsed = parseDocument(targetContent);
-    const newTargetFm: Frontmatter = {
-      ...targetParsed.frontmatter,
-      status: "golden",
-    };
-    const candidate = serializeDocument(newTargetFm, proposalParsed.body);
+    const proposalParsed = parseDocument(
+      await fs.readFile(path.join(workspaceRoot, doc.path), "utf8"),
+    );
+    const targetParsed = parseDocument(
+      await fs.readFile(path.join(workspaceRoot, target.path), "utf8"),
+    );
+    const candidate = serializeDocument(
+      { ...targetParsed.frontmatter, status: "golden" },
+      proposalParsed.body,
+    );
     const targetIndexed = indexDocument(db, workspaceId, target.path, candidate);
     await writeAtomic(workspaceRoot, target.path, targetIndexed.content);
     await applyStatus(db, workspaceId, workspaceRoot, doc, "archived");

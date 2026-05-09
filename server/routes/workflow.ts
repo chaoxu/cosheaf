@@ -18,11 +18,9 @@ export const workflow = new Hono<AppEnv>();
 workflow.use("*", requireAuth);
 workflow.use("/:slug/*", requireMembership());
 
-function handleError<T>(promise: Promise<T>): Promise<T | { __error: WorkflowError }> {
-  return promise.catch((err) => {
-    if (err instanceof WorkflowError) return { __error: err };
-    throw err;
-  });
+function workflowError(c: Context<AppEnv>, err: unknown): Response {
+  if (err instanceof WorkflowError) return c.json({ error: err.message }, err.status as ContentfulStatusCode);
+  throw err;
 }
 
 workflow.get("/:slug/queue", (c) => {
@@ -42,8 +40,7 @@ workflow.put("/:slug/settings", async (c) => {
   try {
     setMinApprovals(c.get("db"), c.get("workspace").id, body.min_approvals);
   } catch (err) {
-    if (err instanceof WorkflowError) return c.json({ error: err.message }, err.status as ContentfulStatusCode);
-    throw err;
+    return workflowError(c, err);
   }
   return c.json({ min_approvals: body.min_approvals });
 });
@@ -56,43 +53,44 @@ workflow.post("/:slug/proposal", async (c) => {
   if (!body?.target_id || body.body == null) {
     return c.json({ error: "target_id and body required" }, 400);
   }
-  const config = c.get("config");
-  const root = workspaceDir(config, ws.slug);
-  const result = await handleError(
-    createProposal(c.get("db"), ws.id, root, body.target_id, body.body, c.get("user").username),
-  );
-  if ("__error" in result) return c.json({ error: result.__error.message }, result.__error.status as ContentfulStatusCode);
-  return c.json({ path: result.proposalPath, meta: result.meta }, 201);
+  const root = workspaceDir(c.get("config"), ws.slug);
+  try {
+    const r = await createProposal(c.get("db"), ws.id, root, body.target_id, body.body, c.get("user").username);
+    return c.json({ path: r.proposalPath, meta: r.meta }, 201);
+  } catch (err) {
+    return workflowError(c, err);
+  }
 });
 
 workflow.post("/:slug/document/:id/submit", async (c) => {
   const ws = c.get("workspace");
-  const config = c.get("config");
-  const root = workspaceDir(config, ws.slug);
-  const id = c.req.param("id");
-  const result = await handleError(submitDocument(c.get("db"), ws.id, root, id));
-  if ("__error" in result) return c.json({ error: result.__error.message }, result.__error.status as ContentfulStatusCode);
-  return c.json(result);
+  const root = workspaceDir(c.get("config"), ws.slug);
+  try {
+    return c.json(await submitDocument(c.get("db"), ws.id, root, c.req.param("id") ?? ""));
+  } catch (err) {
+    return workflowError(c, err);
+  }
 });
 
-async function decide(
-  c: Context<AppEnv>,
-  decision: "approve" | "reject",
-) {
+async function decide(c: Context<AppEnv>, decision: "approve" | "reject"): Promise<Response> {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier") {
     return c.json({ error: "verifier role required" }, 403);
   }
-  const config = c.get("config");
-  const root = workspaceDir(config, ws.slug);
-  const id = c.req.param("id");
-  if (!id) return c.json({ error: "id required" }, 400);
-  const user = c.get("user");
-  const result = await handleError(
-    decideOnDocument(c.get("db"), ws.id, root, id, user.id, decision),
-  );
-  if ("__error" in result) return c.json({ error: result.__error.message }, result.__error.status as ContentfulStatusCode);
-  return c.json(result);
+  const root = workspaceDir(c.get("config"), ws.slug);
+  try {
+    const r = await decideOnDocument(
+      c.get("db"),
+      ws.id,
+      root,
+      c.req.param("id") ?? "",
+      c.get("user").id,
+      decision,
+    );
+    return c.json(r);
+  } catch (err) {
+    return workflowError(c, err);
+  }
 }
 
 workflow.post("/:slug/document/:id/approve", (c) => decide(c, "approve"));

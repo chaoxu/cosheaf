@@ -21,36 +21,32 @@ workspaces.get("/", (c) => {
   return c.json({ workspaces: rows });
 });
 
-workspaces.post("/", (c) => {
-  return (async () => {
-    const body = (await c.req.json().catch(() => null)) as { slug?: string; name?: string } | null;
-    if (!body?.slug || !body.name) return c.json({ error: "slug and name required" }, 400);
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(body.slug)) return c.json({ error: "invalid slug" }, 400);
+workspaces.post("/", async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { slug?: string; name?: string } | null;
+  if (!body?.slug || !body.name) return c.json({ error: "slug and name required" }, 400);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(body.slug)) return c.json({ error: "invalid slug" }, 400);
 
-    const db = c.get("db");
-    const config = c.get("config");
-    const user = c.get("user");
+  const db = c.get("db");
+  const user = c.get("user");
 
-    const tx = db.transaction(() => {
-      const ws = db
-        .prepare("INSERT INTO workspaces (slug, name, created_at) VALUES (?, ?, ?) RETURNING id")
-        .get(body.slug, body.name, Date.now()) as { id: number };
-      db.prepare(
-        "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
-      ).run(ws.id, user.id);
-      return ws;
-    });
+  const tx = db.transaction(() => {
+    const ws = db
+      .prepare("INSERT INTO workspaces (slug, name, created_at) VALUES (?, ?, ?) RETURNING id")
+      .get(body.slug, body.name, Date.now()) as { id: number };
+    db.prepare(
+      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
+    ).run(ws.id, user.id);
+    return ws;
+  });
 
-    let ws: { id: number };
-    try {
-      ws = tx();
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes("UNIQUE")) return c.json({ error: "slug already taken" }, 409);
-      throw err;
-    }
+  let ws: { id: number };
+  try {
+    ws = tx();
+  } catch (err) {
+    if ((err as Error).message.includes("UNIQUE")) return c.json({ error: "slug already taken" }, 409);
+    throw err;
+  }
 
-    mkdirSync(workspaceDir(config, body.slug), { recursive: true });
-    return c.json({ id: ws.id, slug: body.slug, name: body.name, role: "owner" }, 201);
-  })();
+  mkdirSync(workspaceDir(c.get("config"), body.slug), { recursive: true });
+  return c.json({ id: ws.id, slug: body.slug, name: body.name, role: "owner" }, 201);
 });
