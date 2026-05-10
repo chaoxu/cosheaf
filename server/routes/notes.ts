@@ -186,7 +186,19 @@ notes.get("/:slug/events", (c) => {
 notes.get("/:slug/search", (c) => {
   const q = c.req.query("q")?.trim();
   if (!q) return c.json({ results: [] });
-  const limit = Math.min(50, Number(c.req.query("limit") ?? 25));
+  const rawLimit = Number(c.req.query("limit") ?? 25);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 25;
+  const params = new URL(c.req.url).searchParams;
+  const statuses = params.getAll("status");
+  const types = params.getAll("type");
+  const allowedStatuses = new Set(["golden", "unreviewed", "rejected", "draft", "archived"]);
+  const allowedTypes = new Set(["page", "review", "proposal"]);
+  if (statuses.some((s) => !allowedStatuses.has(s))) {
+    return c.json({ error: "invalid status filter", code: "validation" }, 400);
+  }
+  if (types.some((t) => !allowedTypes.has(t))) {
+    return c.json({ error: "invalid type filter", code: "validation" }, 400);
+  }
   const ws = c.get("workspace");
   // Wrap loose query in FTS5 prefix-token form, OR-joined.
   const ftsQuery = q
@@ -200,21 +212,43 @@ notes.get("/:slug/search", (c) => {
     doc_id: string;
     path: string;
     title: string;
+    type: string;
+    status: string;
+    target_id: string | null;
     snippet: string;
     rank: number;
   }>;
+  const filters: string[] = ["notes_fts.workspace_id = ?", "notes_fts MATCH ?"];
+  const args: Array<string | number> = [ws.id, ftsQuery];
+  if (statuses.length > 0) {
+    filters.push(`documents.status IN (${statuses.map(() => "?").join(", ")})`);
+    args.push(...statuses);
+  }
+  if (types.length > 0) {
+    filters.push(`documents.type IN (${types.map(() => "?").join(", ")})`);
+    args.push(...types);
+  }
+  args.push(limit);
   try {
     rows = c
       .get("db")
       .prepare(
-        `SELECT doc_id, path, title,
+        `SELECT notes_fts.doc_id AS doc_id,
+                notes_fts.path AS path,
+                notes_fts.title AS title,
+                documents.type AS type,
+                documents.status AS status,
+                documents.target_id AS target_id,
                 snippet(notes_fts, 4, '<mark>', '</mark>', '...', 16) AS snippet,
                 bm25(notes_fts) AS rank
            FROM notes_fts
-          WHERE workspace_id = ? AND notes_fts MATCH ?
+           JOIN documents
+             ON documents.workspace_id = notes_fts.workspace_id
+            AND documents.id = notes_fts.doc_id
+          WHERE ${filters.join(" AND ")}
           ORDER BY rank LIMIT ?`,
       )
-      .all(ws.id, ftsQuery, limit) as typeof rows;
+      .all(...args) as typeof rows;
   } catch (err) {
     return c.json({ error: `search failed: ${(err as Error).message}`, code: "validation" }, 400);
   }

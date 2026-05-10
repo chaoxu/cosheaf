@@ -160,6 +160,9 @@ export interface SearchResult {
   doc_id: string;
   path: string;
   title: string | null;
+  type: DocumentMeta["type"];
+  status: DocumentMeta["status"];
+  target_id: string | null;
   snippet: string;
   rank: number;
 }

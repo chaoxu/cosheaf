@@ -160,6 +160,44 @@ workflow.get("/:slug/document/:id/approvals", (c) => {
   });
 });
 
+workflow.get("/:slug/document/:id/reviews", async (c) => {
+  const ws = c.get("workspace");
+  const root = workspaceDir(c.get("config"), ws.slug);
+  const includeBody = c.req.query("include_body") !== "false";
+  try {
+    getDocument(c.get("db"), ws.id, c.req.param("id") ?? "");
+    const approvals = getApprovalsForDocument(c.get("db"), ws.id, c.req.param("id") ?? "");
+    const reviews = await Promise.all(
+      approvals
+        .flatMap((row) =>
+          row.review_doc_id && row.review_path
+            ? [{ row, reviewDocId: row.review_doc_id, reviewPath: row.review_path }]
+            : [],
+        )
+        .map(async ({ row, reviewDocId, reviewPath }) => {
+          const review = getDocument(c.get("db"), ws.id, reviewDocId);
+          return {
+            verifier_user_id: row.verifier_user_id,
+            username: row.username,
+            decision: row.decision,
+            comment: row.comment,
+            created_at: row.created_at,
+            review_doc_id: reviewDocId,
+            review_path: reviewPath,
+            review_title: row.review_title,
+            meta: review,
+            content: includeBody
+              ? await fs.readFile(path.join(root, reviewPath), "utf8").catch(() => "")
+              : undefined,
+          };
+        }),
+    );
+    return c.json({ reviews });
+  } catch (err) {
+    return workflowError(c, err);
+  }
+});
+
 workflow.get("/:slug/proposal/:id/target", async (c) => {
   const ws = c.get("workspace");
   const db = c.get("db");

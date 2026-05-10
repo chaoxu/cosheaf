@@ -196,15 +196,28 @@ DELETE /api/v1/w/:slug/note?path=<rel>    → { ok: true }
 
 ```
 GET /api/v1/w/:slug/search?q=<query>      → { results: SearchResult[] }
+GET /api/v1/w/:slug/search?q=<query>&status=golden&type=page&limit=10
+                                         → { results: SearchResult[] }
 ```
 
 ```ts
-SearchResult { doc_id: string, path: string, title: string|null, snippet: string, rank: number }
+SearchResult {
+  doc_id: string,
+  path: string,
+  title: string|null,
+  type: "page"|"proposal"|"review",
+  status: DocumentStatus,
+  target_id: string|null,
+  snippet: string,
+  rank: number,
+}
 ```
 
 `snippet` is server-rendered HTML containing `<mark>` tags around hits — safe
 to insert with `dangerouslySetInnerHTML` in trusted UI; bots should treat it
 as HTML, not plain text.
+
+`status` and `type` filters are repeatable. `limit` is clamped to `1..50`.
 
 ### Backlinks
 
@@ -285,6 +298,9 @@ again overwrites the prior decision (and its comment / review link).
 
 ```
 GET /api/v1/w/:slug/document/:id/approvals → { approvals: ApprovalRecord[] }
+GET /api/v1/w/:slug/document/:id/reviews   → { reviews: ReviewRecord[] }
+GET /api/v1/w/:slug/document/:id/reviews?include_body=false
+                                            → { reviews: ReviewRecord[] }
 ```
 
 ```ts
@@ -299,6 +315,24 @@ ApprovalRecord {
   created_at: number,
 }
 ```
+
+```ts
+ReviewRecord {
+  verifier_user_id: number,
+  username: string,
+  decision: "approve" | "reject",
+  comment: string | null,
+  created_at: number,
+  review_doc_id: string,
+  review_path: string,
+  review_title: string | null,
+  meta: DocumentMeta,
+  content?: string,
+}
+```
+
+`reviews` returns only approval rows that have an attached review document.
+By default `content` contains the full Markdown file content.
 
 ### Review queue
 
@@ -368,6 +402,7 @@ No auth required.
 
 ## Changelog
 
+- **v1 additive** — search filters and `GET /w/:slug/document/:id/reviews`.
 - **v1 additive** — `GET /w/:slug/document/:id` for direct document lookup.
 - **v1 (initial)** — every endpoint above. The contract is stable in the
   sense that future v1 changes are additive (new fields on responses, new
