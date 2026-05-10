@@ -263,13 +263,33 @@ notes.get("/:slug/backlinks", (c) => {
 });
 
 notes.get("/:slug/documents", (c) => {
+  const params = new URL(c.req.url).searchParams;
+  const statuses = params.getAll("status");
+  const types = params.getAll("type");
+  const allowedStatuses = new Set(["golden", "unreviewed", "rejected", "draft", "archived"]);
+  const allowedTypes = new Set(["page", "review", "proposal"]);
+  if (statuses.some((s) => !allowedStatuses.has(s))) {
+    return c.json({ error: "invalid status filter", code: "validation" }, 400);
+  }
+  if (types.some((t) => !allowedTypes.has(t))) {
+    return c.json({ error: "invalid type filter", code: "validation" }, 400);
+  }
   const ws = c.get("workspace");
+  const filters: string[] = ["workspace_id = ?"];
+  const args: Array<string | number> = [ws.id];
+  if (statuses.length > 0) {
+    filters.push(`status IN (${statuses.map(() => "?").join(", ")})`);
+    args.push(...statuses);
+  }
+  if (types.length > 0) {
+    filters.push(`type IN (${types.map(() => "?").join(", ")})`);
+    args.push(...types);
+  }
   const rows = c
     .get("db")
     .prepare(
-      "SELECT id, path, type, status, target_id, title, mtime " +
-        "FROM documents WHERE workspace_id = ? ORDER BY path",
+      `SELECT id, path, type, status, target_id, title, mtime FROM documents WHERE ${filters.join(" AND ")} ORDER BY path`,
     )
-    .all(ws.id);
+    .all(...args);
   return c.json({ documents: rows });
 });
