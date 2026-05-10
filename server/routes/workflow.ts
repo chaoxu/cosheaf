@@ -39,6 +39,15 @@ workflow.get("/:slug/settings", (c) => {
   return c.json({ min_approvals: getMinApprovals(c.get("db"), ws.id) });
 });
 
+workflow.get("/:slug/document/:id", (c) => {
+  const ws = c.get("workspace");
+  try {
+    return c.json({ document: getDocument(c.get("db"), ws.id, c.req.param("id") ?? "") });
+  } catch (err) {
+    return workflowError(c, err);
+  }
+});
+
 workflow.put("/:slug/settings", async (c) => {
   if (c.get("workspace").role !== "owner")
     return c.json({ error: "owner only", code: "forbidden" }, 403);

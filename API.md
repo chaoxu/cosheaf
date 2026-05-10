@@ -150,11 +150,13 @@ All routes scoped to a workspace require membership.
 ```
 GET /api/v1/w/:slug/tree                  → { files: FileEntry[] }
 GET /api/v1/w/:slug/documents             → { documents: DocumentMeta[] }
+GET /api/v1/w/:slug/document/:id          → { document: DocumentMeta }
 ```
 
 `tree` returns disk-level entries (path, size, mtime) with the indexed
 document attached if any. `documents` returns just the indexed documents
-ordered by path.
+ordered by path. `document/:id` is for direct lookup when a client already has
+a stable document id and should not list the full workspace.
 
 ```ts
 FileEntry { path: string, size: number, mtime: number, doc?: DocumentMeta }
@@ -366,6 +368,7 @@ No auth required.
 
 ## Changelog
 
+- **v1 additive** — `GET /w/:slug/document/:id` for direct document lookup.
 - **v1 (initial)** — every endpoint above. The contract is stable in the
   sense that future v1 changes are additive (new fields on responses, new
   optional request fields). Breaking changes will ship under `/api/v2` with

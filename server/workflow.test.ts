@@ -13,6 +13,7 @@ import {
   createReview,
   decideOnDocument,
   getApprovalsForDocument,
+  getDocument,
   getReviewQueue,
   setMinApprovals,
   submitDocument,
@@ -83,6 +84,13 @@ afterEach(() => {
 });
 
 describe("submitDocument", () => {
+  it("looks up one document by id", async () => {
+    const id = await makeDraft(ctx, "page.md", "# Hello\n");
+    const doc = getDocument(ctx.db, ctx.workspaceId, id);
+    expect(doc.path).toBe("page.md");
+    expect(doc.status).toBe("draft");
+  });
+
   it("moves draft → unreviewed and rewrites frontmatter", async () => {
     const id = await makeDraft(ctx, "page.md", "# Hello\n");
     const r = await submitDocument(ctx.db, ctx.workspaceId, ctx.root, id);
