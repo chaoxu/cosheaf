@@ -12,21 +12,90 @@ export interface Workspace {
 
 export interface DocumentMeta {
   id: string;
-  type: "page" | "review" | "proposal";
-  status: "golden" | "unreviewed" | "rejected" | "draft" | "archived";
+  type: "page";
+  status: "golden";
   title: string | null;
 }
 
 export interface FileEntry {
   path: string;
   size: number;
-  mtime: number;
   doc?: DocumentMeta;
 }
 
 export interface NoteContent {
   content: string;
-  mtime: number;
+}
+
+export interface Change {
+  id: string;
+  workspace_id: number;
+  author_user_id: number;
+  branch_name: string;
+  state: "draft" | "review" | "merged" | "rejected" | "abandoned";
+  pr_number: number | null;
+  base_sha: string | null;
+  title: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface QueueEntry {
+  id: string;
+  title: string;
+  pr_number: number | null;
+  author_user_id: number;
+  created_at: number;
+  approvals: number;
+  rejections: number;
+}
+
+export interface ApprovalRecord {
+  verifier_user_id: number;
+  username: string;
+  decision: "approve" | "reject";
+  comment: string | null;
+  created_at: number;
+}
+
+export interface Backlink {
+  src_id: string;
+  src_path: string;
+  src_title: string | null;
+  target_label: string;
+}
+
+export interface SearchResult {
+  doc_id: string;
+  path: string;
+  title: string | null;
+  type: string;
+  status: string;
+  target_id: string | null;
+  snippet: string;
+  rank: number;
+}
+
+export interface TokenInfo {
+  id: number;
+  name: string;
+  created_at: number;
+}
+
+export interface PublishResult {
+  ok: boolean;
+  mode?: "direct" | "review";
+  change_id?: string;
+  pr_number?: number;
+  message?: string;
+}
+
+export interface DecisionResult {
+  decision: "approve" | "reject";
+  change_id: string;
+  state: Change["state"];
+  approvals: number;
+  rejections: number;
 }
 
 export class ApiError extends Error {
@@ -51,6 +120,12 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+const w = (slug: string): string => `/api/v1/w/${encodeURIComponent(slug)}`;
+const qs = (params: Record<string, string | undefined>): string => {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined);
+  return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&")}` : "";
+};
+
 export const api = {
   me: () => jsonFetch<{ user: User | null }>("/api/v1/me"),
   login: (username: string, password: string) =>
@@ -68,76 +143,57 @@ export const api = {
       body: JSON.stringify({ slug, name }),
     }),
 
-  tree: (slug: string) =>
-    jsonFetch<{ files: FileEntry[] }>(`/api/v1/w/${encodeURIComponent(slug)}/tree`).then((r) => r.files),
-  getNote: (slug: string, path: string) =>
-    jsonFetch<NoteContent>(
-      `/api/v1/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
+  tree: (slug: string, change_id?: string) =>
+    jsonFetch<{ files: FileEntry[] }>(`${w(slug)}/tree${qs({ change_id })}`).then((r) => r.files),
+
+  getFile: (slug: string, path: string, change_id?: string) =>
+    jsonFetch<NoteContent>(`${w(slug)}/file${qs({ path, change_id })}`),
+  putFile: (slug: string, path: string, content: string, change_id?: string) =>
+    jsonFetch<{ ok: true; change_id: string; meta: DocumentMeta; content?: string; pending?: boolean }>(
+      `${w(slug)}/file${qs({ path, change_id })}`,
+      { method: "PUT", body: JSON.stringify({ content }) },
     ),
-  putNote: (slug: string, path: string, content: string, expected_mtime?: number) =>
-    jsonFetch<{ ok: true; mtime: number; meta: DocumentMeta; content?: string }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
-      { method: "PUT", body: JSON.stringify({ content, expected_mtime }) },
-    ),
-  deleteNote: (slug: string, path: string) =>
-    jsonFetch<{ ok: true }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/note?path=${encodeURIComponent(path)}`,
+  deleteFile: (slug: string, path: string, change_id?: string) =>
+    jsonFetch<{ ok: true; change_id: string; pending: boolean }>(
+      `${w(slug)}/file${qs({ path, change_id })}`,
       { method: "DELETE" },
     ),
 
   backlinks: (slug: string, id: string) =>
-    jsonFetch<{ backlinks: Backlink[] }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/backlinks?id=${encodeURIComponent(id)}`,
-    ).then((r) => r.backlinks),
-
+    jsonFetch<{ backlinks: Backlink[] }>(`${w(slug)}/backlinks${qs({ id })}`).then((r) => r.backlinks),
   search: (slug: string, q: string) =>
-    jsonFetch<{ results: SearchResult[] }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/search?q=${encodeURIComponent(q)}`,
-    ).then((r) => r.results),
+    jsonFetch<{ results: SearchResult[] }>(`${w(slug)}/search${qs({ q })}`).then((r) => r.results),
+
+  // Changes
+  listChanges: (slug: string) =>
+    jsonFetch<{ changes: Change[] }>(`${w(slug)}/changes`).then((r) => r.changes),
+  createChange: (slug: string, title?: string) =>
+    jsonFetch<Change>(`${w(slug)}/change`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+  abandonChange: (slug: string, change_id: string) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/change/${encodeURIComponent(change_id)}`, { method: "DELETE" }),
+  publish: (slug: string, change_id: string, mode?: "direct" | "review", title?: string) =>
+    jsonFetch<PublishResult>(`${w(slug)}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ change_id, mode, title }),
+    }),
+  approve: (slug: string, change_id: string, comment?: string) =>
+    jsonFetch<DecisionResult>(`${w(slug)}/change/${encodeURIComponent(change_id)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ comment: comment ?? null }),
+    }),
+  reject: (slug: string, change_id: string, comment?: string) =>
+    jsonFetch<DecisionResult>(`${w(slug)}/change/${encodeURIComponent(change_id)}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ comment: comment ?? null }),
+    }),
+  approvals: (slug: string, change_id: string) =>
+    jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/approvals`).then((r) => r.approvals),
 
   queue: (slug: string) =>
-    jsonFetch<{ queue: QueueEntry[] }>(`/api/v1/w/${encodeURIComponent(slug)}/queue`).then(
-      (r) => r.queue,
-    ),
-  submit: (slug: string, id: string) =>
-    jsonFetch<{ status: string }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/submit`,
-      { method: "POST" },
-    ),
-  approve: (slug: string, id: string, comment?: string, reviewDocId?: string) =>
-    jsonFetch<DecisionResult>(
-      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approve`,
-      {
-        method: "POST",
-        body: JSON.stringify({ comment: comment ?? null, review_doc_id: reviewDocId ?? null }),
-      },
-    ),
-  reject: (slug: string, id: string, comment?: string, reviewDocId?: string) =>
-    jsonFetch<DecisionResult>(
-      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/reject`,
-      {
-        method: "POST",
-        body: JSON.stringify({ comment: comment ?? null, review_doc_id: reviewDocId ?? null }),
-      },
-    ),
-  approvals: (slug: string, id: string) =>
-    jsonFetch<{ approvals: ApprovalRecord[] }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/document/${encodeURIComponent(id)}/approvals`,
-    ).then((r) => r.approvals),
-  proposalTarget: (slug: string, id: string) =>
-    jsonFetch<ProposalTarget>(
-      `/api/v1/w/${encodeURIComponent(slug)}/proposal/${encodeURIComponent(id)}/target`,
-    ),
-  createReview: (slug: string, target_id: string, body = "") =>
-    jsonFetch<{ path: string; meta: DocumentMeta }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/review`,
-      { method: "POST", body: JSON.stringify({ target_id, body }) },
-    ),
-  createProposal: (slug: string, target_id: string, body: string) =>
-    jsonFetch<{ path: string; meta: DocumentMeta }>(
-      `/api/v1/w/${encodeURIComponent(slug)}/proposal`,
-      { method: "POST", body: JSON.stringify({ target_id, body }) },
-    ),
+    jsonFetch<{ queue: QueueEntry[] }>(`${w(slug)}/queue`).then((r) => r.queue),
 
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),
@@ -149,63 +205,3 @@ export const api = {
   revokeToken: (id: number) =>
     jsonFetch<{ ok: true }>(`/api/v1/tokens/${id}`, { method: "DELETE" }),
 };
-
-export interface TokenInfo {
-  id: number;
-  name: string;
-  created_at: number;
-}
-
-export interface SearchResult {
-  doc_id: string;
-  path: string;
-  title: string | null;
-  type: DocumentMeta["type"];
-  status: DocumentMeta["status"];
-  target_id: string | null;
-  snippet: string;
-  rank: number;
-}
-
-export interface QueueEntry {
-  id: string;
-  path: string;
-  type: string;
-  title: string | null;
-  target_id: string | null;
-  approvals: number;
-  rejections: number;
-}
-
-export interface DecisionResult {
-  decision: "approve" | "reject";
-  approvals: number;
-  rejections: number;
-  doc_status: DocumentMeta["status"];
-  promoted_meta?: DocumentMeta;
-}
-
-export interface Backlink {
-  src_id: string;
-  src_path: string;
-  src_title: string | null;
-  target_label: string;
-}
-
-export interface ApprovalRecord {
-  verifier_user_id: number;
-  username: string;
-  decision: "approve" | "reject";
-  comment: string | null;
-  created_at: number;
-  review_doc_id: string | null;
-  review_path: string | null;
-  review_title: string | null;
-}
-
-export interface ProposalTarget {
-  target_id: string;
-  target_path: string;
-  target_title: string | null;
-  target_content: string;
-}

@@ -45,6 +45,14 @@ export default defineConfig({
       "@codemirror/search",
       "@lezer/common",
       "@lezer/highlight",
+      // Citation-js packages are CJS; coflat-editor 0.1.13's bundled .mjs does
+      // named imports (`import { parse } from '@citation-js/name'`) which fail
+      // unless Vite pre-bundles them into ESM.
+      "@citation-js/core",
+      "@citation-js/name",
+      "@citation-js/date",
+      "@citation-js/plugin-bibtex",
+      "@citation-js/plugin-csl",
     ],
     // The editor package is already a single bundled .mjs; Vite's optimizer
     // chokes on its `import("pdfjs-dist/.../pdf.worker.min.mjs?url")` line.

@@ -1,0 +1,462 @@
+// Thin wrapper around the Forgejo REST API.
+// All calls go through one admin token; per-user actions use the `Sudo` header.
+
+export interface ForgejoConfig {
+  baseUrl: string;
+  adminToken: string;
+}
+
+export class ForgejoError extends Error {
+  constructor(
+    public status: number,
+    public bodyText: string,
+    public method: string,
+    public path: string,
+  ) {
+    super(`forgejo ${method} ${path} -> ${status}: ${bodyText.slice(0, 300)}`);
+  }
+}
+
+interface RequestOpts {
+  method?: string;
+  query?: Record<string, string | number | undefined>;
+  body?: unknown;
+  sudo?: string;
+  raw?: boolean;
+  expectEmpty?: boolean;
+}
+
+export class Forgejo {
+  constructor(private cfg: ForgejoConfig) {}
+
+  private async req<T = unknown>(p: string, opts: RequestOpts = {}): Promise<T> {
+    const url = new URL(p.startsWith("/") ? this.cfg.baseUrl + p : p);
+    if (opts.query) {
+      for (const [k, v] of Object.entries(opts.query)) {
+        if (v !== undefined) url.searchParams.set(k, String(v));
+      }
+    }
+    const headers: Record<string, string> = {
+      authorization: `token ${this.cfg.adminToken}`,
+      accept: "application/json",
+    };
+    if (opts.body !== undefined) headers["content-type"] = "application/json";
+    if (opts.sudo) headers.sudo = opts.sudo;
+
+    const res = await fetch(url, {
+      method: opts.method ?? "GET",
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!res.ok) {
+      throw new ForgejoError(res.status, await res.text(), opts.method ?? "GET", p);
+    }
+    if (opts.raw) return (await res.text()) as unknown as T;
+    if (opts.expectEmpty || res.status === 204) return undefined as T;
+    const txt = await res.text();
+    return (txt ? JSON.parse(txt) : undefined) as T;
+  }
+
+  // ---------------- users ----------------
+
+  async getUserByName(username: string): Promise<ForgejoUser | null> {
+    try {
+      return await this.req<ForgejoUser>(`/api/v1/users/${encodeURIComponent(username)}`);
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async createUser(opts: {
+    username: string;
+    email: string;
+    password: string;
+    must_change_password?: boolean;
+  }): Promise<ForgejoUser> {
+    return this.req<ForgejoUser>("/api/v1/admin/users", {
+      method: "POST",
+      body: {
+        username: opts.username,
+        email: opts.email,
+        password: opts.password,
+        must_change_password: opts.must_change_password ?? false,
+        send_notify: false,
+        source_id: 0,
+        login_name: opts.username,
+      },
+    });
+  }
+
+  async setUserActive(username: string, active: boolean): Promise<void> {
+    await this.req(`/api/v1/admin/users/${encodeURIComponent(username)}`, {
+      method: "PATCH",
+      body: { active },
+      expectEmpty: true,
+    });
+  }
+
+  // ---------------- repos ----------------
+
+  async createUserRepo(opts: {
+    name: string;
+    description?: string;
+    private?: boolean;
+    auto_init?: boolean;
+    default_branch?: string;
+  }, sudo: string): Promise<ForgejoRepo> {
+    return this.req<ForgejoRepo>("/api/v1/user/repos", {
+      method: "POST",
+      sudo,
+      body: {
+        name: opts.name,
+        description: opts.description ?? "",
+        private: opts.private ?? true,
+        auto_init: opts.auto_init ?? true,
+        default_branch: opts.default_branch ?? "main",
+      },
+    });
+  }
+
+  async deleteRepo(owner: string, repo: string): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}`, { method: "DELETE", expectEmpty: true });
+  }
+
+  async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {
+    try {
+      return await this.req<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`);
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async addCollaborator(owner: string, repo: string, username: string, permission: "read" | "write" | "admin"): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}`, {
+      method: "PUT",
+      body: { permission },
+      expectEmpty: true,
+    });
+  }
+
+  async removeCollaborator(owner: string, repo: string, username: string): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}`, {
+      method: "DELETE",
+      expectEmpty: true,
+    });
+  }
+
+  async listCollaborators(owner: string, repo: string): Promise<ForgejoUser[]> {
+    return this.req<ForgejoUser[]>(`/api/v1/repos/${owner}/${repo}/collaborators`);
+  }
+
+  // ---------------- branch protection ----------------
+
+  async getBranchProtection(owner: string, repo: string, branch: string): Promise<ForgejoBranchProtection | null> {
+    try {
+      return await this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections/${encodeURIComponent(branch)}`);
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async createBranchProtection(owner: string, repo: string, opts: {
+    branch_name: string;
+    required_approvals?: number;
+    push_whitelist_usernames?: string[];
+  }): Promise<ForgejoBranchProtection> {
+    const whitelist = opts.push_whitelist_usernames ?? [];
+    return this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections`, {
+      method: "POST",
+      body: {
+        branch_name: opts.branch_name,
+        required_approvals: opts.required_approvals ?? 1,
+        enable_push: whitelist.length > 0,
+        enable_push_whitelist: whitelist.length > 0,
+        push_whitelist_usernames: whitelist,
+        push_whitelist_deploy_keys: false,
+        enable_approvals_whitelist: false,
+        block_on_rejected_reviews: true,
+        block_on_outdated_branch: false,
+        dismiss_stale_approvals: false,
+        enable_merge_whitelist: false,
+        enable_status_check: false,
+        apply_to_admins: false,
+      },
+    });
+  }
+
+  async patchBranchProtectionPushWhitelist(owner: string, repo: string, branch: string, usernames: string[]): Promise<ForgejoBranchProtection> {
+    return this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections/${encodeURIComponent(branch)}`, {
+      method: "PATCH",
+      body: {
+        enable_push: usernames.length > 0,
+        enable_push_whitelist: usernames.length > 0,
+        push_whitelist_usernames: usernames,
+      },
+    });
+  }
+
+  async updateBranchProtection(owner: string, repo: string, branch: string, patch: {
+    required_approvals?: number;
+  }): Promise<ForgejoBranchProtection> {
+    return this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections/${encodeURIComponent(branch)}`, {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
+  // ---------------- webhooks ----------------
+
+  async createRepoHook(owner: string, repo: string, url: string, secret: string, events: string[]): Promise<ForgejoHook> {
+    return this.req<ForgejoHook>(`/api/v1/repos/${owner}/${repo}/hooks`, {
+      method: "POST",
+      body: {
+        type: "forgejo",
+        active: true,
+        events,
+        config: { url, content_type: "json", secret },
+      },
+    });
+  }
+
+  async listRepoHooks(owner: string, repo: string): Promise<ForgejoHook[]> {
+    return this.req<ForgejoHook[]>(`/api/v1/repos/${owner}/${repo}/hooks`);
+  }
+
+  // ---------------- contents (files) ----------------
+
+  async getRawFile(owner: string, repo: string, ref: string, filepath: string): Promise<string> {
+    return this.req<string>(`/api/v1/repos/${owner}/${repo}/raw/${encodeFilePath(filepath)}`, {
+      query: { ref },
+      raw: true,
+    });
+  }
+
+  async getFileMeta(owner: string, repo: string, ref: string, filepath: string): Promise<ForgejoContent | null> {
+    try {
+      return await this.req<ForgejoContent>(`/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(filepath)}`, {
+        query: { ref },
+      });
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async putFile(owner: string, repo: string, opts: {
+    branch: string;
+    path: string;
+    content: string; // raw text; will be base64-encoded
+    sha?: string; // current sha if updating
+    message: string;
+    sudo: string;
+  }): Promise<ForgejoFileResponse> {
+    const isUpdate = !!opts.sha;
+    const body = {
+      branch: opts.branch,
+      content: Buffer.from(opts.content, "utf8").toString("base64"),
+      message: opts.message,
+      ...(isUpdate ? { sha: opts.sha } : {}),
+    };
+    const path = `/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(opts.path)}`;
+    return this.req<ForgejoFileResponse>(path, {
+      method: isUpdate ? "PUT" : "POST",
+      body,
+      sudo: opts.sudo,
+    });
+  }
+
+  async deleteFile(owner: string, repo: string, opts: {
+    branch: string;
+    path: string;
+    sha: string;
+    message: string;
+    sudo: string;
+  }): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(opts.path)}`, {
+      method: "DELETE",
+      body: { branch: opts.branch, sha: opts.sha, message: opts.message },
+      sudo: opts.sudo,
+      expectEmpty: true,
+    });
+  }
+
+  async getTree(owner: string, repo: string, ref: string, recursive = true): Promise<ForgejoTreeEntry[]> {
+    const out: ForgejoTreeEntry[] = [];
+    let page = 1;
+    while (true) {
+      const r = await this.req<{ tree: ForgejoTreeEntry[]; truncated: boolean }>(
+        `/api/v1/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`,
+        { query: { recursive: recursive ? "true" : "false", page, per_page: 50 } },
+      );
+      out.push(...(r.tree ?? []));
+      if (!r.truncated || (r.tree ?? []).length === 0) break;
+      page++;
+      if (page > 50) break;
+    }
+    return out;
+  }
+
+  // ---------------- branches ----------------
+
+  async createBranch(owner: string, repo: string, opts: { newBranchName: string; oldBranchName?: string; sudo: string }): Promise<ForgejoBranch> {
+    return this.req<ForgejoBranch>(`/api/v1/repos/${owner}/${repo}/branches`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: {
+        new_branch_name: opts.newBranchName,
+        old_branch_name: opts.oldBranchName ?? "main",
+      },
+    });
+  }
+
+  async getBranch(owner: string, repo: string, branch: string): Promise<ForgejoBranch | null> {
+    try {
+      return await this.req<ForgejoBranch>(`/api/v1/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`);
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async deleteBranch(owner: string, repo: string, branch: string): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`, {
+      method: "DELETE",
+      expectEmpty: true,
+    });
+  }
+
+  // ---------------- pulls ----------------
+
+  async createPull(owner: string, repo: string, opts: {
+    head: string;
+    base: string;
+    title: string;
+    body: string;
+    sudo: string;
+  }): Promise<ForgejoPull> {
+    return this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: { head: opts.head, base: opts.base, title: opts.title, body: opts.body },
+    });
+  }
+
+  async getPull(owner: string, repo: string, index: number): Promise<ForgejoPull | null> {
+    try {
+      return await this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls/${index}`);
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  async listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<ForgejoPull[]> {
+    const out: ForgejoPull[] = [];
+    let page = 1;
+    while (true) {
+      const r = await this.req<ForgejoPull[]>(`/api/v1/repos/${owner}/${repo}/pulls`, {
+        query: { state, page, limit: 50, sort: "newest" },
+      });
+      if (!r || r.length === 0) break;
+      out.push(...r);
+      if (r.length < 50) break;
+      page++;
+      if (page > 20) break;
+    }
+    return out;
+  }
+
+  async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed" }, sudo?: string): Promise<ForgejoPull> {
+    return this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls/${index}`, {
+      method: "PATCH",
+      body: patch,
+      sudo,
+    });
+  }
+
+  async mergePull(owner: string, repo: string, index: number, opts: { Do: "merge" | "squash" | "rebase"; sudo: string; message?: string }): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/pulls/${index}/merge`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: { Do: opts.Do, MergeMessageField: opts.message ?? "" },
+      expectEmpty: true,
+    });
+  }
+
+  async listReviews(owner: string, repo: string, index: number): Promise<ForgejoReview[]> {
+    return this.req<ForgejoReview[]>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`);
+  }
+
+  async createReview(owner: string, repo: string, index: number, opts: {
+    event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT";
+    body: string;
+    sudo: string;
+  }): Promise<ForgejoReview> {
+    return this.req<ForgejoReview>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: { event: opts.event, body: opts.body },
+    });
+  }
+}
+
+function encodeFilePath(p: string): string {
+  return p.split("/").map(encodeURIComponent).join("/");
+}
+
+// ---------- types (minimal subset) ----------
+export interface ForgejoUser {
+  id: number;
+  login: string;
+  full_name?: string;
+  email?: string;
+  active?: boolean;
+}
+export interface ForgejoRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  default_branch: string;
+  owner: ForgejoUser;
+}
+export interface ForgejoBranch { name: string; commit: { id: string } }
+export interface ForgejoBranchProtection { branch_name: string; required_approvals: number }
+export interface ForgejoHook { id: number; type: string; events: string[] }
+export interface ForgejoContent {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  type: string;
+  content?: string;
+  encoding?: string;
+}
+export interface ForgejoFileResponse {
+  content: ForgejoContent | null;
+  commit: { sha: string };
+}
+export interface ForgejoTreeEntry { path: string; type: "blob" | "tree" | string; size?: number; sha: string }
+export interface ForgejoPull {
+  id: number;
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  merged: boolean;
+  merged_at?: string | null;
+  head: { ref: string; sha: string; label: string };
+  base: { ref: string; sha: string };
+  user: ForgejoUser;
+  created_at: string;
+  updated_at: string;
+}
+export interface ForgejoReview {
+  id: number;
+  body: string;
+  state: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING" | string;
+  user: ForgejoUser;
+  submitted_at?: string;
+}

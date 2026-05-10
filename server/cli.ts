@@ -1,28 +1,69 @@
-import { mkdirSync, promises as fs } from "node:fs";
-import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { workspaceDir, getDb, loadConfig } from "./db.js";
+import { getDb, loadConfig } from "./db.js";
 import {
   createUser,
+  ensureForgejoProxy,
   findUserByUsername,
   hashPassword,
   setUserPassword,
-} from "./auth.js";
-import { indexDocument } from "./indexer.js";
+} from "./users.js";
+import { Forgejo } from "./forgejo.js";
 
 async function readPassword(prompt: string): Promise<string> {
-  const rl = createInterface({ input: stdin, output: stdout });
-  try {
-    return await rl.question(prompt);
-  } finally {
-    rl.close();
+  // For non-TTY stdin (piped input like `echo pw | cli`), readline echoes
+  // are harmless and we want to keep that path working unchanged.
+  if (!stdin.isTTY) {
+    const rl = createInterface({ input: stdin, output: stdout });
+    try {
+      return await rl.question(prompt);
+    } finally {
+      rl.close();
+    }
   }
+  // TTY: muted input. Set raw mode and read char-by-char until newline.
+  stdout.write(prompt);
+  return new Promise<string>((resolve) => {
+    let buf = "";
+    stdin.setRawMode?.(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    const onData = (chunk: string): void => {
+      for (const ch of chunk) {
+        if (ch === "\n" || ch === "\r" || ch === "") {
+          stdout.write("\n");
+          stdin.setRawMode?.(false);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          resolve(buf);
+          return;
+        }
+        if (ch === "") {
+          // Ctrl-C
+          stdin.setRawMode?.(false);
+          stdin.pause();
+          process.exit(130);
+        }
+        if (ch === "" || ch === "\b") {
+          buf = buf.slice(0, -1);
+          continue;
+        }
+        buf += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
+function ctx() {
+  const config = loadConfig();
+  const db = getDb(config);
+  const forgejo = new Forgejo({ baseUrl: config.forgejoUrl, adminToken: config.forgejoToken });
+  return { config, db, forgejo };
 }
 
 async function userAdd(username: string): Promise<void> {
-  const config = loadConfig();
-  const db = getDb(config);
+  const { db, forgejo } = ctx();
   if (findUserByUsername(db, username)) {
     console.error(`user '${username}' already exists`);
     process.exit(1);
@@ -34,12 +75,12 @@ async function userAdd(username: string): Promise<void> {
   }
   const hash = await hashPassword(password);
   const user = createUser(db, username, hash);
-  console.log(`created user ${user.username} (id=${user.id})`);
+  const fj = await ensureForgejoProxy(db, forgejo, user);
+  console.log(`created user ${user.username} (id=${user.id}, forgejo=${fj})`);
 }
 
 async function userPasswd(username: string): Promise<void> {
-  const config = loadConfig();
-  const db = getDb(config);
+  const { db } = ctx();
   if (!findUserByUsername(db, username)) {
     console.error(`user '${username}' not found`);
     process.exit(1);
@@ -55,21 +96,17 @@ async function userPasswd(username: string): Promise<void> {
 }
 
 function userList(): void {
-  const config = loadConfig();
-  const db = getDb(config);
-  const rows = db.prepare("SELECT id, username, created_at FROM users ORDER BY username").all() as Array<{
-    id: number;
-    username: string;
-    created_at: number;
-  }>;
+  const { db } = ctx();
+  const rows = db
+    .prepare("SELECT id, username, forgejo_username, created_at FROM users ORDER BY username")
+    .all() as Array<{ id: number; username: string; forgejo_username: string | null; created_at: number }>;
   for (const row of rows) {
-    console.log(`${row.id}\t${row.username}\t${new Date(row.created_at).toISOString()}`);
+    console.log(`${row.id}\t${row.username}\t${row.forgejo_username ?? "-"}\t${new Date(row.created_at).toISOString()}`);
   }
 }
 
 function userRm(username: string): void {
-  const config = loadConfig();
-  const db = getDb(config);
+  const { db } = ctx();
   const r = db.prepare("DELETE FROM users WHERE username = ?").run(username);
   if (r.changes === 0) {
     console.error(`user '${username}' not found`);
@@ -78,52 +115,35 @@ function userRm(username: string): void {
   console.log(`deleted user ${username}`);
 }
 
-function workspaceAdd(slug: string, name: string, ownerUsername: string): void {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
-    console.error("invalid slug (lowercase letters, digits, dashes)");
+async function workspaceRm(slug: string): Promise<void> {
+  const { db, forgejo, config } = ctx();
+  const ws = db.prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?").get(slug) as { id: number; forgejo_repo: string } | undefined;
+  if (!ws) {
+    console.error(`workspace '${slug}' not found`);
     process.exit(1);
   }
-  const config = loadConfig();
-  const db = getDb(config);
-  const owner = findUserByUsername(db, ownerUsername);
-  if (!owner) {
-    console.error(`owner '${ownerUsername}' not found`);
-    process.exit(1);
-  }
-  const tx = db.transaction(() => {
-    const ws = db
-      .prepare("INSERT INTO workspaces (slug, name, created_at) VALUES (?, ?, ?) RETURNING id")
-      .get(slug, name, Date.now()) as { id: number };
-    db.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner')").run(
-      ws.id,
-      owner.id,
-    );
-    return ws.id;
-  });
-  let id: number;
   try {
-    id = tx();
+    await forgejo.deleteRepo(config.forgejoOwner, ws.forgejo_repo);
   } catch (err) {
-    if ((err as Error).message.includes("UNIQUE")) {
-      console.error(`slug '${slug}' already taken`);
+    // 404 is fine — repo already gone.
+    const status = (err as { status?: number }).status;
+    if (status !== 404) {
+      console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
       process.exit(1);
     }
-    throw err;
   }
-  mkdirSync(workspaceDir(config, slug), { recursive: true });
-  console.log(`created workspace ${slug} (id=${id}, owner=${ownerUsername})`);
+  // Cascade deletes memberships, doc_map, etc.
+  db.prepare("DELETE FROM workspaces WHERE id = ?").run(ws.id);
+  // FTS / backlinks / page_tags reference workspace_id without FK cascade; clean explicitly.
+  db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(ws.id);
+  db.prepare("DELETE FROM backlinks WHERE workspace_id = ?").run(ws.id);
+  db.prepare("DELETE FROM page_tags WHERE workspace_id = ?").run(ws.id);
+  console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
 }
 
-function workspaceMember(slug: string, username: string, role: string): void {
-  if (!["owner", "verifier", "member"].includes(role)) {
-    console.error("role must be one of: owner, verifier, member");
-    process.exit(1);
-  }
-  const config = loadConfig();
-  const db = getDb(config);
-  const ws = db.prepare("SELECT id FROM workspaces WHERE slug = ?").get(slug) as
-    | { id: number }
-    | undefined;
+async function workspaceMember(slug: string, username: string, role: "owner" | "verifier" | "member"): Promise<void> {
+  const { db, forgejo, config } = ctx();
+  const ws = db.prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?").get(slug) as { id: number; forgejo_repo: string } | undefined;
   if (!ws) {
     console.error(`workspace '${slug}' not found`);
     process.exit(1);
@@ -133,124 +153,20 @@ function workspaceMember(slug: string, username: string, role: string): void {
     console.error(`user '${username}' not found`);
     process.exit(1);
   }
+  const fj = await ensureForgejoProxy(db, forgejo, user);
   db.prepare(
-    "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?) " +
-      "ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = excluded.role",
+    "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = excluded.role",
   ).run(ws.id, user.id, role);
-  console.log(`added ${username} as ${role} of ${slug}`);
-}
-
-async function workspaceReindex(slug: string): Promise<void> {
-  const config = loadConfig();
-  const db = getDb(config);
-  const ws = db.prepare("SELECT id FROM workspaces WHERE slug = ?").get(slug) as
-    | { id: number }
-    | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-  const root = workspaceDir(config, slug);
-
-  async function walk(dir: string): Promise<string[]> {
-    let entries: import("node:fs").Dirent[];
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw err;
-    }
-    const acc: string[] = [];
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) acc.push(...(await walk(full)));
-      else if (entry.isFile() && entry.name.endsWith(".md")) acc.push(full);
-    }
-    return acc;
-  }
-
-  const files = await walk(root);
-  let updated = 0;
-  for (const full of files) {
-    const rel = path.relative(root, full);
-    const content = await fs.readFile(full, "utf8");
-    const result = indexDocument(db, ws.id, rel, content);
-    if (result.rewrote) {
-      const tmp = `${full}.tmp-${process.pid}-${Date.now()}`;
-      await fs.writeFile(tmp, result.content, "utf8");
-      await fs.rename(tmp, full);
-      updated++;
-    }
-    console.log(`indexed ${rel} (${result.meta.id} ${result.meta.type}/${result.meta.status})`);
-  }
-  console.log(`done — ${files.length} files indexed, ${updated} rewritten`);
-}
-
-interface SeedOptions {
-  user: string;
-  password: string;
-  workspace: string;
-  workspaceName: string;
-}
-
-function parseSeedFlags(rest: string[]): SeedOptions {
-  const out: SeedOptions = {
-    user: "admin",
-    password: "admin",
-    workspace: "notes",
-    workspaceName: "Notes",
-  };
-  for (let i = 0; i < rest.length; i += 2) {
-    const flag = rest[i];
-    const value = rest[i + 1];
-    if (!value) {
-      console.error(`missing value for ${flag}`);
-      process.exit(1);
-    }
-    if (flag === "--user") out.user = value;
-    else if (flag === "--password") out.password = value;
-    else if (flag === "--workspace") out.workspace = value;
-    else if (flag === "--workspace-name") out.workspaceName = value;
-    else {
-      console.error(`unknown flag: ${flag}`);
-      process.exit(1);
+  // Grant write so the user's proxy can push branches; main is still gated by branch protection.
+  await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, fj, "write");
+  if (role === "owner") {
+    const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
+    const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
+    if (!current.includes(fj)) {
+      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, fj]);
     }
   }
-  return out;
-}
-
-async function seed(rest: string[]): Promise<void> {
-  const opts = parseSeedFlags(rest);
-  const config = loadConfig();
-  const db = getDb(config);
-
-  const existingUser = findUserByUsername(db, opts.user);
-  if (existingUser) {
-    console.log(`user ${opts.user} already exists (id=${existingUser.id})`);
-  } else {
-    const hash = await hashPassword(opts.password);
-    const u = createUser(db, opts.user, hash);
-    console.log(`created user ${u.username} (id=${u.id})`);
-  }
-
-  const owner = findUserByUsername(db, opts.user);
-  if (!owner) {
-    console.error("user creation failed");
-    process.exit(1);
-  }
-
-  const existingWs = db
-    .prepare("SELECT id FROM workspaces WHERE slug = ?")
-    .get(opts.workspace) as { id: number } | undefined;
-  if (existingWs) {
-    db.prepare(
-      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner') " +
-        "ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = 'owner'",
-    ).run(existingWs.id, owner.id);
-    console.log(`workspace ${opts.workspace} already exists (id=${existingWs.id})`);
-  } else {
-    workspaceAdd(opts.workspace, opts.workspaceName, opts.user);
-  }
+  console.log(`set ${username} as ${role} in workspace ${slug}`);
 }
 
 function help(): void {
@@ -259,10 +175,8 @@ function help(): void {
   cosheaf user passwd <username>
   cosheaf user list
   cosheaf user rm <username>
-  cosheaf workspace add <slug> <name> --owner <username>
-  cosheaf workspace member <slug> <username> <role>
-  cosheaf workspace reindex <slug>
-  cosheaf seed [--user X] [--password X] [--workspace X] [--workspace-name X]
+  cosheaf workspace member <slug> <username> <role>   # role = owner|verifier|member
+  cosheaf workspace rm <slug>                          # delete forgejo repo + sidecar
 `);
 }
 
@@ -274,24 +188,15 @@ async function main(): Promise<void> {
   if (cmd === "user" && sub === "passwd" && rest[0]) return userPasswd(rest[0]);
   if (cmd === "user" && sub === "list") return userList();
   if (cmd === "user" && sub === "rm" && rest[0]) return userRm(rest[0]);
-
-  if (cmd === "workspace" && sub === "add" && rest.length >= 4) {
-    const ownerIdx = rest.indexOf("--owner");
-    if (ownerIdx === -1 || !rest[ownerIdx + 1]) {
-      console.error("--owner <username> required");
+  if (cmd === "workspace" && sub === "rm" && rest[0]) return workspaceRm(rest[0]);
+  if (cmd === "workspace" && sub === "member" && rest[0] && rest[1] && rest[2]) {
+    const role = rest[2];
+    if (role !== "owner" && role !== "verifier" && role !== "member") {
+      console.error("role must be owner|verifier|member");
       process.exit(1);
     }
-    const slug = rest[0];
-    const name = rest[1];
-    const owner = rest[ownerIdx + 1];
-    return workspaceAdd(slug, name, owner);
+    return workspaceMember(rest[0], rest[1], role);
   }
-  if (cmd === "workspace" && sub === "member" && rest.length === 3) {
-    return workspaceMember(rest[0], rest[1], rest[2]);
-  }
-  if (cmd === "workspace" && sub === "reindex" && rest[0]) return workspaceReindex(rest[0]);
-
-  if (cmd === "seed") return seed(sub ? [sub, ...rest] : rest);
 
   help();
   process.exit(cmd ? 1 : 0);

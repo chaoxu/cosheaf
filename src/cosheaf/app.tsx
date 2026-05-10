@@ -1,12 +1,20 @@
 import type { ReactElement } from "react";
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import type { MountedEditor } from "@chaoxu/coflat-editor";
+
+type OutlineEntry = {
+  readonly level: 1 | 2 | 3 | 4 | 5 | 6;
+  readonly text: string;
+  readonly line: number;
+  readonly key: string;
+  readonly number?: string;
+};
 import {
   ApiError,
   api,
   type ApprovalRecord,
   type Backlink,
   type FileEntry,
-  type ProposalTarget,
   type QueueEntry,
   type SearchResult,
   type TokenInfo,
@@ -16,8 +24,6 @@ import {
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
-import { Textarea } from "./components/ui/textarea";
-import { lineDiff, stripFrontmatter } from "./diff";
 import { cn } from "./lib/utils";
 
 const MarkdownEditor = lazy(() =>
@@ -33,8 +39,145 @@ type View =
 
 type DocStatus = NonNullable<FileEntry["doc"]>["status"];
 
+function SidebarTab({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "px-2 py-1 rounded hover:bg-[var(--cf-hover)] disabled:opacity-40 disabled:hover:bg-transparent",
+        active && "bg-[var(--cf-active)] font-medium",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function OutlinePanel({
+  entries,
+  onPick,
+}: {
+  entries: readonly OutlineEntry[];
+  onPick: (line: number) => void;
+}): ReactElement {
+  if (entries.length === 0) {
+    return <div className={cn("p-3 text-xs", muted)}>No headings.</div>;
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1 text-sm">
+      {entries.map((e) => (
+        <button
+          key={e.key}
+          type="button"
+          onClick={() => onPick(e.line)}
+          className="flex items-baseline gap-2 truncate px-3 py-0.5 text-left hover:bg-[var(--cf-hover)]"
+          style={{ paddingLeft: `${(e.level - 1) * 12 + 12}px` }}
+          title={e.text}
+        >
+          <span className={cn("text-xs", muted)}>{e.number ?? ""}</span>
+          <span className="truncate">{e.text}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }): ReactElement {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const initial = user.username.slice(0, 1).toUpperCase();
+  return (
+    <div ref={ref} className={cn("mt-auto relative border-t", borderColor)}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-[var(--cf-hover)]",
+        )}
+        title={user.username}
+      >
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--cf-hover)] text-xs font-semibold">
+          {initial}
+        </span>
+        <span className="truncate text-sm">{user.username}</span>
+      </button>
+      {open && (
+        <div
+          className={cn(
+            "absolute bottom-full left-2 right-2 mb-1 overflow-hidden rounded border bg-[var(--cf-bg)] shadow-lg",
+            borderColor,
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              api.logout().then(onLogout);
+            }}
+            className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--cf-hover)]"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const muted = "text-[var(--cf-muted)]";
 const borderColor = "border-[var(--cf-border)]";
+
+// URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
+// workspace switching, tokens, and workspaces list participate in browser history.
+type RoutePath =
+  | { kind: "workspaces" }
+  | { kind: "tokens" }
+  | { kind: "workspace"; slug: string; filePath: string | null };
+
+function parseRoute(): RoutePath {
+  const path = window.location.pathname;
+  if (path === "/tokens") return { kind: "tokens" };
+  const m = /^\/w\/([^/]+)(?:\/(.*))?$/.exec(path);
+  if (m) {
+    const filePath = m[2] ? decodeURIComponent(m[2]) : null;
+    return { kind: "workspace", slug: m[1], filePath };
+  }
+  return { kind: "workspaces" };
+}
+
+function routeUrl(r: RoutePath): string {
+  if (r.kind === "tokens") return "/tokens";
+  if (r.kind === "workspaces") return "/";
+  if (r.filePath) return `/w/${r.slug}/${r.filePath.split("/").map(encodeURIComponent).join("/")}`;
+  return `/w/${r.slug}`;
+}
+
+function navigate(r: RoutePath, mode: "push" | "replace" = "push"): void {
+  const url = routeUrl(r);
+  if (window.location.pathname + window.location.search === url) return;
+  if (mode === "replace") window.history.replaceState(null, "", url);
+  else window.history.pushState(null, "", url);
+}
 
 export function CosheafApp(): ReactElement {
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -42,23 +185,81 @@ export function CosheafApp(): ReactElement {
   useEffect(() => {
     api
       .me()
-      .then(({ user }) => setView(user ? { kind: "workspaces", user } : { kind: "login" }))
+      .then(({ user }) => {
+        if (!user) {
+          setView({ kind: "login" });
+          return;
+        }
+        // Restore the route from the current URL (deep-link friendly).
+        const r = parseRoute();
+        if (r.kind === "tokens") {
+          setView({ kind: "tokens", user });
+        } else if (r.kind === "workspace") {
+          api.listWorkspaces().then((wss) => {
+            const ws = wss.find((w) => w.slug === r.slug);
+            if (ws) setView({ kind: "workspace", user, workspace: ws });
+            else {
+              navigate({ kind: "workspaces" }, "replace");
+              setView({ kind: "workspaces", user });
+            }
+          });
+        } else {
+          setView({ kind: "workspaces", user });
+        }
+      })
       .catch(() => setView({ kind: "login" }));
   }, []);
+
+  // Wire popstate → re-parse URL → reload the matching view. We don't have the
+  // workspace list in scope here so reload-from-`me`-flow handles it.
+  useEffect(() => {
+    const handler = (): void => {
+      if (view.kind === "loading" || view.kind === "login") return;
+      const r = parseRoute();
+      if (r.kind === "tokens") setView({ kind: "tokens", user: view.user });
+      else if (r.kind === "workspaces") setView({ kind: "workspaces", user: view.user });
+      else if (r.kind === "workspace") {
+        if (view.kind === "workspace" && view.workspace.slug === r.slug) return;
+        api.listWorkspaces().then((wss) => {
+          const ws = wss.find((w) => w.slug === r.slug);
+          if (ws) setView({ kind: "workspace", user: view.user, workspace: ws });
+          else setView({ kind: "workspaces", user: view.user });
+        });
+      }
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [view]);
 
   if (view.kind === "loading") {
     return <div className="h-full" />;
   }
   if (view.kind === "login") {
-    return <LoginScreen onLoggedIn={(user) => setView({ kind: "workspaces", user })} />;
+    return (
+      <LoginScreen
+        onLoggedIn={(user) => {
+          navigate({ kind: "workspaces" });
+          setView({ kind: "workspaces", user });
+        }}
+      />
+    );
   }
   if (view.kind === "workspaces") {
     return (
       <WorkspaceList
         user={view.user}
-        onPick={(workspace) => setView({ kind: "workspace", user: view.user, workspace })}
-        onTokens={() => setView({ kind: "tokens", user: view.user })}
-        onLogout={() => setView({ kind: "login" })}
+        onPick={(workspace) => {
+          navigate({ kind: "workspace", slug: workspace.slug, filePath: null });
+          setView({ kind: "workspace", user: view.user, workspace });
+        }}
+        onTokens={() => {
+          navigate({ kind: "tokens" });
+          setView({ kind: "tokens", user: view.user });
+        }}
+        onLogout={() => {
+          navigate({ kind: "workspaces" }, "replace");
+          setView({ kind: "login" });
+        }}
       />
     );
   }
@@ -66,8 +267,14 @@ export function CosheafApp(): ReactElement {
     return (
       <TokensScreen
         user={view.user}
-        onBack={() => setView({ kind: "workspaces", user: view.user })}
-        onLogout={() => setView({ kind: "login" })}
+        onBack={() => {
+          navigate({ kind: "workspaces" });
+          setView({ kind: "workspaces", user: view.user });
+        }}
+        onLogout={() => {
+          navigate({ kind: "workspaces" }, "replace");
+          setView({ kind: "login" });
+        }}
       />
     );
   }
@@ -75,8 +282,14 @@ export function CosheafApp(): ReactElement {
     <WorkspaceView
       user={view.user}
       workspace={view.workspace}
-      onBack={() => setView({ kind: "workspaces", user: view.user })}
-      onLogout={() => setView({ kind: "login" })}
+      onBack={() => {
+        navigate({ kind: "workspaces" });
+        setView({ kind: "workspaces", user: view.user });
+      }}
+      onLogout={() => {
+        navigate({ kind: "workspaces" }, "replace");
+        setView({ kind: "login" });
+      }}
     />
   );
 }
@@ -452,75 +665,11 @@ function BacklinksPanel({
   );
 }
 
-function ProposalDiffPanel({
-  proposalBody,
-  target,
-  onOpenTarget,
-}: {
-  proposalBody: string;
-  target: ProposalTarget;
-  onOpenTarget: (path: string) => void;
-}): ReactElement {
-  const targetBody = stripFrontmatter(target.target_content);
-  const diff = lineDiff(targetBody, stripFrontmatter(proposalBody));
-  let adds = 0;
-  let dels = 0;
-  for (const d of diff) {
-    if (d.kind === "add") adds++;
-    else if (d.kind === "del") dels++;
-  }
-  const title = (
-    <>
-      Diff vs{" "}
-      <button
-        type="button"
-        onClick={() => onOpenTarget(target.target_path)}
-        className="underline-offset-2 hover:underline"
-      >
-        {target.target_title ?? target.target_path}
-      </button>{" "}
-      <span className={cn("text-xs normal-case tracking-normal", muted)}>
-        +{adds} −{dels}
-      </span>
-    </>
-  );
-  if (adds === 0 && dels === 0) {
-    return (
-      <SidePanel title={title}>
-        <div className={cn("px-2 py-1 text-xs", muted)}>No changes.</div>
-      </SidePanel>
-    );
-  }
-  return (
-    <SidePanel title={title}>
-      <div className="whitespace-pre-wrap break-words font-mono text-xs leading-snug">
-        {diff.map((line, idx) => (
-          <div
-            key={idx}
-            className={cn(
-              "px-1.5",
-              line.kind === "eq" && muted,
-              line.kind === "add" && "bg-green-500/15",
-              line.kind === "del" && "bg-red-500/15",
-            )}
-          >
-            <span className="inline-block w-5 select-none opacity-60">
-              {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
-            </span>
-            {line.text || " "}
-          </div>
-        ))}
-      </div>
-    </SidePanel>
-  );
-}
 
 function ApprovalsPanel({
   approvals,
-  onOpenReview,
 }: {
   approvals: ApprovalRecord[];
-  onOpenReview: (path: string) => void;
 }): ReactElement {
   return (
     <SidePanel title={`Reviews${approvals.length > 0 ? ` (${approvals.length})` : ""}`}>
@@ -535,18 +684,6 @@ function ApprovalsPanel({
                 {a.decision}
               </Badge>{" "}
               <strong>{a.username}</strong>
-              {a.review_path && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    onClick={() => a.review_path && onOpenReview(a.review_path)}
-                    className="underline-offset-2 hover:underline"
-                  >
-                    {a.review_title ?? a.review_path}
-                  </button>
-                </>
-              )}
               {a.comment && <div className={cn("text-xs", muted)}>{a.comment}</div>}
             </li>
           ))}
@@ -584,7 +721,7 @@ function FileRow({
       )}
     >
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {doc && statusBadge(doc.status)}
+      {doc && doc.type !== "page" && statusBadge(doc.status)}
     </button>
   );
 }
@@ -601,10 +738,13 @@ function WorkspaceView({
   onLogout: () => void;
 }): ReactElement {
   const [files, setFiles] = useState<FileEntry[] | null>(null);
-  const [openPath, setOpenPath] = useState<string | null>(null);
+  // Initial openPath comes from the URL so deep links work.
+  const [openPath, setOpenPath] = useState<string | null>(() => {
+    const r = parseRoute();
+    return r.kind === "workspace" && r.slug === workspace.slug ? r.filePath : null;
+  });
   const [openDoc, setOpenDoc] = useState<FileEntry["doc"] | undefined>(undefined);
   const [content, setContent] = useState("");
-  const [mtime, setMtime] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -614,16 +754,35 @@ function WorkspaceView({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [queue, setQueue] = useState<QueueEntry[] | null>(null);
-  const [proposeOpen, setProposeOpen] = useState(false);
-  const [proposalBody, setProposalBody] = useState("");
+  const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
+
+  // Mirror openPath into the URL (push on user-driven change; replaceState-no-op
+  // when popstate already updated the URL because `navigate` short-circuits when
+  // the target URL matches window.location).
+  useEffect(() => {
+    navigate({ kind: "workspace", slug: workspace.slug, filePath: openPath });
+  }, [openPath, workspace.slug]);
+
+  // popstate within the workspace view: re-derive openPath from the URL.
+  useEffect(() => {
+    const handler = (): void => {
+      const r = parseRoute();
+      if (r.kind === "workspace" && r.slug === workspace.slug) {
+        setOpenPath(r.filePath);
+      }
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [workspace.slug]);
+  const [sidebarView, setSidebarView] = useState<"files" | "queue" | "outline">("files");
+  const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [reviewComment, setReviewComment] = useState("");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
-  const [proposalTarget, setProposalTarget] = useState<ProposalTarget | null>(null);
-  const [pendingReview, setPendingReview] = useState<{
-    targetId: string;
-    reviewId: string;
-  } | null>(null);
+  // The active draft change id; set synchronously from each save response.
+  // We track only the id to avoid a stale-state race between setHasPending
+  // and a separate listChanges round-trip.
+  const [currentChangeId, setCurrentChangeId] = useState<string | null>(null);
 
   const reloadTree = useCallback(() => {
     api
@@ -655,20 +814,28 @@ function WorkspaceView({
       } catch (_err) {
         return;
       }
-      if (event.type !== "change" && event.type !== "remove") return;
-      reloadTree();
-      if (
-        event.type === "change" &&
-        event.path &&
-        event.path === openPathRef.current &&
-        !dirtyRef.current
-      ) {
+      if (event.type === "change" || event.type === "remove") {
+        reloadTree();
+        if (event.path && event.path === openPathRef.current) {
+          if (event.type === "remove") {
+            setOpenPath(null);
+            setOpenDoc(undefined);
+            setContent("");
+            setDirty(false);
+            setStatus("file deleted on server");
+          } else if (!dirtyRef.current) {
+            api
+              .getFile(workspace.slug, event.path)
+              .then((r) => setContent(r.content))
+              .catch(() => undefined);
+          }
+        }
+      } else if (event.type === "queue") {
+        // PR opened/merged/closed/reviewed: refresh the queue list so any
+        // open queue tab updates without a manual click.
         api
-          .getNote(workspace.slug, event.path)
-          .then((r) => {
-            setContent(r.content);
-            setMtime(r.mtime);
-          })
+          .queue(workspace.slug)
+          .then(setQueue)
           .catch(() => undefined);
       }
     };
@@ -709,24 +876,15 @@ function WorkspaceView({
       setBusy(true);
       setStatus(null);
       api
-        .getNote(workspace.slug, entry.path)
+        .getFile(workspace.slug, entry.path)
         .then((r) => {
           setOpenPath(entry.path);
           setOpenDoc(entry.doc);
           setContent(r.content);
-          setMtime(r.mtime);
           setDirty(false);
           loadBacklinks(entry.doc?.id);
           loadApprovals(entry.doc?.id);
           setReviewComment("");
-          if (entry.doc?.type === "proposal" && entry.doc?.id) {
-            api
-              .proposalTarget(workspace.slug, entry.doc.id)
-              .then(setProposalTarget)
-              .catch(() => setProposalTarget(null));
-          } else {
-            setProposalTarget(null);
-          }
         })
         .catch((err: unknown) =>
           setStatus(err instanceof ApiError ? err.message : "Failed to open"),
@@ -741,13 +899,13 @@ function WorkspaceView({
     setBusy(true);
     setStatus(null);
     api
-      .putNote(workspace.slug, openPath, content, mtime ?? undefined)
+      .putFile(workspace.slug, openPath, content)
       .then((r) => {
-        setMtime(r.mtime);
         if (r.content !== undefined) setContent(r.content);
         setDirty(false);
-        setStatus("saved");
+        setStatus("saved (unpublished)");
         setOpenDoc(r.meta);
+        setCurrentChangeId(r.change_id);
         loadBacklinks(r.meta.id);
         reloadTree();
       })
@@ -759,7 +917,7 @@ function WorkspaceView({
         }
       })
       .finally(() => setBusy(false));
-  }, [openPath, content, mtime, workspace.slug, reloadTree, loadBacklinks]);
+  }, [openPath, content, workspace.slug, reloadTree, loadBacklinks]);
 
   const openQueue = useCallback(() => {
     api
@@ -768,85 +926,54 @@ function WorkspaceView({
       .catch(() => setQueue([]));
   }, [workspace.slug]);
 
-  const submitDoc = useCallback(() => {
-    if (!openDoc?.id) return;
-    api
-      .submit(workspace.slug, openDoc.id)
-      .then((r) => {
-        setStatus("submitted");
-        setOpenDoc((d) => (d ? { ...d, status: r.status as typeof d.status } : d));
-        reloadTree();
-      })
-      .catch((err: unknown) =>
-        setStatus(err instanceof ApiError ? err.message : "Submit failed"),
-      );
-  }, [openDoc, workspace.slug, reloadTree]);
+  const publish = useCallback(
+    (mode?: "direct" | "review") => {
+      if (!currentChangeId) {
+        setStatus("nothing to publish");
+        return;
+      }
+      setBusy(true);
+      setStatus(null);
+      api
+        .publish(workspace.slug, currentChangeId, mode)
+        .then((r) => {
+          setStatus(r.message ?? (r.mode === "review" ? "sent for review" : "published"));
+          setCurrentChangeId(null);
+          reloadTree();
+        })
+        .catch((err: unknown) =>
+          setStatus(err instanceof ApiError ? err.message : "Publish failed"),
+        )
+        .finally(() => setBusy(false));
+    },
+    [workspace.slug, currentChangeId, reloadTree],
+  );
 
-  const decideDoc = useCallback(
+  // Decide on the queue's currently-open change. Approvals UI only shows when
+  // the user is viewing a change in `review` state, looked up by the queue.
+  const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
+  const decideChange = useCallback(
     (decision: "approve" | "reject") => {
-      if (!openDoc?.id) return;
+      const id = reviewingChangeId;
+      if (!id) return;
       const fn = decision === "approve" ? api.approve : api.reject;
       const comment = reviewComment.trim() || undefined;
-      const docId = openDoc.id;
-      const reviewId =
-        pendingReview && pendingReview.targetId === docId ? pendingReview.reviewId : undefined;
-      fn(workspace.slug, docId, comment, reviewId)
+      fn(workspace.slug, id, comment)
         .then((r) => {
-          setStatus(`${decision}d (status: ${r.doc_status})`);
-          setOpenDoc((d) => (d ? { ...d, status: r.doc_status } : d));
+          setStatus(`${decision}d (state: ${r.state})`);
           setReviewComment("");
-          if (reviewId) setPendingReview(null);
-          loadApprovals(docId);
+          loadApprovals(id);
           reloadTree();
-          if (r.promoted_meta && r.promoted_meta.id !== docId) {
-            const targetEntry = files?.find((f) => f.doc?.id === r.promoted_meta?.id);
-            if (targetEntry) open(targetEntry);
-          }
+          if (r.state === "merged" || r.state === "rejected") setReviewingChangeId(null);
         })
         .catch((err: unknown) =>
           setStatus(err instanceof ApiError ? err.message : `${decision} failed`),
         );
     },
-    [openDoc, workspace.slug, files, open, reloadTree, reviewComment, loadApprovals, pendingReview],
+    [reviewingChangeId, workspace.slug, reloadTree, reviewComment, loadApprovals],
   );
 
-  const writeReview = useCallback(() => {
-    if (!openDoc?.id) return;
-    const targetId = openDoc.id;
-    api
-      .createReview(workspace.slug, targetId, "")
-      .then((r) => {
-        setPendingReview({ targetId, reviewId: r.meta.id });
-        reloadTree();
-        const newPath = r.path;
-        api
-          .tree(workspace.slug)
-          .then((files) => {
-            const entry = files.find((f) => f.path === newPath);
-            if (entry) open(entry);
-            setFiles(files);
-          })
-          .catch(() => undefined);
-      })
-      .catch((err: unknown) =>
-        setStatus(err instanceof ApiError ? err.message : "Failed to create review"),
-      );
-  }, [openDoc, workspace.slug, open, reloadTree]);
-
-  const submitProposal = useCallback(() => {
-    if (!openDoc?.id || !proposalBody.trim()) return;
-    api
-      .createProposal(workspace.slug, openDoc.id, proposalBody.trim())
-      .then(() => {
-        setProposeOpen(false);
-        setProposalBody("");
-        setStatus("proposal created");
-        reloadTree();
-      })
-      .catch((err: unknown) =>
-        setStatus(err instanceof ApiError ? err.message : "Proposal failed"),
-      );
-  }, [openDoc, proposalBody, workspace.slug, reloadTree]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -854,10 +981,18 @@ function WorkspaceView({
         e.preventDefault();
         if (openPath && dirty) save();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b" && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        setSidebarOpen((v) => !v);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        if (!busy) publish();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [openPath, dirty, save]);
+  }, [openPath, dirty, save, busy, publish]);
 
   const create = (e: React.FormEvent) => {
     e.preventDefault();
@@ -866,11 +1001,10 @@ function WorkspaceView({
     if (!path.endsWith(".md")) path += ".md";
     setBusy(true);
     api
-      .putNote(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`)
+      .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`)
       .then((r) => {
         setOpenPath(path);
         setContent(r.content ?? `# ${path.replace(/\.md$/, "")}\n`);
-        setMtime(r.mtime);
         setDirty(false);
         setNewPath("");
         setCreating(false);
@@ -884,62 +1018,77 @@ function WorkspaceView({
 
   return (
     <Screen>
-      <Topbar>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          ← Workspaces
-        </Button>
-        <strong>{workspace.name}</strong>
-        <span className={muted}>/{workspace.slug}</span>
-        <span className="flex-1" />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => (queue === null ? openQueue() : setQueue(null))}
-        >
-          {queue === null ? "Queue" : "Files"}
-        </Button>
-        <span className={muted}>{user.username}</span>
-        <Button variant="ghost" size="sm" onClick={() => api.logout().then(onLogout)}>
-          Sign out
-        </Button>
-      </Topbar>
       <div className="flex min-h-0 flex-1">
         <aside
           className={cn(
             "flex w-60 shrink-0 flex-col border-r min-h-0",
             borderColor,
+            !sidebarOpen && "hidden",
           )}
         >
-          {queue !== null ? (
-            <div className="flex min-h-0 flex-col">
+          <div className={cn("flex items-center gap-1 border-b px-2 py-1", borderColor)}>
+            <Button variant="ghost" size="sm" onClick={onBack} title="Back to workspaces">
+              ←
+            </Button>
+            <strong className="truncate flex-1">{workspace.name}</strong>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarOpen(false)}
+              title="Collapse sidebar (⌘B)"
+              aria-label="Collapse sidebar"
+            >
+              ☰
+            </Button>
+          </div>
+          <div className={cn("flex items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
+            <SidebarTab active={sidebarView === "files"} onClick={() => setSidebarView("files")}>
+              Files
+            </SidebarTab>
+            <SidebarTab
+              active={sidebarView === "queue"}
+              onClick={() => {
+                setSidebarView("queue");
+                openQueue();
+              }}
+            >
+              Queue
+            </SidebarTab>
+            <SidebarTab
+              active={sidebarView === "outline"}
+              onClick={() => setSidebarView("outline")}
+              disabled={!openPath}
+            >
+              Outline
+            </SidebarTab>
+          </div>
+          {sidebarView === "outline" ? (
+            <OutlinePanel
+              entries={outline}
+              onPick={(line) => editorRef.current?.scrollToLine(line, { center: true })}
+            />
+          ) : sidebarView === "queue" ? (
+            <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-3 px-2 py-1">
                 <strong>Review queue</strong>
                 <Button variant="ghost" size="icon" onClick={openQueue} aria-label="Refresh">
                   ↻
                 </Button>
               </div>
-              {queue.length === 0 && (
+              {(queue ?? []).length === 0 && (
                 <div className={cn("px-3 py-2 text-xs", muted)}>Nothing to review.</div>
               )}
               <ul className="m-0 flex-1 overflow-y-auto p-0">
-                {queue.map((entry) => (
+                {(queue ?? []).map((entry) => (
                   <li key={entry.id}>
                     <FileRow
-                      onClick={() => {
-                        const f = files?.find((x) => x.path === entry.path);
-                        if (f) {
-                          setQueue(null);
-                          open(f);
-                        }
-                      }}
+                      onClick={() => setReviewingChangeId(entry.id)}
                     >
-                      <strong>{entry.title ?? entry.path}</strong>
+                      <strong>{entry.title}</strong>
                       <span className={cn("text-xs", muted)}>
-                        {" "}
-                        {entry.type}
-                        {entry.target_id && ` → ${entry.target_id}`}
                         {entry.approvals > 0 && ` ✓${entry.approvals}`}
                         {entry.rejections > 0 && ` ✗${entry.rejections}`}
+                        {entry.pr_number && ` #${entry.pr_number}`}
                       </span>
                     </FileRow>
                   </li>
@@ -1053,8 +1202,24 @@ function WorkspaceView({
               )}
             </>
           )}
+          <UserMenu user={user} onLogout={onLogout} />
         </aside>
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="relative flex min-w-0 flex-1 flex-col">
+          {!sidebarOpen && (
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              title="Open sidebar (⌘B)"
+              aria-label="Open sidebar"
+              className={cn(
+                "absolute left-2 top-2 z-20 flex h-6 w-6 items-center justify-center rounded border bg-[var(--cf-bg)] text-xs",
+                borderColor,
+                "hover:bg-[var(--cf-hover)]",
+              )}
+            >
+              ☰
+            </button>
+          )}
           {!openPath && (
             <div className={cn("flex flex-1 items-center justify-center", muted)}>
               Select a file from the sidebar, or create one.
@@ -1062,111 +1227,23 @@ function WorkspaceView({
           )}
           {openPath && (
             <>
-              <div
-                className={cn(
-                  "flex items-center gap-2.5 border-b px-4 py-1.5",
-                  borderColor,
-                )}
-              >
-                <strong>{openPath}</strong>
-                {openDoc && statusBadge(openDoc.status)}
-                {dirty && <span className="text-[var(--cf-accent)]">●</span>}
-                <span className="flex-1" />
-                <span className={cn("text-xs", muted)}>{status ?? ""}</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
-                  title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
-                >
-                  {editorMode === "rich" ? "Source" : "Rich"}
-                </Button>
-                {openDoc?.status === "draft" && (
-                  <Button size="sm" onClick={submitDoc} disabled={dirty || busy}>
-                    Submit
-                  </Button>
-                )}
-                {openDoc?.status === "unreviewed" &&
-                  (workspace.role === "owner" || workspace.role === "verifier") && (
-                    <>
-                      <Input
-                        placeholder="Comment (optional)"
-                        value={reviewComment}
-                        onChange={(e) => setReviewComment(e.target.value)}
-                        className="h-8 max-w-[16rem]"
-                      />
-                      <Button variant="outline" size="sm" onClick={writeReview} disabled={busy}>
-                        Write review
-                      </Button>
-                      {pendingReview?.targetId === openDoc?.id && (
-                        <span className={cn("text-xs", muted)}>review attached</span>
-                      )}
-                      <Button size="sm" onClick={() => decideDoc("approve")} disabled={busy}>
-                        Approve
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => decideDoc("reject")}
-                        disabled={busy}
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  )}
-                {openDoc?.status === "golden" && openDoc.type === "page" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setProposeOpen((v) => !v)}
-                  >
-                    {proposeOpen ? "Cancel proposal" : "Propose update"}
-                  </Button>
-                )}
-                <Button size="sm" onClick={save} disabled={!dirty || busy}>
-                  Save
-                </Button>
-              </div>
-              {proposeOpen && (
-                <div
-                  className={cn(
-                    "flex flex-col gap-1.5 border-t px-4 py-2",
-                    borderColor,
-                  )}
-                >
-                  <div className={cn("text-xs", muted)}>
-                    Propose a replacement body for{" "}
-                    <strong>{openDoc?.title ?? openPath}</strong>. Don't include frontmatter —
-                    only the body.
-                  </div>
-                  <Textarea
-                    value={proposalBody}
-                    onChange={(e) => setProposalBody(e.target.value)}
-                    placeholder="# Updated title\n\nNew content..."
-                    className="min-h-[120px] resize-y font-mono"
-                  />
-                  <div>
-                    <Button size="sm" onClick={submitProposal} disabled={!proposalBody.trim()}>
-                      Create proposal
-                    </Button>
-                  </div>
-                </div>
-              )}
               <Suspense fallback={<div className="flex-1" />}>
                 <MarkdownEditor
                   value={content}
                   mode={editorMode}
+                  onReady={(editor) => {
+                    editorRef.current = editor;
+                    setOutline(editor.outline.get());
+                    editor.outline.subscribe(setOutline);
+                  }}
                   onChange={(next) => {
                     setContent(next);
                     setDirty(true);
                     setStatus(null);
                   }}
-                  onSave={() => {
-                    if (dirty && !busy) save();
-                  }}
                 />
               </Suspense>
-              {openDoc?.id && (
+              {openDoc?.id && backlinks.length > 0 && (
                 <BacklinksPanel
                   links={backlinks}
                   onPick={(srcPath) => {
@@ -1175,27 +1252,106 @@ function WorkspaceView({
                   }}
                 />
               )}
-              {openDoc?.type === "proposal" && proposalTarget && (
-                <ProposalDiffPanel
-                  proposalBody={content}
-                  target={proposalTarget}
-                  onOpenTarget={(targetPath) => {
-                    const entry = files?.find((f) => f.path === targetPath);
-                    if (entry) open(entry);
-                  }}
-                />
-              )}
-              {openDoc?.id && approvals.length > 0 && (
-                <ApprovalsPanel
-                  approvals={approvals}
-                  onOpenReview={(reviewPath) => {
-                    const entry = files?.find((f) => f.path === reviewPath);
-                    if (entry) open(entry);
-                  }}
-                />
+              {reviewingChangeId && approvals.length > 0 && (
+                <ApprovalsPanel approvals={approvals} />
               )}
             </>
           )}
+          <div
+            data-statusbar
+            className={cn(
+              "shrink-0 flex min-w-0 items-center gap-2 border-t px-2 h-6 text-xs",
+              muted,
+              borderColor,
+            )}
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              {openPath ? (
+                <>
+                  <span className="truncate">{openPath}</span>
+                  {openDoc && openDoc.type !== "page" && statusBadge(openDoc.status)}
+                  {dirty && <span className="text-[var(--cf-accent)]">●</span>}
+                </>
+              ) : (
+                <span>no file open</span>
+              )}
+            </div>
+            <div className="flex-1 min-w-0 flex items-center justify-center">
+              <span className="truncate">{status ?? ""}</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-0.5">
+              {openPath && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
+                    title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
+                    className="px-1.5 rounded hover:bg-[var(--cf-hover)]"
+                  >
+                    {editorMode === "rich" ? "Source" : "Rich"}
+                  </button>
+                  {reviewingChangeId && (workspace.role === "owner" || workspace.role === "verifier") && (
+                    <>
+                      <Input
+                        placeholder="comment"
+                        value={reviewComment}
+                        onChange={(e) => setReviewComment(e.target.value)}
+                        className="h-5 text-xs max-w-[10rem]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => decideChange("approve")}
+                        disabled={busy}
+                        className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => decideChange("reject")}
+                        disabled={busy}
+                        className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={save}
+                    disabled={!dirty || busy}
+                    className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  {currentChangeId && (
+                    <>
+                      {workspace.role === "owner" && (
+                        <button
+                          type="button"
+                          onClick={() => publish("direct")}
+                          disabled={busy}
+                          title="Squash-merge your draft into main (⇧⌘P)"
+                          className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                        >
+                          Publish ●
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => publish("review")}
+                        disabled={busy}
+                        title="Open a PR for review"
+                        className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                      >
+                        Send for review
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         </main>
       </div>
     </Screen>

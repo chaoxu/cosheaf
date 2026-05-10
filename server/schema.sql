@@ -1,10 +1,10 @@
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+-- Cosheaf sidecar schema (Forgejo backend).
 
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY,
-  username TEXT UNIQUE NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  forgejo_username TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -15,22 +15,19 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
-
 CREATE TABLE IF NOT EXISTS tokens (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  token_hash TEXT UNIQUE NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS tokens_user ON tokens(user_id);
-
 CREATE TABLE IF NOT EXISTS workspaces (
-  id INTEGER PRIMARY KEY,
-  slug TEXT UNIQUE NOT NULL,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
+  forgejo_repo TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
 
@@ -41,60 +38,72 @@ CREATE TABLE IF NOT EXISTS memberships (
   PRIMARY KEY (workspace_id, user_id)
 );
 
-CREATE INDEX IF NOT EXISTS memberships_user ON memberships(user_id);
-
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE IF NOT EXISTS doc_map (
+  cosheaf_id TEXT NOT NULL,
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  id TEXT NOT NULL,
-  path TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('page', 'review', 'proposal')),
-  status TEXT NOT NULL CHECK (status IN ('golden', 'unreviewed', 'rejected', 'draft', 'archived')),
+  doc_type TEXT NOT NULL,
+  forgejo_kind TEXT NOT NULL,
+  forgejo_id TEXT NOT NULL,
   target_id TEXT,
   title TEXT,
-  mtime INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, id),
-  UNIQUE (workspace_id, path)
+  author_user_id INTEGER REFERENCES users(id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, cosheaf_id),
+  UNIQUE (workspace_id, forgejo_kind, forgejo_id)
 );
 
-CREATE INDEX IF NOT EXISTS documents_status ON documents(workspace_id, status);
-CREATE INDEX IF NOT EXISTS documents_target ON documents(workspace_id, target_id);
-
-CREATE TABLE IF NOT EXISTS links (
-  workspace_id INTEGER NOT NULL,
-  src_id TEXT NOT NULL,
-  target_id TEXT,
-  target_label TEXT NOT NULL,
-  FOREIGN KEY (workspace_id, src_id)
-    REFERENCES documents(workspace_id, id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS links_target ON links(workspace_id, target_id);
-CREATE INDEX IF NOT EXISTS links_src ON links(workspace_id, src_id);
+CREATE INDEX IF NOT EXISTS idx_doc_map_target ON doc_map (workspace_id, target_id);
+CREATE INDEX IF NOT EXISTS idx_doc_map_type ON doc_map (workspace_id, doc_type);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   workspace_id UNINDEXED,
-  doc_id UNINDEXED,
-  path UNINDEXED,
+  cosheaf_id UNINDEXED,
+  doc_type UNINDEXED,
+  path,
   title,
   body,
-  tokenize = 'porter unicode61'
+  tokenize='trigram'
 );
 
-CREATE TABLE IF NOT EXISTS workspace_settings (
-  workspace_id INTEGER PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
-  min_approvals INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS approvals (
+CREATE TABLE IF NOT EXISTS backlinks (
   workspace_id INTEGER NOT NULL,
-  document_id TEXT NOT NULL,
-  verifier_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  decision TEXT NOT NULL CHECK (decision IN ('approve', 'reject')),
-  comment TEXT,
-  review_doc_id TEXT,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, document_id, verifier_user_id),
-  FOREIGN KEY (workspace_id, document_id) REFERENCES documents(workspace_id, id) ON DELETE CASCADE
+  src_id TEXT NOT NULL,
+  src_path TEXT NOT NULL,
+  target_id TEXT,
+  target_label TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, src_id, target_label)
+);
+CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks (workspace_id, target_id);
+
+CREATE TABLE IF NOT EXISTS page_tags (
+  workspace_id INTEGER NOT NULL,
+  cosheaf_id TEXT NOT NULL,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, cosheaf_id, tag)
 );
 
-CREATE INDEX IF NOT EXISTS approvals_doc ON approvals(workspace_id, document_id);
+CREATE TABLE IF NOT EXISTS webhook_log (
+  delivery_id TEXT PRIMARY KEY,
+  delivered_at INTEGER NOT NULL,
+  event_type TEXT NOT NULL
+);
+
+-- Unified change primitive: replaces working/<user> branches and revision/<id>
+-- branches with a single change/<id> namespace. Lifecycle: draft → review →
+-- merged | rejected | abandoned. Branch deleted on terminal states.
+CREATE TABLE IF NOT EXISTS changes (
+  id TEXT PRIMARY KEY,
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  author_user_id INTEGER NOT NULL REFERENCES users(id),
+  branch_name TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('draft', 'review', 'merged', 'rejected', 'abandoned')),
+  pr_number INTEGER,
+  base_sha TEXT,
+  title TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_changes_workspace_state ON changes (workspace_id, state);
+CREATE INDEX IF NOT EXISTS idx_changes_author_state ON changes (workspace_id, author_user_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_changes_branch ON changes (workspace_id, branch_name);
+CREATE INDEX IF NOT EXISTS idx_changes_pr ON changes (workspace_id, pr_number);

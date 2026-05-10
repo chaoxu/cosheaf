@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@chaoxu/coflat-editor':
-        specifier: ^0.1.1
-        version: 0.1.1(49cd44b3a9d61f6a1f825e91450ca4a3)
+        specifier: file:/Users/chaoxu/playground/coflat-editor
+        version: file:../coflat-editor(624ff2d4dc784682e73e321e2e571cca)
       '@codemirror/autocomplete':
         specifier: ^6.20.1
         version: 6.20.2
@@ -171,8 +171,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@chaoxu/coflat-editor@0.1.1':
-    resolution: {integrity: sha512-iOFb82qsTCmnWOkFiB2alltg6R9HlKVwOftP7ekHpPWDkDpqqBu6havZS0h1jgsLJUpCNranhnpZLmWi/6Rl2A==, tarball: http://localhost:3001/api/packages/chaoxu/npm/%40chaoxu%2Fcoflat-editor/-/0.1.1/coflat-editor-0.1.1.tgz}
+  '@chaoxu/coflat-editor@file:../coflat-editor':
+    resolution: {directory: ../coflat-editor, type: directory}
     peerDependencies:
       '@citation-js/core': ^0.7.21
       '@citation-js/plugin-bibtex': ^0.7.21
@@ -208,6 +208,7 @@ packages:
       react-dom: ^19.2.4
       tailwind-merge: ^3.5.0
       yaml: ^2.8.3
+      zustand: ^5.0.12
 
   '@citation-js/core@0.7.21':
     resolution: {integrity: sha512-Vobv2/Yfnn6C6BVO/pvj7madQ7Mfzl83/jAWwixbemGF6ZThhGMz8++FD9hWHyHXDMYuLGa6fK68c2VsolZmTA==}
@@ -2292,6 +2293,24 @@ packages:
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
+  zustand@5.0.13:
+    resolution: {integrity: sha512-efI2tVaVQPqtOh114loML/Z80Y4NP3yc+Ff0fYiZJPauNeWZeIp/bRFD7I9bfmCOYBh/PHxlglQ9+wvlwnPikQ==}
+    engines: {node: '>=12.20.0'}
+    peerDependencies:
+      '@types/react': '>=18.0.0'
+      immer: '>=9.0.6'
+      react: '>=18.0.0'
+      use-sync-external-store: '>=1.2.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      immer:
+        optional: true
+      react:
+        optional: true
+      use-sync-external-store:
+        optional: true
+
 snapshots:
 
   '@biomejs/biome@2.4.14':
@@ -2329,7 +2348,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.14':
     optional: true
 
-  '@chaoxu/coflat-editor@0.1.1(49cd44b3a9d61f6a1f825e91450ca4a3)':
+  '@chaoxu/coflat-editor@file:../coflat-editor(624ff2d4dc784682e73e321e2e571cca)':
     dependencies:
       '@citation-js/core': 0.7.21
       '@citation-js/plugin-bibtex': 0.7.21(@citation-js/core@0.7.21)
@@ -2366,6 +2385,7 @@ snapshots:
       react-dom: 19.2.6(react@19.2.6)
       tailwind-merge: 3.5.0
       yaml: 2.8.4
+      zustand: 5.0.13(@types/react@19.2.14)(react@19.2.6)
 
   '@citation-js/core@0.7.21':
     dependencies:
@@ -4160,3 +4180,8 @@ snapshots:
   yaml@2.8.4: {}
 
   zod@4.4.3: {}
+
+  zustand@5.0.13(@types/react@19.2.14)(react@19.2.6):
+    optionalDependencies:
+      '@types/react': 19.2.14
+      react: 19.2.6
