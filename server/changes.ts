@@ -1,7 +1,8 @@
 import type Database from "better-sqlite3";
+import type { ChangeState } from "../shared/change-lifecycle.js";
 import { generateDocId } from "./frontmatter.js";
 
-export type ChangeState = "draft" | "review" | "changes_requested" | "merged" | "closed";
+export type { ChangeState };
 
 export interface ChangeRow {
   id: string;

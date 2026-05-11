@@ -1,3 +1,7 @@
+import type { ChangeState, Decision, SseEventType } from "../../shared/change-lifecycle";
+
+export type { ChangeState, Decision, SseEventType };
+
 export interface User {
   id: number;
   username: string;
@@ -32,7 +36,7 @@ export interface Change {
   workspace_id: number;
   author_user_id: number;
   branch_name: string;
-  state: "draft" | "review" | "changes_requested" | "merged" | "closed";
+  state: ChangeState;
   pr_number: number | null;
   base_sha: string | null;
   title: string | null;
@@ -53,7 +57,7 @@ export interface QueueEntry {
 export interface ApprovalRecord {
   verifier_user_id: number;
   username: string;
-  decision: "approve" | "request_changes" | "comment";
+  decision: Decision;
   comment: string | null;
   created_at: number;
 }
@@ -91,9 +95,9 @@ export interface PublishResult {
 }
 
 export interface DecisionResult {
-  decision: "approve" | "request_changes";
+  decision: Exclude<Decision, "comment">;
   change_id: string;
-  state: Change["state"];
+  state: ChangeState;
   approvals: number;
   rejections: number;
 }

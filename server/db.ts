@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CHANGE_STATES, sqlInList } from "../shared/change-lifecycle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,9 +99,8 @@ function ensureChangeStateCheck(db: Database.Database): void {
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'changes'")
     .get() as { sql: string } | undefined;
   if (!row) return;
-  const needsMigration =
-    !row.sql.includes("'changes_requested'") || row.sql.includes("'abandoned'") || row.sql.includes("'rejected'");
-  if (!needsMigration) return;
+  const expectedCheck = `state IN ${sqlInList(CHANGE_STATES)}`;
+  if (row.sql.includes(expectedCheck)) return;
 
   db.exec(`
     PRAGMA foreign_keys = OFF;
@@ -109,7 +109,7 @@ function ensureChangeStateCheck(db: Database.Database): void {
       workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       author_user_id INTEGER NOT NULL REFERENCES users(id),
       branch_name TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('draft', 'review', 'changes_requested', 'merged', 'closed')),
+      state TEXT NOT NULL CHECK (${expectedCheck}),
       pr_number INTEGER,
       base_sha TEXT,
       title TEXT,

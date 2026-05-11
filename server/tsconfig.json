@@ -11,9 +11,9 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "outDir": "../dist-server",
-    "rootDir": ".",
+    "rootDir": "..",
     "declaration": true,
     "lib": ["ES2022"]
   },
-  "include": ["."]
+  "include": [".", "../shared"]
 }

@@ -20,5 +20,5 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src", "editor.ts", "demo"]
+  "include": ["src", "shared", "editor.ts", "demo"]
 }
