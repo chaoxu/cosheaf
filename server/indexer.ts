@@ -119,13 +119,11 @@ interface ExtractedLink {
   raw: string;
 }
 
-const WIKI_LINK = /\[\[([^\]\n]+)\]\]/g;
 const CROSSREF = /\[@([^\]\s]+)\]/g;
-const MD_LINK = /\[([^\]\n]*)\]\(([^)\s]+\.md)\)/g;
+const MD_LINK = /\[([^\]\n]*)\]\(([^)\s]+\.md(?:#[^)\s]+)?)\)/g;
 
 function extractLinks(body: string): ExtractedLink[] {
   const out: ExtractedLink[] = [];
-  for (const m of body.matchAll(WIKI_LINK)) out.push({ kind: "id", ref: m[1].trim(), raw: m[0] });
   for (const m of body.matchAll(CROSSREF)) out.push({ kind: "id", ref: m[1].trim(), raw: m[0] });
   for (const m of body.matchAll(MD_LINK)) out.push({ kind: "path", ref: m[2], raw: m[0] });
   return out;
@@ -143,8 +141,10 @@ function resolveLinkTarget(
       .get(workspaceId, link.ref) as { cosheaf_id: string } | undefined;
     return row?.cosheaf_id ?? link.ref;
   }
+  const [linkPath] = link.ref.split("#", 1);
+  if (!linkPath) return null;
   const dir = path.posix.dirname(srcPath);
-  const resolved = path.posix.normalize(path.posix.join(dir, link.ref));
+  const resolved = path.posix.normalize(path.posix.join(dir, linkPath));
   const row = db
     .prepare(
       "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page' AND forgejo_id = ?",

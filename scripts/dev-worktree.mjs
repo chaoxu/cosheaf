@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import process from "node:process";
-import { createArgParser } from "./devx-cli.mjs";
+import { Command } from "commander";
 
 function withoutGitEnv(env = process.env) {
   return Object.fromEntries(
@@ -213,41 +213,50 @@ function printSummary(result) {
 }
 
 export function parseDevWorktreeArgs(argv) {
-  const parser = createArgParser(argv, {
-    booleanFlags: ["--fetch", "--help", "--no-link-node-modules", "-h"],
-    valueFlags: ["--base", "--branch", "--path"],
-  });
-  parser.assertKnownFlags([
-    "--base",
-    "--branch",
-    "--fetch",
-    "--help",
-    "--no-link-node-modules",
-    "--path",
-    "-h",
-  ]);
+  const program = new Command()
+    .exitOverride()
+    .configureOutput({ writeErr: () => undefined, writeOut: () => undefined })
+    .allowExcessArguments(true)
+    .argument("[name]")
+    .option("--base <ref>")
+    .option("--branch <branch>")
+    .option("--fetch")
+    .option("--no-link-node-modules")
+    .option("--path <path>")
+    .option("-h, --help");
+  try {
+    program.parse(argv, { from: "user" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cleaned = message.replace(/^error: /, "");
+    const unknown = /^unknown option '(.+)'$/.exec(cleaned);
+    const missing = /^option '(--[^ ]+) <[^>]+>' argument missing$/.exec(cleaned);
+    if (missing) {
+      throw new Error(`${missing[1]} requires a value.`);
+    }
+    throw new Error(unknown ? `Unknown option: ${unknown[1]}` : cleaned);
+  }
 
-  const positionals = parser.getPositionals();
+  const positionals = program.args;
   if (positionals.length > 1) {
     throw new Error("Provide only one worktree name.");
   }
+  const opts = program.opts();
+  for (const flag of ["base", "branch", "path"]) {
+    if (typeof opts[flag] === "string" && opts[flag].startsWith("-")) {
+      throw new Error(`--${flag} requires a value.`);
+    }
+  }
 
   const options = {
-    baseRef: parser.hasFlag("--base") ? parser.getRequiredFlag("--base") : "HEAD",
-    branch: parser.getFlag("--branch"),
-    fetch: parser.hasFlag("--fetch"),
-    help: parser.hasFlag("--help") || parser.hasFlag("-h"),
-    linkNodeModules: !parser.hasFlag("--no-link-node-modules"),
+    baseRef: opts.base ?? "HEAD",
+    branch: opts.branch,
+    fetch: Boolean(opts.fetch),
+    help: Boolean(opts.help),
+    linkNodeModules: opts.linkNodeModules !== false,
     name: positionals[0],
-    path: parser.getFlag("--path"),
+    path: opts.path,
   };
-
-  if (parser.hasFlag("--branch")) {
-    options.branch = parser.getRequiredFlag("--branch");
-  }
-  if (parser.hasFlag("--path")) {
-    options.path = parser.getRequiredFlag("--path");
-  }
 
   return options;
 }

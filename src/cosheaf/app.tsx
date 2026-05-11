@@ -1143,13 +1143,18 @@ function WorkspaceView({
                           }}
                         >
                           <strong>{r.title ?? r.path}</strong>
-                          <span
-                            className={cn(
-                              "text-xs [&_mark]:bg-yellow-300/40 [&_mark]:text-inherit",
-                              muted,
+                          <span className={cn("text-xs", muted)}>
+                            {" "}
+                            {r.snippet.map((part, idx) =>
+                              part.match ? (
+                                <mark key={idx} className="bg-yellow-300/40 text-inherit">
+                                  {part.text}
+                                </mark>
+                              ) : (
+                                <span key={idx}>{part.text}</span>
+                              ),
                             )}
-                            dangerouslySetInnerHTML={{ __html: ` ${r.snippet}` }}
-                          />
+                          </span>
                         </FileRow>
                       </li>
                     ))}

@@ -36,14 +36,6 @@ const STATUS_FOR_CODE: Record<ResolveError["code"], 400 | 403 | 404 | 409> = {
   ambiguous: 400,
 };
 
-function htmlEscape(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function likeEscape(s: string): string {
   return s.replace(/[\\%_]/g, (m) => `\\${m}`);
 }
@@ -62,19 +54,26 @@ export function buildFtsQuery(q: string): string {
     .join(" OR ");
 }
 
-function fallbackSnippet(row: { title: string | null; body: string }, terms: string[]): string {
+type SnippetPart = { text: string; match: boolean };
+
+function plainSnippet(row: { title: string | null; body: string }, terms: string[]): SnippetPart[] {
   const source = row.body || row.title || "";
   const lower = source.toLocaleLowerCase();
   const term = terms.find((t) => lower.includes(t.toLocaleLowerCase())) ?? terms[0] ?? "";
-  if (!term) return htmlEscape(source.slice(0, 160));
+  if (!term) return [{ text: source.slice(0, 160), match: false }];
   const idx = lower.indexOf(term.toLocaleLowerCase());
-  if (idx < 0) return htmlEscape(source.slice(0, 160));
+  if (idx < 0) return [{ text: source.slice(0, 160), match: false }];
   const start = Math.max(0, idx - 64);
   const end = Math.min(source.length, idx + term.length + 96);
+  const parts: SnippetPart[] = [];
+  if (start > 0) parts.push({ text: "...", match: false });
   const before = source.slice(start, idx);
-  const match = source.slice(idx, idx + term.length);
+  if (before) parts.push({ text: before, match: false });
+  parts.push({ text: source.slice(idx, idx + term.length), match: true });
   const after = source.slice(idx + term.length, end);
-  return `${start > 0 ? "..." : ""}${htmlEscape(before)}<mark>${htmlEscape(match)}</mark>${htmlEscape(after)}${end < source.length ? "..." : ""}`;
+  if (after) parts.push({ text: after, match: false });
+  if (end < source.length) parts.push({ text: "...", match: false });
+  return parts;
 }
 
 async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<ChangeRow | ResolveError> {
@@ -300,14 +299,13 @@ files.get("/:slug/search", (c) => {
   const terms = searchTerms(q);
   const ftsQuery = buildFtsQuery(q);
   if (!ftsQuery) return c.json({ results: [] });
-  let rows: Array<{ doc_id: string; path: string; title: string; type: string; snippet: string; rank: number }>;
+  let rows: Array<{ doc_id: string; path: string; title: string | null; type: string; body: string; rank: number }>;
   try {
     rows = c
       .get("db")
       .prepare(
         `SELECT cosheaf_id AS doc_id, path, title,
-                doc_type AS type,
-                snippet(notes_fts, 5, '<mark>', '</mark>', '...', 16) AS snippet,
+                doc_type AS type, body,
                 bm25(notes_fts) AS rank
            FROM notes_fts
           WHERE workspace_id = ? AND notes_fts MATCH ?
@@ -336,9 +334,9 @@ files.get("/:slug/search", (c) => {
       rows = fallbackRows.map((r) => ({
         doc_id: r.doc_id,
         path: r.path,
-        title: r.title ?? "",
+        title: r.title,
         type: r.type,
-        snippet: fallbackSnippet(r, terms),
+        body: r.body,
         rank: 0,
       }));
     }
@@ -351,7 +349,7 @@ files.get("/:slug/search", (c) => {
       type: r.type,
       status: "golden",
       target_id: null,
-      snippet: r.snippet,
+      snippet: plainSnippet(r, terms),
       rank: r.rank,
     })),
   });

@@ -2,7 +2,6 @@
 
 import { spawnSync } from "node:child_process";
 import process from "node:process";
-import { splitCliCommand } from "./devx-cli.mjs";
 
 export const DEFAULT_REPO = "chaoxu/coflat";
 export const DEFAULT_ISSUE_OWNER = "chaoxu";
@@ -21,6 +20,13 @@ const COMMANDS = [
   "triage",
   "verify-close",
 ];
+
+function splitIssueCommand(argv = [], defaultCommand = "list") {
+  const normalized = argv.filter((arg) => arg !== "--");
+  const [first, ...rest] = normalized;
+  if (first && COMMANDS.includes(first)) return { command: first, options: rest };
+  return { command: defaultCommand, options: normalized };
+}
 
 function extractValueFlag(args, flag, fallback) {
   const result = [];
@@ -44,7 +50,7 @@ function extractValueFlag(args, flag, fallback) {
 }
 
 export function buildTeaIssueArgs(argv = []) {
-  const { command, options } = splitCliCommand(argv, COMMANDS, "list");
+  const { command, options } = splitIssueCommand(argv, "list");
   const { args, value: repo } = extractValueFlag(options, "--repo", DEFAULT_REPO);
 
   switch (command) {
@@ -133,7 +139,7 @@ function command(argv, options = {}) {
 }
 
 export function buildVerifiedIssueClosePlan(argv = []) {
-  const { command: issueCommand, options } = splitCliCommand(argv, COMMANDS, "list");
+  const { command: issueCommand, options } = splitIssueCommand(argv, "list");
   if (issueCommand !== "verify-close") {
     throw new Error("buildVerifiedIssueClosePlan only supports verify-close.");
   }
@@ -301,7 +307,7 @@ export function runTeaIssue(argv = process.argv.slice(2), options = {}) {
     return 0;
   }
 
-  const { command } = splitCliCommand(argv, COMMANDS, "list");
+  const { command } = splitIssueCommand(argv, "list");
   if (command === "verify-close") {
     return runVerifiedIssueClose(argv, options);
   }

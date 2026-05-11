@@ -3,19 +3,7 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
-import { createArgParser, normalizeCliArgs } from "./devx-cli.mjs";
-
-const VALUE_FLAGS = [
-  "--base",
-  "--base-branch",
-  "--base-ref",
-  "--branch",
-  "--check",
-  "--handoff",
-  "--issue",
-  "--old-base",
-];
-const BOOLEAN_FLAGS = ["--help", "-h", "--run"];
+import { Command } from "commander";
 
 function shellQuote(value) {
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(value)) {
@@ -200,33 +188,67 @@ export function formatMergeTaskSteps(steps) {
 }
 
 export function parseMergeTaskArgs(argv = process.argv.slice(2)) {
-  const { rest, values: checks } = collectRepeatedValueFlag(
-    normalizeCliArgs(argv),
-    "--check",
-  );
-  const parser = createArgParser(rest, {
-    booleanFlags: BOOLEAN_FLAGS,
-    valueFlags: VALUE_FLAGS,
-  });
-  parser.assertKnownFlags([...BOOLEAN_FLAGS, ...VALUE_FLAGS]);
-  const handoff = parser.hasFlag("--handoff")
-    ? normalizeMergeTaskHandoff(readHandoff(parser.getRequiredFlag("--handoff")))
+  const normalized = argv.filter((arg) => arg !== "--");
+  const program = new Command()
+    .exitOverride()
+    .configureOutput({ writeErr: () => undefined, writeOut: () => undefined })
+    .allowExcessArguments(false)
+    .option("--base <branch>")
+    .option("--base-branch <branch>")
+    .option("--base-ref <ref>")
+    .option("--branch <branch>")
+    .option("--check <cmd>", "verification command", (value, previous) => [...previous, value], [])
+    .option("--handoff <path>")
+    .option("--issue <number>")
+    .option("--old-base <ref>")
+    .option("--run")
+    .option("-h, --help");
+  try {
+    program.parse(normalized, { from: "user" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cleaned = message.replace(/^error: /, "");
+    const unknown = /^unknown option '(.+)'$/.exec(cleaned);
+    const missing = /^option '(--[^ ]+) <[^>]+>' argument missing$/.exec(cleaned);
+    if (missing) {
+      throw new Error(`${missing[1]} requires a value.`);
+    }
+    throw new Error(unknown ? `Unknown option: ${unknown[1]}` : cleaned);
+  }
+  const opts = program.opts();
+  for (const [key, flag] of [
+    ["base", "--base"],
+    ["baseBranch", "--base-branch"],
+    ["baseRef", "--base-ref"],
+    ["branch", "--branch"],
+    ["handoff", "--handoff"],
+    ["issue", "--issue"],
+    ["oldBase", "--old-base"],
+  ]) {
+    if (typeof opts[key] === "string" && opts[key].startsWith("-")) {
+      throw new Error(`${flag} requires a value.`);
+    }
+  }
+
+  const handoff = opts.handoff
+    ? normalizeMergeTaskHandoff(readHandoff(opts.handoff))
     : {};
 
-  const cliBaseBranch = parser.getFlag("--base-branch");
-  const cliBaseAlias = parser.getFlag("--base");
+  const checks = opts.check;
+  const cliBaseBranch = opts.baseBranch;
+  const cliBaseAlias = opts.base;
   const baseBranch = cliBaseBranch ?? cliBaseAlias ?? handoff.baseBranch ?? "main";
   const hasCliBaseBranch = cliBaseBranch !== undefined || cliBaseAlias !== undefined;
-  const cliBaseRef = parser.getFlag("--base-ref");
+  const cliBaseRef = opts.baseRef;
 
   return {
     baseBranch,
     baseRef: cliBaseRef ?? (hasCliBaseBranch ? undefined : handoff.baseRef) ?? `origin/${baseBranch}`,
-    branch: parser.getFlag("--branch", handoff.branch),
+    branch: opts.branch ?? handoff.branch,
     checks: checks.length > 0 ? checks : handoff.checks ?? [],
-    issue: parser.getFlag("--issue", handoff.issue),
-    oldBase: parser.getFlag("--old-base", handoff.oldBase),
-    run: parser.hasFlag("--run"),
+    issue: opts.issue ?? handoff.issue,
+    oldBase: opts.oldBase ?? handoff.oldBase,
+    run: Boolean(opts.run),
   };
 }
 

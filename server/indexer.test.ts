@@ -67,7 +67,7 @@ describe("indexPage", () => {
     indexPage(db, {
       workspaceId: 1,
       filePath: "src.md",
-      bodyText: "---\ntags:\n  - geometry\n  - lemma\n---\n# Source\n\n[[targetid]] and [link](other.md)\n",
+      bodyText: "---\ntags:\n  - geometry\n  - lemma\n---\n# Source\n\n[@targetid] and [link](other.md#sec:part) and [[ignored]].\n",
     });
     const ftsRow = db
       .prepare("SELECT path, body FROM notes_fts WHERE workspace_id = 1")
@@ -79,8 +79,8 @@ describe("indexPage", () => {
       .prepare("SELECT target_label FROM backlinks WHERE workspace_id = 1 ORDER BY target_label")
       .all() as Array<{ target_label: string }>;
     expect(links.map((l) => l.target_label)).toEqual([
-      "[[targetid]]",
-      "[link](other.md)",
+      "[@targetid]",
+      "[link](other.md#sec:part)",
     ]);
 
     const tags = db

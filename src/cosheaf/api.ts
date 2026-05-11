@@ -72,7 +72,7 @@ export interface SearchResult {
   type: string;
   status: string;
   target_id: string | null;
-  snippet: string;
+  snippet: Array<{ text: string; match: boolean }>;
   rank: number;
 }
 

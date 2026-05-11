@@ -208,14 +208,13 @@ SearchResult {
   type: "page"|"proposal"|"review",
   status: DocumentStatus,
   target_id: string|null,
-  snippet: string,
+  snippet: Array<{ text: string, match: boolean }>,
   rank: number,
 }
 ```
 
-`snippet` is server-rendered HTML containing `<mark>` tags around hits — safe
-to insert with `dangerouslySetInnerHTML` in trusted UI; bots should treat it
-as HTML, not plain text.
+`snippet` is structured plain text. Render segments with `match: true` as
+highlighted text; clients should not treat snippets as HTML.
 
 `status` and `type` filters are repeatable. `limit` is clamped to `1..50`.
 
@@ -229,8 +228,9 @@ GET /api/v1/w/:slug/backlinks?id=<doc_id> → { backlinks: Backlink[] }
 Backlink { src_id: string, src_path: string, src_title: string|null, target_label: string }
 ```
 
-`target_label` is the `[@id]` reference text the source page uses for the
-target. Multiple labels for the same source page produce multiple rows.
+`target_label` is the reference text the source page uses for the target,
+currently `[@id]` or `[text](relative.md[#fragment])`. Multiple labels for
+the same source page produce multiple rows.
 
 ### File events (SSE)
 
