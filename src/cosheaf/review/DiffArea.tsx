@@ -4,9 +4,8 @@ import { cn } from "../lib/utils";
 import type { PullFile } from "../api";
 import type { SpikeId, SpikeProps } from "./spike-types";
 import { UnifiedSourceDiff } from "./spikes/UnifiedSourceDiff";
-import { CoflatSourceTint } from "./spikes/CoflatSourceTint";
+import { HeadWithTint } from "./spikes/HeadWithTint";
 import { SideBySideRendered } from "./spikes/SideBySideRendered";
-import { RenderedWithHighlights } from "./spikes/RenderedWithHighlights";
 
 const SPIKES: Array<{ id: SpikeId; label: string }> = [
   { id: "unified", label: "Unified" },
@@ -70,9 +69,9 @@ export function DiffArea({
 
 function renderSpike(id: SpikeId, props: SpikeProps): ReactElement {
   if (id === "unified") return <UnifiedSourceDiff {...props} />;
-  if (id === "tint") return <CoflatSourceTint {...props} />;
+  if (id === "tint") return <HeadWithTint {...props} mode="source" testId="spike-tint-pane" />;
   if (id === "split") return <SideBySideRendered {...props} />;
-  return <RenderedWithHighlights {...props} />;
+  return <HeadWithTint {...props} mode="rich" testId="spike-rendered-pane" />;
 }
 
 function readSpike(key: string): SpikeId {

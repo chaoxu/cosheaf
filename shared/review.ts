@@ -1,6 +1,21 @@
-// Pull request metadata surface. Shared by server and client.
+// Types shared by server and client for the PR review surface.
 
 import type { ChangeState } from "./change-lifecycle.js";
+
+export type PullFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
+
+export interface PullFile {
+  path: string;
+  previous_path?: string;
+  status: PullFileStatus;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface ChangeDiff {
+  files: PullFile[];
+}
 
 export interface PrMeta {
   number: number;

@@ -773,10 +773,12 @@ function WorkspaceView({
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
-  const [reviewPr, setReviewPr] = useState<PrMeta | null>(null);
-  const [reviewDiff, setReviewDiff] = useState<ChangeDiff | null>(null);
-  const [reviewSelectedPath, setReviewSelectedPath] = useState<string | null>(null);
-  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewState, setReviewState] = useState<{
+    pr: PrMeta | null;
+    diff: ChangeDiff | null;
+    selectedPath: string | null;
+    busy: boolean;
+  }>({ pr: null, diff: null, selectedPath: null, busy: false });
   // The active writable change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
@@ -1073,7 +1075,7 @@ function WorkspaceView({
       const id = reviewingChangeId;
       if (!id) return;
       const comment = body.trim() || undefined;
-      setReviewBusy(true);
+      setReviewState((s) => ({ ...s, busy: true }));
       try {
         let nextState: string | undefined;
         if (decision === "approve") {
@@ -1104,7 +1106,7 @@ function WorkspaceView({
       } catch (err) {
         setStatus(err instanceof ApiError ? err.message : `${decision} failed`);
       } finally {
-        setReviewBusy(false);
+        setReviewState((s) => ({ ...s, busy: false }));
       }
     },
     [reviewingChangeId, workspace.slug, loadApprovals],
@@ -1113,7 +1115,7 @@ function WorkspaceView({
   const closeReviewedChange = useCallback(async () => {
     const id = reviewingChangeId;
     if (!id) return;
-    setReviewBusy(true);
+    setReviewState((s) => ({ ...s, busy: true }));
     try {
       await api.close(workspace.slug, id);
       setStatus("change closed");
@@ -1129,16 +1131,14 @@ function WorkspaceView({
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : "close failed");
     } finally {
-      setReviewBusy(false);
+      setReviewState((s) => ({ ...s, busy: false }));
     }
   }, [reviewingChangeId, workspace.slug]);
 
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
   useEffect(() => {
     if (!reviewingChangeId) {
-      setReviewPr(null);
-      setReviewDiff(null);
-      setReviewSelectedPath(null);
+      setReviewState({ pr: null, diff: null, selectedPath: null, busy: false });
       return;
     }
     let cancelled = false;
@@ -1148,9 +1148,12 @@ function WorkspaceView({
     ])
       .then(([pr, diff]) => {
         if (cancelled) return;
-        setReviewPr(pr);
-        setReviewDiff(diff);
-        setReviewSelectedPath((prev) => prev ?? diff.files[0]?.path ?? null);
+        setReviewState((s) => ({
+          ...s,
+          pr,
+          diff,
+          selectedPath: s.selectedPath ?? diff.files[0]?.path ?? null,
+        }));
       })
       .catch((err: unknown) => {
         if (!cancelled) setStatus(err instanceof ApiError ? err.message : "Failed to load PR");
@@ -1302,7 +1305,7 @@ function WorkspaceView({
                 ))}
               </ul>
             </div>
-          ) : reviewingChangeId && reviewDiff ? (
+          ) : reviewingChangeId && reviewState.diff ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-3 px-2 py-1">
                 <strong>Changed files</strong>
@@ -1317,9 +1320,9 @@ function WorkspaceView({
               </div>
               <div className="flex-1 min-h-0 overflow-auto">
                 <FileList
-                  files={reviewDiff.files}
-                  selectedPath={reviewSelectedPath}
-                  onSelect={setReviewSelectedPath}
+                  files={reviewState.diff.files}
+                  selectedPath={reviewState.selectedPath}
+                  onSelect={(path) => setReviewState((s) => ({ ...s, selectedPath: path }))}
                 />
               </div>
             </div>
@@ -1459,27 +1462,27 @@ function WorkspaceView({
           )}
           {reviewingChangeId ? (
             <>
-              {reviewPr && <PrHeader pr={reviewPr} />}
+              {reviewState.pr && <PrHeader pr={reviewState.pr} />}
               <div className="flex-1 min-h-0">
                 <DiffArea
                   workspaceSlug={workspace.slug}
                   file={
-                    reviewDiff?.files.find((f) => f.path === reviewSelectedPath) ??
-                    reviewDiff?.files[0] ??
+                    reviewState.diff?.files.find((f) => f.path === reviewState.selectedPath) ??
+                    reviewState.diff?.files[0] ??
                     null
                   }
                   loadContent={loadReviewFileContent}
                 />
               </div>
               {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}
-              {reviewPr && (
+              {reviewState.pr && (
                 <ReviewActions
-                  state={reviewPr.state}
+                  state={reviewState.pr.state}
                   role={workspace.role}
-                  isAuthor={reviewPr.author_user_id === user.id}
+                  isAuthor={reviewState.pr.author_user_id === user.id}
                   onSubmit={submitReview}
                   onClose={closeReviewedChange}
-                  busy={reviewBusy}
+                  busy={reviewState.busy}
                 />
               )}
             </>

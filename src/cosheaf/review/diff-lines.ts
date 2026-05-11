@@ -1,56 +1,32 @@
-// Walks a unified-diff patch and produces, for each `+` line, the absolute
-// head-side line number. Used by the source-tint and rendered-highlight spikes
-// to know which lines in the head file are new/changed.
+// Walks a unified-diff patch and produces, for each `+` (or `-`) line, the
+// absolute line number on the new or old side respectively. Used by the tint
+// spike to know which lines to highlight.
 
-export function addedHeadLines(patch: string): number[] {
+export function diffLineNumbers(patch: string, kind: "added" | "removed"): number[] {
   if (!patch) return [];
+  const matcher = kind === "added" ? "+" : "-";
+  const advanceOnContext = true;
+  const headerGroup = kind === "added" ? 2 : 1;
   const out: number[] = [];
-  let headLine = 0;
+  let line = 0;
   let inHunk = false;
   for (const raw of patch.split("\n")) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
     if (hunk) {
-      headLine = Number(hunk[1]);
+      line = Number(hunk[headerGroup]);
       inHunk = true;
       continue;
     }
     if (!inHunk) continue;
-    if (raw.startsWith("+++") || raw.startsWith("---")) continue;
-    if (raw.startsWith("+")) {
-      out.push(headLine);
-      headLine++;
-    } else if (raw.startsWith("-")) {
-      // old-side line: head line number does not advance
-    } else {
-      // context line: present in both, advance head
-      headLine++;
-    }
-  }
-  return out;
-}
-
-// Same but for the old-side; useful when rendering deletions above context.
-export function removedBaseLines(patch: string): number[] {
-  if (!patch) return [];
-  const out: number[] = [];
-  let baseLine = 0;
-  let inHunk = false;
-  for (const raw of patch.split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(raw);
-    if (hunk) {
-      baseLine = Number(hunk[1]);
-      inHunk = true;
-      continue;
-    }
-    if (!inHunk) continue;
-    if (raw.startsWith("+++") || raw.startsWith("---")) continue;
-    if (raw.startsWith("-")) {
-      out.push(baseLine);
-      baseLine++;
-    } else if (raw.startsWith("+")) {
-      // new-side: base line does not advance
-    } else {
-      baseLine++;
+    const ch = raw[0];
+    if (ch === matcher) {
+      out.push(line);
+      line++;
+    } else if (ch === "+" || ch === "-") {
+      // Other side: this line is absent on our side; don't advance.
+    } else if (advanceOnContext) {
+      // Context line — present on both sides.
+      line++;
     }
   }
   return out;

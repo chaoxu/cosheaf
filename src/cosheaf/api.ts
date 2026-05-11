@@ -1,7 +1,6 @@
 import type { ChangeState, Decision } from "../../shared/change-lifecycle";
 import type { Role } from "../../shared/roles";
-import type { ChangeDiff, PullFile } from "../../shared/diff";
-import type { PrMeta } from "../../shared/pr";
+import type { ChangeDiff, PrMeta, PullFile } from "../../shared/review";
 
 export type { ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta };
 

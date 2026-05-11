@@ -25,10 +25,6 @@ export function lineTintExtension(addedLines: readonly number[]) {
         constructor(view: EditorView) {
           this.decorations = decorate(view);
         }
-        update() {
-          // Decorations are static for the lifetime of this view (the patch
-          // is fixed at mount time and the editor is read-only).
-        }
       },
       { decorations: (v) => v.decorations },
     ),

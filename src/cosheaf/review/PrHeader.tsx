@@ -5,14 +5,7 @@ import type { PrMeta } from "../api";
 
 const muted = "text-[var(--cf-muted)]";
 
-export function PrHeader({
-  pr,
-  forgejoRepoUrl,
-}: {
-  pr: PrMeta;
-  forgejoRepoUrl?: string;
-}): ReactElement {
-  const link = forgejoRepoUrl ? `${forgejoRepoUrl}/pulls/${pr.number}` : null;
+export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
   return (
     <header
       data-testid="pr-header"
@@ -23,19 +16,7 @@ export function PrHeader({
         <h2 className="text-base font-semibold leading-tight flex-1 truncate" title={pr.title}>
           {pr.title}
         </h2>
-        {link ? (
-          <a
-            href={link}
-            target="_blank"
-            rel="noreferrer"
-            className={cn("text-xs hover:underline", muted)}
-            data-testid="pr-header-link"
-          >
-            #{pr.number} ↗
-          </a>
-        ) : (
-          <span className={cn("text-xs", muted)}>#{pr.number}</span>
-        )}
+        <span className={cn("text-xs", muted)} data-testid="pr-header-link">#{pr.number}</span>
       </div>
       <div className={cn("flex items-center gap-3 text-xs", muted)}>
         <span>by @{pr.author_username}</span>

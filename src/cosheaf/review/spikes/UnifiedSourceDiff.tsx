@@ -54,9 +54,6 @@ function renderRows(patch: string): Row[] {
   let headLine = 0;
   let inHunk = false;
   for (const raw of patch.split("\n")) {
-    if (raw.startsWith("diff --git") || raw.startsWith("index ") || raw.startsWith("new file") || raw.startsWith("deleted file") || raw.startsWith("similarity index") || raw.startsWith("rename from") || raw.startsWith("rename to") || raw.startsWith("--- ") || raw.startsWith("+++ ")) {
-      continue;
-    }
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
     if (hunk) {
       baseLine = Number(hunk[1]);
