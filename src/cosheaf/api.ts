@@ -1,7 +1,9 @@
 import type { ChangeState, Decision } from "../../shared/change-lifecycle";
 import type { Role } from "../../shared/roles";
+import type { ChangeDiff, PullFile } from "../../shared/diff";
+import type { PrMeta } from "../../shared/pr";
 
-export type { ChangeState, Decision, Role };
+export type { ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta };
 
 export interface User {
   id: number;
@@ -209,6 +211,15 @@ export const api = {
 
   queue: (slug: string) =>
     jsonFetch<{ queue: QueueEntry[] }>(`${w(slug)}/queue`).then((r) => r.queue),
+
+  changePr: (slug: string, change_id: string) =>
+    jsonFetch<{ pr: PrMeta }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/pr`).then((r) => r.pr),
+  changeDiff: (slug: string, change_id: string) =>
+    jsonFetch<ChangeDiff>(`${w(slug)}/change/${encodeURIComponent(change_id)}/diff`),
+  changeFile: (slug: string, change_id: string, path: string, side: "base" | "head") =>
+    jsonFetch<{ content: string }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/file?path=${encodeURIComponent(path)}&side=${side}`,
+    ).then((r) => r.content),
 
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),

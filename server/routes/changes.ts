@@ -1,10 +1,12 @@
 // Change lifecycle routes: list/create/discard, publish (direct/review),
 // approve/request-changes/comment/close. Replaces the old revision/review/document workflow surface.
 
+import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoReview } from "../forgejo.js";
+import { splitUnifiedDiff } from "../diff-splitter.js";
 import {
   createChange,
   deleteChange,
@@ -388,6 +390,112 @@ changes.get("/:slug/change/:id/approvals", async (c) => {
     });
   return c.json({ approvals });
 });
+
+// ---------- PR view (header, file list, per-file diff, raw content) ----------
+
+function requirePrNumber(c: Context<AppEnv>, change: ChangeRow): { pr_number: number } | Response {
+  if (!change.pr_number) return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
+  return { pr_number: change.pr_number };
+}
+
+changes.get("/:slug/change/:id/pr", async (c) => {
+  const ws = c.get("workspace");
+  const id = c.req.param("id");
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  const pr = requirePrNumber(c, change);
+  if (pr instanceof Response) return pr;
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const pull = await fj.getPull(owner, ws.forgejoRepo, pr.pr_number);
+  if (!pull) return c.json({ error: "pull not found upstream", code: "not_found" }, 404);
+
+  const meta = {
+    number: pull.number,
+    title: pull.title,
+    body: pull.body ?? "",
+    state: change.state,
+    author_username: pull.user.login,
+    created_at: Date.parse(pull.created_at) || 0,
+    merged_at: pull.merged_at ? Date.parse(pull.merged_at) : null,
+    mergeable: pull.mergeable ?? null,
+    head_ref: pull.head.ref,
+    head_sha: pull.head.sha,
+    base_ref: pull.base.ref,
+    base_sha: pull.base.sha,
+    additions_total: pull.additions ?? 0,
+    deletions_total: pull.deletions ?? 0,
+    files_changed: pull.changed_files ?? 0,
+  };
+  return c.json({ pr: meta });
+});
+
+changes.get("/:slug/change/:id/diff", async (c) => {
+  const ws = c.get("workspace");
+  const id = c.req.param("id");
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  const pr = requirePrNumber(c, change);
+  if (pr instanceof Response) return pr;
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const [metas, unified] = await Promise.all([
+    fj.listPullFiles(owner, ws.forgejoRepo, pr.pr_number),
+    fj.getPullDiff(owner, ws.forgejoRepo, pr.pr_number),
+  ]);
+  const patches = splitUnifiedDiff(unified);
+  const byPath = new Map(patches.map((p) => [p.path, p]));
+
+  const files = metas.map((m) => {
+    const slice = byPath.get(m.filename);
+    return {
+      path: m.filename,
+      previous_path: m.previous_filename ?? slice?.previous_path,
+      status: normalizeStatus(m.status),
+      additions: m.additions,
+      deletions: m.deletions,
+      patch: slice?.patch ?? "",
+    };
+  });
+  return c.json({ files });
+});
+
+changes.get("/:slug/change/:id/file", async (c) => {
+  const ws = c.get("workspace");
+  const id = c.req.param("id");
+  const path = c.req.query("path");
+  const side = c.req.query("side");
+  if (!path) return c.json({ error: "path required", code: "validation" }, 400);
+  if (side !== "base" && side !== "head")
+    return c.json({ error: "side must be base or head", code: "validation" }, 400);
+
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  const pr = requirePrNumber(c, change);
+  if (pr instanceof Response) return pr;
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const pull = await fj.getPull(owner, ws.forgejoRepo, pr.pr_number);
+  if (!pull) return c.json({ error: "pull not found upstream", code: "not_found" }, 404);
+
+  const sha = side === "base" ? pull.base.sha : pull.head.sha;
+  try {
+    const content = await fj.getRawFile(owner, ws.forgejoRepo, sha, path);
+    return c.json({ content });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 404)
+      return c.json({ error: "file not present at this side", code: "not_found" }, 404);
+    throw err;
+  }
+});
+
+function normalizeStatus(s: string): "added" | "modified" | "deleted" | "renamed" | "copied" {
+  if (s === "added" || s === "modified" || s === "deleted" || s === "renamed" || s === "copied") return s;
+  return "modified";
+}
 
 // ---------- queue (changes in review) ----------
 

@@ -386,6 +386,14 @@ export class Forgejo {
     });
   }
 
+  async listPullFiles(owner: string, repo: string, index: number): Promise<ForgejoPullFile[]> {
+    return this.req<ForgejoPullFile[]>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/files`);
+  }
+
+  async getPullDiff(owner: string, repo: string, index: number): Promise<string> {
+    return this.req<string>(`/api/v1/repos/${owner}/${repo}/pulls/${index}.diff`, { raw: true });
+  }
+
   async listReviews(owner: string, repo: string, index: number): Promise<ForgejoReview[]> {
     return this.req<ForgejoReview[]>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`);
   }
@@ -447,11 +455,23 @@ export interface ForgejoPull {
   state: "open" | "closed";
   merged: boolean;
   merged_at?: string | null;
+  mergeable?: boolean | null;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
   head: { ref: string; sha: string; label: string };
   base: { ref: string; sha: string };
   user: ForgejoUser;
   created_at: string;
   updated_at: string;
+}
+export interface ForgejoPullFile {
+  filename: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied" | string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  previous_filename?: string;
 }
 export interface ForgejoReview {
   id: number;
