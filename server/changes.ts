@@ -2,8 +2,6 @@ import type Database from "better-sqlite3";
 import type { ChangeState } from "../shared/change-lifecycle.js";
 import { generateDocId } from "./frontmatter.js";
 
-export type { ChangeState };
-
 export interface ChangeRow {
   id: string;
   workspace_id: number;

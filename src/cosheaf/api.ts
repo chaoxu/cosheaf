@@ -1,6 +1,6 @@
-import type { ChangeState, Decision, SseEventType } from "../../shared/change-lifecycle";
+import type { ChangeState, Decision } from "../../shared/change-lifecycle";
 
-export type { ChangeState, Decision, SseEventType };
+export type { ChangeState, Decision };
 
 export interface User {
   id: number;
