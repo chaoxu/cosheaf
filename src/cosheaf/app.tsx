@@ -462,6 +462,7 @@ function WorkspaceList({
               <li key={ws.id}>
                 <button
                   type="button"
+                  data-testid={`workspace-${ws.slug}`}
                   onClick={() => onPick(ws)}
                   className="flex w-full items-center gap-2.5 rounded-md px-4 py-3 text-left hover:bg-[var(--cf-hover)]"
                 >
@@ -703,16 +704,19 @@ function FileRow({
   doc,
   onClick,
   children,
+  testId,
 }: {
   active?: boolean;
   title?: string;
   doc?: FileEntry["doc"];
   onClick: () => void;
   children: React.ReactNode;
+  testId?: string;
 }): ReactElement {
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       title={title}
       className={cn(
@@ -1197,6 +1201,7 @@ function WorkspaceView({
                           title={f.doc?.id ? `id: ${f.doc.id}` : "unindexed"}
                           doc={f.doc}
                           onClick={() => open(f)}
+                          testId={`file-${f.path}`}
                         >
                           {f.doc?.title ?? f.path}
                         </FileRow>
@@ -1236,6 +1241,7 @@ function WorkspaceView({
                 <MarkdownEditor
                   value={content}
                   mode={editorMode}
+                  testId="editor"
                   onReady={(editor) => {
                     editorRef.current = editor;
                     setOutline(editor.outline.get());
@@ -1264,6 +1270,7 @@ function WorkspaceView({
           )}
           <div
             data-statusbar
+            data-testid="statusbar"
             className={cn(
               "shrink-0 flex min-w-0 items-center gap-2 border-t px-2 h-6 text-xs",
               muted,

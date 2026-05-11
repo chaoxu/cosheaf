@@ -1,9 +1,8 @@
 # Cosheaf
 
-Human-usable mathematical knowledge base. Plain markdown files on disk are the
-source of truth; SQLite is a derived, rebuildable index over them. Cosheaf
-also owns the document **lifecycle**: pages, proposed edits, reviews,
-approvals, and trusted ("golden") status.
+Human-usable mathematical knowledge base. Forgejo repositories hold the
+canonical markdown files and change workflow; SQLite is a derived, rebuildable
+sidecar index for fast reads, sessions, memberships, and local auth state.
 
 Agents (autoprover and friends) are out of scope here. They will live in a
 separate layer and participate as ordinary verifier/member users over the same
@@ -16,21 +15,17 @@ HTTP API. Keep cosheaf's surface usable without any automation.
 
 ## Core principles
 
-- **Plain files are source of truth.** Every page, proposal, and review is a
-  `.md` file under `data/workspaces/<slug>/`. Humans can edit them directly
-  with any editor; cosheaf will reconcile.
+- **Forgejo is source of truth.** Every page is a `.md` file on the workspace
+  repo's `main` branch. Draft changes live on `change/<id>` branches and move
+  through Forgejo pull requests.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, approvals, and sessions/tokens — all rebuildable from the
-  files (except auth state). `pnpm cli workspace reindex <slug>` rebuilds from
-  disk.
+  links, FTS index, change metadata, memberships, and sessions/tokens. The
+  page index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
-  frontmatter. The indexer auto-fills missing ids and rewrites the file
-  canonically.
-- **Workflow as trust, not automation.** `proposal → review → approve/reject
-  → promote` is the same whether the proposer is a human or a bot.
-- **One concept, one owner.** A document's status lives in its frontmatter and
-  is mirrored to SQLite by `indexDocument`. Approvals live only in SQLite
-  (they're per-user records, not document content).
+  frontmatter. The indexer records missing ids in SQLite; canonical writes can
+  add frontmatter before persisting content.
+- **Workflow as trust, not automation.** `draft → review → merged/rejected` is
+  the same whether the proposer is a human or a bot.
 
 ## Stack
 
@@ -48,27 +43,28 @@ HTTP API. Keep cosheaf's surface usable without any automation.
 ```
 server/
   index.ts        # Hono entrypoint, routes mounted under /api
-  db.ts           # config + better-sqlite3 instance + workspaceDir()
+  db.ts           # config + better-sqlite3 instance
   schema.sql      # full DB schema (executed on every startup; CREATE IF NOT EXISTS)
-  auth.ts         # users, sessions, tokens, argon2 hashing
+  users.ts        # users, sessions, tokens, argon2 hashing, Forgejo proxy users
   middleware.ts   # requireAuth, requireMembership(slug)
   frontmatter.ts  # parse/serialize YAML frontmatter
-  indexer.ts      # indexDocument(): parse → upsert → reindex links + FTS
-  links.ts        # extract [[id]], [@id], [text](path.md) → links table; getBacklinks()
-  workflow.ts     # submit, approve, reject, createProposal, getReviewQueue, promote
-  cli.ts          # `pnpm cli` user/workspace/reindex commands
+  indexer.ts      # indexPage(): parse → upsert doc_map → reindex backlinks/tags/FTS
+  forgejo.ts      # minimal Forgejo REST client
+  workspace-provisioning.ts # shared repo/workspace setup and reindex helpers
+  cli.ts          # `pnpm cli` user/workspace/seed/reindex commands
   routes/
     auth.ts        # login/logout/me
     tokens.ts      # personal API tokens
     workspaces.ts  # list/create workspaces
-    notes.ts       # tree/note get/put/delete, search, backlinks, documents list
-    workflow.ts    # queue, settings, proposal, submit, approve, reject
+    files.ts       # tree/file get/put/delete, search, backlinks, documents list
+    changes.ts     # draft changes, publish, review, merge/reject
+    webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   main.tsx        # React entry
   app.tsx         # full single-file UI (sidebar, editor, queue, propose, backlinks)
   editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat-editor
   api.ts          # typed fetch client mirroring server routes
-data/             # default COSHEAF_DATA_DIR; db.sqlite + workspaces/<slug>/...
+data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ```
 
 ## Commands
@@ -87,6 +83,7 @@ pnpm issue -- mine
 pnpm cli user add <name>  # create a user (interactive password prompt)
 pnpm cli seed --user <name> --password <pw> --workspace <slug> --workspace-name <name>
 pnpm cli workspace member <slug> <user> <owner|verifier|member>
+pnpm cli workspace reindex <slug>   # rebuild page index from Forgejo main
 pnpm typecheck            # tsc --noEmit (root)
 pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
 pnpm check:types          # both
@@ -97,41 +94,37 @@ pnpm test                 # vitest
 pnpm build                # vite build
 ```
 
-`pnpm dev` and `pnpm server` are separate; in development run both. Vite
+`pnpm dev` and `pnpm server` are separate; `pnpm dev:all` runs both. Vite
 proxies `/api/*` to the server (see `vite.config.ts`).
 
 ## Data model
 
-- `users(id, username, password_hash, created_at)`
+- `users(id, username, password_hash, forgejo_username, created_at)`
 - `sessions(id, user_id, expires_at)` — cookie sessions
 - `tokens(id, user_id, name, token_hash)` — personal API tokens (`Bearer cs_…`)
-- `workspaces(id, slug, name)` — one filesystem root per workspace
+- `workspaces(id, slug, name, forgejo_repo)` — one Forgejo repo per workspace
 - `memberships(workspace_id, user_id, role)` — role ∈ `owner | verifier | member`
-- `documents(workspace_id, id, path, type, status, target_id, title, mtime)`
-  - `type ∈ {page, proposal, review}`
-  - `status ∈ {draft, unreviewed, golden, rejected, archived}`
-  - `target_id` points to the page a proposal/review targets
-- `links(workspace_id, src_id, target_id, target_label)` — drives backlinks
+- `doc_map(workspace_id, cosheaf_id, doc_type, forgejo_kind, forgejo_id, target_id, title, author_user_id)`
+- `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
 - `notes_fts` — FTS5 virtual table over title + body
-- `workspace_settings(workspace_id, min_approvals)` — promotion threshold
-- `approvals(workspace_id, document_id, verifier_user_id, decision, comment, created_at)`
+- `page_tags(workspace_id, cosheaf_id, tag)`
+- `changes(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title)`
+- `webhook_log(delivery_id, delivered_at, event_type)`
 
-## Workflow lifecycle
+## Change lifecycle
 
 ```
-draft  ──submit──▶  unreviewed  ──approve (×min_approvals)──▶  golden
-                     │  ──reject──▶  rejected
-proposal targeting page P:
-  unreviewed ──approve──▶ promote: P.body := proposal.body, P.status := golden,
-                                   proposal.status := archived
+draft ──publish──▶ review ──approve/merge──▶ merged
+                    │
+                    └──request changes/reject──▶ rejected
 ```
 
-- `submitDocument` rewrites the file's frontmatter `status` to `unreviewed`.
-- `decideOnDocument` records an `approvals` row, then either applies
-  `rejected` (on reject) or — if approvals reach `min_approvals` — promotes.
-- Promotion of a `proposal` overwrites the target page body. Promotion of a
-  plain `page` flips its status to `golden` in place.
-- All status transitions write canonical frontmatter to disk via atomic rename.
+- Draft edits are stored on `change/<id>` branches.
+- Publishing opens or updates a Forgejo pull request.
+- Owners can merge directly; verifiers approve or request changes through the
+  same API surface.
+- Webhooks reconcile Forgejo PR/review/file state into SQLite and notify open
+  browsers over SSE.
 
 ## Conventions
 
@@ -141,10 +134,8 @@ proposal targeting page P:
 - Server code uses `.js` import suffixes (NodeNext resolution).
 - Don't add bare `catch {}` — `scripts/check-bare-catch.mjs` will fail.
 - Don't bypass `requireAuth` / `requireMembership` on workspace routes.
-- Atomic file writes: write to `<file>.tmp-<pid>-<ts>` then rename. See
-  `notes.put` and `workflow.writeAtomic`.
-- Path safety: every filesystem-touching route must `safeJoin(root, rel)` to
-  block traversal.
+- Route code must use Forgejo path helpers and existing validation when touching
+  workspace files; never concatenate unvalidated user paths into API URLs.
 
 ## When changing the document model
 
@@ -152,29 +143,27 @@ If you change document types, statuses, link extraction, or workflow
 transitions, you usually need to touch in lockstep:
 
 1. `server/schema.sql` (CHECK constraints)
-2. `server/indexer.ts` (`DOCUMENT_TYPES`, `DOCUMENT_STATUSES`)
-3. `server/workflow.ts` (`DocumentRow.type`)
-4. `src/cosheaf/api.ts` (mirrored `DocumentMeta` type unions)
-5. UI in `src/cosheaf/app.tsx` if a status gates a new affordance
+2. `server/indexer.ts` (page indexing, links, tags, FTS)
+3. `server/routes/changes.ts` and `server/routes/webhooks.ts`
+4. `src/cosheaf/api.ts` (mirrored API types)
+5. UI in `src/cosheaf/app.tsx` if state gates a new affordance
 
 Add a test under `server/*.test.ts` (or `tests/`) for any new transition.
 
 ## Reindexing and external edits
 
-The on-disk file is authoritative. The server runs a filesystem watcher per
-workspace: external `.md` edits are re-indexed automatically and the client
-is notified via the per-workspace SSE stream at `/api/w/:slug/events`. After
-bulk external changes (or if the server was offline), run `pnpm cli workspace
-reindex <slug>` to force a full rebuild.
+Forgejo `main` is authoritative. Push/webhook events re-index changed markdown
+files and notify clients via `/api/v1/w/:slug/events`. After webhook downtime
+or bulk repo changes, run `pnpm cli workspace reindex <slug>` to rebuild the
+page index from Forgejo's `main` tree and remove stale sidecar rows.
 
 ## Document format
 
 See `FORMAT.md` for the canonical Pandoc-flavored markdown spec. Cosheaf
 links recognized by the indexer:
 
-- `[[id]]` — wiki link by document id
 - `[@id]` — Pandoc cross-ref / citation
-- `[text](relative/path.md)` — markdown link to another page
+- `[text](relative/path.md[#fragment])` — markdown link to another page
 
 Bare URLs, raw HTML, and indented code blocks are intentionally out of scope.
 

@@ -2,8 +2,8 @@
 
 A multi-user mathematical knowledge base built on Coflat-format markdown
 files. Cosheaf is the substrate for trustworthy mathematical writing: pages,
-proposed edits, reviews, approvals, and a "golden" trusted state — all backed
-by plain markdown on disk and a SQLite index.
+draft changes, reviews, and approvals — with Forgejo repositories as the
+canonical store and SQLite as a rebuildable sidecar index.
 
 The substrate is fully usable by humans alone. Automated agents
 (an `autoprover` layer, planned separately) participate as additional users
@@ -13,20 +13,14 @@ through the same HTTP API.
 
 - **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
   math, `[@id]` cross-references and citations — see [`FORMAT.md`](./FORMAT.md)).
-- **Workflow lifecycle** — every document is in one of `draft`, `unreviewed`,
-  `golden`, `rejected`, or `archived`. Submit a draft to request review;
-  `min_approvals` approvals from `verifier` users promote it to `golden`.
-- **Proposals** — suggested replacement bodies for an existing page. On
-  approval, the proposal body is merged onto the target and the proposal is
-  archived. The diff is rendered side-by-side at review time.
-- **Reviews as documents** — a verifier can write a long-form review as a
-  first-class markdown document targeting the page under review. The review
-  appears in backlinks, full-text search, and is consumable by other agents.
-  A row in `approvals` tallies the decision and links to the review document.
+- **Change workflow** — edits live on `change/<id>` branches, publish to
+  Forgejo pull requests, and end as `merged`, `rejected`, or `abandoned`.
+- **Review queue** — owners and verifiers review published changes through the
+  Cosheaf UI/API while Forgejo remains the durable record.
 - **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the
   body is full-text searchable.
-- **External-edit safe** — the server watches the workspace directory; edits
-  made in another editor reindex live and stream over SSE to open browsers.
+- **External-edit safe** — Forgejo webhooks reindex changed markdown files and
+  stream updates over SSE to open browsers.
 - **Personal API tokens** — humans and bots authenticate via cookie session
   or `Authorization: Bearer cs_…` token.
 
@@ -50,15 +44,15 @@ to the server.
 - TypeScript end-to-end. Hono on the server, React 19 + Tailwind v4 +
   shadcn primitives in the browser, CodeMirror 6 inside `@chaoxu/coflat-editor`
   (consumed as a published package; not built here).
-- SQLite via `better-sqlite3`. WAL mode. Plain markdown on disk is the source
-  of truth; the DB is a rebuildable index.
-- File watcher (`fs.watch` recursive) reconciles external edits; SSE pushes
-  changes to connected clients.
+- SQLite via `better-sqlite3`. WAL mode. Forgejo `main` is the page source of
+  truth; the DB is a rebuildable index.
+- Forgejo webhooks reconcile external edits; SSE pushes changes to connected
+  clients.
 
 ## Project layout
 
 ```
-server/        Hono API, SQLite indexer, workflow state machine, fs watcher
+server/        Hono API, Forgejo client, SQLite sidecar index, change workflow
 src/cosheaf/   React UI (login, workspace, file tree, editor, review surfaces)
 scripts/       dev:all spawner, lefthook checks, Gitea issue + worker-branch tools
 FORMAT.md      Coflat document format reference
@@ -100,7 +94,6 @@ See [AGENTS.md](./AGENTS.md) for full conventions and debug helpers.
 
 ## Status
 
-Early. The substrate (auth, workflow, indexing, search, proposals, reviews
-as documents) is in place and end-to-end smoke-tested. The autoprover layer
-is not yet built — it lives in a separate repo and talks to Cosheaf over the
-HTTP API.
+Early. The substrate (auth, change workflow, indexing, search, reviews, and
+approvals) is in place and end-to-end smoke-tested. The autoprover layer is not
+yet built — it lives in a separate repo and talks to Cosheaf over the HTTP API.

@@ -1,129 +1,112 @@
-# Cosheaf — Design Document
+# Cosheaf Design
 
-## What is it
+## What It Is
 
-A multi-user mathematical knowledge base. Pages are Coflat-flavored markdown
-files on disk; the workflow that turns drafts into trusted "golden" content
-is a first-class part of the substrate, not bolted on.
+Cosheaf is a multi-user mathematical knowledge base. Pages are
+Coflat-flavored markdown files stored in Forgejo repositories; Cosheaf adds a
+human-usable editing, review, search, backlink, and trust workflow on top.
 
-Cosheaf is meant to be useful with only human users. It is also meant to be
-usable by autonomous agents over the same HTTP API. Both kinds of participants
-read the same files, file the same proposals, write the same reviews, and
-count toward the same approval thresholds.
+Cosheaf is meant to be useful with only human users. Autonomous agents can
+participate later through the same HTTP API as ordinary members or verifiers.
 
-## Core philosophy
+## Core Philosophy
 
-- **Plain files are the source of truth.** Everything visible in the app is
-  derivable from the markdown files in `data/workspaces/<slug>/`. The SQLite
-  index can be rebuilt by reindexing the directory.
-- **Workflow is trust, not automation.** Approval, review, and golden status
-  exist because a math wiki needs human review of changes to theorems and
-  proofs. Agents are one kind of reviewer, not a separate concept.
-- **Substrate, not platform.** Cosheaf does not know how to prove theorems,
-  run mechanical checkers, schedule exploration, or repair rejected proposals.
-  Those concerns belong in an autoprover layer that participates as a user.
-- **No hidden semantics.** Frontmatter fields (`id`, `type`, `status`,
-  `target`, `title`) are the only structured metadata. Everything else lives
-  in the body, where humans and agents read and write the same way.
-- **Author-friendly.** Editing a markdown file in any editor is a first-class
-  operation. The watcher reconciles external edits into the index; the SSE
-  stream pushes changes to open browsers; an external edit never silently
-  loses status or causes data loss.
+- **Forgejo is the source of truth.** Workspace content lives in a Forgejo repo.
+  SQLite is a sidecar for fast reads, sessions, memberships, change metadata,
+  search, backlinks, and tags.
+- **Plain markdown remains inspectable.** The durable content is still ordinary
+  `.md` files with YAML frontmatter for stable Cosheaf ids and titles.
+- **Workflow is trust, not automation.** Review and approval exist because math
+  writing needs accountability. Agents are one possible participant, not a
+  special workflow path.
+- **Substrate, not prover.** Cosheaf does not prove theorems, run checkers, or
+  schedule exploration. Those concerns belong in another layer that talks to
+  Cosheaf over HTTP.
 
-## Document model
+## Document Model
 
-Every document has YAML frontmatter:
+Pages use YAML frontmatter plus Coflat-flavored markdown:
 
 ```yaml
 ---
-id: ksh1jyxe         # stable, generated once on first index
-type: page           # page | proposal | review
-status: golden       # draft | unreviewed | golden | rejected | archived
-target: <id>         # only for proposals and reviews; the page they refer to
-title: …             # derived from first heading if absent
+id: ksh1jyxe
+title: Compactness
 ---
 ```
 
-The body is Coflat-flavored markdown (see `FORMAT.md`).
+Only `page` documents are currently indexed as first-class documents. The
+indexed page status is reported as `golden` for API compatibility, but durable
+review state lives on `Change`, not page frontmatter.
 
-### Types
+Cosheaf indexes:
 
-- **`page`** — primary content. Theorems, proofs, definitions, prose. Pages
-  hold the long-lived knowledge.
-- **`proposal`** — a suggested replacement body for a target `page`. Approving
-  a proposal rewrites the target body in place and archives the proposal. The
-  diff between proposal and target is shown to reviewers.
-- **`review`** — a verifier's long-form report on a target. The verifier's
-  reasoning lives in the body; the same document is FTS5-indexed, backlinked
-  from the target, and citable as `[@id]`. An approval row points at the
-  review via `review_doc_id`, so the row remains the unit of tally and the
-  document remains the unit of reasoning.
+- title and body in FTS5 using the trigram tokenizer
+- tags from frontmatter
+- backlinks from `[@id]` and `[text](relative.md[#fragment])`
+- path-to-id mappings in `doc_map`
 
-### Lifecycle
+## Change Model
+
+Edits happen on `change/<id>` branches.
 
 ```
-draft ──submit──▶ unreviewed ──approve (≥ min)──▶ golden
-                       │
-                       └────reject──▶ rejected
-                                          │
-                                          └──(edit, submit again)──▶ unreviewed
-
-unreviewed proposal ──approve (≥ min)──▶ archived
-                                              └──merges body onto target page
+draft ──publish──▶ review ──approve/merge──▶ merged
+                    │
+                    └──request changes/reject──▶ rejected
 ```
 
-`min_approvals` is per-workspace (default 1).
+Authors can keep one or more draft changes open. Publishing creates or reuses a
+Forgejo pull request. Owners may publish directly, which opens the PR,
+auto-approves through the configured Forgejo owner to satisfy branch protection,
+and merges. Members and verifiers publish to review.
 
-## Trust model
+Rejected, merged, and abandoned changes are terminal. The server deletes the
+change branch on terminal states when Forgejo permits it.
 
-- **`memberships`** define what a user can do in a workspace:
-  `owner` (full), `verifier` (can approve/reject), `member` (can author and
-  propose).
-- **Approvals are rows in `approvals`** keyed by `(workspace_id, document_id,
-  verifier_user_id)`. The row records the decision, an optional one-line
-  comment, and an optional pointer to a review document.
-- **Reviews are documents** because reasoning should be reusable mathematical
-  memory: searchable, linkable, citable, agent-readable. A short "lgtm" stays
-  in the row's `comment`; a counterexample or a verification report belongs
-  in a review document.
+## Trust Model
 
-This split — **rows for the count, documents for the content** — keeps the
-threshold logic simple while letting reviewers' reasoning accumulate as
-first-class content over time.
+Workspace roles:
 
-## Autoprover boundary
+- `owner`: create/configure workspace, direct publish, approve/reject, merge.
+- `verifier`: author changes and approve/reject reviewed changes.
+- `member`: author changes and publish for review.
+
+Review decisions are Forgejo pull-request reviews. SQLite mirrors enough change
+state for the queue and UI, but Forgejo remains the durable review record.
+`min_approvals` maps to Forgejo branch protection on `main`.
+
+## Reconciliation
+
+Forgejo webhooks notify Cosheaf about pushes, pull requests, reviews, comments,
+and issues. Webhook handlers reindex markdown files from Forgejo raw content,
+update change state, and publish SSE events to open browsers.
+
+If webhooks are missed, `pnpm cli workspace reindex <slug>` rebuilds the page
+index from Forgejo `main` and removes stale page index rows.
+
+## Autoprover Boundary
 
 The autoprover layer is intentionally out of this repo. It will:
 
-- Authenticate as a user (or many users) via personal API tokens.
-- Subscribe to SSE events to react to changes.
-- Read pages, search by FTS, walk backlinks via the same HTTP API a human uses.
-- Propose new pages or proposals, write reviews, post approvals/rejections.
+- authenticate via personal API tokens
+- subscribe to SSE events
+- read pages, search, and walk backlinks
+- create changes, publish them, and participate in review
 
-Cosheaf will not import or call agent code. If autoprover ever needs
-something cosheaf does not expose, that is a cosheaf API addition, not a
-shared library. This keeps the substrate honest: it has to be usable by a
-person before it is usable by a bot.
+Cosheaf will not import or call agent code. If an agent needs a capability,
+that should become an HTTP API feature usable by humans too.
 
 ## Stack
 
-- **Server**: Node, TypeScript, Hono, `better-sqlite3` (WAL mode), `fs.watch`
-  for the workspace directory, Hono SSE for change events, argon2 for
-  password hashing.
-- **Client**: React 19, Vite, Tailwind v4, shadcn primitives themed against
-  the editor's `--cf-*` CSS tokens for a uniform black-and-white look.
-- **Editor**: `@chaoxu/coflat-editor` consumed as a published package. The
-  editor is mounted via `mountEditor`; the cosheaf shell wraps it in a
-  React component and lazy-loads it on first file open.
-- **Format**: Coflat-flavored Pandoc markdown, parsed by Lezer (inside the
-  editor package). KaTeX for math. See `FORMAT.md`.
-
-## What is not in scope here
-
-- The editor itself (rendering rules, plugins, parser). Lives in
+- **Server**: Node, TypeScript, Hono, `better-sqlite3`, Forgejo REST API,
+  argon2 for password hashing.
+- **Client**: React 19, Vite, Tailwind v4, shadcn-style primitives, and
   `@chaoxu/coflat-editor`.
-- A desktop app. The previous Tauri shell was for the standalone editor;
-  cosheaf is a server-backed web app.
-- Pandoc export. Cosheaf reads and writes markdown; export is a downstream
-  concern.
-- Theorem proving, exploration, mechanical verification. Autoprover layer.
+- **Format**: Coflat-flavored Pandoc markdown per `FORMAT.md`.
+
+## Out Of Scope
+
+- The editor implementation itself; it lives in `@chaoxu/coflat-editor`.
+- Agent/prover orchestration.
+- Pandoc export.
+- A desktop shell.

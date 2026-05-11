@@ -1,0 +1,230 @@
+import type Database from "better-sqlite3";
+import type { Config } from "./db.js";
+import type { Forgejo } from "./forgejo.js";
+import { ForgejoError } from "./forgejo.js";
+import { deletePage, indexPage } from "./indexer.js";
+import type { User } from "./users.js";
+
+const WEBHOOK_EVENTS = [
+  "push",
+  "pull_request",
+  "pull_request_review",
+  "pull_request_comment",
+  "issues",
+  "issue_comment",
+];
+
+export interface WorkspaceRow {
+  id: number;
+  slug: string;
+  name: string;
+  forgejo_repo: string;
+}
+
+export interface ProvisionWorkspaceOptions {
+  slug: string;
+  name: string;
+  user: User;
+  forgejoUsername: string;
+  allowExistingLocal?: boolean;
+  rollbackCreatedRepoOnLocalFailure?: boolean;
+}
+
+export interface ProvisionWorkspaceResult {
+  workspace: WorkspaceRow;
+  repoExisted: boolean;
+  createdRepo: boolean;
+}
+
+export async function provisionWorkspace(
+  db: Database.Database,
+  forgejo: Forgejo,
+  config: Config,
+  options: ProvisionWorkspaceOptions,
+): Promise<ProvisionWorkspaceResult> {
+  const owner = config.forgejoOwner;
+  const repoName = options.slug;
+  let repoExisted = false;
+  let createdRepo = false;
+
+  const existingRepo = await forgejo.getRepo(owner, repoName);
+  if (existingRepo) {
+    repoExisted = true;
+  } else {
+    await forgejo.createUserRepo(
+      {
+        name: repoName,
+        description: options.name,
+        private: true,
+        auto_init: true,
+        default_branch: "main",
+      },
+      owner,
+    );
+    createdRepo = true;
+  }
+
+  let workspace: WorkspaceRow;
+  try {
+    workspace = upsertWorkspace(db, options, repoName);
+  } catch (err) {
+    if (createdRepo && options.rollbackCreatedRepoOnLocalFailure) {
+      try {
+        await forgejo.deleteRepo(owner, repoName);
+      } catch (rollbackErr) {
+        console.warn(`rollback delete failed: ${(rollbackErr as Error).message}`);
+      }
+    }
+    throw err;
+  }
+
+  await ensureWorkspacePermissions(forgejo, config, repoName, options.forgejoUsername);
+  await ensureWorkspaceWebhook(forgejo, config, repoName);
+  if (!repoExisted) {
+    await ensureWorkspaceFile(forgejo, config, repoName, options.forgejoUsername, {
+      path: ".gitattributes",
+      content: "*.md text eol=lf -text\n",
+      message: "chore: lock byte-exactness for .md",
+    });
+  }
+  try {
+    await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
+  } catch (err) {
+    console.warn(`workspace reindex failed: ${(err as Error).message}`);
+  }
+
+  return { workspace, repoExisted, createdRepo };
+}
+
+function upsertWorkspace(
+  db: Database.Database,
+  options: ProvisionWorkspaceOptions,
+  repoName: string,
+): WorkspaceRow {
+  const existing = db
+    .prepare("SELECT id, slug, name, forgejo_repo FROM workspaces WHERE slug = ?")
+    .get(options.slug) as WorkspaceRow | undefined;
+  if (existing && !options.allowExistingLocal) {
+    throw new Error("workspace slug already exists");
+  }
+
+  if (existing) {
+    db.prepare("UPDATE workspaces SET name = ?, forgejo_repo = ? WHERE id = ?")
+      .run(options.name, repoName, existing.id);
+    db.prepare(
+      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner') " +
+        "ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = 'owner'",
+    ).run(existing.id, options.user.id);
+    return { ...existing, name: options.name, forgejo_repo: repoName };
+  }
+
+  return db.transaction(() => {
+    const workspace = db
+      .prepare(
+        "INSERT INTO workspaces (slug, name, forgejo_repo, created_at) VALUES (?, ?, ?, ?) " +
+          "RETURNING id, slug, name, forgejo_repo",
+      )
+      .get(options.slug, options.name, repoName, Date.now()) as WorkspaceRow;
+    db.prepare(
+      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
+    ).run(workspace.id, options.user.id);
+    return workspace;
+  })();
+}
+
+export async function ensureWorkspacePermissions(
+  forgejo: Forgejo,
+  config: Config,
+  repoName: string,
+  forgejoUsername: string,
+): Promise<void> {
+  if (forgejoUsername !== config.forgejoOwner) {
+    try {
+      await forgejo.addCollaborator(config.forgejoOwner, repoName, forgejoUsername, "write");
+    } catch (err) {
+      if (!(err instanceof ForgejoError && err.status === 409)) {
+        console.warn(`addCollaborator failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  try {
+    const existing = await forgejo.getBranchProtection(config.forgejoOwner, repoName, "main");
+    if (!existing) {
+      await forgejo.createBranchProtection(config.forgejoOwner, repoName, {
+        branch_name: "main",
+        required_approvals: 1,
+        push_whitelist_usernames: [forgejoUsername],
+      });
+    } else {
+      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, repoName, "main", [forgejoUsername]);
+    }
+  } catch (err) {
+    console.warn(`branch protection setup failed: ${(err as Error).message}`);
+  }
+}
+
+async function ensureWorkspaceWebhook(
+  forgejo: Forgejo,
+  config: Config,
+  repoName: string,
+): Promise<void> {
+  try {
+    const hooks = await forgejo.listRepoHooks(config.forgejoOwner, repoName);
+    const hasOurHook = hooks.some((h) => Array.isArray(h.events) && h.events.includes("push"));
+    if (!hasOurHook) {
+      await forgejo.createRepoHook(
+        config.forgejoOwner,
+        repoName,
+        config.webhookUrl,
+        config.webhookSecret,
+        WEBHOOK_EVENTS,
+      );
+    }
+  } catch (err) {
+    console.warn(`webhook setup failed: ${(err as Error).message}`);
+  }
+}
+
+export async function ensureWorkspaceFile(
+  forgejo: Forgejo,
+  config: Config,
+  repoName: string,
+  forgejoUsername: string,
+  file: { path: string; content: string; message: string },
+): Promise<boolean> {
+  const meta = await forgejo.getFileMeta(config.forgejoOwner, repoName, "main", file.path);
+  if (meta) return false;
+  await forgejo.putFile(config.forgejoOwner, repoName, {
+    branch: "main",
+    path: file.path,
+    content: file.content,
+    message: file.message,
+    sudo: forgejoUsername,
+  });
+  return true;
+}
+
+export async function reindexWorkspaceFromForgejo(
+  db: Database.Database,
+  forgejo: Forgejo,
+  config: Config,
+  workspace: Pick<WorkspaceRow, "id" | "forgejo_repo">,
+): Promise<number> {
+  const seen = new Set<string>();
+  const tree = await forgejo.getTree(config.forgejoOwner, workspace.forgejo_repo, "main", true);
+  for (const entry of tree) {
+    if (entry.type !== "blob" || !entry.path.endsWith(".md")) continue;
+    const body = await forgejo.getRawFile(config.forgejoOwner, workspace.forgejo_repo, "main", entry.path);
+    indexPage(db, { workspaceId: workspace.id, filePath: entry.path, bodyText: body });
+    seen.add(entry.path);
+  }
+
+  const indexed = db
+    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page'")
+    .all(workspace.id) as Array<{ forgejo_id: string }>;
+  for (const row of indexed) {
+    if (!seen.has(row.forgejo_id)) deletePage(db, workspace.id, row.forgejo_id);
+  }
+  return seen.size;
+}

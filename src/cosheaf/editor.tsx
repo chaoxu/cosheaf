@@ -12,9 +12,10 @@ interface Props {
   mode: StandaloneEditorMode;
   onChange: (value: string) => void;
   onReady?: (editor: MountedEditor) => void;
+  testId?: string;
 }
 
-export function MarkdownEditor({ value, mode, onChange, onReady }: Props): ReactElement {
+export function MarkdownEditor({ value, mode, onChange, onReady, testId }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MountedEditor | null>(null);
   const onChangeRef = useRef(onChange);
@@ -50,5 +51,5 @@ export function MarkdownEditor({ value, mode, onChange, onReady }: Props): React
     if (editor.getMode() !== mode) editor.setMode(mode);
   }, [mode]);
 
-  return <div ref={containerRef} className="cm-host" />;
+  return <div ref={containerRef} data-testid={testId} className="cm-host" />;
 }

@@ -24,7 +24,9 @@ const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "123123";
 const WORKSPACE = process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin";
+const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const PAGE = process.env.COSHEAF_SMOKE_PAGE ?? "Hello";
+const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md";
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -50,18 +52,12 @@ if (await page.locator('text=username').count() > 0) {
 }
 
 // Click into the seeded workspace.
-await page.locator(`text=${WORKSPACE}`).first().click().catch(() => {});
+await page.getByTestId(`workspace-${WORKSPACE_SLUG}`).click();
 await page.waitForSelector("aside", { timeout: 5000 }).catch(() => {});
 await page.waitForTimeout(500);
 
-// Open the seeded page (sidebar shows titles, not paths).
-await page
-  .locator(`aside button:has-text("${PAGE}"), aside li:has-text("${PAGE}")`)
-  .first()
-  .click()
-  .catch(async () => {
-    await page.locator("aside").locator(`text=${PAGE}`).first().click().catch(() => {});
-  });
+// Open the seeded page.
+await page.getByTestId(`file-${PAGE_PATH}`).click();
 await page.waitForTimeout(2000);
 
 const sizes = await page.evaluate(() => {
@@ -91,6 +87,7 @@ console.log(JSON.stringify({
   url: page.url(),
   workspace: WORKSPACE,
   page: PAGE,
+  pagePath: PAGE_PATH,
   sizes,
   editorTextPreview: editorText.slice(0, 300),
   consoleSample: consoleMessages.slice(-10),
