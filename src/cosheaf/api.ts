@@ -1,6 +1,7 @@
 import type { ChangeState, Decision } from "../../shared/change-lifecycle";
+import type { Role } from "../../shared/roles";
 
-export type { ChangeState, Decision };
+export type { ChangeState, Decision, Role };
 
 export interface User {
   id: number;
@@ -11,7 +12,7 @@ export interface Workspace {
   id: number;
   slug: string;
   name: string;
-  role: "owner" | "verifier" | "member";
+  role: Role;
 }
 
 export interface DocumentMeta {

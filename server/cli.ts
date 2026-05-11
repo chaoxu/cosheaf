@@ -9,6 +9,7 @@ import {
   setUserPassword,
 } from "./users.js";
 import { Forgejo } from "./forgejo.js";
+import { ROLES, type Role } from "../shared/roles.js";
 import {
   ensureWorkspaceFile,
   provisionWorkspace,
@@ -272,7 +273,7 @@ async function workspaceReindex(slug: string): Promise<void> {
   console.log(`reindexed ${count} markdown file${count === 1 ? "" : "s"} in workspace ${slug}`);
 }
 
-async function workspaceMember(slug: string, username: string, role: "owner" | "verifier" | "member"): Promise<void> {
+async function workspaceMember(slug: string, username: string, role: Role): Promise<void> {
   const { db, forgejo, config } = ctx();
   const ws = db.prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?").get(slug) as { id: number; forgejo_repo: string } | undefined;
   if (!ws) {
@@ -328,11 +329,11 @@ async function main(): Promise<void> {
   if (cmd === "workspace" && sub === "rm" && rest[0]) return workspaceRm(rest[0]);
   if (cmd === "workspace" && sub === "member" && rest[0] && rest[1] && rest[2]) {
     const role = rest[2];
-    if (role !== "owner" && role !== "verifier" && role !== "member") {
-      console.error("role must be owner|verifier|member");
+    if (!(ROLES as readonly string[]).includes(role)) {
+      console.error(`role must be ${ROLES.join("|")}`);
       process.exit(1);
     }
-    return workspaceMember(rest[0], rest[1], role);
+    return workspaceMember(rest[0], rest[1], role as Role);
   }
 
   help();

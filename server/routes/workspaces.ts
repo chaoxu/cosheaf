@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
+import type { Role } from "../../shared/roles.js";
 import { requireAuth } from "../middleware.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 
@@ -20,7 +21,7 @@ workspaces.get("/", (c) => {
       slug: string;
       name: string;
       forgejo_repo: string;
-      role: "owner" | "verifier" | "member";
+      role: Role;
     }>;
   return c.json({ workspaces: rows.map(({ forgejo_repo: _drop, ...rest }) => rest) });
 });

@@ -9,6 +9,7 @@ import type { Config } from "../db.js";
 import { ForgejoError, type Forgejo } from "../forgejo.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
+import type { Role } from "../../shared/roles.js";
 import { changes } from "./changes.js";
 import { files } from "./files.js";
 
@@ -36,7 +37,7 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-function seedUser(db: Database.Database, id: number, username: string, role: "owner" | "verifier" | "member"): string {
+function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
   const token = `cs_${username}`;
   db.prepare("INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (?, ?, 'hash', ?, 0)")
     .run(id, username, `cs-${username}`);

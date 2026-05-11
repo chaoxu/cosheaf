@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import type { AppEnv, Role } from "./types.js";
+import type { AppEnv } from "./types.js";
+import type { Role } from "../shared/roles.js";
 import { userFromSession, userFromToken, ensureForgejoProxy } from "./users.js";
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {

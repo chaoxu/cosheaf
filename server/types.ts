@@ -3,8 +3,7 @@ import type { User } from "./users.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import type { SSEHub } from "./sse.js";
-
-export type Role = "owner" | "verifier" | "member";
+import type { Role } from "../shared/roles.js";
 
 export interface WorkspaceContext {
   id: number;
