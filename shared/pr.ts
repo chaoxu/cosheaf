@@ -7,6 +7,7 @@ export interface PrMeta {
   title: string;
   body: string;
   state: ChangeState;
+  author_user_id: number;
   author_username: string;
   created_at: number;
   merged_at: number | null;

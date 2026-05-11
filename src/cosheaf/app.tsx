@@ -14,7 +14,10 @@ import {
   api,
   type ApprovalRecord,
   type Backlink,
+  type ChangeDiff,
+  type Decision,
   type FileEntry,
+  type PrMeta,
   type QueueEntry,
   type SearchResult,
   type TokenInfo,
@@ -25,6 +28,10 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { cn } from "./lib/utils";
+import { PrHeader } from "./review/PrHeader";
+import { FileList } from "./review/FileList";
+import { DiffArea } from "./review/DiffArea";
+import { ReviewActions } from "./review/ReviewActions";
 
 const MarkdownEditor = lazy(() =>
   import("./editor").then((m) => ({ default: m.MarkdownEditor })),
@@ -764,9 +771,12 @@ function WorkspaceView({
   const [sidebarView, setSidebarView] = useState<"files" | "queue" | "outline">("files");
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
-  const [reviewComment, setReviewComment] = useState("");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
+  const [reviewPr, setReviewPr] = useState<PrMeta | null>(null);
+  const [reviewDiff, setReviewDiff] = useState<ChangeDiff | null>(null);
+  const [reviewSelectedPath, setReviewSelectedPath] = useState<string | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   // The active writable change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
@@ -924,7 +934,6 @@ function WorkspaceView({
           openFileChangeIdRef.current = changeId ?? null;
           loadBacklinks(doc?.id);
           loadApprovals(changeId ?? doc?.id);
-          setReviewComment("");
           if (options.push !== false) {
             navigate({ kind: "workspace", slug: workspace.slug, filePath: path });
           }
@@ -1020,20 +1029,10 @@ function WorkspaceView({
       setReviewingChangeId(entry.id);
       setCurrentChangeId(null);
       setSidebarView("files");
-      setStatus(`reviewing ${entry.title}`);
-      api
-        .tree(workspace.slug, entry.id)
-        .then((nextFiles) => {
-          setFiles(nextFiles);
-          const first = nextFiles[0];
-          if (first) openPathFromSource(first.path, { doc: first.doc, changeId: entry.id });
-        })
-        .catch((err: unknown) =>
-          setStatus(err instanceof ApiError ? err.message : "Failed to load review"),
-        );
+      setStatus(null);
       loadApprovals(entry.id);
     },
-    [workspace.slug, openPathFromSource, loadApprovals],
+    [loadApprovals],
   );
 
   const publish = useCallback(
@@ -1067,52 +1066,107 @@ function WorkspaceView({
     [workspace.slug, currentChangeId],
   );
 
-  // Decide on the queue's currently-open change.
-  const decideChange = useCallback(
-    (decision: "approve" | "request_changes") => {
+  // Submit a review decision (approve, request_changes, or comment-only) on
+  // the change currently being reviewed.
+  const submitReview = useCallback(
+    async (decision: Decision, body: string) => {
       const id = reviewingChangeId;
       if (!id) return;
-      const fn = decision === "approve" ? api.approve : api.requestChanges;
-      const comment = reviewComment.trim() || undefined;
-      fn(workspace.slug, id, comment)
-        .then((r) => {
-          setStatus(`${decision === "approve" ? "approved" : "changes requested"} (state: ${r.state})`);
-          setReviewComment("");
-          loadApprovals(id);
+      const comment = body.trim() || undefined;
+      setReviewBusy(true);
+      try {
+        let nextState: string | undefined;
+        if (decision === "approve") {
+          const r = await api.approve(workspace.slug, id, comment);
+          nextState = r.state;
+          setStatus(`approved (state: ${r.state})`);
+        } else if (decision === "request_changes") {
+          const r = await api.requestChanges(workspace.slug, id, comment);
+          nextState = r.state;
+          setStatus(`changes requested (state: ${r.state})`);
+        } else {
+          const r = await api.comment(workspace.slug, id, comment);
+          nextState = r.state;
+          setStatus("commented");
+        }
+        loadApprovals(id);
+        api
+          .queue(workspace.slug)
+          .then(setQueue)
+          .catch(() => undefined);
+        if (nextState === "merged" || nextState === "changes_requested" || nextState === "closed") {
+          setReviewingChangeId(null);
           api
-            .queue(workspace.slug)
-            .then(setQueue)
+            .tree(workspace.slug)
+            .then(setFiles)
             .catch(() => undefined);
-          if (r.state === "merged" || r.state === "changes_requested" || r.state === "closed") {
-            const path = openPathRef.current;
-            setReviewingChangeId(null);
-            api
-              .tree(workspace.slug)
-              .then((nextFiles) => {
-                setFiles(nextFiles);
-                if (!path) return;
-                const entry = nextFiles.find((file) => file.path === path);
-                api
-                  .getFile(workspace.slug, path)
-                  .then((file) => {
-                    setOpenDoc(entry?.doc);
-                    setContent(file.content);
-                    setDirty(false);
-                    loadBacklinks(entry?.doc?.id);
-                    loadApprovals(entry?.doc?.id);
-                  })
-                  .catch(() => undefined);
-              })
-              .catch(() => undefined);
-          } else {
-            reloadTree();
-          }
-        })
-        .catch((err: unknown) =>
-          setStatus(err instanceof ApiError ? err.message : `${decision} failed`),
-        );
+        }
+      } catch (err) {
+        setStatus(err instanceof ApiError ? err.message : `${decision} failed`);
+      } finally {
+        setReviewBusy(false);
+      }
     },
-    [reviewingChangeId, workspace.slug, reloadTree, reviewComment, loadApprovals, loadBacklinks],
+    [reviewingChangeId, workspace.slug, loadApprovals],
+  );
+
+  const closeReviewedChange = useCallback(async () => {
+    const id = reviewingChangeId;
+    if (!id) return;
+    setReviewBusy(true);
+    try {
+      await api.close(workspace.slug, id);
+      setStatus("change closed");
+      setReviewingChangeId(null);
+      api
+        .queue(workspace.slug)
+        .then(setQueue)
+        .catch(() => undefined);
+      api
+        .tree(workspace.slug)
+        .then(setFiles)
+        .catch(() => undefined);
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "close failed");
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [reviewingChangeId, workspace.slug]);
+
+  // When entering review, fetch PR meta + per-file diff. Clear on exit.
+  useEffect(() => {
+    if (!reviewingChangeId) {
+      setReviewPr(null);
+      setReviewDiff(null);
+      setReviewSelectedPath(null);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      api.changePr(workspace.slug, reviewingChangeId),
+      api.changeDiff(workspace.slug, reviewingChangeId),
+    ])
+      .then(([pr, diff]) => {
+        if (cancelled) return;
+        setReviewPr(pr);
+        setReviewDiff(diff);
+        setReviewSelectedPath((prev) => prev ?? diff.files[0]?.path ?? null);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setStatus(err instanceof ApiError ? err.message : "Failed to load PR");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reviewingChangeId, workspace.slug]);
+
+  const loadReviewFileContent = useCallback(
+    async (path: string, side: "base" | "head") => {
+      const id = reviewingChangeId;
+      if (!id) throw new Error("no active review");
+      return api.changeFile(workspace.slug, id, path, side);
+    },
+    [reviewingChangeId, workspace.slug],
   );
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1248,6 +1302,27 @@ function WorkspaceView({
                 ))}
               </ul>
             </div>
+          ) : reviewingChangeId && reviewDiff ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex items-center justify-between gap-3 px-2 py-1">
+                <strong>Changed files</strong>
+                <button
+                  type="button"
+                  data-testid="review-exit"
+                  onClick={() => setReviewingChangeId(null)}
+                  className={cn("text-xs hover:underline", muted)}
+                >
+                  Exit review
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto">
+                <FileList
+                  files={reviewDiff.files}
+                  selectedPath={reviewSelectedPath}
+                  onSelect={setReviewSelectedPath}
+                />
+              </div>
+            </div>
           ) : (
             <>
               <div className={cn("border-b p-2", borderColor)}>
@@ -1382,12 +1457,37 @@ function WorkspaceView({
               ☰
             </button>
           )}
-          {!openPath && (
+          {reviewingChangeId ? (
+            <>
+              {reviewPr && <PrHeader pr={reviewPr} />}
+              <div className="flex-1 min-h-0">
+                <DiffArea
+                  workspaceSlug={workspace.slug}
+                  file={
+                    reviewDiff?.files.find((f) => f.path === reviewSelectedPath) ??
+                    reviewDiff?.files[0] ??
+                    null
+                  }
+                  loadContent={loadReviewFileContent}
+                />
+              </div>
+              {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}
+              {reviewPr && (
+                <ReviewActions
+                  state={reviewPr.state}
+                  role={workspace.role}
+                  isAuthor={reviewPr.author_user_id === user.id}
+                  onSubmit={submitReview}
+                  onClose={closeReviewedChange}
+                  busy={reviewBusy}
+                />
+              )}
+            </>
+          ) : !openPath ? (
             <div className={cn("flex flex-1 items-center justify-center", muted)}>
               Select a file from the sidebar, or create one.
             </div>
-          )}
-          {openPath && (
+          ) : (
             <>
               <Suspense fallback={<div className="flex-1" />}>
                 <MarkdownEditor
@@ -1458,35 +1558,6 @@ function WorkspaceView({
                   >
                     {editorMode === "rich" ? "Source" : "Rich"}
                   </button>
-                  {reviewingChangeId && (workspace.role === "owner" || workspace.role === "verifier") && (
-                    <>
-                      <Input
-                        placeholder="comment"
-                        data-testid="review-comment"
-                        value={reviewComment}
-                        onChange={(e) => setReviewComment(e.target.value)}
-                        className="h-5 text-xs max-w-[10rem]"
-                      />
-                      <button
-                        type="button"
-                        data-testid="review-approve"
-                        onClick={() => decideChange("approve")}
-                        disabled={busy}
-                        className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="review-request-changes"
-                        onClick={() => decideChange("request_changes")}
-                        disabled={busy}
-                        className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
-                      >
-                        Request changes
-                      </button>
-                    </>
-                  )}
                   <button
                     type="button"
                     onClick={save}

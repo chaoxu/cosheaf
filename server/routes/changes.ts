@@ -416,6 +416,7 @@ changes.get("/:slug/change/:id/pr", async (c) => {
     title: pull.title,
     body: pull.body ?? "",
     state: change.state,
+    author_user_id: change.author_user_id,
     author_username: pull.user.login,
     created_at: Date.parse(pull.created_at) || 0,
     merged_at: pull.merged_at ? Date.parse(pull.merged_at) : null,
