@@ -1,5 +1,5 @@
-// Change lifecycle routes: list/create/abandon, publish (direct/review),
-// approve/reject. Replaces the old revision/review/document workflow surface.
+// Change lifecycle routes: list/create/discard, publish (direct/review),
+// approve/request-changes/comment/close. Replaces the old revision/review/document workflow surface.
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
@@ -31,14 +31,14 @@ async function deleteBranchQuietly(fj: Forgejo, owner: string, repo: string, bra
 // auto-approve review lands but before the merge gate sees it. Retry with backoff.
 async function mergeWithRetry(fj: Forgejo, owner: string, repo: string, prNumber: number, sudo: string): Promise<unknown> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
     try {
       await fj.mergePull(owner, repo, prNumber, { Do: "squash", sudo });
       return null;
     } catch (err) {
       lastErr = err;
       if (err instanceof ForgejoError && err.status === 405 && /try again/i.test(err.bodyText)) {
-        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
         continue;
       }
       return err;
@@ -51,7 +51,7 @@ export const changes = new Hono<AppEnv>();
 changes.use("*", requireAuth);
 changes.use("/:slug/*", requireMembership());
 
-// ---------- list / create / abandon ----------
+// ---------- list / create / discard ----------
 
 changes.get("/:slug/changes", (c) => {
   const ws = c.get("workspace");
@@ -84,19 +84,14 @@ changes.delete("/:slug/change/:id", async (c) => {
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.author_user_id !== user.id)
     return c.json({ error: "not your change", code: "forbidden" }, 403);
-  if (change.state === "merged" || change.state === "rejected" || change.state === "abandoned")
+  if (change.state !== "draft")
     return c.json({ error: `change is ${change.state}`, code: "conflict" }, 409);
 
   const fj = c.get("forgejo");
   const owner = c.get("config").forgejoOwner;
-  if (change.state === "review" && change.pr_number) {
-    try {
-      await fj.editPull(owner, ws.forgejoRepo, change.pr_number, { state: "closed" }, c.get("forgejoUsername"));
-    } catch (err) { console.warn(`close PR on abandon: ${(err as Error).message}`); }
-  }
-  await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name, "deleteBranch on abandon");
-  setChangeState(c.get("db"), ws.id, change.id, "abandoned");
-  c.get("sse").publish(ws.slug, { type: "change_abandoned", id: change.id });
+  await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name, "deleteBranch on discard");
+  setChangeState(c.get("db"), ws.id, change.id, "closed");
+  c.get("sse").publish(ws.slug, { type: "change_closed", id: change.id });
   return c.json({ ok: true });
 });
 
@@ -116,7 +111,7 @@ changes.post("/:slug/publish", async (c) => {
   if (!change) return c.json({ error: "change not found", code: "not_found" }, 404);
   if (change.author_user_id !== user.id)
     return c.json({ error: "not your change", code: "forbidden" }, 403);
-  if (change.state !== "draft" && change.state !== "review")
+  if (change.state !== "draft" && change.state !== "review" && change.state !== "changes_requested")
     return c.json({ error: `change is ${change.state}`, code: "conflict" }, 409);
 
   // Non-owners are forced to mode=review.
@@ -131,7 +126,7 @@ changes.post("/:slug/publish", async (c) => {
   // POST /change but never saved anything).
   const branchExists = await fj.getBranch(owner, ws.forgejoRepo, change.branch_name);
   if (!branchExists) {
-    setChangeState(c.get("db"), ws.id, change.id, "abandoned");
+    setChangeState(c.get("db"), ws.id, change.id, "closed");
     return c.json({ ok: true, message: "nothing to publish (no commits)" });
   }
 
@@ -152,11 +147,18 @@ changes.post("/:slug/publish", async (c) => {
       if (err instanceof ForgejoError && err.status === 409) {
         // No diff vs main → nothing to publish; clean up the empty branch.
         await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name);
-        setChangeState(c.get("db"), ws.id, change.id, "abandoned");
+        setChangeState(c.get("db"), ws.id, change.id, "closed");
         return c.json({ ok: true, message: "nothing to publish" });
       }
       throw err;
     }
+  }
+
+  if (prNumber && (body.title !== undefined || body.body !== undefined)) {
+    await fj.editPull(owner, ws.forgejoRepo, prNumber, {
+      ...(body.title !== undefined ? { title: body.title } : {}),
+      ...(body.body !== undefined ? { body: body.body } : {}),
+    }, sudo);
   }
 
   if (mode === "review") {
@@ -188,12 +190,9 @@ changes.post("/:slug/publish", async (c) => {
   return c.json({ ok: true, mode, change_id: change.id, pr_number: prNumber });
 });
 
-// ---------- approve / reject ----------
+// ---------- approve / request changes / comment / close ----------
 
-async function decide(
-  c: import("hono").Context<AppEnv>,
-  decision: "approve" | "reject",
-): Promise<Response> {
+async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
@@ -210,43 +209,119 @@ async function decide(
   const owner = c.get("config").forgejoOwner;
   const sudo = c.get("forgejoUsername");
 
-  const event = decision === "approve" ? "APPROVED" : "REQUEST_CHANGES";
-  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, { event, body: body.comment ?? "", sudo });
+  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
+    event: "APPROVED",
+    body: body.comment ?? "",
+    sudo,
+  });
 
-  if (decision === "reject") {
-    try { await fj.editPull(owner, ws.forgejoRepo, change.pr_number, { state: "closed" }, sudo); } catch (err) {
-      console.warn(`close PR on reject: ${(err as Error).message}`);
+  const bp = await fj.getBranchProtection(owner, ws.forgejoRepo, "main");
+  const threshold = bp?.required_approvals ?? 1;
+  const counts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
+  if (counts.approvals >= threshold && counts.rejections === 0) {
+    const mergeErr = await mergeWithRetry(fj, owner, ws.forgejoRepo, change.pr_number, owner);
+    if (!mergeErr) {
+      await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name);
+      setChangeState(c.get("db"), ws.id, change.id, "merged");
+      c.get("sse").publish(ws.slug, { type: "change_merged", id: change.id });
+    } else {
+      console.warn(`merge failed: ${(mergeErr as Error).message}`);
     }
-    await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name);
-    setChangeState(c.get("db"), ws.id, change.id, "rejected");
-    c.get("sse").publish(ws.slug, { type: "change_rejected", id: change.id });
-  } else {
-    // approve: count latest-state-per-user, merge if threshold met
-    const bp = await fj.getBranchProtection(owner, ws.forgejoRepo, "main");
-    const threshold = bp?.required_approvals ?? 1;
-    const counts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
-    if (counts.approvals >= threshold && counts.rejections === 0) {
-      try {
-        await fj.mergePull(owner, ws.forgejoRepo, change.pr_number, { Do: "squash", sudo: owner });
-        await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name);
-        setChangeState(c.get("db"), ws.id, change.id, "merged");
-        c.get("sse").publish(ws.slug, { type: "change_merged", id: change.id });
-      } catch (err) {
-        if (!(err instanceof ForgejoError && err.status === 405)) console.warn(`merge failed: ${(err as Error).message}`);
-      }
-    }
-    c.get("sse").publish(ws.slug, { type: "change_approved", id: change.id });
   }
+  c.get("sse").publish(ws.slug, { type: "change_approved", id: change.id });
 
   const after = getChange(c.get("db"), ws.id, change.id) as ChangeRow;
-  const counts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
+  const afterCounts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
   return c.json({
-    decision,
+    decision: "approve",
     change_id: change.id,
     state: after.state,
+    approvals: afterCounts.approvals,
+    rejections: afterCounts.rejections,
+  });
+}
+
+async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Response> {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner" && ws.role !== "verifier")
+    return c.json({ error: "verifier role required", code: "forbidden" }, 403);
+  const id = c.req.param("id") ?? "";
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (change.state !== "review" || !change.pr_number)
+    return c.json({ error: "change is not in review", code: "conflict" }, 409);
+  if (change.author_user_id === c.get("user").id)
+    return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
+
+  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const sudo = c.get("forgejoUsername");
+  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
+    event: "REQUEST_CHANGES",
+    body: body.comment ?? "",
+    sudo,
+  });
+  setChangeState(c.get("db"), ws.id, change.id, "changes_requested");
+  c.get("sse").publish(ws.slug, { type: "change_changes_requested", id: change.id });
+
+  const counts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
+  return c.json({
+    decision: "request_changes",
+    change_id: change.id,
+    state: "changes_requested",
     approvals: counts.approvals,
     rejections: counts.rejections,
   });
+}
+
+async function commentChange(c: import("hono").Context<AppEnv>): Promise<Response> {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner" && ws.role !== "verifier")
+    return c.json({ error: "verifier role required", code: "forbidden" }, 403);
+  const id = c.req.param("id") ?? "";
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if ((change.state !== "review" && change.state !== "changes_requested") || !change.pr_number)
+    return c.json({ error: "change is not open for review", code: "conflict" }, 409);
+  if (change.author_user_id === c.get("user").id)
+    return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
+
+  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
+  const fj = c.get("forgejo");
+  await fj.createReview(c.get("config").forgejoOwner, ws.forgejoRepo, change.pr_number, {
+    event: "COMMENT",
+    body: body.comment ?? "",
+    sudo: c.get("forgejoUsername"),
+  });
+  c.get("sse").publish(ws.slug, { type: "change_commented", id: change.id });
+  return c.json({ ok: true, change_id: change.id, state: change.state });
+}
+
+async function closeChange(c: import("hono").Context<AppEnv>): Promise<Response> {
+  const ws = c.get("workspace");
+  const user = c.get("user");
+  const id = c.req.param("id") ?? "";
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (change.state === "merged" || change.state === "closed")
+    return c.json({ error: `change is ${change.state}`, code: "conflict" }, 409);
+  if (change.author_user_id !== user.id && ws.role !== "owner")
+    return c.json({ error: "not allowed to close this change", code: "forbidden" }, 403);
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  if (change.pr_number) {
+    try {
+      await fj.editPull(owner, ws.forgejoRepo, change.pr_number, { state: "closed" }, c.get("forgejoUsername"));
+    } catch (err) {
+      console.warn(`close PR: ${(err as Error).message}`);
+    }
+  }
+  await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name, "deleteBranch on close");
+  setChangeState(c.get("db"), ws.id, change.id, "closed");
+  c.get("sse").publish(ws.slug, { type: "change_closed", id: change.id });
+  return c.json({ ok: true, change_id: change.id, state: "closed" });
 }
 
 async function approvalCounts(
@@ -257,7 +332,12 @@ async function approvalCounts(
 ): Promise<{ approvals: number; rejections: number }> {
   const reviews = await fj.listReviews(owner, repo, index);
   const latestByUser = new Map<string, ForgejoReview>();
-  for (const r of reviews) {
+  const ordered = [...reviews].sort((a, b) => {
+    const at = a.submitted_at ? Date.parse(a.submitted_at) : 0;
+    const bt = b.submitted_at ? Date.parse(b.submitted_at) : 0;
+    return at - bt || (a.id ?? 0) - (b.id ?? 0);
+  });
+  for (const r of ordered) {
     if (r.state === "APPROVED" || r.state === "REQUEST_CHANGES") {
       latestByUser.set(r.user.login, r);
     }
@@ -271,8 +351,10 @@ async function approvalCounts(
   return { approvals, rejections };
 }
 
-changes.post("/:slug/change/:id/approve", (c) => decide(c, "approve"));
-changes.post("/:slug/change/:id/reject", (c) => decide(c, "reject"));
+changes.post("/:slug/change/:id/approve", (c) => approve(c));
+changes.post("/:slug/change/:id/request-changes", (c) => requestChanges(c));
+changes.post("/:slug/change/:id/comment", (c) => commentChange(c));
+changes.post("/:slug/change/:id/close", (c) => closeChange(c));
 
 // ---------- approvals listing ----------
 
@@ -286,7 +368,7 @@ changes.get("/:slug/change/:id/approvals", async (c) => {
   const reviews = await fj.listReviews(owner, ws.forgejoRepo, change.pr_number);
   const db = c.get("db");
   const approvals = reviews
-    .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES")
+    .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
     .map((r) => {
       const cs = db
         .prepare("SELECT id, username FROM users WHERE forgejo_username = ?")
@@ -294,7 +376,12 @@ changes.get("/:slug/change/:id/approvals", async (c) => {
       return {
         verifier_user_id: cs?.id ?? -1,
         username: cs?.username ?? r.user.login,
-        decision: r.state === "APPROVED" ? ("approve" as const) : ("reject" as const),
+        decision:
+          r.state === "APPROVED"
+            ? ("approve" as const)
+            : r.state === "REQUEST_CHANGES"
+              ? ("request_changes" as const)
+              : ("comment" as const),
         comment: r.body || null,
         created_at: r.submitted_at ? Date.parse(r.submitted_at) : 0,
       };
@@ -371,8 +458,43 @@ export function syncChangeFromPr(
   if (!change) return;
   if (prMerged) setChangeState(db, workspaceId, change.id, "merged");
   else if (prState === "closed") {
-    if (change.state === "review") setChangeState(db, workspaceId, change.id, "rejected");
+    if (change.state === "review" || change.state === "changes_requested")
+      setChangeState(db, workspaceId, change.id, "closed");
   }
+}
+
+export async function syncChangeFromReview(
+  db: import("better-sqlite3").Database,
+  workspaceId: number,
+  fj: Forgejo,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  reviewState: string,
+): Promise<{ id: string; state: ChangeRow["state"] } | null> {
+  const change = getChangeByPr(db, workspaceId, prNumber);
+  if (!change) return null;
+  if (change.state === "merged" || change.state === "closed") return null;
+
+  if (reviewState === "REQUEST_CHANGES") {
+    if (change.state === "review") setChangeState(db, workspaceId, change.id, "changes_requested");
+    return { id: change.id, state: "changes_requested" };
+  }
+  if (reviewState !== "APPROVED" || change.state !== "review") return { id: change.id, state: change.state };
+
+  const bp = await fj.getBranchProtection(owner, repo, "main");
+  const threshold = bp?.required_approvals ?? 1;
+  const counts = await approvalCounts(fj, owner, repo, prNumber);
+  if (counts.approvals >= threshold && counts.rejections === 0) {
+    const mergeErr = await mergeWithRetry(fj, owner, repo, prNumber, owner);
+    if (!mergeErr) {
+      await deleteBranchQuietly(fj, owner, repo, change.branch_name);
+      setChangeState(db, workspaceId, change.id, "merged");
+      return { id: change.id, state: "merged" };
+    }
+    console.warn(`merge failed: ${(mergeErr as Error).message}`);
+  }
+  return { id: change.id, state: "review" };
 }
 
 export { deleteChange };

@@ -14,7 +14,8 @@ through the same HTTP API.
 - **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
   math, `[@id]` cross-references and citations — see [`FORMAT.md`](./FORMAT.md)).
 - **Change workflow** — edits live on `change/<id>` branches, publish to
-  Forgejo pull requests, and end as `merged`, `rejected`, or `abandoned`.
+  Forgejo pull requests, move through `review` and `changes_requested`, and end
+  as `merged` or `closed`.
 - **Review queue** — owners and verifiers review published changes through the
   Cosheaf UI/API while Forgejo remains the durable record.
 - **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the

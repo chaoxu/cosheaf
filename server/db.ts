@@ -93,6 +93,41 @@ function ensureTrigramFts(db: Database.Database): void {
   `);
 }
 
+function ensureChangeStateCheck(db: Database.Database): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'changes'")
+    .get() as { sql: string } | undefined;
+  if (!row) return;
+  const needsMigration =
+    !row.sql.includes("'changes_requested'") || row.sql.includes("'abandoned'") || row.sql.includes("'rejected'");
+  if (!needsMigration) return;
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE changes_new (
+      id TEXT PRIMARY KEY,
+      workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      author_user_id INTEGER NOT NULL REFERENCES users(id),
+      branch_name TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('draft', 'review', 'changes_requested', 'merged', 'closed')),
+      pr_number INTEGER,
+      base_sha TEXT,
+      title TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO changes_new(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title, created_at, updated_at)
+      SELECT id, workspace_id, author_user_id, branch_name,
+             CASE state WHEN 'rejected' THEN 'closed' WHEN 'abandoned' THEN 'closed' ELSE state END,
+             pr_number, base_sha, title, created_at, updated_at
+        FROM changes;
+    DROP TABLE changes;
+    ALTER TABLE changes_new RENAME TO changes;
+    PRAGMA foreign_keys = ON;
+  `);
+  db.exec(readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
+}
+
 export function getDb(config: Config): Database.Database {
   if (dbInstance) return dbInstance;
   const dbPath = path.join(config.dataDir, "db.sqlite");
@@ -101,6 +136,7 @@ export function getDb(config: Config): Database.Database {
   db.pragma("foreign_keys = ON");
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  ensureChangeStateCheck(db);
   ensureTrigramFts(db);
   dbInstance = db;
   return db;

@@ -24,8 +24,9 @@ HTTP API. Keep cosheaf's surface usable without any automation.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
-- **Workflow as trust, not automation.** `draft → review → merged/rejected` is
-  the same whether the proposer is a human or a bot.
+- **Workflow as trust, not automation.** `draft → review → merged` and
+  `review → changes_requested → review` are the same whether the proposer is a
+  human or a bot.
 
 ## Stack
 
@@ -57,7 +58,7 @@ server/
     tokens.ts      # personal API tokens
     workspaces.ts  # list/create workspaces
     files.ts       # tree/file get/put/delete, search, backlinks, documents list
-    changes.ts     # draft changes, publish, review, merge/reject
+    changes.ts     # draft changes, publish, review, request changes, close
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   main.tsx        # React entry
@@ -95,6 +96,12 @@ pnpm test                 # vitest
 pnpm build                # vite build
 ```
 
+## Local Forgejo
+
+Cosheaf's local Forgejo is `http://127.0.0.1:3002` with data/config under
+`/opt/homebrew/var/forgejo`. Do not use the unrelated Gitea instance on
+`http://127.0.0.1:3001` for Cosheaf.
+
 `pnpm dev` and `pnpm server` are separate; `pnpm dev:all` runs both. Vite
 proxies `/api/*` to the server (see `vite.config.ts`).
 
@@ -116,14 +123,18 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 
 ```
 draft ──publish──▶ review ──approve/merge──▶ merged
-                    │
-                    └──request changes/reject──▶ rejected
+                    ▲
+                    └──request changes──▶ changes_requested ──publish──┘
+
+draft/review/changes_requested ──close/discard──▶ closed
 ```
 
 - Draft edits are stored on `change/<id>` branches.
 - Publishing opens or updates a Forgejo pull request.
 - Owners can merge directly; verifiers approve or request changes through the
   same API surface.
+- Requesting changes keeps the pull request and branch open for same-change
+  repair. Closing is the terminal non-merge path.
 - Webhooks reconcile Forgejo PR/review/file state into SQLite and notify open
   browsers over SSE.
 

@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { generateDocId } from "./frontmatter.js";
 
-export type ChangeState = "draft" | "review" | "merged" | "rejected" | "abandoned";
+export type ChangeState = "draft" | "review" | "changes_requested" | "merged" | "closed";
 
 export interface ChangeRow {
   id: string;
@@ -46,6 +46,18 @@ export function listOpenDraftsForUser(
     .all(workspaceId, userId) as ChangeRow[];
 }
 
+export function listWritableForUser(
+  db: Database.Database,
+  workspaceId: number,
+  userId: number,
+): ChangeRow[] {
+  return db
+    .prepare(
+      "SELECT * FROM changes WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'changes_requested') ORDER BY updated_at DESC",
+    )
+    .all(workspaceId, userId) as ChangeRow[];
+}
+
 export function listOpenForUser(
   db: Database.Database,
   workspaceId: number,
@@ -53,7 +65,7 @@ export function listOpenForUser(
 ): ChangeRow[] {
   return db
     .prepare(
-      "SELECT * FROM changes WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'review') ORDER BY updated_at DESC",
+      "SELECT * FROM changes WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'review', 'changes_requested') ORDER BY updated_at DESC",
     )
     .all(workspaceId, userId) as ChangeRow[];
 }

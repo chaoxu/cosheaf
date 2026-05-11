@@ -14,7 +14,7 @@ personal tokens.
 
 ```ts
 type Role = "owner" | "verifier" | "member";
-type ChangeState = "draft" | "review" | "merged" | "rejected" | "abandoned";
+type ChangeState = "draft" | "review" | "changes_requested" | "merged" | "closed";
 
 interface User {
   id: number;
@@ -119,8 +119,9 @@ DELETE /w/:slug/file?path=<path>&change_id=<id>
 → { "ok": true, "change_id": string, "pending": boolean }
 ```
 
-Writes target a draft change branch. If `change_id` is omitted, the server
-creates or reuses the caller's open draft change.
+Writes target the author's `draft` or `changes_requested` change branch. If
+`change_id` is omitted, the server creates or reuses the caller's open draft
+change.
 
 ## Search And Backlinks
 
@@ -171,7 +172,10 @@ DELETE /w/:slug/change/:id
 → { "ok": true }
 ```
 
-Only the change author can abandon a non-terminal change.
+`/changes` is author-facing and returns the caller's `draft`, `review`, and
+`changes_requested` changes. Only the change author can discard a `draft`
+change via DELETE; the branch is removed and the change moves to `closed`. Use
+the review close route to terminate a published change.
 
 ```http
 POST /w/:slug/publish
@@ -189,7 +193,8 @@ interface PublishResult {
 
 Owners may publish directly, which opens/reuses a PR, auto-approves as the
 Forgejo owner to satisfy branch protection, and merges. Members and verifiers
-publish to review.
+publish to review. Publishing a `changes_requested` change reuses the existing
+PR and returns it to `review`.
 
 ## Review
 
@@ -211,12 +216,19 @@ POST /w/:slug/change/:id/approve
 { "comment"?: string | null }
 → DecisionResult
 
-POST /w/:slug/change/:id/reject
+POST /w/:slug/change/:id/request-changes
 { "comment"?: string | null }
 → DecisionResult
 
+POST /w/:slug/change/:id/comment
+{ "comment"?: string | null }
+→ { "ok": true, "change_id": string, "state": ChangeState }
+
+POST /w/:slug/change/:id/close
+→ { "ok": true, "change_id": string, "state": "closed" }
+
 interface DecisionResult {
-  decision: "approve" | "reject";
+  decision: "approve" | "request_changes";
   change_id: string;
   state: ChangeState;
   approvals: number;
@@ -229,15 +241,22 @@ GET /w/:slug/change/:id/approvals
 interface ApprovalRecord {
   verifier_user_id: number;
   username: string;
-  decision: "approve" | "reject";
+  decision: "approve" | "request_changes" | "comment";
   comment: string | null;
   created_at: number;
 }
 ```
 
-Approvals and rejections are Forgejo pull-request reviews. When approvals meet
-the branch-protection threshold and there are no outstanding request-changes
-reviews, the server attempts to merge and marks the change `merged`.
+`/queue` is review-facing and includes only changes currently in `review`.
+
+Approvals and request-changes decisions are Forgejo pull-request reviews.
+`request-changes` moves the change to `changes_requested`, keeps the PR open,
+and keeps the branch for repair. When approvals meet the branch-protection
+threshold and there are no outstanding request-changes reviews, the server
+attempts to merge and marks the change `merged`. `POST /close` (author or
+workspace owner) terminates a non-merged change at any state and sets it to
+`closed`. Request-changes reviews are resolved by a later approval from that
+same verifier; an explicit owner override endpoint is not implemented yet.
 
 ## Settings
 
@@ -261,5 +280,5 @@ GET /w/:slug/events
 
 Server-sent events stream JSON messages. Current event types include file
 changes, file removals, and change lifecycle updates such as
-`change_review`, `change_approved`, `change_merged`, `change_rejected`, and
-`change_abandoned`.
+`change_review`, `change_approved`, `change_changes_requested`,
+`change_commented`, `change_merged`, and `change_closed`.

@@ -32,7 +32,7 @@ export interface Change {
   workspace_id: number;
   author_user_id: number;
   branch_name: string;
-  state: "draft" | "review" | "merged" | "rejected" | "abandoned";
+  state: "draft" | "review" | "changes_requested" | "merged" | "closed";
   pr_number: number | null;
   base_sha: string | null;
   title: string | null;
@@ -53,7 +53,7 @@ export interface QueueEntry {
 export interface ApprovalRecord {
   verifier_user_id: number;
   username: string;
-  decision: "approve" | "reject";
+  decision: "approve" | "request_changes" | "comment";
   comment: string | null;
   created_at: number;
 }
@@ -91,7 +91,7 @@ export interface PublishResult {
 }
 
 export interface DecisionResult {
-  decision: "approve" | "reject";
+  decision: "approve" | "request_changes";
   change_id: string;
   state: Change["state"];
   approvals: number;
@@ -172,7 +172,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
-  abandonChange: (slug: string, change_id: string) =>
+  discardChange: (slug: string, change_id: string) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/change/${encodeURIComponent(change_id)}`, { method: "DELETE" }),
   publish: (slug: string, change_id: string, mode?: "direct" | "review", title?: string) =>
     jsonFetch<PublishResult>(`${w(slug)}/publish`, {
@@ -184,11 +184,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ comment: comment ?? null }),
     }),
-  reject: (slug: string, change_id: string, comment?: string) =>
-    jsonFetch<DecisionResult>(`${w(slug)}/change/${encodeURIComponent(change_id)}/reject`, {
+  requestChanges: (slug: string, change_id: string, comment?: string) =>
+    jsonFetch<DecisionResult>(`${w(slug)}/change/${encodeURIComponent(change_id)}/request-changes`, {
       method: "POST",
       body: JSON.stringify({ comment: comment ?? null }),
     }),
+  comment: (slug: string, change_id: string, comment?: string) =>
+    jsonFetch<{ ok: true; change_id: string; state: Change["state"] }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/comment`,
+      { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
+    ),
+  close: (slug: string, change_id: string) =>
+    jsonFetch<{ ok: true; change_id: string; state: Change["state"] }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/close`,
+      { method: "POST" },
+    ),
   approvals: (slug: string, change_id: string) =>
     jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/approvals`).then((r) => r.approvals),
 

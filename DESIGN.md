@@ -52,23 +52,27 @@ Edits happen on `change/<id>` branches.
 ```
 draft ──publish──▶ review ──approve/merge──▶ merged
                     │
-                    └──request changes/reject──▶ rejected
+                    └──request changes──▶ changes_requested ──publish──▶ review
+
+draft/review/changes_requested ──close/discard──▶ closed
 ```
 
 Authors can keep one or more draft changes open. Publishing creates or reuses a
 Forgejo pull request. Owners may publish directly, which opens the PR,
 auto-approves through the configured Forgejo owner to satisfy branch protection,
-and merges. Members and verifiers publish to review.
+and merges. Members and verifiers publish to review. A request-changes review is
+non-terminal verifier feedback: the PR stays open, the branch is kept, and the
+author repairs the same `change_id` before publishing it back to review.
 
-Rejected, merged, and abandoned changes are terminal. The server deletes the
+Merged and closed changes are terminal. The server deletes the
 change branch on terminal states when Forgejo permits it.
 
 ## Trust Model
 
 Workspace roles:
 
-- `owner`: create/configure workspace, direct publish, approve/reject, merge.
-- `verifier`: author changes and approve/reject reviewed changes.
+- `owner`: create/configure workspace, direct publish, approve, request changes, close, merge.
+- `verifier`: author changes and approve/request changes reviewed changes.
 - `member`: author changes and publish for review.
 
 Review decisions are Forgejo pull-request reviews. SQLite mirrors enough change

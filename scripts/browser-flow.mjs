@@ -2,19 +2,9 @@
 // Creates a unique page through the UI, verifies publish controls appear, and
 // direct-publishes it. Defaults match `pnpm setup:dev`.
 
-import { existsSync } from "node:fs";
-import path from "node:path";
+import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
 
-const candidates = [
-  path.join(process.cwd(), "node_modules/playwright/index.js"),
-  "/Users/chaoxu/Library/pnpm/global/5/node_modules/playwright/index.js",
-];
-const playwrightPath = candidates.find(existsSync);
-if (!playwrightPath) {
-  console.error("playwright not found; install via `pnpm add -g playwright` and `pnpm exec playwright install chromium`");
-  process.exit(1);
-}
-const { chromium } = (await import(playwrightPath)).default;
+const chromium = await loadChromium();
 
 const URL = process.env.URL ?? "http://localhost:5173/";
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-flow.png";
@@ -29,15 +19,7 @@ const page = await context.newPage();
 const consoleMessages = [];
 const pageErrors = [];
 const badResponses = [];
-
-page.on("console", async (msg) => {
-  const args = await Promise.all(msg.args().map((a) => a.jsonValue().catch(() => "[unserializable]")));
-  consoleMessages.push(`[${msg.type()}] ${msg.text()} | ${JSON.stringify(args).slice(0, 400)}`);
-});
-page.on("pageerror", (err) => pageErrors.push(`${err.name}: ${err.message}\n${err.stack ?? ""}`));
-page.on("response", (res) => {
-  if (res.status() >= 400) badResponses.push(`${res.status()} ${res.url()}`);
-});
+attachPageListeners(page, { consoleSink: consoleMessages, errorSink: pageErrors, badResponseSink: badResponses });
 
 async function textOfTestId(id) {
   return page.getByTestId(id).innerText().catch(() => "");
@@ -45,13 +27,7 @@ async function textOfTestId(id) {
 
 try {
   await page.goto(URL, { waitUntil: "networkidle" });
-
-  if (await page.locator("text=username").count() > 0) {
-    const inputs = page.locator("input");
-    await inputs.nth(0).fill(USERNAME);
-    await inputs.nth(1).fill(PASSWORD);
-    await page.locator('button:has-text("Sign in")').click();
-  }
+  await signInIfNeeded(page, USERNAME, PASSWORD);
 
   await page.getByTestId(`workspace-${WORKSPACE_SLUG}`).waitFor({ state: "visible", timeout: 8000 });
   await page.getByTestId(`workspace-${WORKSPACE_SLUG}`).click();

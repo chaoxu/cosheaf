@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
-import { syncChangeFromPr } from "./changes.js";
+import { syncChangeFromPr, syncChangeFromReview } from "./changes.js";
 
 export const webhooks = new Hono<AppEnv>();
 
@@ -126,6 +126,22 @@ webhooks.post("/forgejo", async (c) => {
         sse.publish(ws.slug, { type: "queue" });
       }
     } else if (event === "pull_request_review") {
+      const pr = payload.pull_request as Record<string, unknown> | undefined;
+      const review = payload.review as Record<string, unknown> | undefined;
+      const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
+      const state = String(review?.state ?? "");
+      if (Number.isFinite(number) && state) {
+        const synced = await syncChangeFromReview(db, ws.id, fj, owner, ws.forgejo_repo, number, state);
+        if (synced?.state === "changes_requested") {
+          sse.publish(ws.slug, { type: "change_changes_requested", id: synced.id });
+        } else if (synced?.state === "merged") {
+          sse.publish(ws.slug, { type: "change_merged", id: synced.id });
+        } else if (state === "APPROVED" && synced) {
+          sse.publish(ws.slug, { type: "change_approved", id: synced.id });
+        } else if (state === "COMMENT" && synced) {
+          sse.publish(ws.slug, { type: "change_commented", id: synced.id });
+        }
+      }
       sse.publish(ws.slug, { type: "queue" });
     }
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(

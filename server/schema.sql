@@ -90,13 +90,13 @@ CREATE TABLE IF NOT EXISTS webhook_log (
 
 -- Unified change primitive: replaces working/<user> branches and revision/<id>
 -- branches with a single change/<id> namespace. Lifecycle: draft → review →
--- merged | rejected | abandoned. Branch deleted on terminal states.
+-- changes_requested → review → merged, or closed terminal state.
 CREATE TABLE IF NOT EXISTS changes (
   id TEXT PRIMARY KEY,
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   author_user_id INTEGER NOT NULL REFERENCES users(id),
   branch_name TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('draft', 'review', 'merged', 'rejected', 'abandoned')),
+  state TEXT NOT NULL CHECK (state IN ('draft', 'review', 'changes_requested', 'merged', 'closed')),
   pr_number INTEGER,
   base_sha TEXT,
   title TEXT,

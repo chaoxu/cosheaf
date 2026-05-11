@@ -130,6 +130,10 @@ async function userAdd(username: string): Promise<void> {
   console.log(`created user ${user.username} (id=${user.id}, forgejo=${fj})`);
 }
 
+async function userCreate(username: string, password: string): Promise<void> {
+  await ensureSeedUser(username, password);
+}
+
 async function userPasswd(username: string): Promise<void> {
   const { db } = ctx();
   if (!findUserByUsername(db, username)) {
@@ -300,6 +304,7 @@ function help(): void {
   console.log(`Usage:
   cosheaf seed --user <username> --password <password> --workspace <slug> --workspace-name <name>
   cosheaf user add <username>
+  cosheaf user create <username> <password>   # non-interactive (dev/CI use)
   cosheaf user passwd <username>
   cosheaf user list
   cosheaf user rm <username>
@@ -315,6 +320,7 @@ async function main(): Promise<void> {
 
   if (cmd === "seed") return seed(argv.slice(1));
   if (cmd === "user" && sub === "add" && rest[0]) return userAdd(rest[0]);
+  if (cmd === "user" && sub === "create" && rest[0] && rest[1]) return userCreate(rest[0], rest[1]);
   if (cmd === "user" && sub === "passwd" && rest[0]) return userPasswd(rest[0]);
   if (cmd === "user" && sub === "list") return userList();
   if (cmd === "user" && sub === "rm" && rest[0]) return userRm(rest[0]);

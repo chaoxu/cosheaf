@@ -9,6 +9,7 @@
     "dev:all": "node scripts/dev.mjs",
     "dev:worktree": "node scripts/dev-worktree.mjs",
     "setup:dev": "tsx server/cli.ts seed --user chao --password 123123 --workspace flushing-coin --workspace-name \"Flushing Coin\"",
+    "setup:dev:review": "pnpm setup:dev && tsx server/cli.ts user create vera 123123 && tsx server/cli.ts user create meri 123123 && tsx server/cli.ts workspace member flushing-coin vera verifier && tsx server/cli.ts workspace member flushing-coin meri member",
     "server": "tsx watch server/index.ts",
     "server:start": "tsx server/index.ts",
     "cli": "tsx server/cli.ts",
@@ -37,7 +38,8 @@
     "merge-task": "node scripts/merge-task.mjs",
     "smoke": "node scripts/browser-smoke.mjs",
     "smoke:flow": "node scripts/browser-flow.mjs",
-    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow",
+    "smoke:review": "node scripts/browser-flow-review.mjs",
+    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review",
     "clean": "rm -rf dist",
     "prepare": "lefthook install"
   },

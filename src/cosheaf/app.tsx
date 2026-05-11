@@ -44,17 +44,20 @@ function SidebarTab({
   disabled,
   onClick,
   children,
+  testId,
 }: {
   active: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  testId?: string;
 }): ReactElement {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      data-testid={testId}
       className={cn(
         "px-2 py-1 rounded hover:bg-[var(--cf-hover)] disabled:opacity-40 disabled:hover:bg-transparent",
         active && "bg-[var(--cf-active)] font-medium",
@@ -679,10 +682,13 @@ function ApprovalsPanel({
       )}
       {approvals.length > 0 && (
         <ul className="flex flex-col gap-1">
-          {approvals.map((a) => (
-            <li key={a.verifier_user_id}>
-              <Badge variant={a.decision === "approve" ? "golden" : "rejected"}>
-                {a.decision}
+          {approvals.map((a, idx) => (
+            <li key={`${a.verifier_user_id}-${a.created_at}-${idx}`}>
+              <Badge
+                data-testid={`approval-badge-${a.decision}`}
+                variant={a.decision === "approve" ? "golden" : a.decision === "request_changes" ? "rejected" : "outline"}
+              >
+                {a.decision === "request_changes" ? "changes requested" : a.decision}
               </Badge>{" "}
               <strong>{a.username}</strong>
               {a.comment && <div className={cn("text-xs", muted)}>{a.comment}</div>}
@@ -761,43 +767,53 @@ function WorkspaceView({
   const [reviewComment, setReviewComment] = useState("");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
-  // The active draft change id; set synchronously from each save response.
+  // The active writable change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
   const [currentChangeId, setCurrentChangeId] = useState<string | null>(null);
   const [changesReady, setChangesReady] = useState(false);
-  const readChangeId = reviewingChangeId ?? currentChangeId;
+  const activeChangeId = reviewingChangeId ?? currentChangeId;
   const filesRef = useRef<FileEntry[] | null>(null);
   const openRequestRef = useRef(0);
 
   const reloadTree = useCallback(() => {
     api
-      .tree(workspace.slug, readChangeId ?? undefined)
+      .tree(workspace.slug, activeChangeId ?? undefined)
       .then(setFiles)
       .catch((err: unknown) =>
         setStatus(err instanceof ApiError ? err.message : "Failed to load tree"),
       );
-  }, [workspace.slug, readChangeId]);
+  }, [workspace.slug, activeChangeId]);
 
   useEffect(reloadTree, [reloadTree]);
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
 
-  useEffect(() => {
-    setChangesReady(false);
+  const reloadChanges = useCallback((markReady = false) => {
+    if (markReady) setChangesReady(false);
     api
       .listChanges(workspace.slug)
       .then((changes) => {
-        const drafts = changes.filter((change) => change.state === "draft");
-        setCurrentChangeId(drafts.length === 1 ? (drafts[0]?.id ?? null) : null);
+        const writable = changes.filter((change) => change.state === "draft" || change.state === "changes_requested");
+        setCurrentChangeId(writable.length === 1 ? (writable[0]?.id ?? null) : null);
       })
       .catch(() => undefined)
-      .finally(() => setChangesReady(true));
+      .finally(() => {
+        if (markReady) setChangesReady(true);
+      });
   }, [workspace.slug]);
+
+  useEffect(() => {
+    reloadChanges(true);
+  }, [reloadChanges]);
 
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
+  // Tracks the change_id the currently-open file was last fetched against, so
+  // background refetches (e.g. SSE-driven refreshes) keep hitting the same
+  // branch even after currentChangeId is nulled by publish.
+  const openFileChangeIdRef = useRef<string | null>(null);
   useEffect(() => {
     openPathRef.current = openPath;
   }, [openPath]);
@@ -826,7 +842,7 @@ function WorkspaceView({
             setStatus("file deleted on server");
           } else if (!dirtyRef.current) {
             api
-              .getFile(workspace.slug, event.path)
+              .getFile(workspace.slug, event.path, openFileChangeIdRef.current ?? undefined)
               .then((r) => setContent(r.content))
               .catch(() => undefined);
           }
@@ -838,11 +854,12 @@ function WorkspaceView({
           .queue(workspace.slug)
           .then(setQueue)
           .catch(() => undefined);
+        reloadChanges();
         reloadTree();
       }
     };
     return () => es.close();
-  }, [workspace.slug, reloadTree]);
+  }, [workspace.slug, reloadTree, reloadChanges]);
 
   const loadBacklinks = useCallback(
     (id: string | undefined) => {
@@ -872,6 +889,10 @@ function WorkspaceView({
     [workspace.slug],
   );
 
+  useEffect(() => {
+    loadApprovals(activeChangeId ?? undefined);
+  }, [activeChangeId, loadApprovals]);
+
   const openPathFromSource = useCallback(
     (
       path: string,
@@ -880,7 +901,15 @@ function WorkspaceView({
       if (!options.force && dirtyRef.current && !confirm("Discard unsaved changes?")) return false;
       const requestId = openRequestRef.current + 1;
       openRequestRef.current = requestId;
-      const changeId = "changeId" in options ? (options.changeId ?? undefined) : (readChangeId ?? undefined);
+      // Prefer an explicit option; otherwise the live activeChangeId; otherwise
+      // the change_id this file was last loaded against, so SSE-triggered
+      // re-opens after a publish (which nulls activeChangeId) keep hitting the
+      // same branch instead of 404ing against main.
+      const fallback = path === openPathRef.current ? openFileChangeIdRef.current : null;
+      const changeId =
+        "changeId" in options
+          ? (options.changeId ?? undefined)
+          : (activeChangeId ?? fallback ?? undefined);
       setBusy(true);
       setStatus(null);
       api
@@ -892,6 +921,7 @@ function WorkspaceView({
           setOpenDoc(doc);
           setContent(r.content);
           setDirty(false);
+          openFileChangeIdRef.current = changeId ?? null;
           loadBacklinks(doc?.id);
           loadApprovals(changeId ?? doc?.id);
           setReviewComment("");
@@ -908,7 +938,7 @@ function WorkspaceView({
         });
       return true;
     },
-    [workspace.slug, readChangeId, loadBacklinks, loadApprovals],
+    [workspace.slug, activeChangeId, loadBacklinks, loadApprovals],
   );
 
   const open = useCallback(
@@ -950,16 +980,21 @@ function WorkspaceView({
 
   const save = useCallback(() => {
     if (!openPath) return;
+    if (reviewingChangeId) {
+      setStatus("review mode is read-only");
+      return;
+    }
     setBusy(true);
     setStatus(null);
     api
-      .putFile(workspace.slug, openPath, content)
+      .putFile(workspace.slug, openPath, content, currentChangeId ?? undefined)
       .then((r) => {
         if (r.content !== undefined) setContent(r.content);
         setDirty(false);
         setStatus("saved (unpublished)");
         setOpenDoc(r.meta);
         setCurrentChangeId(r.change_id);
+        openFileChangeIdRef.current = r.change_id;
         loadBacklinks(r.meta.id);
         reloadTree();
       })
@@ -971,7 +1006,7 @@ function WorkspaceView({
         }
       })
       .finally(() => setBusy(false));
-  }, [openPath, content, workspace.slug, reloadTree, loadBacklinks]);
+  }, [openPath, content, workspace.slug, currentChangeId, reviewingChangeId, reloadTree, loadBacklinks]);
 
   const openQueue = useCallback(() => {
     api
@@ -1034,21 +1069,21 @@ function WorkspaceView({
 
   // Decide on the queue's currently-open change.
   const decideChange = useCallback(
-    (decision: "approve" | "reject") => {
+    (decision: "approve" | "request_changes") => {
       const id = reviewingChangeId;
       if (!id) return;
-      const fn = decision === "approve" ? api.approve : api.reject;
+      const fn = decision === "approve" ? api.approve : api.requestChanges;
       const comment = reviewComment.trim() || undefined;
       fn(workspace.slug, id, comment)
         .then((r) => {
-          setStatus(`${decision === "approve" ? "approved" : "rejected"} (state: ${r.state})`);
+          setStatus(`${decision === "approve" ? "approved" : "changes requested"} (state: ${r.state})`);
           setReviewComment("");
           loadApprovals(id);
           api
             .queue(workspace.slug)
             .then(setQueue)
             .catch(() => undefined);
-          if (r.state === "merged" || r.state === "rejected") {
+          if (r.state === "merged" || r.state === "changes_requested" || r.state === "closed") {
             const path = openPathRef.current;
             setReviewingChangeId(null);
             api
@@ -1108,12 +1143,13 @@ function WorkspaceView({
     if (!path.endsWith(".md")) path += ".md";
     setBusy(true);
     api
-      .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`)
+      .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`, currentChangeId ?? undefined)
       .then((r) => {
         setOpenPath(path);
         setContent(r.content ?? `# ${path.replace(/\.md$/, "")}\n`);
         setOpenDoc(r.meta);
         setCurrentChangeId(r.change_id);
+        openFileChangeIdRef.current = r.change_id;
         setStatus("saved (unpublished)");
         setDirty(false);
         setNewPath("");
@@ -1153,7 +1189,11 @@ function WorkspaceView({
             </Button>
           </div>
           <div className={cn("flex items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
-            <SidebarTab active={sidebarView === "files"} onClick={() => setSidebarView("files")}>
+            <SidebarTab
+              active={sidebarView === "files"}
+              onClick={() => setSidebarView("files")}
+              testId="sidebar-tab-files"
+            >
               Files
             </SidebarTab>
             <SidebarTab
@@ -1162,6 +1202,7 @@ function WorkspaceView({
                 setSidebarView("queue");
                 openQueue();
               }}
+              testId="sidebar-tab-queue"
             >
               Queue
             </SidebarTab>
@@ -1375,10 +1416,13 @@ function WorkspaceView({
                   }}
                 />
               )}
-              {reviewingChangeId && approvals.length > 0 && (
+              {activeChangeId && approvals.length > 0 && (
                 <ApprovalsPanel approvals={approvals} />
               )}
             </>
+          )}
+          {activeChangeId && (
+            <span data-testid="active-change-id" hidden>{activeChangeId}</span>
           )}
           <div
             data-statusbar
@@ -1418,12 +1462,14 @@ function WorkspaceView({
                     <>
                       <Input
                         placeholder="comment"
+                        data-testid="review-comment"
                         value={reviewComment}
                         onChange={(e) => setReviewComment(e.target.value)}
                         className="h-5 text-xs max-w-[10rem]"
                       />
                       <button
                         type="button"
+                        data-testid="review-approve"
                         onClick={() => decideChange("approve")}
                         disabled={busy}
                         className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
@@ -1432,18 +1478,19 @@ function WorkspaceView({
                       </button>
                       <button
                         type="button"
-                        onClick={() => decideChange("reject")}
+                        data-testid="review-request-changes"
+                        onClick={() => decideChange("request_changes")}
                         disabled={busy}
                         className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
                       >
-                        Reject
+                        Request changes
                       </button>
                     </>
                   )}
                   <button
                     type="button"
                     onClick={save}
-                    disabled={!dirty || busy}
+                    disabled={!dirty || busy || !!reviewingChangeId}
                     className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
                   >
                     Save

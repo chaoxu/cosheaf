@@ -8,6 +8,7 @@ import {
   createChange,
   getChange,
   listOpenDraftsForUser,
+  listWritableForUser,
   setChangeState,
   type ChangeRow,
 } from "../changes.js";
@@ -23,10 +24,10 @@ function safeRel(p: string | undefined): string | null {
 }
 
 // Resolve which change to write to. Rules:
-// - explicit change_id → that change (must be draft, must belong to user)
-// - no change_id, zero open drafts → lazily create one
-// - no change_id, exactly one open draft → use it
-// - no change_id, multiple open drafts → 400 ambiguous
+// - explicit change_id → that change (must be writable, must belong to user)
+// - no change_id, zero writable changes → lazily create one
+// - no change_id, exactly one writable change → use it
+// - no change_id, multiple writable changes → 400 ambiguous
 type ResolveError = { error: string; code: "not_found" | "forbidden" | "conflict" | "ambiguous" };
 
 const STATUS_FOR_CODE: Record<ResolveError["code"], 400 | 403 | 404 | 409> = {
@@ -84,22 +85,23 @@ async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<Ch
   if (explicit) {
     const change = getChange(db, ws.id, explicit);
     if (!change) return { error: "change not found", code: "not_found" };
-    if (change.state !== "draft") return { error: `change is ${change.state}; cannot write`, code: "conflict" };
+    if (change.state !== "draft" && change.state !== "changes_requested")
+      return { error: `change is ${change.state}; cannot write`, code: "conflict" };
     if (change.author_user_id !== user.id) return { error: "not your change", code: "forbidden" };
     return change;
   }
-  const drafts = listOpenDraftsForUser(db, ws.id, user.id);
-  if (drafts.length === 1) {
-    const draft = drafts[0];
-    if (draft) return draft;
+  const writable = listWritableForUser(db, ws.id, user.id);
+  if (writable.length === 1) {
+    const change = writable[0];
+    if (change) return change;
   }
-  if (drafts.length > 1) {
+  if (writable.length > 1) {
     return {
-      error: `multiple open drafts (${drafts.map((d) => d.id).join(", ")}); pass change_id explicitly`,
+      error: `multiple writable changes (${writable.map((d) => d.id).join(", ")}); pass change_id explicitly`,
       code: "ambiguous",
     };
   }
-  // Zero drafts → create one. Branch is created lazily on first putFile below.
+  // Zero writable changes → create one. Branch is created lazily on first putFile below.
   const fj = c.get("forgejo");
   const owner = c.get("config").forgejoOwner;
   const mainBranch = await fj.getBranch(owner, ws.forgejoRepo, "main");
@@ -121,13 +123,21 @@ async function resolveReadRef(c: import("hono").Context<AppEnv>): Promise<{ ref:
   const explicit = c.req.query("change_id");
   if (explicit) {
     const change = getChange(db, ws.id, explicit);
-    if (change && (change.state === "draft" || change.state === "review")) {
+    if (change && (change.state === "draft" || change.state === "review" || change.state === "changes_requested")) {
       if (change.state === "draft" && change.author_user_id !== user.id) {
+        return { ref: "main", change: null };
+      }
+      if (
+        change.state === "changes_requested" &&
+        change.author_user_id !== user.id &&
+        ws.role !== "owner" &&
+        ws.role !== "verifier"
+      ) {
         return { ref: "main", change: null };
       }
       return { ref: change.branch_name, change };
     }
-    // Fall through to main if change is abandoned/missing.
+    // Fall through to main if change is closed/missing.
   }
   if (!explicit) {
     const drafts = listOpenDraftsForUser(db, ws.id, user.id);

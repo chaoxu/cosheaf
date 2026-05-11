@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
-import type { Forgejo } from "../forgejo.js";
+import { ForgejoError, type Forgejo } from "../forgejo.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import { changes } from "./changes.js";
@@ -86,6 +86,11 @@ function fakeForgejo(): Forgejo {
       if (raw[ref]?.[filePath] === undefined) return null;
       return { name: path.posix.basename(filePath), path: filePath, sha: `sha-${ref}-${filePath}`, size: raw[ref][filePath].length, type: "file" };
     }),
+    putFile: vi.fn(async (_owner: string, _repo: string, opts: { branch: string; path: string; content: string }) => {
+      raw[opts.branch] ??= { ...raw.main };
+      raw[opts.branch][opts.path] = opts.content;
+      return { commit: { sha: `commit-${opts.branch}-${opts.path}` } };
+    }),
     deleteFile: vi.fn(async () => undefined),
     getBranch: vi.fn(async (_owner: string, _repo: string, branch: string) =>
       raw[branch] ? { name: branch, commit: { id: `sha-${branch}` } } : null,
@@ -97,6 +102,7 @@ function fakeForgejo(): Forgejo {
     createPull: vi.fn(async () => ({ number: 5 })),
     createReview: vi.fn(async () => ({ id: 1, body: "", state: "APPROVED", user: { id: 1, login: "cs-user" } })),
     listReviews: vi.fn(async () => []),
+    getBranchProtection: vi.fn(async () => ({ required_approvals: 1 })),
     mergePull: vi.fn(async () => undefined),
     editPull: vi.fn(async () => ({ number: 5 })),
     deleteBranch: vi.fn(async () => undefined),
@@ -139,7 +145,7 @@ describe("route stability boundaries", () => {
     expect(forgejo.deleteFile).not.toHaveBeenCalled();
   });
 
-  it("abandons an empty draft publish instead of leaving a stale draft", async () => {
+  it("closes an empty draft publish instead of leaving a stale draft", async () => {
     const db = freshDb();
     seedWorkspace(db);
     const token = seedUser(db, 1, "alice", "owner");
@@ -156,7 +162,7 @@ describe("route stability boundaries", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'empty'").get()).toEqual({ state: "abandoned" });
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'empty'").get()).toEqual({ state: "closed" });
   });
 
   it("rejects non-owner self-review", async () => {
@@ -178,5 +184,280 @@ describe("route stability boundaries", () => {
 
     expect(res.status).toBe(403);
     expect(forgejo.createReview).not.toHaveBeenCalled();
+  });
+
+  it("request-changes keeps the PR branch open for author repair", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    seedUser(db, 1, "alice", "member");
+    const verifierToken = seedUser(db, 2, "vera", "verifier");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('needs-work', 1, 1, 'change/needs-work', 'review', 9, 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo();
+    const app = appFor(db, forgejo);
+
+    const res = await app.request("/api/v1/w/w/change/needs-work/request-changes", {
+      method: "POST",
+      headers: { authorization: `Bearer ${verifierToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ comment: "please repair" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'needs-work'").get()).toEqual({ state: "changes_requested" });
+    expect(forgejo.createReview).toHaveBeenCalledWith("owner", "repo", 9, {
+      event: "REQUEST_CHANGES",
+      body: "please repair",
+      sudo: "cs-vera",
+    });
+    expect(forgejo.editPull).not.toHaveBeenCalled();
+    expect(forgejo.deleteBranch).not.toHaveBeenCalled();
+  });
+
+  it("retries transient Forgejo merge failures after approval", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    seedUser(db, 1, "alice", "member");
+    const verifierToken = seedUser(db, 2, "vera", "verifier");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('approve-me', 1, 1, 'change/abc', 'review', 5, 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo() as Forgejo & {
+      listReviews: ReturnType<typeof vi.fn>;
+      mergePull: ReturnType<typeof vi.fn>;
+    };
+    forgejo.listReviews.mockResolvedValue([
+      { state: "APPROVED", body: "", user: { login: "cs-vera" }, submitted_at: "2026-05-11T00:00:00Z" },
+    ]);
+    for (let i = 0; i < 3; i++) {
+      forgejo.mergePull.mockRejectedValueOnce(new ForgejoError(405, "Please try again later", "POST", "/merge"));
+    }
+    forgejo.mergePull.mockResolvedValueOnce(undefined);
+    const app = appFor(db, forgejo);
+
+    const res = await app.request("/api/v1/w/w/change/approve-me/approve", {
+      method: "POST",
+      headers: { authorization: `Bearer ${verifierToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ comment: "ok" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(forgejo.mergePull).toHaveBeenCalledTimes(4);
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'approve-me'").get()).toEqual({ state: "merged" });
+    expect(forgejo.deleteBranch).toHaveBeenCalledWith("owner", "repo", "change/abc");
+  });
+
+  it("records comment-only reviews without changing state", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    seedUser(db, 1, "alice", "member");
+    const verifierToken = seedUser(db, 2, "vera", "verifier");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('comment-me', 1, 1, 'change/abc', 'review', 5, 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo() as Forgejo & { listReviews: ReturnType<typeof vi.fn> };
+    forgejo.listReviews.mockResolvedValue([
+      { state: "COMMENT", body: "note only", user: { login: "cs-vera" }, submitted_at: "2026-05-11T00:00:00Z" },
+    ]);
+    const app = appFor(db, forgejo);
+
+    const comment = await app.request("/api/v1/w/w/change/comment-me/comment", {
+      method: "POST",
+      headers: { authorization: `Bearer ${verifierToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ comment: "note only" }),
+    });
+    expect(comment.status).toBe(200);
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'comment-me'").get()).toEqual({ state: "review" });
+    expect(forgejo.createReview).toHaveBeenCalledWith("owner", "repo", 5, {
+      event: "COMMENT",
+      body: "note only",
+      sudo: "cs-vera",
+    });
+
+    const approvals = await app.request("/api/v1/w/w/change/comment-me/approvals", {
+      headers: { authorization: `Bearer ${verifierToken}` },
+    });
+    expect(await approvals.json()).toEqual({
+      approvals: [
+        {
+          verifier_user_id: 2,
+          username: "vera",
+          decision: "comment",
+          comment: "note only",
+          created_at: Date.parse("2026-05-11T00:00:00Z"),
+        },
+      ],
+    });
+  });
+
+  it("lets the author repair a changes_requested branch and publish it back to review", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const authorToken = seedUser(db, 1, "alice", "member");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo();
+    const app = appFor(db, forgejo);
+
+    const write = await app.request("/api/v1/w/w/file?path=a.md&change_id=repair-me", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: "# Repaired\n" }),
+    });
+    expect(write.status).toBe(200);
+    expect(forgejo.putFile).toHaveBeenCalled();
+
+    const publish = await app.request("/api/v1/w/w/publish", {
+      method: "POST",
+      headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ change_id: "repair-me", mode: "review" }),
+    });
+    expect(publish.status).toBe(200);
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'repair-me'").get()).toEqual({ state: "review" });
+    expect(forgejo.createPull).not.toHaveBeenCalled();
+  });
+
+  it("reuses a single changes_requested change for omitted change_id writes", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const authorToken = seedUser(db, 1, "alice", "member");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo();
+    const app = appFor(db, forgejo);
+
+    const write = await app.request("/api/v1/w/w/file?path=a.md", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: "# Repaired implicitly\n" }),
+    });
+
+    expect(write.status).toBe(200);
+    await expect(write.json()).resolves.toMatchObject({ change_id: "repair-me" });
+    expect(forgejo.putFile).toHaveBeenCalledWith("owner", "repo", expect.objectContaining({
+      branch: "change/abc",
+      path: "a.md",
+    }));
+  });
+
+  it("requires explicit change_id when draft and changes_requested writes are ambiguous", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const authorToken = seedUser(db, 1, "alice", "member");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
+        "VALUES ('draft-one', 1, 1, 'change/draft-one', 'draft', 0, 0)",
+    ).run();
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 1, 1)",
+    ).run();
+    const forgejo = fakeForgejo();
+    const app = appFor(db, forgejo);
+
+    const write = await app.request("/api/v1/w/w/file?path=a.md", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: "# Ambiguous\n" }),
+    });
+
+    expect(write.status).toBe(400);
+    await expect(write.json()).resolves.toMatchObject({ code: "ambiguous" });
+    expect(forgejo.putFile).not.toHaveBeenCalled();
+  });
+
+  it("hides changes_requested branch contents from unrelated members", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    seedUser(db, 1, "alice", "member");
+    const bobToken = seedUser(db, 2, "bob", "member");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 0, 0)",
+    ).run();
+    const app = appFor(db, fakeForgejo());
+
+    const res = await app.request("/api/v1/w/w/file?path=a.md&change_id=repair-me", {
+      headers: { authorization: `Bearer ${bobToken}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ content: "# Main\n" });
+  });
+
+  it("does not let verifiers terminally close another author's change", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    seedUser(db, 1, "alice", "member");
+    const verifierToken = seedUser(db, 2, "vera", "verifier");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+        "VALUES ('review-me', 1, 1, 'change/abc', 'review', 5, 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo();
+    const app = appFor(db, forgejo);
+
+    const res = await app.request("/api/v1/w/w/change/review-me/close", {
+      method: "POST",
+      headers: { authorization: `Bearer ${verifierToken}` },
+    });
+
+    expect(res.status).toBe(403);
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'review-me'").get()).toEqual({ state: "review" });
+    expect(forgejo.editPull).not.toHaveBeenCalled();
+    expect(forgejo.deleteBranch).not.toHaveBeenCalled();
+  });
+
+  it("updates an existing PR title/body when publishing again", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const authorToken = seedUser(db, 1, "alice", "member");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, title, created_at, updated_at) " +
+        "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 'old title', 0, 0)",
+    ).run();
+    const forgejo = fakeForgejo();
+    const app = appFor(db, forgejo);
+
+    const publish = await app.request("/api/v1/w/w/publish", {
+      method: "POST",
+      headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ change_id: "repair-me", mode: "review", title: "new title", body: "new body" }),
+    });
+
+    expect(publish.status).toBe(200);
+    expect(forgejo.editPull).toHaveBeenCalledWith("owner", "repo", 5, { title: "new title", body: "new body" }, "cs-alice");
+    expect(db.prepare("SELECT state FROM changes WHERE id = 'repair-me'").get()).toEqual({ state: "review" });
+  });
+
+  it("keeps changes_requested out of the review queue but visible to the author", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const authorToken = seedUser(db, 1, "alice", "member");
+    db.prepare(
+      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, title, created_at, updated_at) " +
+        "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 'Repair me', 0, 0)",
+    ).run();
+    const app = appFor(db, fakeForgejo());
+
+    const queue = await app.request("/api/v1/w/w/queue", {
+      headers: { authorization: `Bearer ${authorToken}` },
+    });
+    expect(queue.status).toBe(200);
+    await expect(queue.json()).resolves.toEqual({ queue: [] });
+
+    const changesRes = await app.request("/api/v1/w/w/changes", {
+      headers: { authorization: `Bearer ${authorToken}` },
+    });
+    expect(changesRes.status).toBe(200);
+    const payload = await changesRes.json() as { changes: Array<{ id: string; state: string }> };
+    expect(payload.changes.map((change) => [change.id, change.state])).toEqual([["repair-me", "changes_requested"]]);
   });
 });
