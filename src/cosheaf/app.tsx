@@ -742,11 +742,7 @@ function WorkspaceView({
   onLogout: () => void;
 }): ReactElement {
   const [files, setFiles] = useState<FileEntry[] | null>(null);
-  // Initial openPath comes from the URL so deep links work.
-  const [openPath, setOpenPath] = useState<string | null>(() => {
-    const r = parseRoute();
-    return r.kind === "workspace" && r.slug === workspace.slug ? r.filePath : null;
-  });
+  const [openPath, setOpenPath] = useState<string | null>(null);
   const [openDoc, setOpenDoc] = useState<FileEntry["doc"] | undefined>(undefined);
   const [content, setContent] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -759,45 +755,46 @@ function WorkspaceView({
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [queue, setQueue] = useState<QueueEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
-
-  // Mirror openPath into the URL (push on user-driven change; replaceState-no-op
-  // when popstate already updated the URL because `navigate` short-circuits when
-  // the target URL matches window.location).
-  useEffect(() => {
-    navigate({ kind: "workspace", slug: workspace.slug, filePath: openPath });
-  }, [openPath, workspace.slug]);
-
-  // popstate within the workspace view: re-derive openPath from the URL.
-  useEffect(() => {
-    const handler = (): void => {
-      const r = parseRoute();
-      if (r.kind === "workspace" && r.slug === workspace.slug) {
-        setOpenPath(r.filePath);
-      }
-    };
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, [workspace.slug]);
   const [sidebarView, setSidebarView] = useState<"files" | "queue" | "outline">("files");
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [reviewComment, setReviewComment] = useState("");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
+  const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
   // The active draft change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
   const [currentChangeId, setCurrentChangeId] = useState<string | null>(null);
+  const [changesReady, setChangesReady] = useState(false);
+  const readChangeId = reviewingChangeId ?? currentChangeId;
+  const filesRef = useRef<FileEntry[] | null>(null);
+  const openRequestRef = useRef(0);
 
   const reloadTree = useCallback(() => {
     api
-      .tree(workspace.slug)
+      .tree(workspace.slug, readChangeId ?? undefined)
       .then(setFiles)
       .catch((err: unknown) =>
         setStatus(err instanceof ApiError ? err.message : "Failed to load tree"),
       );
-  }, [workspace.slug]);
+  }, [workspace.slug, readChangeId]);
 
   useEffect(reloadTree, [reloadTree]);
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  useEffect(() => {
+    setChangesReady(false);
+    api
+      .listChanges(workspace.slug)
+      .then((changes) => {
+        const drafts = changes.filter((change) => change.state === "draft");
+        setCurrentChangeId(drafts.length === 1 ? (drafts[0]?.id ?? null) : null);
+      })
+      .catch(() => undefined)
+      .finally(() => setChangesReady(true));
+  }, [workspace.slug]);
 
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
@@ -834,13 +831,14 @@ function WorkspaceView({
               .catch(() => undefined);
           }
         }
-      } else if (event.type === "queue") {
+      } else if (event.type === "queue" || event.type.startsWith("change_")) {
         // PR opened/merged/closed/reviewed: refresh the queue list so any
         // open queue tab updates without a manual click.
         api
           .queue(workspace.slug)
           .then(setQueue)
           .catch(() => undefined);
+        reloadTree();
       }
     };
     return () => es.close();
@@ -874,29 +872,81 @@ function WorkspaceView({
     [workspace.slug],
   );
 
-  const open = useCallback(
-    (entry: FileEntry) => {
-      if (dirty && !confirm("Discard unsaved changes?")) return;
+  const openPathFromSource = useCallback(
+    (
+      path: string,
+      options: { doc?: FileEntry["doc"]; changeId?: string | null; push?: boolean; force?: boolean } = {},
+    ) => {
+      if (!options.force && dirtyRef.current && !confirm("Discard unsaved changes?")) return false;
+      const requestId = openRequestRef.current + 1;
+      openRequestRef.current = requestId;
+      const changeId = "changeId" in options ? (options.changeId ?? undefined) : (readChangeId ?? undefined);
       setBusy(true);
       setStatus(null);
       api
-        .getFile(workspace.slug, entry.path)
+        .getFile(workspace.slug, path, changeId)
         .then((r) => {
-          setOpenPath(entry.path);
-          setOpenDoc(entry.doc);
+          if (openRequestRef.current !== requestId) return;
+          const doc = options.doc ?? filesRef.current?.find((f) => f.path === path)?.doc;
+          setOpenPath(path);
+          setOpenDoc(doc);
           setContent(r.content);
           setDirty(false);
-          loadBacklinks(entry.doc?.id);
-          loadApprovals(entry.doc?.id);
+          loadBacklinks(doc?.id);
+          loadApprovals(changeId ?? doc?.id);
           setReviewComment("");
+          if (options.push !== false) {
+            navigate({ kind: "workspace", slug: workspace.slug, filePath: path });
+          }
         })
-        .catch((err: unknown) =>
-          setStatus(err instanceof ApiError ? err.message : "Failed to open"),
-        )
-        .finally(() => setBusy(false));
+        .catch((err: unknown) => {
+          if (openRequestRef.current !== requestId) return;
+          setStatus(err instanceof ApiError ? err.message : "Failed to open");
+        })
+        .finally(() => {
+          if (openRequestRef.current === requestId) setBusy(false);
+        });
+      return true;
     },
-    [dirty, workspace.slug, loadBacklinks, loadApprovals],
+    [workspace.slug, readChangeId, loadBacklinks, loadApprovals],
   );
+
+  const open = useCallback(
+    (entry: FileEntry) => {
+      openPathFromSource(entry.path, { doc: entry.doc });
+    },
+    [openPathFromSource],
+  );
+
+  useEffect(() => {
+    if (!changesReady) return;
+    const r = parseRoute();
+    if (r.kind === "workspace" && r.slug === workspace.slug && r.filePath) {
+      openPathFromSource(r.filePath, { push: false, force: true });
+    }
+  }, [changesReady, workspace.slug, openPathFromSource]);
+
+  useEffect(() => {
+    const handler = (): void => {
+      const r = parseRoute();
+      if (r.kind !== "workspace" || r.slug !== workspace.slug) return;
+      if (!r.filePath) {
+        if (dirtyRef.current && !confirm("Discard unsaved changes?")) {
+          navigate({ kind: "workspace", slug: workspace.slug, filePath: openPathRef.current }, "replace");
+          return;
+        }
+        setOpenPath(null);
+        setOpenDoc(undefined);
+        setContent("");
+        setDirty(false);
+        return;
+      }
+      const opened = openPathFromSource(r.filePath, { push: false });
+      if (!opened) navigate({ kind: "workspace", slug: workspace.slug, filePath: openPathRef.current }, "replace");
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [workspace.slug, openPathFromSource]);
 
   const save = useCallback(() => {
     if (!openPath) return;
@@ -930,6 +980,27 @@ function WorkspaceView({
       .catch(() => setQueue([]));
   }, [workspace.slug]);
 
+  const reviewChange = useCallback(
+    (entry: QueueEntry) => {
+      setReviewingChangeId(entry.id);
+      setCurrentChangeId(null);
+      setSidebarView("files");
+      setStatus(`reviewing ${entry.title}`);
+      api
+        .tree(workspace.slug, entry.id)
+        .then((nextFiles) => {
+          setFiles(nextFiles);
+          const first = nextFiles[0];
+          if (first) openPathFromSource(first.path, { doc: first.doc, changeId: entry.id });
+        })
+        .catch((err: unknown) =>
+          setStatus(err instanceof ApiError ? err.message : "Failed to load review"),
+        );
+      loadApprovals(entry.id);
+    },
+    [workspace.slug, openPathFromSource, loadApprovals],
+  );
+
   const publish = useCallback(
     (mode?: "direct" | "review") => {
       if (!currentChangeId) {
@@ -943,19 +1014,25 @@ function WorkspaceView({
         .then((r) => {
           setStatus(r.message ?? (r.mode === "review" ? "sent for review" : "published"));
           setCurrentChangeId(null);
-          reloadTree();
+          if (r.mode === "direct") setReviewingChangeId(null);
+          api
+            .queue(workspace.slug)
+            .then(setQueue)
+            .catch(() => undefined);
+          api
+            .tree(workspace.slug)
+            .then(setFiles)
+            .catch(() => undefined);
         })
         .catch((err: unknown) =>
           setStatus(err instanceof ApiError ? err.message : "Publish failed"),
         )
         .finally(() => setBusy(false));
     },
-    [workspace.slug, currentChangeId, reloadTree],
+    [workspace.slug, currentChangeId],
   );
 
-  // Decide on the queue's currently-open change. Approvals UI only shows when
-  // the user is viewing a change in `review` state, looked up by the queue.
-  const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
+  // Decide on the queue's currently-open change.
   const decideChange = useCallback(
     (decision: "approve" | "reject") => {
       const id = reviewingChangeId;
@@ -964,17 +1041,43 @@ function WorkspaceView({
       const comment = reviewComment.trim() || undefined;
       fn(workspace.slug, id, comment)
         .then((r) => {
-          setStatus(`${decision}d (state: ${r.state})`);
+          setStatus(`${decision === "approve" ? "approved" : "rejected"} (state: ${r.state})`);
           setReviewComment("");
           loadApprovals(id);
-          reloadTree();
-          if (r.state === "merged" || r.state === "rejected") setReviewingChangeId(null);
+          api
+            .queue(workspace.slug)
+            .then(setQueue)
+            .catch(() => undefined);
+          if (r.state === "merged" || r.state === "rejected") {
+            const path = openPathRef.current;
+            setReviewingChangeId(null);
+            api
+              .tree(workspace.slug)
+              .then((nextFiles) => {
+                setFiles(nextFiles);
+                if (!path) return;
+                const entry = nextFiles.find((file) => file.path === path);
+                api
+                  .getFile(workspace.slug, path)
+                  .then((file) => {
+                    setOpenDoc(entry?.doc);
+                    setContent(file.content);
+                    setDirty(false);
+                    loadBacklinks(entry?.doc?.id);
+                    loadApprovals(entry?.doc?.id);
+                  })
+                  .catch(() => undefined);
+              })
+              .catch(() => undefined);
+          } else {
+            reloadTree();
+          }
         })
         .catch((err: unknown) =>
           setStatus(err instanceof ApiError ? err.message : `${decision} failed`),
         );
     },
-    [reviewingChangeId, workspace.slug, reloadTree, reviewComment, loadApprovals],
+    [reviewingChangeId, workspace.slug, reloadTree, reviewComment, loadApprovals, loadBacklinks],
   );
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1009,9 +1112,13 @@ function WorkspaceView({
       .then((r) => {
         setOpenPath(path);
         setContent(r.content ?? `# ${path.replace(/\.md$/, "")}\n`);
+        setOpenDoc(r.meta);
+        setCurrentChangeId(r.change_id);
+        setStatus("saved (unpublished)");
         setDirty(false);
         setNewPath("");
         setCreating(false);
+        navigate({ kind: "workspace", slug: workspace.slug, filePath: path });
         reloadTree();
       })
       .catch((err: unknown) =>
@@ -1086,7 +1193,8 @@ function WorkspaceView({
                 {(queue ?? []).map((entry) => (
                   <li key={entry.id}>
                     <FileRow
-                      onClick={() => setReviewingChangeId(entry.id)}
+                      onClick={() => reviewChange(entry)}
+                      testId={`queue-change-${entry.id}`}
                     >
                       <strong>{entry.title}</strong>
                       <span className={cn("text-xs", muted)}>
@@ -1144,6 +1252,7 @@ function WorkspaceView({
                           onClick={() => {
                             const entry = files?.find((f) => f.path === r.path);
                             if (entry) open(entry);
+                            else openPathFromSource(r.path);
                           }}
                         >
                           <strong>{r.title ?? r.path}</strong>
@@ -1171,6 +1280,7 @@ function WorkspaceView({
                     <Button
                       variant="ghost"
                       size="icon"
+                      data-testid="new-file-toggle"
                       onClick={() => setCreating((v) => !v)}
                       aria-label={creating ? "Cancel" : "New file"}
                     >
@@ -1181,6 +1291,7 @@ function WorkspaceView({
                     <form onSubmit={create} className="flex gap-2 px-2 pb-2">
                       <Input
                         placeholder="path/to/note.md"
+                        data-testid="new-file-path"
                         value={newPath}
                         onChange={(e) => setNewPath(e.target.value)}
                         autoFocus
@@ -1260,6 +1371,7 @@ function WorkspaceView({
                   onPick={(srcPath) => {
                     const entry = files?.find((f) => f.path === srcPath);
                     if (entry) open(entry);
+                    else openPathFromSource(srcPath);
                   }}
                 />
               )}
@@ -1341,6 +1453,7 @@ function WorkspaceView({
                       {workspace.role === "owner" && (
                         <button
                           type="button"
+                          data-testid="publish-direct"
                           onClick={() => publish("direct")}
                           disabled={busy}
                           title="Squash-merge your draft into main (⇧⌘P)"
@@ -1351,6 +1464,7 @@ function WorkspaceView({
                       )}
                       <button
                         type="button"
+                        data-testid="publish-review"
                         onClick={() => publish("review")}
                         disabled={busy}
                         title="Open a PR for review"

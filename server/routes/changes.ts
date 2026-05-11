@@ -130,7 +130,10 @@ changes.post("/:slug/publish", async (c) => {
   // Ensure the branch exists (it might not if the user created a change via
   // POST /change but never saved anything).
   const branchExists = await fj.getBranch(owner, ws.forgejoRepo, change.branch_name);
-  if (!branchExists) return c.json({ ok: true, message: "nothing to publish (no commits)" });
+  if (!branchExists) {
+    setChangeState(c.get("db"), ws.id, change.id, "abandoned");
+    return c.json({ ok: true, message: "nothing to publish (no commits)" });
+  }
 
   // Open or reuse a PR.
   let prNumber = change.pr_number;
@@ -199,6 +202,8 @@ async function decide(
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.state !== "review" || !change.pr_number)
     return c.json({ error: "change is not in review", code: "conflict" }, 409);
+  if (change.author_user_id === c.get("user").id)
+    return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
   const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
   const fj = c.get("forgejo");

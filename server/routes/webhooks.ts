@@ -59,10 +59,6 @@ webhooks.post("/forgejo", async (c) => {
   const db = c.get("db");
   const exists = db.prepare("SELECT 1 FROM webhook_log WHERE delivery_id = ?").get(deliveryId) as unknown;
   if (exists) return c.json({ ok: true, dedup: true });
-  db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
-    deliveryId, Date.now(), event,
-  );
-
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(raw) as Record<string, unknown>;
@@ -71,13 +67,24 @@ webhooks.post("/forgejo", async (c) => {
   }
   const repoFullName = (payload.repository as { full_name?: string } | undefined)?.full_name ?? "";
   const ws = workspaceForRepo(db, repoFullName);
-  if (!ws) return c.json({ ok: true, ignored: "unknown_repo" });
+  if (!ws) {
+    db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
+      deliveryId, Date.now(), event,
+    );
+    return c.json({ ok: true, ignored: "unknown_repo" });
+  }
 
   const fj = c.get("forgejo");
   const owner = config.forgejoOwner;
   const sse = c.get("sse");
 
+  let deduped = false;
   await serializeWorkspace(ws.id, async () => {
+    const alreadyLogged = db.prepare("SELECT 1 FROM webhook_log WHERE delivery_id = ?").get(deliveryId) as unknown;
+    if (alreadyLogged) {
+      deduped = true;
+      return;
+    }
     if (event === "push") {
       const ref = payload.ref as string | undefined;
       if (ref === "refs/heads/main") {
@@ -92,14 +99,18 @@ webhooks.post("/forgejo", async (c) => {
         for (const path of removed) {
           if (path.endsWith(".md")) deletePage(db, ws.id, path);
         }
+        const failures: string[] = [];
         for (const path of touched) {
           if (!path.endsWith(".md")) continue;
           try {
             const body = await fj.getRawFile(owner, ws.forgejo_repo, "main", path);
             indexPage(db, { workspaceId: ws.id, filePath: path, bodyText: body });
           } catch (err) {
-            console.warn(`reindex ${path} failed: ${(err as Error).message}`);
+            failures.push(`${path}: ${(err as Error).message}`);
           }
+        }
+        if (failures.length > 0) {
+          throw new Error(`reindex failed: ${failures.join("; ")}`);
         }
         // Per-path events let the frontend reload only the open file when needed.
         for (const path of touched) sse.publish(ws.slug, { type: "change", path });
@@ -117,7 +128,11 @@ webhooks.post("/forgejo", async (c) => {
     } else if (event === "pull_request_review") {
       sse.publish(ws.slug, { type: "queue" });
     }
+    db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
+      deliveryId, Date.now(), event,
+    );
   });
+  if (deduped) return c.json({ ok: true, dedup: true });
   // issues/comments are not surfaced to the UI yet — drop them.
 
   return c.json({ ok: true });

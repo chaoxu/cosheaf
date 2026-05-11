@@ -72,6 +72,7 @@ pnpm dev              # Vite only
 pnpm build            # Vite production build
 pnpm preview          # Serve the built bundle on 0.0.0.0
 pnpm test             # vitest run
+pnpm check:stability  # unit/API tests plus browser open/create/publish flows
 pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```

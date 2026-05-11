@@ -47,6 +47,18 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   const title = explicitTitle ?? extractTitle(parsed.body);
 
   const commit = db.transaction(() => {
+    const stalePath = db
+      .prepare(
+        "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page' AND forgejo_id = ? AND cosheaf_id != ?",
+      )
+      .get(p.workspaceId, p.filePath, cosheafId) as { cosheaf_id: string } | undefined;
+    if (stalePath) {
+      db.prepare("DELETE FROM notes_fts WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
+      db.prepare("DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
+      db.prepare("DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
+      db.prepare("DELETE FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
+    }
+
     const exists = db.prepare("SELECT 1 FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?").get(p.workspaceId, cosheafId);
     if (exists) {
       db.prepare("UPDATE doc_map SET forgejo_id = ?, title = ? WHERE workspace_id = ? AND cosheaf_id = ?")

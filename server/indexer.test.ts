@@ -62,6 +62,48 @@ describe("indexPage", () => {
     expect(r.cosheafId).toBe("abcd1234");
   });
 
+  it("repairs a path row when frontmatter id changes on the same file", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceId: 1,
+      filePath: "page.md",
+      bodyText: "---\nid: one\n---\n# One\n",
+    });
+    indexPage(db, {
+      workspaceId: 1,
+      filePath: "page.md",
+      bodyText: "---\nid: two\n---\n# Two\n",
+    });
+
+    const rows = db
+      .prepare("SELECT cosheaf_id, forgejo_id FROM doc_map WHERE workspace_id = 1")
+      .all() as Array<{ cosheaf_id: string; forgejo_id: string }>;
+    expect(rows).toEqual([{ cosheaf_id: "two", forgejo_id: "page.md" }]);
+  });
+
+  it("generates a fresh id when another path already owns an explicit id", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceId: 1,
+      filePath: "a.md",
+      bodyText: "---\nid: same\n---\n# A\n",
+    });
+    const second = indexPage(db, {
+      workspaceId: 1,
+      filePath: "b.md",
+      bodyText: "---\nid: same\n---\n# B\n",
+    });
+
+    expect(second.cosheafId).not.toBe("same");
+    const rows = db
+      .prepare("SELECT cosheaf_id, forgejo_id FROM doc_map WHERE workspace_id = 1 ORDER BY forgejo_id")
+      .all() as Array<{ cosheaf_id: string; forgejo_id: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ cosheaf_id: "same", forgejo_id: "a.md" });
+    expect(rows[1]?.forgejo_id).toBe("b.md");
+    expect(rows[1]?.cosheaf_id).toBe(second.cosheafId);
+  });
+
   it("populates FTS, backlinks, and tags on insert", () => {
     const db = freshDb();
     indexPage(db, {

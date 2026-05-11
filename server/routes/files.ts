@@ -121,7 +121,12 @@ async function resolveReadRef(c: import("hono").Context<AppEnv>): Promise<{ ref:
   const explicit = c.req.query("change_id");
   if (explicit) {
     const change = getChange(db, ws.id, explicit);
-    if (change && change.state !== "abandoned") return { ref: change.branch_name, change };
+    if (change && (change.state === "draft" || change.state === "review")) {
+      if (change.state === "draft" && change.author_user_id !== user.id) {
+        return { ref: "main", change: null };
+      }
+      return { ref: change.branch_name, change };
+    }
     // Fall through to main if change is abandoned/missing.
   }
   if (!explicit) {
@@ -268,7 +273,8 @@ files.put("/:slug/file", async (c) => {
 
 files.delete("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
-  if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
+  if (!rel || !rel.endsWith(".md"))
+    return c.json({ error: "invalid path", code: "validation" }, 400);
   const resolved = await resolveWriteChange(c);
   if ("error" in resolved) return c.json(resolved, STATUS_FOR_CODE[resolved.code]);
   const change = resolved;

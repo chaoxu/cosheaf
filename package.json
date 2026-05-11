@@ -36,6 +36,8 @@
     "issue": "node scripts/issue.mjs",
     "merge-task": "node scripts/merge-task.mjs",
     "smoke": "node scripts/browser-smoke.mjs",
+    "smoke:flow": "node scripts/browser-flow.mjs",
+    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow",
     "clean": "rm -rf dist",
     "prepare": "lefthook install"
   },
