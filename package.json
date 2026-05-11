@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
     "dev:worktree": "node scripts/dev-worktree.mjs",
+    "setup:dev": "tsx server/cli.ts seed --user chao --password 123123 --workspace flushing-coin --workspace-name \"Flushing Coin\"",
     "server": "tsx watch server/index.ts",
     "server:start": "tsx server/index.ts",
     "cli": "tsx server/cli.ts",
@@ -34,6 +35,7 @@
     "check:merge": "pnpm check:static && pnpm check:unit",
     "issue": "node scripts/issue.mjs",
     "merge-task": "node scripts/merge-task.mjs",
+    "smoke": "node scripts/browser-smoke.mjs",
     "clean": "rm -rf dist",
     "prepare": "lefthook install"
   },

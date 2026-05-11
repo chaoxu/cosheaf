@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { getDb, loadConfig } from "./db.js";
+import { indexPage } from "./indexer.js";
 import {
   createUser,
   ensureForgejoProxy,
@@ -8,7 +9,19 @@ import {
   hashPassword,
   setUserPassword,
 } from "./users.js";
-import { Forgejo } from "./forgejo.js";
+import { Forgejo, ForgejoError } from "./forgejo.js";
+
+interface WorkspaceRow {
+  id: number;
+  forgejo_repo: string;
+}
+
+interface SeedOptions {
+  user: string;
+  password: string;
+  workspace: string;
+  workspaceName: string;
+}
 
 async function readPassword(prompt: string): Promise<string> {
   // For non-TTY stdin (piped input like `echo pw | cli`), readline echoes
@@ -62,6 +75,45 @@ function ctx() {
   return { config, db, forgejo };
 }
 
+function valueFlag(args: string[], flag: string): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === flag) {
+      const value = args[i + 1];
+      return value && !value.startsWith("-") ? value : undefined;
+    }
+    if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+function parseSeedOptions(args: string[]): SeedOptions {
+  const user = valueFlag(args, "--user");
+  const password = valueFlag(args, "--password");
+  const workspace = valueFlag(args, "--workspace");
+  const workspaceName = valueFlag(args, "--workspace-name") ?? workspace;
+  const missing = [
+    ["--user", user],
+    ["--password", password],
+    ["--workspace", workspace],
+    ["--workspace-name", workspaceName],
+  ]
+    .filter(([, value]) => !value)
+    .map(([flag]) => flag);
+  if (missing.length > 0) {
+    throw new Error(`seed requires ${missing.join(", ")}`);
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(workspace ?? "")) {
+    throw new Error("workspace must match /^[a-z0-9][a-z0-9-]*$/");
+  }
+  return {
+    user: user as string,
+    password: password as string,
+    workspace: workspace as string,
+    workspaceName: workspaceName as string,
+  };
+}
+
 async function userAdd(username: string): Promise<void> {
   const { db, forgejo } = ctx();
   if (findUserByUsername(db, username)) {
@@ -93,6 +145,156 @@ async function userPasswd(username: string): Promise<void> {
   const hash = await hashPassword(password);
   setUserPassword(db, username, hash);
   console.log(`updated password for ${username}`);
+}
+
+async function ensureSeedUser(username: string, password: string): Promise<{ id: number; username: string; forgejo_username: string | null }> {
+  const { db, forgejo } = ctx();
+  const passwordHash = await hashPassword(password);
+  const existing = findUserByUsername(db, username);
+  if (existing) {
+    setUserPassword(db, username, passwordHash);
+    const fj = await ensureForgejoProxy(db, forgejo, existing);
+    console.log(`updated user ${username} (forgejo=${fj})`);
+    return findUserByUsername(db, username) ?? existing;
+  }
+  const user = createUser(db, username, passwordHash);
+  const fj = await ensureForgejoProxy(db, forgejo, user);
+  console.log(`created user ${username} (id=${user.id}, forgejo=${fj})`);
+  return findUserByUsername(db, username) ?? user;
+}
+
+async function ensureWorkspaceSeed(options: SeedOptions, user: { id: number; username: string; forgejo_username: string | null }): Promise<WorkspaceRow> {
+  const { db, forgejo, config } = ctx();
+  const owner = config.forgejoOwner;
+  const repoName = options.workspace;
+  const fjUser = await ensureForgejoProxy(db, forgejo, user);
+
+  const existing = db
+    .prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?")
+    .get(options.workspace) as WorkspaceRow | undefined;
+  let ws = existing;
+  const repo = await forgejo.getRepo(owner, repoName);
+  if (!repo) {
+    await forgejo.createUserRepo(
+      {
+        name: repoName,
+        description: options.workspaceName,
+        private: true,
+        auto_init: true,
+        default_branch: "main",
+      },
+      owner,
+    );
+    console.log(`created Forgejo repo ${owner}/${repoName}`);
+  }
+  if (!ws) {
+    ws = db
+      .prepare(
+        "INSERT INTO workspaces (slug, name, forgejo_repo, created_at) VALUES (?, ?, ?, ?) RETURNING id, forgejo_repo",
+      )
+      .get(options.workspace, options.workspaceName, repoName, Date.now()) as WorkspaceRow;
+    console.log(`created workspace ${options.workspace}`);
+  } else {
+    db.prepare("UPDATE workspaces SET name = ?, forgejo_repo = ? WHERE id = ?")
+      .run(options.workspaceName, repoName, ws.id);
+    console.log(`updated workspace ${options.workspace}`);
+  }
+
+  db.prepare(
+    "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner') " +
+      "ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = 'owner'",
+  ).run(ws.id, user.id);
+
+  try {
+    await forgejo.addCollaborator(owner, repoName, fjUser, "write");
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 409)) throw err;
+  }
+
+  try {
+    const existingProtection = await forgejo.getBranchProtection(owner, repoName, "main");
+    if (!existingProtection) {
+      await forgejo.createBranchProtection(owner, repoName, {
+        branch_name: "main",
+        required_approvals: 1,
+        push_whitelist_usernames: [fjUser],
+      });
+    } else {
+      await forgejo.patchBranchProtectionPushWhitelist(owner, repoName, "main", [fjUser]);
+    }
+  } catch (err) {
+    console.warn(`branch protection setup failed: ${(err as Error).message}`);
+  }
+
+  try {
+    const hooks = await forgejo.listRepoHooks(owner, repoName);
+    const hasOurHook = hooks.some((h) => Array.isArray(h.events) && h.events.includes("push"));
+    if (!hasOurHook) {
+      await forgejo.createRepoHook(
+        owner,
+        repoName,
+        config.webhookUrl,
+        config.webhookSecret,
+        ["push", "pull_request", "pull_request_review", "pull_request_comment", "issues", "issue_comment"],
+      );
+    }
+  } catch (err) {
+    console.warn(`webhook setup failed: ${(err as Error).message}`);
+  }
+
+  return ws;
+}
+
+async function seed(args: string[]): Promise<void> {
+  const options = parseSeedOptions(args);
+  const user = await ensureSeedUser(options.user, options.password);
+  const ws = await ensureWorkspaceSeed(options, user);
+  const { config, db, forgejo } = ctx();
+  const fjUser = await ensureForgejoProxy(db, forgejo, user);
+  const owner = config.forgejoOwner;
+  const repoName = options.workspace;
+
+  const files = [
+    {
+      path: ".gitattributes",
+      content: "*.md text eol=lf -text\n",
+      message: "chore: lock byte-exactness for .md",
+    },
+    {
+      path: "hello.md",
+      content: [
+        "---",
+        "id: hello",
+        "title: Hello",
+        "---",
+        "# Hello",
+        "",
+        `This is the default development page for ${options.workspaceName}.`,
+        "",
+      ].join("\n"),
+      message: "docs: add development hello page",
+    },
+  ];
+
+  for (const file of files) {
+    const meta = await forgejo.getFileMeta(owner, repoName, "main", file.path);
+    if (!meta) {
+      await forgejo.putFile(owner, repoName, {
+        branch: "main",
+        path: file.path,
+        content: file.content,
+        message: file.message,
+        sudo: fjUser,
+      });
+      console.log(`created ${file.path}`);
+    }
+    if (file.path.endsWith(".md")) {
+      const body = meta ? await forgejo.getRawFile(owner, repoName, "main", file.path) : file.content;
+      indexPage(db, { workspaceId: ws.id, filePath: file.path, bodyText: body });
+    }
+  }
+
+  console.log(`seeded dev workspace: user=${options.user} workspace=${options.workspace}`);
 }
 
 function userList(): void {
@@ -171,6 +373,7 @@ async function workspaceMember(slug: string, username: string, role: "owner" | "
 
 function help(): void {
   console.log(`Usage:
+  cosheaf seed --user <username> --password <password> --workspace <slug> --workspace-name <name>
   cosheaf user add <username>
   cosheaf user passwd <username>
   cosheaf user list
@@ -184,6 +387,7 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const [cmd, sub, ...rest] = argv;
 
+  if (cmd === "seed") return seed(argv.slice(1));
   if (cmd === "user" && sub === "add" && rest[0]) return userAdd(rest[0]);
   if (cmd === "user" && sub === "passwd" && rest[0]) return userPasswd(rest[0]);
   if (cmd === "user" && sub === "list") return userList();

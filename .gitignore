@@ -4,6 +4,7 @@ dist-server/
 .vite/
 data/
 .DS_Store
+.env.dev
 *.tsbuildinfo
 .worktrees/
 .claude/state/

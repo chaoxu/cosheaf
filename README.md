@@ -34,13 +34,16 @@ through the same HTTP API.
 
 ```bash
 pnpm install
-pnpm cli seed --user me --password <pw> --workspace notes --workspace-name Notes
+cp .env.example .env.dev
+# edit .env.dev with COSHEAF_FORGEJO_TOKEN
+pnpm setup:dev
 pnpm dev:all
 # → http://localhost:5173
 ```
 
 `dev:all` runs the API server (`:3030`) and Vite (`:5173`) together with
-prefixed logs. Vite proxies `/api/*` to the server.
+prefixed logs and prints the app/API URLs on startup. Vite proxies `/api/*`
+to the server.
 
 ## Stack
 
@@ -68,6 +71,8 @@ DESIGN.md      Product philosophy and trust model
 
 ```bash
 pnpm dev:all          # API + Vite together (recommended)
+pnpm setup:dev        # Seed chao / Flushing Coin / Hello for local testing
+pnpm smoke            # Headless browser smoke test against the dev fixture
 pnpm server           # API only (port 3030)
 pnpm dev              # Vite only
 pnpm build            # Vite production build
@@ -76,6 +81,20 @@ pnpm test             # vitest run
 pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```
+
+## Dev workflow helpers
+
+```bash
+pnpm dev:worktree -- <name> [--base origin/main --fetch]
+pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
+pnpm issue -- mine
+pnpm issue -- verify-close <number> --commit <sha> --verify "pnpm test"
+```
+
+`dev:worktree` creates an isolated Git worktree under `.worktrees/` and links
+`node_modules` when available. `merge-task` prints the fetch/rebase/check/merge
+sequence for integrating worker branches. `issue` wraps the Forgejo `tea`
+issue commands with the repo defaults used by this project.
 
 See [AGENTS.md](./AGENTS.md) for full conventions and debug helpers.
 

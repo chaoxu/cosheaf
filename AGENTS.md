@@ -75,12 +75,18 @@ data/             # default COSHEAF_DATA_DIR; db.sqlite + workspaces/<slug>/...
 
 ```bash
 pnpm install
+cp .env.example .env.dev
+pnpm setup:dev              # seed local chao / Flushing Coin / Hello fixture
 pnpm dev                  # Vite dev server (frontend) on :5173
-pnpm server               # tsx watch on server/index.ts (port 3000 by default)
+pnpm server               # tsx watch on server/index.ts (port 3030 by default)
+pnpm dev:all              # API + Vite together with URL banner
+pnpm smoke                # headless browser smoke test; defaults to setup:dev fixture
+pnpm dev:worktree -- <name> [--base origin/main --fetch]
+pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
+pnpm issue -- mine
 pnpm cli user add <name>  # create a user (interactive password prompt)
-pnpm cli workspace add <slug> <name> --owner <user>
+pnpm cli seed --user <name> --password <pw> --workspace <slug> --workspace-name <name>
 pnpm cli workspace member <slug> <user> <owner|verifier|member>
-pnpm cli workspace reindex <slug>   # rebuild SQLite index from disk
 pnpm typecheck            # tsc --noEmit (root)
 pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
 pnpm check:types          # both
