@@ -825,7 +825,7 @@ function WorkspaceView({
 
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
-  const refreshReviewCommentsRef = useRef<() => void>(() => undefined);
+  const reviewingChangeIdRef = useRef<string | null>(null);
   // Tracks the change_id the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
   // branch even after currentChangeId is nulled by publish.
@@ -836,6 +836,9 @@ function WorkspaceView({
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+  useEffect(() => {
+    reviewingChangeIdRef.current = reviewingChangeId;
+  }, [reviewingChangeId]);
 
   useEffect(() => {
     const url = `/api/v1/w/${encodeURIComponent(workspace.slug)}/events`;
@@ -873,8 +876,16 @@ function WorkspaceView({
         reloadChanges();
         reloadTree();
       } else if (event.type.startsWith("comment_")) {
-        // Line-comment add/edit/delete on the change currently being reviewed.
-        refreshReviewCommentsRef.current();
+        // SSE handler can't close over the reviewingChangeId state directly
+        // (the effect deps would re-subscribe on every entry/exit), so read
+        // through the ref kept in sync below.
+        const id = reviewingChangeIdRef.current;
+        if (id) {
+          api
+            .changeComments(workspace.slug, id)
+            .then((comments) => setReviewState((s) => ({ ...s, comments })))
+            .catch(() => undefined);
+        }
       }
     };
     return () => es.close();
@@ -1191,7 +1202,6 @@ function WorkspaceView({
       .then((comments) => setReviewState((s) => ({ ...s, comments })))
       .catch(() => undefined);
   }, [reviewingChangeId, workspace.slug]);
-  refreshReviewCommentsRef.current = refreshReviewComments;
 
   const addReviewComment = useCallback(
     async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {

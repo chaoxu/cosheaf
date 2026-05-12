@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface State {
   content: string | null;
@@ -8,6 +8,9 @@ interface State {
 // Loads one side of a file (base or head) lazily. `enabled=false` short-circuits
 // to a synthetic empty string — used when a status is "added" (no base) or
 // "deleted" (no head), so the caller doesn't need a separate branch.
+// `load` lives in a ref so callers can pass a fresh closure each render
+// without retriggering the fetch; the effect re-runs only when (resetKey,
+// side, enabled) actually change.
 export function useFileSide(
   load: (side: "base" | "head") => Promise<string>,
   side: "base" | "head",
@@ -15,6 +18,8 @@ export function useFileSide(
   resetKey: string,
 ): State {
   const [state, setState] = useState<State>({ content: enabled ? null : "", error: null });
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
     if (!enabled) {
@@ -23,7 +28,7 @@ export function useFileSide(
     }
     let cancelled = false;
     setState({ content: null, error: null });
-    load(side)
+    loadRef.current(side)
       .then((content) => {
         if (!cancelled) setState({ content, error: null });
       })
@@ -33,7 +38,7 @@ export function useFileSide(
     return () => {
       cancelled = true;
     };
-  }, [resetKey, side, enabled, load]);
+  }, [resetKey, side, enabled]);
 
   return state;
 }

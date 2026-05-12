@@ -26,7 +26,7 @@ export function UnifiedSourceDiff({ file, comments, onAddComment }: SpikeProps):
           key={i}
           row={r}
           byLine={byLine}
-          onAddClick={onAddComment ? (t) => setComposerAt(t) : undefined}
+          onAddClick={onAddComment ? (t) => setComposerAt({ ...t, path: file.path }) : undefined}
           composerAt={composerAt}
           composer={
             composerAt && onAddComment ? (
@@ -36,7 +36,7 @@ export function UnifiedSourceDiff({ file, comments, onAddComment }: SpikeProps):
                 onSubmit={async (body) => {
                   setBusy(true);
                   try {
-                    await onAddComment({ ...composerAt, path: file.path }, body);
+                    await onAddComment(composerAt, body);
                     setComposerAt(null);
                   } finally {
                     setBusy(false);
@@ -66,7 +66,7 @@ function RowWithThread({
 }: {
   row: Row;
   byLine: Map<LineKey, LineComment[]>;
-  onAddClick?: (target: { line: number; side: "new" | "old"; path: string }) => void;
+  onAddClick?: (target: { line: number; side: "new" | "old" }) => void;
   composerAt: AddCommentTarget | null;
   composer: ReactElement | null;
 }): ReactElement {
@@ -100,7 +100,7 @@ function RowWithThread({
             <button
               type="button"
               data-testid={`comment-add-${target.side}-${target.line}`}
-              onClick={() => onAddClick({ ...target, path: "" })}
+              onClick={() => onAddClick(target)}
               className="absolute -left-2 top-0 hidden group-hover:flex w-4 h-4 items-center justify-center rounded bg-[var(--cf-accent)] text-[var(--cf-accent-fg)] text-[10px]"
               title="Add comment"
             >

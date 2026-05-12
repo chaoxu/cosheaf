@@ -18,8 +18,8 @@ export function SideBySideRendered({ file, loadContent, comments }: SpikeProps):
 
   return (
     <div data-testid="spike-split-pane" className="grid grid-cols-2 h-full divide-x divide-[var(--cf-border)]">
-      <Pane label="base" content={base.content} emptyLabel={file.status === "added" ? "(new file)" : null} comments={comments} side="old" />
-      <Pane label="head" content={head.content} emptyLabel={file.status === "deleted" ? "(deleted)" : null} comments={comments} side="new" />
+      <Pane label="base" content={base.content} emptyLabel={file.status === "added" ? "(new file)" : null} comments={comments} side="old" filePath={file.path} />
+      <Pane label="head" content={head.content} emptyLabel={file.status === "deleted" ? "(deleted)" : null} comments={comments} side="new" filePath={file.path} />
     </div>
   );
 }
@@ -30,12 +30,14 @@ function Pane({
   emptyLabel,
   comments,
   side,
+  filePath,
 }: {
   label: "base" | "head";
   content: string | null;
   emptyLabel: string | null;
   comments: readonly LineComment[];
   side: "new" | "old";
+  filePath: string;
 }): ReactElement {
   const extensions = useMemo(() => [commentThreadExtension(comments, side)], [comments, side]);
   return (
@@ -48,7 +50,7 @@ function Pane({
           <div className={cn("p-3 text-sm", muted)}>Loading…</div>
         ) : (
           <MarkdownEditor
-            key={`${label}-${content.length}`}
+            key={`${label}-${filePath}`}
             value={content}
             mode="rich"
             onChange={() => undefined}

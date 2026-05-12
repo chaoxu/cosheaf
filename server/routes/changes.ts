@@ -539,44 +539,68 @@ changes.get("/:slug/change/:id/comments", async (c) => {
   return c.json({ comments: out });
 });
 
-changes.post("/:slug/change/:id/comments", async (c) => {
+interface CommentInput {
+  path: string;
+  line: number;
+  side: "new" | "old";
+  body: string;
+}
+
+function parseCommentInput(raw: unknown): CommentInput | null {
+  const v = raw as Partial<CommentInput> | null;
+  if (!v?.path || !v.line || !v.body || (v.side !== "new" && v.side !== "old")) return null;
+  return { path: v.path, line: v.line, side: v.side, body: v.body };
+}
+
+function gateReviewerWrite(
+  c: import("hono").Context<AppEnv>,
+  change: ChangeRow | null | undefined,
+): Response | { change: ChangeRow & { pr_number: number } } {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "only owners and verifiers can comment", code: "forbidden" }, 403);
-
-  const id = c.req.param("id");
-  const change = getChange(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
   if (c.get("user").id === change.author_user_id)
     return c.json({ error: "authors cannot review their own change", code: "forbidden" }, 403);
+  return { change: change as ChangeRow & { pr_number: number } };
+}
 
-  const body = (await c.req.json().catch(() => null)) as {
-    path?: string;
-    line?: number;
-    side?: "new" | "old";
-    body?: string;
-  } | null;
-  if (!body?.path || !body.line || !body.body || (body.side !== "new" && body.side !== "old")) {
-    return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
-  }
+async function resolveLinePosition(
+  fj: Forgejo,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  input: CommentInput,
+): Promise<{ new_position?: number; old_position?: number } | { error: string }> {
+  const unified = await fj.getPullDiff(owner, repo, prNumber);
+  const filePatch = splitUnifiedDiff(unified).find((p) => p.path === input.path)?.patch;
+  if (!filePatch) return { error: "file not part of this PR" };
+  const pos = fileLineToWritePosition(filePatch, input.line, input.side);
+  if (!pos) return { error: "line not present in diff" };
+  return pos;
+}
 
+changes.post("/:slug/change/:id/comments", async (c) => {
+  const gate = gateReviewerWrite(c, getChange(c.get("db"), c.get("workspace").id, c.req.param("id")));
+  if (gate instanceof Response) return gate;
+  const { change } = gate;
+
+  const input = parseCommentInput(await c.req.json().catch(() => null));
+  if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
+
+  const ws = c.get("workspace");
   const fj = c.get("forgejo");
   const owner = c.get("config").forgejoOwner;
-  const unified = await fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number);
-  const filePatch = splitUnifiedDiff(unified).find((p) => p.path === body.path)?.patch;
-  if (!filePatch)
-    return c.json({ error: "file not part of this PR", code: "validation" }, 400);
-  const pos = fileLineToWritePosition(filePatch, body.line, body.side);
-  if (!pos)
-    return c.json({ error: "line not present in diff", code: "validation" }, 400);
+  const pos = await resolveLinePosition(fj, owner, ws.forgejoRepo, change.pr_number, input);
+  if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
 
   await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
     event: "COMMENT",
     body: "",
     sudo: c.get("forgejoUsername"),
-    comments: [{ path: body.path, body: body.body, ...pos }],
+    comments: [{ path: input.path, body: input.body, ...pos }],
   });
   c.get("sse").publish(ws.slug, { type: "comment_added", id: change.id });
   return c.json({ ok: true });
@@ -662,32 +686,24 @@ changes.post("/:slug/change/:id/draft-review", async (c) => {
 });
 
 changes.post("/:slug/change/:id/draft-review/:reviewId/comments", async (c) => {
-  const ws = c.get("workspace");
-  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
-  if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
+  const gate = gateReviewerWrite(c, getChange(c.get("db"), c.get("workspace").id, c.req.param("id")));
+  if (gate instanceof Response) return gate;
+  const { change } = gate;
   const reviewId = Number(c.req.param("reviewId"));
   if (!reviewId) return c.json({ error: "bad reviewId", code: "validation" }, 400);
 
-  const body = (await c.req.json().catch(() => null)) as {
-    path?: string;
-    line?: number;
-    side?: "new" | "old";
-    body?: string;
-  } | null;
-  if (!body?.path || !body.line || !body.body || (body.side !== "new" && body.side !== "old"))
-    return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
+  const input = parseCommentInput(await c.req.json().catch(() => null));
+  if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
 
+  const ws = c.get("workspace");
   const fj = c.get("forgejo");
   const owner = c.get("config").forgejoOwner;
-  const unified = await fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number);
-  const patch = splitUnifiedDiff(unified).find((p) => p.path === body.path)?.patch;
-  if (!patch) return c.json({ error: "file not part of this PR", code: "validation" }, 400);
-  const pos = fileLineToWritePosition(patch, body.line, body.side);
-  if (!pos) return c.json({ error: "line not present in diff", code: "validation" }, 400);
+  const pos = await resolveLinePosition(fj, owner, ws.forgejoRepo, change.pr_number, input);
+  if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
 
   await fj.addCommentToReview(owner, ws.forgejoRepo, change.pr_number, reviewId, {
-    path: body.path,
-    body: body.body,
+    path: input.path,
+    body: input.body,
     ...pos,
     sudo: c.get("forgejoUsername"),
   });
