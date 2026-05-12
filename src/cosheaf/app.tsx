@@ -824,6 +824,7 @@ function WorkspaceView({
 
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
+  const refreshReviewCommentsRef = useRef<() => void>(() => undefined);
   // Tracks the change_id the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
   // branch even after currentChangeId is nulled by publish.
@@ -870,6 +871,9 @@ function WorkspaceView({
           .catch(() => undefined);
         reloadChanges();
         reloadTree();
+      } else if (event.type.startsWith("comment_")) {
+        // Line-comment add/edit/delete on the change currently being reviewed.
+        refreshReviewCommentsRef.current();
       }
     };
     return () => es.close();
@@ -1174,6 +1178,26 @@ function WorkspaceView({
       return api.changeFile(workspace.slug, id, path, side);
     },
     [reviewingChangeId, workspace.slug],
+  );
+
+  const refreshReviewComments = useCallback(() => {
+    const id = reviewingChangeId;
+    if (!id) return;
+    api
+      .changeComments(workspace.slug, id)
+      .then((comments) => setReviewState((s) => ({ ...s, comments })))
+      .catch(() => undefined);
+  }, [reviewingChangeId, workspace.slug]);
+  refreshReviewCommentsRef.current = refreshReviewComments;
+
+  const addReviewComment = useCallback(
+    async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {
+      const id = reviewingChangeId;
+      if (!id) return;
+      await api.addChangeComment(workspace.slug, id, { ...target, body });
+      refreshReviewComments();
+    },
+    [reviewingChangeId, workspace.slug, refreshReviewComments],
   );
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -1517,6 +1541,11 @@ function WorkspaceView({
                   }
                   loadContent={loadReviewFileContent}
                   comments={reviewState.comments}
+                  onAddComment={
+                    workspace.role === "owner" || workspace.role === "verifier"
+                      ? addReviewComment
+                      : undefined
+                  }
                 />
               </div>
               {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}

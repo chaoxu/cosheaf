@@ -450,12 +450,14 @@ export class Forgejo {
     );
   }
 
+  // Forgejo doesn't expose PATCH on /pulls/.../reviews/{id}/comments/{cid}
+  // (only GET/DELETE). Review-comment edits go through the generic
+  // issue-comment endpoint, which Forgejo treats as the same record.
   async editReviewComment(
-    owner: string, repo: string, index: number, reviewId: number, commentId: number,
-    body: string, sudo: string,
+    owner: string, repo: string, commentId: number, body: string, sudo: string,
   ): Promise<ForgejoPullReviewComment> {
     return this.req<ForgejoPullReviewComment>(
-      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments/${commentId}`,
+      `/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`,
       { method: "PATCH", sudo, body: { body } },
     );
   }

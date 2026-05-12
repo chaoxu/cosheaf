@@ -108,11 +108,10 @@ describe("round-trip", () => {
   it("position → (line, side) → position is identity for body positions in modified", () => {
     for (let p = 1; p <= 6; p++) {
       const mapped = positionToFileLine(modified, p);
-      expect(mapped).not.toBeNull();
-      // The known-good positions:
-      const back = fileLineToWritePosition(modified, mapped!.line, mapped!.side);
-      expect(back).not.toBeNull();
-      const recovered = back!.new_position ?? back!.old_position;
+      if (!mapped) throw new Error(`position ${p} did not map`);
+      const back = fileLineToWritePosition(modified, mapped.line, mapped.side);
+      if (!back) throw new Error(`line ${mapped.line}/${mapped.side} did not map back`);
+      const recovered = back.new_position ?? back.old_position;
       expect(recovered).toBe(p);
     }
   });

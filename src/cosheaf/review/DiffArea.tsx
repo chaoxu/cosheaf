@@ -21,11 +21,13 @@ export function DiffArea({
   workspaceSlug,
   loadContent,
   comments,
+  onAddComment,
 }: {
   file: PullFile | null;
   workspaceSlug: string;
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
+  onAddComment?: SpikeProps["onAddComment"];
 }): ReactElement {
   const fileComments = useMemo(
     () => (file ? comments.filter((c) => c.path === file.path) : []),
@@ -71,6 +73,7 @@ export function DiffArea({
           file,
           loadContent: (side) => loadContent(file.path, side),
           comments: fileComments,
+          onAddComment,
         })}
       </div>
     </div>

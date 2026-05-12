@@ -224,6 +224,30 @@ export const api = {
     jsonFetch<{ comments: LineComment[] }>(
       `${w(slug)}/change/${encodeURIComponent(change_id)}/comments`,
     ).then((r) => r.comments),
+  addChangeComment: (
+    slug: string,
+    change_id: string,
+    payload: { path: string; line: number; side: CommentSide; body: string },
+  ) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/comments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  editChangeComment: (slug: string, change_id: string, commentId: number, body: string) =>
+    jsonFetch<{ ok: true }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/comments/${commentId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body }),
+      },
+    ),
+  deleteChangeComment: (slug: string, change_id: string, commentId: number, reviewId: number) =>
+    jsonFetch<{ ok: true }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/comments/${commentId}?review_id=${reviewId}`,
+      { method: "DELETE" },
+    ),
 
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),

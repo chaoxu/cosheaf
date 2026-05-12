@@ -6,7 +6,7 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoReview } from "../forgejo.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
-import { positionToFileLine } from "../diff-position.js";
+import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import type { LineComment } from "../../shared/comments.js";
 import {
   createChange,
@@ -537,6 +537,84 @@ changes.get("/:slug/change/:id/comments", async (c) => {
     };
   });
   return c.json({ comments: out });
+});
+
+changes.post("/:slug/change/:id/comments", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner" && ws.role !== "verifier")
+    return c.json({ error: "only owners and verifiers can comment", code: "forbidden" }, 403);
+
+  const id = c.req.param("id");
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!change.pr_number)
+    return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
+  if (c.get("user").id === change.author_user_id)
+    return c.json({ error: "authors cannot review their own change", code: "forbidden" }, 403);
+
+  const body = (await c.req.json().catch(() => null)) as {
+    path?: string;
+    line?: number;
+    side?: "new" | "old";
+    body?: string;
+  } | null;
+  if (!body?.path || !body.line || !body.body || (body.side !== "new" && body.side !== "old")) {
+    return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
+  }
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const unified = await fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number);
+  const filePatch = splitUnifiedDiff(unified).find((p) => p.path === body.path)?.patch;
+  if (!filePatch)
+    return c.json({ error: "file not part of this PR", code: "validation" }, 400);
+  const pos = fileLineToWritePosition(filePatch, body.line, body.side);
+  if (!pos)
+    return c.json({ error: "line not present in diff", code: "validation" }, 400);
+
+  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
+    event: "COMMENT",
+    body: "",
+    sudo: c.get("forgejoUsername"),
+    comments: [{ path: body.path, body: body.body, ...pos }],
+  });
+  c.get("sse").publish(ws.slug, { type: "comment_added", id: change.id });
+  return c.json({ ok: true });
+});
+
+changes.patch("/:slug/change/:id/comments/:commentId", async (c) => {
+  const ws = c.get("workspace");
+  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
+  const commentId = Number(c.req.param("commentId"));
+  if (!commentId) return c.json({ error: "bad commentId", code: "validation" }, 400);
+
+  const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
+  if (!body?.body) return c.json({ error: "body required", code: "validation" }, 400);
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  await fj.editReviewComment(owner, ws.forgejoRepo, commentId, body.body, c.get("forgejoUsername"));
+  c.get("sse").publish(ws.slug, { type: "comment_edited", id: change.id });
+  return c.json({ ok: true });
+});
+
+changes.delete("/:slug/change/:id/comments/:commentId", async (c) => {
+  const ws = c.get("workspace");
+  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
+  const commentId = Number(c.req.param("commentId"));
+  const reviewId = Number(c.req.query("review_id"));
+  if (!commentId || !reviewId)
+    return c.json({ error: "review_id query param required", code: "validation" }, 400);
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  await fj.deleteReviewComment(
+    owner, ws.forgejoRepo, change.pr_number, reviewId, commentId, c.get("forgejoUsername"),
+  );
+  c.get("sse").publish(ws.slug, { type: "comment_deleted", id: change.id });
+  return c.json({ ok: true });
 });
 
 function normalizeStatus(s: string): "added" | "modified" | "deleted" | "renamed" | "copied" {
