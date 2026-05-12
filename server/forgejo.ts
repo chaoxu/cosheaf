@@ -399,15 +399,74 @@ export class Forgejo {
   }
 
   async createReview(owner: string, repo: string, index: number, opts: {
+    event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
+    body: string;
+    sudo: string;
+    comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
+    commit_id?: string;
+  }): Promise<ForgejoReview> {
+    const payload: Record<string, unknown> = { event: opts.event, body: opts.body };
+    if (opts.comments && opts.comments.length > 0) payload.comments = opts.comments;
+    if (opts.commit_id) payload.commit_id = opts.commit_id;
+    return this.req<ForgejoReview>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: payload,
+    });
+  }
+
+  async submitPullReview(owner: string, repo: string, index: number, reviewId: number, opts: {
     event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT";
     body: string;
     sudo: string;
   }): Promise<ForgejoReview> {
-    return this.req<ForgejoReview>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`, {
-      method: "POST",
-      sudo: opts.sudo,
-      body: { event: opts.event, body: opts.body },
-    });
+    return this.req<ForgejoReview>(
+      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}`,
+      { method: "POST", sudo: opts.sudo, body: { event: opts.event, body: opts.body } },
+    );
+  }
+
+  async addCommentToReview(owner: string, repo: string, index: number, reviewId: number, opts: {
+    path: string;
+    body: string;
+    new_position?: number;
+    old_position?: number;
+    sudo: string;
+  }): Promise<ForgejoPullReviewComment> {
+    const payload: Record<string, unknown> = { path: opts.path, body: opts.body };
+    if (opts.new_position !== undefined) payload.new_position = opts.new_position;
+    if (opts.old_position !== undefined) payload.old_position = opts.old_position;
+    return this.req<ForgejoPullReviewComment>(
+      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments`,
+      { method: "POST", sudo: opts.sudo, body: payload },
+    );
+  }
+
+  async listReviewComments(
+    owner: string, repo: string, index: number, reviewId: number,
+  ): Promise<ForgejoPullReviewComment[]> {
+    return this.req<ForgejoPullReviewComment[]>(
+      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments`,
+    );
+  }
+
+  async editReviewComment(
+    owner: string, repo: string, index: number, reviewId: number, commentId: number,
+    body: string, sudo: string,
+  ): Promise<ForgejoPullReviewComment> {
+    return this.req<ForgejoPullReviewComment>(
+      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments/${commentId}`,
+      { method: "PATCH", sudo, body: { body } },
+    );
+  }
+
+  async deleteReviewComment(
+    owner: string, repo: string, index: number, reviewId: number, commentId: number, sudo: string,
+  ): Promise<void> {
+    await this.req<unknown>(
+      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments/${commentId}`,
+      { method: "DELETE", sudo, expectEmpty: true },
+    );
   }
 }
 
@@ -472,6 +531,21 @@ export interface ForgejoPullFile {
   deletions: number;
   changes: number;
   previous_filename?: string;
+}
+
+export interface ForgejoPullReviewComment {
+  id: number;
+  pull_request_review_id: number;
+  path: string;
+  body: string;
+  position: number | null;
+  original_position: number | null;
+  commit_id: string;
+  original_commit_id: string;
+  diff_hunk: string;
+  user: ForgejoUser;
+  created_at: string;
+  updated_at: string;
 }
 export interface ForgejoReview {
   id: number;

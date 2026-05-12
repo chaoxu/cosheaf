@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
-import type { PullFile } from "../api";
+import type { LineComment, PullFile } from "../api";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -8,11 +8,18 @@ export function FileList({
   files,
   selectedPath,
   onSelect,
+  comments,
 }: {
   files: readonly PullFile[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  comments?: readonly LineComment[];
 }): ReactElement {
+  const countsByPath = new Map<string, number>();
+  for (const c of comments ?? []) {
+    if (c.outdated) continue;
+    countsByPath.set(c.path, (countsByPath.get(c.path) ?? 0) + 1);
+  }
   if (files.length === 0) {
     return <div className={cn("px-3 py-4 text-xs", muted)}>No files changed.</div>;
   }
@@ -39,6 +46,14 @@ export function FileList({
                 f.path
               )}
             </span>
+            {countsByPath.get(f.path) ? (
+              <span
+                className="text-[10px] px-1 rounded bg-[var(--cf-accent)] text-[var(--cf-accent-fg)]"
+                title={`${countsByPath.get(f.path)} comment(s)`}
+              >
+                💬{countsByPath.get(f.path)}
+              </span>
+            ) : null}
             <span className={cn("text-xs tabular-nums", muted)}>
               <span className="text-green-600">+{f.additions}</span>{" "}
               <span className="text-red-600">−{f.deletions}</span>

@@ -17,6 +17,7 @@ import {
   type ChangeDiff,
   type Decision,
   type FileEntry,
+  type LineComment,
   type PrMeta,
   type QueueEntry,
   type SearchResult,
@@ -776,9 +777,10 @@ function WorkspaceView({
   const [reviewState, setReviewState] = useState<{
     pr: PrMeta | null;
     diff: ChangeDiff | null;
+    comments: LineComment[];
     selectedPath: string | null;
     busy: boolean;
-  }>({ pr: null, diff: null, selectedPath: null, busy: false });
+  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false });
   // The active writable change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
@@ -1138,20 +1140,22 @@ function WorkspaceView({
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
   useEffect(() => {
     if (!reviewingChangeId) {
-      setReviewState({ pr: null, diff: null, selectedPath: null, busy: false });
+      setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false });
       return;
     }
     let cancelled = false;
     Promise.all([
       api.changePr(workspace.slug, reviewingChangeId),
       api.changeDiff(workspace.slug, reviewingChangeId),
+      api.changeComments(workspace.slug, reviewingChangeId).catch(() => []),
     ])
-      .then(([pr, diff]) => {
+      .then(([pr, diff, comments]) => {
         if (cancelled) return;
         setReviewState((s) => ({
           ...s,
           pr,
           diff,
+          comments,
           selectedPath: s.selectedPath ?? diff.files[0]?.path ?? null,
         }));
       })
@@ -1323,6 +1327,7 @@ function WorkspaceView({
                   files={reviewState.diff.files}
                   selectedPath={reviewState.selectedPath}
                   onSelect={(path) => setReviewState((s) => ({ ...s, selectedPath: path }))}
+                  comments={reviewState.comments}
                 />
               </div>
             </div>
@@ -1511,6 +1516,7 @@ function WorkspaceView({
                     null
                   }
                   loadContent={loadReviewFileContent}
+                  comments={reviewState.comments}
                 />
               </div>
               {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}

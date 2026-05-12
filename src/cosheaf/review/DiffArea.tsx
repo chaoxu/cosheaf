@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
-import type { PullFile } from "../api";
+import type { LineComment, PullFile } from "../api";
 import type { SpikeId, SpikeProps } from "./spike-types";
 import { UnifiedSourceDiff } from "./spikes/UnifiedSourceDiff";
 import { HeadWithTint } from "./spikes/HeadWithTint";
@@ -20,11 +20,17 @@ export function DiffArea({
   file,
   workspaceSlug,
   loadContent,
+  comments,
 }: {
   file: PullFile | null;
   workspaceSlug: string;
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
+  comments: readonly LineComment[];
 }): ReactElement {
+  const fileComments = useMemo(
+    () => (file ? comments.filter((c) => c.path === file.path) : []),
+    [comments, file],
+  );
   const storageKey = `cosheaf:diff-spike:${workspaceSlug}`;
   const [spike, setSpike] = useState<SpikeId>(() => readSpike(storageKey));
 
@@ -61,7 +67,11 @@ export function DiffArea({
         <span className={cn("ml-auto text-xs", muted)}>{file.path}</span>
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
-        {renderSpike(spike, { file, loadContent: (side) => loadContent(file.path, side) })}
+        {renderSpike(spike, {
+          file,
+          loadContent: (side) => loadContent(file.path, side),
+          comments: fileComments,
+        })}
       </div>
     </div>
   );

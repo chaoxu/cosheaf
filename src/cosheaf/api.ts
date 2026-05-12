@@ -1,8 +1,9 @@
 import type { ChangeState, Decision } from "../../shared/change-lifecycle";
 import type { Role } from "../../shared/roles";
 import type { ChangeDiff, PrMeta, PullFile } from "../../shared/review";
+import type { LineComment, CommentSide } from "../../shared/comments";
 
-export type { ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta };
+export type { ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineComment, CommentSide };
 
 export interface User {
   id: number;
@@ -219,6 +220,10 @@ export const api = {
     jsonFetch<{ content: string }>(
       `${w(slug)}/change/${encodeURIComponent(change_id)}/file?path=${encodeURIComponent(path)}&side=${side}`,
     ).then((r) => r.content),
+  changeComments: (slug: string, change_id: string) =>
+    jsonFetch<{ comments: LineComment[] }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/comments`,
+    ).then((r) => r.comments),
 
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),

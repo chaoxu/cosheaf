@@ -6,6 +6,8 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoReview } from "../forgejo.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
+import { positionToFileLine } from "../diff-position.js";
+import type { LineComment } from "../../shared/comments.js";
 import {
   createChange,
   deleteChange,
@@ -485,6 +487,56 @@ changes.get("/:slug/change/:id/file", async (c) => {
       return c.json({ error: "file not present at this side", code: "not_found" }, 404);
     throw err;
   }
+});
+
+changes.get("/:slug/change/:id/comments", async (c) => {
+  const ws = c.get("workspace");
+  const id = c.req.param("id");
+  const change = getChange(c.get("db"), ws.id, id);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!change.pr_number)
+    return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const [reviews, metas, unified] = await Promise.all([
+    fj.listReviews(owner, ws.forgejoRepo, change.pr_number),
+    fj.listPullFiles(owner, ws.forgejoRepo, change.pr_number),
+    fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number),
+  ]);
+  const patchesByPath = new Map(
+    splitUnifiedDiff(unified).map((p) => [p.path, p.patch]),
+  );
+  const status = new Map(metas.map((m) => [m.filename, m.status]));
+
+  // Per-review fan-out. PRs usually have <10 reviews, so this is fine.
+  const allComments = (
+    await Promise.all(
+      reviews.map((r) =>
+        fj.listReviewComments(owner, ws.forgejoRepo, change.pr_number as number, r.id).catch(() => []),
+      ),
+    )
+  ).flat();
+
+  const out: LineComment[] = allComments.map((cm) => {
+    const patch = patchesByPath.get(cm.path);
+    const pos = cm.position ?? cm.original_position;
+    const mapped = patch && pos !== null ? positionToFileLine(patch, pos) : null;
+    const outdated = cm.position === null;
+    return {
+      id: cm.id,
+      review_id: cm.pull_request_review_id,
+      path: cm.path,
+      line: mapped?.line ?? null,
+      side: mapped?.side ?? (status.get(cm.path) === "deleted" ? "old" : "new"),
+      body: cm.body,
+      author_username: cm.user.login,
+      created_at: Date.parse(cm.created_at) || 0,
+      updated_at: Date.parse(cm.updated_at) || 0,
+      outdated,
+    };
+  });
+  return c.json({ comments: out });
 });
 
 function normalizeStatus(s: string): "added" | "modified" | "deleted" | "renamed" | "copied" {

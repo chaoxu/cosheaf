@@ -5,6 +5,7 @@ import { cn } from "../../lib/utils";
 import { MarkdownEditor } from "../../editor";
 import { diffLineNumbers } from "../diff-lines";
 import { lineTintExtension } from "../cm-line-tint";
+import { commentThreadExtension } from "../cm-comment-widgets";
 import { useFileSide } from "../use-file-side";
 import type { SpikeProps } from "../spike-types";
 
@@ -16,13 +17,17 @@ const muted = "text-[var(--cf-muted)]";
 export function HeadWithTint({
   file,
   loadContent,
+  comments,
   mode,
   testId,
 }: SpikeProps & { mode: StandaloneEditorMode; testId: string }): ReactElement {
   const { content, error } = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const extensions = useMemo(
-    () => lineTintExtension(diffLineNumbers(file.patch, "added")),
-    [file.patch],
+    () => [
+      ...lineTintExtension(diffLineNumbers(file.patch, "added")),
+      commentThreadExtension(comments, "new"),
+    ],
+    [file.patch, comments],
   );
 
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;
