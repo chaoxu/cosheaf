@@ -248,6 +248,39 @@ export const api = {
       `${w(slug)}/change/${encodeURIComponent(change_id)}/comments/${commentId}?review_id=${reviewId}`,
       { method: "DELETE" },
     ),
+  startDraftReview: (slug: string, change_id: string) =>
+    jsonFetch<{ review_id: number }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/draft-review`,
+      { method: "POST" },
+    ),
+  addDraftReviewComment: (
+    slug: string,
+    change_id: string,
+    review_id: number,
+    payload: { path: string; line: number; side: CommentSide; body: string },
+  ) =>
+    jsonFetch<{ ok: true }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/draft-review/${review_id}/comments`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
+  submitDraftReview: (
+    slug: string,
+    change_id: string,
+    review_id: number,
+    payload: { event: "approve" | "request_changes" | "comment"; body?: string },
+  ) =>
+    jsonFetch<{ ok: true }>(
+      `${w(slug)}/change/${encodeURIComponent(change_id)}/draft-review/${review_id}/submit`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
 
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),

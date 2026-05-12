@@ -617,6 +617,113 @@ changes.delete("/:slug/change/:id/comments/:commentId", async (c) => {
   return c.json({ ok: true });
 });
 
+// Reuse the reviewer's existing PENDING review on this PR, or create a new
+// one. Forgejo allows multiple PENDING reviews per user; we deduplicate to
+// avoid leaking drafts on accidental double-clicks.
+async function findOrCreatePendingReview(
+  fj: Forgejo,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  forgejoUsername: string,
+): Promise<number> {
+  const reviews = await fj.listReviews(owner, repo, prNumber);
+  const existing = reviews.find(
+    (r) => r.state === "PENDING" && r.user?.login === forgejoUsername,
+  );
+  if (existing) return existing.id;
+  // Forgejo rejects an empty body on PENDING; placeholder gets replaced when
+  // the review is submitted with the user's actual body.
+  const created = await fj.createReview(owner, repo, prNumber, {
+    event: "PENDING",
+    body: "(draft)",
+    sudo: forgejoUsername,
+  });
+  return created.id;
+}
+
+changes.post("/:slug/change/:id/draft-review", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner" && ws.role !== "verifier")
+    return c.json({ error: "only owners and verifiers can review", code: "forbidden" }, 403);
+  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!change.pr_number)
+    return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
+  if (c.get("user").id === change.author_user_id)
+    return c.json({ error: "authors cannot review their own change", code: "forbidden" }, 403);
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const review_id = await findOrCreatePendingReview(
+    fj, owner, ws.forgejoRepo, change.pr_number, c.get("forgejoUsername"),
+  );
+  return c.json({ review_id });
+});
+
+changes.post("/:slug/change/:id/draft-review/:reviewId/comments", async (c) => {
+  const ws = c.get("workspace");
+  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
+  const reviewId = Number(c.req.param("reviewId"));
+  if (!reviewId) return c.json({ error: "bad reviewId", code: "validation" }, 400);
+
+  const body = (await c.req.json().catch(() => null)) as {
+    path?: string;
+    line?: number;
+    side?: "new" | "old";
+    body?: string;
+  } | null;
+  if (!body?.path || !body.line || !body.body || (body.side !== "new" && body.side !== "old"))
+    return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const unified = await fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number);
+  const patch = splitUnifiedDiff(unified).find((p) => p.path === body.path)?.patch;
+  if (!patch) return c.json({ error: "file not part of this PR", code: "validation" }, 400);
+  const pos = fileLineToWritePosition(patch, body.line, body.side);
+  if (!pos) return c.json({ error: "line not present in diff", code: "validation" }, 400);
+
+  await fj.addCommentToReview(owner, ws.forgejoRepo, change.pr_number, reviewId, {
+    path: body.path,
+    body: body.body,
+    ...pos,
+    sudo: c.get("forgejoUsername"),
+  });
+  c.get("sse").publish(ws.slug, { type: "comment_added", id: change.id });
+  return c.json({ ok: true });
+});
+
+changes.post("/:slug/change/:id/draft-review/:reviewId/submit", async (c) => {
+  const ws = c.get("workspace");
+  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
+  const reviewId = Number(c.req.param("reviewId"));
+  const body = (await c.req.json().catch(() => null)) as {
+    event?: "approve" | "request_changes" | "comment";
+    body?: string;
+  } | null;
+  if (!reviewId || !body?.event)
+    return c.json({ error: "reviewId + event required", code: "validation" }, 400);
+
+  const eventMap = {
+    approve: "APPROVED",
+    request_changes: "REQUEST_CHANGES",
+    comment: "COMMENT",
+  } as const;
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  await fj.submitPullReview(owner, ws.forgejoRepo, change.pr_number, reviewId, {
+    event: eventMap[body.event],
+    body: body.body ?? "",
+    sudo: c.get("forgejoUsername"),
+  });
+  // The submit will fire a pull_request_review webhook; let that path drive
+  // the SSE event so client state derives from authoritative server data.
+  return c.json({ ok: true });
+});
+
 function normalizeStatus(s: string): "added" | "modified" | "deleted" | "renamed" | "copied" {
   if (s === "added" || s === "modified" || s === "deleted" || s === "renamed" || s === "copied") return s;
   console.warn(`Unknown Forgejo file status: ${JSON.stringify(s)} — treating as modified`);

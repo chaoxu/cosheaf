@@ -13,6 +13,8 @@ export function ReviewActions({
   onSubmit,
   onClose,
   busy,
+  draftReviewActive,
+  onToggleDraftReview,
 }: {
   state: ChangeState;
   role: Role;
@@ -20,6 +22,8 @@ export function ReviewActions({
   onSubmit: (decision: Decision, body: string) => void | Promise<void>;
   onClose: () => void | Promise<void>;
   busy?: boolean;
+  draftReviewActive?: boolean;
+  onToggleDraftReview?: () => void | Promise<void>;
 }): ReactElement | null {
   const [body, setBody] = useState("");
 
@@ -62,11 +66,27 @@ export function ReviewActions({
         className="w-full resize-y rounded-md border border-[var(--cf-border)] bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--cf-accent)] disabled:opacity-60"
       />
       <div className="flex items-center gap-2">
+        {onToggleDraftReview && canDecide && (
+          <Button
+            data-testid="review-toggle-draft"
+            variant={draftReviewActive ? "default" : "outline"}
+            size="sm"
+            disabled={busy}
+            onClick={onToggleDraftReview}
+            title={
+              draftReviewActive
+                ? "Comments are batched into a draft review; submit with Approve/Request changes/Comment."
+                : "Batch line comments before submitting one review."
+            }
+          >
+            {draftReviewActive ? "Draft active" : "Start a review"}
+          </Button>
+        )}
         <Button
           data-testid="review-comment-submit"
           variant="outline"
           size="sm"
-          disabled={!canDecide || busy || body.trim().length === 0}
+          disabled={!canDecide || busy || (body.trim().length === 0 && !draftReviewActive)}
           onClick={async () => {
             await onSubmit("comment", body);
             setBody("");

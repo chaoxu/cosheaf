@@ -780,7 +780,8 @@ function WorkspaceView({
     comments: LineComment[];
     selectedPath: string | null;
     busy: boolean;
-  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false });
+    draftReviewId: number | null;
+  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
   // The active writable change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
@@ -1081,33 +1082,35 @@ function WorkspaceView({
       const id = reviewingChangeId;
       if (!id) return;
       const comment = body.trim() || undefined;
+      const draftId = reviewState.draftReviewId;
       setReviewState((s) => ({ ...s, busy: true }));
       try {
-        let nextState: string | undefined;
-        if (decision === "approve") {
+        if (draftId) {
+          await api.submitDraftReview(workspace.slug, id, draftId, {
+            event: decision,
+            body: comment,
+          });
+          setStatus(`submitted ${decision}`);
+        } else if (decision === "approve") {
           const r = await api.approve(workspace.slug, id, comment);
-          nextState = r.state;
           setStatus(`approved (state: ${r.state})`);
         } else if (decision === "request_changes") {
           const r = await api.requestChanges(workspace.slug, id, comment);
-          nextState = r.state;
           setStatus(`changes requested (state: ${r.state})`);
         } else {
-          const r = await api.comment(workspace.slug, id, comment);
-          nextState = r.state;
+          await api.comment(workspace.slug, id, comment);
           setStatus("commented");
         }
         loadApprovals(id);
-        api
-          .queue(workspace.slug)
-          .then(setQueue)
-          .catch(() => undefined);
-        if (nextState === "merged" || nextState === "changes_requested" || nextState === "closed") {
-          setReviewingChangeId(null);
-          api
-            .tree(workspace.slug)
-            .then(setFiles)
-            .catch(() => undefined);
+        api.queue(workspace.slug).then(setQueue).catch(() => undefined);
+        // The PR meta will reflect any state transition; re-fetch authoritative.
+        const pr = await api.changePr(workspace.slug, id).catch(() => null);
+        if (pr) {
+          setReviewState((s) => ({ ...s, pr, draftReviewId: null }));
+          if (pr.state === "merged" || pr.state === "changes_requested" || pr.state === "closed") {
+            setReviewingChangeId(null);
+            api.tree(workspace.slug).then(setFiles).catch(() => undefined);
+          }
         }
       } catch (err) {
         setStatus(err instanceof ApiError ? err.message : `${decision} failed`);
@@ -1115,7 +1118,7 @@ function WorkspaceView({
         setReviewState((s) => ({ ...s, busy: false }));
       }
     },
-    [reviewingChangeId, workspace.slug, loadApprovals],
+    [reviewingChangeId, workspace.slug, reviewState.draftReviewId, loadApprovals],
   );
 
   const closeReviewedChange = useCallback(async () => {
@@ -1144,7 +1147,7 @@ function WorkspaceView({
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
   useEffect(() => {
     if (!reviewingChangeId) {
-      setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false });
+      setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
       return;
     }
     let cancelled = false;
@@ -1194,11 +1197,36 @@ function WorkspaceView({
     async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {
       const id = reviewingChangeId;
       if (!id) return;
-      await api.addChangeComment(workspace.slug, id, { ...target, body });
+      const draftId = reviewState.draftReviewId;
+      if (draftId) {
+        await api.addDraftReviewComment(workspace.slug, id, draftId, { ...target, body });
+      } else {
+        await api.addChangeComment(workspace.slug, id, { ...target, body });
+      }
       refreshReviewComments();
     },
-    [reviewingChangeId, workspace.slug, refreshReviewComments],
+    [reviewingChangeId, workspace.slug, reviewState.draftReviewId, refreshReviewComments],
   );
+
+  const toggleDraftReview = useCallback(async () => {
+    const id = reviewingChangeId;
+    if (!id) return;
+    if (reviewState.draftReviewId) {
+      // Cancel local batch — Forgejo keeps the PENDING review server-side
+      // for reuse; we just stop sending into it.
+      setReviewState((s) => ({ ...s, draftReviewId: null }));
+      return;
+    }
+    setReviewState((s) => ({ ...s, busy: true }));
+    try {
+      const { review_id } = await api.startDraftReview(workspace.slug, id);
+      setReviewState((s) => ({ ...s, draftReviewId: review_id }));
+    } catch (err) {
+      setStatus(err instanceof ApiError ? err.message : "could not start draft review");
+    } finally {
+      setReviewState((s) => ({ ...s, busy: false }));
+    }
+  }, [reviewingChangeId, workspace.slug, reviewState.draftReviewId]);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1557,6 +1585,8 @@ function WorkspaceView({
                   onSubmit={submitReview}
                   onClose={closeReviewedChange}
                   busy={reviewState.busy}
+                  draftReviewActive={reviewState.draftReviewId !== null}
+                  onToggleDraftReview={toggleDraftReview}
                 />
               )}
             </>
