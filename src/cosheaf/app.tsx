@@ -1460,37 +1460,12 @@ function WorkspaceView({
               ☰
             </button>
           )}
-          {reviewingChangeId ? (
-            <>
-              {reviewState.pr && <PrHeader pr={reviewState.pr} />}
-              <div className="flex-1 min-h-0">
-                <DiffArea
-                  workspaceSlug={workspace.slug}
-                  file={
-                    reviewState.diff?.files.find((f) => f.path === reviewState.selectedPath) ??
-                    reviewState.diff?.files[0] ??
-                    null
-                  }
-                  loadContent={loadReviewFileContent}
-                />
-              </div>
-              {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}
-              {reviewState.pr && (
-                <ReviewActions
-                  state={reviewState.pr.state}
-                  role={workspace.role}
-                  isAuthor={reviewState.pr.author_user_id === user.id}
-                  onSubmit={submitReview}
-                  onClose={closeReviewedChange}
-                  busy={reviewState.busy}
-                />
-              )}
-            </>
-          ) : !openPath ? (
+          {!reviewingChangeId && !openPath && (
             <div className={cn("flex flex-1 items-center justify-center", muted)}>
               Select a file from the sidebar, or create one.
             </div>
-          ) : (
+          )}
+          {!reviewingChangeId && openPath && (
             <>
               <Suspense fallback={<div className="flex-1" />}>
                 <MarkdownEditor
@@ -1521,6 +1496,33 @@ function WorkspaceView({
               )}
               {activeChangeId && approvals.length > 0 && (
                 <ApprovalsPanel approvals={approvals} />
+              )}
+            </>
+          )}
+          {reviewingChangeId && (
+            <>
+              {reviewState.pr && <PrHeader pr={reviewState.pr} />}
+              <div className="flex-1 min-h-0">
+                <DiffArea
+                  workspaceSlug={workspace.slug}
+                  file={
+                    reviewState.diff?.files.find((f) => f.path === reviewState.selectedPath) ??
+                    reviewState.diff?.files[0] ??
+                    null
+                  }
+                  loadContent={loadReviewFileContent}
+                />
+              </div>
+              {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}
+              {reviewState.pr && (
+                <ReviewActions
+                  state={reviewState.pr.state}
+                  role={workspace.role}
+                  isAuthor={reviewState.pr.author_user_id === user.id}
+                  onSubmit={submitReview}
+                  onClose={closeReviewedChange}
+                  busy={reviewState.busy}
+                />
               )}
             </>
           )}

@@ -79,6 +79,11 @@ try {
 
   stage = "vera-click-queue";
   await queueItem.click();
+  // Review surface should render: PR header, changed-files list, diff area
+  // with the spike picker, and the action bar at the bottom.
+  await vera.getByTestId("pr-header").waitFor({ state: "visible", timeout: 8000 });
+  await vera.getByTestId("pr-file-list").waitFor({ state: "visible", timeout: 8000 });
+  await vera.getByTestId("spike-unified").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("review-request-changes").waitFor({ state: "visible", timeout: 8000 });
 
   stage = "vera-request-changes";
