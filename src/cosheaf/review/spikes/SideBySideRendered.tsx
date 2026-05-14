@@ -24,7 +24,13 @@ export function SideBySideRendered({
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;
 
   return (
-    <div data-testid="spike-split-pane" className="grid grid-cols-2 h-full divide-x divide-[var(--cf-border)]">
+    <div
+      data-testid="spike-split-pane"
+      // Zero out coflat's sidenote gutter so each pane's rich content fills
+      // its column width.
+      style={{ ["--cf-sidenote-width" as never]: "0px", ["--cf-content-max-width" as never]: "none" }}
+      className="grid grid-cols-2 h-full divide-x divide-[var(--cf-border)]"
+    >
       <Pane label="base" content={base.content} emptyLabel={file.status === "added" ? "(new file)" : null} comments={comments} side="old" filePath={file.path} currentForgejoUsername={currentForgejoUsername} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
       <Pane label="head" content={head.content} emptyLabel={file.status === "deleted" ? "(deleted)" : null} comments={comments} side="new" filePath={file.path} currentForgejoUsername={currentForgejoUsername} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
     </div>

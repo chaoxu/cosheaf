@@ -118,7 +118,10 @@ export function UnifiedSourceDiff({
         diffType={parsed.type}
         hunks={parsed.hunks}
         widgets={widgets}
-        renderGutter={({ change, renderDefault }) => {
+        renderGutter={({ change, side, renderDefault }) => {
+          // react-diff-view calls renderGutter for both gutter columns
+          // (old line numbers + new line numbers); we only want one "+".
+          if (side !== "new") return renderDefault();
           const c = change as unknown as ParsedChange;
           const { newLine, oldLine } = lineFor(c);
           const target =
