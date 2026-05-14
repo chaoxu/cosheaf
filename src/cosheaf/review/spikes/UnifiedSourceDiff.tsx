@@ -112,7 +112,7 @@ export function UnifiedSourceDiff({
   }
 
   return (
-    <div data-testid="spike-unified-pane" className="cf-unified-diff text-[12.5px]">
+    <div data-testid="diff-pane-unified" className="cf-unified-diff text-[12.5px]">
       <Diff
         viewType="unified"
         diffType={parsed.type}

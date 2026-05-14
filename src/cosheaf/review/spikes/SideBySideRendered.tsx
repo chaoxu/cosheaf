@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { ReactElement } from "react";
+import type { StandaloneEditorMode } from "@chaoxu/coflat-editor";
 import { cn } from "../../lib/utils";
 import { MarkdownEditor } from "../../editor";
 import { commentThreadExtension } from "../cm-comment-widgets";
@@ -16,7 +17,8 @@ export function SideBySideRendered({
   currentForgejoUsername,
   onEditComment,
   onDeleteComment,
-}: SpikeProps): ReactElement {
+  mode,
+}: SpikeProps & { mode: StandaloneEditorMode }): ReactElement {
   const base = useFileSide(loadContent, "base", file.status !== "added", file.path);
   const head = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const error = base.error ?? head.error;
@@ -25,20 +27,21 @@ export function SideBySideRendered({
 
   return (
     <div
-      data-testid="spike-split-pane"
+      data-testid="diff-pane-split"
       // Zero out coflat's sidenote gutter so each pane's rich content fills
       // its column width.
       style={{ ["--cf-sidenote-width" as never]: "0px", ["--cf-content-max-width" as never]: "none" }}
       className="grid grid-cols-2 h-full divide-x divide-[var(--cf-border)]"
     >
-      <Pane label="base" content={base.content} emptyLabel={file.status === "added" ? "(new file)" : null} comments={comments} side="old" filePath={file.path} currentForgejoUsername={currentForgejoUsername} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
-      <Pane label="head" content={head.content} emptyLabel={file.status === "deleted" ? "(deleted)" : null} comments={comments} side="new" filePath={file.path} currentForgejoUsername={currentForgejoUsername} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+      <Pane label="base" mode={mode} content={base.content} emptyLabel={file.status === "added" ? "(new file)" : null} comments={comments} side="old" filePath={file.path} currentForgejoUsername={currentForgejoUsername} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
+      <Pane label="head" mode={mode} content={head.content} emptyLabel={file.status === "deleted" ? "(deleted)" : null} comments={comments} side="new" filePath={file.path} currentForgejoUsername={currentForgejoUsername} onEditComment={onEditComment} onDeleteComment={onDeleteComment} />
     </div>
   );
 }
 
 function Pane({
   label,
+  mode,
   content,
   emptyLabel,
   comments,
@@ -49,6 +52,7 @@ function Pane({
   onDeleteComment,
 }: {
   label: "base" | "head";
+  mode: StandaloneEditorMode;
   content: string | null;
   emptyLabel: string | null;
   comments: readonly LineComment[];
@@ -76,9 +80,9 @@ function Pane({
           <div className={cn("p-3 text-sm", muted)}>Loading…</div>
         ) : (
           <MarkdownEditor
-            key={`${label}-${filePath}`}
+            key={`${label}-${mode}-${filePath}`}
             value={content}
-            mode="rich"
+            mode={mode}
             onChange={() => undefined}
             readOnly
             extensions={extensions}

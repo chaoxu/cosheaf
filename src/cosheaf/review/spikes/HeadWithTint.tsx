@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { ReactElement } from "react";
+import type { StandaloneEditorMode } from "@chaoxu/coflat-editor";
 import { cn } from "../../lib/utils";
 import { MarkdownEditor } from "../../editor";
 import { diffLineNumbers } from "../diff-lines";
@@ -10,8 +11,8 @@ import type { SpikeProps } from "../spike-types";
 
 const muted = "text-[var(--cf-muted)]";
 
-// Rendered spike: the head version of the file in rich mode, with the
-// added lines tinted in-line.
+// "After only" — the head version of the file, with added lines tinted.
+// `mode` toggles between raw markdown source and rich rendering.
 export function HeadWithTint({
   file,
   loadContent,
@@ -19,7 +20,8 @@ export function HeadWithTint({
   currentForgejoUsername,
   onEditComment,
   onDeleteComment,
-}: SpikeProps): ReactElement {
+  mode,
+}: SpikeProps & { mode: StandaloneEditorMode }): ReactElement {
   const { content, error } = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const extensions = useMemo(
     () => [
@@ -37,11 +39,11 @@ export function HeadWithTint({
   if (file.status === "deleted") return <div className={cn("p-3 text-sm", muted)}>(file deleted)</div>;
   if (content === null) return <div className={cn("p-3 text-sm", muted)}>Loading…</div>;
   return (
-    <div data-testid="spike-rendered-pane" className="h-full min-h-0 flex flex-col">
+    <div data-testid="diff-pane-after" className="h-full min-h-0 flex flex-col">
       <MarkdownEditor
-        key={`rendered-${file.path}`}
+        key={`after-${mode}-${file.path}`}
         value={content}
-        mode="rich"
+        mode={mode}
         onChange={() => undefined}
         readOnly
         extensions={extensions}

@@ -17,10 +17,12 @@ export async function openReview(page: Page, expectMarker = "Pythagoras") {
   await page.getByTestId("sidebar-tab-queue").click();
   await page.locator('[data-testid^="queue-change-"]').first().click();
   await page.getByTestId("pr-header").waitFor({ state: "visible" });
-  await page.getByTestId("spike-unified").click();
-  await page.getByTestId("spike-unified-pane").waitFor({ state: "visible" });
+  // Default mode/shape lands on Source + Unified.
+  await page.getByTestId("view-mode-source").click();
+  await page.getByTestId("view-shape-unified").click();
+  await page.getByTestId("diff-pane-unified").waitFor({ state: "visible" });
   await page
-    .locator(`[data-testid="spike-unified-pane"] >> text=${expectMarker}`)
+    .locator(`[data-testid="diff-pane-unified"] >> text=${expectMarker}`)
     .first()
     .waitFor({ timeout: 8000 });
 }

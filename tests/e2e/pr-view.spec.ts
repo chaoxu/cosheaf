@@ -10,24 +10,32 @@ test.describe.serial("PR review surface", () => {
 
     await expect(page.locator('[data-testid="comment-thread"]')).not.toHaveCount(0);
 
-    for (const id of ["unified", "split", "rendered"] as const) {
-      await page.getByTestId(`spike-${id}`).click();
-      await expect(page.getByTestId(`spike-${id}-pane`)).toBeVisible({ timeout: 5000 });
-      if (id === "split") {
-        await expect(page.locator('[data-testid="spike-split-pane"] .cm-content').first()).toBeVisible({
-          timeout: 8000,
-        });
-        await expect(page.locator('[data-testid="spike-split-pane"] >> text=Loading')).toHaveCount(0);
-      } else if (id === "rendered") {
-        await expect(page.locator('[data-testid="spike-rendered-pane"] .cm-content').first()).toBeVisible({
+    // Walk the five reachable (mode, shape) combinations.
+    const combos: Array<{ mode: "source" | "rich"; shape: "unified" | "split" | "after"; testId: string }> = [
+      { mode: "source", shape: "unified", testId: "diff-pane-unified" },
+      { mode: "source", shape: "split", testId: "diff-pane-split" },
+      { mode: "source", shape: "after", testId: "diff-pane-after" },
+      { mode: "rich", shape: "split", testId: "diff-pane-split" },
+      { mode: "rich", shape: "after", testId: "diff-pane-after" },
+    ];
+    for (const { mode, shape, testId } of combos) {
+      await page.getByTestId(`view-mode-${mode}`).click();
+      await page.getByTestId(`view-shape-${shape}`).click();
+      await expect(page.getByTestId(testId)).toBeVisible({ timeout: 5000 });
+      if (shape !== "unified") {
+        await expect(page.locator(`[data-testid="${testId}"] .cm-content`).first()).toBeVisible({
           timeout: 8000,
         });
       }
     }
+    // Rich + Unified should be disabled.
+    await page.getByTestId("view-mode-rich").click();
+    await expect(page.getByTestId("view-shape-unified")).toBeDisabled();
 
-    // Back to unified for composer tests.
-    await page.getByTestId("spike-unified").click();
-    await expect(page.getByTestId("spike-unified-pane")).toBeVisible();
+    // Back to Source + Unified for composer tests.
+    await page.getByTestId("view-mode-source").click();
+    await page.getByTestId("view-shape-unified").click();
+    await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
 
     // Add a single-shot comment.
     await page.locator('[data-testid^="comment-add-new-"]').first().click({ force: true });
@@ -87,7 +95,7 @@ test.describe.serial("PR review surface", () => {
     const files = page.locator('[data-testid^="pr-file-"]');
     expect(await files.count()).toBeGreaterThanOrEqual(2);
     await files.nth(1).click();
-    await expect(page.getByTestId("spike-unified-pane")).toBeVisible();
+    await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
 
     // Exit + re-enter.
     await page.getByTestId("review-exit").click();
