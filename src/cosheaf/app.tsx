@@ -1620,7 +1620,7 @@ function WorkspaceView({
                   {openDoc && openDoc.type !== "page" && statusBadge(openDoc.status)}
                   {dirty && <span className="text-[var(--cf-accent)]">●</span>}
                 </>
-              ) : (
+              ) : reviewingChangeId ? null : (
                 <span>no file open</span>
               )}
             </div>

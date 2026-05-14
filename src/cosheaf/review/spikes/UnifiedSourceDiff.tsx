@@ -101,7 +101,7 @@ function RowWithThread({
               type="button"
               data-testid={`comment-add-${target.side}-${target.line}`}
               onClick={() => onAddClick(target)}
-              className="absolute -left-2 top-0 hidden group-hover:flex w-4 h-4 items-center justify-center rounded bg-[var(--cf-accent)] text-[var(--cf-accent-fg)] text-[10px]"
+              className="absolute -left-2 top-0 flex w-4 h-4 items-center justify-center rounded bg-[var(--cf-accent)] text-[var(--cf-accent-fg)] text-[10px] leading-none opacity-0 group-hover:opacity-100 focus:opacity-100"
               title="Add comment"
             >
               +
