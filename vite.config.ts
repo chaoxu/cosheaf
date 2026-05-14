@@ -53,6 +53,10 @@ export default defineConfig({
       "@citation-js/date",
       "@citation-js/plugin-bibtex",
       "@citation-js/plugin-csl",
+      // PR-review surface deps — pre-bundle so the first visit to a PR
+      // doesn't trigger a 5–15s optimize pause.
+      "parse-diff",
+      "react-diff-view",
     ],
     // The editor package is already a single bundled .mjs; Vite's optimizer
     // chokes on its `import("pdfjs-dist/.../pdf.worker.min.mjs?url")` line.
