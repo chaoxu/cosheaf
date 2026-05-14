@@ -1,6 +1,6 @@
 import type { CommentSide, LineComment, PullFile } from "../api";
 
-export type SpikeId = "unified" | "tint" | "split" | "rendered";
+export type SpikeId = "unified" | "tint" | "split" | "rendered" | "library";
 
 export interface AddCommentTarget {
   path: string;
