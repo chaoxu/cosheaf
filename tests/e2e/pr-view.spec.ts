@@ -10,7 +10,7 @@ test.describe.serial("PR review surface", () => {
 
     await expect(page.locator('[data-testid="comment-thread"]')).not.toHaveCount(0);
 
-    for (const id of ["unified", "tint", "split", "rendered", "library"] as const) {
+    for (const id of ["unified", "tint", "split", "rendered"] as const) {
       await page.getByTestId(`spike-${id}`).click();
       await expect(page.getByTestId(`spike-${id}-pane`)).toBeVisible({ timeout: 5000 });
       if (id === "split") {

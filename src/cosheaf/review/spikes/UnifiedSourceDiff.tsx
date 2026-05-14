@@ -1,13 +1,34 @@
+// Unified diff via react-diff-view. The library handles patch parsing,
+// gutter line numbers, +/-/normal styling; we override colors to match
+// cosheaf's theme, render the "+ add comment" affordance inside the gutter
+// on hover (via renderGutter), and inject comment threads + inline composer
+// through the library's `widgets` map.
+
 import { useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { Diff, Hunk, getChangeKey, parseDiff } from "react-diff-view";
+import "react-diff-view/style/index.css";
 import { cn } from "../../lib/utils";
 import { CommentThread } from "../CommentThread";
 import { InlineComposer } from "../InlineComposer";
-import { groupCommentsByLine, type LineKey } from "../comment-anchors";
-import type { LineComment } from "../../api";
+import { groupCommentsByLine } from "../comment-anchors";
 import type { AddCommentTarget, SpikeProps } from "../spike-types";
+import "./unified.css";
 
 const muted = "text-[var(--cf-muted)]";
+
+interface ParsedChange {
+  type: "normal" | "insert" | "delete";
+  lineNumber?: number;
+  newLineNumber?: number;
+  oldLineNumber?: number;
+}
+
+function lineFor(change: ParsedChange): { newLine?: number; oldLine?: number } {
+  if (change.type === "insert") return { newLine: change.lineNumber };
+  if (change.type === "delete") return { oldLine: change.lineNumber };
+  return { newLine: change.newLineNumber, oldLine: change.oldLineNumber };
+}
 
 export function UnifiedSourceDiff({
   file,
@@ -19,166 +40,117 @@ export function UnifiedSourceDiff({
 }: SpikeProps): ReactElement {
   const [composerAt, setComposerAt] = useState<AddCommentTarget | null>(null);
   const [busy, setBusy] = useState(false);
+
   if (!file.patch) {
-    return <div className={cn("p-3 text-sm", muted)}>(no textual diff — binary or empty)</div>;
+    return <div className={cn("p-3 text-sm", muted)}>(no textual diff)</div>;
   }
-  const rows = renderRows(file.patch);
+
+  // Forgejo gives body-only patches; react-diff-view wants the `diff --git`
+  // header. Synthesize one when missing.
+  const withHeader = file.patch.startsWith("diff --git")
+    ? file.patch
+    : `diff --git a/${file.path} b/${file.path}\n--- a/${file.path}\n+++ b/${file.path}\n${file.patch}`;
+  const parsed = parseDiff(withHeader)[0];
+  if (!parsed) return <div className={cn("p-3 text-sm", muted)}>(could not parse diff)</div>;
+
   const byLine = groupCommentsByLine(comments);
-  const orphanOutdated = comments.filter((c) => c.outdated && c.line === null);
+
+  // Build a widgets map keyed by change. Each entry is a column-spanning row
+  // appended right under its anchor change.
+  const widgets: Record<string, ReactNode> = {};
+  for (const hunk of parsed.hunks) {
+    for (const change of hunk.changes) {
+      const pc = change as unknown as ParsedChange;
+      const { newLine, oldLine } = lineFor(pc);
+      const newThread = newLine !== undefined ? byLine.get(`new:${newLine}`) : undefined;
+      const oldThread = oldLine !== undefined ? byLine.get(`old:${oldLine}`) : undefined;
+      const target =
+        newLine !== undefined
+          ? { line: newLine, side: "new" as const }
+          : oldLine !== undefined
+            ? { line: oldLine, side: "old" as const }
+            : null;
+      const composerHere =
+        composerAt && target && composerAt.line === target.line && composerAt.side === target.side;
+      if (!newThread && !oldThread && !composerHere) continue;
+      widgets[getChangeKey(change)] = (
+        <div className="bg-[var(--cf-bg)] border-t border-[var(--cf-border)]">
+          {newThread && (
+            <CommentThread
+              comments={newThread}
+              currentForgejoUsername={currentForgejoUsername}
+              onEdit={onEditComment}
+              onDelete={onDeleteComment}
+            />
+          )}
+          {oldThread && (
+            <CommentThread
+              comments={oldThread}
+              currentForgejoUsername={currentForgejoUsername}
+              onEdit={onEditComment}
+              onDelete={onDeleteComment}
+            />
+          )}
+          {composerHere && composerAt && onAddComment && (
+            <InlineComposer
+              busy={busy}
+              onCancel={() => setComposerAt(null)}
+              onSubmit={async (body) => {
+                setBusy(true);
+                try {
+                  await onAddComment(composerAt, body);
+                  setComposerAt(null);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+  }
 
   return (
-    <div data-testid="spike-unified-pane" className="text-[13px] font-mono leading-5">
-      {rows.map((r, i) => (
-        <RowWithThread
-          key={i}
-          row={r}
-          byLine={byLine}
-          currentForgejoUsername={currentForgejoUsername}
-          onEditComment={onEditComment}
-          onDeleteComment={onDeleteComment}
-          onAddClick={onAddComment ? (t) => setComposerAt({ ...t, path: file.path }) : undefined}
-          composerAt={composerAt}
-          composer={
-            composerAt && onAddComment ? (
-              <InlineComposer
-                busy={busy}
-                onCancel={() => setComposerAt(null)}
-                onSubmit={async (body) => {
-                  setBusy(true);
-                  try {
-                    await onAddComment(composerAt, body);
-                    setComposerAt(null);
-                  } finally {
-                    setBusy(false);
-                  }
+    <div data-testid="spike-unified-pane" className="cf-unified-diff text-[12.5px]">
+      <Diff
+        viewType="unified"
+        diffType={parsed.type}
+        hunks={parsed.hunks}
+        widgets={widgets}
+        renderGutter={({ change, renderDefault }) => {
+          const c = change as unknown as ParsedChange;
+          const { newLine, oldLine } = lineFor(c);
+          const target =
+            newLine !== undefined
+              ? { line: newLine, side: "new" as const }
+              : oldLine !== undefined
+                ? { line: oldLine, side: "old" as const }
+                : null;
+          if (!onAddComment || !target) return renderDefault();
+          // The button is always present in the DOM (so tests and keyboard
+          // users can reach it) but visually hidden until the row is hovered.
+          return (
+            <span className="cf-gutter-with-add">
+              {renderDefault()}
+              <button
+                type="button"
+                data-testid={`comment-add-${target.side}-${target.line}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setComposerAt({ ...target, path: file.path });
                 }}
-              />
-            ) : null
-          }
-        />
-      ))}
-      {orphanOutdated.length > 0 && (
-        <div className="px-3 pt-3">
-          <div className={cn("text-xs mb-1", muted)}>Outdated comments (anchored lines no longer in diff):</div>
-          <CommentThread comments={orphanOutdated} />
-        </div>
-      )}
+                className="cf-gutter-add"
+                title="Add comment"
+              >
+                +
+              </button>
+            </span>
+          );
+        }}
+      >
+        {(hunks) => hunks.map((hunk) => <Hunk key={hunk.content} hunk={hunk} />)}
+      </Diff>
     </div>
   );
-}
-
-function RowWithThread({
-  row,
-  byLine,
-  currentForgejoUsername,
-  onEditComment,
-  onDeleteComment,
-  onAddClick,
-  composerAt,
-  composer,
-}: {
-  row: Row;
-  byLine: Map<LineKey, LineComment[]>;
-  currentForgejoUsername?: string;
-  onEditComment?: (id: number, body: string) => Promise<void>;
-  onDeleteComment?: (id: number, reviewId: number) => Promise<void>;
-  onAddClick?: (target: { line: number; side: "new" | "old" }) => void;
-  composerAt: AddCommentTarget | null;
-  composer: ReactElement | null;
-}): ReactElement {
-  if (row.kind === "hunk") {
-    return <div className={cn("px-3 py-1 bg-[var(--cf-hover)] text-xs", muted)}>{row.text}</div>;
-  }
-  const bg = row.kind === "add" ? "bg-green-500/10" : row.kind === "del" ? "bg-red-500/10" : "";
-  const sign = row.kind === "add" ? "+" : row.kind === "del" ? "−" : " ";
-  const newSide = row.headLine !== null ? byLine.get(`new:${row.headLine}`) : undefined;
-  const oldSide = row.baseLine !== null ? byLine.get(`old:${row.baseLine}`) : undefined;
-  // Prefer commenting on the new side when both are present (added/context).
-  const target =
-    row.headLine !== null
-      ? { line: row.headLine, side: "new" as const }
-      : row.baseLine !== null
-        ? { line: row.baseLine, side: "old" as const }
-        : null;
-  const composerForRow =
-    composerAt && target && composerAt.line === target.line && composerAt.side === target.side
-      ? composer
-      : null;
-  return (
-    <>
-      <div className={cn("flex group", bg)}>
-        <span className={cn("w-10 px-1 text-right tabular-nums text-xs select-none", muted)}>
-          {row.baseLine ?? ""}
-        </span>
-        <span className={cn("w-10 px-1 text-right tabular-nums text-xs select-none relative", muted)}>
-          {row.headLine ?? ""}
-          {onAddClick && target && (
-            <button
-              type="button"
-              data-testid={`comment-add-${target.side}-${target.line}`}
-              onClick={() => onAddClick(target)}
-              className="absolute -left-2 top-0 flex w-4 h-4 items-center justify-center rounded bg-[var(--cf-accent)] text-[var(--cf-accent-fg)] text-[10px] leading-none opacity-0 group-hover:opacity-100 focus:opacity-100"
-              title="Add comment"
-            >
-              +
-            </button>
-          )}
-        </span>
-        <span className="w-4 select-none text-center">{sign}</span>
-        <span className="flex-1 whitespace-pre">{row.text}</span>
-      </div>
-      {newSide && (
-        <CommentThread
-          comments={newSide}
-          currentForgejoUsername={currentForgejoUsername}
-          onEdit={onEditComment}
-          onDelete={onDeleteComment}
-        />
-      )}
-      {oldSide && (
-        <CommentThread
-          comments={oldSide}
-          currentForgejoUsername={currentForgejoUsername}
-          onEdit={onEditComment}
-          onDelete={onDeleteComment}
-        />
-      )}
-      {composerForRow}
-    </>
-  );
-}
-
-type Row =
-  | { kind: "hunk"; text: string }
-  | { kind: "ctx" | "add" | "del"; text: string; baseLine: number | null; headLine: number | null };
-
-function renderRows(patch: string): Row[] {
-  const out: Row[] = [];
-  let baseLine = 0;
-  let headLine = 0;
-  let inHunk = false;
-  for (const raw of patch.split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
-    if (hunk) {
-      baseLine = Number(hunk[1]);
-      headLine = Number(hunk[2]);
-      inHunk = true;
-      out.push({ kind: "hunk", text: raw });
-      continue;
-    }
-    if (!inHunk) continue;
-    if (raw.startsWith("+")) {
-      out.push({ kind: "add", text: raw.slice(1), baseLine: null, headLine });
-      headLine++;
-    } else if (raw.startsWith("-")) {
-      out.push({ kind: "del", text: raw.slice(1), baseLine, headLine: null });
-      baseLine++;
-    } else {
-      const content = raw.startsWith(" ") ? raw.slice(1) : raw;
-      out.push({ kind: "ctx", text: content, baseLine, headLine });
-      baseLine++;
-      headLine++;
-    }
-  }
-  return out;
 }
