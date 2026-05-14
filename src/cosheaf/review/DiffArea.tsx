@@ -21,13 +21,19 @@ export function DiffArea({
   workspaceSlug,
   loadContent,
   comments,
+  currentForgejoUsername,
   onAddComment,
+  onEditComment,
+  onDeleteComment,
 }: {
   file: PullFile | null;
   workspaceSlug: string;
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
+  currentForgejoUsername?: string;
   onAddComment?: SpikeProps["onAddComment"];
+  onEditComment?: SpikeProps["onEditComment"];
+  onDeleteComment?: SpikeProps["onDeleteComment"];
 }): ReactElement {
   const fileComments = useMemo(
     () => (file ? comments.filter((c) => c.path === file.path) : []),
@@ -73,7 +79,10 @@ export function DiffArea({
           file,
           loadContent: (side) => loadContent(file.path, side),
           comments: fileComments,
+          currentForgejoUsername,
           onAddComment,
+          onEditComment,
+          onDeleteComment,
         })}
       </div>
     </div>

@@ -6,23 +6,26 @@ import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import { type EditorState, StateField } from "@codemirror/state";
 import { type DecorationSet, Decoration, EditorView, WidgetType } from "@codemirror/view";
-import { CommentThread } from "./CommentThread";
+import { CommentThread, type CommentActions } from "./CommentThread";
 import { groupCommentsByLine } from "./comment-anchors";
 import type { LineComment } from "../api";
 
 class ThreadWidget extends WidgetType {
   private root: Root | null = null;
-  constructor(private readonly comments: readonly LineComment[]) {
+  constructor(
+    private readonly comments: readonly LineComment[],
+    private readonly actions: CommentActions,
+  ) {
     super();
   }
   eq(other: ThreadWidget): boolean {
-    return other.comments === this.comments;
+    return other.comments === this.comments && other.actions === this.actions;
   }
   toDOM(): HTMLElement {
     const el = document.createElement("div");
     el.className = "cf-comment-host";
     this.root = createRoot(el);
-    this.root.render(createElement(CommentThread, { comments: this.comments }));
+    this.root.render(createElement(CommentThread, { comments: this.comments, ...this.actions }));
     return el;
   }
   destroy(): void {
@@ -34,6 +37,7 @@ class ThreadWidget extends WidgetType {
 export function commentThreadExtension(
   comments: readonly LineComment[],
   side: "new" | "old",
+  actions: CommentActions = {},
 ) {
   const byLine = groupCommentsByLine(comments);
 
@@ -46,7 +50,11 @@ export function commentThreadExtension(
       const line = doc.line(i);
       ranges.push({
         from: line.to,
-        deco: Decoration.widget({ widget: new ThreadWidget(bucket), block: true, side: 1 }),
+        deco: Decoration.widget({
+          widget: new ThreadWidget(bucket, actions),
+          block: true,
+          side: 1,
+        }),
       });
     }
     return Decoration.set(ranges.map((r) => r.deco.range(r.from)));

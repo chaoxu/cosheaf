@@ -9,7 +9,14 @@ import type { AddCommentTarget, SpikeProps } from "../spike-types";
 
 const muted = "text-[var(--cf-muted)]";
 
-export function UnifiedSourceDiff({ file, comments, onAddComment }: SpikeProps): ReactElement {
+export function UnifiedSourceDiff({
+  file,
+  comments,
+  currentForgejoUsername,
+  onAddComment,
+  onEditComment,
+  onDeleteComment,
+}: SpikeProps): ReactElement {
   const [composerAt, setComposerAt] = useState<AddCommentTarget | null>(null);
   const [busy, setBusy] = useState(false);
   if (!file.patch) {
@@ -26,6 +33,9 @@ export function UnifiedSourceDiff({ file, comments, onAddComment }: SpikeProps):
           key={i}
           row={r}
           byLine={byLine}
+          currentForgejoUsername={currentForgejoUsername}
+          onEditComment={onEditComment}
+          onDeleteComment={onDeleteComment}
           onAddClick={onAddComment ? (t) => setComposerAt({ ...t, path: file.path }) : undefined}
           composerAt={composerAt}
           composer={
@@ -60,12 +70,18 @@ export function UnifiedSourceDiff({ file, comments, onAddComment }: SpikeProps):
 function RowWithThread({
   row,
   byLine,
+  currentForgejoUsername,
+  onEditComment,
+  onDeleteComment,
   onAddClick,
   composerAt,
   composer,
 }: {
   row: Row;
   byLine: Map<LineKey, LineComment[]>;
+  currentForgejoUsername?: string;
+  onEditComment?: (id: number, body: string) => Promise<void>;
+  onDeleteComment?: (id: number, reviewId: number) => Promise<void>;
   onAddClick?: (target: { line: number; side: "new" | "old" }) => void;
   composerAt: AddCommentTarget | null;
   composer: ReactElement | null;
@@ -111,8 +127,22 @@ function RowWithThread({
         <span className="w-4 select-none text-center">{sign}</span>
         <span className="flex-1 whitespace-pre">{row.text}</span>
       </div>
-      {newSide && <CommentThread comments={newSide} />}
-      {oldSide && <CommentThread comments={oldSide} />}
+      {newSide && (
+        <CommentThread
+          comments={newSide}
+          currentForgejoUsername={currentForgejoUsername}
+          onEdit={onEditComment}
+          onDelete={onDeleteComment}
+        />
+      )}
+      {oldSide && (
+        <CommentThread
+          comments={oldSide}
+          currentForgejoUsername={currentForgejoUsername}
+          onEdit={onEditComment}
+          onDelete={onDeleteComment}
+        />
+      )}
       {composerForRow}
     </>
   );

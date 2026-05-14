@@ -8,6 +8,7 @@ export type { ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineCom
 export interface User {
   id: number;
   username: string;
+  forgejo_username: string;
 }
 
 export interface Workspace {

@@ -1218,6 +1218,26 @@ function WorkspaceView({
     [reviewingChangeId, workspace.slug, reviewState.draftReviewId, refreshReviewComments],
   );
 
+  const editReviewComment = useCallback(
+    async (commentId: number, body: string) => {
+      const id = reviewingChangeId;
+      if (!id) return;
+      await api.editChangeComment(workspace.slug, id, commentId, body);
+      refreshReviewComments();
+    },
+    [reviewingChangeId, workspace.slug, refreshReviewComments],
+  );
+
+  const deleteReviewComment = useCallback(
+    async (commentId: number, reviewId: number) => {
+      const id = reviewingChangeId;
+      if (!id) return;
+      await api.deleteChangeComment(workspace.slug, id, commentId, reviewId);
+      refreshReviewComments();
+    },
+    [reviewingChangeId, workspace.slug, refreshReviewComments],
+  );
+
   const toggleDraftReview = useCallback(async () => {
     const id = reviewingChangeId;
     if (!id) return;
@@ -1579,11 +1599,14 @@ function WorkspaceView({
                   }
                   loadContent={loadReviewFileContent}
                   comments={reviewState.comments}
+                  currentForgejoUsername={user.forgejo_username}
                   onAddComment={
                     workspace.role === "owner" || workspace.role === "verifier"
                       ? addReviewComment
                       : undefined
                   }
+                  onEditComment={editReviewComment}
+                  onDeleteComment={deleteReviewComment}
                 />
               </div>
               {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}

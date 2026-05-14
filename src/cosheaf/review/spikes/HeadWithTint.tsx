@@ -18,6 +18,9 @@ export function HeadWithTint({
   file,
   loadContent,
   comments,
+  currentForgejoUsername,
+  onEditComment,
+  onDeleteComment,
   mode,
   testId,
 }: SpikeProps & { mode: StandaloneEditorMode; testId: string }): ReactElement {
@@ -25,9 +28,13 @@ export function HeadWithTint({
   const extensions = useMemo(
     () => [
       ...lineTintExtension(diffLineNumbers(file.patch, "added")),
-      commentThreadExtension(comments, "new"),
+      commentThreadExtension(comments, "new", {
+        currentForgejoUsername,
+        onEdit: onEditComment,
+        onDelete: onDeleteComment,
+      }),
     ],
-    [file.patch, comments],
+    [file.patch, comments, currentForgejoUsername, onEditComment, onDeleteComment],
   );
 
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;

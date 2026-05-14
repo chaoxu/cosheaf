@@ -30,7 +30,7 @@ auth.post("/login", async (c) => {
     maxAge: 30 * 24 * 60 * 60,
     secure: process.env.NODE_ENV === "production",
   });
-  return c.json({ id: user.id, username: user.username });
+  return c.json({ id: user.id, username: user.username, forgejo_username: user.forgejo_username });
 });
 
 auth.post("/logout", (c) => {
@@ -47,5 +47,5 @@ auth.get("/me", (c) => {
   if (!sid) return c.json({ user: null });
   const u = userFromSession(c.get("db"), sid);
   if (!u) return c.json({ user: null });
-  return c.json({ user: { id: u.id, username: u.username } });
+  return c.json({ user: { id: u.id, username: u.username, forgejo_username: u.forgejo_username } });
 });

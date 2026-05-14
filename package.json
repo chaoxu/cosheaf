@@ -39,7 +39,8 @@
     "smoke": "node scripts/browser-smoke.mjs",
     "smoke:flow": "node scripts/browser-flow.mjs",
     "smoke:review": "node scripts/browser-flow-review.mjs",
-    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review",
+    "smoke:pr-view": "node scripts/browser-flow-pr-view.mjs",
+    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review && pnpm smoke:pr-view",
     "clean": "rm -rf dist",
     "prepare": "lefthook install"
   },
