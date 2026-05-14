@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
   testMatch: /.*\.spec\.ts$/,
+  globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: false, // state-transition specs publish PRs serially
   workers: 1,
   retries: process.env.CI ? 2 : 1,
