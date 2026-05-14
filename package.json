@@ -39,9 +39,8 @@
     "smoke": "node scripts/browser-smoke.mjs",
     "smoke:flow": "node scripts/browser-flow.mjs",
     "smoke:review": "node scripts/browser-flow-review.mjs",
-    "smoke:pr-view": "node scripts/browser-flow-pr-view.mjs",
-    "smoke:pr-transitions": "node scripts/browser-flow-pr-transitions.mjs",
-    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review && pnpm smoke:pr-view && pnpm smoke:pr-transitions",
+    "test:e2e": "playwright test",
+    "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review && pnpm test:e2e",
     "clean": "rm -rf dist",
     "prepare": "lefthook install"
   },
@@ -80,6 +79,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.9",
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.5.0",
