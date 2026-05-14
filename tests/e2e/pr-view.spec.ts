@@ -10,7 +10,7 @@ test.describe.serial("PR review surface", () => {
 
     await expect(page.locator('[data-testid="comment-thread"]')).not.toHaveCount(0);
 
-    for (const id of ["unified", "tint", "split", "rendered"] as const) {
+    for (const id of ["unified", "split", "rendered"] as const) {
       await page.getByTestId(`spike-${id}`).click();
       await expect(page.getByTestId(`spike-${id}-pane`)).toBeVisible({ timeout: 5000 });
       if (id === "split") {
@@ -18,8 +18,8 @@ test.describe.serial("PR review surface", () => {
           timeout: 8000,
         });
         await expect(page.locator('[data-testid="spike-split-pane"] >> text=Loading')).toHaveCount(0);
-      } else if (id === "tint" || id === "rendered") {
-        await expect(page.locator(`[data-testid="spike-${id}-pane"] .cm-content`).first()).toBeVisible({
+      } else if (id === "rendered") {
+        await expect(page.locator('[data-testid="spike-rendered-pane"] .cm-content').first()).toBeVisible({
           timeout: 8000,
         });
       }

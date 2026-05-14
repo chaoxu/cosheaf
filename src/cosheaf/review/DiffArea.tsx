@@ -9,7 +9,6 @@ import { SideBySideRendered } from "./spikes/SideBySideRendered";
 
 const SPIKES: Array<{ id: SpikeId; label: string }> = [
   { id: "unified", label: "Unified" },
-  { id: "tint", label: "Source tint" },
   { id: "split", label: "Side-by-side" },
   { id: "rendered", label: "Rendered" },
 ];
@@ -91,13 +90,12 @@ export function DiffArea({
 
 function renderSpike(id: SpikeId, props: SpikeProps): ReactElement {
   if (id === "unified") return <UnifiedSourceDiff {...props} />;
-  if (id === "tint") return <HeadWithTint {...props} mode="source" testId="spike-tint-pane" />;
   if (id === "split") return <SideBySideRendered {...props} />;
-  return <HeadWithTint {...props} mode="rich" testId="spike-rendered-pane" />;
+  return <HeadWithTint {...props} />;
 }
 
 function readSpike(key: string): SpikeId {
   const v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  if (v === "unified" || v === "tint" || v === "split" || v === "rendered") return v;
+  if (v === "unified" || v === "split" || v === "rendered") return v;
   return "unified";
 }
