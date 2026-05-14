@@ -41,7 +41,7 @@ export function HeadWithTint({
   if (file.status === "deleted") return <div className={cn("p-3 text-sm", muted)}>(file deleted)</div>;
   if (content === null) return <div className={cn("p-3 text-sm", muted)}>Loading…</div>;
   return (
-    <div data-testid={testId} className="h-full">
+    <div data-testid={testId} className="h-full min-h-0 flex flex-col">
       <MarkdownEditor
         key={`${mode}-${file.path}`}
         value={content}
