@@ -119,13 +119,16 @@ try {
   });
 
   await step("delete-own", async () => {
-    page.once("dialog", (d) => d.accept());
-    const deleteButtons = page.locator('[data-testid^="comment-delete-"]');
+    const deleteButtons = page.locator('[data-testid^="comment-delete-"]:not([data-testid*="confirm"])');
     const before = await deleteButtons.count();
     if (before === 0) throw new Error("no delete buttons visible");
     await deleteButtons.first().click();
+    // Inline confirm appears; click Delete.
+    const confirm = page.locator('[data-testid^="comment-delete-confirm-"]').first();
+    await confirm.waitFor({ state: "visible", timeout: 5000 });
+    await confirm.click();
     await page.waitForFunction(
-      (was) => document.querySelectorAll('[data-testid^="comment-delete-"]').length < was,
+      (was) => document.querySelectorAll('[data-testid^="comment-delete-"]:not([data-testid*="confirm"])').length < was,
       before,
       { timeout: 8000 },
     );

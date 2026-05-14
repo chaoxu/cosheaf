@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ReactElement } from "react";
+import type { KeyboardEvent, ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import type { LineComment } from "../api";
@@ -56,18 +56,61 @@ function CommentRow({
   onDelete?: (id: number, reviewId: number) => void | Promise<void>;
 }): ReactElement {
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const edited = comment.updated_at > comment.created_at + 1000; // 1s slack
+  const canSave = draft.trim().length > 0 && draft !== comment.body;
+
+  async function save() {
+    if (!onEdit || !canSave) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onEdit(comment.id, draft.trim());
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!onDelete) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onDelete(comment.id, comment.review_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+      setBusy(false); // only reset on error — successful delete unmounts the row
+    }
+  }
+
+  function onTextareaKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setEditing(false);
+      setDraft(comment.body);
+    } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      void save();
+    }
+  }
 
   return (
     <div className={cn("p-2", showSeparator && "border-t border-[var(--cf-border)]")}>
       <div className={cn("flex items-center gap-2 mb-1 text-xs", muted)}>
         <strong className="text-[var(--cf-fg)]">@{comment.author_username}</strong>
         <span>{formatRelative(comment.created_at)}</span>
+        {edited && <span className="text-[10px]">(edited)</span>}
         {comment.outdated && (
           <span className="px-1 rounded bg-yellow-500/20 text-yellow-700 text-[10px]">outdated</span>
         )}
-        {isOwn && !editing && (onEdit || onDelete) && (
+        {isOwn && !editing && !confirmDelete && (onEdit || onDelete) && (
           <span className="ml-auto flex gap-2">
             {onEdit && (
               <button
@@ -75,6 +118,7 @@ function CommentRow({
                 data-testid={`comment-edit-${comment.id}`}
                 onClick={() => {
                   setDraft(comment.body);
+                  setError(null);
                   setEditing(true);
                 }}
                 className="hover:underline"
@@ -86,16 +130,7 @@ function CommentRow({
               <button
                 type="button"
                 data-testid={`comment-delete-${comment.id}`}
-                disabled={busy}
-                onClick={async () => {
-                  if (!window.confirm("Delete this comment?")) return;
-                  setBusy(true);
-                  try {
-                    await onDelete(comment.id, comment.review_id);
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
+                onClick={() => setConfirmDelete(true)}
                 className="hover:underline text-red-600"
               >
                 delete
@@ -107,39 +142,50 @@ function CommentRow({
       {editing ? (
         <div className="flex flex-col gap-1">
           <textarea
+            autoFocus
             data-testid={`comment-edit-body-${comment.id}`}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onTextareaKey}
             rows={2}
             disabled={busy}
             className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--cf-accent)]"
           />
-          <div className="flex gap-2 justify-end">
+          <div className="flex items-center gap-2 justify-end">
+            <span className={cn("text-[10px] mr-auto", muted)}>Esc to cancel · ⌘↵ to save</span>
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(false)}>
               Cancel
             </Button>
             <Button
               size="sm"
               data-testid={`comment-edit-save-${comment.id}`}
-              disabled={busy || draft.trim().length === 0 || draft === comment.body}
-              onClick={async () => {
-                if (!onEdit) return;
-                setBusy(true);
-                try {
-                  await onEdit(comment.id, draft.trim());
-                  setEditing(false);
-                } finally {
-                  setBusy(false);
-                }
-              }}
+              disabled={busy || !canSave}
+              onClick={save}
             >
               Save
             </Button>
           </div>
         </div>
+      ) : confirmDelete ? (
+        <div className="flex items-center gap-2 p-1">
+          <span className="text-xs">Delete this comment?</span>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmDelete(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            data-testid={`comment-delete-confirm-${comment.id}`}
+            disabled={busy}
+            onClick={remove}
+          >
+            Delete
+          </Button>
+        </div>
       ) : (
         <div className="whitespace-pre-wrap break-words">{comment.body}</div>
       )}
+      {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
     </div>
   );
 }
