@@ -353,6 +353,8 @@ export const api = {
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "POST" }),
   unpinIssue: (slug: string, number: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "DELETE" }),
+  getIssueTimeline: (slug: string, number: number) =>
+    jsonFetch<{ events: TimelineEvent[] }>(`${w(slug)}/issues/${number}/timeline`),
 
   // ---- notifications ----
   listNotifications: (slug: string) =>
@@ -382,6 +384,25 @@ export interface OpenChangeRow {
   pr_number: number | null;
   author_user_id: number;
   updated_at: number;
+}
+
+export interface TimelineEvent {
+  id: number;
+  type: string;
+  author: string | null;
+  body: string | null;
+  created_at: number;
+  updated_at: number | null;
+  label: { name: string; color: string } | null;
+  old_title: string | null;
+  new_title: string | null;
+  assignee: string | null;
+  removed_assignee: boolean;
+  ref_issue: number | null;
+  ref_action: string | null;
+  ref_commit_sha: string | null;
+  milestone: string | null;
+  dependent_issue: { number: number; title: string; state: string } | null;
 }
 
 export interface Label {

@@ -132,6 +132,27 @@ test.describe.serial("Issues", () => {
     await expect(page.locator('[data-testid^="pinned-issue-"]')).toHaveCount(0, { timeout: 8000 });
   });
 
+  test("Timeline renders non-comment events (close, label) alongside comments", async ({ page }) => {
+    await loginAs(page, "chao");
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Timeline target");
+    await page.getByTestId("new-issue-body").fill("Trigger events.");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+
+    // Comment, label, close — three timeline-shaped events
+    await page.getByTestId("issue-new-comment").fill("Initial thought.");
+    await page.getByTestId("issue-new-comment-submit").click();
+    await expect(page.locator('[data-testid^="issue-comment-"]').first()).toBeVisible({ timeout: 8000 });
+
+    await page.getByTestId("issue-toggle-state").click();   // close
+    await expect(page.getByTestId("issue-toggle-state")).toContainText("Reopen", { timeout: 8000 });
+
+    // Timeline should now show the close event
+    await expect(page.locator('[data-testid^="timeline-close-"]').first()).toBeVisible({ timeout: 8000 });
+  });
+
   test("Activity lists open PRs alongside issues; issue body renders markdown", async ({ page }) => {
     await loginAs(page, "meri");
     await page.getByTestId("sidebar-tab-activity").click();

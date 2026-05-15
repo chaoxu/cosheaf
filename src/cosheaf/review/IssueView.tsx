@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
-import type { IssueComment, IssueDetail, Label } from "../api";
+import type { IssueComment, IssueDetail, Label, TimelineEvent } from "../api";
 import { IssueBodyRender } from "./IssueBodyRender";
 
 const muted = "text-[var(--cf-muted)]";
@@ -40,6 +40,7 @@ export function IssueView({
   const [comments, setComments] = useState<IssueComment[]>([]);
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,12 +49,14 @@ export function IssueView({
 
   const refresh = async () => {
     try {
-      const [det, cms] = await Promise.all([
+      const [det, cms, tl] = await Promise.all([
         api.getIssue(workspaceSlug, number),
         api.getIssueComments(workspaceSlug, number),
+        api.getIssueTimeline(workspaceSlug, number),
       ]);
       setIssue(det);
       setComments(cms.comments);
+      setTimeline(tl.events);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load issue");
     }
@@ -229,7 +232,11 @@ export function IssueView({
             )}
           </div>
         </div>
-        {comments.map((c) => {
+        {mergeTimeline(comments, timeline).map((item) => {
+          if (item.kind === "event") {
+            return <TimelineRow key={`event-${item.e.id}`} e={item.e} onOpenNumber={onOpenNumber} />;
+          }
+          const c = item.c;
           const isOwn = !!currentForgejoUsername && c.author === currentForgejoUsername;
           const editing = editingId === c.id;
           return (
@@ -334,6 +341,150 @@ export function IssueView({
       </div>
     </div>
   );
+}
+
+type MergedItem =
+  | { kind: "comment"; c: IssueComment; ts: number }
+  | { kind: "event"; e: TimelineEvent; ts: number };
+
+function mergeTimeline(
+  comments: readonly IssueComment[],
+  timeline: readonly TimelineEvent[],
+): MergedItem[] {
+  // Forgejo's timeline includes "comment" events that duplicate the items
+  // we already fetched from /comments (with edit/delete affordances). Use
+  // the latter for comments; pull non-comment events from the timeline.
+  const items: MergedItem[] = [];
+  for (const c of comments) items.push({ kind: "comment", c, ts: c.created_at });
+  for (const e of timeline) {
+    if (e.type === "comment") continue;
+    items.push({ kind: "event", e, ts: e.created_at });
+  }
+  items.sort((a, b) => a.ts - b.ts);
+  return items;
+}
+
+function TimelineRow({
+  e,
+  onOpenNumber,
+}: {
+  e: TimelineEvent;
+  onOpenNumber?: (n: number) => void;
+}): ReactElement | null {
+  const desc = describeEvent(e);
+  if (!desc) return null;
+  return (
+    <div
+      data-testid={`timeline-${e.type}-${e.id}`}
+      className={cn("flex items-center gap-2 text-xs px-2 py-1 border-l-2 border-[var(--cf-border)]", muted)}
+    >
+      <span aria-hidden>{desc.icon}</span>
+      {e.author && <strong className="text-[var(--cf-fg)]">@{e.author}</strong>}
+      <span>{desc.text(onOpenNumber)}</span>
+      <span className="ml-auto">{formatRel(e.created_at)}</span>
+    </div>
+  );
+}
+
+function describeEvent(e: TimelineEvent): { icon: string; text: (jump?: (n: number) => void) => ReactElement } | null {
+  switch (e.type) {
+    case "close":
+      return { icon: "●", text: () => <span>closed this</span> };
+    case "reopen":
+      return { icon: "○", text: () => <span>reopened this</span> };
+    case "label":
+      return e.label
+        ? {
+            icon: "🏷",
+            text: () => (
+              <>
+                added the{" "}
+                <span
+                  className="px-1 rounded"
+                  style={{ backgroundColor: `#${e.label?.color}33`, color: `#${e.label?.color}` }}
+                >
+                  {e.label?.name}
+                </span>{" "}
+                label
+              </>
+            ),
+          }
+        : null;
+    case "unlabel":
+      return e.label
+        ? { icon: "🏷", text: () => <>removed the {e.label?.name} label</> }
+        : null;
+    case "assignees":
+      return e.assignee
+        ? {
+            icon: "👤",
+            text: () => <>{e.removed_assignee ? "unassigned" : "assigned"} @{e.assignee}</>,
+          }
+        : null;
+    case "change_title":
+      return {
+        icon: "✎",
+        text: () => <>renamed from "{e.old_title}" to "{e.new_title}"</>,
+      };
+    case "milestone":
+      return e.milestone ? { icon: "🎯", text: () => <>added to milestone "{e.milestone}"</> } : null;
+    case "demilestone":
+      return e.milestone ? { icon: "🎯", text: () => <>removed from milestone "{e.milestone}"</> } : null;
+    case "commit_ref":
+      return e.ref_commit_sha
+        ? { icon: "✦", text: () => <>referenced this in commit {e.ref_commit_sha?.slice(0, 7)}</> }
+        : null;
+    case "issue_ref":
+    case "comment_ref":
+      return e.ref_issue
+        ? {
+            icon: "↩",
+            text: (jump) => (
+              <>
+                referenced this in{" "}
+                <button
+                  type="button"
+                  className="text-[var(--cf-accent)] hover:underline"
+                  onClick={() => e.ref_issue && jump?.(e.ref_issue)}
+                >
+                  #{e.ref_issue}
+                </button>
+              </>
+            ),
+          }
+        : null;
+    case "dependency_added":
+      return e.dependent_issue
+        ? {
+            icon: "⛓",
+            text: (jump) => (
+              <>
+                added dependency{" "}
+                <button
+                  type="button"
+                  className="text-[var(--cf-accent)] hover:underline"
+                  onClick={() => e.dependent_issue && jump?.(e.dependent_issue.number)}
+                >
+                  #{e.dependent_issue?.number}
+                </button>
+              </>
+            ),
+          }
+        : null;
+    case "dependency_removed":
+      return e.dependent_issue
+        ? {
+            icon: "⛓",
+            text: () => <>removed dependency #{e.dependent_issue?.number}</>,
+          }
+        : null;
+    case "pin":
+      return { icon: "📌", text: () => <>pinned this</> };
+    case "unpin":
+      return { icon: "📌", text: () => <>unpinned this</> };
+    default:
+      return null;
+  }
 }
 
 function formatRel(ms: number): string {

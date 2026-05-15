@@ -280,6 +280,42 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /api/v1/w/:slug/issues/:number/timeline — full event log
+issues.get("/:slug/issues/:number/timeline", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const events = await c.get("forgejo").listIssueTimeline(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+  );
+  // Forgejo returns null instead of [] for some empty issue timelines.
+  const safe = events ?? [];
+  return c.json({
+    events: safe.map((e) => ({
+      id: e.id,
+      type: e.type,
+      author: e.user?.login ?? null,
+      body: e.body ?? null,
+      created_at: new Date(e.created_at).getTime(),
+      updated_at: e.updated_at ? new Date(e.updated_at).getTime() : null,
+      label: e.label ? { name: e.label.name, color: e.label.color } : null,
+      old_title: e.old_title ?? null,
+      new_title: e.new_title ?? null,
+      assignee: e.assignee?.login ?? null,
+      removed_assignee: e.removed_assignee ?? false,
+      ref_issue: e.ref_issue ?? null,
+      ref_action: e.ref_action ?? null,
+      ref_commit_sha: e.ref_commit_sha ?? null,
+      milestone: e.milestone?.title ?? null,
+      dependent_issue: e.dependent_issue
+        ? { number: e.dependent_issue.number, title: e.dependent_issue.title, state: e.dependent_issue.state }
+        : null,
+    })),
+  });
+});
+
 // GET /api/v1/w/:slug/issues/:number/comments
 issues.get("/:slug/issues/:number/comments", async (c) => {
   const ws = c.get("workspace");

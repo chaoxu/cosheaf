@@ -508,6 +508,10 @@ export class Forgejo {
     });
   }
 
+  async listIssueTimeline(owner: string, repo: string, number: number): Promise<ForgejoTimelineEvent[]> {
+    return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
+  }
+
   async createIssue(
     owner: string, repo: string,
     opts: { title: string; body: string; assignees?: string[]; labels?: number[]; sudo: string },
@@ -662,6 +666,29 @@ export interface ForgejoIssueComment {
   user: { id: number; login: string };
   created_at: string;
   updated_at: string;
+}
+
+export interface ForgejoTimelineEvent {
+  id: number;
+  type: string;
+  user?: { id: number; login: string };
+  body?: string;
+  created_at: string;
+  updated_at?: string;
+  // Type-specific fields. Forgejo's swagger says these are present on
+  // some kinds and not others; we pick out what we use.
+  label?: { id: number; name: string; color: string };
+  old_title?: string;
+  new_title?: string;
+  assignee?: { id: number; login: string };
+  ref_issue?: number;
+  ref_comment?: { id: number; body: string };
+  ref_action?: string;            // "neutral" | "closes" | "reopens"
+  ref_commit_sha?: string;
+  milestone?: { id: number; title: string };
+  dependent_issue?: { id: number; number: number; title: string; state: string };
+  resolve_doer?: { id: number; login: string };
+  removed_assignee?: boolean;
 }
 
 export interface ForgejoLabel {
