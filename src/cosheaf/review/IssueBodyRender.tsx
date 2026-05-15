@@ -1,11 +1,20 @@
-// Rich-markdown rendering for issue bodies and comments. Uses
-// react-markdown with remark-gfm + remark-math + rehype-katex so headings,
-// lists, tables, inline code, code fences, $math$, and $$display math$$
-// all render. Plain-text segments are then post-processed for cosheaf's
-// three cross-link patterns:
-//   [@page-id]                  → workspace cross-reference
-//   path/to.md(#L1-2 | #frag)?  → page link, optionally with line range
-//   #N                          → issue or PR cross-reference
+// Rich rendering for issue bodies and comments.
+//
+// TODO: switch to coflat-editor (Pandoc-flavored FORMAT.md) once coflat
+// ships a "lite" read-only render mode. Tried mounting full coflat
+// here in rich+readOnly; ran into:
+//   1. Decoration overlays for cosheaf cross-refs (#N, path.md#L5-12)
+//      conflict with coflat's own rich-mode widget replacements.
+//   2. Per-instance editor cost — every comment thread mounting a CM6
+//      surface is too heavy for the line-comment surface where N can be
+//      large.
+// Until coflat lite mode lands, use react-markdown with GitHub-flavored
+// markdown + remark-math + rehype-katex. This is a *close* approximation
+// of FORMAT.md (Pandoc-flavored): math, headings, lists, tables, code,
+// blockquotes all render. Pandoc-specific features (footnotes, def lists,
+// fenced divs) won't render but rarely matter in conversational issue
+// bodies. The cosheaf cross-ref patterns ([@id], path.md#Lx, #N) are
+// post-processed inside text nodes by `processChildren`.
 
 import type { ReactElement, ReactNode } from "react";
 import { Children, isValidElement } from "react";
@@ -96,7 +105,7 @@ function tokenizeRefs(
     cursor = REF_RE.lastIndex;
   }
   if (cursor < text.length) nodes.push(text.slice(cursor));
-  return nodes.length === 1 && typeof nodes[0] === "string" ? text : <>{nodes}</>;
+  return nodes.length === 0 ? text : <>{nodes}</>;
 }
 
 function processChildren(
@@ -119,7 +128,7 @@ export function IssueBodyRender({
   onOpenNumber,
 }: RenderProps): ReactElement {
   return (
-    <div className="cf-issue-body prose prose-sm max-w-none">
+    <div className="cf-issue-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}

@@ -128,7 +128,6 @@ test.describe.serial("Issues", () => {
     await expect(page.locator(".cf-issue-body h2")).toHaveText("Heading");
     await expect(page.locator(".cf-issue-body li").first()).toContainText("item one");
     await expect(page.locator(".cf-issue-body code").first()).toHaveText("code");
-    // KaTeX renders math into a .katex span.
     await expect(page.locator(".cf-issue-body .katex").first()).toBeVisible();
   });
 });
