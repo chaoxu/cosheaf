@@ -680,32 +680,111 @@ function BacklinksPanel({
 
 function ApprovalsPanel({
   approvals,
+  lineCommentCount = 0,
 }: {
   approvals: ApprovalRecord[];
+  lineCommentCount?: number;
 }): ReactElement {
+  // Latest verdict per reviewer (excluding "comment", which is just activity).
+  const verdictByUser = new Map<number, ApprovalRecord>();
+  for (const a of approvals) {
+    if (a.decision === "comment") continue;
+    const existing = verdictByUser.get(a.verifier_user_id);
+    if (!existing || a.created_at > existing.created_at) {
+      verdictByUser.set(a.verifier_user_id, a);
+    }
+  }
+  const verdicts = Array.from(verdictByUser.values()).sort((a, b) => a.created_at - b.created_at);
+
+  const approvedCount = verdicts.filter((v) => v.decision === "approve").length;
+  const changesRequestedCount = verdicts.filter((v) => v.decision === "request_changes").length;
+
+  // Activity list: only entries with a body or a non-comment decision.
+  const meaningful = approvals.filter(
+    (a) => (a.comment && a.comment.trim().length > 0) || a.decision !== "comment",
+  );
+
   return (
-    <SidePanel title={`Reviews${approvals.length > 0 ? ` (${approvals.length})` : ""}`}>
-      {approvals.length === 0 && (
-        <div className={cn("px-2 py-1 text-xs", muted)}>No reviews yet.</div>
-      )}
-      {approvals.length > 0 && (
-        <ul className="flex flex-col gap-1">
-          {approvals.map((a, idx) => (
-            <li key={`${a.verifier_user_id}-${a.created_at}-${idx}`}>
-              <Badge
-                data-testid={`approval-badge-${a.decision}`}
-                variant={a.decision === "approve" ? "golden" : a.decision === "request_changes" ? "rejected" : "outline"}
+    <SidePanel title="Reviews">
+      <div className="px-2 py-1 flex flex-col gap-2">
+        {/* Verdicts strip */}
+        {verdicts.length === 0 ? (
+          <div className={cn("text-xs", muted)}>No verdict yet.</div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {verdicts.map((v) => (
+              <span
+                key={v.verifier_user_id}
+                data-testid={`verdict-${v.decision}-${v.username}`}
+                className={cn(
+                  "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs",
+                  v.decision === "approve"
+                    ? "bg-green-500/15 text-green-700"
+                    : "bg-red-500/15 text-red-700",
+                )}
+                title={v.comment ?? ""}
               >
-                {a.decision === "request_changes" ? "changes requested" : a.decision}
-              </Badge>{" "}
-              <strong>{a.username}</strong>
-              {a.comment && <div className={cn("text-xs", muted)}>{a.comment}</div>}
-            </li>
-          ))}
-        </ul>
-      )}
+                <span aria-hidden>{v.decision === "approve" ? "✓" : "✗"}</span>
+                <strong>{v.username}</strong>
+                <span className={muted}>·</span>
+                <span>{v.decision === "approve" ? "approved" : "changes requested"}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* One-line counters */}
+        <div className={cn("text-xs", muted)}>
+          {approvedCount > 0 && <span>{approvedCount} approved</span>}
+          {approvedCount > 0 && (changesRequestedCount > 0 || lineCommentCount > 0) && " · "}
+          {changesRequestedCount > 0 && <span>{changesRequestedCount} requested changes</span>}
+          {changesRequestedCount > 0 && lineCommentCount > 0 && " · "}
+          {lineCommentCount > 0 && <span>{lineCommentCount} line comment{lineCommentCount === 1 ? "" : "s"}</span>}
+          {approvedCount === 0 && changesRequestedCount === 0 && lineCommentCount === 0 && (
+            <span>No activity yet</span>
+          )}
+        </div>
+
+        {/* Activity timeline (only entries with body or verdict) */}
+        {meaningful.length > 0 && (
+          <ol className="flex flex-col gap-1.5 mt-1 border-t border-[var(--cf-border)] pt-1.5">
+            {meaningful.map((a, idx) => (
+              <li
+                key={`${a.verifier_user_id}-${a.created_at}-${idx}`}
+                className="flex flex-col gap-0.5"
+              >
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span aria-hidden className={
+                    a.decision === "approve"
+                      ? "text-green-700"
+                      : a.decision === "request_changes"
+                        ? "text-red-700"
+                        : muted
+                  }>
+                    {a.decision === "approve" ? "✓" : a.decision === "request_changes" ? "✗" : "•"}
+                  </span>
+                  <strong>{a.username}</strong>
+                  <span className={muted}>{formatTime(a.created_at)}</span>
+                </div>
+                {a.comment && (
+                  <div className="text-xs pl-4 whitespace-pre-wrap break-words">{a.comment}</div>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </SidePanel>
   );
+}
+
+function formatTime(ms: number): string {
+  if (!ms) return "";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
 function statusBadge(status: DocStatus): ReactElement {
@@ -1581,7 +1660,7 @@ function WorkspaceView({
                   }}
                 />
               )}
-              {activeChangeId && approvals.length > 0 && (
+              {activeChangeId && (
                 <ApprovalsPanel approvals={approvals} />
               )}
             </>
@@ -1609,7 +1688,10 @@ function WorkspaceView({
                   onDeleteComment={deleteReviewComment}
                 />
               </div>
-              {approvals.length > 0 && <ApprovalsPanel approvals={approvals} />}
+              <ApprovalsPanel
+                approvals={approvals}
+                lineCommentCount={reviewState.comments.length}
+              />
               {reviewState.pr && (
                 <ReviewActions
                   state={reviewState.pr.state}
