@@ -836,7 +836,7 @@ function InboxOrActivity({
       )}
       {visibleQueue.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
-          {useOpenList ? "Open PRs" : "PRs awaiting your review"}
+          {useOpenList ? "Open pull requests" : "Pull requests awaiting your review"}
         </div>
       )}
       <ul className="m-0 p-0">
@@ -1421,7 +1421,7 @@ function WorkspaceView({
       .then((r) => {
         if (r.content !== undefined) setContent(r.content);
         setDirty(false);
-        setStatus("saved (unpublished)");
+        setStatus("saved on branch");
         setOpenDoc(r.meta);
         setCurrentChangeId(r.change_id);
         openFileChangeIdRef.current = r.change_id;
@@ -1540,7 +1540,7 @@ function WorkspaceView({
   const publish = useCallback(
     (mode?: "direct" | "review") => {
       if (!currentChangeId) {
-        setStatus("nothing to publish");
+        setStatus("nothing on this branch to merge or review");
         return;
       }
       setBusy(true);
@@ -1548,7 +1548,7 @@ function WorkspaceView({
       api
         .publish(workspace.slug, currentChangeId, mode)
         .then((r) => {
-          setStatus(r.message ?? (r.mode === "review" ? "sent for review" : "published"));
+          setStatus(r.message ?? (r.mode === "review" ? "pull request opened" : "merged to main"));
           setCurrentChangeId(null);
           if (r.mode === "direct") setReviewingChangeId(null);
           api
@@ -1561,7 +1561,7 @@ function WorkspaceView({
             .catch(() => undefined);
         })
         .catch((err: unknown) =>
-          setStatus(err instanceof ApiError ? err.message : "Publish failed"),
+          setStatus(err instanceof ApiError ? err.message : "Open pull request failed"),
         )
         .finally(() => setBusy(false));
     },
@@ -1620,7 +1620,7 @@ function WorkspaceView({
     setReviewState((s) => ({ ...s, busy: true }));
     try {
       await api.close(workspace.slug, id);
-      setStatus("change closed");
+      setStatus("Pull request closed");
       setReviewingChangeId(null);
       api
         .queue(workspace.slug)
@@ -1734,7 +1734,7 @@ function WorkspaceView({
       const { review_id } = await api.startDraftReview(workspace.slug, id);
       setReviewState((s) => ({ ...s, draftReviewId: review_id }));
     } catch (err) {
-      setStatus(err instanceof ApiError ? err.message : "could not start draft review");
+      setStatus(err instanceof ApiError ? err.message : "could not start a pending review");
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
@@ -1775,7 +1775,7 @@ function WorkspaceView({
         setOpenDoc(r.meta);
         setCurrentChangeId(r.change_id);
         openFileChangeIdRef.current = r.change_id;
-        setStatus("saved (unpublished)");
+        setStatus("saved on branch");
         setDirty(false);
         setNewPath("");
         setCreating(false);
@@ -2320,10 +2320,10 @@ function WorkspaceView({
                           data-testid="publish-direct"
                           onClick={() => publish("direct")}
                           disabled={busy}
-                          title="Squash-merge your draft into main (⇧⌘P)"
+                          title="Squash-merge this branch into main (⇧⌘P)"
                           className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
                         >
-                          Publish ●
+                          Merge to main
                         </button>
                       )}
                       <button
@@ -2331,10 +2331,10 @@ function WorkspaceView({
                         data-testid="publish-review"
                         onClick={() => publish("review")}
                         disabled={busy}
-                        title="Open a PR for review"
+                        title="Open a pull request for this branch"
                         className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
                       >
-                        Send for review
+                        Open pull request
                       </button>
                     </>
                   )}
