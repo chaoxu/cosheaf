@@ -6,7 +6,8 @@ import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
-import type { IssueComment, IssueDetail } from "../api";
+import type { IssueComment, IssueDetail, Label } from "../api";
+import { IssueBodyRender } from "./IssueBodyRender";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -14,15 +15,23 @@ export function IssueView({
   workspaceSlug,
   number,
   currentForgejoUsername,
+  canManageLabels,
   onClose,
+  onOpenPageById,
+  onOpenPath,
 }: {
   workspaceSlug: string;
   number: number;
   currentForgejoUsername?: string;
+  canManageLabels?: boolean;
   onClose: () => void;
+  onOpenPageById?: (id: string) => void;
+  onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
 }): ReactElement {
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<IssueComment[]>([]);
+  const [allLabels, setAllLabels] = useState<Label[]>([]);
+  const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +53,19 @@ export function IssueView({
 
   useEffect(() => {
     void refresh();
+    api.listLabels(workspaceSlug).then((r) => setAllLabels(r.labels)).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSlug, number]);
+
+  async function toggleLabel(id: number) {
+    if (!issue) return;
+    const has = issue.labels.some((l) => l.id === id);
+    const next = has
+      ? issue.labels.filter((l) => l.id !== id).map((l) => l.id)
+      : [...issue.labels.map((l) => l.id), id];
+    await api.setIssueLabels(workspaceSlug, number, next);
+    await refresh();
+  }
 
   async function submitComment() {
     if (!draft.trim() || busy) return;
@@ -100,6 +120,58 @@ export function IssueView({
             <span className={cn("ml-auto", muted)}>#{issue.number}</span>
           </div>
           <h1 className="text-lg font-semibold truncate">{issue.title}</h1>
+          {(issue.labels.length > 0 || canManageLabels) && (
+            <div className="flex flex-wrap items-center gap-1 mt-1 relative">
+              {issue.labels.map((l) => (
+                <span
+                  key={l.id}
+                  data-testid={`label-chip-${l.id}`}
+                  className="text-[11px] px-1.5 py-0.5 rounded"
+                  style={{ backgroundColor: `#${l.color}33`, color: `#${l.color}` }}
+                >
+                  {l.name}
+                </span>
+              ))}
+              {canManageLabels && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="label-add"
+                    onClick={() => setLabelMenuOpen((v) => !v)}
+                    className={cn("text-[11px] underline opacity-70", muted)}
+                  >
+                    + label
+                  </button>
+                  {labelMenuOpen && (
+                    <div className="absolute z-10 top-full mt-1 left-0 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] p-1 min-w-[160px] shadow">
+                      {allLabels.length === 0 && (
+                        <div className={cn("text-xs px-2 py-1", muted)}>No labels defined.</div>
+                      )}
+                      {allLabels.map((l) => {
+                        const checked = issue.labels.some((x) => x.id === l.id);
+                        return (
+                          <button
+                            key={l.id}
+                            type="button"
+                            data-testid={`label-toggle-${l.id}`}
+                            onClick={() => toggleLabel(l.id)}
+                            className="flex items-center gap-2 w-full px-2 py-1 text-xs hover:bg-[var(--cf-hover)] rounded"
+                          >
+                            <span aria-hidden>{checked ? "✓" : " "}</span>
+                            <span
+                              className="inline-block w-2 h-2 rounded-full"
+                              style={{ backgroundColor: `#${l.color}` }}
+                            />
+                            <span>{l.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button variant="outline" size="sm" onClick={toggleState} disabled={busy} data-testid="issue-toggle-state">
@@ -115,7 +187,13 @@ export function IssueView({
           <div className={cn("text-xs mb-2", muted)}>
             <strong className="text-[var(--cf-fg)]">@{issue.author}</strong> opened this issue
           </div>
-          <div className="whitespace-pre-wrap break-words text-sm">{issue.body || <em className={muted}>(no description)</em>}</div>
+          <div className="text-sm">
+            {issue.body ? (
+              <IssueBodyRender text={issue.body} onOpenPageById={onOpenPageById} onOpenPath={onOpenPath} />
+            ) : (
+              <em className={muted}>(no description)</em>
+            )}
+          </div>
         </div>
         {comments.map((c) => {
           const isOwn = !!currentForgejoUsername && c.author === currentForgejoUsername;
@@ -186,7 +264,9 @@ export function IssueView({
                   </div>
                 </div>
               ) : (
-                <div className="whitespace-pre-wrap break-words text-sm">{c.body}</div>
+                <div className="text-sm">
+                  <IssueBodyRender text={c.body} onOpenPageById={onOpenPageById} onOpenPath={onOpenPath} />
+                </div>
               )}
             </div>
           );

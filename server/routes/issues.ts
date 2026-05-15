@@ -66,18 +66,74 @@ issues.get("/:slug/issues/:number", async (c) => {
 // POST /api/v1/w/:slug/issues — create
 issues.post("/:slug/issues", async (c) => {
   const ws = c.get("workspace");
-  const body = (await c.req.json().catch(() => null)) as { title?: string; body?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    title?: string;
+    body?: string;
+    labels?: number[];
+  } | null;
   if (!body?.title || !body.title.trim())
     return c.json({ error: "title required", code: "validation" }, 400);
   const fj = c.get("forgejo");
   const created = await fj.createIssue(c.get("config").forgejoOwner, ws.forgejoRepo, {
     title: body.title.trim(),
     body: body.body ?? "",
+    labels: body.labels,
     sudo: c.get("forgejoUsername"),
   });
   upsertIssue(c.get("db"), ws.id, created);
   c.get("sse").publish(ws.slug, { type: "issue", number: created.number, action: "opened" });
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
+});
+
+// GET /api/v1/w/:slug/labels
+issues.get("/:slug/labels", async (c) => {
+  const ws = c.get("workspace");
+  const fj = c.get("forgejo");
+  const labels = await fj.listLabels(c.get("config").forgejoOwner, ws.forgejoRepo);
+  return c.json({ labels });
+});
+
+// POST /api/v1/w/:slug/labels — owners only
+issues.post("/:slug/labels", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => null)) as {
+    name?: string;
+    color?: string;
+    description?: string;
+  } | null;
+  if (!body?.name || !body.color)
+    return c.json({ error: "name and color required", code: "validation" }, 400);
+  const fj = c.get("forgejo");
+  const created = await fj.createLabel(c.get("config").forgejoOwner, ws.forgejoRepo, {
+    name: body.name.trim(),
+    color: body.color.replace(/^#/, ""),
+    description: body.description,
+    sudo: c.get("forgejoUsername"),
+  });
+  return c.json(created, 201);
+});
+
+// PUT /api/v1/w/:slug/issues/:n/labels — replace label set
+issues.put("/:slug/issues/:number/labels", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  const body = (await c.req.json().catch(() => null)) as { labels?: number[] } | null;
+  if (!body || !Array.isArray(body.labels))
+    return c.json({ error: "labels (number[]) required", code: "validation" }, 400);
+  const fj = c.get("forgejo");
+  const labels = await fj.setIssueLabels(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+    body.labels,
+    c.get("forgejoUsername"),
+  );
+  // Reflect into the sidecar.
+  const updated = await fj.getIssue(c.get("config").forgejoOwner, ws.forgejoRepo, number);
+  upsertIssue(c.get("db"), ws.id, updated);
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "labeled" });
+  return c.json({ labels });
 });
 
 // POST /api/v1/w/:slug/issues/:number/close|reopen

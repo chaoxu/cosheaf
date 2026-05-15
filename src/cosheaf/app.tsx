@@ -1606,8 +1606,14 @@ function WorkspaceView({
                 }
               }}
               onReviewChange={reviewChange}
-              onOpenIssue={(n) => setViewingIssue(n)}
-              onNewIssue={() => setNewIssueOpen(true)}
+              onOpenIssue={(n) => {
+                setNewIssueOpen(false);
+                setViewingIssue(n);
+              }}
+              onNewIssue={() => {
+                setViewingIssue(null);
+                setNewIssueOpen(true);
+              }}
             />
           ) : reviewingChangeId && reviewState.diff ? (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -1770,7 +1776,19 @@ function WorkspaceView({
               workspaceSlug={workspace.slug}
               number={viewingIssue}
               currentForgejoUsername={user.forgejo_username}
+              canManageLabels={workspace.role === "owner"}
               onClose={() => setViewingIssue(null)}
+              onOpenPageById={(id) => {
+                const match = filesRef.current?.find((f) => f.doc?.id === id);
+                if (match) {
+                  setViewingIssue(null);
+                  openPathFromSource(match.path);
+                }
+              }}
+              onOpenPath={(p) => {
+                setViewingIssue(null);
+                openPathFromSource(p);
+              }}
             />
           )}
           {!reviewingChangeId && !openPath && viewingIssue === null && newIssueOpen && (

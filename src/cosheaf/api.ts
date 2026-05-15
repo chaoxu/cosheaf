@@ -327,7 +327,28 @@ export const api = {
     ),
   deleteIssueComment: (slug: string, number: number, id: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/comments/${id}`, { method: "DELETE" }),
+  listLabels: (slug: string) =>
+    jsonFetch<{ labels: Label[] }>(`${w(slug)}/labels`),
+  createLabel: (slug: string, body: { name: string; color: string; description?: string }) =>
+    jsonFetch<Label>(`${w(slug)}/labels`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  setIssueLabels: (slug: string, number: number, labels: number[]) =>
+    jsonFetch<{ labels: Label[] }>(`${w(slug)}/issues/${number}/labels`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ labels }),
+    }),
 };
+
+export interface Label {
+  id: number;
+  name: string;
+  color: string;
+  description?: string;
+}
 
 export interface IssueRow {
   number: number;
@@ -348,7 +369,7 @@ export interface IssueDetail {
   state: "open" | "closed";
   author: string;
   assignees: string[];
-  labels: Array<{ id: number; name: string; color: string }>;
+  labels: Label[];
   comment_count: number;
   created_at: number;
   updated_at: number;
