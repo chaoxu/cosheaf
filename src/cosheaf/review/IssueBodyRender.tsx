@@ -1,12 +1,19 @@
-// Lightweight renderer for issue bodies and comments. Plain text passes
-// through; we only special-case the two math-native links cosheaf cares
-// about:
-//   [@page-id]                  → cross-reference into the workspace
-//   relative/path.md            → file link
-//   relative/path.md#L5-12      → file link scrolled to a line range
-//   relative/path.md#fragment   → file link with anchor
+// Rich-markdown rendering for issue bodies and comments. Uses
+// react-markdown with remark-gfm + remark-math + rehype-katex so headings,
+// lists, tables, inline code, code fences, $math$, and $$display math$$
+// all render. Plain-text segments are then post-processed for cosheaf's
+// three cross-link patterns:
+//   [@page-id]                  → workspace cross-reference
+//   path/to.md(#L1-2 | #frag)?  → page link, optionally with line range
+//   #N                          → issue or PR cross-reference
 
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
+import { Children, isValidElement } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 interface RenderProps {
   text: string;
@@ -15,23 +22,23 @@ interface RenderProps {
   onOpenNumber?: (n: number) => void;
 }
 
-// Crude tokenizer: walks the string, emitting plaintext + ref nodes. Avoids
-// pulling in a full markdown engine for what's effectively a few patterns.
-//   [@page-id]
-//   path/to.md(#L1-2 | #fragment)?
-//   #N        — cross-reference to an issue or PR
-export function IssueBodyRender({ text, onOpenPageById, onOpenPath, onOpenNumber }: RenderProps): ReactElement {
-  const nodes: ReactElement[] = [];
+const REF_RE =
+  /\[@([a-z0-9][a-z0-9-]*)\]|(?:^|(?<=\s|\())([\w./-]+\.md(?:#L(\d+)(?:-(\d+))?|#[\w-]+)?)|(?:^|(?<=[\s(]))#(\d+)\b/g;
+
+function tokenizeRefs(
+  text: string,
+  onOpenPageById?: (id: string) => void,
+  onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void,
+  onOpenNumber?: (n: number) => void,
+): ReactNode {
+  const nodes: ReactNode[] = [];
   let cursor = 0;
-  const re = /\[@([a-z0-9][a-z0-9-]*)\]|(?:^|(?<=\s|\())([\w./-]+\.md(?:#L(\d+)(?:-(\d+))?|#[\w-]+)?)|(?:^|(?<=[\s(]))#(\d+)\b/g;
-  let m: RegExpExecArray | null;
   let key = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > cursor) {
-      nodes.push(<span key={key++}>{text.slice(cursor, m.index)}</span>);
-    }
+  REF_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = REF_RE.exec(text)) !== null) {
+    if (m.index > cursor) nodes.push(text.slice(cursor, m.index));
     if (m[1]) {
-      // [@page-id]
       const id = m[1];
       nodes.push(
         <button
@@ -45,7 +52,6 @@ export function IssueBodyRender({ text, onOpenPageById, onOpenPath, onOpenNumber
         </button>,
       );
     } else if (m[5]) {
-      // #N
       const n = Number(m[5]);
       nodes.push(
         <button
@@ -87,8 +93,47 @@ export function IssueBodyRender({ text, onOpenPageById, onOpenPath, onOpenNumber
         </button>,
       );
     }
-    cursor = re.lastIndex;
+    cursor = REF_RE.lastIndex;
   }
-  if (cursor < text.length) nodes.push(<span key={key++}>{text.slice(cursor)}</span>);
-  return <div className="whitespace-pre-wrap break-words">{nodes}</div>;
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes.length === 1 && typeof nodes[0] === "string" ? text : <>{nodes}</>;
+}
+
+function processChildren(
+  children: ReactNode,
+  onOpenPageById?: (id: string) => void,
+  onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void,
+  onOpenNumber?: (n: number) => void,
+): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child === "string") return tokenizeRefs(child, onOpenPageById, onOpenPath, onOpenNumber);
+    if (isValidElement(child)) return child;
+    return child;
+  });
+}
+
+export function IssueBodyRender({
+  text,
+  onOpenPageById,
+  onOpenPath,
+  onOpenNumber,
+}: RenderProps): ReactElement {
+  return (
+    <div className="cf-issue-body prose prose-sm max-w-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          p: ({ children }) => <p>{processChildren(children, onOpenPageById, onOpenPath, onOpenNumber)}</p>,
+          li: ({ children }) => <li>{processChildren(children, onOpenPageById, onOpenPath, onOpenNumber)}</li>,
+          td: ({ children }) => <td>{processChildren(children, onOpenPageById, onOpenPath, onOpenNumber)}</td>,
+          h1: ({ children }) => <h1>{processChildren(children, onOpenPageById, onOpenPath, onOpenNumber)}</h1>,
+          h2: ({ children }) => <h2>{processChildren(children, onOpenPageById, onOpenPath, onOpenNumber)}</h2>,
+          h3: ({ children }) => <h3>{processChildren(children, onOpenPageById, onOpenPath, onOpenNumber)}</h3>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
 }

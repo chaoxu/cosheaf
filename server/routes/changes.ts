@@ -63,6 +63,18 @@ changes.get("/:slug/changes", (c) => {
   return c.json({ changes: rows });
 });
 
+// All open changes (any author) — feeds the Activity panel.
+changes.get("/:slug/changes/open", (c) => {
+  const ws = c.get("workspace");
+  const rows = c
+    .get("db")
+    .prepare(
+      "SELECT * FROM changes WHERE workspace_id = ? AND state IN ('review', 'changes_requested') ORDER BY updated_at DESC",
+    )
+    .all(ws.id);
+  return c.json({ changes: rows });
+});
+
 changes.post("/:slug/change", async (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");

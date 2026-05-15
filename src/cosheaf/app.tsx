@@ -19,6 +19,7 @@ import {
   type FileEntry,
   type IssueRow,
   type LineComment,
+  type OpenChangeRow,
   type PrMeta,
   type QueueEntry,
   type SearchResult,
@@ -683,6 +684,7 @@ function BacklinksPanel({
 function InboxOrActivity({
   kind,
   queue,
+  openPrs,
   issues,
   scope,
   setScope,
@@ -695,6 +697,7 @@ function InboxOrActivity({
 }: {
   kind: "inbox" | "activity";
   queue: readonly QueueEntry[];
+  openPrs: readonly OpenChangeRow[];
   issues: readonly IssueRow[];
   scope: "mine" | "all";
   setScope: (s: "mine" | "all") => void;
@@ -706,11 +709,24 @@ function InboxOrActivity({
   onNewIssue: () => void;
 }): ReactElement {
   const isInbox = kind === "inbox";
-  const showQueueAll = !isInbox;
+  // In Inbox+Mine: only PRs awaiting your review (queue).
+  // In Inbox+All or Activity: every open PR in the workspace.
+  const useOpenList = !isInbox || scope === "all";
   const q = query.trim().toLowerCase();
+  const sourceQueue: QueueEntry[] = useOpenList
+    ? openPrs.map((r) => ({
+        id: r.id,
+        title: r.title ?? r.id,
+        pr_number: r.pr_number ?? null,
+        author_user_id: r.author_user_id,
+        created_at: r.updated_at,
+        approvals: 0,
+        rejections: 0,
+      }))
+    : [...queue];
   const visibleQueue = q
-    ? queue.filter((qe) => qe.title.toLowerCase().includes(q))
-    : queue;
+    ? sourceQueue.filter((qe) => qe.title.toLowerCase().includes(q))
+    : sourceQueue;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-2 py-1">
@@ -762,7 +778,7 @@ function InboxOrActivity({
       )}
       {visibleQueue.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
-          {showQueueAll ? "Open PRs" : "PRs awaiting your review"}
+          {useOpenList ? "Open PRs" : "PRs awaiting your review"}
         </div>
       )}
       <ul className="m-0 p-0">
@@ -977,6 +993,7 @@ function WorkspaceView({
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
+  const [openChanges, setOpenChanges] = useState<OpenChangeRow[] | null>(null);
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
@@ -1281,6 +1298,15 @@ function WorkspaceView({
       return () => clearTimeout(handle);
     }
   }, [sidebarView, issuesScope, inboxQuery, refreshIssues]);
+
+  // Eagerly fetch every open PR once per workspace — used by Activity, the
+  // Inbox All scope, and #N cross-reference resolution.
+  useEffect(() => {
+    api
+      .openChanges(workspace.slug)
+      .then(setOpenChanges)
+      .catch(() => setOpenChanges([]));
+  }, [workspace.slug]);
 
   const reviewChange = useCallback(
     (entry: QueueEntry) => {
@@ -1631,6 +1657,7 @@ function WorkspaceView({
                     .catch(() => undefined);
                 }
               }}
+              openPrs={openChanges ?? []}
               onReviewChange={reviewChange}
               onOpenIssue={(n) => {
                 setNewIssueOpen(false);
@@ -1815,7 +1842,28 @@ function WorkspaceView({
                 setViewingIssue(null);
                 openPathFromSource(p);
               }}
-              onOpenNumber={(n) => setViewingIssue(n)}
+              onOpenNumber={(n) => {
+                // PRs and issues share the number space in Forgejo. If we
+                // know about a change with this pr_number, open it as a PR;
+                // otherwise treat the number as an issue.
+                const pr =
+                  (openChanges ?? []).find((c) => c.pr_number === n) ??
+                  (queue ?? []).find((c) => c.pr_number === n);
+                if (pr) {
+                  setViewingIssue(null);
+                  reviewChange({
+                    id: pr.id,
+                    title: (pr as { title?: string | null }).title ?? pr.id,
+                    pr_number: pr.pr_number ?? null,
+                    author_user_id: (pr as { author_user_id?: number }).author_user_id ?? 0,
+                    created_at: (pr as { updated_at?: number }).updated_at ?? 0,
+                    approvals: 0,
+                    rejections: 0,
+                  });
+                } else {
+                  setViewingIssue(n);
+                }
+              }}
             />
           )}
           {!reviewingChangeId && !openPath && viewingIssue === null && newIssueOpen && (

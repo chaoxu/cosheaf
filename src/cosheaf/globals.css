@@ -35,3 +35,45 @@ body {
 .cm-scroller {
   overflow: auto;
 }
+
+.cf-issue-body {
+  line-height: 1.55;
+}
+.cf-issue-body h1 { font-size: 1.2rem; font-weight: 600; margin: 0.75rem 0 0.5rem; }
+.cf-issue-body h2 { font-size: 1.05rem; font-weight: 600; margin: 0.75rem 0 0.4rem; }
+.cf-issue-body h3 { font-size: 0.95rem; font-weight: 600; margin: 0.5rem 0 0.3rem; }
+.cf-issue-body p { margin: 0.4rem 0; }
+.cf-issue-body ul, .cf-issue-body ol { padding-left: 1.5rem; margin: 0.4rem 0; }
+.cf-issue-body li { margin: 0.15rem 0; }
+.cf-issue-body ul { list-style: disc; }
+.cf-issue-body ol { list-style: decimal; }
+.cf-issue-body code {
+  background: var(--cf-hover);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+.cf-issue-body pre {
+  background: var(--cf-hover);
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.4rem 0;
+}
+.cf-issue-body pre code { background: transparent; padding: 0; }
+.cf-issue-body blockquote {
+  border-left: 3px solid var(--cf-border);
+  padding-left: 0.75rem;
+  color: var(--cf-muted);
+  margin: 0.4rem 0;
+}
+.cf-issue-body table {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+.cf-issue-body th, .cf-issue-body td {
+  border: 1px solid var(--cf-border);
+  padding: 0.25rem 0.5rem;
+}
+.cf-issue-body a { color: var(--cf-accent); text-decoration: underline; }

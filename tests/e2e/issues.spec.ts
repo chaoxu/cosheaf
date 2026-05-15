@@ -107,4 +107,28 @@ test.describe.serial("Issues", () => {
     expect(visibleTitles.some((t) => t.includes("Target"))).toBe(true);
     expect(visibleTitles.some((t) => t.includes("Source"))).toBe(false);
   });
+
+  test("Activity lists open PRs alongside issues; issue body renders markdown", async ({ page }) => {
+    await loginAs(page, "meri");
+    await page.getByTestId("sidebar-tab-activity").click();
+    // The global-setup publishes one PR — it should show in Activity.
+    await expect.poll(async () =>
+      page.locator('[data-testid^="queue-change-"]').count(), { timeout: 8000 }
+    ).toBeGreaterThanOrEqual(1);
+
+    // Issue body markdown: headings, lists, code, math all render.
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Markdown test");
+    await page.getByTestId("new-issue-body").fill(
+      "## Heading\n\n- item one\n- item two\n\nInline `code` and math $a^2+b^2=c^2$.\n",
+    );
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+    await expect(page.locator(".cf-issue-body h2")).toHaveText("Heading");
+    await expect(page.locator(".cf-issue-body li").first()).toContainText("item one");
+    await expect(page.locator(".cf-issue-body code").first()).toHaveText("code");
+    // KaTeX renders math into a .katex span.
+    await expect(page.locator(".cf-issue-body .katex").first()).toBeVisible();
+  });
 });

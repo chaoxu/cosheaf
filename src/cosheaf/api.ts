@@ -212,6 +212,8 @@ export const api = {
 
   queue: (slug: string) =>
     jsonFetch<{ queue: QueueEntry[] }>(`${w(slug)}/queue`).then((r) => r.queue),
+  openChanges: (slug: string) =>
+    jsonFetch<{ changes: OpenChangeRow[] }>(`${w(slug)}/changes/open`).then((r) => r.changes),
 
   changePr: (slug: string, change_id: string) =>
     jsonFetch<{ pr: PrMeta }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/pr`).then((r) => r.pr),
@@ -346,6 +348,15 @@ export const api = {
       body: JSON.stringify({ labels }),
     }),
 };
+
+export interface OpenChangeRow {
+  id: string;
+  title: string | null;
+  state: "review" | "changes_requested";
+  pr_number: number | null;
+  author_user_id: number;
+  updated_at: number;
+}
 
 export interface Label {
   id: number;
