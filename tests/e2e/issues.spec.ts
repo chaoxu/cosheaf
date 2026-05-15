@@ -132,6 +132,42 @@ test.describe.serial("Issues", () => {
     await expect(page.locator('[data-testid^="pinned-issue-"]')).toHaveCount(0, { timeout: 8000 });
   });
 
+  test("Add and remove an issue dependency", async ({ page }) => {
+    await loginAs(page, "chao");
+    await page.getByTestId("sidebar-tab-inbox").click();
+    // Open issue A
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Theorem T");
+    await page.getByTestId("new-issue-body").fill("Needs lemma L1");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+    // Open issue B
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Lemma L1");
+    await page.getByTestId("new-issue-body").fill("Will support theorem T.");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+    // Back to inbox to read both issue numbers from the row test ids.
+    await page.getByTestId("sidebar-tab-inbox").click();
+    const lemmaRow = page.locator('li [data-testid^="issue-"]').filter({ hasText: "Lemma L1" }).first();
+    await expect(lemmaRow).toBeVisible({ timeout: 8000 });
+    const lemmaTestId = await lemmaRow.getAttribute("data-testid");
+    const lemmaNum = lemmaTestId?.match(/^issue-(\d+)$/)?.[1];
+    expect(lemmaNum).toBeTruthy();
+    // Click Theorem T to open it.
+    await page.locator('li [data-testid^="issue-"]').filter({ hasText: "Theorem T" }).first().click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+    await expect(page.getByTestId("depends-on-section")).toBeVisible();
+    await page.getByTestId("depends-on-add-input").fill(String(lemmaNum));
+    await page.getByTestId("depends-on-add").click();
+    await expect(page.getByTestId(`depends-on-${lemmaNum}`)).toBeVisible({ timeout: 8000 });
+
+    // Remove
+    await page.getByTestId(`depends-on-${lemmaNum}-remove`).click();
+    await expect(page.getByTestId(`depends-on-${lemmaNum}`)).toHaveCount(0, { timeout: 8000 });
+  });
+
   test("Timeline renders non-comment events (close, label) alongside comments", async ({ page }) => {
     await loginAs(page, "chao");
     await page.getByTestId("sidebar-tab-inbox").click();

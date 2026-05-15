@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
-import type { IssueComment, IssueDetail, Label, TimelineEvent } from "../api";
+import type { DependencyRow, IssueComment, IssueDetail, Label, TimelineEvent } from "../api";
 import { IssueBodyRender } from "./IssueBodyRender";
 
 const muted = "text-[var(--cf-muted)]";
@@ -41,6 +41,9 @@ export function IssueView({
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [dependencies, setDependencies] = useState<DependencyRow[]>([]);
+  const [blocks, setBlocks] = useState<DependencyRow[]>([]);
+  const [addDepNum, setAddDepNum] = useState("");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,14 +52,18 @@ export function IssueView({
 
   const refresh = async () => {
     try {
-      const [det, cms, tl] = await Promise.all([
+      const [det, cms, tl, deps, blks] = await Promise.all([
         api.getIssue(workspaceSlug, number),
         api.getIssueComments(workspaceSlug, number),
         api.getIssueTimeline(workspaceSlug, number),
+        api.listIssueDependencies(workspaceSlug, number),
+        api.listIssueBlocks(workspaceSlug, number),
       ]);
       setIssue(det);
       setComments(cms.comments);
       setTimeline(tl.events);
+      setDependencies(deps.issues);
+      setBlocks(blks.issues);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load issue");
     }
@@ -232,6 +239,47 @@ export function IssueView({
             )}
           </div>
         </div>
+        <div className="grid grid-cols-2 gap-3">
+            <DependencySection
+              testIdPrefix="depends-on"
+              title="Depends on"
+              items={dependencies}
+              showAdd={true}
+              addValue={addDepNum}
+              setAddValue={setAddDepNum}
+              onAdd={async () => {
+                const n = Number(addDepNum);
+                if (!Number.isFinite(n) || n <= 0 || n === number) return;
+                setBusy(true);
+                try {
+                  await api.addIssueDependency(workspaceSlug, number, n);
+                  setAddDepNum("");
+                  await refresh();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              onRemove={async (n) => {
+                setBusy(true);
+                try {
+                  await api.removeIssueDependency(workspaceSlug, number, n);
+                  await refresh();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              onOpen={onOpenNumber}
+              busy={busy}
+            />
+            <DependencySection
+              testIdPrefix="blocked-by"
+              title="Blocks"
+              items={blocks}
+              showAdd={false}
+              onOpen={onOpenNumber}
+              busy={busy}
+            />
+        </div>
         {mergeTimeline(comments, timeline).map((item) => {
           if (item.kind === "event") {
             return <TimelineRow key={`event-${item.e.id}`} e={item.e} onOpenNumber={onOpenNumber} />;
@@ -339,6 +387,96 @@ export function IssueView({
         </div>
         {error && <div className="text-xs text-red-600">{error}</div>}
       </div>
+    </div>
+  );
+}
+
+function DependencySection({
+  testIdPrefix,
+  title,
+  items,
+  showAdd,
+  addValue,
+  setAddValue,
+  onAdd,
+  onRemove,
+  onOpen,
+  busy,
+}: {
+  testIdPrefix: string;
+  title: string;
+  items: readonly DependencyRow[];
+  showAdd: boolean;
+  addValue?: string;
+  setAddValue?: (v: string) => void;
+  onAdd?: () => void | Promise<void>;
+  onRemove?: (n: number) => void | Promise<void>;
+  onOpen?: (n: number) => void;
+  busy: boolean;
+}): ReactElement {
+  return (
+    <div
+      data-testid={`${testIdPrefix}-section`}
+      className="rounded border border-[var(--cf-border)] p-2 flex flex-col gap-1"
+    >
+      <div className={cn("text-xs uppercase tracking-wide", muted)}>{title}</div>
+      {items.length === 0 ? (
+        <div className={cn("text-xs", muted)}>—</div>
+      ) : (
+        <ul className="m-0 p-0 list-none flex flex-col gap-0.5">
+          {items.map((it) => (
+            <li
+              key={`${testIdPrefix}-${it.number}`}
+              data-testid={`${testIdPrefix}-${it.number}`}
+              className="flex items-baseline gap-1 text-xs"
+            >
+              <span aria-hidden>{it.state === "closed" ? "●" : "○"}</span>
+              <button
+                type="button"
+                className="text-[var(--cf-accent)] hover:underline"
+                onClick={() => onOpen?.(it.number)}
+              >
+                #{it.number}
+              </button>
+              <span className="truncate">{it.title}</span>
+              {onRemove && (
+                <button
+                  type="button"
+                  data-testid={`${testIdPrefix}-${it.number}-remove`}
+                  onClick={() => onRemove(it.number)}
+                  disabled={busy}
+                  className="ml-auto text-red-600 hover:underline"
+                  title="Remove dependency"
+                >
+                  ×
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {showAdd && setAddValue && onAdd && (
+        <div className="flex items-center gap-1 mt-1">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={addValue ?? ""}
+            onChange={(e) => setAddValue(e.target.value)}
+            placeholder="# of issue"
+            data-testid={`${testIdPrefix}-add-input`}
+            className="w-20 text-xs rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 py-0.5"
+          />
+          <button
+            type="button"
+            disabled={busy || !addValue?.trim()}
+            data-testid={`${testIdPrefix}-add`}
+            onClick={() => void onAdd()}
+            className="text-xs hover:underline"
+          >
+            + add
+          </button>
+        </div>
+      )}
     </div>
   );
 }

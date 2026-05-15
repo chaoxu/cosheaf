@@ -280,6 +280,62 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------- dependencies ----------
+
+function depRow(i: { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }) {
+  return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
+}
+
+issues.get("/:slug/issues/:number/dependencies", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const list = await c.get("forgejo").listIssueDependencies(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+  );
+  return c.json({ issues: (list ?? []).map(depRow) });
+});
+
+issues.get("/:slug/issues/:number/blocks", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const list = await c.get("forgejo").listIssueBlocks(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+  );
+  return c.json({ issues: (list ?? []).map(depRow) });
+});
+
+issues.post("/:slug/issues/:number/dependencies", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  const body = (await c.req.json().catch(() => null)) as { index?: number } | null;
+  if (!Number.isFinite(number) || !body?.index)
+    return c.json({ error: "bad number / index", code: "validation" }, 400);
+  await c.get("forgejo").addIssueDependency(
+    c.get("config").forgejoOwner, ws.forgejoRepo, number, body.index, c.get("forgejoUsername"),
+  );
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_added" });
+  return c.json({ ok: true });
+});
+
+issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  const dep = Number(c.req.param("dep"));
+  if (!Number.isFinite(number) || !Number.isFinite(dep))
+    return c.json({ error: "bad number" }, 400);
+  await c.get("forgejo").removeIssueDependency(
+    c.get("config").forgejoOwner, ws.forgejoRepo, number, dep, c.get("forgejoUsername"),
+  );
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_removed" });
+  return c.json({ ok: true });
+});
+
 // GET /api/v1/w/:slug/activities — workspace event feed
 issues.get("/:slug/activities", async (c) => {
   const ws = c.get("workspace");

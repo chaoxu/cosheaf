@@ -512,6 +512,54 @@ export class Forgejo {
     return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
   }
 
+  async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
+    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`);
+  }
+
+  async addIssueDependency(
+    owner: string, repo: string, number: number, depIndex: number, sudo: string,
+  ): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
+      method: "POST",
+      sudo,
+      body: { index: depIndex, owner, repo },
+    });
+  }
+
+  async removeIssueDependency(
+    owner: string, repo: string, number: number, depIndex: number, sudo: string,
+  ): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
+      method: "DELETE",
+      sudo,
+      body: { index: depIndex, owner, repo },
+    });
+  }
+
+  async listIssueBlocks(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
+    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`);
+  }
+
+  async addIssueBlock(
+    owner: string, repo: string, number: number, blockIndex: number, sudo: string,
+  ): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`, {
+      method: "POST",
+      sudo,
+      body: { index: blockIndex, owner, repo },
+    });
+  }
+
+  async removeIssueBlock(
+    owner: string, repo: string, number: number, blockIndex: number, sudo: string,
+  ): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`, {
+      method: "DELETE",
+      sudo,
+      body: { index: blockIndex, owner, repo },
+    });
+  }
+
   async listRepoActivities(
     owner: string,
     repo: string,

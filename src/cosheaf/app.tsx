@@ -895,6 +895,7 @@ function InboxOrActivity({
       <ul className="m-0 flex-1 overflow-y-auto p-0">
         {issues
           .filter((iss) => !pinned.some((p) => p.number === iss.number))
+          .filter((iss) => !q || iss.title.toLowerCase().includes(q))
           .map((iss) => (
           <li key={`issue-${iss.number}`}>
             <FileRow onClick={() => onOpenIssue(iss.number)} testId={`issue-${iss.number}`}>
@@ -2154,6 +2155,9 @@ function WorkspaceView({
                       setNewIssueTitle("");
                       setNewIssueBody("");
                       setViewingIssue(created.number);
+                      // Refresh the sidebar list so the new issue is in
+                      // the inbox immediately, not only after a manual refresh.
+                      refreshIssues(issuesScope, "inbox", inboxQuery);
                     } finally {
                       setNewIssueBusy(false);
                     }

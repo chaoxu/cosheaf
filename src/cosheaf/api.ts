@@ -357,6 +357,18 @@ export const api = {
     jsonFetch<{ events: TimelineEvent[] }>(`${w(slug)}/issues/${number}/timeline`),
   listActivities: (slug: string, limit = 50) =>
     jsonFetch<{ activities: ActivityRow[] }>(`${w(slug)}/activities?limit=${limit}`),
+  listIssueDependencies: (slug: string, number: number) =>
+    jsonFetch<{ issues: DependencyRow[] }>(`${w(slug)}/issues/${number}/dependencies`),
+  listIssueBlocks: (slug: string, number: number) =>
+    jsonFetch<{ issues: DependencyRow[] }>(`${w(slug)}/issues/${number}/blocks`),
+  addIssueDependency: (slug: string, number: number, index: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/dependencies`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ index }),
+    }),
+  removeIssueDependency: (slug: string, number: number, index: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/dependencies/${index}`, { method: "DELETE" }),
 
   // ---- notifications ----
   listNotifications: (slug: string) =>
@@ -386,6 +398,13 @@ export interface OpenChangeRow {
   pr_number: number | null;
   author_user_id: number;
   updated_at: number;
+}
+
+export interface DependencyRow {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  is_pr: boolean;
 }
 
 export interface ActivityRow {
