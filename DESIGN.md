@@ -6,6 +6,7 @@ Cosheaf is a multi-user knowledge base for Coflat-flavored markdown files.
 Pages are stored in Forgejo repositories; Cosheaf adds a human-usable editing,
 review, search, backlink, and trust workflow on top.
 
+Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is designed to be comfortable for mathematical writing, with
 math syntax, theorem-style blocks, cross-references, citations, and LaTeX export
 conventions. Cosheaf does not model mathematical objects as a separate graph:

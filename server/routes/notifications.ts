@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
+import type { NotificationRow } from "../../shared/issues.js";
 
 export const notifications = new Hono<AppEnv>();
 notifications.use("*", requireAuth);
@@ -15,15 +16,7 @@ function numberFromSubjectUrl(url: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function mapThread(t: ForgejoNotificationThread): {
-  id: number;
-  kind: "issue" | "pr";
-  number: number;
-  title: string;
-  repo: string;
-  updated_at: number;
-  url: string;
-} | null {
+function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
   const subjectType = t.subject.type;
   const kind: "issue" | "pr" | null =
     subjectType === "Issue" ? "issue" : subjectType === "Pull" ? "pr" : null;

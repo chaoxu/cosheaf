@@ -3,6 +3,14 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { listIssues, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
+import type {
+  ActivityRow,
+  DependencyRow,
+  IssueComment,
+  IssueDetail,
+  Milestone,
+  TimelineEvent,
+} from "../../shared/issues.js";
 
 // Refresh the sidecar mirror of an issue after a Forgejo mutation. Many
 // fields (updated_at, comment_count, labels, milestone) change on the
@@ -120,9 +128,8 @@ issues.get("/:slug/issues/:number", async (c) => {
   try {
     const issue = await fj.getIssue(config.forgejoOwner, ws.forgejoRepo, number);
     if (issue.pull_request) return c.json({ error: "not an issue" }, 404);
-    // Keep the sidecar in sync opportunistically.
     upsertIssue(c.get("db"), ws.id, issue);
-    return c.json({
+    const detail: IssueDetail = {
       number: issue.number,
       title: issue.title,
       body: issue.body,
@@ -135,7 +142,8 @@ issues.get("/:slug/issues/:number", async (c) => {
       created_at: new Date(issue.created_at).getTime(),
       updated_at: new Date(issue.updated_at).getTime(),
       closed_at: issue.closed_at ? new Date(issue.closed_at).getTime() : null,
-    });
+    };
+    return c.json(detail);
   } catch (_err) {
     return c.json({ error: "not found", code: "not_found" }, 404);
   }
@@ -251,13 +259,14 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
   );
   await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
-  return c.json({
+  const created: IssueComment = {
     id: cm.id,
     body: cm.body,
     author: cm.user.login,
     created_at: new Date(cm.created_at).getTime(),
     updated_at: new Date(cm.updated_at).getTime(),
-  }, 201);
+  };
+  return c.json(created, 201);
 });
 
 // PATCH /api/v1/w/:slug/issues/:number/comments/:id — edit own
@@ -317,7 +326,7 @@ issues.get("/:slug/milestones", async (c) => {
     state,
   );
   return c.json({
-    milestones: (list ?? []).map((m) => ({
+    milestones: (list ?? []).map<Milestone>((m) => ({
       id: m.id,
       title: m.title,
       description: m.description ?? "",
@@ -374,7 +383,7 @@ issues.put("/:slug/issues/:number/milestone", async (c) => {
 
 // ---------- dependencies ----------
 
-function depRow(i: { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }) {
+function depRow(i: { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }): DependencyRow {
   return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
 }
 
@@ -441,7 +450,7 @@ issues.get("/:slug/activities", async (c) => {
   );
   const safe = raw ?? [];
   return c.json({
-    activities: safe.map((a) => {
+    activities: safe.map<ActivityRow>((a) => {
       // Forgejo encodes content as a JSON array string for many op_types.
       // For comment_*: ["<issue_index>","<body>"]
       // For close_issue, reopen_issue, etc: often just "<issue_index>" or
@@ -490,7 +499,7 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
   // Forgejo returns null instead of [] for some empty issue timelines.
   const safe = events ?? [];
   return c.json({
-    events: safe.map((e) => ({
+    events: safe.map<TimelineEvent>((e) => ({
       id: e.id,
       type: e.type,
       author: e.user?.login ?? null,
@@ -526,7 +535,7 @@ issues.get("/:slug/issues/:number/comments", async (c) => {
     number,
   );
   return c.json({
-    comments: list.map((cm) => ({
+    comments: list.map<IssueComment>((cm) => ({
       id: cm.id,
       body: cm.body,
       author: cm.user.login,

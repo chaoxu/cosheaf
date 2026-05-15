@@ -5,6 +5,7 @@ the substrate for trustworthy markdown authoring: pages, draft changes,
 reviews, and approvals — with Forgejo repositories as the canonical store and
 SQLite as a rebuildable sidecar index.
 
+Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is intentionally close to mathematical writing: theorem-style
 fenced divs, KaTeX math, `[@id]` cross-references, citations, and LaTeX export
 conventions. Cosheaf itself stays page-oriented; it does not maintain a

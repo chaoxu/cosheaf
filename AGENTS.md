@@ -5,7 +5,8 @@ hold the canonical markdown files and change workflow; SQLite is a derived,
 rebuildable sidecar index for fast reads, sessions, memberships, and local auth
 state.
 
-Coflat markdown is math-friendly, but Cosheaf is page-oriented rather than
+Cosheaf was originally motivated by mathematical knowledge-base work, and
+Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
 math-native: do not add theorem graphs, proof dependency models, or other
 semantic math layers unless explicitly requested.
 

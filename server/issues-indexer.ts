@@ -4,18 +4,11 @@
 
 import type Database from "better-sqlite3";
 import type { Forgejo, ForgejoIssue } from "./forgejo.js";
+import type { IssueRow } from "../shared/issues.js";
 
-export interface IndexedIssue {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  author_login: string;
-  author_user_id: number | null;
-  labels: string[];
-  comment_count: number;
-  created_at: number;
-  updated_at: number;
-}
+// Re-export so existing imports keep working but the canonical shape lives
+// in shared/.
+export type IndexedIssue = IssueRow;
 
 function userIdForLogin(db: Database.Database, login: string): number | null {
   const row = db
