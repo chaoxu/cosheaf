@@ -63,6 +63,112 @@ issues.get("/:slug/issues/:number", async (c) => {
   }
 });
 
+// POST /api/v1/w/:slug/issues — create
+issues.post("/:slug/issues", async (c) => {
+  const ws = c.get("workspace");
+  const body = (await c.req.json().catch(() => null)) as { title?: string; body?: string } | null;
+  if (!body?.title || !body.title.trim())
+    return c.json({ error: "title required", code: "validation" }, 400);
+  const fj = c.get("forgejo");
+  const created = await fj.createIssue(c.get("config").forgejoOwner, ws.forgejoRepo, {
+    title: body.title.trim(),
+    body: body.body ?? "",
+    sudo: c.get("forgejoUsername"),
+  });
+  upsertIssue(c.get("db"), ws.id, created);
+  c.get("sse").publish(ws.slug, { type: "issue", number: created.number, action: "opened" });
+  return c.json({ number: created.number, title: created.title, state: created.state }, 201);
+});
+
+// POST /api/v1/w/:slug/issues/:number/close|reopen
+issues.post("/:slug/issues/:number/close", async (c) => transitionIssue(c, "closed"));
+issues.post("/:slug/issues/:number/reopen", async (c) => transitionIssue(c, "open"));
+
+async function transitionIssue(
+  c: import("hono").Context<import("../types.js").AppEnv>,
+  state: "open" | "closed",
+): Promise<Response> {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const fj = c.get("forgejo");
+  const updated = await fj.editIssue(c.get("config").forgejoOwner, ws.forgejoRepo, number, {
+    state,
+    sudo: c.get("forgejoUsername"),
+  });
+  upsertIssue(c.get("db"), ws.id, updated);
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: state });
+  return c.json({ ok: true, state: updated.state });
+}
+
+// POST /api/v1/w/:slug/issues/:number/comments — create comment
+issues.post("/:slug/issues/:number/comments", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
+  if (!body?.body || !body.body.trim())
+    return c.json({ error: "body required", code: "validation" }, 400);
+  const fj = c.get("forgejo");
+  const cm = await fj.createIssueComment(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+    body.body.trim(),
+    c.get("forgejoUsername"),
+  );
+  c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
+  return c.json({
+    id: cm.id,
+    body: cm.body,
+    author: cm.user.login,
+    created_at: new Date(cm.created_at).getTime(),
+    updated_at: new Date(cm.updated_at).getTime(),
+  }, 201);
+});
+
+// PATCH /api/v1/w/:slug/issues/:number/comments/:id — edit own
+issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
+  const ws = c.get("workspace");
+  const commentId = Number(c.req.param("id"));
+  const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
+  if (!body?.body || !body.body.trim())
+    return c.json({ error: "body required", code: "validation" }, 400);
+  const fj = c.get("forgejo");
+  const cm = await fj.editIssueComment(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    commentId,
+    body.body.trim(),
+    c.get("forgejoUsername"),
+  );
+  c.get("sse").publish(ws.slug, {
+    type: "issue_comment",
+    number: Number(c.req.param("number")),
+    action: "edited",
+  });
+  return c.json({ id: cm.id, body: cm.body, updated_at: new Date(cm.updated_at).getTime() });
+});
+
+// DELETE /api/v1/w/:slug/issues/:number/comments/:id
+issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
+  const ws = c.get("workspace");
+  const commentId = Number(c.req.param("id"));
+  const fj = c.get("forgejo");
+  await fj.deleteIssueComment(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    commentId,
+    c.get("forgejoUsername"),
+  );
+  c.get("sse").publish(ws.slug, {
+    type: "issue_comment",
+    number: Number(c.req.param("number")),
+    action: "deleted",
+  });
+  return c.json({ ok: true });
+});
+
 // GET /api/v1/w/:slug/issues/:number/comments
 issues.get("/:slug/issues/:number/comments", async (c) => {
   const ws = c.get("workspace");

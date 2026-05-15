@@ -34,6 +34,7 @@ import { PrHeader } from "./review/PrHeader";
 import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
 import { ReviewActions } from "./review/ReviewActions";
+import { IssueView } from "./review/IssueView";
 
 const MarkdownEditor = lazy(() =>
   import("./editor").then((m) => ({ default: m.MarkdownEditor })),
@@ -688,6 +689,7 @@ function InboxOrActivity({
   onRefresh,
   onReviewChange,
   onOpenIssue,
+  onNewIssue,
 }: {
   kind: "inbox" | "activity";
   queue: readonly QueueEntry[];
@@ -697,6 +699,7 @@ function InboxOrActivity({
   onRefresh: () => void;
   onReviewChange: (entry: QueueEntry) => void;
   onOpenIssue: (number: number) => void;
+  onNewIssue: () => void;
 }): ReactElement {
   const isInbox = kind === "inbox";
   // Activity uses scope="all" implicitly; Inbox honors the toggle.
@@ -726,6 +729,15 @@ function InboxOrActivity({
             </div>
           )}
           <Button variant="ghost" size="icon" onClick={onRefresh} aria-label="Refresh">↻</Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onNewIssue}
+            data-testid="new-issue"
+            aria-label="New issue"
+          >
+            + Issue
+          </Button>
         </div>
       </div>
       {visibleQueue.length === 0 && issues.length === 0 && (
@@ -949,6 +961,11 @@ function WorkspaceView({
   const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
+  const [viewingIssue, setViewingIssue] = useState<number | null>(null);
+  const [newIssueOpen, setNewIssueOpen] = useState(false);
+  const [newIssueTitle, setNewIssueTitle] = useState("");
+  const [newIssueBody, setNewIssueBody] = useState("");
+  const [newIssueBusy, setNewIssueBusy] = useState(false);
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
@@ -1573,11 +1590,24 @@ function WorkspaceView({
               issues={issues ?? []}
               scope={issuesScope}
               setScope={setIssuesScope}
-              onRefresh={openQueue}
-              onReviewChange={reviewChange}
-              onOpenIssue={() => {
-                /* M2: open issue detail */
+              onRefresh={() => {
+                openQueue();
+                if (sidebarView === "inbox" || sidebarView === "activity") {
+                  // refresh issues too
+                  api
+                    .listIssues(workspace.slug, {
+                      state: "open",
+                      ...(sidebarView === "inbox" && issuesScope === "mine"
+                        ? { filter: "mine" as const }
+                        : {}),
+                    })
+                    .then((r) => setIssues(r.issues))
+                    .catch(() => undefined);
+                }
               }}
+              onReviewChange={reviewChange}
+              onOpenIssue={(n) => setViewingIssue(n)}
+              onNewIssue={() => setNewIssueOpen(true)}
             />
           ) : reviewingChangeId && reviewState.diff ? (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -1735,7 +1765,67 @@ function WorkspaceView({
               ☰
             </button>
           )}
-          {!reviewingChangeId && !openPath && (
+          {!reviewingChangeId && !openPath && viewingIssue !== null && (
+            <IssueView
+              workspaceSlug={workspace.slug}
+              number={viewingIssue}
+              currentForgejoUsername={user.forgejo_username}
+              onClose={() => setViewingIssue(null)}
+            />
+          )}
+          {!reviewingChangeId && !openPath && viewingIssue === null && newIssueOpen && (
+            <div className="flex flex-1 flex-col p-4 gap-3 max-w-2xl mx-auto w-full">
+              <h2 className="text-lg font-semibold">New issue</h2>
+              <Input
+                placeholder="Title"
+                value={newIssueTitle}
+                onChange={(e) => setNewIssueTitle(e.target.value)}
+                data-testid="new-issue-title"
+              />
+              <textarea
+                placeholder="Describe the question, problem, or proposal…"
+                value={newIssueBody}
+                onChange={(e) => setNewIssueBody(e.target.value)}
+                rows={10}
+                data-testid="new-issue-body"
+                className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 text-sm"
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setNewIssueOpen(false);
+                    setNewIssueTitle("");
+                    setNewIssueBody("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  data-testid="new-issue-submit"
+                  disabled={newIssueBusy || newIssueTitle.trim().length === 0}
+                  onClick={async () => {
+                    setNewIssueBusy(true);
+                    try {
+                      const created = await api.createIssue(workspace.slug, {
+                        title: newIssueTitle.trim(),
+                        body: newIssueBody,
+                      });
+                      setNewIssueOpen(false);
+                      setNewIssueTitle("");
+                      setNewIssueBody("");
+                      setViewingIssue(created.number);
+                    } finally {
+                      setNewIssueBusy(false);
+                    }
+                  }}
+                >
+                  Create issue
+                </Button>
+              </div>
+            </div>
+          )}
+          {!reviewingChangeId && !openPath && viewingIssue === null && !newIssueOpen && (
             <div className={cn("flex flex-1 items-center justify-center", muted)}>
               Select a file from the sidebar, or create one.
             </div>

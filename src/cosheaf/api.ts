@@ -305,6 +305,28 @@ export const api = {
     jsonFetch<IssueDetail>(`${w(slug)}/issues/${number}`),
   getIssueComments: (slug: string, number: number) =>
     jsonFetch<{ comments: IssueComment[] }>(`${w(slug)}/issues/${number}/comments`),
+  createIssue: (slug: string, body: { title: string; body: string }) =>
+    jsonFetch<{ number: number; title: string; state: "open" | "closed" }>(
+      `${w(slug)}/issues`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  closeIssue: (slug: string, number: number) =>
+    jsonFetch<{ ok: true; state: "closed" }>(`${w(slug)}/issues/${number}/close`, { method: "POST" }),
+  reopenIssue: (slug: string, number: number) =>
+    jsonFetch<{ ok: true; state: "open" }>(`${w(slug)}/issues/${number}/reopen`, { method: "POST" }),
+  createIssueComment: (slug: string, number: number, body: string) =>
+    jsonFetch<IssueComment>(`${w(slug)}/issues/${number}/comments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body }),
+    }),
+  editIssueComment: (slug: string, number: number, id: number, body: string) =>
+    jsonFetch<{ id: number; body: string; updated_at: number }>(
+      `${w(slug)}/issues/${number}/comments/${id}`,
+      { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ body }) },
+    ),
+  deleteIssueComment: (slug: string, number: number, id: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/comments/${id}`, { method: "DELETE" }),
 };
 
 export interface IssueRow {
