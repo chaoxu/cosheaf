@@ -292,4 +292,51 @@ export const api = {
     }),
   revokeToken: (id: number) =>
     jsonFetch<{ ok: true }>(`/api/v1/tokens/${id}`, { method: "DELETE" }),
+
+  // ---- issues ----
+  listIssues: (slug: string, opts: { state?: "open" | "closed" | "all"; filter?: "mine" | "assigned" | "all" } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.state) qs.set("state", opts.state);
+    if (opts.filter) qs.set("filter", opts.filter);
+    const q = qs.toString();
+    return jsonFetch<{ issues: IssueRow[] }>(`${w(slug)}/issues${q ? `?${q}` : ""}`);
+  },
+  getIssue: (slug: string, number: number) =>
+    jsonFetch<IssueDetail>(`${w(slug)}/issues/${number}`),
+  getIssueComments: (slug: string, number: number) =>
+    jsonFetch<{ comments: IssueComment[] }>(`${w(slug)}/issues/${number}/comments`),
 };
+
+export interface IssueRow {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  author_login: string;
+  author_user_id: number | null;
+  labels: string[];
+  comment_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface IssueDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  author: string;
+  assignees: string[];
+  labels: Array<{ id: number; name: string; color: string }>;
+  comment_count: number;
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+}
+
+export interface IssueComment {
+  id: number;
+  body: string;
+  author: string;
+  created_at: number;
+  updated_at: number;
+}

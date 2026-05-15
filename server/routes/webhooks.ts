@@ -6,6 +6,8 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
 import { syncChangeFromPr, syncChangeFromReview } from "./changes.js";
+import { deleteIssue, upsertIssue } from "../issues-indexer.js";
+import type { ForgejoIssue } from "../forgejo.js";
 
 export const webhooks = new Hono<AppEnv>();
 
@@ -143,6 +145,28 @@ webhooks.post("/forgejo", async (c) => {
         }
       }
       sse.publish(ws.slug, { type: "queue" });
+    } else if (event === "issues") {
+      const issue = payload.issue as ForgejoIssue | undefined;
+      const action = String(payload.action ?? "");
+      if (issue && !issue.pull_request) {
+        if (action === "deleted") {
+          deleteIssue(db, ws.id, issue.number);
+        } else {
+          upsertIssue(db, ws.id, issue);
+        }
+        sse.publish(ws.slug, { type: "issue", number: issue.number, action });
+      }
+    } else if (event === "issue_comment") {
+      const issue = payload.issue as ForgejoIssue | undefined;
+      if (issue && !issue.pull_request) {
+        // Bump cached comment count + updated_at.
+        upsertIssue(db, ws.id, issue);
+        sse.publish(ws.slug, {
+          type: "issue_comment",
+          number: issue.number,
+          action: String(payload.action ?? ""),
+        });
+      }
     } else if (event === "pull_request_review_comment") {
       const pr = payload.pull_request as Record<string, unknown> | undefined;
       const action = String(payload.action ?? "");

@@ -107,3 +107,31 @@ CREATE INDEX IF NOT EXISTS idx_changes_workspace_state ON changes (workspace_id,
 CREATE INDEX IF NOT EXISTS idx_changes_author_state ON changes (workspace_id, author_user_id, state);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_changes_branch ON changes (workspace_id, branch_name);
 CREATE INDEX IF NOT EXISTS idx_changes_pr ON changes (workspace_id, pr_number);
+
+-- Issues mirror Forgejo issues. They live alongside changes in the same
+-- Forgejo repo; here we cache the metadata for fast listing + author/assignee
+-- lookups. Bodies and comments are fetched on demand from Forgejo.
+CREATE TABLE IF NOT EXISTS issues (
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  number INTEGER NOT NULL,
+  forgejo_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('open', 'closed')),
+  author_user_id INTEGER REFERENCES users(id),
+  author_login TEXT NOT NULL,
+  labels TEXT NOT NULL DEFAULT '[]', -- JSON array of label names
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_issues_state ON issues (workspace_id, state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_author ON issues (workspace_id, author_user_id, state);
+
+CREATE TABLE IF NOT EXISTS issue_assignees (
+  workspace_id INTEGER NOT NULL,
+  number INTEGER NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (workspace_id, number, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_issue_assignees_user ON issue_assignees (user_id, workspace_id);

@@ -17,6 +17,7 @@ import {
   type ChangeDiff,
   type Decision,
   type FileEntry,
+  type IssueRow,
   type LineComment,
   type PrMeta,
   type QueueEntry,
@@ -678,6 +679,103 @@ function BacklinksPanel({
 }
 
 
+function InboxOrActivity({
+  kind,
+  queue,
+  issues,
+  scope,
+  setScope,
+  onRefresh,
+  onReviewChange,
+  onOpenIssue,
+}: {
+  kind: "inbox" | "activity";
+  queue: readonly QueueEntry[];
+  issues: readonly IssueRow[];
+  scope: "mine" | "all";
+  setScope: (s: "mine" | "all") => void;
+  onRefresh: () => void;
+  onReviewChange: (entry: QueueEntry) => void;
+  onOpenIssue: (number: number) => void;
+}): ReactElement {
+  const isInbox = kind === "inbox";
+  // Activity uses scope="all" implicitly; Inbox honors the toggle.
+  const showQueueAll = !isInbox;
+  const visibleQueue = isInbox ? queue : queue;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-3 px-2 py-1">
+        <strong>{isInbox ? "Inbox" : "Activity"}</strong>
+        <div className="flex items-center gap-1">
+          {isInbox && (
+            <div className="flex text-[10px] uppercase tracking-wide">
+              <button
+                type="button"
+                onClick={() => setScope("mine")}
+                className={cn("px-1.5 py-0.5 rounded", scope === "mine" && "bg-[var(--cf-hover)]")}
+              >
+                Mine
+              </button>
+              <button
+                type="button"
+                onClick={() => setScope("all")}
+                className={cn("px-1.5 py-0.5 rounded", scope === "all" && "bg-[var(--cf-hover)]")}
+              >
+                All
+              </button>
+            </div>
+          )}
+          <Button variant="ghost" size="icon" onClick={onRefresh} aria-label="Refresh">↻</Button>
+        </div>
+      </div>
+      {visibleQueue.length === 0 && issues.length === 0 && (
+        <div className={cn("px-3 py-2 text-xs", muted)}>
+          {isInbox ? "Nothing waiting on you." : "No open activity."}
+        </div>
+      )}
+      {visibleQueue.length > 0 && (
+        <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+          {showQueueAll ? "Open PRs" : "PRs awaiting your review"}
+        </div>
+      )}
+      <ul className="m-0 p-0">
+        {visibleQueue.map((entry) => (
+          <li key={`pr-${entry.id}`}>
+            <FileRow onClick={() => onReviewChange(entry)} testId={`queue-change-${entry.id}`}>
+              <span className="text-[10px] uppercase tracking-wide bg-blue-500/15 text-blue-700 rounded px-1 mr-1">PR</span>
+              <strong>{entry.title}</strong>
+              <span className={cn("text-xs", muted)}>
+                {entry.approvals > 0 && ` ✓${entry.approvals}`}
+                {entry.rejections > 0 && ` ✗${entry.rejections}`}
+                {entry.pr_number && ` #${entry.pr_number}`}
+              </span>
+            </FileRow>
+          </li>
+        ))}
+      </ul>
+      {issues.length > 0 && (
+        <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+          {isInbox ? (scope === "mine" ? "Your issues" : "Issues") : "Open issues"}
+        </div>
+      )}
+      <ul className="m-0 flex-1 overflow-y-auto p-0">
+        {issues.map((iss) => (
+          <li key={`issue-${iss.number}`}>
+            <FileRow onClick={() => onOpenIssue(iss.number)} testId={`issue-${iss.number}`}>
+              <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-800 rounded px-1 mr-1">ISSUE</span>
+              <strong>{iss.title}</strong>
+              <span className={cn("text-xs", muted)}>
+                {iss.comment_count > 0 && ` 💬${iss.comment_count}`}
+                {` #${iss.number}`}
+              </span>
+            </FileRow>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ApprovalsPanel({
   approvals,
   lineCommentCount = 0,
@@ -848,7 +946,9 @@ function WorkspaceView({
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [queue, setQueue] = useState<QueueEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
-  const [sidebarView, setSidebarView] = useState<"files" | "queue" | "outline">("files");
+  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline">("pages");
+  const [issues, setIssues] = useState<IssueRow[] | null>(null);
+  const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
@@ -1123,11 +1223,29 @@ function WorkspaceView({
       .catch(() => setQueue([]));
   }, [workspace.slug]);
 
+  const refreshIssues = useCallback(
+    (scope: "mine" | "all", panel: "inbox" | "activity") => {
+      const filter = panel === "inbox" && scope === "mine" ? "mine" : undefined;
+      api
+        .listIssues(workspace.slug, { state: "open", ...(filter ? { filter } : {}) })
+        .then((r) => setIssues(r.issues))
+        .catch(() => setIssues([]));
+    },
+    [workspace.slug],
+  );
+
+  // Fetch issues whenever the user opens Inbox/Activity or switches scope.
+  useEffect(() => {
+    if (sidebarView === "inbox" || sidebarView === "activity") {
+      refreshIssues(issuesScope, sidebarView);
+    }
+  }, [sidebarView, issuesScope, refreshIssues]);
+
   const reviewChange = useCallback(
     (entry: QueueEntry) => {
       setReviewingChangeId(entry.id);
       setCurrentChangeId(null);
-      setSidebarView("files");
+      setSidebarView("pages");
       setStatus(null);
       loadApprovals(entry.id);
     },
@@ -1412,21 +1530,28 @@ function WorkspaceView({
           </div>
           <div className={cn("flex items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
             <SidebarTab
-              active={sidebarView === "files"}
-              onClick={() => setSidebarView("files")}
-              testId="sidebar-tab-files"
+              active={sidebarView === "pages"}
+              onClick={() => setSidebarView("pages")}
+              testId="sidebar-tab-pages"
             >
-              Files
+              Pages
             </SidebarTab>
             <SidebarTab
-              active={sidebarView === "queue"}
+              active={sidebarView === "inbox"}
               onClick={() => {
-                setSidebarView("queue");
+                setSidebarView("inbox");
                 openQueue();
               }}
-              testId="sidebar-tab-queue"
+              testId="sidebar-tab-inbox"
             >
-              Queue
+              Inbox
+            </SidebarTab>
+            <SidebarTab
+              active={sidebarView === "activity"}
+              onClick={() => setSidebarView("activity")}
+              testId="sidebar-tab-activity"
+            >
+              Activity
             </SidebarTab>
             <SidebarTab
               active={sidebarView === "outline"}
@@ -1441,35 +1566,19 @@ function WorkspaceView({
               entries={outline}
               onPick={(line) => editorRef.current?.scrollToLine(line, { center: true })}
             />
-          ) : sidebarView === "queue" ? (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex items-center justify-between gap-3 px-2 py-1">
-                <strong>Review queue</strong>
-                <Button variant="ghost" size="icon" onClick={openQueue} aria-label="Refresh">
-                  ↻
-                </Button>
-              </div>
-              {(queue ?? []).length === 0 && (
-                <div className={cn("px-3 py-2 text-xs", muted)}>Nothing to review.</div>
-              )}
-              <ul className="m-0 flex-1 overflow-y-auto p-0">
-                {(queue ?? []).map((entry) => (
-                  <li key={entry.id}>
-                    <FileRow
-                      onClick={() => reviewChange(entry)}
-                      testId={`queue-change-${entry.id}`}
-                    >
-                      <strong>{entry.title}</strong>
-                      <span className={cn("text-xs", muted)}>
-                        {entry.approvals > 0 && ` ✓${entry.approvals}`}
-                        {entry.rejections > 0 && ` ✗${entry.rejections}`}
-                        {entry.pr_number && ` #${entry.pr_number}`}
-                      </span>
-                    </FileRow>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          ) : sidebarView === "inbox" || sidebarView === "activity" ? (
+            <InboxOrActivity
+              kind={sidebarView}
+              queue={queue ?? []}
+              issues={issues ?? []}
+              scope={issuesScope}
+              setScope={setIssuesScope}
+              onRefresh={openQueue}
+              onReviewChange={reviewChange}
+              onOpenIssue={() => {
+                /* M2: open issue detail */
+              }}
+            />
           ) : reviewingChangeId && reviewState.diff ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-3 px-2 py-1">

@@ -60,6 +60,7 @@ function fakeForgejo(files: Record<string, string> = {}): Forgejo {
       Object.keys(files).map((filePath) => ({ path: filePath, type: "blob", sha: `sha-${filePath}` })),
     ),
     getRawFile: vi.fn(async (_owner: string, _repo: string, _ref: string, filePath: string) => files[filePath] ?? ""),
+    listIssues: vi.fn(async () => []),
   } as unknown as Forgejo;
 }
 

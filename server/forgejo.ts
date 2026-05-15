@@ -470,6 +470,112 @@ export class Forgejo {
       { method: "DELETE", sudo, expectEmpty: true },
     );
   }
+
+  // ---------- issues ----------
+
+  async listIssues(
+    owner: string, repo: string, opts: { state?: "open" | "closed" | "all"; page?: number; limit?: number } = {},
+  ): Promise<ForgejoIssue[]> {
+    const params = new URLSearchParams();
+    params.set("type", "issues"); // exclude PRs; Forgejo's /issues endpoint returns both
+    if (opts.state) params.set("state", opts.state);
+    if (opts.page) params.set("page", String(opts.page));
+    if (opts.limit) params.set("limit", String(opts.limit));
+    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues?${params.toString()}`);
+  }
+
+  async getIssue(owner: string, repo: string, number: number): Promise<ForgejoIssue> {
+    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`);
+  }
+
+  async createIssue(
+    owner: string, repo: string,
+    opts: { title: string; body: string; assignees?: string[]; labels?: number[]; sudo: string },
+  ): Promise<ForgejoIssue> {
+    const payload: Record<string, unknown> = { title: opts.title, body: opts.body };
+    if (opts.assignees?.length) payload.assignees = opts.assignees;
+    if (opts.labels?.length) payload.labels = opts.labels;
+    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: payload,
+    });
+  }
+
+  async editIssue(
+    owner: string, repo: string, number: number,
+    opts: { title?: string; body?: string; state?: "open" | "closed"; assignees?: string[]; sudo: string },
+  ): Promise<ForgejoIssue> {
+    const payload: Record<string, unknown> = {};
+    if (opts.title !== undefined) payload.title = opts.title;
+    if (opts.body !== undefined) payload.body = opts.body;
+    if (opts.state !== undefined) payload.state = opts.state;
+    if (opts.assignees !== undefined) payload.assignees = opts.assignees;
+    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`, {
+      method: "PATCH",
+      sudo: opts.sudo,
+      body: payload,
+    });
+  }
+
+  async listIssueComments(owner: string, repo: string, number: number): Promise<ForgejoIssueComment[]> {
+    return this.req<ForgejoIssueComment[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/comments`);
+  }
+
+  async createIssueComment(
+    owner: string, repo: string, number: number, body: string, sudo: string,
+  ): Promise<ForgejoIssueComment> {
+    return this.req<ForgejoIssueComment>(`/api/v1/repos/${owner}/${repo}/issues/${number}/comments`, {
+      method: "POST",
+      sudo,
+      body: { body },
+    });
+  }
+
+  async editIssueComment(
+    owner: string, repo: string, commentId: number, body: string, sudo: string,
+  ): Promise<ForgejoIssueComment> {
+    return this.req<ForgejoIssueComment>(`/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`, {
+      method: "PATCH",
+      sudo,
+      body: { body },
+    });
+  }
+
+  async deleteIssueComment(
+    owner: string, repo: string, commentId: number, sudo: string,
+  ): Promise<void> {
+    await this.req<unknown>(
+      `/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`,
+      { method: "DELETE", sudo, expectEmpty: true },
+    );
+  }
+
+  // ---------- labels ----------
+
+  async listLabels(owner: string, repo: string): Promise<ForgejoLabel[]> {
+    return this.req<ForgejoLabel[]>(`/api/v1/repos/${owner}/${repo}/labels`);
+  }
+
+  async createLabel(
+    owner: string, repo: string, opts: { name: string; color: string; description?: string; sudo: string },
+  ): Promise<ForgejoLabel> {
+    return this.req<ForgejoLabel>(`/api/v1/repos/${owner}/${repo}/labels`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: { name: opts.name, color: opts.color, description: opts.description ?? "" },
+    });
+  }
+
+  async setIssueLabels(
+    owner: string, repo: string, number: number, labelIds: number[], sudo: string,
+  ): Promise<ForgejoLabel[]> {
+    return this.req<ForgejoLabel[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/labels`, {
+      method: "PUT",
+      sudo,
+      body: { labels: labelIds },
+    });
+  }
 }
 
 function encodeFilePath(p: string): string {
@@ -477,6 +583,37 @@ function encodeFilePath(p: string): string {
 }
 
 // ---------- types (minimal subset) ----------
+export interface ForgejoIssue {
+  id: number;
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  user: { id: number; login: string };
+  assignees: Array<{ id: number; login: string }> | null;
+  labels: Array<{ id: number; name: string; color: string }>;
+  comments: number;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  pull_request?: unknown; // present (truthy) for PRs; we filter these out
+}
+
+export interface ForgejoIssueComment {
+  id: number;
+  body: string;
+  user: { id: number; login: string };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ForgejoLabel {
+  id: number;
+  name: string;
+  color: string;
+  description?: string;
+}
+
 export interface ForgejoUser {
   id: number;
   login: string;

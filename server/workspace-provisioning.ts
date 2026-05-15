@@ -3,6 +3,7 @@ import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
 import { deletePage, indexPage } from "./indexer.js";
+import { reindexAllIssues } from "./issues-indexer.js";
 import type { User } from "./users.js";
 
 const WEBHOOK_EVENTS = [
@@ -226,5 +227,7 @@ export async function reindexWorkspaceFromForgejo(
   for (const row of indexed) {
     if (!seen.has(row.forgejo_id)) deletePage(db, workspace.id, row.forgejo_id);
   }
+  // Issues live in the same Forgejo repo; sweep them too so the sidecar matches.
+  await reindexAllIssues(db, forgejo, config.forgejoOwner, workspace.forgejo_repo, workspace.id);
   return seen.size;
 }

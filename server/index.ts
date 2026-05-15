@@ -9,6 +9,7 @@ import { tokens } from "./routes/tokens.js";
 import { workspaces } from "./routes/workspaces.js";
 import { files } from "./routes/files.js";
 import { changes } from "./routes/changes.js";
+import { issues } from "./routes/issues.js";
 import { webhooks } from "./routes/webhooks.js";
 
 const config = loadConfig();
@@ -32,6 +33,7 @@ app.route("/api/v1/tokens", tokens);
 app.route("/api/v1/workspaces", workspaces);
 app.route("/api/v1/w", files);
 app.route("/api/v1/w", changes);
+app.route("/api/v1/w", issues);
 app.route("/api/v1/webhooks", webhooks);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {

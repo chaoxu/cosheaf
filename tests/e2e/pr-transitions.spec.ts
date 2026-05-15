@@ -7,7 +7,7 @@ test.describe.serial("PR review state transitions", () => {
     const { changeId } = await createPrAsMeri(page);
 
     await loginAs(page, "vera");
-    await page.getByTestId("sidebar-tab-queue").click();
+    await page.getByTestId("sidebar-tab-inbox").click();
     const queueItem = page.getByTestId(`queue-change-${changeId}`);
     await expect(queueItem).toBeVisible({ timeout: 8000 });
     await queueItem.click();
@@ -22,7 +22,7 @@ test.describe.serial("PR review state transitions", () => {
     const { changeId } = await createPrAsMeri(page);
 
     await loginAs(page, "vera");
-    await page.getByTestId("sidebar-tab-queue").click();
+    await page.getByTestId("sidebar-tab-inbox").click();
     const queueItem = page.getByTestId(`queue-change-${changeId}`);
     await expect(queueItem).toBeVisible({ timeout: 8000 });
     await queueItem.click();
