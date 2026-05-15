@@ -687,6 +687,7 @@ function InboxOrActivity({
   queue,
   openPrs,
   issues,
+  pinned,
   notifications,
   scope,
   setScope,
@@ -704,6 +705,7 @@ function InboxOrActivity({
   queue: readonly QueueEntry[];
   openPrs: readonly OpenChangeRow[];
   issues: readonly IssueRow[];
+  pinned: readonly IssueRow[];
   notifications: readonly NotificationRow[];
   scope: "mine" | "all";
   setScope: (s: "mine" | "all") => void;
@@ -848,13 +850,35 @@ function InboxOrActivity({
           </li>
         ))}
       </ul>
+      {pinned.length > 0 && (
+        <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+          Pinned
+        </div>
+      )}
+      <ul className="m-0 p-0">
+        {pinned.map((iss) => (
+          <li key={`pinned-${iss.number}`}>
+            <FileRow onClick={() => onOpenIssue(iss.number)} testId={`pinned-issue-${iss.number}`}>
+              <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-800 rounded px-1 mr-1">ISSUE</span>
+              <span aria-hidden className="mr-1">📌</span>
+              <strong>{iss.title}</strong>
+              <span className={cn("text-xs", muted)}>
+                {iss.comment_count > 0 && ` 💬${iss.comment_count}`}
+                {` #${iss.number}`}
+              </span>
+            </FileRow>
+          </li>
+        ))}
+      </ul>
       {issues.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
           {isInbox ? (scope === "mine" ? "Your issues" : "Issues") : "Open issues"}
         </div>
       )}
       <ul className="m-0 flex-1 overflow-y-auto p-0">
-        {issues.map((iss) => (
+        {issues
+          .filter((iss) => !pinned.some((p) => p.number === iss.number))
+          .map((iss) => (
           <li key={`issue-${iss.number}`}>
             <FileRow onClick={() => onOpenIssue(iss.number)} testId={`issue-${iss.number}`}>
               <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-800 rounded px-1 mr-1">ISSUE</span>
@@ -1046,6 +1070,7 @@ function WorkspaceView({
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
   const [openChanges, setOpenChanges] = useState<OpenChangeRow[] | null>(null);
+  const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
@@ -1377,6 +1402,19 @@ function WorkspaceView({
       .catch(() => setOpenChanges([]));
   }, [workspace.slug]);
 
+  const refreshPinned = useCallback(async () => {
+    try {
+      const r = await api.listPinnedIssues(workspace.slug);
+      setPinnedIssues(r.issues);
+    } catch (_err) {
+      setPinnedIssues([]);
+    }
+  }, [workspace.slug]);
+
+  useEffect(() => {
+    void refreshPinned();
+  }, [refreshPinned]);
+
   const reviewChange = useCallback(
     (entry: QueueEntry) => {
       setReviewingChangeId(entry.id);
@@ -1707,12 +1745,14 @@ function WorkspaceView({
               kind={sidebarView}
               queue={queue ?? []}
               issues={issues ?? []}
+              pinned={pinnedIssues}
               scope={issuesScope}
               setScope={setIssuesScope}
               query={inboxQuery}
               setQuery={setInboxQuery}
               onRefresh={() => {
                 openQueue();
+                refreshPinned();
                 if (sidebarView === "inbox") refreshNotifs();
                 if (sidebarView === "inbox" || sidebarView === "activity") {
                   // refresh issues too
@@ -1923,6 +1963,9 @@ function WorkspaceView({
               number={viewingIssue}
               currentForgejoUsername={user.forgejo_username}
               canManageLabels={workspace.role === "owner"}
+              canPin={workspace.role === "owner"}
+              isPinned={pinnedIssues.some((p) => p.number === viewingIssue)}
+              onPinChanged={refreshPinned}
               onClose={() => setViewingIssue(null)}
               onOpenPageById={(id) => {
                 const match = filesRef.current?.find((f) => f.doc?.id === id);

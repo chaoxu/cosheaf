@@ -347,6 +347,12 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ labels }),
     }),
+  listPinnedIssues: (slug: string) =>
+    jsonFetch<{ issues: IssueRow[] }>(`${w(slug)}/issues/pinned`),
+  pinIssue: (slug: string, number: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "POST" }),
+  unpinIssue: (slug: string, number: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "DELETE" }),
 
   // ---- notifications ----
   listNotifications: (slug: string) =>

@@ -33,6 +33,61 @@ issues.get("/:slug/issues", (c) => {
   return c.json({ issues: listIssues(db, ws.id, { state, q }) });
 });
 
+// GET /api/v1/w/:slug/issues/pinned — must come before :number routes.
+issues.get("/:slug/issues/pinned", async (c) => {
+  const ws = c.get("workspace");
+  const fj = c.get("forgejo");
+  const config = c.get("config");
+  const list = await fj.listPinnedIssues(config.forgejoOwner, ws.forgejoRepo);
+  const issuesOnly = list.filter((i) => !i.pull_request);
+  return c.json({
+    issues: issuesOnly.map((i) => ({
+      number: i.number,
+      title: i.title,
+      state: i.state,
+      comment_count: i.comments,
+      updated_at: new Date(i.updated_at).getTime(),
+      author_login: i.user.login,
+    })),
+  });
+});
+
+// POST /api/v1/w/:slug/issues/:number/pin — owner-only (Forgejo enforces too)
+issues.post("/:slug/issues/:number/pin", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  // Forgejo restricts pinning to repo owner/admin; cosheaf's workspace owner
+  // is the Forgejo repo owner (created the repo). Sudo as the workspace
+  // owner rather than the calling user, since the caller may be a workspace
+  // owner role but not the Forgejo repo owner identity.
+  await c.get("forgejo").pinIssue(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+    c.get("config").forgejoOwner,
+  );
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "pinned" });
+  return c.json({ ok: true });
+});
+
+// DELETE /api/v1/w/:slug/issues/:number/pin — owner-only
+issues.delete("/:slug/issues/:number/pin", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  await c.get("forgejo").unpinIssue(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+    c.get("config").forgejoOwner,
+  );
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "unpinned" });
+  return c.json({ ok: true });
+});
+
 // GET /api/v1/w/:slug/issues/:number — full issue from Forgejo (body + meta)
 issues.get("/:slug/issues/:number", async (c) => {
   const ws = c.get("workspace");

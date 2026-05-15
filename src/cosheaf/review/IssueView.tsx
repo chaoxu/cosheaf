@@ -16,7 +16,10 @@ export function IssueView({
   number,
   currentForgejoUsername,
   canManageLabels,
+  canPin = false,
+  isPinned = false,
   onClose,
+  onPinChanged,
   onOpenPageById,
   onOpenPath,
   onOpenNumber,
@@ -25,7 +28,10 @@ export function IssueView({
   number: number;
   currentForgejoUsername?: string;
   canManageLabels?: boolean;
+  canPin?: boolean;
+  isPinned?: boolean;
   onClose: () => void;
+  onPinChanged?: () => void | Promise<void>;
   onOpenPageById?: (id: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
   onOpenNumber?: (n: number) => void;
@@ -176,6 +182,25 @@ export function IssueView({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {canPin && <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            data-testid="issue-pin-toggle"
+            title={isPinned ? "Unpin" : "Pin to top"}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                if (isPinned) await api.unpinIssue(workspaceSlug, number);
+                else await api.pinIssue(workspaceSlug, number);
+                await onPinChanged?.();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {isPinned ? "📌 Pinned" : "📌 Pin"}
+          </Button>}
           <Button variant="outline" size="sm" onClick={toggleState} disabled={busy} data-testid="issue-toggle-state">
             {issue.state === "open" ? "Close issue" : "Reopen"}
           </Button>

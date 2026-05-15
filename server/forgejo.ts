@@ -488,6 +488,26 @@ export class Forgejo {
     return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`);
   }
 
+  async listPinnedIssues(owner: string, repo: string): Promise<ForgejoIssue[]> {
+    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/pinned`);
+  }
+
+  async pinIssue(owner: string, repo: string, number: number, sudo: string): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/pin`, {
+      method: "POST",
+      sudo,
+      expectEmpty: true,
+    });
+  }
+
+  async unpinIssue(owner: string, repo: string, number: number, sudo: string): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/pin`, {
+      method: "DELETE",
+      sudo,
+      expectEmpty: true,
+    });
+  }
+
   async createIssue(
     owner: string, repo: string,
     opts: { title: string; body: string; assignees?: string[]; labels?: number[]; sudo: string },

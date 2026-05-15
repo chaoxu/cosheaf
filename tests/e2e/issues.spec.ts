@@ -108,6 +108,30 @@ test.describe.serial("Issues", () => {
     expect(visibleTitles.some((t) => t.includes("Source"))).toBe(false);
   });
 
+  test("Pin and unpin an issue; pinned issues render at top of Inbox", async ({ page }) => {
+    await loginAs(page, "chao");
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Master roadmap");
+    await page.getByTestId("new-issue-body").fill("The big one.");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+
+    await page.getByTestId("issue-pin-toggle").click();
+    await expect(page.getByTestId("issue-pin-toggle")).toContainText("Pinned", { timeout: 8000 });
+
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await expect(page.locator('[data-testid^="pinned-issue-"]').first()).toBeVisible({ timeout: 8000 });
+
+    // Unpin
+    await page.locator('[data-testid^="pinned-issue-"]').first().click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+    await page.getByTestId("issue-pin-toggle").click();
+    await expect(page.getByTestId("issue-pin-toggle")).toContainText("Pin", { timeout: 8000 });
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await expect(page.locator('[data-testid^="pinned-issue-"]')).toHaveCount(0, { timeout: 8000 });
+  });
+
   test("Activity lists open PRs alongside issues; issue body renders markdown", async ({ page }) => {
     await loginAs(page, "meri");
     await page.getByTestId("sidebar-tab-activity").click();
