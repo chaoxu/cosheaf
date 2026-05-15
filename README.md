@@ -1,9 +1,18 @@
 # Cosheaf
 
-A multi-user mathematical knowledge base built on Coflat-format markdown
-files. Cosheaf is the substrate for trustworthy mathematical writing: pages,
-draft changes, reviews, and approvals — with Forgejo repositories as the
-canonical store and SQLite as a rebuildable sidecar index.
+A multi-user knowledge base built on Coflat-format markdown files. Cosheaf is
+the substrate for trustworthy markdown authoring: pages, draft changes,
+reviews, and approvals — with Forgejo repositories as the canonical store and
+SQLite as a rebuildable sidecar index.
+
+Coflat markdown is intentionally close to mathematical writing: theorem-style
+fenced divs, KaTeX math, `[@id]` cross-references, citations, and LaTeX export
+conventions. Cosheaf itself stays page-oriented; it does not maintain a
+math-native theorem graph or proof dependency model.
+
+Coflat is the current canonical document format. Supporting other markdown
+profiles or document formats may make sense later, but it is not part of the
+current product surface.
 
 The substrate is fully usable by humans alone. Automated agents
 (an `autoprover` layer, planned separately) participate as additional users

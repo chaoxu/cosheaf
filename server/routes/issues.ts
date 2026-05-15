@@ -4,6 +4,28 @@ import { requireAuth, requireMembership } from "../middleware.js";
 import { listIssues, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
 
+// Refresh the sidecar mirror of an issue after a Forgejo mutation. Many
+// fields (updated_at, comment_count, labels, milestone) change on the
+// Forgejo side and would lag here until the next webhook delivery. Calling
+// this keeps the cache coherent immediately.
+async function syncIssue(
+  c: import("hono").Context<AppEnv>,
+  number: number,
+): Promise<void> {
+  const ws = c.get("workspace");
+  try {
+    const fresh = await c.get("forgejo").getIssue(
+      c.get("config").forgejoOwner,
+      ws.forgejoRepo,
+      number,
+    );
+    upsertIssue(c.get("db"), ws.id, fresh);
+  } catch (_err) {
+    // Best-effort. If the refetch fails, the webhook will eventually
+    // reconcile; the caller's primary write has already succeeded.
+  }
+}
+
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
 issues.use("/:slug/*", requireMembership());
@@ -185,9 +207,7 @@ issues.put("/:slug/issues/:number/labels", async (c) => {
     body.labels,
     c.get("forgejoUsername"),
   );
-  // Reflect into the sidecar.
-  const updated = await fj.getIssue(c.get("config").forgejoOwner, ws.forgejoRepo, number);
-  upsertIssue(c.get("db"), ws.id, updated);
+  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "labeled" });
   return c.json({ labels });
 });
@@ -229,6 +249,7 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
     body.body.trim(),
     c.get("forgejoUsername"),
   );
+  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
   return c.json({
     id: cm.id,
@@ -254,6 +275,7 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
     body.body.trim(),
     c.get("forgejoUsername"),
   );
+  await syncIssue(c, Number(c.req.param("number")));
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
     number: Number(c.req.param("number")),
@@ -273,6 +295,7 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
     commentId,
     c.get("forgejoUsername"),
   );
+  await syncIssue(c, Number(c.req.param("number")));
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
     number: Number(c.req.param("number")),
@@ -344,6 +367,7 @@ issues.put("/:slug/issues/:number/milestone", async (c) => {
       sudo: c.get("forgejoUsername"),
     },
   );
+  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "milestone" });
   return c.json({ ok: true });
 });
@@ -387,6 +411,7 @@ issues.post("/:slug/issues/:number/dependencies", async (c) => {
   await c.get("forgejo").addIssueDependency(
     c.get("config").forgejoOwner, ws.forgejoRepo, number, body.index, c.get("forgejoUsername"),
   );
+  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_added" });
   return c.json({ ok: true });
 });
@@ -400,6 +425,7 @@ issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
   await c.get("forgejo").removeIssueDependency(
     c.get("config").forgejoOwner, ws.forgejoRepo, number, dep, c.get("forgejoUsername"),
   );
+  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_removed" });
   return c.json({ ok: true });
 });

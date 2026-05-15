@@ -2,9 +2,19 @@
 
 ## What It Is
 
-Cosheaf is a multi-user mathematical knowledge base. Pages are
-Coflat-flavored markdown files stored in Forgejo repositories; Cosheaf adds a
-human-usable editing, review, search, backlink, and trust workflow on top.
+Cosheaf is a multi-user knowledge base for Coflat-flavored markdown files.
+Pages are stored in Forgejo repositories; Cosheaf adds a human-usable editing,
+review, search, backlink, and trust workflow on top.
+
+Coflat markdown is designed to be comfortable for mathematical writing, with
+math syntax, theorem-style blocks, cross-references, citations, and LaTeX export
+conventions. Cosheaf does not model mathematical objects as a separate graph:
+the durable unit is still the markdown page, and the sidecar index stores only
+page metadata, links, tags, search text, and workflow state.
+
+Coflat is the only supported document format today. The architecture should not
+pretend that formats are pluggable yet, though future work may allow a workspace
+to choose another markdown profile or document format.
 
 Cosheaf is meant to be useful with only human users. Autonomous agents can
 participate later through the same HTTP API as ordinary members or verifiers.
@@ -16,12 +26,12 @@ participate later through the same HTTP API as ordinary members or verifiers.
   search, backlinks, and tags.
 - **Plain markdown remains inspectable.** The durable content is still ordinary
   `.md` files with YAML frontmatter for stable Cosheaf ids and titles.
-- **Workflow is trust, not automation.** Review and approval exist because math
-  writing needs accountability. Agents are one possible participant, not a
-  special workflow path.
-- **Substrate, not prover.** Cosheaf does not prove theorems, run checkers, or
-  schedule exploration. Those concerns belong in another layer that talks to
-  Cosheaf over HTTP.
+- **Workflow is trust, not automation.** Review and approval exist because
+  collaborative knowledge work needs accountability. Agents are one possible
+  participant, not a special workflow path.
+- **Substrate, not semantic engine.** Cosheaf does not prove theorems, run
+  checkers, infer dependencies, or schedule exploration. Those concerns belong
+  in another layer that talks to Cosheaf over HTTP.
 
 ## Document Model
 

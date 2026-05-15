@@ -44,15 +44,15 @@ CREATE TABLE IF NOT EXISTS doc_map (
   doc_type TEXT NOT NULL,
   forgejo_kind TEXT NOT NULL,
   forgejo_id TEXT NOT NULL,
-  target_id TEXT,
   title TEXT,
-  author_user_id INTEGER REFERENCES users(id),
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, cosheaf_id),
   UNIQUE (workspace_id, forgejo_kind, forgejo_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_doc_map_target ON doc_map (workspace_id, target_id);
+-- Pre-existing DBs may have legacy target_id / author_user_id columns and
+-- idx_doc_map_target; both unused since pre-changes refactor.
+DROP INDEX IF EXISTS idx_doc_map_target;
 CREATE INDEX IF NOT EXISTS idx_doc_map_type ON doc_map (workspace_id, doc_type);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(

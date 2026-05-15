@@ -1,8 +1,18 @@
 # Cosheaf
 
-Human-usable mathematical knowledge base. Forgejo repositories hold the
-canonical markdown files and change workflow; SQLite is a derived, rebuildable
-sidecar index for fast reads, sessions, memberships, and local auth state.
+Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
+hold the canonical markdown files and change workflow; SQLite is a derived,
+rebuildable sidecar index for fast reads, sessions, memberships, and local auth
+state.
+
+Coflat markdown is math-friendly, but Cosheaf is page-oriented rather than
+math-native: do not add theorem graphs, proof dependency models, or other
+semantic math layers unless explicitly requested.
+
+Coflat is the only supported document format for now. Do not introduce
+format-plug-in architecture or alternate document formats unless explicitly
+requested; future support for that should stay a design possibility, not an
+assumption in current code.
 
 Agents (autoprover and friends) are out of scope here. They will live in a
 separate layer and participate as ordinary verifier/member users over the same
@@ -112,7 +122,7 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `tokens(id, user_id, name, token_hash)` — personal API tokens (`Bearer cs_…`)
 - `workspaces(id, slug, name, forgejo_repo)` — one Forgejo repo per workspace
 - `memberships(workspace_id, user_id, role)` — role ∈ `owner | verifier | member`
-- `doc_map(workspace_id, cosheaf_id, doc_type, forgejo_kind, forgejo_id, target_id, title, author_user_id)`
+- `doc_map(workspace_id, cosheaf_id, doc_type, forgejo_kind, forgejo_id, title)`
 - `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
 - `notes_fts` — FTS5 virtual table over title + body
 - `page_tags(workspace_id, cosheaf_id, tag)`
@@ -186,6 +196,7 @@ Bare URLs, raw HTML, and indented code blocks are intentionally out of scope.
   helpers, browser harness, perf scripts, etc. None of `__cmView`,
   `__cmDebug`, `pnpm test:browser`, `pnpm chrome`, `scripts/perf-*` apply
   here.
-- It is not an agent system. No proving, exploration, or verifier-bot logic
-  belongs in this repo. That goes in `autoprover` later, talking to cosheaf
-  over the same HTTP API a human uses.
+- It is not a math-native semantic engine or an agent system. No theorem graph,
+  proof dependency model, proving, exploration, or verifier-bot logic belongs
+  in this repo. That goes in a separate layer, talking to cosheaf over the same
+  HTTP API a human uses.
