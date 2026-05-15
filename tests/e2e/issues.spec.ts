@@ -168,6 +168,33 @@ test.describe.serial("Issues", () => {
     await expect(page.getByTestId(`depends-on-${lemmaNum}`)).toHaveCount(0, { timeout: 8000 });
   });
 
+  test("Owner creates a milestone via API; can assign + clear on an issue", async ({ page }) => {
+    await loginAs(page, "chao");
+    // Create milestone server-side (no full UI for create yet)
+    await page.evaluate(async () => {
+      await fetch("/api/v1/w/flushing-coin/milestones", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "v1 polish" }),
+      });
+    });
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Milestone target");
+    await page.getByTestId("new-issue-body").fill("Goes into v1.");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+
+    await page.getByTestId("milestone-pick").click();
+    await page.locator('[data-testid^="milestone-set-"]').first().click();
+    await expect(page.locator('[data-testid^="milestone-chip-"]').first()).toBeVisible({ timeout: 8000 });
+
+    // Clear
+    await page.getByTestId("milestone-pick").click();
+    await page.getByTestId("milestone-clear").click();
+    await expect(page.locator('[data-testid^="milestone-chip-"]')).toHaveCount(0, { timeout: 8000 });
+  });
+
   test("Timeline renders non-comment events (close, label) alongside comments", async ({ page }) => {
     await loginAs(page, "chao");
     await page.getByTestId("sidebar-tab-inbox").click();

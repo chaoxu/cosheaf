@@ -512,6 +512,46 @@ export class Forgejo {
     return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
   }
 
+  // ---------- milestones ----------
+
+  async listMilestones(
+    owner: string,
+    repo: string,
+    state: "open" | "closed" | "all" = "open",
+  ): Promise<ForgejoMilestone[]> {
+    return this.req<ForgejoMilestone[]>(`/api/v1/repos/${owner}/${repo}/milestones?state=${state}`);
+  }
+
+  async createMilestone(
+    owner: string, repo: string,
+    opts: { title: string; description?: string; due_on?: string; sudo: string },
+  ): Promise<ForgejoMilestone> {
+    return this.req<ForgejoMilestone>(`/api/v1/repos/${owner}/${repo}/milestones`, {
+      method: "POST",
+      sudo: opts.sudo,
+      body: {
+        title: opts.title,
+        description: opts.description ?? "",
+        ...(opts.due_on ? { due_on: opts.due_on } : {}),
+      },
+    });
+  }
+
+  async editMilestone(
+    owner: string, repo: string, id: number,
+    opts: { title?: string; description?: string; state?: "open" | "closed"; sudo: string },
+  ): Promise<ForgejoMilestone> {
+    const payload: Record<string, unknown> = {};
+    if (opts.title !== undefined) payload.title = opts.title;
+    if (opts.description !== undefined) payload.description = opts.description;
+    if (opts.state !== undefined) payload.state = opts.state;
+    return this.req<ForgejoMilestone>(`/api/v1/repos/${owner}/${repo}/milestones/${id}`, {
+      method: "PATCH",
+      sudo: opts.sudo,
+      body: payload,
+    });
+  }
+
   async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
     return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`);
   }
@@ -588,13 +628,17 @@ export class Forgejo {
 
   async editIssue(
     owner: string, repo: string, number: number,
-    opts: { title?: string; body?: string; state?: "open" | "closed"; assignees?: string[]; sudo: string },
+    opts: {
+      title?: string; body?: string; state?: "open" | "closed";
+      assignees?: string[]; milestone?: number | null; sudo: string;
+    },
   ): Promise<ForgejoIssue> {
     const payload: Record<string, unknown> = {};
     if (opts.title !== undefined) payload.title = opts.title;
     if (opts.body !== undefined) payload.body = opts.body;
     if (opts.state !== undefined) payload.state = opts.state;
     if (opts.assignees !== undefined) payload.assignees = opts.assignees;
+    if (opts.milestone !== undefined) payload.milestone = opts.milestone ?? 0;
     return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`, {
       method: "PATCH",
       sudo: opts.sudo,
@@ -713,6 +757,7 @@ export interface ForgejoIssue {
   user: { id: number; login: string };
   assignees: Array<{ id: number; login: string }> | null;
   labels: Array<{ id: number; name: string; color: string }>;
+  milestone?: { id: number; title: string; state: "open" | "closed" } | null;
   comments: number;
   created_at: string;
   updated_at: string;
@@ -726,6 +771,19 @@ export interface ForgejoIssueComment {
   user: { id: number; login: string };
   created_at: string;
   updated_at: string;
+}
+
+export interface ForgejoMilestone {
+  id: number;
+  title: string;
+  description?: string;
+  state: "open" | "closed";
+  open_issues: number;
+  closed_issues: number;
+  due_on?: string | null;
+  created_at: string;
+  updated_at?: string;
+  closed_at?: string | null;
 }
 
 export interface ForgejoActivity {

@@ -369,6 +369,20 @@ export const api = {
     }),
   removeIssueDependency: (slug: string, number: number, index: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/dependencies/${index}`, { method: "DELETE" }),
+  listMilestones: (slug: string, state: "open" | "closed" | "all" = "open") =>
+    jsonFetch<{ milestones: Milestone[] }>(`${w(slug)}/milestones?state=${state}`),
+  createMilestone: (slug: string, body: { title: string; description?: string }) =>
+    jsonFetch<{ id: number; title: string; state: "open" | "closed" }>(`${w(slug)}/milestones`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  setIssueMilestone: (slug: string, number: number, id: number | null) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/milestone`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    }),
 
   // ---- notifications ----
   listNotifications: (slug: string) =>
@@ -398,6 +412,16 @@ export interface OpenChangeRow {
   pr_number: number | null;
   author_user_id: number;
   updated_at: number;
+}
+
+export interface Milestone {
+  id: number;
+  title: string;
+  description: string;
+  state: "open" | "closed";
+  open_issues: number;
+  closed_issues: number;
+  due_on: number | null;
 }
 
 export interface DependencyRow {
@@ -463,6 +487,7 @@ export interface IssueDetail {
   author: string;
   assignees: string[];
   labels: Label[];
+  milestone: { id: number; title: string } | null;
   comment_count: number;
   created_at: number;
   updated_at: number;

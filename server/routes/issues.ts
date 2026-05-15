@@ -108,6 +108,7 @@ issues.get("/:slug/issues/:number", async (c) => {
       author: issue.user.login,
       assignees: (issue.assignees ?? []).map((a) => a.login),
       labels: issue.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
+      milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,
       comment_count: issue.comments,
       created_at: new Date(issue.created_at).getTime(),
       updated_at: new Date(issue.updated_at).getTime(),
@@ -277,6 +278,73 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
     number: Number(c.req.param("number")),
     action: "deleted",
   });
+  return c.json({ ok: true });
+});
+
+// ---------- milestones ----------
+
+issues.get("/:slug/milestones", async (c) => {
+  const ws = c.get("workspace");
+  const stateRaw = c.req.query("state");
+  const state: "open" | "closed" | "all" =
+    stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
+  const list = await c.get("forgejo").listMilestones(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    state,
+  );
+  return c.json({
+    milestones: (list ?? []).map((m) => ({
+      id: m.id,
+      title: m.title,
+      description: m.description ?? "",
+      state: m.state,
+      open_issues: m.open_issues,
+      closed_issues: m.closed_issues,
+      due_on: m.due_on ? new Date(m.due_on).getTime() : null,
+    })),
+  });
+});
+
+issues.post("/:slug/milestones", async (c) => {
+  const ws = c.get("workspace");
+  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  const body = (await c.req.json().catch(() => null)) as {
+    title?: string;
+    description?: string;
+  } | null;
+  if (!body?.title || !body.title.trim())
+    return c.json({ error: "title required", code: "validation" }, 400);
+  const m = await c.get("forgejo").createMilestone(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    {
+      title: body.title.trim(),
+      description: body.description,
+      sudo: c.get("forgejoUsername"),
+    },
+  );
+  return c.json({ id: m.id, title: m.title, state: m.state }, 201);
+});
+
+// PUT /api/v1/w/:slug/issues/:n/milestone (body: { id: number | null })
+issues.put("/:slug/issues/:number/milestone", async (c) => {
+  const ws = c.get("workspace");
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const body = (await c.req.json().catch(() => null)) as { id?: number | null } | null;
+  if (body === null) return c.json({ error: "body required", code: "validation" }, 400);
+  const milestoneId = body.id ?? null;
+  await c.get("forgejo").editIssue(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    number,
+    {
+      milestone: milestoneId,
+      sudo: c.get("forgejoUsername"),
+    },
+  );
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "milestone" });
   return c.json({ ok: true });
 });
 

@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
-import type { DependencyRow, IssueComment, IssueDetail, Label, TimelineEvent } from "../api";
+import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
 import { IssueBodyRender } from "./IssueBodyRender";
 
 const muted = "text-[var(--cf-muted)]";
@@ -40,6 +40,8 @@ export function IssueView({
   const [comments, setComments] = useState<IssueComment[]>([]);
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const [labelMenuOpen, setLabelMenuOpen] = useState(false);
+  const [allMilestones, setAllMilestones] = useState<Milestone[]>([]);
+  const [milestoneMenuOpen, setMilestoneMenuOpen] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [dependencies, setDependencies] = useState<DependencyRow[]>([]);
   const [blocks, setBlocks] = useState<DependencyRow[]>([]);
@@ -72,6 +74,7 @@ export function IssueView({
   useEffect(() => {
     void refresh();
     api.listLabels(workspaceSlug).then((r) => setAllLabels(r.labels)).catch(() => undefined);
+    api.listMilestones(workspaceSlug, "open").then((r) => setAllMilestones(r.milestones)).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSlug, number]);
 
@@ -181,6 +184,80 @@ export function IssueView({
                               style={{ backgroundColor: `#${l.color}` }}
                             />
                             <span>{l.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          {(issue.milestone || canManageLabels) && (
+            <div className="flex flex-wrap items-center gap-1 mt-1 relative">
+              {issue.milestone && (
+                <span
+                  data-testid={`milestone-chip-${issue.milestone.id}`}
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-700"
+                  title="Milestone"
+                >
+                  🎯 {issue.milestone.title}
+                </span>
+              )}
+              {canManageLabels && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    data-testid="milestone-pick"
+                    onClick={() => setMilestoneMenuOpen((v) => !v)}
+                    className={cn("text-[11px] underline opacity-70", muted)}
+                  >
+                    {issue.milestone ? "change" : "+ milestone"}
+                  </button>
+                  {milestoneMenuOpen && (
+                    <div className="absolute z-10 top-full mt-1 left-0 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] p-1 min-w-[180px] shadow">
+                      {allMilestones.length === 0 && (
+                        <div className={cn("text-xs px-2 py-1", muted)}>No open milestones.</div>
+                      )}
+                      <button
+                        type="button"
+                        data-testid="milestone-clear"
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            await api.setIssueMilestone(workspaceSlug, number, null);
+                            setMilestoneMenuOpen(false);
+                            await refresh();
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        className="flex items-center gap-2 w-full px-2 py-1 text-xs hover:bg-[var(--cf-hover)] rounded"
+                      >
+                        <span aria-hidden>{!issue.milestone ? "✓" : " "}</span>
+                        <span className={muted}>(none)</span>
+                      </button>
+                      {allMilestones.map((m) => {
+                        const checked = issue.milestone?.id === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            data-testid={`milestone-set-${m.id}`}
+                            onClick={async () => {
+                              setBusy(true);
+                              try {
+                                await api.setIssueMilestone(workspaceSlug, number, m.id);
+                                setMilestoneMenuOpen(false);
+                                await refresh();
+                              } finally {
+                                setBusy(false);
+                              }
+                            }}
+                            className="flex items-center gap-2 w-full px-2 py-1 text-xs hover:bg-[var(--cf-hover)] rounded"
+                          >
+                            <span aria-hidden>{checked ? "✓" : " "}</span>
+                            <span>{m.title}</span>
                           </button>
                         );
                       })}
