@@ -355,6 +355,8 @@ export const api = {
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "DELETE" }),
   getIssueTimeline: (slug: string, number: number) =>
     jsonFetch<{ events: TimelineEvent[] }>(`${w(slug)}/issues/${number}/timeline`),
+  listActivities: (slug: string, limit = 50) =>
+    jsonFetch<{ activities: ActivityRow[] }>(`${w(slug)}/activities?limit=${limit}`),
 
   // ---- notifications ----
   listNotifications: (slug: string) =>
@@ -384,6 +386,16 @@ export interface OpenChangeRow {
   pr_number: number | null;
   author_user_id: number;
   updated_at: number;
+}
+
+export interface ActivityRow {
+  id: number;
+  op_type: string;
+  actor: string | null;
+  ref_index: number | null;
+  ref_name: string | null;
+  comment_body: string | null;
+  created_at: number;
 }
 
 export interface TimelineEvent {

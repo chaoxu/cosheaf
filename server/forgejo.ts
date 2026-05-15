@@ -512,6 +512,18 @@ export class Forgejo {
     return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
   }
 
+  async listRepoActivities(
+    owner: string,
+    repo: string,
+    opts: { limit?: number } = {},
+  ): Promise<ForgejoActivity[]> {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    return this.req<ForgejoActivity[]>(
+      `/api/v1/repos/${owner}/${repo}/activities/feeds?${params.toString()}`,
+    );
+  }
+
   async createIssue(
     owner: string, repo: string,
     opts: { title: string; body: string; assignees?: string[]; labels?: number[]; sudo: string },
@@ -666,6 +678,18 @@ export interface ForgejoIssueComment {
   user: { id: number; login: string };
   created_at: string;
   updated_at: string;
+}
+
+export interface ForgejoActivity {
+  id: number;
+  op_type: string;
+  act_user?: { id: number; login: string };
+  repo?: { full_name: string };
+  comment_id?: number;
+  comment?: { id: number; body: string; issue_url?: string; pull_request_url?: string };
+  ref_name?: string;
+  content?: string;
+  created: string;
 }
 
 export interface ForgejoTimelineEvent {

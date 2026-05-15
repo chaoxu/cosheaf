@@ -12,6 +12,7 @@ type OutlineEntry = {
 import {
   ApiError,
   api,
+  type ActivityRow,
   type ApprovalRecord,
   type Backlink,
   type ChangeDiff,
@@ -688,6 +689,7 @@ function InboxOrActivity({
   openPrs,
   issues,
   pinned,
+  activities,
   notifications,
   scope,
   setScope,
@@ -706,6 +708,7 @@ function InboxOrActivity({
   openPrs: readonly OpenChangeRow[];
   issues: readonly IssueRow[];
   pinned: readonly IssueRow[];
+  activities: readonly ActivityRow[];
   notifications: readonly NotificationRow[];
   scope: "mine" | "all";
   setScope: (s: "mine" | "all") => void;
@@ -850,6 +853,20 @@ function InboxOrActivity({
           </li>
         ))}
       </ul>
+      {!isInbox && activities.length > 0 && (
+        <>
+          <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+            Recent activity
+          </div>
+          <ul className="m-0 p-0 max-h-64 overflow-y-auto">
+            {activities.slice(0, 30).map((a) => (
+              <li key={`act-${a.id}`} className={cn("px-2 py-1 text-xs leading-snug")}>
+                <ActivityLine row={a} onOpenIssue={onOpenIssue} onOpenPr={onOpenPr} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {pinned.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
           Pinned
@@ -893,6 +910,80 @@ function InboxOrActivity({
       </ul>
     </div>
   );
+}
+
+function ActivityLine({
+  row,
+  onOpenIssue,
+  onOpenPr,
+}: {
+  row: ActivityRow;
+  onOpenIssue: (n: number) => void;
+  onOpenPr: (n: number) => void;
+}): ReactElement {
+  const desc = describeOpType(row);
+  return (
+    <div className={cn("flex items-baseline gap-1", muted)}>
+      <strong className="text-[var(--cf-fg)]">@{row.actor ?? "?"}</strong>
+      <span>{desc.verb}</span>
+      {desc.targetKind && desc.targetNumber !== null && (() => {
+        const n = desc.targetNumber;
+        const kind = desc.targetKind;
+        return (
+          <button
+            type="button"
+            className="text-[var(--cf-accent)] hover:underline"
+            onClick={() => (kind === "pr" ? onOpenPr(n) : onOpenIssue(n))}
+          >
+            {kind === "pr" ? "PR" : "issue"} #{n}
+          </button>
+        );
+      })()}
+      {desc.extra && <span className="opacity-75">{desc.extra}</span>}
+    </div>
+  );
+}
+
+function describeOpType(row: ActivityRow): {
+  verb: string;
+  targetKind: "issue" | "pr" | null;
+  targetNumber: number | null;
+  extra: string | null;
+} {
+  const n = row.ref_index;
+  switch (row.op_type) {
+    case "create_issue":
+      return { verb: "opened", targetKind: "issue", targetNumber: n, extra: null };
+    case "close_issue":
+      return { verb: "closed", targetKind: "issue", targetNumber: n, extra: null };
+    case "reopen_issue":
+      return { verb: "reopened", targetKind: "issue", targetNumber: n, extra: null };
+    case "comment_issue":
+      return { verb: "commented on", targetKind: "issue", targetNumber: n, extra: null };
+    case "create_pull_request":
+      return { verb: "opened", targetKind: "pr", targetNumber: n, extra: null };
+    case "close_pull_request":
+      return { verb: "closed", targetKind: "pr", targetNumber: n, extra: null };
+    case "reopen_pull_request":
+      return { verb: "reopened", targetKind: "pr", targetNumber: n, extra: null };
+    case "merge_pull_request":
+      return { verb: "merged", targetKind: "pr", targetNumber: n, extra: null };
+    case "comment_pull":
+      return { verb: "commented on", targetKind: "pr", targetNumber: n, extra: null };
+    case "pull_review":
+    case "approve_pull_request":
+      return { verb: "approved", targetKind: "pr", targetNumber: n, extra: null };
+    case "reject_pull_request":
+      return { verb: "requested changes on", targetKind: "pr", targetNumber: n, extra: null };
+    case "push":
+      return { verb: "pushed to", targetKind: null, targetNumber: null, extra: row.ref_name };
+    case "create_branch":
+      return { verb: "created branch", targetKind: null, targetNumber: null, extra: row.ref_name };
+    case "delete_branch":
+      return { verb: "deleted branch", targetKind: null, targetNumber: null, extra: row.ref_name };
+    default:
+      return { verb: row.op_type.replace(/_/g, " "), targetKind: null, targetNumber: null, extra: null };
+  }
 }
 
 function ApprovalsPanel({
@@ -1071,6 +1162,7 @@ function WorkspaceView({
   const [inboxQuery, setInboxQuery] = useState("");
   const [openChanges, setOpenChanges] = useState<OpenChangeRow[] | null>(null);
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
+  const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
@@ -1415,6 +1507,23 @@ function WorkspaceView({
     void refreshPinned();
   }, [refreshPinned]);
 
+  // Activity feed refreshes when the user opens the Activity tab.
+  useEffect(() => {
+    if (sidebarView !== "activity") return;
+    let cancel = false;
+    api
+      .listActivities(workspace.slug, 50)
+      .then((r) => {
+        if (!cancel) setActivities(r.activities);
+      })
+      .catch(() => {
+        if (!cancel) setActivities([]);
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [sidebarView, workspace.slug]);
+
   const reviewChange = useCallback(
     (entry: QueueEntry) => {
       setReviewingChangeId(entry.id);
@@ -1746,6 +1855,7 @@ function WorkspaceView({
               queue={queue ?? []}
               issues={issues ?? []}
               pinned={pinnedIssues}
+              activities={activities}
               scope={issuesScope}
               setScope={setIssuesScope}
               query={inboxQuery}

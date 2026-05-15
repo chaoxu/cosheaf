@@ -280,6 +280,53 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /api/v1/w/:slug/activities — workspace event feed
+issues.get("/:slug/activities", async (c) => {
+  const ws = c.get("workspace");
+  const limit = Math.min(Number(c.req.query("limit") ?? 50), 100);
+  const raw = await c.get("forgejo").listRepoActivities(
+    c.get("config").forgejoOwner,
+    ws.forgejoRepo,
+    { limit },
+  );
+  const safe = raw ?? [];
+  return c.json({
+    activities: safe.map((a) => {
+      // Forgejo encodes content as a JSON array string for many op_types.
+      // For comment_*: ["<issue_index>","<body>"]
+      // For close_issue, reopen_issue, etc: often just "<issue_index>" or
+      // similar — keep raw and let the client parse what it can.
+      let refIndex: number | null = null;
+      let body: string | null = null;
+      if (a.content) {
+        try {
+          const parsed: unknown = JSON.parse(a.content);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const first = parsed[0];
+            const n = Number(first);
+            if (Number.isFinite(n)) refIndex = n;
+            if (parsed.length > 1 && typeof parsed[1] === "string") body = parsed[1];
+          } else if (typeof parsed === "string") {
+            const n = Number(parsed);
+            if (Number.isFinite(n)) refIndex = n;
+          }
+        } catch (_err) {
+          // content wasn't JSON; ignore.
+        }
+      }
+      return {
+        id: a.id,
+        op_type: a.op_type,
+        actor: a.act_user?.login ?? null,
+        ref_index: refIndex,
+        ref_name: a.ref_name ?? null,
+        comment_body: body,
+        created_at: new Date(a.created).getTime(),
+      };
+    }),
+  });
+});
+
 // GET /api/v1/w/:slug/issues/:number/timeline — full event log
 issues.get("/:slug/issues/:number/timeline", async (c) => {
   const ws = c.get("workspace");
