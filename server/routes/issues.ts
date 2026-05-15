@@ -21,12 +21,9 @@ async function syncIssue(
   number: number,
 ): Promise<void> {
   const ws = c.get("workspace");
+  const { fj, owner, repo } = c.get("repoCtx");
   try {
-    const fresh = await c.get("forgejo").getIssue(
-      c.get("config").forgejoOwner,
-      ws.forgejoRepo,
-      number,
-    );
+    const fresh = await fj.getIssue(owner, repo, number);
     upsertIssue(c.get("db"), ws.id, fresh);
   } catch (_err) {
     // Best-effort. If the refetch fails, the webhook will eventually
@@ -65,10 +62,8 @@ issues.get("/:slug/issues", (c) => {
 
 // GET /api/v1/w/:slug/issues/pinned — must come before :number routes.
 issues.get("/:slug/issues/pinned", async (c) => {
-  const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const config = c.get("config");
-  const list = await fj.listPinnedIssues(config.forgejoOwner, ws.forgejoRepo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listPinnedIssues(owner, repo);
   const issuesOnly = list.filter((i) => !i.pull_request);
   return c.json({
     issues: issuesOnly.map((i) => ({
@@ -92,12 +87,8 @@ issues.post("/:slug/issues/:number/pin", async (c) => {
   // is the Forgejo repo owner (created the repo). Sudo as the workspace
   // owner rather than the calling user, since the caller may be a workspace
   // owner role but not the Forgejo repo owner identity.
-  await c.get("forgejo").pinIssue(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-    c.get("config").forgejoOwner,
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.pinIssue(owner, repo, number, owner);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "pinned" });
   return c.json({ ok: true });
 });
@@ -108,12 +99,8 @@ issues.delete("/:slug/issues/:number/pin", async (c) => {
   if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  await c.get("forgejo").unpinIssue(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-    c.get("config").forgejoOwner,
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.unpinIssue(owner, repo, number, owner);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "unpinned" });
   return c.json({ ok: true });
 });
@@ -121,12 +108,11 @@ issues.delete("/:slug/issues/:number/pin", async (c) => {
 // GET /api/v1/w/:slug/issues/:number — full issue from Forgejo (body + meta)
 issues.get("/:slug/issues/:number", async (c) => {
   const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const config = c.get("config");
+  const { fj, owner, repo } = c.get("repoCtx");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   try {
-    const issue = await fj.getIssue(config.forgejoOwner, ws.forgejoRepo, number);
+    const issue = await fj.getIssue(owner, repo, number);
     if (issue.pull_request) return c.json({ error: "not an issue" }, 404);
     upsertIssue(c.get("db"), ws.id, issue);
     const detail: IssueDetail = {
@@ -159,12 +145,12 @@ issues.post("/:slug/issues", async (c) => {
   } | null;
   if (!body?.title || !body.title.trim())
     return c.json({ error: "title required", code: "validation" }, 400);
-  const fj = c.get("forgejo");
-  const created = await fj.createIssue(c.get("config").forgejoOwner, ws.forgejoRepo, {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const created = await fj.createIssue(owner, repo, {
     title: body.title.trim(),
     body: body.body ?? "",
     labels: body.labels,
-    sudo: c.get("forgejoUsername"),
+    sudo,
   });
   upsertIssue(c.get("db"), ws.id, created);
   c.get("sse").publish(ws.slug, { type: "issue", number: created.number, action: "opened" });
@@ -173,9 +159,8 @@ issues.post("/:slug/issues", async (c) => {
 
 // GET /api/v1/w/:slug/labels
 issues.get("/:slug/labels", async (c) => {
-  const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const labels = await fj.listLabels(c.get("config").forgejoOwner, ws.forgejoRepo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const labels = await fj.listLabels(owner, repo);
   return c.json({ labels });
 });
 
@@ -190,12 +175,12 @@ issues.post("/:slug/labels", async (c) => {
   } | null;
   if (!body?.name || !body.color)
     return c.json({ error: "name and color required", code: "validation" }, 400);
-  const fj = c.get("forgejo");
-  const created = await fj.createLabel(c.get("config").forgejoOwner, ws.forgejoRepo, {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const created = await fj.createLabel(owner, repo, {
     name: body.name.trim(),
     color: body.color.replace(/^#/, ""),
     description: body.description,
-    sudo: c.get("forgejoUsername"),
+    sudo,
   });
   return c.json(created, 201);
 });
@@ -207,14 +192,8 @@ issues.put("/:slug/issues/:number/labels", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { labels?: number[] } | null;
   if (!body || !Array.isArray(body.labels))
     return c.json({ error: "labels (number[]) required", code: "validation" }, 400);
-  const fj = c.get("forgejo");
-  const labels = await fj.setIssueLabels(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-    body.labels,
-    c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const labels = await fj.setIssueLabels(owner, repo, number, body.labels, sudo);
   await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "labeled" });
   return c.json({ labels });
@@ -231,10 +210,10 @@ async function transitionIssue(
   const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const fj = c.get("forgejo");
-  const updated = await fj.editIssue(c.get("config").forgejoOwner, ws.forgejoRepo, number, {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const updated = await fj.editIssue(owner, repo, number, {
     state,
-    sudo: c.get("forgejoUsername"),
+    sudo,
   });
   upsertIssue(c.get("db"), ws.id, updated);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: state });
@@ -249,14 +228,8 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
   if (!body?.body || !body.body.trim())
     return c.json({ error: "body required", code: "validation" }, 400);
-  const fj = c.get("forgejo");
-  const cm = await fj.createIssueComment(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-    body.body.trim(),
-    c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const cm = await fj.createIssueComment(owner, repo, number, body.body.trim(), sudo);
   await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
   const created: IssueComment = {
@@ -276,14 +249,8 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
   if (!body?.body || !body.body.trim())
     return c.json({ error: "body required", code: "validation" }, 400);
-  const fj = c.get("forgejo");
-  const cm = await fj.editIssueComment(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    commentId,
-    body.body.trim(),
-    c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const cm = await fj.editIssueComment(owner, repo, commentId, body.body.trim(), sudo);
   await syncIssue(c, Number(c.req.param("number")));
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
@@ -297,13 +264,8 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
 issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   const ws = c.get("workspace");
   const commentId = Number(c.req.param("id"));
-  const fj = c.get("forgejo");
-  await fj.deleteIssueComment(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    commentId,
-    c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.deleteIssueComment(owner, repo, commentId, sudo);
   await syncIssue(c, Number(c.req.param("number")));
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
@@ -316,15 +278,11 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
 // ---------- milestones ----------
 
 issues.get("/:slug/milestones", async (c) => {
-  const ws = c.get("workspace");
   const stateRaw = c.req.query("state");
   const state: "open" | "closed" | "all" =
     stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
-  const list = await c.get("forgejo").listMilestones(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    state,
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listMilestones(owner, repo, state);
   return c.json({
     milestones: (list ?? []).map<Milestone>((m) => ({
       id: m.id,
@@ -347,15 +305,12 @@ issues.post("/:slug/milestones", async (c) => {
   } | null;
   if (!body?.title || !body.title.trim())
     return c.json({ error: "title required", code: "validation" }, 400);
-  const m = await c.get("forgejo").createMilestone(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    {
-      title: body.title.trim(),
-      description: body.description,
-      sudo: c.get("forgejoUsername"),
-    },
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const m = await fj.createMilestone(owner, repo, {
+    title: body.title.trim(),
+    description: body.description,
+    sudo,
+  });
   return c.json({ id: m.id, title: m.title, state: m.state }, 201);
 });
 
@@ -367,15 +322,11 @@ issues.put("/:slug/issues/:number/milestone", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { id?: number | null } | null;
   if (body === null) return c.json({ error: "body required", code: "validation" }, 400);
   const milestoneId = body.id ?? null;
-  await c.get("forgejo").editIssue(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-    {
-      milestone: milestoneId,
-      sudo: c.get("forgejoUsername"),
-    },
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.editIssue(owner, repo, number, {
+    milestone: milestoneId,
+    sudo,
+  });
   await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "milestone" });
   return c.json({ ok: true });
@@ -388,26 +339,18 @@ function depRow(i: { number: number; title: string; state: "open" | "closed"; pu
 }
 
 issues.get("/:slug/issues/:number/dependencies", async (c) => {
-  const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const list = await c.get("forgejo").listIssueDependencies(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listIssueDependencies(owner, repo, number);
   return c.json({ issues: (list ?? []).map(depRow) });
 });
 
 issues.get("/:slug/issues/:number/blocks", async (c) => {
-  const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const list = await c.get("forgejo").listIssueBlocks(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listIssueBlocks(owner, repo, number);
   return c.json({ issues: (list ?? []).map(depRow) });
 });
 
@@ -417,9 +360,8 @@ issues.post("/:slug/issues/:number/dependencies", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { index?: number } | null;
   if (!Number.isFinite(number) || !body?.index)
     return c.json({ error: "bad number / index", code: "validation" }, 400);
-  await c.get("forgejo").addIssueDependency(
-    c.get("config").forgejoOwner, ws.forgejoRepo, number, body.index, c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.addIssueDependency(owner, repo, number, body.index, sudo);
   await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_added" });
   return c.json({ ok: true });
@@ -431,9 +373,8 @@ issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
   const dep = Number(c.req.param("dep"));
   if (!Number.isFinite(number) || !Number.isFinite(dep))
     return c.json({ error: "bad number" }, 400);
-  await c.get("forgejo").removeIssueDependency(
-    c.get("config").forgejoOwner, ws.forgejoRepo, number, dep, c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.removeIssueDependency(owner, repo, number, dep, sudo);
   await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_removed" });
   return c.json({ ok: true });
@@ -441,13 +382,9 @@ issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
 
 // GET /api/v1/w/:slug/activities — workspace event feed
 issues.get("/:slug/activities", async (c) => {
-  const ws = c.get("workspace");
   const limit = Math.min(Number(c.req.query("limit") ?? 50), 100);
-  const raw = await c.get("forgejo").listRepoActivities(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    { limit },
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  const raw = await fj.listRepoActivities(owner, repo, { limit });
   const safe = raw ?? [];
   return c.json({
     activities: safe.map<ActivityRow>((a) => {
@@ -488,14 +425,10 @@ issues.get("/:slug/activities", async (c) => {
 
 // GET /api/v1/w/:slug/issues/:number/timeline — full event log
 issues.get("/:slug/issues/:number/timeline", async (c) => {
-  const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const events = await c.get("forgejo").listIssueTimeline(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    number,
-  );
+  const { fj, owner, repo } = c.get("repoCtx");
+  const events = await fj.listIssueTimeline(owner, repo, number);
   // Forgejo returns null instead of [] for some empty issue timelines.
   const safe = events ?? [];
   return c.json({
@@ -524,16 +457,10 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
 
 // GET /api/v1/w/:slug/issues/:number/comments
 issues.get("/:slug/issues/:number/comments", async (c) => {
-  const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const config = c.get("config");
+  const { fj, owner, repo } = c.get("repoCtx");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const list: ForgejoIssueComment[] = await fj.listIssueComments(
-    config.forgejoOwner,
-    ws.forgejoRepo,
-    number,
-  );
+  const list: ForgejoIssueComment[] = await fj.listIssueComments(owner, repo, number);
   return c.json({
     comments: list.map<IssueComment>((cm) => ({
       id: cm.id,

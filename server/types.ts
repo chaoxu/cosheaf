@@ -13,6 +13,17 @@ export interface WorkspaceContext {
   role: Role;
 }
 
+// Materialized inside requireMembership so every workspace-scoped route
+// has a single shorthand for the Forgejo client + (owner, repo, sudo)
+// tuple. Eliminates ~28 sites of repeated c.get() unpacking and removes
+// the "did I remember sudo?" footgun.
+export interface RepoCtx {
+  fj: Forgejo;
+  owner: string;
+  repo: string;
+  sudo: string;
+}
+
 export interface AppEnv {
   Variables: {
     db: Database.Database;
@@ -22,5 +33,6 @@ export interface AppEnv {
     user: User;
     forgejoUsername: string;
     workspace: WorkspaceContext;
+    repoCtx: RepoCtx;
   };
 }

@@ -37,14 +37,8 @@ function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
 // GET /api/v1/w/:slug/notifications — unread notifications for the calling
 // user in this workspace's Forgejo repo.
 notifications.get("/:slug/notifications", async (c) => {
-  const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const sudo = c.get("forgejoUsername");
-  const threads = await fj.listRepoNotifications(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    sudo,
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const threads = await fj.listRepoNotifications(owner, repo, sudo);
   const mapped = threads
     .map(mapThread)
     .filter((x): x is NonNullable<ReturnType<typeof mapThread>> => x !== null)
@@ -56,17 +50,14 @@ notifications.get("/:slug/notifications", async (c) => {
 notifications.post("/:slug/notifications/:id/read", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ error: "bad id", code: "validation" }, 400);
-  await c.get("forgejo").markNotificationRead(id, c.get("forgejoUsername"));
+  const { fj, sudo } = c.get("repoCtx");
+  await fj.markNotificationRead(id, sudo);
   return c.json({ ok: true });
 });
 
 // POST /api/v1/w/:slug/notifications/read-all
 notifications.post("/:slug/notifications/read-all", async (c) => {
-  const ws = c.get("workspace");
-  await c.get("forgejo").markRepoNotificationsRead(
-    c.get("config").forgejoOwner,
-    ws.forgejoRepo,
-    c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.markRepoNotificationsRead(owner, repo, sudo);
   return c.json({ ok: true });
 });

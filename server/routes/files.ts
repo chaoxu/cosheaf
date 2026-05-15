@@ -102,9 +102,8 @@ async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<Ch
     };
   }
   // Zero writable changes → create one. Branch is created lazily on first putFile below.
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const mainBranch = await fj.getBranch(owner, ws.forgejoRepo, "main");
+  const { fj, owner, repo } = c.get("repoCtx");
+  const mainBranch = await fj.getBranch(owner, repo, "main");
   return createChange(db, {
     workspaceId: ws.id,
     authorUserId: user.id,
@@ -155,12 +154,10 @@ async function ensureChangeBranch(
   c: import("hono").Context<AppEnv>,
   change: ChangeRow,
 ): Promise<void> {
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const sudo = c.get("forgejoUsername");
-  const exists = await fj.getBranch(owner, c.get("workspace").forgejoRepo, change.branch_name);
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const exists = await fj.getBranch(owner, repo, change.branch_name);
   if (exists) return;
-  await fj.createBranch(owner, c.get("workspace").forgejoRepo, {
+  await fj.createBranch(owner, repo, {
     newBranchName: change.branch_name,
     oldBranchName: "main",
     sudo,
@@ -169,16 +166,15 @@ async function ensureChangeBranch(
 
 files.get("/:slug/tree", async (c) => {
   const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
+  const { fj, owner, repo } = c.get("repoCtx");
   const { ref } = await resolveReadRef(c);
   let tree;
   try {
-    tree = await fj.getTree(owner, ws.forgejoRepo, ref, true);
+    tree = await fj.getTree(owner, repo, ref, true);
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
       // change branch missing (e.g. merged); fall back to main
-      tree = await fj.getTree(owner, ws.forgejoRepo, "main", true);
+      tree = await fj.getTree(owner, repo, "main", true);
     } else {
       throw err;
     }
@@ -207,18 +203,16 @@ files.get("/:slug/tree", async (c) => {
 files.get("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
-  const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
+  const { fj, owner, repo } = c.get("repoCtx");
   const { ref } = await resolveReadRef(c);
   try {
-    const content = await fj.getRawFile(owner, ws.forgejoRepo, ref, rel);
+    const content = await fj.getRawFile(owner, repo, ref, rel);
     return c.json({ content });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
       // Change branch may not have this file yet — fall back to main.
       try {
-        const content = await fj.getRawFile(owner, ws.forgejoRepo, "main", rel);
+        const content = await fj.getRawFile(owner, repo, "main", rel);
         return c.json({ content });
       } catch (err2) {
         if (err2 instanceof ForgejoError && err2.status === 404)
@@ -245,19 +239,17 @@ files.put("/:slug/file", async (c) => {
   const change = resolved;
 
   await ensureChangeBranch(c, change);
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const sudo = c.get("forgejoUsername");
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
 
   const plan = planIndexPage(db, { workspaceId: ws.id, filePath: rel, bodyText: body.content });
   const finalContent = plan.rewrittenContent ?? body.content;
 
-  const existing = await fj.getFileMeta(owner, ws.forgejoRepo, change.branch_name, rel);
+  const existing = await fj.getFileMeta(owner, repo, change.branch_name, rel);
   let r;
   try {
-    r = await fj.putFile(owner, ws.forgejoRepo, {
+    r = await fj.putFile(owner, repo, {
       branch: change.branch_name,
       path: rel,
       content: finalContent,
@@ -289,13 +281,11 @@ files.delete("/:slug/file", async (c) => {
   if ("error" in resolved) return c.json(resolved, STATUS_FOR_CODE[resolved.code]);
   const change = resolved;
   await ensureChangeBranch(c, change);
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const sudo = c.get("forgejoUsername");
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
   const ws = c.get("workspace");
-  const meta = await fj.getFileMeta(owner, ws.forgejoRepo, change.branch_name, rel);
+  const meta = await fj.getFileMeta(owner, repo, change.branch_name, rel);
   if (!meta) return c.json({ error: "not found", code: "not_found" }, 404);
-  await fj.deleteFile(owner, ws.forgejoRepo, {
+  await fj.deleteFile(owner, repo, {
     branch: change.branch_name,
     path: rel,
     sha: meta.sha,

@@ -39,5 +39,14 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
     | undefined;
   if (!row) return c.json({ error: "workspace not found", code: "not_found" }, 404);
   c.set("workspace", { id: row.id, slug, name: row.name, forgejoRepo: row.forgejo_repo, role: row.role });
+  // The same Forgejo + (owner, repo, sudo) tuple is needed in nearly every
+  // workspace-scoped handler. Materialize it once so each route doesn't
+  // re-pull from c.get() and accidentally forget the sudo header.
+  c.set("repoCtx", {
+    fj: c.get("forgejo"),
+    owner: c.get("config").forgejoOwner,
+    repo: row.forgejo_repo,
+    sudo: c.get("forgejoUsername"),
+  });
   await next();
 };

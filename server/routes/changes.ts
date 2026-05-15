@@ -79,9 +79,8 @@ changes.post("/:slug/change", async (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");
   const body = (await c.req.json().catch(() => ({}))) as { title?: string };
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const mainBranch = await fj.getBranch(owner, ws.forgejoRepo, "main");
+  const { fj, owner, repo } = c.get("repoCtx");
+  const mainBranch = await fj.getBranch(owner, repo, "main");
   const change = createChange(c.get("db"), {
     workspaceId: ws.id,
     authorUserId: user.id,
@@ -102,9 +101,8 @@ changes.delete("/:slug/change/:id", async (c) => {
   if (change.state !== "draft")
     return c.json({ error: `change is ${change.state}`, code: "conflict" }, 409);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name, "deleteBranch on discard");
+  const { fj, owner, repo } = c.get("repoCtx");
+  await deleteBranchQuietly(fj, owner, repo, change.branch_name, "deleteBranch on discard");
   setChangeState(c.get("db"), ws.id, change.id, "closed");
   c.get("sse").publish(ws.slug, { type: "change_closed", id: change.id });
   return c.json({ ok: true });
@@ -133,13 +131,11 @@ changes.post("/:slug/publish", async (c) => {
   let mode = body.mode ?? (ws.role === "owner" ? "direct" : "review");
   if (mode === "direct" && ws.role !== "owner") mode = "review";
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const sudo = c.get("forgejoUsername");
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
 
   // Ensure the branch exists (it might not if the user created a change via
   // POST /change but never saved anything).
-  const branchExists = await fj.getBranch(owner, ws.forgejoRepo, change.branch_name);
+  const branchExists = await fj.getBranch(owner, repo, change.branch_name);
   if (!branchExists) {
     setChangeState(c.get("db"), ws.id, change.id, "closed");
     return c.json({ ok: true, message: "nothing to publish (no commits)" });
@@ -149,7 +145,7 @@ changes.post("/:slug/publish", async (c) => {
   let prNumber = change.pr_number;
   if (!prNumber) {
     try {
-      const pr = await fj.createPull(owner, ws.forgejoRepo, {
+      const pr = await fj.createPull(owner, repo, {
         head: change.branch_name,
         base: "main",
         title: body.title ?? change.title ?? `change ${change.id}`,
@@ -161,7 +157,7 @@ changes.post("/:slug/publish", async (c) => {
     } catch (err) {
       if (err instanceof ForgejoError && err.status === 409) {
         // No diff vs main → nothing to publish; clean up the empty branch.
-        await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name);
+        await deleteBranchQuietly(fj, owner, repo, change.branch_name);
         setChangeState(c.get("db"), ws.id, change.id, "closed");
         return c.json({ ok: true, message: "nothing to publish" });
       }
@@ -170,7 +166,7 @@ changes.post("/:slug/publish", async (c) => {
   }
 
   if (prNumber && (body.title !== undefined || body.body !== undefined)) {
-    await fj.editPull(owner, ws.forgejoRepo, prNumber, {
+    await fj.editPull(owner, repo, prNumber, {
       ...(body.title !== undefined ? { title: body.title } : {}),
       ...(body.body !== undefined ? { body: body.body } : {}),
     }, sudo);
@@ -185,7 +181,7 @@ changes.post("/:slug/publish", async (c) => {
   // direct: auto-approve as cosheaf-admin to satisfy required_approvals (Forgejo's
   // apply_to_admins flag doesn't bypass merge gates in our deployment), then merge.
   try {
-    await fj.createReview(owner, ws.forgejoRepo, prNumber, {
+    await fj.createReview(owner, repo, prNumber, {
       event: "APPROVED",
       body: `auto-approved on direct publish by ${sudo}`,
       sudo: owner,
@@ -195,11 +191,11 @@ changes.post("/:slug/publish", async (c) => {
       console.warn(`auto-approve failed: ${(err as Error).message}`);
     }
   }
-  const mergeErr = await mergeWithRetry(fj, owner, ws.forgejoRepo, prNumber, owner);
+  const mergeErr = await mergeWithRetry(fj, owner, repo, prNumber, owner);
   if (mergeErr) {
     return c.json({ error: `merge failed: ${(mergeErr as Error).message}`, code: "conflict", pr_number: prNumber }, 409);
   }
-  await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name, "deleteBranch after merge");
+  await deleteBranchQuietly(fj, owner, repo, change.branch_name, "deleteBranch after merge");
   setChangeState(c.get("db"), ws.id, change.id, "merged");
   c.get("sse").publish(ws.slug, { type: "change_merged", id: change.id });
   return c.json({ ok: true, mode, change_id: change.id, pr_number: prNumber });
@@ -220,23 +216,21 @@ async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
     return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
   const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const sudo = c.get("forgejoUsername");
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
 
-  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
+  await fj.createReview(owner, repo, change.pr_number, {
     event: "APPROVED",
     body: body.comment ?? "",
     sudo,
   });
 
-  const bp = await fj.getBranchProtection(owner, ws.forgejoRepo, "main");
+  const bp = await fj.getBranchProtection(owner, repo, "main");
   const threshold = bp?.required_approvals ?? 1;
-  const counts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
+  const counts = await approvalCounts(fj, owner, repo, change.pr_number);
   if (counts.approvals >= threshold && counts.rejections === 0) {
-    const mergeErr = await mergeWithRetry(fj, owner, ws.forgejoRepo, change.pr_number, owner);
+    const mergeErr = await mergeWithRetry(fj, owner, repo, change.pr_number, owner);
     if (!mergeErr) {
-      await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name);
+      await deleteBranchQuietly(fj, owner, repo, change.branch_name);
       setChangeState(c.get("db"), ws.id, change.id, "merged");
       c.get("sse").publish(ws.slug, { type: "change_merged", id: change.id });
     } else {
@@ -246,7 +240,7 @@ async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
   c.get("sse").publish(ws.slug, { type: "change_approved", id: change.id });
 
   const after = getChange(c.get("db"), ws.id, change.id) as ChangeRow;
-  const afterCounts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
+  const afterCounts = await approvalCounts(fj, owner, repo, change.pr_number);
   return c.json({
     decision: "approve",
     change_id: change.id,
@@ -269,10 +263,8 @@ async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Respon
     return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
   const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const sudo = c.get("forgejoUsername");
-  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.createReview(owner, repo, change.pr_number, {
     event: "REQUEST_CHANGES",
     body: body.comment ?? "",
     sudo,
@@ -280,7 +272,7 @@ async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Respon
   setChangeState(c.get("db"), ws.id, change.id, "changes_requested");
   c.get("sse").publish(ws.slug, { type: "change_changes_requested", id: change.id });
 
-  const counts = await approvalCounts(fj, owner, ws.forgejoRepo, change.pr_number);
+  const counts = await approvalCounts(fj, owner, repo, change.pr_number);
   return c.json({
     decision: "request_changes",
     change_id: change.id,
@@ -303,11 +295,11 @@ async function commentChange(c: import("hono").Context<AppEnv>): Promise<Respons
     return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
   const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
-  const fj = c.get("forgejo");
-  await fj.createReview(c.get("config").forgejoOwner, ws.forgejoRepo, change.pr_number, {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.createReview(owner, repo, change.pr_number, {
     event: "COMMENT",
     body: body.comment ?? "",
-    sudo: c.get("forgejoUsername"),
+    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "change_commented", id: change.id });
   return c.json({ ok: true, change_id: change.id, state: change.state });
@@ -324,16 +316,15 @@ async function closeChange(c: import("hono").Context<AppEnv>): Promise<Response>
   if (change.author_user_id !== user.id && ws.role !== "owner")
     return c.json({ error: "not allowed to close this change", code: "forbidden" }, 403);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
   if (change.pr_number) {
     try {
-      await fj.editPull(owner, ws.forgejoRepo, change.pr_number, { state: "closed" }, c.get("forgejoUsername"));
+      await fj.editPull(owner, repo, change.pr_number, { state: "closed" }, sudo);
     } catch (err) {
       console.warn(`close PR: ${(err as Error).message}`);
     }
   }
-  await deleteBranchQuietly(fj, owner, ws.forgejoRepo, change.branch_name, "deleteBranch on close");
+  await deleteBranchQuietly(fj, owner, repo, change.branch_name, "deleteBranch on close");
   setChangeState(c.get("db"), ws.id, change.id, "closed");
   c.get("sse").publish(ws.slug, { type: "change_closed", id: change.id });
   return c.json({ ok: true, change_id: change.id, state: "closed" });
@@ -378,9 +369,8 @@ changes.get("/:slug/change/:id/approvals", async (c) => {
   const id = c.req.param("id") ?? "";
   const change = getChange(c.get("db"), ws.id, id);
   if (!change || !change.pr_number) return c.json({ approvals: [] });
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const reviews = await fj.listReviews(owner, ws.forgejoRepo, change.pr_number);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const reviews = await fj.listReviews(owner, repo, change.pr_number);
   const db = c.get("db");
   const approvals = reviews
     .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
@@ -414,9 +404,8 @@ changes.get("/:slug/change/:id/pr", async (c) => {
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const pull = await fj.getPull(owner, ws.forgejoRepo, change.pr_number);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const pull = await fj.getPull(owner, repo, change.pr_number);
   if (!pull) return c.json({ error: "pull not found upstream", code: "not_found" }, 404);
 
   const meta = {
@@ -448,11 +437,10 @@ changes.get("/:slug/change/:id/diff", async (c) => {
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
+  const { fj, owner, repo } = c.get("repoCtx");
   const [metas, unified] = await Promise.all([
-    fj.listPullFiles(owner, ws.forgejoRepo, change.pr_number),
-    fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number),
+    fj.listPullFiles(owner, repo, change.pr_number),
+    fj.getPullDiff(owner, repo, change.pr_number),
   ]);
   const patches = splitUnifiedDiff(unified);
   const byPath = new Map(patches.map((p) => [p.path, p]));
@@ -485,14 +473,13 @@ changes.get("/:slug/change/:id/file", async (c) => {
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const pull = await fj.getPull(owner, ws.forgejoRepo, change.pr_number);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const pull = await fj.getPull(owner, repo, change.pr_number);
   if (!pull) return c.json({ error: "pull not found upstream", code: "not_found" }, 404);
 
   const sha = side === "base" ? pull.base.sha : pull.head.sha;
   try {
-    const content = await fj.getRawFile(owner, ws.forgejoRepo, sha, path);
+    const content = await fj.getRawFile(owner, repo, sha, path);
     return c.json({ content });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404)
@@ -509,12 +496,11 @@ changes.get("/:slug/change/:id/comments", async (c) => {
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
+  const { fj, owner, repo } = c.get("repoCtx");
   const [reviews, metas, unified] = await Promise.all([
-    fj.listReviews(owner, ws.forgejoRepo, change.pr_number),
-    fj.listPullFiles(owner, ws.forgejoRepo, change.pr_number),
-    fj.getPullDiff(owner, ws.forgejoRepo, change.pr_number),
+    fj.listReviews(owner, repo, change.pr_number),
+    fj.listPullFiles(owner, repo, change.pr_number),
+    fj.getPullDiff(owner, repo, change.pr_number),
   ]);
   const patchesByPath = new Map(
     splitUnifiedDiff(unified).map((p) => [p.path, p.patch]),
@@ -525,7 +511,7 @@ changes.get("/:slug/change/:id/comments", async (c) => {
   const allComments = (
     await Promise.all(
       reviews.map((r) =>
-        fj.listReviewComments(owner, ws.forgejoRepo, change.pr_number as number, r.id).catch(() => []),
+        fj.listReviewComments(owner, repo, change.pr_number as number, r.id).catch(() => []),
       ),
     )
   ).flat();
@@ -603,15 +589,14 @@ changes.post("/:slug/change/:id/comments", async (c) => {
   if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
 
   const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const pos = await resolveLinePosition(fj, owner, ws.forgejoRepo, change.pr_number, input);
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const pos = await resolveLinePosition(fj, owner, repo, change.pr_number, input);
   if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
 
-  await fj.createReview(owner, ws.forgejoRepo, change.pr_number, {
+  await fj.createReview(owner, repo, change.pr_number, {
     event: "COMMENT",
     body: "",
-    sudo: c.get("forgejoUsername"),
+    sudo,
     comments: [{ path: input.path, body: input.body, ...pos }],
   });
   c.get("sse").publish(ws.slug, { type: "comment_added", id: change.id });
@@ -628,9 +613,8 @@ changes.patch("/:slug/change/:id/comments/:commentId", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
   if (!body?.body) return c.json({ error: "body required", code: "validation" }, 400);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  await fj.editReviewComment(owner, ws.forgejoRepo, commentId, body.body, c.get("forgejoUsername"));
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.editReviewComment(owner, repo, commentId, body.body, sudo);
   c.get("sse").publish(ws.slug, { type: "comment_edited", id: change.id });
   return c.json({ ok: true });
 });
@@ -644,11 +628,8 @@ changes.delete("/:slug/change/:id/comments/:commentId", async (c) => {
   if (!commentId || !reviewId)
     return c.json({ error: "review_id query param required", code: "validation" }, 400);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  await fj.deleteReviewComment(
-    owner, ws.forgejoRepo, change.pr_number, reviewId, commentId, c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.deleteReviewComment(owner, repo, change.pr_number, reviewId, commentId, sudo);
   c.get("sse").publish(ws.slug, { type: "comment_deleted", id: change.id });
   return c.json({ ok: true });
 });
@@ -689,11 +670,8 @@ changes.post("/:slug/change/:id/draft-review", async (c) => {
   if (c.get("user").id === change.author_user_id)
     return c.json({ error: "authors cannot review their own change", code: "forbidden" }, 403);
 
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const review_id = await findOrCreatePendingReview(
-    fj, owner, ws.forgejoRepo, change.pr_number, c.get("forgejoUsername"),
-  );
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const review_id = await findOrCreatePendingReview(fj, owner, repo, change.pr_number, sudo);
   return c.json({ review_id });
 });
 
@@ -708,16 +686,15 @@ changes.post("/:slug/change/:id/draft-review/:reviewId/comments", async (c) => {
   if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
 
   const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const pos = await resolveLinePosition(fj, owner, ws.forgejoRepo, change.pr_number, input);
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const pos = await resolveLinePosition(fj, owner, repo, change.pr_number, input);
   if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
 
-  await fj.addCommentToReview(owner, ws.forgejoRepo, change.pr_number, reviewId, {
+  await fj.addCommentToReview(owner, repo, change.pr_number, reviewId, {
     path: input.path,
     body: input.body,
     ...pos,
-    sudo: c.get("forgejoUsername"),
+    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "comment_added", id: change.id });
   return c.json({ ok: true });
@@ -740,12 +717,11 @@ changes.post("/:slug/change/:id/draft-review/:reviewId/submit", async (c) => {
     request_changes: "REQUEST_CHANGES",
     comment: "COMMENT",
   } as const;
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  await fj.submitPullReview(owner, ws.forgejoRepo, change.pr_number, reviewId, {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  await fj.submitPullReview(owner, repo, change.pr_number, reviewId, {
     event: eventMap[body.event],
     body: body.body ?? "",
-    sudo: c.get("forgejoUsername"),
+    sudo,
   });
   // The submit will fire a pull_request_review webhook; let that path drive
   // the SSE event so client state derives from authoritative server data.
@@ -762,12 +738,11 @@ function normalizeStatus(s: string): "added" | "modified" | "deleted" | "renamed
 
 changes.get("/:slug/queue", async (c) => {
   const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
+  const { fj, owner, repo } = c.get("repoCtx");
   const inReview = listInReview(c.get("db"), ws.id);
   const queue = await Promise.all(inReview.map(async (ch) => {
     const counts = ch.pr_number
-      ? await approvalCounts(fj, owner, ws.forgejoRepo, ch.pr_number)
+      ? await approvalCounts(fj, owner, repo, ch.pr_number)
       : { approvals: 0, rejections: 0 };
     return {
       id: ch.id,
@@ -785,10 +760,8 @@ changes.get("/:slug/queue", async (c) => {
 // ---------- settings (min_approvals) ----------
 
 changes.get("/:slug/settings", async (c) => {
-  const ws = c.get("workspace");
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const bp = await fj.getBranchProtection(owner, ws.forgejoRepo, "main");
+  const { fj, owner, repo } = c.get("repoCtx");
+  const bp = await fj.getBranchProtection(owner, repo, "main");
   return c.json({ min_approvals: bp?.required_approvals ?? 1 });
 });
 
@@ -798,16 +771,15 @@ changes.put("/:slug/settings", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { min_approvals?: number } | null;
   if (!body || !Number.isInteger(body.min_approvals) || (body.min_approvals as number) < 1)
     return c.json({ error: "min_approvals must be >= 1", code: "validation" }, 400);
-  const fj = c.get("forgejo");
-  const owner = c.get("config").forgejoOwner;
-  const existing = await fj.getBranchProtection(owner, ws.forgejoRepo, "main");
+  const { fj, owner, repo } = c.get("repoCtx");
+  const existing = await fj.getBranchProtection(owner, repo, "main");
   if (!existing) {
-    await fj.createBranchProtection(owner, ws.forgejoRepo, {
+    await fj.createBranchProtection(owner, repo, {
       branch_name: "main",
       required_approvals: body.min_approvals,
     });
   } else {
-    await fj.updateBranchProtection(owner, ws.forgejoRepo, "main", {
+    await fj.updateBranchProtection(owner, repo, "main", {
       required_approvals: body.min_approvals,
     });
   }
