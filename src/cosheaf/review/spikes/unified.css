@@ -71,3 +71,24 @@
 .cf-gutter-add:focus {
   opacity: 1;
 }
+
+.cf-source-gutter-add {
+  position: absolute;
+  right: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  border-radius: 3px;
+  background: var(--cf-accent);
+  color: var(--cf-accent-fg);
+  cursor: pointer;
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--cf-bg);
+  transition: opacity 80ms;
+}

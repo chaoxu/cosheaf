@@ -23,9 +23,10 @@ test.describe.serial("PR review surface", () => {
       await page.getByTestId(`view-shape-${shape}`).click();
       await expect(page.getByTestId(testId)).toBeVisible({ timeout: 5000 });
       if (shape !== "unified") {
-        await expect(page.locator(`[data-testid="${testId}"] .cm-content`).first()).toBeVisible({
-          timeout: 8000,
-        });
+        // Source mode → DOM line view; Rich mode → CodeMirror.
+        const contentSelector =
+          mode === "source" ? `[data-testid="${testId}"] .cf-source-view` : `[data-testid="${testId}"] .cm-content`;
+        await expect(page.locator(contentSelector).first()).toBeVisible({ timeout: 8000 });
       }
     }
     // Rich + Unified should be disabled.
