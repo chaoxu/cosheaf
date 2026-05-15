@@ -294,10 +294,14 @@ export const api = {
     jsonFetch<{ ok: true }>(`/api/v1/tokens/${id}`, { method: "DELETE" }),
 
   // ---- issues ----
-  listIssues: (slug: string, opts: { state?: "open" | "closed" | "all"; filter?: "mine" | "assigned" | "all" } = {}) => {
+  listIssues: (
+    slug: string,
+    opts: { state?: "open" | "closed" | "all"; filter?: "mine" | "assigned" | "all"; q?: string } = {},
+  ) => {
     const qs = new URLSearchParams();
     if (opts.state) qs.set("state", opts.state);
     if (opts.filter) qs.set("filter", opts.filter);
+    if (opts.q && opts.q.trim()) qs.set("q", opts.q.trim());
     const q = qs.toString();
     return jsonFetch<{ issues: IssueRow[] }>(`${w(slug)}/issues${q ? `?${q}` : ""}`);
   },

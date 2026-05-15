@@ -19,6 +19,7 @@ export function IssueView({
   onClose,
   onOpenPageById,
   onOpenPath,
+  onOpenNumber,
 }: {
   workspaceSlug: string;
   number: number;
@@ -27,6 +28,7 @@ export function IssueView({
   onClose: () => void;
   onOpenPageById?: (id: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
+  onOpenNumber?: (n: number) => void;
 }): ReactElement {
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<IssueComment[]>([]);
@@ -189,7 +191,14 @@ export function IssueView({
           </div>
           <div className="text-sm">
             {issue.body ? (
-              <IssueBodyRender text={issue.body} onOpenPageById={onOpenPageById} onOpenPath={onOpenPath} />
+              <IssueBodyRender
+                text={issue.body}
+                onOpenPageById={onOpenPageById}
+                onOpenPath={onOpenPath}
+                onOpenNumber={(n) => {
+                  if (n !== number) onOpenNumber?.(n);
+                }}
+              />
             ) : (
               <em className={muted}>(no description)</em>
             )}
@@ -265,7 +274,12 @@ export function IssueView({
                 </div>
               ) : (
                 <div className="text-sm">
-                  <IssueBodyRender text={c.body} onOpenPageById={onOpenPageById} onOpenPath={onOpenPath} />
+                  <IssueBodyRender
+                    text={c.body}
+                    onOpenPageById={onOpenPageById}
+                    onOpenPath={onOpenPath}
+                    onOpenNumber={onOpenNumber}
+                  />
                 </div>
               )}
             </div>

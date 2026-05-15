@@ -686,6 +686,8 @@ function InboxOrActivity({
   issues,
   scope,
   setScope,
+  query,
+  setQuery,
   onRefresh,
   onReviewChange,
   onOpenIssue,
@@ -696,15 +698,19 @@ function InboxOrActivity({
   issues: readonly IssueRow[];
   scope: "mine" | "all";
   setScope: (s: "mine" | "all") => void;
+  query: string;
+  setQuery: (q: string) => void;
   onRefresh: () => void;
   onReviewChange: (entry: QueueEntry) => void;
   onOpenIssue: (number: number) => void;
   onNewIssue: () => void;
 }): ReactElement {
   const isInbox = kind === "inbox";
-  // Activity uses scope="all" implicitly; Inbox honors the toggle.
   const showQueueAll = !isInbox;
-  const visibleQueue = isInbox ? queue : queue;
+  const q = query.trim().toLowerCase();
+  const visibleQueue = q
+    ? queue.filter((qe) => qe.title.toLowerCase().includes(q))
+    : queue;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-2 py-1">
@@ -739,6 +745,15 @@ function InboxOrActivity({
             + Issue
           </Button>
         </div>
+      </div>
+      <div className="px-2 pb-1">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search title…"
+          data-testid="inbox-search"
+          className="h-7 text-xs"
+        />
       </div>
       {visibleQueue.length === 0 && issues.length === 0 && (
         <div className={cn("px-3 py-2 text-xs", muted)}>
@@ -961,6 +976,7 @@ function WorkspaceView({
   const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
+  const [inboxQuery, setInboxQuery] = useState("");
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
@@ -1241,22 +1257,30 @@ function WorkspaceView({
   }, [workspace.slug]);
 
   const refreshIssues = useCallback(
-    (scope: "mine" | "all", panel: "inbox" | "activity") => {
+    (scope: "mine" | "all", panel: "inbox" | "activity", q: string) => {
       const filter = panel === "inbox" && scope === "mine" ? "mine" : undefined;
       api
-        .listIssues(workspace.slug, { state: "open", ...(filter ? { filter } : {}) })
+        .listIssues(workspace.slug, {
+          state: "open",
+          ...(filter ? { filter } : {}),
+          ...(q.trim() ? { q } : {}),
+        })
         .then((r) => setIssues(r.issues))
         .catch(() => setIssues([]));
     },
     [workspace.slug],
   );
 
-  // Fetch issues whenever the user opens Inbox/Activity or switches scope.
+  // Fetch issues whenever the user opens Inbox/Activity, switches scope, or
+  // changes the search query. Server-side LIKE filter on title.
   useEffect(() => {
     if (sidebarView === "inbox" || sidebarView === "activity") {
-      refreshIssues(issuesScope, sidebarView);
+      const handle = setTimeout(() => {
+        refreshIssues(issuesScope, sidebarView, inboxQuery);
+      }, 150);
+      return () => clearTimeout(handle);
     }
-  }, [sidebarView, issuesScope, refreshIssues]);
+  }, [sidebarView, issuesScope, inboxQuery, refreshIssues]);
 
   const reviewChange = useCallback(
     (entry: QueueEntry) => {
@@ -1590,6 +1614,8 @@ function WorkspaceView({
               issues={issues ?? []}
               scope={issuesScope}
               setScope={setIssuesScope}
+              query={inboxQuery}
+              setQuery={setInboxQuery}
               onRefresh={() => {
                 openQueue();
                 if (sidebarView === "inbox" || sidebarView === "activity") {
@@ -1789,6 +1815,7 @@ function WorkspaceView({
                 setViewingIssue(null);
                 openPathFromSource(p);
               }}
+              onOpenNumber={(n) => setViewingIssue(n)}
             />
           )}
           {!reviewingChangeId && !openPath && viewingIssue === null && newIssueOpen && (

@@ -15,12 +15,12 @@ issues.get("/:slug/issues", (c) => {
   const state: "open" | "closed" | "all" =
     stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
   const filter = c.req.query("filter");
+  const q = c.req.query("q") ?? undefined;
   const userId = c.get("user").id;
   const db = c.get("db");
   if (filter === "mine") {
-    // Issues you authored OR are assigned to.
-    const authored = listIssues(db, ws.id, { state, authorUserId: userId });
-    const assigned = listIssues(db, ws.id, { state, assigneeUserId: userId });
+    const authored = listIssues(db, ws.id, { state, authorUserId: userId, q });
+    const assigned = listIssues(db, ws.id, { state, assigneeUserId: userId, q });
     const byNum = new Map<number, (typeof authored)[number]>();
     for (const x of authored) byNum.set(x.number, x);
     for (const x of assigned) byNum.set(x.number, x);
@@ -28,9 +28,9 @@ issues.get("/:slug/issues", (c) => {
     return c.json({ issues: merged });
   }
   if (filter === "assigned") {
-    return c.json({ issues: listIssues(db, ws.id, { state, assigneeUserId: userId }) });
+    return c.json({ issues: listIssues(db, ws.id, { state, assigneeUserId: userId, q }) });
   }
-  return c.json({ issues: listIssues(db, ws.id, { state }) });
+  return c.json({ issues: listIssues(db, ws.id, { state, q }) });
 });
 
 // GET /api/v1/w/:slug/issues/:number — full issue from Forgejo (body + meta)

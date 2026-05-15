@@ -12,14 +12,18 @@ interface RenderProps {
   text: string;
   onOpenPageById?: (cosheafId: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
+  onOpenNumber?: (n: number) => void;
 }
 
 // Crude tokenizer: walks the string, emitting plaintext + ref nodes. Avoids
-// pulling in a full markdown engine for what's effectively two patterns.
-export function IssueBodyRender({ text, onOpenPageById, onOpenPath }: RenderProps): ReactElement {
+// pulling in a full markdown engine for what's effectively a few patterns.
+//   [@page-id]
+//   path/to.md(#L1-2 | #fragment)?
+//   #N        — cross-reference to an issue or PR
+export function IssueBodyRender({ text, onOpenPageById, onOpenPath, onOpenNumber }: RenderProps): ReactElement {
   const nodes: ReactElement[] = [];
   let cursor = 0;
-  const re = /\[@([a-z0-9][a-z0-9-]*)\]|(?:^|(?<=\s|\())([\w./-]+\.md(?:#L(\d+)(?:-(\d+))?|#[\w-]+)?)/g;
+  const re = /\[@([a-z0-9][a-z0-9-]*)\]|(?:^|(?<=\s|\())([\w./-]+\.md(?:#L(\d+)(?:-(\d+))?|#[\w-]+)?)|(?:^|(?<=[\s(]))#(\d+)\b/g;
   let m: RegExpExecArray | null;
   let key = 0;
   while ((m = re.exec(text)) !== null) {
@@ -38,6 +42,20 @@ export function IssueBodyRender({ text, onOpenPageById, onOpenPath }: RenderProp
           data-testid={`ref-page-${id}`}
         >
           [@{id}]
+        </button>,
+      );
+    } else if (m[5]) {
+      // #N
+      const n = Number(m[5]);
+      nodes.push(
+        <button
+          key={key++}
+          type="button"
+          onClick={() => onOpenNumber?.(n)}
+          className="text-[var(--cf-accent)] hover:underline"
+          data-testid={`ref-num-${n}`}
+        >
+          #{n}
         </button>,
       );
     } else if (m[2]) {

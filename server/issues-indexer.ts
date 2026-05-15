@@ -95,7 +95,12 @@ export async function reindexAllIssues(
 export function listIssues(
   db: Database.Database,
   workspaceId: number,
-  filter: { state?: "open" | "closed" | "all"; assigneeUserId?: number; authorUserId?: number } = {},
+  filter: {
+    state?: "open" | "closed" | "all";
+    assigneeUserId?: number;
+    authorUserId?: number;
+    q?: string;
+  } = {},
 ): IndexedIssue[] {
   const state = filter.state ?? "open";
   const conditions: string[] = ["i.workspace_id = ?"];
@@ -113,6 +118,11 @@ export function listIssues(
   if (filter.authorUserId !== undefined) {
     conditions.push("i.author_user_id = ?");
     params.push(filter.authorUserId);
+  }
+  if (filter.q && filter.q.trim()) {
+    conditions.push("i.title LIKE ? ESCAPE '\\'");
+    const pat = `%${filter.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    params.push(pat);
   }
   const rows = db
     .prepare(

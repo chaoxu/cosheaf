@@ -75,4 +75,36 @@ test.describe.serial("Issues", () => {
     await expect(page.getByTestId("ref-path-hello.md")).toBeVisible();
     await expect(page.getByTestId("ref-page-some-id")).toBeVisible();
   });
+
+  test("#N references jump between issues and inbox search filters", async ({ page }) => {
+    await loginAs(page, "meri");
+    // Open two issues so we can reference one from the other.
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Target issue");
+    await page.getByTestId("new-issue-body").fill("To be referenced.");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("new-issue").click();
+    await page.getByTestId("new-issue-title").fill("Source issue");
+    // Reference issue #1 (the first one seeded by globalSetup is #1; the
+    // ones we just opened are #2, #3 — we reference #2 which is "Target".
+    // Use #2 explicitly since title search will narrow.
+    await page.getByTestId("new-issue-body").fill("Closes #2 — fixes the proof.");
+    await page.getByTestId("new-issue-submit").click();
+    await expect(page.getByTestId("issue-view")).toBeVisible();
+    await expect(page.getByTestId("ref-num-2")).toBeVisible();
+
+    // Search narrows the inbox to titles matching the query.
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.getByTestId("inbox-search").fill("Target");
+    await expect.poll(async () =>
+      page.locator('[data-testid^="issue-"]:visible').count(), { timeout: 5000 }
+    ).toBeGreaterThanOrEqual(1);
+    const visibleTitles = await page.locator('[data-testid^="issue-"]:visible strong').allTextContents();
+    expect(visibleTitles.some((t) => t.includes("Target"))).toBe(true);
+    expect(visibleTitles.some((t) => t.includes("Source"))).toBe(false);
+  });
 });
