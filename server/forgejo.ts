@@ -551,6 +551,43 @@ export class Forgejo {
     );
   }
 
+  // ---------- notifications ----------
+
+  // List unread notification threads for the calling user (via Sudo), scoped
+  // to a single repository. Forgejo returns subjects of type "Issue"/"Pull"/
+  // "Commit"; we filter to Issue/Pull at the route layer.
+  async listRepoNotifications(
+    owner: string, repo: string, sudo: string, opts: { all?: boolean; limit?: number } = {},
+  ): Promise<ForgejoNotificationThread[]> {
+    return this.req<ForgejoNotificationThread[]>(
+      `/api/v1/repos/${owner}/${repo}/notifications`,
+      {
+        sudo,
+        query: {
+          all: opts.all ? "true" : undefined,
+          limit: opts.limit ?? 50,
+        },
+      },
+    );
+  }
+
+  async markNotificationRead(id: number, sudo: string): Promise<void> {
+    await this.req(`/api/v1/notifications/threads/${id}`, {
+      method: "PATCH",
+      sudo,
+      query: { "to-status": "read" },
+      expectEmpty: true,
+    });
+  }
+
+  async markRepoNotificationsRead(owner: string, repo: string, sudo: string): Promise<void> {
+    await this.req(`/api/v1/repos/${owner}/${repo}/notifications`, {
+      method: "PUT",
+      sudo,
+      expectEmpty: true,
+    });
+  }
+
   // ---------- labels ----------
 
   async listLabels(owner: string, repo: string): Promise<ForgejoLabel[]> {
@@ -627,6 +664,22 @@ export interface ForgejoRepo {
   full_name: string;
   default_branch: string;
   owner: ForgejoUser;
+}
+export interface ForgejoNotificationThread {
+  id: number;
+  unread: boolean;
+  pinned: boolean;
+  updated_at: string;
+  url: string;
+  subject: {
+    title: string;
+    url: string;
+    latest_comment_url: string;
+    html_url?: string;
+    type: "Issue" | "Pull" | "Commit" | string;
+    state?: string;
+  };
+  repository: { full_name: string; name: string };
 }
 export interface ForgejoBranch { name: string; commit: { id: string } }
 export interface ForgejoBranchProtection { branch_name: string; required_approvals: number }

@@ -19,6 +19,7 @@ import {
   type FileEntry,
   type IssueRow,
   type LineComment,
+  type NotificationRow,
   type OpenChangeRow,
   type PrMeta,
   type QueueEntry,
@@ -686,6 +687,7 @@ function InboxOrActivity({
   queue,
   openPrs,
   issues,
+  notifications,
   scope,
   setScope,
   query,
@@ -693,12 +695,16 @@ function InboxOrActivity({
   onRefresh,
   onReviewChange,
   onOpenIssue,
+  onOpenPr,
+  onMarkNotifRead,
+  onMarkAllNotifsRead,
   onNewIssue,
 }: {
   kind: "inbox" | "activity";
   queue: readonly QueueEntry[];
   openPrs: readonly OpenChangeRow[];
   issues: readonly IssueRow[];
+  notifications: readonly NotificationRow[];
   scope: "mine" | "all";
   setScope: (s: "mine" | "all") => void;
   query: string;
@@ -706,6 +712,9 @@ function InboxOrActivity({
   onRefresh: () => void;
   onReviewChange: (entry: QueueEntry) => void;
   onOpenIssue: (number: number) => void;
+  onOpenPr: (number: number) => void;
+  onMarkNotifRead: (id: number) => void;
+  onMarkAllNotifsRead: () => void;
   onNewIssue: () => void;
 }): ReactElement {
   const isInbox = kind === "inbox";
@@ -771,10 +780,53 @@ function InboxOrActivity({
           className="h-7 text-xs"
         />
       </div>
-      {visibleQueue.length === 0 && issues.length === 0 && (
+      {visibleQueue.length === 0 && issues.length === 0 && notifications.length === 0 && (
         <div className={cn("px-3 py-2 text-xs", muted)}>
           {isInbox ? "Nothing waiting on you." : "No open activity."}
         </div>
+      )}
+      {isInbox && notifications.length > 0 && (
+        <>
+          <div
+            className="flex items-center justify-between px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70"
+            data-testid="notifs-section"
+          >
+            <span>Notifications</span>
+            <button
+              type="button"
+              className="text-[10px] normal-case opacity-80 hover:opacity-100 underline"
+              onClick={onMarkAllNotifsRead}
+              data-testid="notifs-mark-all-read"
+              aria-label="Mark all notifications read"
+            >
+              mark all read
+            </button>
+          </div>
+          <ul className="m-0 p-0">
+            {notifications.map((n) => (
+              <li key={`notif-${n.id}`}>
+                <FileRow
+                  onClick={() => {
+                    onMarkNotifRead(n.id);
+                    if (n.kind === "pr") onOpenPr(n.number);
+                    else onOpenIssue(n.number);
+                  }}
+                  testId={`notif-${n.id}`}
+                >
+                  {n.kind === "pr" ? (
+                    <span className="text-[10px] uppercase tracking-wide bg-blue-500/15 text-blue-700 rounded px-1 mr-1">PR</span>
+                  ) : (
+                    <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-800 rounded px-1 mr-1">ISSUE</span>
+                  )}
+                  <strong>{n.title}</strong>
+                  <span className={cn("text-xs ml-1", muted)}>
+                    {`#${n.number} · ${formatTime(n.updated_at)}`}
+                  </span>
+                </FileRow>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       {visibleQueue.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
@@ -994,6 +1046,7 @@ function WorkspaceView({
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
   const [openChanges, setOpenChanges] = useState<OpenChangeRow[] | null>(null);
+  const [notifs, setNotifs] = useState<NotificationRow[]>([]);
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
@@ -1298,6 +1351,22 @@ function WorkspaceView({
       return () => clearTimeout(handle);
     }
   }, [sidebarView, issuesScope, inboxQuery, refreshIssues]);
+
+  const refreshNotifs = useCallback(() => {
+    api
+      .listNotifications(workspace.slug)
+      .then(setNotifs)
+      .catch(() => setNotifs([]));
+  }, [workspace.slug]);
+
+  // Poll Forgejo notifications while Inbox is open. Forgejo doesn't broadcast
+  // these over webhooks, so we refresh on open + every 30s.
+  useEffect(() => {
+    if (sidebarView !== "inbox") return;
+    refreshNotifs();
+    const t = setInterval(refreshNotifs, 30_000);
+    return () => clearInterval(t);
+  }, [sidebarView, refreshNotifs]);
 
   // Eagerly fetch every open PR once per workspace — used by Activity, the
   // Inbox All scope, and #N cross-reference resolution.
@@ -1644,6 +1713,7 @@ function WorkspaceView({
               setQuery={setInboxQuery}
               onRefresh={() => {
                 openQueue();
+                if (sidebarView === "inbox") refreshNotifs();
                 if (sidebarView === "inbox" || sidebarView === "activity") {
                   // refresh issues too
                   api
@@ -1658,10 +1728,33 @@ function WorkspaceView({
                 }
               }}
               openPrs={openChanges ?? []}
+              notifications={notifs}
               onReviewChange={reviewChange}
               onOpenIssue={(n) => {
                 setNewIssueOpen(false);
                 setViewingIssue(n);
+              }}
+              onOpenPr={(prNumber) => {
+                const row = (openChanges ?? []).find((r) => r.pr_number === prNumber);
+                if (row) {
+                  reviewChange({
+                    id: row.id,
+                    title: row.title ?? row.id,
+                    pr_number: row.pr_number ?? null,
+                    author_user_id: row.author_user_id,
+                    created_at: row.updated_at,
+                    approvals: 0,
+                    rejections: 0,
+                  });
+                }
+              }}
+              onMarkNotifRead={(id) => {
+                setNotifs((prev) => prev.filter((x) => x.id !== id));
+                api.markNotificationRead(workspace.slug, id).catch(() => refreshNotifs());
+              }}
+              onMarkAllNotifsRead={() => {
+                setNotifs([]);
+                api.markAllNotificationsRead(workspace.slug).catch(() => refreshNotifs());
               }}
               onNewIssue={() => {
                 setViewingIssue(null);

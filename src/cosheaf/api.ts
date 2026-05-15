@@ -347,7 +347,27 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ labels }),
     }),
+
+  // ---- notifications ----
+  listNotifications: (slug: string) =>
+    jsonFetch<{ notifications: NotificationRow[] }>(`${w(slug)}/notifications`).then(
+      (r) => r.notifications,
+    ),
+  markNotificationRead: (slug: string, id: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: (slug: string) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/notifications/read-all`, { method: "POST" }),
 };
+
+export interface NotificationRow {
+  id: number;
+  kind: "issue" | "pr";
+  number: number;
+  title: string;
+  repo: string;
+  updated_at: number;
+  url: string;
+}
 
 export interface OpenChangeRow {
   id: string;
