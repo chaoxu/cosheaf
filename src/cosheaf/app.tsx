@@ -38,6 +38,7 @@ import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
 import { ReviewActions } from "./review/ReviewActions";
 import { IssueView } from "./review/IssueView";
+import { SettingsPanel } from "./review/SettingsPanel";
 
 const MarkdownEditor = lazy(() =>
   import("./editor").then((m) => ({ default: m.MarkdownEditor })),
@@ -1157,7 +1158,7 @@ function WorkspaceView({
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [queue, setQueue] = useState<QueueEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
-  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline">("pages");
+  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "settings">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
@@ -1844,8 +1845,21 @@ function WorkspaceView({
             >
               Outline
             </SidebarTab>
+            {workspace.role === "owner" && (
+              <SidebarTab
+                active={sidebarView === "settings"}
+                onClick={() => setSidebarView("settings")}
+                testId="sidebar-tab-settings"
+              >
+                ⚙
+              </SidebarTab>
+            )}
           </div>
-          {sidebarView === "outline" ? (
+          {sidebarView === "settings" ? (
+            <div className={cn("px-3 py-2 text-xs", muted)}>
+              Settings open in main pane →
+            </div>
+          ) : sidebarView === "outline" ? (
             <OutlinePanel
               entries={outline}
               onPick={(line) => editorRef.current?.scrollToLine(line, { center: true })}
@@ -2168,7 +2182,12 @@ function WorkspaceView({
               </div>
             </div>
           )}
-          {!reviewingChangeId && !openPath && viewingIssue === null && !newIssueOpen && (
+          {!reviewingChangeId && !openPath && viewingIssue === null && !newIssueOpen && sidebarView === "settings" && (
+            <div className="flex-1 overflow-auto">
+              <SettingsPanel workspaceSlug={workspace.slug} />
+            </div>
+          )}
+          {!reviewingChangeId && !openPath && viewingIssue === null && !newIssueOpen && sidebarView !== "settings" && (
             <div className={cn("flex flex-1 items-center justify-center", muted)}>
               Select a file from the sidebar, or create one.
             </div>

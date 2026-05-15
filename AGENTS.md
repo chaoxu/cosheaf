@@ -1,9 +1,9 @@
 # Cosheaf
 
 Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
-hold the canonical markdown files and change workflow; SQLite is a derived,
-rebuildable sidecar index for fast reads, sessions, memberships, and local auth
-state.
+hold the canonical markdown files, branches, pull requests, reviews, and issues;
+SQLite is a derived, rebuildable sidecar index for fast reads, sessions,
+memberships, and local auth state.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
@@ -27,17 +27,20 @@ HTTP API. Keep cosheaf's surface usable without any automation.
 ## Core principles
 
 - **Forgejo is source of truth.** Every page is a `.md` file on the workspace
-  repo's `main` branch. Draft changes live on `change/<id>` branches and move
-  through Forgejo pull requests.
+  repo's `main` branch. Work lives on branches and moves through Forgejo pull
+  requests.
+- **Use Forgejo terminology.** Prefer branch, pull request, review, issue,
+  merge, and close over Cosheaf-specific workflow terms. Cosheaf should be a
+  Forgejo UI with custom Coflat markdown rendering; durable operations should be
+  possible directly in Forgejo too.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
   links, FTS index, change metadata, memberships, and sessions/tokens. The
   page index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
-- **Workflow as trust, not automation.** `draft → review → merged` and
-  `review → changes_requested → review` are the same whether the proposer is a
-  human or a bot.
+- **Workflow as trust, not automation.** Branches, pull requests, reviews, and
+  merges are the same whether the proposer is a human or a bot.
 
 ## Stack
 
@@ -69,7 +72,7 @@ server/
     tokens.ts      # personal API tokens
     workspaces.ts  # list/create workspaces
     files.ts       # tree/file get/put/delete, search, backlinks, documents list
-    changes.ts     # draft changes, publish, review, request changes, close
+    changes.ts     # compatibility API for branches, pull requests, reviews, close
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   main.tsx        # React entry
@@ -130,22 +133,22 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `changes(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title)`
 - `webhook_log(delivery_id, delivered_at, event_type)`
 
-## Change lifecycle
+## Branch and pull request lifecycle
 
 ```
-draft ──publish──▶ review ──approve/merge──▶ merged
-                    ▲
-                    └──request changes──▶ changes_requested ──publish──┘
+branch without PR ──open PR──▶ pull request ──approve/merge──▶ merged
+                                  ▲
+                                  └──request changes, push more commits
 
-draft/review/changes_requested ──close/discard──▶ closed
+branch deleted or PR closed unmerged ──▶ closed/discarded
 ```
 
-- Draft edits are stored on `change/<id>` branches.
-- Publishing opens or updates a Forgejo pull request.
-- Owners can merge directly; verifiers approve or request changes through the
-  same API surface.
-- Requesting changes keeps the pull request and branch open for same-change
-  repair. Closing is the terminal non-merge path.
+- Edits are stored on Forgejo branches.
+- Opening a pull request submits a branch for review.
+- Owners can merge when Forgejo branch protection allows it; verifiers approve
+  or request changes through the same API surface.
+- Requesting changes keeps the pull request and branch open for more commits.
+  Closing is the terminal non-merge path.
 - Webhooks reconcile Forgejo PR/review/file state into SQLite and notify open
   browsers over SSE.
 

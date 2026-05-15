@@ -3,8 +3,8 @@
 ## What It Is
 
 Cosheaf is a multi-user knowledge base for Coflat-flavored markdown files.
-Pages are stored in Forgejo repositories; Cosheaf adds a human-usable editing,
-review, search, backlink, and trust workflow on top.
+Pages are stored in Forgejo repositories; Cosheaf is a human-usable Forgejo UI
+for editing, branches, pull requests, reviews, issues, search, and backlinks.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is designed to be comfortable for mathematical writing, with
@@ -25,6 +25,10 @@ participate later through the same HTTP API as ordinary members or verifiers.
 - **Forgejo is the source of truth.** Workspace content lives in a Forgejo repo.
   SQLite is a sidecar for fast reads, sessions, memberships, change metadata,
   search, backlinks, and tags.
+- **Use Forgejo terms directly.** Cosheaf should mirror Forgejo's branch, pull
+  request, review, issue, merge, and close model instead of inventing parallel
+  workflow concepts. A user should be able to perform the same durable
+  operations in Forgejo without Cosheaf.
 - **Plain markdown remains inspectable.** The durable content is still ordinary
   `.md` files with YAML frontmatter for stable Cosheaf ids and titles.
 - **Workflow is trust, not automation.** Review and approval exist because
@@ -56,27 +60,29 @@ Cosheaf indexes:
 - backlinks from `[@id]` and `[text](relative.md[#fragment])`
 - path-to-id mappings in `doc_map`
 
-## Change Model
+## Branch And Pull Request Model
 
-Edits happen on `change/<id>` branches.
+Edits happen on Forgejo branches. A branch is saved work. A pull request is the
+review wrapper around a branch compared to `main`. Merging the pull request
+makes the branch content canonical.
 
 ```
-draft ──publish──▶ review ──approve/merge──▶ merged
-                    │
-                    └──request changes──▶ changes_requested ──publish──▶ review
+branch without PR ──open PR──▶ pull request ──approve/merge──▶ merged
+                                  │
+                                  └──request changes──▶ same PR, branch updated
 
-draft/review/changes_requested ──close/discard──▶ closed
+branch deleted or PR closed unmerged ──▶ closed/discarded
 ```
 
-Authors can keep one or more draft changes open. Publishing creates or reuses a
-Forgejo pull request. Owners may publish directly, which opens the PR,
-auto-approves through the configured Forgejo owner to satisfy branch protection,
-and merges. Members and verifiers publish to review. A request-changes review is
-non-terminal verifier feedback: the PR stays open, the branch is kept, and the
-author repairs the same `change_id` before publishing it back to review.
+Authors can keep one or more branches open without asking for review. Opening a
+Forgejo pull request submits a branch for review. Owners may merge when branch
+protection allows it. A request-changes review is non-terminal feedback: the PR
+stays open, the branch is kept, and the author pushes more commits to the same
+branch.
 
-Merged and closed changes are terminal. The server deletes the
-change branch on terminal states when Forgejo permits it.
+Cosheaf may keep compatibility names in code while the implementation catches
+up, but the product language should follow Forgejo: branch, pull request,
+review, merge, close, issue.
 
 ## Trust Model
 
@@ -86,8 +92,8 @@ Workspace roles:
 - `verifier`: author changes and approve/request changes reviewed changes.
 - `member`: author changes and publish for review.
 
-Review decisions are Forgejo pull-request reviews. SQLite mirrors enough change
-state for the queue and UI, but Forgejo remains the durable review record.
+Review decisions are Forgejo pull-request reviews. SQLite mirrors enough pull
+request state for the queue and UI, but Forgejo remains the durable review record.
 `min_approvals` maps to Forgejo branch protection on `main`.
 
 ## Reconciliation
@@ -123,5 +129,6 @@ that should become an HTTP API feature usable by humans too.
 
 - The editor implementation itself; it lives in `@chaoxu/coflat-editor`.
 - Agent/prover orchestration.
-- Pandoc export.
-- A desktop shell.
+- Built-in Pandoc export and desktop-native behavior. These may return later as
+  optional Cosheaf operations rather than core requirements; see
+  [Bring Coflat Operations Into Cosheaf](./docs/epics/coflat-operations.md).

@@ -1,9 +1,9 @@
 # Cosheaf
 
 A multi-user knowledge base built on Coflat-format markdown files. Cosheaf is
-the substrate for trustworthy markdown authoring: pages, draft changes,
-reviews, and approvals — with Forgejo repositories as the canonical store and
-SQLite as a rebuildable sidecar index.
+a Forgejo-native UI for trustworthy markdown authoring: pages live in Forgejo,
+work happens on branches, review happens in pull requests, and merged markdown
+on `main` is canonical. SQLite is only a rebuildable sidecar index.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is intentionally close to mathematical writing: theorem-style
@@ -23,11 +23,11 @@ through the same HTTP API.
 
 - **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
   math, `[@id]` cross-references and citations — see [`FORMAT.md`](./FORMAT.md)).
-- **Change workflow** — edits live on `change/<id>` branches, publish to
-  Forgejo pull requests, move through `review` and `changes_requested`, and end
-  as `merged` or `closed`.
-- **Review queue** — owners and verifiers review published changes through the
-  Cosheaf UI/API while Forgejo remains the durable record.
+- **Branch workflow** — edits live on ordinary Forgejo branches. Opening a pull
+  request submits the branch for review; merging the pull request makes it
+  canonical.
+- **Pull request review** — owners and verifiers review pull requests through
+  the Cosheaf UI/API while Forgejo remains the durable record.
 - **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the
   body is full-text searchable.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
@@ -106,6 +106,6 @@ See [AGENTS.md](./AGENTS.md) for full conventions and debug helpers.
 
 ## Status
 
-Early. The substrate (auth, change workflow, indexing, search, reviews, and
-approvals) is in place and end-to-end smoke-tested. The autoprover layer is not
+Early. The substrate (auth, branch and pull request workflow, indexing, search,
+reviews, and approvals) is in place and end-to-end smoke-tested. The autoprover layer is not
 yet built — it lives in a separate repo and talks to Cosheaf over the HTTP API.

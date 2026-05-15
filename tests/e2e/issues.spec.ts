@@ -168,6 +168,31 @@ test.describe.serial("Issues", () => {
     await expect(page.getByTestId(`depends-on-${lemmaNum}`)).toHaveCount(0, { timeout: 8000 });
   });
 
+  test("Settings panel: owner creates a label and a milestone", async ({ page }) => {
+    await loginAs(page, "chao");
+    await expect(page.getByTestId("sidebar-tab-settings")).toBeVisible();
+    await page.getByTestId("sidebar-tab-settings").click();
+
+    // Create a label
+    await page.getByTestId("settings-label-name").fill("needs-review");
+    await page.getByTestId("settings-label-color-3b82f6").click();
+    await page.getByTestId("settings-label-create").click();
+    await expect(page.locator('[data-testid^="settings-label-"][data-testid*="needs"]').or(
+      page.getByText("needs-review"),
+    ).first()).toBeVisible({ timeout: 8000 });
+
+    // Create a milestone
+    await page.getByTestId("settings-milestone-title").fill("v1 polish");
+    await page.getByTestId("settings-milestone-description").fill("First round of cleanups.");
+    await page.getByTestId("settings-milestone-create").click();
+    await expect(page.getByText("v1 polish").first()).toBeVisible({ timeout: 8000 });
+  });
+
+  test("Non-owner doesn't see the Settings tab", async ({ page }) => {
+    await loginAs(page, "meri");
+    await expect(page.getByTestId("sidebar-tab-settings")).toHaveCount(0);
+  });
+
   test("Owner creates a milestone via API; can assign + clear on an issue", async ({ page }) => {
     await loginAs(page, "chao");
     // Create milestone server-side (no full UI for create yet)
