@@ -170,7 +170,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }): Rea
 }
 
 function shortId(): string {
-  return Math.random().toString(36).slice(2, 8);
+  return crypto.randomUUID().slice(0, 8);
 }
 
 // Focus-on-mount via ref instead of the `autoFocus` attribute. autoFocus

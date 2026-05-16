@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { Command, InvalidArgumentError } from "commander";
 import { getDb, loadConfig } from "./db.js";
 import {
   createUser,
@@ -331,50 +332,76 @@ function passthroughLog(slug: string): void {
   }
 }
 
-function help(): void {
-  console.log(`Usage:
-  cosheaf seed --user <username> --password <password> --workspace <slug> --workspace-name <name>
-  cosheaf user add <username>
-  cosheaf user create <username> <password>   # non-interactive (dev/CI use)
-  cosheaf user passwd <username>
-  cosheaf user list
-  cosheaf user rm <username>
-  cosheaf workspace member <slug> <username> <role>   # role = admin|write|read
-  cosheaf workspace reindex <slug>                     # rebuild sidecar index from Forgejo main
-  cosheaf workspace rm <slug>                          # delete forgejo repo + sidecar
-  cosheaf passthrough-log <slug>                       # last 50 /forgejo/* passthrough calls
-`);
+function parseRole(value: string): Role {
+  if (!(ROLES as readonly string[]).includes(value))
+    throw new InvalidArgumentError(`role must be ${ROLES.join("|")}`);
+  return value as Role;
+}
+
+function buildProgram(): Command {
+  const program = new Command("cosheaf").description("cosheaf admin CLI").exitOverride();
+
+  // `seed`: keep the raw-args pipeline through parseSeedOptions so its
+  // behavior (and dedicated test) stays the single source of truth for
+  // option parsing + validation. allowUnknownOption is on so commander
+  // doesn't reject e.g. `--password=…`.
+  program
+    .command("seed")
+    .description("create-or-update a user and workspace for local development")
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action((_opts, cmd) => seed(cmd.args));
+
+  const user = program.command("user").description("user management");
+  user.command("add <username>").description("create a user; prompts for password").action(userAdd);
+  user
+    .command("create <username> <password>")
+    .description("non-interactive create (dev/CI use)")
+    .action(userCreate);
+  user.command("passwd <username>").description("reset a user's password").action(userPasswd);
+  user.command("list").description("list users").action(userList);
+  user.command("rm <username>").description("delete a user").action(userRm);
+
+  const workspace = program.command("workspace").description("workspace management");
+  workspace
+    .command("member <slug> <username> <role>")
+    .description("set a collaborator's Forgejo role (admin|write|read)")
+    .action((slug, username, roleArg) => workspaceMember(slug, username, parseRole(roleArg)));
+  workspace
+    .command("reindex <slug>")
+    .description("rebuild the SQLite sidecar from Forgejo main")
+    .action(workspaceReindex);
+  workspace
+    .command("rm <slug>")
+    .description("delete the Forgejo repo and the SQLite sidecar")
+    .action(workspaceRm);
+
+  program
+    .command("passthrough-log <slug>")
+    .description("last 50 /forgejo/* passthrough calls")
+    .action(passthroughLog);
+
+  return program;
 }
 
 async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
-  const [cmd, sub, ...rest] = argv;
-
-  if (cmd === "seed") return seed(argv.slice(1));
-  if (cmd === "user" && sub === "add" && rest[0]) return userAdd(rest[0]);
-  if (cmd === "user" && sub === "create" && rest[0] && rest[1]) return userCreate(rest[0], rest[1]);
-  if (cmd === "user" && sub === "passwd" && rest[0]) return userPasswd(rest[0]);
-  if (cmd === "user" && sub === "list") return userList();
-  if (cmd === "user" && sub === "rm" && rest[0]) return userRm(rest[0]);
-  if (cmd === "passthrough-log" && sub) return passthroughLog(sub);
-  if (cmd === "workspace" && sub === "reindex" && rest[0]) return workspaceReindex(rest[0]);
-  if (cmd === "workspace" && sub === "rm" && rest[0]) return workspaceRm(rest[0]);
-  if (cmd === "workspace" && sub === "member" && rest[0] && rest[1] && rest[2]) {
-    const role = rest[2];
-    if (!(ROLES as readonly string[]).includes(role)) {
-      console.error(`role must be ${ROLES.join("|")}`);
-      process.exit(1);
+  const program = buildProgram();
+  try {
+    await program.parseAsync(process.argv);
+  } catch (err) {
+    if (err instanceof Error && "code" in err) {
+      // Commander already printed the help/error; just exit non-zero unless
+      // it was the user explicitly asking for help.
+      const code = (err as { code?: string }).code;
+      if (code === "commander.help" || code === "commander.helpDisplayed") return;
+      if (code === "commander.version") return;
     }
-    return workspaceMember(rest[0], rest[1], role as Role);
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
   }
-
-  help();
-  process.exit(cmd ? 1 : 0);
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+  void main();
 }
