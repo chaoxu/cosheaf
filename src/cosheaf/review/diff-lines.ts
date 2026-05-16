@@ -1,6 +1,6 @@
 // Walks a unified-diff patch and produces, for each `+` (or `-`) line, the
 // absolute line number on the new or old side respectively. Used by the tint
-// spike to know which lines to highlight.
+// renderer to know which lines to highlight.
 
 export function diffLineNumbers(patch: string, kind: "added" | "removed"): number[] {
   if (!patch) return [];

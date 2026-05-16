@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import type { LineComment, PullFile } from "../api";
-import type { SpikeProps, ViewMode, ViewShape } from "./spike-types";
-import { SourceDiff } from "./spikes/SourceDiff";
-import { SourceAfterOnly } from "./spikes/SourceAfterOnly";
-import { HeadWithTint } from "./spikes/HeadWithTint";
-import { SideBySideRendered } from "./spikes/SideBySideRendered";
+import type { DiffRendererProps, ViewMode, ViewShape } from "./diff-renderer-types";
+import { SourceDiff } from "./diff-renderers/SourceDiff";
+import { SourceAfterOnly } from "./diff-renderers/SourceAfterOnly";
+import { HeadWithTint } from "./diff-renderers/HeadWithTint";
+import { SideBySideRendered } from "./diff-renderers/SideBySideRendered";
 
 const MODES: Array<{ id: ViewMode; label: string }> = [
   { id: "source", label: "Source" },
@@ -43,9 +43,9 @@ export function DiffArea({
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
   currentForgejoUsername?: string;
-  onAddComment?: SpikeProps["onAddComment"];
-  onEditComment?: SpikeProps["onEditComment"];
-  onDeleteComment?: SpikeProps["onDeleteComment"];
+  onAddComment?: DiffRendererProps["onAddComment"];
+  onEditComment?: DiffRendererProps["onEditComment"];
+  onDeleteComment?: DiffRendererProps["onDeleteComment"];
 }): ReactElement {
   const fileComments = useMemo(
     () => (file ? comments.filter((c) => c.path === file.path) : []),
@@ -77,7 +77,7 @@ export function DiffArea({
     );
   }
 
-  const spikeProps: SpikeProps = {
+  const rendererProps: DiffRendererProps = {
     file,
     loadContent: (side) => loadContent(file.path, side),
     comments: fileComments,
@@ -101,7 +101,7 @@ export function DiffArea({
         />
         <span className={cn("ml-auto text-xs", muted)}>{file.path}</span>
       </div>
-      <div className="min-h-0">{renderView(mode, shape, spikeProps)}</div>
+      <div className="min-h-0">{renderView(mode, shape, rendererProps)}</div>
     </div>
   );
 }
@@ -149,7 +149,7 @@ function Toggle<T extends string>({
   );
 }
 
-function renderView(mode: ViewMode, shape: ViewShape, props: SpikeProps): ReactElement {
+function renderView(mode: ViewMode, shape: ViewShape, props: DiffRendererProps): ReactElement {
   // Source mode: every shape renders via react-diff-view (parsing + line
   // numbers + +/- styling + gutter + comment widgets all in one library).
   if (mode === "source") {

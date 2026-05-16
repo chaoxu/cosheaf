@@ -1,5 +1,5 @@
 /* Theme overrides for react-diff-view. Match cosheaf's monochrome shell
-   and the green/red tints used by the other spikes. */
+   and the green/red tints used by the other renderers. */
 
 .cf-unified-diff {
   --diff-background-color: var(--cf-bg);

@@ -12,7 +12,7 @@ import { cn } from "../../lib/utils";
 import { CommentThread } from "../CommentThread";
 import { InlineComposer } from "../InlineComposer";
 import { groupCommentsByLine } from "../comment-anchors";
-import type { AddCommentTarget, SpikeProps } from "../spike-types";
+import type { AddCommentTarget, DiffRendererProps } from "../diff-renderer-types";
 import "./unified.css";
 
 const muted = "text-[var(--cf-muted)]";
@@ -40,7 +40,7 @@ export function SourceDiff({
   viewType = "unified",
   testId,
   patchOverride,
-}: SpikeProps & {
+}: DiffRendererProps & {
   viewType?: "unified" | "split";
   testId: string;
   // When set, the renderer uses this patch instead of file.patch. Used by

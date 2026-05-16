@@ -13,7 +13,7 @@ import { diffLineNumbers } from "../diff-lines";
 import { lineTintExtension } from "../cm-line-tint";
 import { commentThreadExtension } from "../cm-comment-widgets";
 import { useFileSide } from "../use-file-side";
-import type { SpikeProps } from "../spike-types";
+import type { DiffRendererProps } from "../diff-renderer-types";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -24,7 +24,7 @@ export function HeadWithTint({
   currentForgejoUsername,
   onEditComment,
   onDeleteComment,
-}: SpikeProps): ReactElement {
+}: DiffRendererProps): ReactElement {
   const { content, error } = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const extensions = useMemo(
     () => [

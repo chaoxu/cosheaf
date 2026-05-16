@@ -7,11 +7,11 @@ import { cn } from "../../lib/utils";
 import { diffLineNumbers } from "../diff-lines";
 import { useFileSide } from "../use-file-side";
 import { SourceDiff, synthesizeFullFilePatch } from "./SourceDiff";
-import type { SpikeProps } from "../spike-types";
+import type { DiffRendererProps } from "../diff-renderer-types";
 
 const muted = "text-[var(--cf-muted)]";
 
-export function SourceAfterOnly(props: SpikeProps): ReactElement {
+export function SourceAfterOnly(props: DiffRendererProps): ReactElement {
   const { content, error } = useFileSide(
     props.loadContent,
     "head",

@@ -10,7 +10,7 @@ import { MarkdownEditor } from "../../document-format/coflat-editor";
 import { commentThreadExtension } from "../cm-comment-widgets";
 import { useFileSide } from "../use-file-side";
 import type { LineComment } from "../../api";
-import type { SpikeProps } from "../spike-types";
+import type { DiffRendererProps } from "../diff-renderer-types";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -21,7 +21,7 @@ export function SideBySideRendered({
   currentForgejoUsername,
   onEditComment,
   onDeleteComment,
-}: SpikeProps): ReactElement {
+}: DiffRendererProps): ReactElement {
   const base = useFileSide(loadContent, "base", file.status !== "added", file.path);
   const head = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const error = base.error ?? head.error;
@@ -78,10 +78,10 @@ function Pane({
   emptyLabel: string | null;
   comments: readonly LineComment[];
   side: "new" | "old";
-  file: SpikeProps["file"];
+  file: DiffRendererProps["file"];
   currentForgejoUsername?: string;
-  onEditComment?: SpikeProps["onEditComment"];
-  onDeleteComment?: SpikeProps["onDeleteComment"];
+  onEditComment?: DiffRendererProps["onEditComment"];
+  onDeleteComment?: DiffRendererProps["onDeleteComment"];
 }): ReactElement {
   const extensions = useMemo(
     () => [
