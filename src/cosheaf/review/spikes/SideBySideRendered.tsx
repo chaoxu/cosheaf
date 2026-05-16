@@ -43,7 +43,7 @@ export function SideBySideRendered({
       data-testid="diff-pane-split"
       // Zero out coflat's sidenote gutter so rich-mode panes fill their column width.
       style={{ ["--cf-sidenote-width" as never]: "0px", ["--cf-content-max-width" as never]: "none" }}
-      className="grid grid-cols-2 h-full divide-x divide-[var(--cf-border)]"
+      className="grid grid-cols-2 divide-x divide-[var(--cf-border)]"
     >
       <Pane
         {...sharedProps}
@@ -104,11 +104,11 @@ function Pane({
   );
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col min-h-0">
       <div className={cn("px-3 py-1 text-xs border-b border-[var(--cf-border)]", muted)}>
         {label}
       </div>
-      <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+      <div className="min-h-0 flex flex-col">
         {emptyLabel ? (
           <div className={cn("p-3 text-sm", muted)}>{emptyLabel}</div>
         ) : content === null ? (

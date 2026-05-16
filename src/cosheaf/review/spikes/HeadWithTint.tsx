@@ -45,7 +45,7 @@ export function HeadWithTint({
 
   if (mode === "source") {
     return (
-      <div data-testid="diff-pane-after" className="h-full min-h-0 overflow-auto">
+      <div data-testid="diff-pane-after" className="min-h-0">
         <SourceLineView
           content={content}
           addedLines={diffLineNumbers(file.patch, "added")}
@@ -62,7 +62,7 @@ export function HeadWithTint({
   }
 
   return (
-    <div data-testid="diff-pane-after" className="h-full min-h-0 flex flex-col">
+    <div data-testid="diff-pane-after" className="min-h-0 flex flex-col">
       <MarkdownEditor
         key={`after-rich-${file.path}`}
         value={content}

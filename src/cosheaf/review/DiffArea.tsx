@@ -87,7 +87,7 @@ export function DiffArea({
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col min-h-0">
       <div className="flex items-center gap-3 px-3 py-1.5 border-b border-[var(--cf-border)]">
         <Toggle label="View" items={MODES} value={mode} onChange={setMode} testIdPrefix="view-mode" />
         <Toggle
@@ -100,7 +100,7 @@ export function DiffArea({
         />
         <span className={cn("ml-auto text-xs", muted)}>{file.path}</span>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto">{renderView(mode, shape, spikeProps)}</div>
+      <div className="min-h-0">{renderView(mode, shape, spikeProps)}</div>
     </div>
   );
 }

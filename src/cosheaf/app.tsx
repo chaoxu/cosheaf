@@ -2066,7 +2066,12 @@ function WorkspaceView({
           )}
           <UserMenu user={user} onLogout={onLogout} />
         </aside>
-        <main className="relative flex min-w-0 flex-1 flex-col">
+        <main
+          className={cn(
+            "relative flex min-w-0 flex-1 flex-col",
+            reviewingBranchId && "overflow-auto",
+          )}
+        >
           {!sidebarOpen && (
             <button
               type="button"
@@ -2229,7 +2234,7 @@ function WorkspaceView({
           {reviewingBranchId && (
             <>
               {reviewState.pr && <PrHeader pr={reviewState.pr} />}
-              <div className="flex-1 min-h-0">
+              <div className="min-h-0 shrink-0">
                 <DiffArea
                   workspaceSlug={workspace.slug}
                   file={
