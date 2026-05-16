@@ -205,6 +205,40 @@ describe("Forgejo passthrough", () => {
     ]);
   });
 
+  it("blocks write methods on GET-only prefixes (branches/contents)", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+
+    for (const target of [
+      { method: "POST", url: "/api/v1/w/w/forgejo/branches" },
+      { method: "DELETE", url: "/api/v1/w/w/forgejo/branches/feature-x" },
+      { method: "PUT", url: "/api/v1/w/w/forgejo/contents/file.md" },
+      { method: "POST", url: "/api/v1/w/w/forgejo/contents/file.md" },
+    ]) {
+      const res = await appFor(db).request(target.url, {
+        method: target.method,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      });
+      expect(res.status, `${target.method} ${target.url}`).toBe(405);
+      expect(fetchMock, `${target.method} ${target.url}`).not.toHaveBeenCalled();
+    }
+  });
+
+  it("blocks pulls/:n/merge passthrough (must go through requireAdminFresh route)", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "admin");
+    const res = await appFor(db).request("/api/v1/w/w/forgejo/pulls/7/merge", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "passthrough path not allowed", code: "forbidden" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("non-owner member can hit /forgejo/issues (Sudo carries their identity)", async () => {
     const db = freshDb();
     seedWorkspace(db);

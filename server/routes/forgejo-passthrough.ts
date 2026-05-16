@@ -18,27 +18,42 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 
-// Tail prefixes we forward. Each entry matches either the exact segment
-// (e.g. `pulls`) or anything under it (`pulls/`). Anything else: 403.
-const ALLOWED_PREFIXES = [
-  "pulls",
-  "issues",
-  "labels",
-  "milestones",
-  "branches",
-  "commits",
-  "contents",
-  "reviews",
-  "activities/feeds",
-] as const;
+// Tail prefixes we forward. `methods` lists which HTTP verbs are allowed
+// for that prefix.
+//
+// `branches` and `contents` are GET-only on purpose: cosheaf has
+// dedicated, validated endpoints for branch creation and file writes
+// that enforce the `user/<sudo>/` prefix and content conventions.
+// Letting them through the passthrough would bypass those gates.
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [
+  { prefix: "pulls",            methods: new Set<Method>(["GET", "POST", "PATCH"]) },
+  { prefix: "issues",           methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
+  { prefix: "labels",           methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
+  { prefix: "milestones",       methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
+  { prefix: "branches",         methods: new Set<Method>(["GET"]) },
+  { prefix: "commits",          methods: new Set<Method>(["GET"]) },
+  { prefix: "contents",         methods: new Set<Method>(["GET"]) },
+  { prefix: "reviews",          methods: new Set<Method>(["GET", "POST"]) },
+  { prefix: "activities/feeds", methods: new Set<Method>(["GET"]) },
+];
 
-function isAllowedTail(tail: string): boolean {
-  for (const p of ALLOWED_PREFIXES) {
-    if (tail === p) return true;
-    if (tail.startsWith(p + "/")) return true;
-    if (tail.startsWith(p + "?")) return true;
+// Tails that, no matter what prefix matched, must never be forwarded.
+// `pulls/*/merge` bypasses `requireAdminFresh`; admins should merge
+// through cosheaf's `/changes/:n/merge` route, not raw passthrough.
+const FORBIDDEN_RE = [/^pulls\/\d+\/merge(\/|\?|$)/];
+
+function classifyTail(tail: string, method: string): "ok" | "method" | "forbidden" {
+  const pathPart = tail.split("?")[0];
+  for (const re of FORBIDDEN_RE) {
+    if (re.test(tail)) return "forbidden";
   }
-  return false;
+  for (const { prefix, methods } of ALLOWED) {
+    const matches = pathPart === prefix || pathPart.startsWith(prefix + "/");
+    if (!matches) continue;
+    return methods.has(method as Method) ? "ok" : "method";
+  }
+  return "forbidden";
 }
 
 // Cheap path-traversal / cross-repo guard. The wildcard already strips the
@@ -80,7 +95,15 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   const tailPath = reqUrl.pathname.slice(prefix.length);
   const queryString = reqUrl.search; // includes leading "?" or ""
 
-  if (!isSafeTail(tailPath) || !isAllowedTail(tailPath)) {
+  if (!isSafeTail(tailPath)) {
+    return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
+  }
+  const method = c.req.method.toUpperCase();
+  const verdict = classifyTail(tailPath, method);
+  if (verdict === "method") {
+    return c.json({ error: "method not allowed for this path", code: "method_not_allowed" }, 405);
+  }
+  if (verdict === "forbidden") {
     return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
   }
 
@@ -103,7 +126,6 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
 
   // Buffer the request body. Fine for v1 — agents are not pushing huge
   // payloads through here.
-  const method = c.req.method.toUpperCase();
   const hasBody = method !== "GET" && method !== "HEAD";
   const body = hasBody ? await c.req.raw.arrayBuffer() : undefined;
 
