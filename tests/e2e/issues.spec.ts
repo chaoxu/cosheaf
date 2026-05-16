@@ -246,7 +246,7 @@ test.describe.serial("Issues", () => {
     await page.getByTestId("sidebar-tab-activity").click();
     // The global-setup publishes one PR — it should show in Activity.
     await expect.poll(async () =>
-      page.locator('[data-testid^="review-queue-branch-"]').count(), { timeout: 8000 }
+      page.locator('[data-testid^="review-queue-pull-"]').count(), { timeout: 8000 }
     ).toBeGreaterThanOrEqual(1);
 
     // Issue body markdown: headings, lists, code, math all render.

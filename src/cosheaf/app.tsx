@@ -2316,6 +2316,9 @@ function WorkspaceView({
                   </button>
                   {currentBranchName && (
                     <>
+                      <span data-testid="active-branch-name" className="hidden">
+                        {currentBranchName}
+                      </span>
                       {workspace.role === "admin" && (
                         <button
                           type="button"

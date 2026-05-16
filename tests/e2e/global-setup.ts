@@ -11,7 +11,6 @@ function run(label: string, cmd: string, args: string[]): void {
 export default async function globalSetup(): Promise<void> {
   run("workspace rm", "pnpm", ["cli", "workspace", "rm", "flushing-coin"]);
   run("setup:dev:review", "pnpm", ["setup:dev:review"]);
-  // Publish one in-review change as meri so the pr-view spec has a PR to open.
   await seedReviewablePr();
 }
 
@@ -23,44 +22,31 @@ async function seedReviewablePr(): Promise<void> {
   });
   const cookie = login.headers.get("set-cookie") ?? "";
 
-  const put = await fetch(
-    "http://localhost:3030/api/v1/w/flushing-coin/file?path=demo.md",
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        content:
-          "# Pythagoras\n\nIn a right triangle, a^2 + b^2 = c^2.\n\nProof: similar triangles.\n",
-      }),
-    },
-  );
-  if (!put.ok) throw new Error(`seedReviewablePr putFile: ${put.status}`);
-  const { branchId } = (await put.json()) as { branchId: string };
+  const branch = "user/cs-meri/e2e-demo";
 
-  const put2 = await fetch(
-    "http://localhost:3030/api/v1/w/flushing-coin/file?path=demo2.md",
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        content: "# Companion\n\nA second file in the same change.\n",
-      }),
-    },
-  );
-  if (!put2.ok) throw new Error(`seedReviewablePr putFile2: ${put2.status}`);
+  for (const file of [
+    { path: "demo.md", content: "# Pythagoras\n\nIn a right triangle, a^2 + b^2 = c^2.\n\nProof: similar triangles.\n" },
+    { path: "demo2.md", content: "# Companion\n\nA second file in the same change.\n" },
+  ]) {
+    const put = await fetch(
+      `http://localhost:3030/api/v1/w/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ content: file.content }),
+      },
+    );
+    if (!put.ok) throw new Error(`seedReviewablePr putFile ${file.path}: ${put.status}`);
+  }
 
-  const pub = await fetch(
-    "http://localhost:3030/api/v1/w/flushing-coin/publish",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ branchId, mode: "review" }),
-    },
-  );
-  if (!pub.ok) throw new Error(`seedReviewablePr publish: ${pub.status}`);
+  const opened = await fetch("http://localhost:3030/api/v1/w/flushing-coin/pulls", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ head: branch, title: "e2e demo PR" }),
+  });
+  if (!opened.ok) throw new Error(`seedReviewablePr openPull: ${opened.status}`);
+  const { number: prNumber } = (await opened.json()) as { number: number };
 
-  // Login as vera and seed a comment so the pr-view spec has something to
-  // assert against.
   const vlogin = await fetch("http://localhost:3030/api/v1/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -68,7 +54,7 @@ async function seedReviewablePr(): Promise<void> {
   });
   const vcookie = vlogin.headers.get("set-cookie") ?? "";
   const cmt = await fetch(
-    `http://localhost:3030/api/v1/w/flushing-coin/branch/${branchId}/comments`,
+    `http://localhost:3030/api/v1/w/flushing-coin/pulls/${prNumber}/comments`,
     {
       method: "POST",
       headers: { "content-type": "application/json", cookie: vcookie },

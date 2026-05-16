@@ -1,7 +1,7 @@
-// Multi-user browser-level smoke for the review lifecycle.
+// Multi-user browser smoke for the Forgejo-shell review lifecycle.
 // Requires `pnpm setup:dev:review` to have seeded chao/vera/meri.
-// Walks: meri publishes-for-review → vera requests changes → meri re-publishes
-// → vera approves → state goes to merged.
+// Walks: meri opens a PR → vera requests changes → meri amends and re-opens
+// → vera approves → admin merges → state goes to merged.
 
 import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
 
@@ -44,7 +44,7 @@ const vera = await makeContext("vera");
 
 let stage = "start";
 try {
-  // ── 1. meri creates a file and sends it for review ─────────────────────────
+  // ── 1. meri creates a file and opens a PR ──────────────────────────────────
   stage = "meri-login";
   await loginAs(meri, "meri", "123123");
 
@@ -57,73 +57,99 @@ try {
 
   stage = "meri-edit-1";
   await typeIntoEditor(meri, " v1");
-  // Save before publish (Save is disabled until dirty)
   await meri.locator('button:has-text("Save")').first().click();
+  await meri.getByTestId("active-branch-name").waitFor({ state: "attached", timeout: 8000 });
+  const meriBranch = (await meri.getByTestId("active-branch-name").innerText()).trim();
+  if (!meriBranch) throw new Error("could not read active-branch-name from meri's session");
 
-  stage = "meri-publish-review-1";
+  stage = "meri-open-pr-1";
   await meri.getByTestId("publish-review").waitFor({ state: "visible", timeout: 8000 });
   await meri.getByTestId("publish-review").click();
-  // Read meri's active change id from the hidden DOM signal.
-  await meri.getByTestId("active-change-id").waitFor({ state: "attached", timeout: 8000 });
-  const changeId = (await meri.getByTestId("active-change-id").innerText()).trim();
-  if (!changeId) throw new Error("could not read active-change-id from meri's session");
+  // After open, currentBranch is cleared.
+  await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
+
+  // Locate the just-opened PR number via Forgejo-shape API on the same origin.
+  const prNumber = await meri.evaluate(async (branch) => {
+    const r = await fetch("/api/v1/w/flushing-coin/pulls?state=open");
+    const { pulls } = await r.json();
+    const found = pulls.find((p) => p.head_ref === branch);
+    return found ? found.number : null;
+  }, meriBranch);
+  if (!prNumber) throw new Error("could not locate PR by head_ref after open");
 
   // ── 2. vera reviews and requests changes ───────────────────────────────────
   stage = "vera-login";
   await loginAs(vera, "vera", "123123");
 
-  stage = "vera-open-queue";
-  await vera.getByTestId("sidebar-tab-queue").click();
-  const queueItem = vera.locator(`[data-testid="queue-change-${changeId}"]`);
+  stage = "vera-open-inbox";
+  await vera.getByTestId("sidebar-tab-inbox").click();
+  const queueItem = vera.locator(`[data-testid="review-queue-pull-${prNumber}"]`);
   await queueItem.waitFor({ state: "visible", timeout: 15000 });
 
   stage = "vera-click-queue";
   await queueItem.click();
-  // Review surface should render: PR header, changed-files list, diff area
-  // with the spike picker, and the action bar at the bottom.
   await vera.getByTestId("pr-header").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("pr-file-list").waitFor({ state: "visible", timeout: 8000 });
-  await vera.getByTestId("spike-unified").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("review-request-changes").waitFor({ state: "visible", timeout: 8000 });
 
   stage = "vera-request-changes";
   await vera.getByTestId("review-comment").fill("please add v2");
   await vera.getByTestId("review-request-changes").click();
-  // After request-changes the UI exits review mode (buttons disappear) and the
-  // queue item is removed.
-  await vera.getByTestId("review-request-changes").waitFor({ state: "detached", timeout: 10000 });
-  await vera.locator(`[data-testid="queue-change-${changeId}"]`).waitFor({ state: "detached", timeout: 10000 });
+  // After REQUEST_CHANGES the PR stays open; we just verify via API.
+  await vera.waitForFunction(
+    async (n) => {
+      const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`);
+      const j = await r.json();
+      return j.rejections >= 1;
+    },
+    prNumber,
+    { timeout: 10000 },
+  );
 
-  // ── 3. meri re-publishes after the request ────────────────────────────────
+  // ── 3. meri amends the same branch and we resubmit by re-saving ───────────
   stage = "meri-edit-2";
-  // SSE should have updated meri's state. Just re-edit.
   await meri.bringToFront();
   await typeIntoEditor(meri, " v2");
   await meri.locator('button:has-text("Save")').first().click();
-
-  stage = "meri-publish-review-2";
+  // The save goes to a fresh user branch (currentBranchName was cleared on
+  // publish). Open a *second* PR — Forgejo treats each amend session as its
+  // own PR in this smoke; production would push to the same branch.
+  await meri.getByTestId("active-branch-name").waitFor({ state: "attached", timeout: 8000 });
+  const meriBranch2 = (await meri.getByTestId("active-branch-name").innerText()).trim();
   await meri.getByTestId("publish-review").click();
-  await meri.waitForTimeout(1500);
+  await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
+  const prNumber2 = await meri.evaluate(async (branch) => {
+    const r = await fetch("/api/v1/w/flushing-coin/pulls?state=open");
+    const { pulls } = await r.json();
+    const found = pulls.find((p) => p.head_ref === branch);
+    return found ? found.number : null;
+  }, meriBranch2);
+  if (!prNumber2) throw new Error("could not locate PR2");
 
-  // ── 4. vera approves; auto-merge fires ────────────────────────────────────
-  stage = "vera-refresh-queue";
-  // After re-publish, change re-enters review state and queue. SSE refreshes it,
-  // but we click the Queue tab again to force a clean state.
-  await vera.bringToFront();
-  await vera.getByTestId("sidebar-tab-files").click();
-  await vera.getByTestId("sidebar-tab-queue").click();
-  await vera.locator(`[data-testid="queue-change-${changeId}"]`).waitFor({ state: "visible", timeout: 10000 });
-  await vera.locator(`[data-testid="queue-change-${changeId}"]`).click();
-  await vera.getByTestId("review-approve").waitFor({ state: "visible", timeout: 8000 });
-
+  // ── 4. vera approves the new PR ───────────────────────────────────────────
   stage = "vera-approve";
+  await vera.bringToFront();
+  await vera.getByTestId("sidebar-tab-inbox").click();
+  const queueItem2 = vera.locator(`[data-testid="review-queue-pull-${prNumber2}"]`);
+  await queueItem2.waitFor({ state: "visible", timeout: 15000 });
+  await queueItem2.click();
+  await vera.getByTestId("review-approve").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("review-comment").fill("LGTM");
   await vera.getByTestId("review-approve").click();
-  // After approval at threshold=1, change merges. Queue item disappears.
-  await vera.locator(`[data-testid="queue-change-${changeId}"]`).waitFor({ state: "detached", timeout: 15000 });
 
-  // Approval badge for the merged change should now show "approve".
-  // (Switch back to files tab to check meri's view of merged state via /api works too.)
+  // Approval lands; chao (admin) merges through the API.
+  stage = "admin-merge";
+  const adminPage = await makeContext("chao");
+  await loginAs(adminPage, "chao", "123123");
+  const mergeStatus = await adminPage.evaluate(async (n) => {
+    const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/merge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ Do: "squash" }),
+    });
+    return r.status;
+  }, prNumber2);
+  if (mergeStatus !== 200) throw new Error(`merge ${prNumber2}: ${mergeStatus}`);
 
   await meri.screenshot({ path: SCREENSHOT, fullPage: false });
 
@@ -131,7 +157,8 @@ try {
   console.log(JSON.stringify({
     ok,
     stage,
-    changeId,
+    prNumber,
+    prNumber2,
     path: FLOW_PATH,
     badResponses,
     pageErrors,
