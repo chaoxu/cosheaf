@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
+import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { listIssues, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
 import type {
@@ -72,7 +73,7 @@ issues.get("/:slug/issues/pinned", async (c) => {
       state: i.state,
       comment_count: i.comments,
       updated_at: new Date(i.updated_at).getTime(),
-      author_login: i.user.login,
+      author_login: i.user?.login ?? DELETED_USER_LOGIN,
     })),
   });
 });
@@ -120,7 +121,7 @@ issues.get("/:slug/issues/:number", async (c) => {
       title: issue.title,
       body: issue.body,
       state: issue.state,
-      author: issue.user.login,
+      author: issue.user?.login ?? DELETED_USER_LOGIN,
       assignees: (issue.assignees ?? []).map((a) => a.login),
       labels: issue.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
       milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,
@@ -235,7 +236,7 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
   const created: IssueComment = {
     id: cm.id,
     body: cm.body,
-    author: cm.user.login,
+    author: cm.user?.login ?? DELETED_USER_LOGIN,
     created_at: new Date(cm.created_at).getTime(),
     updated_at: new Date(cm.updated_at).getTime(),
   };
@@ -465,7 +466,7 @@ issues.get("/:slug/issues/:number/comments", async (c) => {
     comments: list.map<IssueComment>((cm) => ({
       id: cm.id,
       body: cm.body,
-      author: cm.user.login,
+      author: cm.user?.login ?? DELETED_USER_LOGIN,
       created_at: new Date(cm.created_at).getTime(),
       updated_at: new Date(cm.updated_at).getTime(),
     })),

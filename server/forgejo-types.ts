@@ -9,7 +9,7 @@ export interface ForgejoIssue {
   title: string;
   body: string;
   state: "open" | "closed";
-  user: { id: number; login: string };
+  user: { id: number; login: string } | null;
   assignees: Array<{ id: number; login: string }> | null;
   labels: Array<{ id: number; name: string; color: string }>;
   milestone?: { id: number; title: string; state: "open" | "closed" } | null;
@@ -23,7 +23,7 @@ export interface ForgejoIssue {
 export interface ForgejoIssueComment {
   id: number;
   body: string;
-  user: { id: number; login: string };
+  user: { id: number; login: string } | null;
   created_at: string;
   updated_at: string;
 }
@@ -83,6 +83,10 @@ export interface ForgejoLabel {
   description?: string;
 }
 
+// Forgejo's API returns `user: null` for actions attributed to a deleted
+// account (e.g. a comment authored by a user who later deleted themselves).
+// Consumers must guard `user?.login` — see `DELETED_USER_LOGIN` below for
+// the convention we use to render an unknown author safely.
 export interface ForgejoUser {
   id: number;
   login: string;
@@ -90,6 +94,9 @@ export interface ForgejoUser {
   email?: string;
   active?: boolean;
 }
+
+/** Stand-in login when a Forgejo response has `user: null`. */
+export const DELETED_USER_LOGIN = "(deleted)";
 export interface ForgejoRepo {
   id: number;
   name: string;
@@ -152,7 +159,7 @@ export interface ForgejoPull {
   changed_files?: number;
   head: { ref: string; sha: string; label: string };
   base: { ref: string; sha: string };
-  user: ForgejoUser;
+  user: ForgejoUser | null;
   created_at: string;
   updated_at: string;
 }
@@ -175,7 +182,7 @@ export interface ForgejoPullReviewComment {
   commit_id: string;
   original_commit_id: string;
   diff_hunk: string;
-  user: ForgejoUser;
+  user: ForgejoUser | null;
   created_at: string;
   updated_at: string;
 }
@@ -183,6 +190,6 @@ export interface ForgejoReview {
   id: number;
   body: string;
   state: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING" | string;
-  user: ForgejoUser;
+  user: ForgejoUser | null;
   submitted_at?: string;
 }

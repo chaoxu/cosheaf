@@ -4,6 +4,7 @@
 
 import type Database from "better-sqlite3";
 import type { Forgejo, ForgejoIssue } from "./forgejo.js";
+import { DELETED_USER_LOGIN } from "./forgejo-types.js";
 import type { IssueRow } from "../shared/issues.js";
 
 // Re-export so existing imports keep working but the canonical shape lives
@@ -23,7 +24,8 @@ export function upsertIssue(
   issue: ForgejoIssue,
 ): void {
   if (issue.pull_request) return; // skip PRs — they live in `changes`
-  const authorId = userIdForLogin(db, issue.user.login);
+  const authorLogin = issue.user?.login ?? DELETED_USER_LOGIN;
+  const authorId = userIdForLogin(db, authorLogin);
   const labels = JSON.stringify(issue.labels.map((l) => l.name));
   db.prepare(
     `INSERT INTO issues (workspace_id, number, forgejo_id, title, state, author_user_id, author_login, labels, comment_count, created_at, updated_at)
@@ -41,7 +43,7 @@ export function upsertIssue(
     title: issue.title,
     state: issue.state,
     author_user_id: authorId,
-    author_login: issue.user.login,
+    author_login: authorLogin,
     labels,
     comment_count: issue.comments,
     created_at: new Date(issue.created_at).getTime(),

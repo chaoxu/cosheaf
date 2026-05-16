@@ -31,6 +31,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoPull, type ForgejoReview } from "../forgejo.js";
+import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import type { LineComment } from "../../shared/comments.js";
@@ -68,7 +69,7 @@ function prMeta(pull: ForgejoPull): PrMeta {
     body: pull.body ?? "",
     state: pull.state === "closed" ? "closed" : "open",
     merged: pull.merged ?? false,
-    author_username: pull.user.login,
+    author_username: pull.user?.login ?? DELETED_USER_LOGIN,
     created_at: Date.parse(pull.created_at) || 0,
     merged_at: pull.merged_at ? Date.parse(pull.merged_at) : null,
     mergeable: pull.mergeable ?? null,
@@ -97,6 +98,7 @@ async function approvalCounts(
     return at - bt || (a.id ?? 0) - (b.id ?? 0);
   });
   for (const r of ordered) {
+    if (!r.user) continue; // deleted account; review still counted by Forgejo
     if (r.state === "APPROVED" || r.state === "REQUEST_CHANGES") {
       latestByUser.set(r.user.login, r);
     }
@@ -353,7 +355,7 @@ changes.get("/:slug/pulls/:n/reviews", async (c) => {
   const out = reviews
     .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
     .map((r) => ({
-      username: r.user.login,
+      username: r.user?.login ?? DELETED_USER_LOGIN,
       decision:
         r.state === "APPROVED"
           ? ("approve" as const)
@@ -375,7 +377,7 @@ changes.post("/:slug/pulls/:n/reviews", async (c) => {
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  if (pull.user.login === sudo)
+  if (pull.user?.login === sudo)
     return c.json({ error: "cannot review your own pull request", code: "forbidden" }, 403);
 
   const payload = (await c.req.json().catch(() => ({}))) as { event?: string; body?: string | null };
@@ -444,7 +446,7 @@ changes.get("/:slug/pulls/:n/comments", async (c) => {
       line: mapped?.line ?? null,
       side: mapped?.side ?? (status.get(cm.path) === "deleted" ? "old" : "new"),
       body: cm.body,
-      author_username: cm.user.login,
+      author_username: cm.user?.login ?? DELETED_USER_LOGIN,
       created_at: Date.parse(cm.created_at) || 0,
       updated_at: Date.parse(cm.updated_at) || 0,
       outdated: cm.position === null,
@@ -461,7 +463,7 @@ changes.post("/:slug/pulls/:n/comments", async (c) => {
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  if (pull.user.login === sudo)
+  if (pull.user?.login === sudo)
     return c.json({ error: "cannot comment on your own pull request", code: "forbidden" }, 403);
 
   const input = parseCommentInput(await c.req.json().catch(() => null));
@@ -531,7 +533,7 @@ changes.post("/:slug/pulls/:n/draft-review", async (c) => {
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  if (pull.user.login === sudo)
+  if (pull.user?.login === sudo)
     return c.json({ error: "cannot review your own pull request", code: "forbidden" }, 403);
   const review_id = await findOrCreatePendingReview(fj, owner, repo, n, sudo);
   return c.json({ review_id });
