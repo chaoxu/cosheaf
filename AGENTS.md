@@ -5,6 +5,12 @@ hold the canonical markdown files, branches, pull requests, reviews, and issues;
 SQLite is a derived, rebuildable sidecar index for fast reads, sessions,
 memberships, and local auth state.
 
+The long-term direction is a thin knowledge-base UI over a Forgejo/Gitea-style
+forge. Cosheaf should feel like a focused repository interface with custom
+Coflat rendering and indexing, not a separate CMS with its own workflow model.
+When adding features, prefer a direct mapping to Forgejo concepts and APIs
+before inventing a Cosheaf-specific abstraction.
+
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
 math-native: do not add theorem graphs, proof dependency models, or other
@@ -30,19 +36,50 @@ HTTP API. Keep cosheaf's surface usable without any automation.
 
 - **Forgejo is source of truth.** Every page is a `.md` file on the workspace
   repo's `main` branch. Work lives on branches and moves through Forgejo pull
-  requests.
-- **Use Forgejo terminology.** Prefer branch, pull request, review, issue,
-  merge, and close over Cosheaf-specific workflow terms. Cosheaf should be a
-  Forgejo UI with custom Coflat markdown rendering; durable operations should be
-  possible directly in Forgejo too.
+  requests. Issues, comments, labels, milestones, reviews, and merge state
+  should come from Forgejo wherever practical.
+- **Thin shell over forge concepts.** Prefer repository, branch, pull request,
+  review, issue, comment, label, milestone, notification, merge, and close over
+  Cosheaf-specific workflow terms. Durable operations should be understandable
+  and usually reproducible directly in Forgejo.
+- **Do not fork the workflow model.** Avoid database-only drafts, proposals,
+  reviews, issue boards, or permissions that can diverge from Forgejo. If local
+  state is needed for speed or UX, treat it as cache/mapping/reconciliation
+  state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, change metadata, memberships, and sessions/tokens. The
+  links, FTS index, branch/PR cache metadata, memberships, and sessions/tokens. The
   page index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
 - **Workflow as trust, not automation.** Branches, pull requests, reviews, and
   merges are the same whether the proposer is a human or a bot.
+
+## Future direction
+
+Track the Forgejo-shell direction in issue #1595. Future work should move in
+small, reversible steps:
+
+- Make editing branch-native: use real branch names as the primary identity for
+  work in progress; keep local branch ids only as transitional/cache details.
+- Make review pull-request-native: prefer PR numbers, head/base branches,
+  review states, review comments, and Forgejo merge behavior over change-centric
+  Cosheaf vocabulary.
+- Keep the issue board close to Forgejo issues: labels, milestones, pinned
+  state, dependencies/blocks, comments, and timeline should be mediated only
+  where Cosheaf adds knowledge-base rendering or links.
+- Keep API shapes Forgejo-like where possible (`/branches`, `/pulls`,
+  `/issues`, file contents) and mark older compatibility wrappers as
+  transitional when replacing them.
+- Treat webhooks and repair/reindex commands as the reconciliation path from
+  Forgejo into SQLite.
+- Document Forgejo-vs-Gitea compatibility only after testing. Many APIs are
+  Gitea-family APIs, but webhooks, branch protection, pinned issues,
+  dependencies/blocks, activity feeds, notifications, and PR review drafts may
+  be version-sensitive.
+
+Do not rewrite the app, build a generic CMS, add arbitrary document-format
+plugins, or move agent/prover logic into this repo as part of this direction.
 
 ## Stack
 
