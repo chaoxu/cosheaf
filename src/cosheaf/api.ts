@@ -187,10 +187,14 @@ export const api = {
     }),
   getPull: (slug: string, prNumber: number) =>
     jsonFetch<PrMeta>(`${w(slug)}/pulls/${prNumber}`),
-  mergePull: (slug: string, prNumber: number, Do: "squash" | "merge" | "rebase" = "squash") =>
+  mergePull: (
+    slug: string,
+    prNumber: number,
+    opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
+  ) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/merge`, {
       method: "POST",
-      body: JSON.stringify({ Do }),
+      body: JSON.stringify({ Do: opts.Do ?? "squash", force: opts.force ?? false }),
     }),
   closePull: (slug: string, prNumber: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/close`, { method: "POST" }),

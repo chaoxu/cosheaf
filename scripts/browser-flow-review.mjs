@@ -141,15 +141,16 @@ try {
   stage = "admin-merge";
   const adminPage = await makeContext("chao");
   await loginAs(adminPage, "chao", "123123");
-  const mergeStatus = await adminPage.evaluate(async (n) => {
+  const mergeResult = await adminPage.evaluate(async (n) => {
     const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/merge`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ Do: "squash" }),
     });
-    return r.status;
+    return { status: r.status, body: await r.text() };
   }, prNumber2);
-  if (mergeStatus !== 200) throw new Error(`merge ${prNumber2}: ${mergeStatus}`);
+  if (mergeResult.status !== 200)
+    throw new Error(`merge ${prNumber2}: ${mergeResult.status} ${mergeResult.body}`);
 
   await meri.screenshot({ path: SCREENSHOT, fullPage: false });
 

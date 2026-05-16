@@ -7,23 +7,27 @@ import { provisionWorkspace } from "../workspace-provisioning.js";
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
 
-workspaces.get("/", (c) => {
+workspaces.get("/", async (c) => {
   const rows = c
     .get("db")
     .prepare(
-      "SELECT workspaces.id AS id, workspaces.slug AS slug, workspaces.name AS name, " +
-        "workspaces.forgejo_repo AS forgejo_repo, memberships.role AS role " +
-        "FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id " +
-        "WHERE memberships.user_id = ? ORDER BY workspaces.name",
+      "SELECT id, slug, name, forgejo_repo FROM workspaces ORDER BY name",
     )
-    .all(c.get("user").id) as Array<{
-      id: number;
-      slug: string;
-      name: string;
-      forgejo_repo: string;
-      role: Role;
-    }>;
-  return c.json({ workspaces: rows.map(({ forgejo_repo: _drop, ...rest }) => rest) });
+    .all() as Array<{ id: number; slug: string; name: string; forgejo_repo: string }>;
+
+  // Resolve the caller's role on each workspace via Forgejo. Workspaces where
+  // the user has no permission are filtered out, mirroring the old behavior
+  // where listing was gated by membership.
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const fjUser = c.get("forgejoUsername");
+  const resolved = await Promise.all(
+    rows.map(async (r) => {
+      const p = await fj.getRepoPermission(owner, r.forgejo_repo, fjUser).catch(() => "none" as const);
+      return p === "none" ? null : { id: r.id, slug: r.slug, name: r.name, role: p as Role };
+    }),
+  );
+  return c.json({ workspaces: resolved.filter((r): r is NonNullable<typeof r> => r !== null) });
 });
 
 workspaces.post("/", async (c) => {
@@ -52,7 +56,7 @@ workspaces.post("/", async (c) => {
       rollbackCreatedRepoOnLocalFailure: true,
     });
     return c.json(
-      { id: workspace.id, slug: body.slug, name: body.name, role: "owner" },
+      { id: workspace.id, slug: body.slug, name: body.name, role: "admin" },
       201,
     );
   } catch (err) {

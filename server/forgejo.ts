@@ -439,11 +439,11 @@ export class Forgejo {
     });
   }
 
-  async mergePull(owner: string, repo: string, index: number, opts: { Do: "merge" | "squash" | "rebase"; sudo: string; message?: string }): Promise<void> {
+  async mergePull(owner: string, repo: string, index: number, opts: { Do: "merge" | "squash" | "rebase"; sudo: string; message?: string; force?: boolean }): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/pulls/${index}/merge`, {
       method: "POST",
       sudo: opts.sudo,
-      body: { Do: opts.Do, MergeMessageField: opts.message ?? "" },
+      body: { Do: opts.Do, MergeMessageField: opts.message ?? "", force_merge: opts.force ?? false },
       expectEmpty: true,
     });
   }

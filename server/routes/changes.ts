@@ -117,13 +117,13 @@ async function mergeWithRetry(
   repo: string,
   prNumber: number,
   sudo: string,
-  opts: { Do?: "squash" | "merge" | "rebase" } = {},
+  opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
 ): Promise<unknown> {
   const Do = opts.Do ?? "squash";
   let lastErr: unknown;
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      await fj.mergePull(owner, repo, prNumber, { Do, sudo });
+      await fj.mergePull(owner, repo, prNumber, { Do, sudo, force: opts.force });
       return null;
     } catch (err) {
       lastErr = err;
@@ -233,9 +233,14 @@ changes.post("/:slug/pulls/:n/merge", async (c) => {
   if (ws.role !== "admin") return c.json({ error: "admin required", code: "forbidden" }, 403);
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
-  const body = (await c.req.json().catch(() => ({}))) as { Do?: "squash" | "merge" | "rebase" };
+  const body = (await c.req.json().catch(() => ({}))) as {
+    Do?: "squash" | "merge" | "rebase";
+    force?: boolean;
+  };
   const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const err = await mergeWithRetry(fj, owner, repo, n, sudo, { Do: body.Do });
+  // Admins can bypass the required-approvals branch protection rule by
+  // passing `force: true`. Callers default to false (normal review flow).
+  const err = await mergeWithRetry(fj, owner, repo, n, sudo, { Do: body.Do, force: body.force });
   if (err) return c.json({ error: `merge failed: ${(err as Error).message}`, code: "conflict" }, 409);
   const pull = await fj.getPull(owner, repo, n);
   if (pull) await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
