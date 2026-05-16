@@ -80,7 +80,7 @@ issues.get("/:slug/issues/pinned", async (c) => {
 // POST /api/v1/w/:slug/issues/:number/pin — owner-only (Forgejo enforces too)
 issues.post("/:slug/issues/:number/pin", async (c) => {
   const ws = c.get("workspace");
-  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   // Forgejo restricts pinning to repo owner/admin; cosheaf's workspace owner
@@ -96,7 +96,7 @@ issues.post("/:slug/issues/:number/pin", async (c) => {
 // DELETE /api/v1/w/:slug/issues/:number/pin — owner-only
 issues.delete("/:slug/issues/:number/pin", async (c) => {
   const ws = c.get("workspace");
-  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -167,7 +167,7 @@ issues.get("/:slug/labels", async (c) => {
 // POST /api/v1/w/:slug/labels — owners only
 issues.post("/:slug/labels", async (c) => {
   const ws = c.get("workspace");
-  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const body = (await c.req.json().catch(() => null)) as {
     name?: string;
     color?: string;
@@ -298,7 +298,7 @@ issues.get("/:slug/milestones", async (c) => {
 
 issues.post("/:slug/milestones", async (c) => {
   const ws = c.get("workspace");
-  if (ws.role !== "owner") return c.json({ error: "owner required", code: "forbidden" }, 403);
+  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const body = (await c.req.json().catch(() => null)) as {
     title?: string;
     description?: string;

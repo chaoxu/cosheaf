@@ -10,6 +10,7 @@ import { Forgejo } from "../forgejo.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
+import { _seedPermCacheForTests } from "../middleware.js";
 import { forgejoPassthrough } from "./forgejo-passthrough.js";
 
 const config: Config = {
@@ -45,7 +46,10 @@ function seedUser(db: Database.Database, id: number, username: string, role: Rol
     id,
     sha256Hex(token),
   );
-  db.prepare("INSERT INTO memberships (workspace_id, user_id, role) VALUES (1, ?, ?)").run(id, role);
+  // Skip the requireMembership Forgejo call by pre-populating its cache so the
+  // fetchMock can be asserted purely against the request under test.
+  // seedWorkspace uses repo='repo', forgejoOwner='owner'.
+  _seedPermCacheForTests("owner", "repo", `cs-${username}`, role);
   return token;
 }
 
@@ -90,7 +94,7 @@ describe("Forgejo passthrough", () => {
   it("GET /forgejo/pulls proxies to /repos/{owner}/{repo}/pulls and returns body verbatim", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "member");
+    const token = seedUser(db, 1, "alice", "write");
     fetchMock.mockResolvedValueOnce(ok([{ number: 7 }], { link: "<next>; rel=\"next\"" }));
 
     const res = await appFor(db).request("/api/v1/w/w/forgejo/pulls?state=open", {
@@ -112,7 +116,7 @@ describe("Forgejo passthrough", () => {
   it("POST /forgejo/issues forwards body verbatim and returns Forgejo's response", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "member");
+    const token = seedUser(db, 1, "alice", "write");
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ number: 42, title: "hi" }), {
         status: 201,
@@ -138,7 +142,7 @@ describe("Forgejo passthrough", () => {
   it("rejects admin paths with 403", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "member");
+    const token = seedUser(db, 1, "alice", "write");
     const res = await appFor(db).request("/api/v1/w/w/forgejo/admin/users", {
       headers: { authorization: `Bearer ${token}` },
     });
@@ -150,7 +154,7 @@ describe("Forgejo passthrough", () => {
   it("rejects traversal segments with 403", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "member");
+    const token = seedUser(db, 1, "alice", "write");
     // Hono normalizes ../ in the URL — exercise the explicit `..` segment.
     const res = await appFor(db).request("/api/v1/w/w/forgejo/pulls/..", {
       headers: { authorization: `Bearer ${token}` },
@@ -162,7 +166,7 @@ describe("Forgejo passthrough", () => {
   it("rejects unknown prefixes with 403", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "member");
+    const token = seedUser(db, 1, "alice", "write");
     const res = await appFor(db).request("/api/v1/w/w/forgejo/unknown-thing", {
       headers: { authorization: `Bearer ${token}` },
     });
@@ -173,7 +177,7 @@ describe("Forgejo passthrough", () => {
   it("writes an audit log entry per call", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "member");
+    const token = seedUser(db, 1, "alice", "write");
     fetchMock.mockResolvedValueOnce(ok([]));
     fetchMock.mockResolvedValueOnce(ok({ number: 3 }, { "content-type": "application/json" }));
 
@@ -204,7 +208,7 @@ describe("Forgejo passthrough", () => {
   it("non-owner member can hit /forgejo/issues (Sudo carries their identity)", async () => {
     const db = freshDb();
     seedWorkspace(db);
-    const memberToken = seedUser(db, 1, "bob", "member");
+    const memberToken = seedUser(db, 1, "bob", "write");
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ number: 1 }), {
         status: 201,

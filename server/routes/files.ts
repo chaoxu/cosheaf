@@ -4,14 +4,6 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { planIndexPage } from "../indexer.js";
-import {
-  createBranchRow,
-  getBranchRow,
-  listOpenDraftsForUser,
-  listWritableForUser,
-  setBranchState,
-  type BranchRow,
-} from "../changes.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -23,19 +15,24 @@ function safeRel(p: string | undefined): string | null {
   return p;
 }
 
-// Resolve which change to write to. Rules:
-// - explicit branchId → that change (must be writable, must belong to user)
-// - no branchId, zero writable changes → lazily create one
-// - no branchId, exactly one writable change → use it
-// - no branchId, multiple writable changes → 400 ambiguous
-type ResolveError = { error: string; code: "not_found" | "forbidden" | "conflict" | "ambiguous" };
+// Resolve which Forgejo ref to read/write from. Caller passes ?branch=<name>;
+// missing/blank means `main`. We don't validate "is this user's branch" — that
+// is Forgejo's job (push rejections via branch protection).
+function refFromQuery(c: import("hono").Context<AppEnv>): string {
+  const b = c.req.query("branch")?.trim();
+  return b && b.length > 0 ? b : "main";
+}
 
-const STATUS_FOR_CODE: Record<ResolveError["code"], 400 | 403 | 404 | 409> = {
-  not_found: 404,
-  forbidden: 403,
-  conflict: 409,
-  ambiguous: 400,
-};
+async function ensureBranch(
+  c: import("hono").Context<AppEnv>,
+  branch: string,
+): Promise<void> {
+  if (branch === "main") return;
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const exists = await fj.getBranch(owner, repo, branch);
+  if (exists) return;
+  await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main", sudo });
+}
 
 function likeEscape(s: string): string {
   return s.replace(/[\\%_]/g, (m) => `\\${m}`);
@@ -77,103 +74,15 @@ function plainSnippet(row: { title: string | null; body: string }, terms: string
   return parts;
 }
 
-async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<BranchRow | ResolveError> {
-  const ws = c.get("workspace");
-  const user = c.get("user");
-  const db = c.get("db");
-  const explicit = c.req.query("branchId");
-  if (explicit) {
-    const change = getBranchRow(db, ws.id, explicit);
-    if (!change) return { error: "change not found", code: "not_found" };
-    if (change.state !== "draft" && change.state !== "changes_requested")
-      return { error: `change is ${change.state}; cannot write`, code: "conflict" };
-    if (change.author_user_id !== user.id) return { error: "not your change", code: "forbidden" };
-    return change;
-  }
-  const writable = listWritableForUser(db, ws.id, user.id);
-  if (writable.length === 1) {
-    const change = writable[0];
-    if (change) return change;
-  }
-  if (writable.length > 1) {
-    return {
-      error: `multiple writable changes (${writable.map((d) => d.id).join(", ")}); pass branchId explicitly`,
-      code: "ambiguous",
-    };
-  }
-  // Zero writable changes → create one. Branch is created lazily on first putFile below.
-  const { fj, owner, repo } = c.get("repoCtx");
-  const mainBranch = await fj.getBranch(owner, repo, "main");
-  return createBranchRow(db, {
-    workspaceId: ws.id,
-    authorUserId: user.id,
-    baseSha: mainBranch?.commit?.id ?? null,
-  });
-}
-
-// For reads (get/tree): resolve the ref to read from.
-// - explicit branchId → that change's branch
-// - else if user has exactly one open draft → that draft's branch (the historical "working branch" feel)
-// - else → main
-async function resolveReadRef(c: import("hono").Context<AppEnv>): Promise<{ ref: string; change: BranchRow | null }> {
-  const ws = c.get("workspace");
-  const user = c.get("user");
-  const db = c.get("db");
-  const explicit = c.req.query("branchId");
-  if (explicit) {
-    const change = getBranchRow(db, ws.id, explicit);
-    if (change && (change.state === "draft" || change.state === "review" || change.state === "changes_requested")) {
-      if (change.state === "draft" && change.author_user_id !== user.id) {
-        return { ref: "main", change: null };
-      }
-      if (
-        change.state === "changes_requested" &&
-        change.author_user_id !== user.id &&
-        ws.role !== "owner" &&
-        ws.role !== "verifier"
-      ) {
-        return { ref: "main", change: null };
-      }
-      return { ref: change.branch_name, change };
-    }
-    // Fall through to main if change is closed/missing.
-  }
-  if (!explicit) {
-    const drafts = listOpenDraftsForUser(db, ws.id, user.id);
-    if (drafts.length === 1) {
-      // Verify the branch still exists; if it was deleted (publish merged it),
-      // the change will have been transitioned. Be defensive.
-      const draft = drafts[0];
-      if (draft) return { ref: draft.branch_name, change: draft };
-    }
-  }
-  return { ref: "main", change: null };
-}
-
-async function ensureChangeBranch(
-  c: import("hono").Context<AppEnv>,
-  change: BranchRow,
-): Promise<void> {
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const exists = await fj.getBranch(owner, repo, change.branch_name);
-  if (exists) return;
-  await fj.createBranch(owner, repo, {
-    newBranchName: change.branch_name,
-    oldBranchName: "main",
-    sudo,
-  });
-}
-
 files.get("/:slug/tree", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
-  const { ref } = await resolveReadRef(c);
+  const ref = refFromQuery(c);
   let tree;
   try {
     tree = await fj.getTree(owner, repo, ref, true);
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
-      // change branch missing (e.g. merged); fall back to main
       tree = await fj.getTree(owner, repo, "main", true);
     } else {
       throw err;
@@ -204,13 +113,14 @@ files.get("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
-  const { ref } = await resolveReadRef(c);
+  const ref = refFromQuery(c);
   try {
     const content = await fj.getRawFile(owner, repo, ref, rel);
     return c.json({ content });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
-      // Change branch may not have this file yet — fall back to main.
+      // File not on the branch — fall back to main so the editor can still
+      // show the canonical version.
       try {
         const content = await fj.getRawFile(owner, repo, "main", rel);
         return c.json({ content });
@@ -230,15 +140,14 @@ files.put("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))
     return c.json({ error: "invalid path", code: "validation" }, 400);
+  const branch = refFromQuery(c);
+  if (branch === "main")
+    return c.json({ error: "branch required (cannot write to main)", code: "validation" }, 400);
   const body = (await c.req.json().catch(() => null)) as { content?: string } | null;
   if (body?.content === undefined)
     return c.json({ error: "content required", code: "validation" }, 400);
 
-  const resolved = await resolveWriteChange(c);
-  if ("error" in resolved) return c.json(resolved, STATUS_FOR_CODE[resolved.code]);
-  const change = resolved;
-
-  await ensureChangeBranch(c, change);
+  await ensureBranch(c, branch);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
@@ -246,11 +155,11 @@ files.put("/:slug/file", async (c) => {
   const plan = planIndexPage(db, { workspaceId: ws.id, filePath: rel, bodyText: body.content });
   const finalContent = plan.rewrittenContent ?? body.content;
 
-  const existing = await fj.getFileMeta(owner, repo, change.branch_name, rel);
+  const existing = await fj.getFileMeta(owner, repo, branch, rel);
   let r;
   try {
     r = await fj.putFile(owner, repo, {
-      branch: change.branch_name,
+      branch,
       path: rel,
       content: finalContent,
       sha: existing?.sha,
@@ -262,14 +171,12 @@ files.put("/:slug/file", async (c) => {
       return c.json({ error: "conflict on push", code: "conflict" }, 409);
     throw err;
   }
-  setBranchState(db, ws.id, change.id, change.state); // bumps updated_at
   return c.json({
     ok: true,
-    branchId: change.id,
+    branch,
     meta: { id: plan.cosheafId, type: "page", status: "golden", title: plan.title },
     content: plan.rewrittenContent ?? undefined,
     commit: r.commit?.sha,
-    pending: true,
   });
 });
 
@@ -277,23 +184,21 @@ files.delete("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))
     return c.json({ error: "invalid path", code: "validation" }, 400);
-  const resolved = await resolveWriteChange(c);
-  if ("error" in resolved) return c.json(resolved, STATUS_FOR_CODE[resolved.code]);
-  const change = resolved;
-  await ensureChangeBranch(c, change);
+  const branch = refFromQuery(c);
+  if (branch === "main")
+    return c.json({ error: "branch required (cannot delete on main)", code: "validation" }, 400);
+  await ensureBranch(c, branch);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const ws = c.get("workspace");
-  const meta = await fj.getFileMeta(owner, repo, change.branch_name, rel);
+  const meta = await fj.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json({ error: "not found", code: "not_found" }, 404);
   await fj.deleteFile(owner, repo, {
-    branch: change.branch_name,
+    branch,
     path: rel,
     sha: meta.sha,
     message: `delete ${rel}`,
     sudo,
   });
-  setBranchState(c.get("db"), ws.id, change.id, change.state);
-  return c.json({ ok: true, branchId: change.id, pending: true });
+  return c.json({ ok: true, branch });
 });
 
 files.get("/:slug/search", (c) => {

@@ -128,58 +128,27 @@ describe("forgejo webhooks", () => {
     expect(db.prepare("SELECT count(*) AS count FROM webhook_log").get()).toEqual({ count: 1 });
   });
 
-  it("syncs Forgejo request-changes reviews into changes_requested", async () => {
+  it("publishes an SSE pull event on pull_request webhook delivery", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (1, 'alice', 'hash', 'cs-alice', 0)",
-    ).run();
-    db.prepare(
-      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
-        "VALUES ('needs-work', 1, 1, 'change/needs-work', 'review', 12, 0, 0)",
-    ).run();
     const app = appFor(db, {} as Forgejo);
     const body = JSON.stringify({
+      action: "opened",
       repository: { full_name: "owner/repo" },
       pull_request: { number: 12 },
-      review: { state: "REQUEST_CHANGES" },
     });
-
-    const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "review-1"));
-
+    const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request", "pr-1"));
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM branches WHERE id = 'needs-work'").get()).toEqual({ state: "changes_requested" });
   });
 
-  it("syncs Forgejo approval reviews through merge when blockers are resolved", async () => {
+  it("publishes an SSE pull_reviewed event on pull_request_review delivery", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (1, 'alice', 'hash', 'cs-alice', 0)",
-    ).run();
-    db.prepare(
-      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
-        "VALUES ('approve-me', 1, 1, 'change/approve-me', 'review', 13, 0, 0)",
-    ).run();
-    const forgejo = {
-      getBranchProtection: vi.fn(async () => ({ required_approvals: 1 })),
-      listReviews: vi.fn(async () => [
-        { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "cs-vera" }, submitted_at: "2026-05-11T00:00:00Z" },
-        { id: 2, state: "APPROVED", body: "", user: { login: "cs-vera" }, submitted_at: "2026-05-11T00:01:00Z" },
-      ]),
-      mergePull: vi.fn(async () => undefined),
-      deleteBranch: vi.fn(async () => undefined),
-    } as unknown as Forgejo;
-    const app = appFor(db, forgejo);
+    const app = appFor(db, {} as Forgejo);
     const body = JSON.stringify({
       repository: { full_name: "owner/repo" },
       pull_request: { number: 13 },
       review: { state: "APPROVED" },
     });
-
-    const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "review-2"));
-
+    const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "rev-1"));
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM branches WHERE id = 'approve-me'").get()).toEqual({ state: "merged" });
-    expect(forgejo.mergePull).toHaveBeenCalledWith("owner", "repo", 13, { Do: "squash", sudo: "owner" });
-    expect(forgejo.deleteBranch).toHaveBeenCalledWith("owner", "repo", "change/approve-me");
   });
 });

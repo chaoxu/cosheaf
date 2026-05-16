@@ -82,8 +82,7 @@ describe("workspace provisioning", () => {
 
     expect(result.createdRepo).toBe(true);
     expect(result.workspace.slug).toBe("notes");
-    expect(db.prepare("SELECT role FROM memberships WHERE workspace_id = ? AND user_id = ?").get(result.workspace.id, user.id))
-      .toEqual({ role: "owner" });
+    expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "cs-chao", "admin");
     expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_id = ?").get(result.workspace.id))
       .toEqual({ path: "readme.md" });
     expect(forgejo.createBranchProtection).toHaveBeenCalledOnce();

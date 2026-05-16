@@ -286,12 +286,10 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
     process.exit(1);
   }
   const fj = await ensureForgejoProxy(db, forgejo, user);
-  db.prepare(
-    "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = excluded.role",
-  ).run(ws.id, user.id, role);
-  // Grant write so the user's proxy can push branches; main is still gated by branch protection.
-  await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, fj, "write");
-  if (role === "owner") {
+  await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, fj, role);
+  if (role === "admin") {
+    // Admins can direct-push to main (branch protection has a push whitelist
+    // for direct-merge operations from the cosheaf UI).
     const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
     const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
     if (!current.includes(fj)) {

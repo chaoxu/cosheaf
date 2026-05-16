@@ -1,11 +1,9 @@
-import type { BranchState, ChangeState, Decision } from "../../shared/change-lifecycle";
 import type { Role } from "../../shared/roles";
-import type { ChangeDiff, PrMeta, PullFile } from "../../shared/review";
+import type { ChangeDiff, PrMeta, PrState, PullFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 
-export type { BranchState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineComment, CommentSide };
-/** @deprecated use BranchState */
-export type { ChangeState };
+export type Decision = "approve" | "request_changes" | "comment";
+export type { Role, ChangeDiff, PullFile, PrMeta, PrState, LineComment, CommentSide };
 
 export interface User {
   id: number;
@@ -38,15 +36,8 @@ export interface NoteContent {
 }
 
 export interface Branch {
-  id: string;
-  workspace_id: number;
-  author_user_id: number;
-  branch_name: string;
-  state: BranchState;
-  pr_number: number | null;
-  base_sha: string | null;
-  title: string | null;
-  created_at: number;
+  name: string;
+  commit_sha: string | null;
   updated_at: number;
 }
 /** @deprecated use Branch */
@@ -105,9 +96,7 @@ export interface PublishResult {
 }
 
 export interface DecisionResult {
-  decision: Exclude<Decision, "comment">;
-  branchId: string;
-  state: BranchState;
+  ok: true;
   approvals: number;
   rejections: number;
 }
@@ -178,156 +167,117 @@ export const api = {
   search: (slug: string, q: string) =>
     jsonFetch<{ results: SearchResult[] }>(`${w(slug)}/search${qs({ q })}`).then((r) => r.results),
 
-  // Branches / pull requests
-  branches: (slug: string) =>
-    jsonFetch<{ changes: Branch[] }>(`${w(slug)}/branches`).then((r) => r.changes),
-  createBranch: (slug: string, title?: string) =>
-    jsonFetch<Branch>(`${w(slug)}/branch`, {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    }),
-  discard: (slug: string, branchId: string) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}`, { method: "DELETE" }),
-  publish: (slug: string, branchId: string, mode?: "direct" | "review", title?: string) =>
-    jsonFetch<PublishResult>(`${w(slug)}/publish`, {
-      method: "POST",
-      body: JSON.stringify({ branchId, mode, title }),
-    }),
-  /** @deprecated Use `api.submitReview(slug, prNumber, "APPROVE", body)` (Forgejo-shape). */
-  approve: (slug: string, branchId: string, comment?: string) =>
-    jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ comment: comment ?? null }),
-    }),
-  /** @deprecated Use `api.submitReview(slug, prNumber, "REQUEST_CHANGES", body)` (Forgejo-shape). */
-  requestChanges: (slug: string, branchId: string, comment?: string) =>
-    jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/request-changes`, {
-      method: "POST",
-      body: JSON.stringify({ comment: comment ?? null }),
-    }),
-  /** @deprecated Use `api.submitReview(slug, prNumber, "COMMENT", body)` (Forgejo-shape). */
-  comment: (slug: string, branchId: string, comment?: string) =>
-    jsonFetch<{ ok: true; branchId: string; state: Branch["state"] }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comment`,
-      { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
-    ),
-  close: (slug: string, branchId: string) =>
-    jsonFetch<{ ok: true; branchId: string; state: Branch["state"] }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/close`,
-      { method: "POST" },
-    ),
-  /** @deprecated Use `api.listReviews(slug, prNumber)` (Forgejo-shape). */
-  approvals: (slug: string, branchId: string) =>
-    jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approvals`).then((r) => r.approvals),
+  // ---------- Branches (your in-progress branches, no open PR) ----------
 
-  reviewQueue: (slug: string) =>
-    jsonFetch<{ queue: ReviewQueueEntry[] }>(`${w(slug)}/review-queue`).then((r) => r.queue),
-  /** @deprecated Use `api.listPulls(slug, "open")` (Forgejo-shape). */
-  openBranches: (slug: string) =>
-    jsonFetch<{ changes: OpenBranchRow[] }>(`${w(slug)}/branches/open`).then((r) => r.changes),
+  myBranches: (slug: string) =>
+    jsonFetch<{ branches: Branch[] }>(`${w(slug)}/branches/mine`).then((r) => r.branches),
+  createBranch: (slug: string, name: string) =>
+    jsonFetch<{ name: string }>(`${w(slug)}/branches`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  deleteBranch: (slug: string, name: string) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/branches/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
-  /** @deprecated Use `api.getPull(slug, prNumber)` (Forgejo-shape, returns raw Forgejo PR + cosheaf extras). */
-  pr: (slug: string, branchId: string) =>
-    jsonFetch<{ pr: PrMeta }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/pr`).then((r) => r.pr),
-  /** @deprecated Use `api.listPullFiles(slug, prNumber)` (Forgejo-shape, same per-file body). */
-  diff: (slug: string, branchId: string) =>
-    jsonFetch<ChangeDiff>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/diff`),
+  // ---------- Pulls (Forgejo-shape) ----------
 
-  // ---------- Forgejo-shape endpoints (preferred) ----------
+  listPulls: (slug: string, state: "open" | "closed" | "all" = "open") =>
+    jsonFetch<{ pulls: PrMeta[] }>(`${w(slug)}/pulls?state=${state}`).then((r) => r.pulls),
+  openPull: (
+    slug: string,
+    payload: { head: string; base?: string; title?: string; body?: string },
+  ) =>
+    jsonFetch<PrMeta>(`${w(slug)}/pulls`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getPull: (slug: string, prNumber: number) =>
+    jsonFetch<PrMeta>(`${w(slug)}/pulls/${prNumber}`),
+  mergePull: (slug: string, prNumber: number, Do: "squash" | "merge" | "rebase" = "squash") =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ Do }),
+    }),
+  closePull: (slug: string, prNumber: number) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/close`, { method: "POST" }),
 
-  /** POST /pulls/{n}/reviews — Forgejo-shape review submission. */
+  listPullFiles: (slug: string, prNumber: number) =>
+    jsonFetch<ChangeDiff>(`${w(slug)}/pulls/${prNumber}/files`),
+  pullFile: (slug: string, prNumber: number, path: string, side: "base" | "head") =>
+    jsonFetch<{ content: string }>(
+      `${w(slug)}/pulls/${prNumber}/file?path=${encodeURIComponent(path)}&side=${side}`,
+    ).then((r) => r.content),
+
   submitReview: (
     slug: string,
     prNumber: number,
     event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
     body?: string | null,
   ) =>
-    jsonFetch<unknown>(`${w(slug)}/pulls/${prNumber}/reviews`, {
+    jsonFetch<DecisionResult>(`${w(slug)}/pulls/${prNumber}/reviews`, {
       method: "POST",
       body: JSON.stringify({ event, body: body ?? null }),
     }),
-  /** GET /pulls/{n}/reviews — same shape as the deprecated `api.approvals`. */
   listReviews: (slug: string, prNumber: number) =>
-    jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/pulls/${prNumber}/reviews`).then(
-      (r) => r.approvals,
-    ),
-  /** GET /pulls/{n} — Forgejo PR object plus cosheaf extras (head_sha, base_sha, …). */
-  getPull: (slug: string, prNumber: number) =>
-    jsonFetch<Record<string, unknown>>(`${w(slug)}/pulls/${prNumber}`),
-  /** GET /pulls/{n}/files — same per-file split-patch shape as the deprecated `api.diff`. */
-  listPullFiles: (slug: string, prNumber: number) =>
-    jsonFetch<ChangeDiff>(`${w(slug)}/pulls/${prNumber}/files`),
-  /** GET /pulls?state=open|closed|all — Forgejo-shape PR listing (returns `{ changes }`). */
-  listPulls: (slug: string, state: "open" | "closed" | "all" = "open") =>
-    jsonFetch<{ changes: OpenBranchRow[] }>(`${w(slug)}/pulls?state=${state}`).then(
-      (r) => r.changes,
+    jsonFetch<{ reviews: ApprovalRecord[]; approvals: number; rejections: number }>(
+      `${w(slug)}/pulls/${prNumber}/reviews`,
     ),
 
-  file: (slug: string, branchId: string, path: string, side: "base" | "head") =>
-    jsonFetch<{ content: string }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/file?path=${encodeURIComponent(path)}&side=${side}`,
-    ).then((r) => r.content),
-  comments: (slug: string, branchId: string) =>
-    jsonFetch<{ comments: LineComment[] }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comments`,
-    ).then((r) => r.comments),
+  // ---------- Line comments on a PR ----------
+
+  listComments: (slug: string, prNumber: number) =>
+    jsonFetch<{ comments: LineComment[] }>(`${w(slug)}/pulls/${prNumber}/comments`).then((r) => r.comments),
   addComment: (
     slug: string,
-    branchId: string,
+    prNumber: number,
     payload: { path: string; line: number; side: CommentSide; body: string },
   ) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/comments`, {
+    jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/comments`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  editComment: (slug: string, branchId: string, commentId: number, body: string) =>
+  editComment: (slug: string, prNumber: number, commentId: number, body: string) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/comments/${commentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body }),
+    }),
+  deleteComment: (slug: string, prNumber: number, commentId: number, reviewId: number) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comments/${commentId}`,
-      {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body }),
-      },
-    ),
-  deleteComment: (slug: string, branchId: string, commentId: number, reviewId: number) =>
-    jsonFetch<{ ok: true }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comments/${commentId}?review_id=${reviewId}`,
+      `${w(slug)}/pulls/${prNumber}/comments/${commentId}?review_id=${reviewId}`,
       { method: "DELETE" },
     ),
-  startDraftReview: (slug: string, branchId: string) =>
-    jsonFetch<{ review_id: number }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/draft-review`,
-      { method: "POST" },
-    ),
+
+  startDraftReview: (slug: string, prNumber: number) =>
+    jsonFetch<{ review_id: number }>(`${w(slug)}/pulls/${prNumber}/draft-review`, { method: "POST" }),
   addDraftReviewComment: (
     slug: string,
-    branchId: string,
-    review_id: number,
+    prNumber: number,
+    reviewId: number,
     payload: { path: string; line: number; side: CommentSide; body: string },
   ) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/draft-review/${review_id}/comments`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      },
+      `${w(slug)}/pulls/${prNumber}/draft-review/${reviewId}/comments`,
+      { method: "POST", body: JSON.stringify(payload) },
     ),
   submitDraftReview: (
     slug: string,
-    branchId: string,
-    review_id: number,
+    prNumber: number,
+    reviewId: number,
     payload: { event: "approve" | "request_changes" | "comment"; body?: string },
   ) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/branch/${encodeURIComponent(branchId)}/draft-review/${review_id}/submit`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      },
+      `${w(slug)}/pulls/${prNumber}/draft-review/${reviewId}/submit`,
+      { method: "POST", body: JSON.stringify(payload) },
     ),
+
+  // ---------- Workspace settings ----------
+
+  getSettings: (slug: string) => jsonFetch<{ min_approvals: number }>(`${w(slug)}/settings`),
+  updateSettings: (slug: string, body: { min_approvals: number }) =>
+    jsonFetch<{ min_approvals: number }>(`${w(slug)}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   listTokens: () =>
     jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),

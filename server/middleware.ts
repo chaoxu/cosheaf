@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
+import type { Forgejo } from "./forgejo.js";
 import { userFromSession, userFromToken, ensureForgejoProxy } from "./users.js";
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -23,30 +24,61 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+// In-process cache of Forgejo collaborator-permission lookups. Forgejo is SoT;
+// this avoids a Forgejo round-trip on every workspace request. TTL is short so
+// permission revocations propagate quickly enough for our use.
+interface PermCacheEntry { role: Role | "none"; expiresAt: number }
+const PERM_CACHE = new Map<string, PermCacheEntry>();
+const PERM_TTL_MS = 30_000;
+
+export function _resetPermCacheForTests(): void {
+  PERM_CACHE.clear();
+}
+
+export function _seedPermCacheForTests(
+  owner: string,
+  repo: string,
+  forgejoUsername: string,
+  role: Role,
+): void {
+  PERM_CACHE.set(`${owner}/${repo}/${forgejoUsername}`, {
+    role,
+    expiresAt: Date.now() + 60_000,
+  });
+}
+
+async function fetchRole(
+  fj: Forgejo,
+  owner: string,
+  repo: string,
+  forgejoUsername: string,
+): Promise<Role | "none"> {
+  const key = `${owner}/${repo}/${forgejoUsername}`;
+  const now = Date.now();
+  const cached = PERM_CACHE.get(key);
+  if (cached && cached.expiresAt > now) return cached.role;
+  const p = await fj.getRepoPermission(owner, repo, forgejoUsername);
+  PERM_CACHE.set(key, { role: p, expiresAt: now + PERM_TTL_MS });
+  return p;
+}
+
 export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => async (c, next) => {
   const slug = c.req.param(param);
   if (!slug) return c.json({ error: "workspace required", code: "validation" }, 400);
   const db = c.get("db");
-  const user = c.get("user");
   const row = db
-    .prepare(
-      "SELECT workspaces.id AS id, workspaces.name AS name, workspaces.forgejo_repo AS forgejo_repo, memberships.role AS role " +
-        "FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id " +
-        "WHERE workspaces.slug = ? AND memberships.user_id = ?",
-    )
-    .get(slug, user.id) as
-    | { id: number; name: string; forgejo_repo: string; role: Role }
-    | undefined;
+    .prepare("SELECT id, name, forgejo_repo FROM workspaces WHERE slug = ?")
+    .get(slug) as { id: number; name: string; forgejo_repo: string } | undefined;
   if (!row) return c.json({ error: "workspace not found", code: "not_found" }, 404);
-  c.set("workspace", { id: row.id, slug, name: row.name, forgejoRepo: row.forgejo_repo, role: row.role });
-  // The same Forgejo + (owner, repo, sudo) tuple is needed in nearly every
-  // workspace-scoped handler. Materialize it once so each route doesn't
-  // re-pull from c.get() and accidentally forget the sudo header.
-  c.set("repoCtx", {
-    fj: c.get("forgejo"),
-    owner: c.get("config").forgejoOwner,
-    repo: row.forgejo_repo,
-    sudo: c.get("forgejoUsername"),
-  });
+
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const fjName = c.get("forgejoUsername");
+  const role = await fetchRole(fj, owner, row.forgejo_repo, fjName);
+  if (role === "none")
+    return c.json({ error: "workspace not found", code: "not_found" }, 404);
+
+  c.set("workspace", { id: row.id, slug, name: row.name, forgejoRepo: row.forgejo_repo, role });
+  c.set("repoCtx", { fj, owner, repo: row.forgejo_repo, sudo: fjName });
   await next();
 };

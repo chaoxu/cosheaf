@@ -172,6 +172,29 @@ export class Forgejo {
     return this.req<ForgejoUser[]>(`/api/v1/repos/${owner}/${repo}/collaborators`);
   }
 
+  // Returns "admin"|"write"|"read"|"none". `owner` is collapsed to `admin` so
+  // routes have one fewer level to gate on. 404 on the repo (or unknown user)
+  // surfaces as "none" — the workspace middleware treats that as no access.
+  async getRepoPermission(
+    owner: string,
+    repo: string,
+    username: string,
+  ): Promise<"admin" | "write" | "read" | "none"> {
+    try {
+      const r = await this.req<{ permission?: string }>(
+        `/api/v1/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}/permission`,
+      );
+      const p = r.permission;
+      if (p === "owner" || p === "admin") return "admin";
+      if (p === "write") return "write";
+      if (p === "read") return "read";
+      return "none";
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return "none";
+      throw e;
+    }
+  }
+
   // ---------------- branch protection ----------------
 
   async getBranchProtection(owner: string, repo: string, branch: string): Promise<ForgejoBranchProtection | null> {
@@ -332,6 +355,23 @@ export class Forgejo {
         old_branch_name: opts.oldBranchName ?? "main",
       },
     });
+  }
+
+  async listBranches(owner: string, repo: string): Promise<ForgejoBranch[]> {
+    const out: ForgejoBranch[] = [];
+    let page = 1;
+    while (true) {
+      const batch = await this.req<ForgejoBranch[]>(
+        `/api/v1/repos/${owner}/${repo}/branches`,
+        { query: { page, per_page: 50 } },
+      );
+      if (batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < 50) break;
+      page++;
+      if (page > 50) break;
+    }
+    return out;
   }
 
   async getBranch(owner: string, repo: string, branch: string): Promise<ForgejoBranch | null> {

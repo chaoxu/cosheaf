@@ -5,7 +5,6 @@ import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
-import { syncBranchFromPr, syncBranchFromReview } from "./changes.js";
 import { deleteIssue, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssue } from "../forgejo.js";
 
@@ -119,13 +118,12 @@ webhooks.post("/forgejo", async (c) => {
         for (const path of removed) sse.publish(ws.slug, { type: "remove", path });
       }
     } else if (event === "pull_request") {
+      // PR state lives on Forgejo; we only ping clients to refetch.
       const pr = payload.pull_request as Record<string, unknown> | undefined;
       if (pr) {
         const number = pr.number as number;
-        const merged = !!pr.merged;
-        const state = pr.state as "open" | "closed";
-        syncBranchFromPr(db, ws.id, number, state, merged);
-        sse.publish(ws.slug, { type: "queue" });
+        const action = String(payload.action ?? "");
+        sse.publish(ws.slug, { type: "pull", number, action });
       }
     } else if (event === "pull_request_review") {
       const pr = payload.pull_request as Record<string, unknown> | undefined;
@@ -133,18 +131,8 @@ webhooks.post("/forgejo", async (c) => {
       const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
       const state = String(review?.state ?? "");
       if (Number.isFinite(number) && state) {
-        const synced = await syncBranchFromReview(db, ws.id, fj, owner, ws.forgejo_repo, number, state);
-        if (synced?.state === "changes_requested") {
-          sse.publish(ws.slug, { type: "branch_changes_requested", id: synced.id });
-        } else if (synced?.state === "merged") {
-          sse.publish(ws.slug, { type: "branch_merged", id: synced.id });
-        } else if (state === "APPROVED" && synced) {
-          sse.publish(ws.slug, { type: "branch_approved", id: synced.id });
-        } else if (state === "COMMENT" && synced) {
-          sse.publish(ws.slug, { type: "branch_commented", id: synced.id });
-        }
+        sse.publish(ws.slug, { type: "pull_reviewed", number, state });
       }
-      sse.publish(ws.slug, { type: "queue" });
     } else if (event === "issues") {
       const issue = payload.issue as ForgejoIssue | undefined;
       const action = String(payload.action ?? "");

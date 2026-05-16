@@ -31,12 +31,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS memberships (
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('owner', 'verifier', 'member')),
-  PRIMARY KEY (workspace_id, user_id)
-);
+-- Memberships: removed. Role and access are sourced from Forgejo's
+-- collaborator-permission API; middleware queries Forgejo and caches.
 
 CREATE TABLE IF NOT EXISTS doc_map (
   cosheaf_id TEXT NOT NULL,
@@ -88,26 +84,10 @@ CREATE TABLE IF NOT EXISTS webhook_log (
   event_type TEXT NOT NULL
 );
 
--- Sidecar rows for the branch / pull-request workflow. Lifecycle:
--- draft → review → changes_requested → review → merged, or closed terminal
--- state. (The state literal `changes_requested` mirrors Forgejo's
--- REQUEST_CHANGES review event and is intentionally retained.)
-CREATE TABLE IF NOT EXISTS branches (
-  id TEXT PRIMARY KEY,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  author_user_id INTEGER NOT NULL REFERENCES users(id),
-  branch_name TEXT NOT NULL,
-  state TEXT NOT NULL CHECK (state IN ('draft', 'review', 'changes_requested', 'merged', 'closed')),
-  pr_number INTEGER,
-  base_sha TEXT,
-  title TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_branches_workspace_state ON branches (workspace_id, state);
-CREATE INDEX IF NOT EXISTS idx_branches_author_state ON branches (workspace_id, author_user_id, state);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_branch ON branches (workspace_id, branch_name);
-CREATE INDEX IF NOT EXISTS idx_branches_pr ON branches (workspace_id, pr_number);
+-- Branches and pull requests: removed. They live on Forgejo as their natural
+-- representation. The server reads them on demand via the Forgejo client and
+-- relies on push/PR/review webhooks only for cache invalidation (page
+-- reindex on push; issue mirror on issue events). No SQLite workflow state.
 
 -- Issues mirror Forgejo issues. They live alongside branches in the same
 -- Forgejo repo; here we cache the metadata for fast listing + author/assignee

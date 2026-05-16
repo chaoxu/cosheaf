@@ -2,12 +2,13 @@ import { useState } from "react";
 import type { ReactElement } from "react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
-import type { BranchState, Decision, Role } from "../api";
+import type { Decision, PrState, Role } from "../api";
 
 const muted = "text-[var(--cf-muted)]";
 
 export function ReviewActions({
   state,
+  merged,
   role,
   isAuthor,
   onSubmit,
@@ -16,7 +17,8 @@ export function ReviewActions({
   draftReviewActive,
   onToggleDraftReview,
 }: {
-  state: BranchState;
+  state: PrState;
+  merged: boolean;
   role: Role;
   isAuthor: boolean;
   onSubmit: (decision: Decision, body: string) => void | Promise<void>;
@@ -26,20 +28,20 @@ export function ReviewActions({
   onToggleDraftReview?: () => void | Promise<void>;
 }): ReactElement | null {
   const [body, setBody] = useState("");
+  const isTerminal = merged || state === "closed";
+  const canDecide = role !== "read" && !isAuthor && !isTerminal;
+  const canCloseAsAuthor = isAuthor && !isTerminal;
+  const canCloseAsAdmin = role === "admin" && !isTerminal;
+  const canClose = canCloseAsAuthor || canCloseAsAdmin;
 
-  const canDecide = (role === "owner" || role === "verifier") && !isAuthor;
-  const canCloseAsAuthor = isAuthor && state !== "merged" && state !== "closed";
-  const canCloseAsOwner = role === "owner" && state !== "merged" && state !== "closed";
-  const canClose = canCloseAsAuthor || canCloseAsOwner;
-
-  if (state === "merged" || state === "closed") {
+  if (isTerminal) {
     return (
       <footer
         data-testid="review-actions"
         className="flex items-center gap-2 px-4 py-3 border-t border-[var(--cf-border)]"
       >
         <span className={cn("text-sm", muted)}>
-          {state === "merged" ? "Merged — no further actions." : "Closed."}
+          {merged ? "Merged — no further actions." : "Closed."}
         </span>
       </footer>
     );

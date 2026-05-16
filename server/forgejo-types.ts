@@ -113,7 +113,15 @@ export interface ForgejoNotificationThread {
   };
   repository: { full_name: string; name: string };
 }
-export interface ForgejoBranch { name: string; commit: { id: string } }
+export interface ForgejoBranch {
+  name: string;
+  commit: {
+    id: string;
+    timestamp?: string;
+    author?: { username?: string; name?: string; email?: string };
+    committer?: { username?: string; name?: string; email?: string };
+  };
+}
 export interface ForgejoBranchProtection { branch_name: string; required_approvals: number }
 export interface ForgejoHook { id: number; type: string; events: string[] }
 export interface ForgejoContent {

@@ -12,7 +12,7 @@ export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
       className="flex flex-col gap-1 px-4 py-3 border-b border-[var(--cf-border)]"
     >
       <div className="flex items-baseline gap-2">
-        <Badge variant={badgeVariant(pr.state)}>{pr.state}</Badge>
+        <Badge variant={badgeVariant(pr.state, pr.merged)}>{pr.merged ? "merged" : pr.state}</Badge>
         <h2 className="text-base font-semibold leading-tight flex-1 truncate" title={pr.title}>
           {pr.title}
         </h2>
@@ -31,8 +31,8 @@ export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
   );
 }
 
-function badgeVariant(state: PrMeta["state"]): "golden" | "rejected" | "outline" {
-  if (state === "merged") return "golden";
-  if (state === "closed" || state === "changes_requested") return "rejected";
+function badgeVariant(state: PrMeta["state"], merged: boolean): "golden" | "rejected" | "outline" {
+  if (merged) return "golden";
+  if (state === "closed") return "rejected";
   return "outline";
 }

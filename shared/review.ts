@@ -1,7 +1,5 @@
 // Types shared by server and client for the PR review surface.
 
-import type { BranchState } from "./change-lifecycle.js";
-
 export type PullFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
 
 export interface PullFile {
@@ -17,12 +15,17 @@ export interface ChangeDiff {
   files: PullFile[];
 }
 
+// Forgejo PR state vocabulary. Cosheaf no longer stores its own workflow
+// state — `open` and `closed` come straight from Forgejo, and `merged` is
+// distinguished by the `merged: true` flag on a closed PR.
+export type PrState = "open" | "closed";
+
 export interface PrMeta {
   number: number;
   title: string;
   body: string;
-  state: BranchState;
-  author_user_id: number;
+  state: PrState;
+  merged: boolean;
   author_username: string;
   created_at: number;
   merged_at: number | null;

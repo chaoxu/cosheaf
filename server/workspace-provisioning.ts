@@ -112,25 +112,15 @@ function upsertWorkspace(
   if (existing) {
     db.prepare("UPDATE workspaces SET name = ?, forgejo_repo = ? WHERE id = ?")
       .run(options.name, repoName, existing.id);
-    db.prepare(
-      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner') " +
-        "ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = 'owner'",
-    ).run(existing.id, options.user.id);
     return { ...existing, name: options.name, forgejo_repo: repoName };
   }
 
-  return db.transaction(() => {
-    const workspace = db
-      .prepare(
-        "INSERT INTO workspaces (slug, name, forgejo_repo, created_at) VALUES (?, ?, ?, ?) " +
-          "RETURNING id, slug, name, forgejo_repo",
-      )
-      .get(options.slug, options.name, repoName, Date.now()) as WorkspaceRow;
-    db.prepare(
-      "INSERT INTO memberships (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
-    ).run(workspace.id, options.user.id);
-    return workspace;
-  })();
+  return db
+    .prepare(
+      "INSERT INTO workspaces (slug, name, forgejo_repo, created_at) VALUES (?, ?, ?, ?) " +
+        "RETURNING id, slug, name, forgejo_repo",
+    )
+    .get(options.slug, options.name, repoName, Date.now()) as WorkspaceRow;
 }
 
 export async function ensureWorkspacePermissions(
@@ -141,7 +131,9 @@ export async function ensureWorkspacePermissions(
 ): Promise<void> {
   if (forgejoUsername !== config.forgejoOwner) {
     try {
-      await forgejo.addCollaborator(config.forgejoOwner, repoName, forgejoUsername, "write");
+      // The creator becomes the workspace owner — Forgejo "admin" so they can
+      // change settings (e.g. branch protection) and direct-merge.
+      await forgejo.addCollaborator(config.forgejoOwner, repoName, forgejoUsername, "admin");
     } catch (err) {
       if (!(err instanceof ForgejoError && err.status === 409)) {
         console.warn(`addCollaborator failed: ${(err as Error).message}`);
