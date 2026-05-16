@@ -182,7 +182,7 @@ export function IssueView({
                           >
                             <span aria-hidden>{checked ? "✓" : " "}</span>
                             <span
-                              className="inline-block w-2 h-2 rounded-full"
+                              className="inline-block size-2 rounded-full"
                               style={{ backgroundColor: `#${l.color}` }}
                             />
                             <span>{l.name}</span>
@@ -501,7 +501,7 @@ function DependencySection({
     >
       <div className={cn("text-xs uppercase tracking-wide", muted)}>{title}</div>
       {items.length === 0 ? (
-        <div className={cn("text-xs", muted)}>—</div>
+        <div className={cn("text-xs", muted)}>·</div>
       ) : (
         <ul className="m-0 p-0 list-none flex flex-col gap-0.5">
           {items.map((it) => (

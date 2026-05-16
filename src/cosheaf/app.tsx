@@ -645,7 +645,7 @@ function TokensScreen({
             )}
           >
             <div className={cn("text-xs", muted)}>
-              {created.name} — copy this now, it won't be shown again:
+              {created.name}: copy this now, it won't be shown again:
             </div>
             <code className="select-all break-all rounded border border-[var(--cf-border)] p-2 font-mono">
               {created.token}

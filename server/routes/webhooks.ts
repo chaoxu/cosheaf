@@ -100,15 +100,25 @@ webhooks.post("/forgejo", async (c) => {
         for (const path of removed) {
           if (path.endsWith(".md")) deletePage(db, ws.id, path);
         }
+        const mdPaths = [...touched].filter((p) => p.endsWith(".md"));
+        // Parallel fetch — each Forgejo getRawFile is independent and the
+        // indexPage write is local; sequential blew up the tail when a
+        // push touched many notes.
+        const results = await Promise.all(
+          mdPaths.map((path) =>
+            fj.getRawFile(owner, ws.forgejo_repo, "main", path).then(
+              (body) => ({ path, body, error: null as string | null }),
+              (err: unknown) => ({ path, body: "", error: (err as Error).message }),
+            ),
+          ),
+        );
         const failures: string[] = [];
-        for (const path of touched) {
-          if (!path.endsWith(".md")) continue;
-          try {
-            const body = await fj.getRawFile(owner, ws.forgejo_repo, "main", path);
-            indexPage(db, { workspaceId: ws.id, filePath: path, bodyText: body });
-          } catch (err) {
-            failures.push(`${path}: ${(err as Error).message}`);
+        for (const r of results) {
+          if (r.error) {
+            failures.push(`${r.path}: ${r.error}`);
+            continue;
           }
+          indexPage(db, { workspaceId: ws.id, filePath: r.path, bodyText: r.body });
         }
         if (failures.length > 0) {
           throw new Error(`reindex failed: ${failures.join("; ")}`);

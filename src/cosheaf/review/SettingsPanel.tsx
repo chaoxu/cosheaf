@@ -73,7 +73,7 @@ function LabelsManager({ workspaceSlug }: { workspaceSlug: string }): ReactEleme
                 style={{ backgroundColor: `#${l.color}33`, color: `#${l.color}` }}
               >
                 <span
-                  className="inline-block w-2 h-2 rounded-full"
+                  className="inline-block size-2 rounded-full"
                   style={{ backgroundColor: `#${l.color}` }}
                   aria-hidden
                 />
@@ -185,7 +185,7 @@ function MilestonesManager({ workspaceSlug }: { workspaceSlug: string }): ReactE
                 {m.open_issues} open · {m.closed_issues} closed
                 {m.due_on && ` · due ${new Date(m.due_on).toLocaleDateString()}`}
               </span>
-              {m.description && <span className={cn("text-xs", muted)}>— {m.description}</span>}
+              {m.description && <span className={cn("text-xs", muted)}>· {m.description}</span>}
             </li>
           ))}
         </ul>

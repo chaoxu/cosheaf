@@ -206,11 +206,22 @@ export async function reindexWorkspaceFromForgejo(
 ): Promise<number> {
   const seen = new Set<string>();
   const tree = await forgejo.getTree(config.forgejoOwner, workspace.forgejo_repo, "main", true);
-  for (const entry of tree) {
-    if (entry.type !== "blob" || !entry.path.endsWith(".md")) continue;
-    const body = await forgejo.getRawFile(config.forgejoOwner, workspace.forgejo_repo, "main", entry.path);
-    indexPage(db, { workspaceId: workspace.id, filePath: entry.path, bodyText: body });
-    seen.add(entry.path);
+  const mdPaths = tree
+    .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
+    .map((e) => e.path);
+  // Fetch all markdown bodies in parallel — each getRawFile is independent
+  // and the indexPage write that follows is local. Note Forgejo rate limits
+  // aren't a concern at this volume (one workspace's tree).
+  const bodies = await Promise.all(
+    mdPaths.map((path) =>
+      forgejo
+        .getRawFile(config.forgejoOwner, workspace.forgejo_repo, "main", path)
+        .then((body) => ({ path, body })),
+    ),
+  );
+  for (const { path, body } of bodies) {
+    indexPage(db, { workspaceId: workspace.id, filePath: path, bodyText: body });
+    seen.add(path);
   }
 
   const indexed = db
