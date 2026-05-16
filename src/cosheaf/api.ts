@@ -43,20 +43,15 @@ export interface Branch {
 /** @deprecated use Branch */
 export type Change = Branch;
 
-export interface ReviewQueueEntry {
-  id: string;
-  title: string;
-  pr_number: number | null;
-  author_user_id: number;
-  created_at: number;
-  approvals: number;
-  rejections: number;
-}
-/** @deprecated use ReviewQueueEntry */
-export type QueueEntry = ReviewQueueEntry;
+// Queue + open-PR rows are now thin views over the Forgejo PrMeta. Old
+// cosheaf-side fields (`id`, `author_user_id`, `state ∈ {review, changes_requested}`,
+// approvals) have been replaced by Forgejo's PR number, author_username,
+// open/closed + `merged: boolean`, and a derived approvals count fetched
+// alongside.
+export type ReviewQueueEntry = PrMeta & { approvals: number; rejections: number };
+export type OpenBranchRow = PrMeta;
 
 export interface ApprovalRecord {
-  verifier_user_id: number;
   username: string;
   decision: Decision;
   comment: string | null;
@@ -146,21 +141,20 @@ export const api = {
       body: JSON.stringify({ slug, name }),
     }),
 
-  tree: (slug: string, branchId?: string) =>
-    jsonFetch<{ files: FileEntry[] }>(`${w(slug)}/tree${qs({ branchId })}`).then((r) => r.files),
+  tree: (slug: string, branch?: string) =>
+    jsonFetch<{ files: FileEntry[] }>(`${w(slug)}/tree${qs({ branch })}`).then((r) => r.files),
 
-  getFile: (slug: string, path: string, branchId?: string) =>
-    jsonFetch<NoteContent>(`${w(slug)}/file${qs({ path, branchId })}`),
-  putFile: (slug: string, path: string, content: string, branchId?: string) =>
-    jsonFetch<{ ok: true; branchId: string; meta: DocumentMeta; content?: string; pending?: boolean }>(
-      `${w(slug)}/file${qs({ path, branchId })}`,
+  getFile: (slug: string, path: string, branch?: string) =>
+    jsonFetch<NoteContent>(`${w(slug)}/file${qs({ path, branch })}`),
+  putFile: (slug: string, path: string, content: string, branch: string) =>
+    jsonFetch<{ ok: true; branch: string; meta: DocumentMeta; content?: string; commit?: string }>(
+      `${w(slug)}/file${qs({ path, branch })}`,
       { method: "PUT", body: JSON.stringify({ content }) },
     ),
-  deleteFile: (slug: string, path: string, branchId?: string) =>
-    jsonFetch<{ ok: true; branchId: string; pending: boolean }>(
-      `${w(slug)}/file${qs({ path, branchId })}`,
-      { method: "DELETE" },
-    ),
+  deleteFile: (slug: string, path: string, branch: string) =>
+    jsonFetch<{ ok: true; branch: string }>(`${w(slug)}/file${qs({ path, branch })}`, {
+      method: "DELETE",
+    }),
 
   backlinks: (slug: string, id: string) =>
     jsonFetch<{ backlinks: Backlink[] }>(`${w(slug)}/backlinks${qs({ id })}`).then((r) => r.backlinks),
@@ -414,13 +408,3 @@ export type {
   TimelineEvent,
 };
 
-export interface OpenBranchRow {
-  id: string;
-  title: string | null;
-  state: "review" | "changes_requested";
-  pr_number: number | null;
-  author_user_id: number;
-  updated_at: number;
-}
-/** @deprecated use OpenBranchRow */
-export type OpenChangeRow = OpenBranchRow;
