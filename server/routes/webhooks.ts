@@ -155,31 +155,11 @@ webhooks.post("/forgejo", async (c) => {
           action: String(payload.action ?? ""),
         });
       }
-    } else if (event === "pull_request_review_comment") {
-      const pr = payload.pull_request as Record<string, unknown> | undefined;
-      const action = String(payload.action ?? "");
-      const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
-      const type =
-        action === "created"
-          ? "comment_added"
-          : action === "edited"
-            ? "comment_edited"
-            : action === "deleted"
-              ? "comment_deleted"
-              : null;
-      if (type && Number.isFinite(number)) {
-        const row = db
-          .prepare("SELECT id FROM branches WHERE workspace_id = ? AND pr_number = ?")
-          .get(ws.id, number) as { id: string } | undefined;
-        if (row) sse.publish(ws.slug, { type, id: row.id });
-      }
     }
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
       deliveryId, Date.now(), event,
     );
   });
   if (deduped) return c.json({ ok: true, dedup: true });
-  // issues/comments are not surfaced to the UI yet — drop them.
-
   return c.json({ ok: true });
 });

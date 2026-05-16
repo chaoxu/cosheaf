@@ -251,7 +251,6 @@ async function workspaceRm(slug: string): Promise<void> {
       process.exit(1);
     }
   }
-  // Cascade deletes memberships, doc_map, etc.
   db.prepare("DELETE FROM workspaces WHERE id = ?").run(ws.id);
   // FTS / backlinks / page_tags reference workspace_id without FK cascade; clean explicitly.
   db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(ws.id);

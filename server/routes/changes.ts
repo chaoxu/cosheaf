@@ -246,9 +246,11 @@ changes.post("/:slug/pulls/:n/merge", async (c) => {
 changes.post("/:slug/pulls/:n/close", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  const ws = c.get("workspace");
+  if (ws.role === "read") return c.json({ error: "write access required", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.editPull(owner, repo, n, { state: "closed" }, sudo);
-  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "closed" });
+  c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
   return c.json({ ok: true });
 });
 

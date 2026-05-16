@@ -11,7 +11,13 @@ files.use("/:slug/*", requireMembership());
 
 function safeRel(p: string | undefined): string | null {
   if (!p) return null;
-  if (p.includes("\0") || p.startsWith("/") || p.includes("..")) return null;
+  if (p.startsWith("/") || p.startsWith("\\")) return null;
+  for (let i = 0; i < p.length; i++) {
+    const code = p.charCodeAt(i);
+    if (code < 0x20 || p[i] === "\\") return null;
+  }
+  if (p.split(/[/\\]/).some((seg) => seg === ".." || seg === "")) return null;
+  if (/%2e%2e/i.test(p) || /%2f/i.test(p)) return null;
   return p;
 }
 
@@ -23,15 +29,21 @@ function refFromQuery(c: import("hono").Context<AppEnv>): string {
   return b && b.length > 0 ? b : "main";
 }
 
+// Auto-create the target branch from `main` if it doesn't exist, but only if
+// the name is prefixed with `user/<sudo>/` — otherwise reject. Without this
+// gate, `PUT /file?branch=<arbitrary>` is an unbounded branch-creation
+// primitive for any write member (including misbehaving clients).
 async function ensureBranch(
   c: import("hono").Context<AppEnv>,
   branch: string,
-): Promise<void> {
-  if (branch === "main") return;
+): Promise<"ok" | "forbidden"> {
+  if (branch === "main") return "ok";
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, branch);
-  if (exists) return;
+  if (exists) return "ok";
+  if (!branch.startsWith(`user/${sudo}/`)) return "forbidden";
   await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main", sudo });
+  return "ok";
 }
 
 function likeEscape(s: string): string {
@@ -147,7 +159,9 @@ files.put("/:slug/file", async (c) => {
   if (body?.content === undefined)
     return c.json({ error: "content required", code: "validation" }, 400);
 
-  await ensureBranch(c, branch);
+  const ensured = await ensureBranch(c, branch);
+  if (ensured === "forbidden")
+    return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
@@ -187,7 +201,9 @@ files.delete("/:slug/file", async (c) => {
   const branch = refFromQuery(c);
   if (branch === "main")
     return c.json({ error: "branch required (cannot delete on main)", code: "validation" }, 400);
-  await ensureBranch(c, branch);
+  const ensured = await ensureBranch(c, branch);
+  if (ensured === "forbidden")
+    return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const meta = await fj.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json({ error: "not found", code: "not_found" }, 404);
