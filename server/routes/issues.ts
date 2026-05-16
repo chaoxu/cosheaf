@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import { requireAdmin, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { listIssues, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
@@ -80,9 +80,8 @@ issues.get("/:slug/issues/pinned", async (c) => {
 });
 
 // POST /api/v1/w/:slug/issues/:number/pin — owner-only (Forgejo enforces too)
-issues.post("/:slug/issues/:number/pin", async (c) => {
+issues.post("/:slug/issues/:number/pin", requireAdmin, async (c) => {
   const ws = c.get("workspace");
-  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   // Forgejo restricts pinning to repo owner/admin; cosheaf's workspace owner
@@ -96,9 +95,8 @@ issues.post("/:slug/issues/:number/pin", async (c) => {
 });
 
 // DELETE /api/v1/w/:slug/issues/:number/pin — owner-only
-issues.delete("/:slug/issues/:number/pin", async (c) => {
+issues.delete("/:slug/issues/:number/pin", requireAdmin, async (c) => {
   const ws = c.get("workspace");
-  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -167,9 +165,7 @@ issues.get("/:slug/labels", async (c) => {
 });
 
 // POST /api/v1/w/:slug/labels — owners only
-issues.post("/:slug/labels", async (c) => {
-  const ws = c.get("workspace");
-  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
+issues.post("/:slug/labels", requireAdmin, async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     name?: string;
     color?: string;
@@ -298,9 +294,7 @@ issues.get("/:slug/milestones", async (c) => {
   });
 });
 
-issues.post("/:slug/milestones", async (c) => {
-  const ws = c.get("workspace");
-  if (ws.role !== "admin") return c.json({ error: "owner required", code: "forbidden" }, 403);
+issues.post("/:slug/milestones", requireAdmin, async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     title?: string;
     description?: string;

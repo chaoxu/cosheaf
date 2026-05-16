@@ -298,7 +298,6 @@ changes.post("/:slug/pulls/:n/close", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
-  if (ws.role === "read") return c.json({ error: "write access required", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.editPull(owner, repo, n, { state: "closed" }, sudo);
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
@@ -387,7 +386,6 @@ changes.post("/:slug/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
-  if (ws.role === "read") return c.json({ error: "write access required", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
@@ -439,16 +437,13 @@ changes.get("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
-  const [reviews, metas, unified] = await Promise.all([
-    fj.listReviews(owner, repo, n),
+  const [allComments, metas, unified] = await Promise.all([
+    fj.listPullComments(owner, repo, n).catch(() => []),
     fj.listPullFiles(owner, repo, n),
     fj.getPullDiff(owner, repo, n),
   ]);
   const patchesByPath = new Map(splitUnifiedDiff(unified).map((p) => [p.path, p.patch]));
   const status = new Map(metas.map((m) => [m.filename, m.status]));
-  const allComments = (
-    await Promise.all(reviews.map((r) => fj.listReviewComments(owner, repo, n, r.id).catch(() => [])))
-  ).flat();
   const out: LineComment[] = allComments.map((cm) => {
     const patch = patchesByPath.get(cm.path);
     const pos = cm.position ?? cm.original_position;
@@ -473,7 +468,6 @@ changes.post("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
-  if (ws.role === "read") return c.json({ error: "write access required", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
@@ -542,8 +536,6 @@ async function findOrCreatePendingReview(
 changes.post("/:slug/pulls/:n/draft-review", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
-  const ws = c.get("workspace");
-  if (ws.role === "read") return c.json({ error: "write access required", code: "forbidden" }, 403);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
@@ -558,7 +550,6 @@ changes.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
   const rid = Number(c.req.param("rid"));
   if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);
   const ws = c.get("workspace");
-  if (ws.role === "read") return c.json({ error: "write access required", code: "forbidden" }, 403);
   const input = parseCommentInput(await c.req.json().catch(() => null));
   if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");

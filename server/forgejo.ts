@@ -537,6 +537,15 @@ export class Forgejo {
     );
   }
 
+  // All review comments on a PR in one call — no per-review fan-out.
+  async listPullComments(
+    owner: string, repo: string, index: number,
+  ): Promise<ForgejoPullReviewComment[]> {
+    return this.req<ForgejoPullReviewComment[]>(
+      `/api/v1/repos/${owner}/${repo}/pulls/${index}/comments`,
+    );
+  }
+
   // Forgejo doesn't expose PATCH on /pulls/.../reviews/{id}/comments/{cid}
   // (only GET/DELETE). Review-comment edits go through the generic
   // issue-comment endpoint, which Forgejo treats as the same record.
