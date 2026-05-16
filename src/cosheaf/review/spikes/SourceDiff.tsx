@@ -1,8 +1,8 @@
-// Unified diff via react-diff-view. The library handles patch parsing,
-// gutter line numbers, +/-/normal styling; we override colors to match
-// cosheaf's theme, render the "+ add comment" affordance inside the gutter
-// on hover (via renderGutter), and inject comment threads + inline composer
-// through the library's `widgets` map.
+// Source-mode diff renderer for all three shapes (unified, split, after only).
+// Uses react-diff-view for parsing + rendering + line numbers + +/- styling;
+// overlays comment threads via the library's `widgets` slot and the inline
+// "+ add comment" gutter button via renderGutter. Same library, different
+// `viewType` and patch payload per shape.
 
 import { useState } from "react";
 import type { ReactElement, ReactNode } from "react";
@@ -30,33 +30,42 @@ function lineFor(change: ParsedChange): { newLine?: number; oldLine?: number } {
   return { newLine: change.newLineNumber, oldLine: change.oldLineNumber };
 }
 
-export function UnifiedSourceDiff({
+export function SourceDiff({
   file,
   comments,
   currentForgejoUsername,
   onAddComment,
   onEditComment,
   onDeleteComment,
-}: SpikeProps): ReactElement {
+  viewType = "unified",
+  testId,
+  patchOverride,
+}: SpikeProps & {
+  viewType?: "unified" | "split";
+  testId: string;
+  // When set, the renderer uses this patch instead of file.patch. Used by
+  // the After-only view to feed a synthesized "whole file with adds marked"
+  // patch into the same renderer.
+  patchOverride?: string;
+}): ReactElement {
   const [composerAt, setComposerAt] = useState<AddCommentTarget | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!file.patch) {
+  const rawPatch = patchOverride ?? file.patch;
+  if (!rawPatch) {
     return <div className={cn("p-3 text-sm", muted)}>(no textual diff)</div>;
   }
 
   // Forgejo gives body-only patches; react-diff-view wants the `diff --git`
   // header. Synthesize one when missing.
-  const withHeader = file.patch.startsWith("diff --git")
-    ? file.patch
-    : `diff --git a/${file.path} b/${file.path}\n--- a/${file.path}\n+++ b/${file.path}\n${file.patch}`;
+  const withHeader = rawPatch.startsWith("diff --git")
+    ? rawPatch
+    : `diff --git a/${file.path} b/${file.path}\n--- a/${file.path}\n+++ b/${file.path}\n${rawPatch}`;
   const parsed = parseDiff(withHeader)[0];
   if (!parsed) return <div className={cn("p-3 text-sm", muted)}>(could not parse diff)</div>;
 
   const byLine = groupCommentsByLine(comments);
 
-  // Build a widgets map keyed by change. Each entry is a column-spanning row
-  // appended right under its anchor change.
   const widgets: Record<string, ReactNode> = {};
   for (const hunk of parsed.hunks) {
     for (const change of hunk.changes) {
@@ -112,9 +121,9 @@ export function UnifiedSourceDiff({
   }
 
   return (
-    <div data-testid="diff-pane-unified" className="cf-unified-diff text-[12.5px]">
+    <div data-testid={testId} className="cf-unified-diff text-[12.5px]">
       <Diff
-        viewType="unified"
+        viewType={viewType}
         diffType={parsed.type}
         hunks={parsed.hunks}
         widgets={widgets}
@@ -131,8 +140,6 @@ export function UnifiedSourceDiff({
                 ? { line: oldLine, side: "old" as const }
                 : null;
           if (!onAddComment || !target) return renderDefault();
-          // The button is always present in the DOM (so tests and keyboard
-          // users can reach it) but visually hidden until the row is hovered.
           return (
             <span className="cf-gutter-with-add">
               {renderDefault()}
@@ -156,4 +163,30 @@ export function UnifiedSourceDiff({
       </Diff>
     </div>
   );
+}
+
+// Synthesize a unified-patch string that covers the whole head file: every
+// line is either a context line (` `) or an addition (`+`), based on the
+// addedLines set. Used by the "After only" Source view so the same library
+// renders it.
+export function synthesizeFullFilePatch(
+  content: string,
+  addedLineSet: ReadonlySet<number>,
+): string {
+  const lines = content.split("\n");
+  // Drop trailing empty line from a final \n so the patch doesn't over-count.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  const total = lines.length;
+  // Count context lines (= total - additions) for the hunk header. With
+  // diff convention, old-side count = context-line count, new-side = total.
+  let contextCount = 0;
+  const body: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const ln = i + 1;
+    const isAdded = addedLineSet.has(ln);
+    if (!isAdded) contextCount += 1;
+    body.push((isAdded ? "+" : " ") + lines[i]);
+  }
+  const header = `@@ -1,${contextCount || 0} +1,${total} @@`;
+  return `${header}\n${body.join("\n")}`;
 }

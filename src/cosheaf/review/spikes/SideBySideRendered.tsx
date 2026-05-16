@@ -1,12 +1,14 @@
+// Rich "Side-by-side" view: base and head rendered through coflat-editor.
+// Reader sees both versions of the page as they will appear, side by side.
+// Source mode for split is handled separately (SourceDiff in `viewType="split"`),
+// not via this component. This file is rich-only.
+
 import { useMemo } from "react";
 import type { ReactElement } from "react";
-import type { StandaloneEditorMode } from "@chaoxu/coflat-editor";
 import { cn } from "../../lib/utils";
 import { MarkdownEditor } from "../../editor";
 import { commentThreadExtension } from "../cm-comment-widgets";
 import { useFileSide } from "../use-file-side";
-import { SourceLineView } from "./SourceLineView";
-import { diffLineNumbers } from "../diff-lines";
 import type { LineComment } from "../../api";
 import type { SpikeProps } from "../spike-types";
 
@@ -17,49 +19,44 @@ export function SideBySideRendered({
   loadContent,
   comments,
   currentForgejoUsername,
-  onAddComment,
   onEditComment,
   onDeleteComment,
-  mode,
-}: SpikeProps & { mode: StandaloneEditorMode }): ReactElement {
+}: SpikeProps): ReactElement {
   const base = useFileSide(loadContent, "base", file.status !== "added", file.path);
   const head = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const error = base.error ?? head.error;
 
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;
 
-  const sharedProps = {
+  const shared = {
     file,
     comments,
     currentForgejoUsername,
-    onAddComment,
     onEditComment,
     onDeleteComment,
-    mode,
   };
 
   return (
     <div
       data-testid="diff-pane-split"
-      // Zero out coflat's sidenote gutter so rich-mode panes fill their column width.
+      // Zero out coflat's sidenote gutter so each pane's rich content fills
+      // its column width.
       style={{ ["--cf-sidenote-width" as never]: "0px", ["--cf-content-max-width" as never]: "none" }}
       className="grid grid-cols-2 divide-x divide-[var(--cf-border)]"
     >
       <Pane
-        {...sharedProps}
+        {...shared}
         label="base"
         side="old"
         content={base.content}
         emptyLabel={file.status === "added" ? "(new file)" : null}
-        addedLines={[]}
       />
       <Pane
-        {...sharedProps}
+        {...shared}
         label="head"
         side="new"
         content={head.content}
         emptyLabel={file.status === "deleted" ? "(deleted)" : null}
-        addedLines={diffLineNumbers(file.patch, "added")}
       />
     </div>
   );
@@ -67,28 +64,22 @@ export function SideBySideRendered({
 
 function Pane({
   label,
-  mode,
   content,
   emptyLabel,
   comments,
   side,
   file,
-  addedLines,
   currentForgejoUsername,
-  onAddComment,
   onEditComment,
   onDeleteComment,
 }: {
   label: "base" | "head";
-  mode: StandaloneEditorMode;
   content: string | null;
   emptyLabel: string | null;
   comments: readonly LineComment[];
   side: "new" | "old";
   file: SpikeProps["file"];
-  addedLines: Iterable<number>;
   currentForgejoUsername?: string;
-  onAddComment?: SpikeProps["onAddComment"];
   onEditComment?: SpikeProps["onEditComment"];
   onDeleteComment?: SpikeProps["onDeleteComment"];
 }): ReactElement {
@@ -113,18 +104,6 @@ function Pane({
           <div className={cn("p-3 text-sm", muted)}>{emptyLabel}</div>
         ) : content === null ? (
           <div className={cn("p-3 text-sm", muted)}>Loading…</div>
-        ) : mode === "source" ? (
-          <SourceLineView
-            content={content}
-            addedLines={addedLines}
-            filePath={file.path}
-            comments={comments}
-            side={side}
-            currentForgejoUsername={currentForgejoUsername}
-            onAddComment={onAddComment}
-            onEditComment={onEditComment}
-            onDeleteComment={onDeleteComment}
-          />
         ) : (
           <MarkdownEditor
             key={`${label}-rich-${file.path}`}

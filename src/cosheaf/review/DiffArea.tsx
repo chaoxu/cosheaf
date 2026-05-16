@@ -3,7 +3,8 @@ import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import type { LineComment, PullFile } from "../api";
 import type { SpikeProps, ViewMode, ViewShape } from "./spike-types";
-import { UnifiedSourceDiff } from "./spikes/UnifiedSourceDiff";
+import { SourceDiff } from "./spikes/SourceDiff";
+import { SourceAfterOnly } from "./spikes/SourceAfterOnly";
 import { HeadWithTint } from "./spikes/HeadWithTint";
 import { SideBySideRendered } from "./spikes/SideBySideRendered";
 
@@ -149,9 +150,16 @@ function Toggle<T extends string>({
 }
 
 function renderView(mode: ViewMode, shape: ViewShape, props: SpikeProps): ReactElement {
-  if (shape === "unified") return <UnifiedSourceDiff {...props} />;
-  if (shape === "split") return <SideBySideRendered {...props} mode={mode} />;
-  return <HeadWithTint {...props} mode={mode} />;
+  // Source mode: every shape renders via react-diff-view (parsing + line
+  // numbers + +/- styling + gutter + comment widgets all in one library).
+  if (mode === "source") {
+    if (shape === "unified") return <SourceDiff {...props} testId="diff-pane-unified" />;
+    if (shape === "split") return <SourceDiff {...props} viewType="split" testId="diff-pane-split" />;
+    return <SourceAfterOnly {...props} />;
+  }
+  // Rich mode: coflat-editor renders the markdown (math, headings, ...).
+  if (shape === "split") return <SideBySideRendered {...props} />;
+  return <HeadWithTint {...props} />;
 }
 
 function readMode(key: string): ViewMode {
