@@ -6,11 +6,14 @@ import { deletePage, indexPage } from "./indexer.js";
 import { reindexAllIssues } from "./issues-indexer.js";
 import type { User } from "./users.js";
 
+// Forgejo events we subscribe to. The cosheaf webhook handler in
+// `server/routes/webhooks.ts` switches on these exact strings — if you
+// add to this list, add a handler branch too, or Forgejo will keep
+// re-delivering an event we always 200-noop.
 const WEBHOOK_EVENTS = [
   "push",
   "pull_request",
   "pull_request_review",
-  "pull_request_comment",
   "issues",
   "issue_comment",
 ];

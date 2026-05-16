@@ -4,6 +4,11 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { planIndexPage } from "../indexer.js";
+import {
+  MAX_ASSET_BYTES,
+  MAX_ASSET_DISPLAY,
+  userBranchPrefix,
+} from "../../shared/conventions.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -41,7 +46,7 @@ async function ensureBranch(
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, branch);
   if (exists) return "ok";
-  if (!branch.startsWith(`user/${sudo}/`)) return "forbidden";
+  if (!branch.startsWith(userBranchPrefix(sudo))) return "forbidden";
   await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main", sudo });
   return "ok";
 }
@@ -209,8 +214,8 @@ files.post("/:slug/assets", async (c) => {
   const file = form?.get("file");
   if (!(file instanceof File))
     return c.json({ error: "file field required", code: "validation" }, 400);
-  if (file.size > 25 * 1024 * 1024)
-    return c.json({ error: "asset exceeds 25 MiB", code: "validation" }, 400);
+  if (file.size > MAX_ASSET_BYTES)
+    return c.json({ error: `asset exceeds ${MAX_ASSET_DISPLAY}`, code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const ensured = await ensureBranch(c, branch);
   if (ensured === "forbidden")

@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Command, InvalidArgumentError } from "commander";
+import { WORKSPACE_SLUG_RE } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
 import {
   createUser,
@@ -104,8 +105,8 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   if (missing.length > 0) {
     throw new Error(`seed requires ${missing.join(", ")}`);
   }
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(workspace ?? "")) {
-    throw new Error("workspace must match /^[a-z0-9][a-z0-9-]*$/");
+  if (!WORKSPACE_SLUG_RE.test(workspace ?? "")) {
+    throw new Error(`workspace must match ${WORKSPACE_SLUG_RE}`);
   }
   return {
     user: user as string,

@@ -35,6 +35,7 @@ import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import type { LineComment } from "../../shared/comments.js";
 import type { PrMeta, PullFileStatus } from "../../shared/review.js";
+import { userBranchPrefix } from "../../shared/conventions.js";
 
 export const changes = new Hono<AppEnv>();
 changes.use("*", requireAuth);
@@ -160,7 +161,7 @@ changes.get("/:slug/branches/mine", async (c) => {
   // file PUT auto-create. This is deterministic — unlike scanning the
   // latest commit's author/committer, which falls over after rebase,
   // cherry-pick, or a web-UI edit attributed to a different user.
-  const prefix = `user/${sudo}/`;
+  const prefix = userBranchPrefix(sudo);
   const mine = branches
     .filter((b) => b.name.startsWith(prefix) && !openHeads.has(b.name))
     .map((b) => ({

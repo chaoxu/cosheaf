@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
+import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { requireAuth } from "../middleware.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 
@@ -34,7 +35,7 @@ workspaces.post("/", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { slug?: string; name?: string } | null;
   if (!body?.slug || !body.name)
     return c.json({ error: "slug and name required", code: "validation" }, 400);
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(body.slug))
+  if (!WORKSPACE_SLUG_RE.test(body.slug))
     return c.json({ error: "invalid slug", code: "validation" }, 400);
 
   const db = c.get("db");

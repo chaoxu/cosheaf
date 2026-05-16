@@ -33,6 +33,11 @@ import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { cn } from "./lib/utils";
 import { formatRelativeTime } from "./lib/format-relative-time";
+import {
+  MAX_ASSET_BYTES,
+  MAX_ASSET_DISPLAY,
+  userBranchPrefix,
+} from "../../shared/conventions";
 import { PrHeader } from "./review/PrHeader";
 import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
@@ -1495,7 +1500,7 @@ function WorkspaceView({
   const branchForWrite = useCallback(
     (): string =>
       currentBranchNameRef.current ??
-      `user/${user.forgejo_username ?? user.username}/wip-${shortId()}`,
+      `${userBranchPrefix(user.forgejo_username ?? user.username)}wip-${shortId()}`,
     [user],
   );
 
@@ -1556,7 +1561,7 @@ function WorkspaceView({
   const editorAssetUploader = useMemo<EditorAssetUploader>(
     () => ({
       accept: (file) =>
-        file.size > 25 * 1024 * 1024 ? { reject: "asset exceeds 25 MiB" } : null,
+        file.size > MAX_ASSET_BYTES ? { reject: `asset exceeds ${MAX_ASSET_DISPLAY}` } : null,
       upload: async (file) => {
         if (reviewingPullNumberRef.current)
           return { error: "review mode is read-only" };
@@ -1945,7 +1950,8 @@ function WorkspaceView({
     if (!path.endsWith(".md")) path += ".md";
     setBusy(true);
     const branch =
-      currentBranchName ?? `user/${user.forgejo_username ?? user.username}/wip-${shortId()}`;
+      currentBranchName ??
+      `${userBranchPrefix(user.forgejo_username ?? user.username)}wip-${shortId()}`;
     api
       .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`, branch)
       .then((r) => {
