@@ -10,10 +10,12 @@ Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
 math-native: do not add theorem graphs, proof dependency models, or other
 semantic math layers unless explicitly requested.
 
-Coflat is the only supported document format for now. Do not introduce
-format-plug-in architecture or alternate document formats unless explicitly
-requested; future support for that should stay a design possibility, not an
-assumption in current code.
+Coflat markdown is one of the document formats cosheaf supports, and currently
+the only one. The codebase carries a `DocumentFormat` seam
+(`server/document-format/`, `src/cosheaf/document-format/`) so additional
+formats can be added cleanly later; touch that seam through the
+`coflatMarkdownFormat` singleton rather than reaching into its internals.
+Don't add a second format until one is asked for.
 
 Agents (autoprover and friends) are out of scope here. They will live in a
 separate layer and participate as ordinary verifier/member users over the same
