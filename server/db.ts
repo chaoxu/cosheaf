@@ -63,6 +63,18 @@ let dbInstance: Database.Database | null = null;
 // existing DBs. The sidecar is rebuildable; we don't preserve FTS content —
 // `pnpm cli workspace reindex <slug>` regenerates it from Forgejo. The
 // migration is idempotent: it only runs if the columns are still present.
+// Drop the legacy `issues` / `issue_assignees` tables on existing DBs.
+// The mirror is gone; routes now proxy to Forgejo directly.
+function migrateDropIssuesSidecar(db: Database.Database): void {
+  db.exec(`
+    DROP INDEX IF EXISTS idx_issues_state;
+    DROP INDEX IF EXISTS idx_issues_author;
+    DROP INDEX IF EXISTS idx_issue_assignees_user;
+    DROP TABLE IF EXISTS issue_assignees;
+    DROP TABLE IF EXISTS issues;
+  `);
+}
+
 function migrateDropDocKindColumns(db: Database.Database): void {
   const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
   const hasLegacyDocMapCols = docMapCols.some((c) => c.name === "doc_type" || c.name === "forgejo_kind");
@@ -103,6 +115,7 @@ export function getDb(config: Config): Database.Database {
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
   migrateDropDocKindColumns(db);
+  migrateDropIssuesSidecar(db);
   dbInstance = db;
   return db;
 }

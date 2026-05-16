@@ -570,13 +570,27 @@ export class Forgejo {
   // ---------- issues ----------
 
   async listIssues(
-    owner: string, repo: string, opts: { state?: "open" | "closed" | "all"; page?: number; limit?: number } = {},
+    owner: string,
+    repo: string,
+    opts: {
+      state?: "open" | "closed" | "all";
+      page?: number;
+      limit?: number;
+      // Forgejo accepts these as repo-scoped filters; values are Forgejo usernames.
+      assigned_by?: string;
+      created_by?: string;
+      // Title/body free-text search. Forgejo's `q` is title-only on /issues.
+      q?: string;
+    } = {},
   ): Promise<ForgejoIssue[]> {
     const params = new URLSearchParams();
     params.set("type", "issues"); // exclude PRs; Forgejo's /issues endpoint returns both
     if (opts.state) params.set("state", opts.state);
     if (opts.page) params.set("page", String(opts.page));
     if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.assigned_by) params.set("assigned_by", opts.assigned_by);
+    if (opts.created_by) params.set("created_by", opts.created_by);
+    if (opts.q) params.set("q", opts.q);
     return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues?${params.toString()}`);
   }
 

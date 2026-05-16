@@ -15,7 +15,6 @@ export interface IssueRow {
   title: string;
   state: "open" | "closed";
   author_login: string;
-  author_user_id: number | null;
   labels: string[];
   comment_count: number;
   created_at: number;

@@ -1,35 +1,29 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAdmin, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
-import { DELETED_USER_LOGIN } from "../forgejo-types.js";
-import { listIssues, upsertIssue } from "../issues-indexer.js";
+import { DELETED_USER_LOGIN, type ForgejoIssue } from "../forgejo-types.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
 import type {
   ActivityRow,
   DependencyRow,
   IssueComment,
   IssueDetail,
+  IssueRow,
   Milestone,
   TimelineEvent,
 } from "../../shared/issues.js";
 
-// Refresh the sidecar mirror of an issue after a Forgejo mutation. Many
-// fields (updated_at, comment_count, labels, milestone) change on the
-// Forgejo side and would lag here until the next webhook delivery. Calling
-// this keeps the cache coherent immediately.
-async function syncIssue(
-  c: import("hono").Context<AppEnv>,
-  number: number,
-): Promise<void> {
-  const ws = c.get("workspace");
-  const { fj, owner, repo } = c.get("repoCtx");
-  try {
-    const fresh = await fj.getIssue(owner, repo, number);
-    upsertIssue(c.get("db"), ws.id, fresh);
-  } catch (_err) {
-    // Best-effort. If the refetch fails, the webhook will eventually
-    // reconcile; the caller's primary write has already succeeded.
-  }
+function toIssueRow(i: ForgejoIssue): IssueRow {
+  return {
+    number: i.number,
+    title: i.title,
+    state: i.state,
+    author_login: i.user?.login ?? DELETED_USER_LOGIN,
+    labels: i.labels.map((l) => l.name),
+    comment_count: i.comments,
+    created_at: new Date(i.created_at).getTime(),
+    updated_at: new Date(i.updated_at).getTime(),
+  };
 }
 
 export const issues = new Hono<AppEnv>();
@@ -38,28 +32,36 @@ issues.use("/:slug/*", requireMembership());
 issues.use("/:slug/*", requireWriteOnMutation);
 
 // GET /api/v1/w/:slug/issues?state=open|closed|all&filter=mine|assigned|all
-issues.get("/:slug/issues", (c) => {
-  const ws = c.get("workspace");
+issues.get("/:slug/issues", async (c) => {
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
   const stateRaw = c.req.query("state");
   const state: "open" | "closed" | "all" =
     stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
   const filter = c.req.query("filter");
   const q = c.req.query("q") ?? undefined;
-  const userId = c.get("user").id;
-  const db = c.get("db");
+  // The sidecar used to compute these locally; Forgejo's repo-scoped /issues
+  // already supports the same filters, so proxy through with `Sudo` so it
+  // resolves against the caller's identity.
   if (filter === "mine") {
-    const authored = listIssues(db, ws.id, { state, authorUserId: userId, q });
-    const assigned = listIssues(db, ws.id, { state, assigneeUserId: userId, q });
-    const byNum = new Map<number, (typeof authored)[number]>();
-    for (const x of authored) byNum.set(x.number, x);
-    for (const x of assigned) byNum.set(x.number, x);
+    // "mine" = authored OR assigned. Forgejo doesn't OR these server-side,
+    // so two calls + dedupe. They're cheap and the response is small.
+    const [authored, assigned] = await Promise.all([
+      fj.listIssues(owner, repo, { state, created_by: sudo, q }),
+      fj.listIssues(owner, repo, { state, assigned_by: sudo, q }),
+    ]);
+    const byNum = new Map<number, IssueRow>();
+    for (const i of [...authored, ...assigned]) {
+      if (!i.pull_request) byNum.set(i.number, toIssueRow(i));
+    }
     const merged = Array.from(byNum.values()).sort((a, b) => b.updated_at - a.updated_at);
     return c.json({ issues: merged });
   }
-  if (filter === "assigned") {
-    return c.json({ issues: listIssues(db, ws.id, { state, assigneeUserId: userId, q }) });
-  }
-  return c.json({ issues: listIssues(db, ws.id, { state, q }) });
+  const list = await fj.listIssues(owner, repo, {
+    state,
+    q,
+    ...(filter === "assigned" ? { assigned_by: sudo } : {}),
+  });
+  return c.json({ issues: list.filter((i) => !i.pull_request).map(toIssueRow) });
 });
 
 // GET /api/v1/w/:slug/issues/pinned — must come before :number routes.
@@ -107,14 +109,12 @@ issues.delete("/:slug/issues/:number/pin", requireAdmin, async (c) => {
 
 // GET /api/v1/w/:slug/issues/:number — full issue from Forgejo (body + meta)
 issues.get("/:slug/issues/:number", async (c) => {
-  const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   try {
     const issue = await fj.getIssue(owner, repo, number);
     if (issue.pull_request) return c.json({ error: "not an issue" }, 404);
-    upsertIssue(c.get("db"), ws.id, issue);
     const detail: IssueDetail = {
       number: issue.number,
       title: issue.title,
@@ -152,7 +152,6 @@ issues.post("/:slug/issues", async (c) => {
     labels: body.labels,
     sudo,
   });
-  upsertIssue(c.get("db"), ws.id, created);
   c.get("sse").publish(ws.slug, { type: "issue", number: created.number, action: "opened" });
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
 });
@@ -192,7 +191,6 @@ issues.put("/:slug/issues/:number/labels", async (c) => {
     return c.json({ error: "labels (number[]) required", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const labels = await fj.setIssueLabels(owner, repo, number, body.labels, sudo);
-  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "labeled" });
   return c.json({ labels });
 });
@@ -213,7 +211,6 @@ async function transitionIssue(
     state,
     sudo,
   });
-  upsertIssue(c.get("db"), ws.id, updated);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: state });
   return c.json({ ok: true, state: updated.state });
 }
@@ -228,7 +225,6 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
     return c.json({ error: "body required", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const cm = await fj.createIssueComment(owner, repo, number, body.body.trim(), sudo);
-  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
   const created: IssueComment = {
     id: cm.id,
@@ -249,7 +245,6 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
     return c.json({ error: "body required", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const cm = await fj.editIssueComment(owner, repo, commentId, body.body.trim(), sudo);
-  await syncIssue(c, Number(c.req.param("number")));
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
     number: Number(c.req.param("number")),
@@ -264,7 +259,6 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   const commentId = Number(c.req.param("id"));
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.deleteIssueComment(owner, repo, commentId, sudo);
-  await syncIssue(c, Number(c.req.param("number")));
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
     number: Number(c.req.param("number")),
@@ -323,7 +317,6 @@ issues.put("/:slug/issues/:number/milestone", async (c) => {
     milestone: milestoneId,
     sudo,
   });
-  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "milestone" });
   return c.json({ ok: true });
 });
@@ -358,7 +351,6 @@ issues.post("/:slug/issues/:number/dependencies", async (c) => {
     return c.json({ error: "bad number / index", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.addIssueDependency(owner, repo, number, body.index, sudo);
-  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_added" });
   return c.json({ ok: true });
 });
@@ -371,7 +363,6 @@ issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
     return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.removeIssueDependency(owner, repo, number, dep, sudo);
-  await syncIssue(c, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_removed" });
   return c.json({ ok: true });
 });
