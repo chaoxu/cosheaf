@@ -4,6 +4,7 @@
 
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { extractReferences } from "@chaoxu/coflat-editor/parse";
 import { extractTitle, generateDocId, parseDocument, serializeDocument } from "./frontmatter.js";
 
 export interface PageIngest {
@@ -131,13 +132,18 @@ interface ExtractedLink {
   raw: string;
 }
 
-const CROSSREF = /\[@([^\]\s]+)\]/g;
-const MD_LINK = /\[([^\]\n]*)\]\(([^)\s]+\.md(?:#[^)\s]+)?)\)/g;
-
 function extractLinks(body: string): ExtractedLink[] {
   const out: ExtractedLink[] = [];
-  for (const m of body.matchAll(CROSSREF)) out.push({ kind: "id", ref: m[1].trim(), raw: m[0] });
-  for (const m of body.matchAll(MD_LINK)) out.push({ kind: "path", ref: m[2], raw: m[0] });
+  for (const ref of extractReferences(body)) {
+    if (ref.kind === "ref" && ref.mode === "bracketed" && ref.key) {
+      // Coflat's `raw` is `@key`; cosheaf's historical label is `[@key]`.
+      out.push({ kind: "id", ref: ref.key, raw: `[@${ref.key}]` });
+    } else if (ref.kind === "link" && ref.href) {
+      // Match only markdown links targeting .md pages (with optional fragment).
+      if (!/\.md(?:#[^)\s]+)?$/.test(ref.href)) continue;
+      out.push({ kind: "path", ref: ref.href, raw: ref.raw });
+    }
+  }
   return out;
 }
 
