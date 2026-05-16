@@ -10,6 +10,9 @@ export const CHANGE_STATES = [
   "closed",
 ] as const;
 export type ChangeState = (typeof CHANGE_STATES)[number];
+// Forgejo-shaped alias for new code. ChangeState stays the canonical export
+// because too many call sites reference it; treat them as interchangeable.
+export type BranchState = ChangeState;
 
 export type Decision = "approve" | "request_changes" | "comment";
 

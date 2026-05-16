@@ -15,7 +15,7 @@ export async function loginAs(page: Page, username: string) {
 
 export async function openReview(page: Page, expectMarker = "Pythagoras") {
   await page.getByTestId("sidebar-tab-inbox").click();
-  await page.locator('[data-testid^="queue-change-"]').first().click();
+  await page.locator('[data-testid^="review-queue-branch-"]').first().click();
   await page.getByTestId("pr-header").waitFor({ state: "visible" });
   // Default mode/shape lands on Source + Unified.
   await page.getByTestId("view-mode-source").click();

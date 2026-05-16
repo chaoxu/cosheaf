@@ -88,9 +88,10 @@ CREATE TABLE IF NOT EXISTS webhook_log (
   event_type TEXT NOT NULL
 );
 
--- Unified change primitive: replaces working/<user> branches and revision/<id>
--- branches with a single change/<id> namespace. Lifecycle: draft → review →
--- changes_requested → review → merged, or closed terminal state.
+-- Sidecar rows for the branch / pull-request workflow. The table is
+-- legacy-named `changes`; routes, types, and UI now use branch / PR
+-- vocabulary on the wire. Lifecycle: draft → review → changes_requested →
+-- review → merged, or closed terminal state.
 CREATE TABLE IF NOT EXISTS changes (
   id TEXT PRIMARY KEY,
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

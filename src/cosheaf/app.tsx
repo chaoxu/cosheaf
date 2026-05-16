@@ -21,9 +21,9 @@ import {
   type IssueRow,
   type LineComment,
   type NotificationRow,
-  type OpenChangeRow,
+  type OpenBranchRow,
   type PrMeta,
-  type QueueEntry,
+  type ReviewQueueEntry,
   type SearchResult,
   type TokenInfo,
   type User,
@@ -705,8 +705,8 @@ function InboxOrActivity({
   onNewIssue,
 }: {
   kind: "inbox" | "activity";
-  queue: readonly QueueEntry[];
-  openPrs: readonly OpenChangeRow[];
+  queue: readonly ReviewQueueEntry[];
+  openPrs: readonly OpenBranchRow[];
   issues: readonly IssueRow[];
   pinned: readonly IssueRow[];
   activities: readonly ActivityRow[];
@@ -716,7 +716,7 @@ function InboxOrActivity({
   query: string;
   setQuery: (q: string) => void;
   onRefresh: () => void;
-  onReviewChange: (entry: QueueEntry) => void;
+  onReviewChange: (entry: ReviewQueueEntry) => void;
   onOpenIssue: (number: number) => void;
   onOpenPr: (number: number) => void;
   onMarkNotifRead: (id: number) => void;
@@ -728,7 +728,7 @@ function InboxOrActivity({
   // In Inbox+All or Activity: every open PR in the workspace.
   const useOpenList = !isInbox || scope === "all";
   const q = query.trim().toLowerCase();
-  const sourceQueue: QueueEntry[] = useOpenList
+  const sourceQueue: ReviewQueueEntry[] = useOpenList
     ? openPrs.map((r) => ({
         id: r.id,
         title: r.title ?? r.id,
@@ -842,7 +842,7 @@ function InboxOrActivity({
       <ul className="m-0 p-0">
         {visibleQueue.map((entry) => (
           <li key={`pr-${entry.id}`}>
-            <FileRow onClick={() => onReviewChange(entry)} testId={`queue-change-${entry.id}`}>
+            <FileRow onClick={() => onReviewChange(entry)} testId={`review-queue-branch-${entry.id}`}>
               <span className="text-[10px] uppercase tracking-wide bg-blue-500/15 text-blue-700 rounded px-1 mr-1">PR</span>
               <strong>{entry.title}</strong>
               <span className={cn("text-xs", muted)}>
@@ -1156,13 +1156,13 @@ function WorkspaceView({
   const [newPath, setNewPath] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-  const [queue, setQueue] = useState<QueueEntry[] | null>(null);
+  const [queue, setQueue] = useState<ReviewQueueEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "settings">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
-  const [openChanges, setOpenChanges] = useState<OpenChangeRow[] | null>(null);
+  const [openBranches, setOpenBranches] = useState<OpenBranchRow[] | null>(null);
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
@@ -1174,7 +1174,7 @@ function WorkspaceView({
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
-  const [reviewingChangeId, setReviewingChangeId] = useState<string | null>(null);
+  const [reviewingBranchId, setReviewingBranchId] = useState<string | null>(null);
   const [reviewState, setReviewState] = useState<{
     pr: PrMeta | null;
     diff: ChangeDiff | null;
@@ -1186,33 +1186,33 @@ function WorkspaceView({
   // The active writable change id; set synchronously from each save response.
   // We track only the id to avoid a stale-state race between setHasPending
   // and a separate listChanges round-trip.
-  const [currentChangeId, setCurrentChangeId] = useState<string | null>(null);
+  const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
   const [changesReady, setChangesReady] = useState(false);
-  const activeChangeId = reviewingChangeId ?? currentChangeId;
+  const activeBranchId = reviewingBranchId ?? currentBranchId;
   const filesRef = useRef<FileEntry[] | null>(null);
   const openRequestRef = useRef(0);
 
   const reloadTree = useCallback(() => {
     api
-      .tree(workspace.slug, activeChangeId ?? undefined)
+      .tree(workspace.slug, activeBranchId ?? undefined)
       .then(setFiles)
       .catch((err: unknown) =>
         setStatus(err instanceof ApiError ? err.message : "Failed to load tree"),
       );
-  }, [workspace.slug, activeChangeId]);
+  }, [workspace.slug, activeBranchId]);
 
   useEffect(reloadTree, [reloadTree]);
   useEffect(() => {
     filesRef.current = files;
   }, [files]);
 
-  const reloadChanges = useCallback((markReady = false) => {
+  const reloadBranches = useCallback((markReady = false) => {
     if (markReady) setChangesReady(false);
     api
-      .listChanges(workspace.slug)
-      .then((changes) => {
-        const writable = changes.filter((change) => change.state === "draft" || change.state === "changes_requested");
-        setCurrentChangeId(writable.length === 1 ? (writable[0]?.id ?? null) : null);
+      .branches(workspace.slug)
+      .then((branches) => {
+        const writableBranches = branches.filter((b) => b.state === "draft" || b.state === "changes_requested");
+        setCurrentBranchId(writableBranches.length === 1 ? (writableBranches[0]?.id ?? null) : null);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -1221,16 +1221,16 @@ function WorkspaceView({
   }, [workspace.slug]);
 
   useEffect(() => {
-    reloadChanges(true);
-  }, [reloadChanges]);
+    reloadBranches(true);
+  }, [reloadBranches]);
 
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
-  const reviewingChangeIdRef = useRef<string | null>(null);
+  const reviewingBranchIdRef = useRef<string | null>(null);
   // Tracks the change_id the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
-  // branch even after currentChangeId is nulled by publish.
-  const openFileChangeIdRef = useRef<string | null>(null);
+  // branch even after currentBranchId is nulled by publish.
+  const openFileBranchIdRef = useRef<string | null>(null);
   useEffect(() => {
     openPathRef.current = openPath;
   }, [openPath]);
@@ -1238,8 +1238,8 @@ function WorkspaceView({
     dirtyRef.current = dirty;
   }, [dirty]);
   useEffect(() => {
-    reviewingChangeIdRef.current = reviewingChangeId;
-  }, [reviewingChangeId]);
+    reviewingBranchIdRef.current = reviewingBranchId;
+  }, [reviewingBranchId]);
 
   useEffect(() => {
     const url = `/api/v1/w/${encodeURIComponent(workspace.slug)}/events`;
@@ -1262,7 +1262,7 @@ function WorkspaceView({
             setStatus("file deleted on server");
           } else if (!dirtyRef.current) {
             api
-              .getFile(workspace.slug, event.path, openFileChangeIdRef.current ?? undefined)
+              .getFile(workspace.slug, event.path, openFileBranchIdRef.current ?? undefined)
               .then((r) => setContent(r.content))
               .catch(() => undefined);
           }
@@ -1271,26 +1271,26 @@ function WorkspaceView({
         // PR opened/merged/closed/reviewed: refresh the queue list so any
         // open queue tab updates without a manual click.
         api
-          .queue(workspace.slug)
+          .reviewQueue(workspace.slug)
           .then(setQueue)
           .catch(() => undefined);
-        reloadChanges();
+        reloadBranches();
         reloadTree();
       } else if (event.type.startsWith("comment_")) {
-        // SSE handler can't close over the reviewingChangeId state directly
+        // SSE handler can't close over the reviewingBranchId state directly
         // (the effect deps would re-subscribe on every entry/exit), so read
         // through the ref kept in sync below.
-        const id = reviewingChangeIdRef.current;
+        const id = reviewingBranchIdRef.current;
         if (id) {
           api
-            .changeComments(workspace.slug, id)
+            .comments(workspace.slug, id)
             .then((comments) => setReviewState((s) => ({ ...s, comments })))
             .catch(() => undefined);
         }
       }
     };
     return () => es.close();
-  }, [workspace.slug, reloadTree, reloadChanges]);
+  }, [workspace.slug, reloadTree, reloadBranches]);
 
   const loadBacklinks = useCallback(
     (id: string | undefined) => {
@@ -1321,8 +1321,8 @@ function WorkspaceView({
   );
 
   useEffect(() => {
-    loadApprovals(activeChangeId ?? undefined);
-  }, [activeChangeId, loadApprovals]);
+    loadApprovals(activeBranchId ?? undefined);
+  }, [activeBranchId, loadApprovals]);
 
   const openPathFromSource = useCallback(
     (
@@ -1332,15 +1332,15 @@ function WorkspaceView({
       if (!options.force && dirtyRef.current && !confirm("Discard unsaved changes?")) return false;
       const requestId = openRequestRef.current + 1;
       openRequestRef.current = requestId;
-      // Prefer an explicit option; otherwise the live activeChangeId; otherwise
+      // Prefer an explicit option; otherwise the live activeBranchId; otherwise
       // the change_id this file was last loaded against, so SSE-triggered
-      // re-opens after a publish (which nulls activeChangeId) keep hitting the
+      // re-opens after a publish (which nulls activeBranchId) keep hitting the
       // same branch instead of 404ing against main.
-      const fallback = path === openPathRef.current ? openFileChangeIdRef.current : null;
+      const fallback = path === openPathRef.current ? openFileBranchIdRef.current : null;
       const changeId =
         "changeId" in options
           ? (options.changeId ?? undefined)
-          : (activeChangeId ?? fallback ?? undefined);
+          : (activeBranchId ?? fallback ?? undefined);
       setBusy(true);
       setStatus(null);
       api
@@ -1352,7 +1352,7 @@ function WorkspaceView({
           setOpenDoc(doc);
           setContent(r.content);
           setDirty(false);
-          openFileChangeIdRef.current = changeId ?? null;
+          openFileBranchIdRef.current = changeId ?? null;
           loadBacklinks(doc?.id);
           loadApprovals(changeId ?? doc?.id);
           if (options.push !== false) {
@@ -1368,7 +1368,7 @@ function WorkspaceView({
         });
       return true;
     },
-    [workspace.slug, activeChangeId, loadBacklinks, loadApprovals],
+    [workspace.slug, activeBranchId, loadBacklinks, loadApprovals],
   );
 
   const open = useCallback(
@@ -1410,21 +1410,21 @@ function WorkspaceView({
 
   const save = useCallback(() => {
     if (!openPath) return;
-    if (reviewingChangeId) {
+    if (reviewingBranchId) {
       setStatus("review mode is read-only");
       return;
     }
     setBusy(true);
     setStatus(null);
     api
-      .putFile(workspace.slug, openPath, content, currentChangeId ?? undefined)
+      .putFile(workspace.slug, openPath, content, currentBranchId ?? undefined)
       .then((r) => {
         if (r.content !== undefined) setContent(r.content);
         setDirty(false);
         setStatus("saved on branch");
         setOpenDoc(r.meta);
-        setCurrentChangeId(r.change_id);
-        openFileChangeIdRef.current = r.change_id;
+        setCurrentBranchId(r.change_id);
+        openFileBranchIdRef.current = r.change_id;
         loadBacklinks(r.meta.id);
         reloadTree();
       })
@@ -1436,11 +1436,11 @@ function WorkspaceView({
         }
       })
       .finally(() => setBusy(false));
-  }, [openPath, content, workspace.slug, currentChangeId, reviewingChangeId, reloadTree, loadBacklinks]);
+  }, [openPath, content, workspace.slug, currentBranchId, reviewingBranchId, reloadTree, loadBacklinks]);
 
   const openQueue = useCallback(() => {
     api
-      .queue(workspace.slug)
+      .reviewQueue(workspace.slug)
       .then(setQueue)
       .catch(() => setQueue([]));
   }, [workspace.slug]);
@@ -1491,9 +1491,9 @@ function WorkspaceView({
   // Inbox All scope, and #N cross-reference resolution.
   useEffect(() => {
     api
-      .openChanges(workspace.slug)
-      .then(setOpenChanges)
-      .catch(() => setOpenChanges([]));
+      .openBranches(workspace.slug)
+      .then(setOpenBranches)
+      .catch(() => setOpenBranches([]));
   }, [workspace.slug]);
 
   const refreshPinned = useCallback(async () => {
@@ -1527,9 +1527,9 @@ function WorkspaceView({
   }, [sidebarView, workspace.slug]);
 
   const reviewChange = useCallback(
-    (entry: QueueEntry) => {
-      setReviewingChangeId(entry.id);
-      setCurrentChangeId(null);
+    (entry: ReviewQueueEntry) => {
+      setReviewingBranchId(entry.id);
+      setCurrentBranchId(null);
       setSidebarView("pages");
       setStatus(null);
       loadApprovals(entry.id);
@@ -1539,20 +1539,20 @@ function WorkspaceView({
 
   const publish = useCallback(
     (mode?: "direct" | "review") => {
-      if (!currentChangeId) {
+      if (!currentBranchId) {
         setStatus("nothing on this branch to merge or review");
         return;
       }
       setBusy(true);
       setStatus(null);
       api
-        .publish(workspace.slug, currentChangeId, mode)
+        .publish(workspace.slug, currentBranchId, mode)
         .then((r) => {
           setStatus(r.message ?? (r.mode === "review" ? "pull request opened" : "merged to main"));
-          setCurrentChangeId(null);
-          if (r.mode === "direct") setReviewingChangeId(null);
+          setCurrentBranchId(null);
+          if (r.mode === "direct") setReviewingBranchId(null);
           api
-            .queue(workspace.slug)
+            .reviewQueue(workspace.slug)
             .then(setQueue)
             .catch(() => undefined);
           api
@@ -1565,14 +1565,14 @@ function WorkspaceView({
         )
         .finally(() => setBusy(false));
     },
-    [workspace.slug, currentChangeId],
+    [workspace.slug, currentBranchId],
   );
 
   // Submit a review decision (approve, request_changes, or comment-only) on
   // the change currently being reviewed.
   const submitReview = useCallback(
     async (decision: Decision, body: string) => {
-      const id = reviewingChangeId;
+      const id = reviewingBranchId;
       if (!id) return;
       const comment = body.trim() || undefined;
       const draftId = reviewState.draftReviewId;
@@ -1595,13 +1595,13 @@ function WorkspaceView({
           setStatus("commented");
         }
         loadApprovals(id);
-        api.queue(workspace.slug).then(setQueue).catch(() => undefined);
+        api.reviewQueue(workspace.slug).then(setQueue).catch(() => undefined);
         // The PR meta will reflect any state transition; re-fetch authoritative.
-        const pr = await api.changePr(workspace.slug, id).catch(() => null);
+        const pr = await api.pr(workspace.slug, id).catch(() => null);
         if (pr) {
           setReviewState((s) => ({ ...s, pr, draftReviewId: null }));
           if (pr.state === "merged" || pr.state === "changes_requested" || pr.state === "closed") {
-            setReviewingChangeId(null);
+            setReviewingBranchId(null);
             api.tree(workspace.slug).then(setFiles).catch(() => undefined);
           }
         }
@@ -1611,19 +1611,19 @@ function WorkspaceView({
         setReviewState((s) => ({ ...s, busy: false }));
       }
     },
-    [reviewingChangeId, workspace.slug, reviewState.draftReviewId, loadApprovals],
+    [reviewingBranchId, workspace.slug, reviewState.draftReviewId, loadApprovals],
   );
 
   const closeReviewedChange = useCallback(async () => {
-    const id = reviewingChangeId;
+    const id = reviewingBranchId;
     if (!id) return;
     setReviewState((s) => ({ ...s, busy: true }));
     try {
       await api.close(workspace.slug, id);
       setStatus("Pull request closed");
-      setReviewingChangeId(null);
+      setReviewingBranchId(null);
       api
-        .queue(workspace.slug)
+        .reviewQueue(workspace.slug)
         .then(setQueue)
         .catch(() => undefined);
       api
@@ -1635,19 +1635,19 @@ function WorkspaceView({
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
-  }, [reviewingChangeId, workspace.slug]);
+  }, [reviewingBranchId, workspace.slug]);
 
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
   useEffect(() => {
-    if (!reviewingChangeId) {
+    if (!reviewingBranchId) {
       setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
       return;
     }
     let cancelled = false;
     Promise.all([
-      api.changePr(workspace.slug, reviewingChangeId),
-      api.changeDiff(workspace.slug, reviewingChangeId),
-      api.changeComments(workspace.slug, reviewingChangeId).catch(() => []),
+      api.pr(workspace.slug, reviewingBranchId),
+      api.diff(workspace.slug, reviewingBranchId),
+      api.comments(workspace.slug, reviewingBranchId).catch(() => []),
     ])
       .then(([pr, diff, comments]) => {
         if (cancelled) return;
@@ -1665,63 +1665,63 @@ function WorkspaceView({
     return () => {
       cancelled = true;
     };
-  }, [reviewingChangeId, workspace.slug]);
+  }, [reviewingBranchId, workspace.slug]);
 
   const loadReviewFileContent = useCallback(
     async (path: string, side: "base" | "head") => {
-      const id = reviewingChangeId;
+      const id = reviewingBranchId;
       if (!id) throw new Error("no active review");
-      return api.changeFile(workspace.slug, id, path, side);
+      return api.file(workspace.slug, id, path, side);
     },
-    [reviewingChangeId, workspace.slug],
+    [reviewingBranchId, workspace.slug],
   );
 
   const refreshReviewComments = useCallback(() => {
-    const id = reviewingChangeId;
+    const id = reviewingBranchId;
     if (!id) return;
     api
-      .changeComments(workspace.slug, id)
+      .comments(workspace.slug, id)
       .then((comments) => setReviewState((s) => ({ ...s, comments })))
       .catch(() => undefined);
-  }, [reviewingChangeId, workspace.slug]);
+  }, [reviewingBranchId, workspace.slug]);
 
   const addReviewComment = useCallback(
     async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {
-      const id = reviewingChangeId;
+      const id = reviewingBranchId;
       if (!id) return;
       const draftId = reviewState.draftReviewId;
       if (draftId) {
         await api.addDraftReviewComment(workspace.slug, id, draftId, { ...target, body });
       } else {
-        await api.addChangeComment(workspace.slug, id, { ...target, body });
+        await api.addComment(workspace.slug, id, { ...target, body });
       }
       refreshReviewComments();
     },
-    [reviewingChangeId, workspace.slug, reviewState.draftReviewId, refreshReviewComments],
+    [reviewingBranchId, workspace.slug, reviewState.draftReviewId, refreshReviewComments],
   );
 
   const editReviewComment = useCallback(
     async (commentId: number, body: string) => {
-      const id = reviewingChangeId;
+      const id = reviewingBranchId;
       if (!id) return;
-      await api.editChangeComment(workspace.slug, id, commentId, body);
+      await api.editComment(workspace.slug, id, commentId, body);
       refreshReviewComments();
     },
-    [reviewingChangeId, workspace.slug, refreshReviewComments],
+    [reviewingBranchId, workspace.slug, refreshReviewComments],
   );
 
   const deleteReviewComment = useCallback(
     async (commentId: number, reviewId: number) => {
-      const id = reviewingChangeId;
+      const id = reviewingBranchId;
       if (!id) return;
-      await api.deleteChangeComment(workspace.slug, id, commentId, reviewId);
+      await api.deleteComment(workspace.slug, id, commentId, reviewId);
       refreshReviewComments();
     },
-    [reviewingChangeId, workspace.slug, refreshReviewComments],
+    [reviewingBranchId, workspace.slug, refreshReviewComments],
   );
 
   const toggleDraftReview = useCallback(async () => {
-    const id = reviewingChangeId;
+    const id = reviewingBranchId;
     if (!id) return;
     if (reviewState.draftReviewId) {
       // Cancel local batch — Forgejo keeps the PENDING review server-side
@@ -1738,7 +1738,7 @@ function WorkspaceView({
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
-  }, [reviewingChangeId, workspace.slug, reviewState.draftReviewId]);
+  }, [reviewingBranchId, workspace.slug, reviewState.draftReviewId]);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1768,13 +1768,13 @@ function WorkspaceView({
     if (!path.endsWith(".md")) path += ".md";
     setBusy(true);
     api
-      .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`, currentChangeId ?? undefined)
+      .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`, currentBranchId ?? undefined)
       .then((r) => {
         setOpenPath(path);
         setContent(r.content ?? `# ${path.replace(/\.md$/, "")}\n`);
         setOpenDoc(r.meta);
-        setCurrentChangeId(r.change_id);
-        openFileChangeIdRef.current = r.change_id;
+        setCurrentBranchId(r.change_id);
+        openFileBranchIdRef.current = r.change_id;
         setStatus("saved on branch");
         setDirty(false);
         setNewPath("");
@@ -1892,7 +1892,7 @@ function WorkspaceView({
                     .catch(() => undefined);
                 }
               }}
-              openPrs={openChanges ?? []}
+              openPrs={openBranches ?? []}
               notifications={notifs}
               onReviewChange={reviewChange}
               onOpenIssue={(n) => {
@@ -1900,7 +1900,7 @@ function WorkspaceView({
                 setViewingIssue(n);
               }}
               onOpenPr={(prNumber) => {
-                const row = (openChanges ?? []).find((r) => r.pr_number === prNumber);
+                const row = (openBranches ?? []).find((r) => r.pr_number === prNumber);
                 if (row) {
                   reviewChange({
                     id: row.id,
@@ -1926,14 +1926,14 @@ function WorkspaceView({
                 setNewIssueOpen(true);
               }}
             />
-          ) : reviewingChangeId && reviewState.diff ? (
+          ) : reviewingBranchId && reviewState.diff ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex items-center justify-between gap-3 px-2 py-1">
                 <strong>Changed files</strong>
                 <button
                   type="button"
                   data-testid="review-exit"
-                  onClick={() => setReviewingChangeId(null)}
+                  onClick={() => setReviewingBranchId(null)}
                   className={cn("text-xs hover:underline", muted)}
                 >
                   Exit review
@@ -2082,7 +2082,7 @@ function WorkspaceView({
               ☰
             </button>
           )}
-          {!reviewingChangeId && !openPath && viewingIssue !== null && (
+          {!reviewingBranchId && !openPath && viewingIssue !== null && (
             <IssueView
               workspaceSlug={workspace.slug}
               number={viewingIssue}
@@ -2108,7 +2108,7 @@ function WorkspaceView({
                 // know about a change with this pr_number, open it as a PR;
                 // otherwise treat the number as an issue.
                 const pr =
-                  (openChanges ?? []).find((c) => c.pr_number === n) ??
+                  (openBranches ?? []).find((c) => c.pr_number === n) ??
                   (queue ?? []).find((c) => c.pr_number === n);
                 if (pr) {
                   setViewingIssue(null);
@@ -2127,7 +2127,7 @@ function WorkspaceView({
               }}
             />
           )}
-          {!reviewingChangeId && !openPath && viewingIssue === null && newIssueOpen && (
+          {!reviewingBranchId && !openPath && viewingIssue === null && newIssueOpen && (
             <div className="flex flex-1 flex-col p-4 gap-3 max-w-2xl mx-auto w-full">
               <h2 className="text-lg font-semibold">New issue</h2>
               <Input
@@ -2182,17 +2182,17 @@ function WorkspaceView({
               </div>
             </div>
           )}
-          {!reviewingChangeId && !openPath && viewingIssue === null && !newIssueOpen && sidebarView === "settings" && (
+          {!reviewingBranchId && !openPath && viewingIssue === null && !newIssueOpen && sidebarView === "settings" && (
             <div className="flex-1 overflow-auto">
               <SettingsPanel workspaceSlug={workspace.slug} />
             </div>
           )}
-          {!reviewingChangeId && !openPath && viewingIssue === null && !newIssueOpen && sidebarView !== "settings" && (
+          {!reviewingBranchId && !openPath && viewingIssue === null && !newIssueOpen && sidebarView !== "settings" && (
             <div className={cn("flex flex-1 items-center justify-center", muted)}>
               Select a file from the sidebar, or create one.
             </div>
           )}
-          {!reviewingChangeId && openPath && (
+          {!reviewingBranchId && openPath && (
             <>
               <Suspense fallback={<div className="flex-1" />}>
                 <MarkdownEditor
@@ -2221,12 +2221,12 @@ function WorkspaceView({
                   }}
                 />
               )}
-              {activeChangeId && (
+              {activeBranchId && (
                 <ApprovalsPanel approvals={approvals} />
               )}
             </>
           )}
-          {reviewingChangeId && (
+          {reviewingBranchId && (
             <>
               {reviewState.pr && <PrHeader pr={reviewState.pr} />}
               <div className="flex-1 min-h-0">
@@ -2267,8 +2267,8 @@ function WorkspaceView({
               )}
             </>
           )}
-          {activeChangeId && (
-            <span data-testid="active-change-id" hidden>{activeChangeId}</span>
+          {activeBranchId && (
+            <span data-testid="active-branch-id" hidden>{activeBranchId}</span>
           )}
           <div
             data-statusbar
@@ -2286,7 +2286,7 @@ function WorkspaceView({
                   {openDoc && openDoc.type !== "page" && statusBadge(openDoc.status)}
                   {dirty && <span className="text-[var(--cf-accent)]">●</span>}
                 </>
-              ) : reviewingChangeId ? null : (
+              ) : reviewingBranchId ? null : (
                 <span>no file open</span>
               )}
             </div>
@@ -2307,12 +2307,12 @@ function WorkspaceView({
                   <button
                     type="button"
                     onClick={save}
-                    disabled={!dirty || busy || !!reviewingChangeId}
+                    disabled={!dirty || busy || !!reviewingBranchId}
                     className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
                   >
                     Save
                   </button>
-                  {currentChangeId && (
+                  {currentBranchId && (
                     <>
                       {workspace.role === "owner" && (
                         <button

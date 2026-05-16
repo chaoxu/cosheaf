@@ -68,7 +68,7 @@ async function seedReviewablePr(): Promise<void> {
   });
   const vcookie = vlogin.headers.get("set-cookie") ?? "";
   const cmt = await fetch(
-    `http://localhost:3030/api/v1/w/flushing-coin/change/${change_id}/comments`,
+    `http://localhost:3030/api/v1/w/flushing-coin/branch/${change_id}/comments`,
     {
       method: "POST",
       headers: { "content-type": "application/json", cookie: vcookie },

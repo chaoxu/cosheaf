@@ -1,5 +1,7 @@
-// Change lifecycle routes: list/create/discard, publish (direct/review),
-// approve/request-changes/comment/close. Replaces the old revision/review/document workflow surface.
+// Manages branch / pull-request workflow: list/create/discard, publish
+// (direct/review), approve/request-changes/comment/close. The SQL table
+// behind these rows is legacy-named `changes`; routes and types now use
+// branch / pull-request vocabulary on the wire.
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
@@ -56,15 +58,15 @@ changes.use("/:slug/*", requireMembership());
 
 // ---------- list / create / discard ----------
 
-changes.get("/:slug/changes", (c) => {
+changes.get("/:slug/branches", (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");
   const rows = listOpenForUser(c.get("db"), ws.id, user.id);
   return c.json({ changes: rows });
 });
 
-// All open changes (any author) — feeds the Activity panel.
-changes.get("/:slug/changes/open", (c) => {
+// All open branches with PRs (any author) — feeds the Activity panel.
+changes.get("/:slug/branches/open", (c) => {
   const ws = c.get("workspace");
   const rows = c
     .get("db")
@@ -75,7 +77,7 @@ changes.get("/:slug/changes/open", (c) => {
   return c.json({ changes: rows });
 });
 
-changes.post("/:slug/change", async (c) => {
+changes.post("/:slug/branch", async (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");
   const body = (await c.req.json().catch(() => ({}))) as { title?: string };
@@ -90,7 +92,7 @@ changes.post("/:slug/change", async (c) => {
   return c.json(change, 201);
 });
 
-changes.delete("/:slug/change/:id", async (c) => {
+changes.delete("/:slug/branch/:id", async (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");
   const id = c.req.param("id");
@@ -357,14 +359,14 @@ async function approvalCounts(
   return { approvals, rejections };
 }
 
-changes.post("/:slug/change/:id/approve", (c) => approve(c));
-changes.post("/:slug/change/:id/request-changes", (c) => requestChanges(c));
-changes.post("/:slug/change/:id/comment", (c) => commentChange(c));
-changes.post("/:slug/change/:id/close", (c) => closeChange(c));
+changes.post("/:slug/branch/:id/approve", (c) => approve(c));
+changes.post("/:slug/branch/:id/request-changes", (c) => requestChanges(c));
+changes.post("/:slug/branch/:id/comment", (c) => commentChange(c));
+changes.post("/:slug/branch/:id/close", (c) => closeChange(c));
 
 // ---------- approvals listing ----------
 
-changes.get("/:slug/change/:id/approvals", async (c) => {
+changes.get("/:slug/branch/:id/approvals", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id") ?? "";
   const change = getChange(c.get("db"), ws.id, id);
@@ -396,7 +398,7 @@ changes.get("/:slug/change/:id/approvals", async (c) => {
 
 // ---------- PR view (header, file list, per-file diff, raw content) ----------
 
-changes.get("/:slug/change/:id/pr", async (c) => {
+changes.get("/:slug/branch/:id/pr", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
   const change = getChange(c.get("db"), ws.id, id);
@@ -429,7 +431,7 @@ changes.get("/:slug/change/:id/pr", async (c) => {
   return c.json({ pr: meta });
 });
 
-changes.get("/:slug/change/:id/diff", async (c) => {
+changes.get("/:slug/branch/:id/diff", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
   const change = getChange(c.get("db"), ws.id, id);
@@ -459,7 +461,7 @@ changes.get("/:slug/change/:id/diff", async (c) => {
   return c.json({ files });
 });
 
-changes.get("/:slug/change/:id/file", async (c) => {
+changes.get("/:slug/branch/:id/file", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
   const path = c.req.query("path");
@@ -488,7 +490,7 @@ changes.get("/:slug/change/:id/file", async (c) => {
   }
 });
 
-changes.get("/:slug/change/:id/comments", async (c) => {
+changes.get("/:slug/branch/:id/comments", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
   const change = getChange(c.get("db"), ws.id, id);
@@ -580,7 +582,7 @@ async function resolveLinePosition(
   return pos;
 }
 
-changes.post("/:slug/change/:id/comments", async (c) => {
+changes.post("/:slug/branch/:id/comments", async (c) => {
   const gate = gateReviewerWrite(c, getChange(c.get("db"), c.get("workspace").id, c.req.param("id")));
   if (gate instanceof Response) return gate;
   const { change } = gate;
@@ -603,7 +605,7 @@ changes.post("/:slug/change/:id/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-changes.patch("/:slug/change/:id/comments/:commentId", async (c) => {
+changes.patch("/:slug/branch/:id/comments/:commentId", async (c) => {
   const ws = c.get("workspace");
   const change = getChange(c.get("db"), ws.id, c.req.param("id"));
   if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
@@ -619,7 +621,7 @@ changes.patch("/:slug/change/:id/comments/:commentId", async (c) => {
   return c.json({ ok: true });
 });
 
-changes.delete("/:slug/change/:id/comments/:commentId", async (c) => {
+changes.delete("/:slug/branch/:id/comments/:commentId", async (c) => {
   const ws = c.get("workspace");
   const change = getChange(c.get("db"), ws.id, c.req.param("id"));
   if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
@@ -659,7 +661,7 @@ async function findOrCreatePendingReview(
   return created.id;
 }
 
-changes.post("/:slug/change/:id/draft-review", async (c) => {
+changes.post("/:slug/branch/:id/draft-review", async (c) => {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "only owners and verifiers can review", code: "forbidden" }, 403);
@@ -675,7 +677,7 @@ changes.post("/:slug/change/:id/draft-review", async (c) => {
   return c.json({ review_id });
 });
 
-changes.post("/:slug/change/:id/draft-review/:reviewId/comments", async (c) => {
+changes.post("/:slug/branch/:id/draft-review/:reviewId/comments", async (c) => {
   const gate = gateReviewerWrite(c, getChange(c.get("db"), c.get("workspace").id, c.req.param("id")));
   if (gate instanceof Response) return gate;
   const { change } = gate;
@@ -700,7 +702,7 @@ changes.post("/:slug/change/:id/draft-review/:reviewId/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-changes.post("/:slug/change/:id/draft-review/:reviewId/submit", async (c) => {
+changes.post("/:slug/branch/:id/draft-review/:reviewId/submit", async (c) => {
   const ws = c.get("workspace");
   const change = getChange(c.get("db"), ws.id, c.req.param("id"));
   if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
@@ -734,9 +736,9 @@ function normalizeStatus(s: string): "added" | "modified" | "deleted" | "renamed
   return "modified";
 }
 
-// ---------- queue (changes in review) ----------
+// ---------- review queue (PRs awaiting your review) ----------
 
-changes.get("/:slug/queue", async (c) => {
+changes.get("/:slug/review-queue", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const inReview = listInReview(c.get("db"), ws.id);

@@ -177,7 +177,7 @@ describe("route stability boundaries", () => {
     const forgejo = fakeForgejo();
     const app = appFor(db, forgejo);
 
-    const res = await app.request("/api/v1/w/w/change/self/approve", {
+    const res = await app.request("/api/v1/w/w/branch/self/approve", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ comment: "looks good to me" }),
@@ -199,7 +199,7 @@ describe("route stability boundaries", () => {
     const forgejo = fakeForgejo();
     const app = appFor(db, forgejo);
 
-    const res = await app.request("/api/v1/w/w/change/needs-work/request-changes", {
+    const res = await app.request("/api/v1/w/w/branch/needs-work/request-changes", {
       method: "POST",
       headers: { authorization: `Bearer ${verifierToken}`, "content-type": "application/json" },
       body: JSON.stringify({ comment: "please repair" }),
@@ -238,7 +238,7 @@ describe("route stability boundaries", () => {
     forgejo.mergePull.mockResolvedValueOnce(undefined);
     const app = appFor(db, forgejo);
 
-    const res = await app.request("/api/v1/w/w/change/approve-me/approve", {
+    const res = await app.request("/api/v1/w/w/branch/approve-me/approve", {
       method: "POST",
       headers: { authorization: `Bearer ${verifierToken}`, "content-type": "application/json" },
       body: JSON.stringify({ comment: "ok" }),
@@ -265,7 +265,7 @@ describe("route stability boundaries", () => {
     ]);
     const app = appFor(db, forgejo);
 
-    const comment = await app.request("/api/v1/w/w/change/comment-me/comment", {
+    const comment = await app.request("/api/v1/w/w/branch/comment-me/comment", {
       method: "POST",
       headers: { authorization: `Bearer ${verifierToken}`, "content-type": "application/json" },
       body: JSON.stringify({ comment: "note only" }),
@@ -278,7 +278,7 @@ describe("route stability boundaries", () => {
       sudo: "cs-vera",
     });
 
-    const approvals = await app.request("/api/v1/w/w/change/comment-me/approvals", {
+    const approvals = await app.request("/api/v1/w/w/branch/comment-me/approvals", {
       headers: { authorization: `Bearer ${verifierToken}` },
     });
     expect(await approvals.json()).toEqual({
@@ -405,7 +405,7 @@ describe("route stability boundaries", () => {
     const forgejo = fakeForgejo();
     const app = appFor(db, forgejo);
 
-    const res = await app.request("/api/v1/w/w/change/review-me/close", {
+    const res = await app.request("/api/v1/w/w/branch/review-me/close", {
       method: "POST",
       headers: { authorization: `Bearer ${verifierToken}` },
     });
@@ -448,13 +448,13 @@ describe("route stability boundaries", () => {
     ).run();
     const app = appFor(db, fakeForgejo());
 
-    const queue = await app.request("/api/v1/w/w/queue", {
+    const queue = await app.request("/api/v1/w/w/review-queue", {
       headers: { authorization: `Bearer ${authorToken}` },
     });
     expect(queue.status).toBe(200);
     await expect(queue.json()).resolves.toEqual({ queue: [] });
 
-    const changesRes = await app.request("/api/v1/w/w/changes", {
+    const changesRes = await app.request("/api/v1/w/w/branches", {
       headers: { authorization: `Bearer ${authorToken}` },
     });
     expect(changesRes.status).toBe(200);

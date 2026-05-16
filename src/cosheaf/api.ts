@@ -1,9 +1,9 @@
-import type { ChangeState, Decision } from "../../shared/change-lifecycle";
+import type { BranchState, ChangeState, Decision } from "../../shared/change-lifecycle";
 import type { Role } from "../../shared/roles";
 import type { ChangeDiff, PrMeta, PullFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 
-export type { ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineComment, CommentSide };
+export type { BranchState, ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineComment, CommentSide };
 
 export interface User {
   id: number;
@@ -48,7 +48,7 @@ export interface Change {
   updated_at: number;
 }
 
-export interface QueueEntry {
+export interface ReviewQueueEntry {
   id: string;
   title: string;
   pr_number: number | null;
@@ -57,6 +57,8 @@ export interface QueueEntry {
   approvals: number;
   rejections: number;
 }
+/** @deprecated use ReviewQueueEntry */
+export type QueueEntry = ReviewQueueEntry;
 
 export interface ApprovalRecord {
   verifier_user_id: number;
@@ -172,98 +174,100 @@ export const api = {
   search: (slug: string, q: string) =>
     jsonFetch<{ results: SearchResult[] }>(`${w(slug)}/search${qs({ q })}`).then((r) => r.results),
 
-  // Changes
-  listChanges: (slug: string) =>
-    jsonFetch<{ changes: Change[] }>(`${w(slug)}/changes`).then((r) => r.changes),
-  createChange: (slug: string, title?: string) =>
-    jsonFetch<Change>(`${w(slug)}/change`, {
+  // Branches / pull requests
+  branches: (slug: string) =>
+    jsonFetch<{ changes: Change[] }>(`${w(slug)}/branches`).then((r) => r.changes),
+  createBranch: (slug: string, title?: string) =>
+    jsonFetch<Change>(`${w(slug)}/branch`, {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
-  discardChange: (slug: string, change_id: string) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/change/${encodeURIComponent(change_id)}`, { method: "DELETE" }),
-  publish: (slug: string, change_id: string, mode?: "direct" | "review", title?: string) =>
+  discard: (slug: string, branchId: string) =>
+    jsonFetch<{ ok: true }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}`, { method: "DELETE" }),
+  publish: (slug: string, branchId: string, mode?: "direct" | "review", title?: string) =>
     jsonFetch<PublishResult>(`${w(slug)}/publish`, {
       method: "POST",
-      body: JSON.stringify({ change_id, mode, title }),
+      // The publish endpoint still reads `change_id` from the body (legacy
+      // server-side field; not renamed alongside the JS surface).
+      body: JSON.stringify({ change_id: branchId, mode, title }),
     }),
-  approve: (slug: string, change_id: string, comment?: string) =>
-    jsonFetch<DecisionResult>(`${w(slug)}/change/${encodeURIComponent(change_id)}/approve`, {
+  approve: (slug: string, branchId: string, comment?: string) =>
+    jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approve`, {
       method: "POST",
       body: JSON.stringify({ comment: comment ?? null }),
     }),
-  requestChanges: (slug: string, change_id: string, comment?: string) =>
-    jsonFetch<DecisionResult>(`${w(slug)}/change/${encodeURIComponent(change_id)}/request-changes`, {
+  requestChanges: (slug: string, branchId: string, comment?: string) =>
+    jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/request-changes`, {
       method: "POST",
       body: JSON.stringify({ comment: comment ?? null }),
     }),
-  comment: (slug: string, change_id: string, comment?: string) =>
+  comment: (slug: string, branchId: string, comment?: string) =>
     jsonFetch<{ ok: true; change_id: string; state: Change["state"] }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/comment`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comment`,
       { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
     ),
-  close: (slug: string, change_id: string) =>
+  close: (slug: string, branchId: string) =>
     jsonFetch<{ ok: true; change_id: string; state: Change["state"] }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/close`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/close`,
       { method: "POST" },
     ),
-  approvals: (slug: string, change_id: string) =>
-    jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/approvals`).then((r) => r.approvals),
+  approvals: (slug: string, branchId: string) =>
+    jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approvals`).then((r) => r.approvals),
 
-  queue: (slug: string) =>
-    jsonFetch<{ queue: QueueEntry[] }>(`${w(slug)}/queue`).then((r) => r.queue),
-  openChanges: (slug: string) =>
-    jsonFetch<{ changes: OpenChangeRow[] }>(`${w(slug)}/changes/open`).then((r) => r.changes),
+  reviewQueue: (slug: string) =>
+    jsonFetch<{ queue: ReviewQueueEntry[] }>(`${w(slug)}/review-queue`).then((r) => r.queue),
+  openBranches: (slug: string) =>
+    jsonFetch<{ changes: OpenBranchRow[] }>(`${w(slug)}/branches/open`).then((r) => r.changes),
 
-  changePr: (slug: string, change_id: string) =>
-    jsonFetch<{ pr: PrMeta }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/pr`).then((r) => r.pr),
-  changeDiff: (slug: string, change_id: string) =>
-    jsonFetch<ChangeDiff>(`${w(slug)}/change/${encodeURIComponent(change_id)}/diff`),
-  changeFile: (slug: string, change_id: string, path: string, side: "base" | "head") =>
+  pr: (slug: string, branchId: string) =>
+    jsonFetch<{ pr: PrMeta }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/pr`).then((r) => r.pr),
+  diff: (slug: string, branchId: string) =>
+    jsonFetch<ChangeDiff>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/diff`),
+  file: (slug: string, branchId: string, path: string, side: "base" | "head") =>
     jsonFetch<{ content: string }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/file?path=${encodeURIComponent(path)}&side=${side}`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/file?path=${encodeURIComponent(path)}&side=${side}`,
     ).then((r) => r.content),
-  changeComments: (slug: string, change_id: string) =>
+  comments: (slug: string, branchId: string) =>
     jsonFetch<{ comments: LineComment[] }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/comments`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comments`,
     ).then((r) => r.comments),
-  addChangeComment: (
+  addComment: (
     slug: string,
-    change_id: string,
+    branchId: string,
     payload: { path: string; line: number; side: CommentSide; body: string },
   ) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/change/${encodeURIComponent(change_id)}/comments`, {
+    jsonFetch<{ ok: true }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/comments`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  editChangeComment: (slug: string, change_id: string, commentId: number, body: string) =>
+  editComment: (slug: string, branchId: string, commentId: number, body: string) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/comments/${commentId}`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comments/${commentId}`,
       {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ body }),
       },
     ),
-  deleteChangeComment: (slug: string, change_id: string, commentId: number, reviewId: number) =>
+  deleteComment: (slug: string, branchId: string, commentId: number, reviewId: number) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/comments/${commentId}?review_id=${reviewId}`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/comments/${commentId}?review_id=${reviewId}`,
       { method: "DELETE" },
     ),
-  startDraftReview: (slug: string, change_id: string) =>
+  startDraftReview: (slug: string, branchId: string) =>
     jsonFetch<{ review_id: number }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/draft-review`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/draft-review`,
       { method: "POST" },
     ),
   addDraftReviewComment: (
     slug: string,
-    change_id: string,
+    branchId: string,
     review_id: number,
     payload: { path: string; line: number; side: CommentSide; body: string },
   ) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/draft-review/${review_id}/comments`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/draft-review/${review_id}/comments`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -272,12 +276,12 @@ export const api = {
     ),
   submitDraftReview: (
     slug: string,
-    change_id: string,
+    branchId: string,
     review_id: number,
     payload: { event: "approve" | "request_changes" | "comment"; body?: string },
   ) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/change/${encodeURIComponent(change_id)}/draft-review/${review_id}/submit`,
+      `${w(slug)}/branch/${encodeURIComponent(branchId)}/draft-review/${review_id}/submit`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -420,7 +424,7 @@ export type {
   TimelineEvent,
 };
 
-export interface OpenChangeRow {
+export interface OpenBranchRow {
   id: string;
   title: string | null;
   state: "review" | "changes_requested";
@@ -428,3 +432,5 @@ export interface OpenChangeRow {
   author_user_id: number;
   updated_at: number;
 }
+/** @deprecated use OpenBranchRow */
+export type OpenChangeRow = OpenBranchRow;

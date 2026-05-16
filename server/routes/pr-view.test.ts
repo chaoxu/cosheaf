@@ -125,13 +125,13 @@ function appFor(db: Database.Database, forgejo: Forgejo): Hono<AppEnv> {
 }
 
 describe("PR view endpoints", () => {
-  it("GET /change/:id/pr returns PR metadata", async () => {
+  it("GET /branch/:id/pr returns PR metadata", async () => {
     const db = freshDb();
     const { token } = seed(db);
     seedChange(db, "abc", 7, "review");
     const app = appFor(db, fakeForgejo());
 
-    const res = await app.request("/api/v1/w/w/change/abc/pr", {
+    const res = await app.request("/api/v1/w/w/branch/abc/pr", {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
@@ -150,25 +150,25 @@ describe("PR view endpoints", () => {
     });
   });
 
-  it("GET /change/:id/pr returns 409 when the change has no PR yet", async () => {
+  it("GET /branch/:id/pr returns 409 when the change has no PR yet", async () => {
     const db = freshDb();
     const { token } = seed(db);
     seedChange(db, "draft", null, "draft");
     const app = appFor(db, fakeForgejo());
 
-    const res = await app.request("/api/v1/w/w/change/draft/pr", {
+    const res = await app.request("/api/v1/w/w/branch/draft/pr", {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(409);
   });
 
-  it("GET /change/:id/diff returns per-file metadata with split patches", async () => {
+  it("GET /branch/:id/diff returns per-file metadata with split patches", async () => {
     const db = freshDb();
     const { token } = seed(db);
     seedChange(db, "abc", 7, "review");
     const app = appFor(db, fakeForgejo());
 
-    const res = await app.request("/api/v1/w/w/change/abc/diff", {
+    const res = await app.request("/api/v1/w/w/branch/abc/diff", {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
@@ -184,48 +184,48 @@ describe("PR view endpoints", () => {
     expect(added.patch).toContain("@@ -0,0 +1,3 @@");
   });
 
-  it("GET /change/:id/file returns content at the requested side", async () => {
+  it("GET /branch/:id/file returns content at the requested side", async () => {
     const db = freshDb();
     const { token } = seed(db);
     seedChange(db, "abc", 7, "review");
     const app = appFor(db, fakeForgejo());
 
     const headRes = await app.request(
-      "/api/v1/w/w/change/abc/file?path=hello.md&side=head",
+      "/api/v1/w/w/branch/abc/file?path=hello.md&side=head",
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(headRes.status).toBe(200);
     expect(await headRes.json()).toEqual({ content: "context\nnew\nadded\n" });
 
     const baseRes = await app.request(
-      "/api/v1/w/w/change/abc/file?path=hello.md&side=base",
+      "/api/v1/w/w/branch/abc/file?path=hello.md&side=base",
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(baseRes.status).toBe(200);
     expect(await baseRes.json()).toEqual({ content: "context\nold\n" });
   });
 
-  it("GET /change/:id/file 404s when the file is absent on the requested side", async () => {
+  it("GET /branch/:id/file 404s when the file is absent on the requested side", async () => {
     const db = freshDb();
     const { token } = seed(db);
     seedChange(db, "abc", 7, "review");
     const app = appFor(db, fakeForgejo());
 
     const res = await app.request(
-      "/api/v1/w/w/change/abc/file?path=new.md&side=base",
+      "/api/v1/w/w/branch/abc/file?path=new.md&side=base",
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(res.status).toBe(404);
   });
 
-  it("GET /change/:id/file rejects invalid side", async () => {
+  it("GET /branch/:id/file rejects invalid side", async () => {
     const db = freshDb();
     const { token } = seed(db);
     seedChange(db, "abc", 7, "review");
     const app = appFor(db, fakeForgejo());
 
     const res = await app.request(
-      "/api/v1/w/w/change/abc/file?path=hello.md&side=bogus",
+      "/api/v1/w/w/branch/abc/file?path=hello.md&side=bogus",
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(res.status).toBe(400);
