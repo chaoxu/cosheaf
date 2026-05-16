@@ -52,6 +52,8 @@ export default defineConfig({
       // Coflat reader/parse subpaths used outside the editor surface.
       "@chaoxu/coflat-editor/reader",
       "@chaoxu/coflat-editor/parse",
+      // hydrateMath dynamic-imports katex; pre-bundle so it's ready on first paint.
+      "katex",
     ],
     // The editor package is already a single bundled .mjs; Vite's optimizer
     // chokes on its `import("pdfjs-dist/.../pdf.worker.min.mjs?url")` line.

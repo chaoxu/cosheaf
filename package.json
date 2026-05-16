@@ -76,10 +76,6 @@
     "react": "^19.2.4",
     "react-diff-view": "^3.3.3",
     "react-dom": "^19.2.4",
-    "react-markdown": "^10.1.0",
-    "rehype-katex": "^7.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0",
     "tailwind-merge": "^3.5.0",
     "yaml": "^2.8.3"
   },
