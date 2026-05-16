@@ -34,9 +34,15 @@ async function loginAs(page, user, password) {
 }
 
 async function typeIntoEditor(page, text) {
-  const editor = page.locator(".cm-content").first();
+  // Wait for the editor's CodeMirror surface to be fully attached and
+  // focusable. Without the editable=true check we can race against a
+  // re-mount from the post-create state churn and end up typing into the
+  // detached previous view.
+  const editor = page.locator(".cm-content[contenteditable=true]").first();
+  await editor.waitFor({ state: "visible", timeout: 8000 });
   await editor.click();
-  await page.keyboard.type(text);
+  await editor.focus();
+  await page.keyboard.type(text, { delay: 10 });
 }
 
 const meri = await makeContext("meri");

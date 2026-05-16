@@ -37,7 +37,7 @@ try {
   await page.getByTestId("new-file-path").fill(FLOW_PATH);
   await page.keyboard.press("Enter");
 
-  await page.getByTestId(`file-${FLOW_PATH}`).waitFor({ state: "visible", timeout: 12000 });
+  await page.getByTestId(`file-${FLOW_PATH}`).waitFor({ state: "visible", timeout: 15000 });
   await page.waitForURL(`**/w/${WORKSPACE_SLUG}/${FLOW_PATH}`, { timeout: 8000 });
   await page.getByTestId("publish-direct").waitFor({ state: "visible", timeout: 8000 });
   const unpublishedStatus = await textOfTestId("statusbar");

@@ -94,7 +94,14 @@ files.get("/:slug/tree", async (c) => {
   try {
     tree = await fj.getTree(owner, repo, ref, true);
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
+    // Forgejo returns 404 for a missing ref *or* 400 with "sha not found"
+    // for a branch that was deleted while a client still held its name
+    // (e.g. squash-merge dropped the head branch). Either way, fall back
+    // to main so a stale tab keeps rendering.
+    const missing =
+      err instanceof ForgejoError &&
+      (err.status === 404 || (err.status === 400 && /sha not found/i.test(err.bodyText)));
+    if (missing && ref !== "main") {
       tree = await fj.getTree(owner, repo, "main", true);
     } else {
       throw err;

@@ -1193,14 +1193,29 @@ function WorkspaceView({
   const filesRef = useRef<FileEntry[] | null>(null);
   const openRequestRef = useRef(0);
 
+  // Sequence id for tree fetches: any in-flight tree response that isn't
+  // the *latest* request is dropped. Without this, the initial-mount fetch
+  // against `main` can resolve after a post-create fetch against the new
+  // branch and silently overwrite the fresh tree.
+  const treeReqSeqRef = useRef(0);
+  const loadTree = useCallback(
+    (branch?: string) => {
+      const seq = ++treeReqSeqRef.current;
+      return api
+        .tree(workspace.slug, branch)
+        .then((next) => {
+          if (treeReqSeqRef.current === seq) setFiles(next);
+        })
+        .catch((err: unknown) => {
+          if (treeReqSeqRef.current === seq)
+            setStatus(err instanceof ApiError ? err.message : "Failed to load tree");
+        });
+    },
+    [workspace.slug],
+  );
   const reloadTree = useCallback(() => {
-    api
-      .tree(workspace.slug, activeBranchName ?? undefined)
-      .then(setFiles)
-      .catch((err: unknown) =>
-        setStatus(err instanceof ApiError ? err.message : "Failed to load tree"),
-      );
-  }, [workspace.slug, activeBranchName]);
+    void loadTree(activeBranchName ?? undefined);
+  }, [loadTree, activeBranchName]);
 
   useEffect(reloadTree, [reloadTree]);
   useEffect(() => {
@@ -1216,7 +1231,12 @@ function WorkspaceView({
       .myBranches(workspace.slug)
       .then((branches) => {
         setCurrentBranchName((current) => {
-          if (current && branches.some((b) => b.name === current)) return current;
+          // If the user has an explicit branch selected, keep it. Forgejo's
+          // branch listing is eventually consistent — a branch we just
+          // created via PUT /file may take a beat to appear in /branches/mine,
+          // and clearing the selection in the interim wipes the publish
+          // affordance and the post-save tree refresh.
+          if (current) return current;
           return branches.length === 1 ? (branches[0]?.name ?? null) : null;
         });
       })
@@ -1377,13 +1397,20 @@ function WorkspaceView({
     [openPathFromSource],
   );
 
+  // Open whatever file is in the URL on workspace entry. Intentionally
+  // omits openPathFromSource from the deps: its identity changes whenever
+  // activeBranchName updates, and re-running it after a save would refetch
+  // the file and wipe `dirty=true` from any local edits in flight.
+  const initialOpenRef = useRef(false);
   useEffect(() => {
-    if (!changesReady) return;
+    if (!changesReady || initialOpenRef.current) return;
     const r = parseRoute();
     if (r.kind === "workspace" && r.slug === workspace.slug && r.filePath) {
+      initialOpenRef.current = true;
       openPathFromSource(r.filePath, { push: false, force: true });
     }
-  }, [changesReady, workspace.slug, openPathFromSource]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional, see comment above
+  }, [changesReady, workspace.slug]);
 
   useEffect(() => {
     const handler = (): void => {
@@ -1429,7 +1456,7 @@ function WorkspaceView({
         setCurrentBranchName(r.branch);
         openFileBranchRef.current = r.branch;
         loadBacklinks(r.meta.id);
-        api.tree(workspace.slug, r.branch).then(setFiles).catch(() => undefined);
+        void loadTree(r.branch);
       })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 409) {
@@ -1439,7 +1466,7 @@ function WorkspaceView({
         }
       })
       .finally(() => setBusy(false));
-  }, [openPath, content, workspace.slug, currentBranchName, reviewingPullNumber, reloadTree, loadBacklinks, user]);
+  }, [openPath, content, workspace.slug, currentBranchName, reviewingPullNumber, loadTree, loadBacklinks, user]);
 
   const openQueue = useCallback(() => {
     api
@@ -1576,7 +1603,7 @@ function WorkspaceView({
           }
           setCurrentBranchName(null);
           openQueue();
-          api.tree(workspace.slug).then(setFiles).catch(() => undefined);
+          void loadTree();
         } catch (err) {
           setStatus(err instanceof ApiError ? err.message : "Open pull request failed");
         } finally {
@@ -1620,7 +1647,7 @@ function WorkspaceView({
           if (pr.merged || pr.state === "closed") {
             setReviewingPullNumber(null);
             setReviewBranchName(null);
-            api.tree(workspace.slug).then(setFiles).catch(() => undefined);
+            void loadTree();
           }
         }
       } catch (err) {
@@ -1642,7 +1669,7 @@ function WorkspaceView({
       setReviewingPullNumber(null);
       setReviewBranchName(null);
       openQueue();
-      api.tree(workspace.slug).then(setFiles).catch(() => undefined);
+      void loadTree();
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : "close failed");
     } finally {
@@ -1796,7 +1823,7 @@ function WorkspaceView({
         setNewPath("");
         setCreating(false);
         navigate({ kind: "workspace", slug: workspace.slug, filePath: path });
-        api.tree(workspace.slug, r.branch).then(setFiles).catch(() => undefined);
+        void loadTree(r.branch);
       })
       .catch((err: unknown) =>
         setStatus(err instanceof ApiError ? err.message : "Create failed"),
