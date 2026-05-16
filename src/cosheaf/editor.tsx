@@ -43,12 +43,16 @@ export function MarkdownEditor({
     if (!containerRef.current) return;
     const mountExtensions: Extension[] = [...(extensions ?? [])];
     if (readOnly) mountExtensions.push(EditorView.editable.of(false));
+    // `from` is accepted as a prop so call sites can declare the source-file
+    // path, but coflat 0.2.0's MountEditorOptions doesn't expose it yet.
+    // Plumb-through is a no-op until coflat re-exports documentContextFacet
+    // or surfaces a documentContext option on mountEditor.
+    void from;
     const editor = mountEditor({
       parent: containerRef.current,
       doc: value,
       mode,
       extensions: mountExtensions,
-      from,
       onChange: (next) => onChangeRef.current(next),
     });
     editorRef.current = editor;
