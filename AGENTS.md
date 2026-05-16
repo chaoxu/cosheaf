@@ -81,6 +81,31 @@ move in small, reversible steps:
 Forgejo-only: Gitea is not a supported target. Don't add Gitea-compatibility
 hedging or version-sensitivity caveats; assume Forgejo behavior.
 
+### Typed routes vs Forgejo passthrough
+
+Cosheaf exposes two HTTP surfaces; pick by consumer, not by endpoint:
+
+- **Typed routes** (`routes/pulls.ts`, `routes/issues.ts`, `routes/files.ts`,
+  `routes/branches.ts`, `routes/notifications.ts`) are the **human-UI
+  surface**. Add to them when a route needs validation, response shaping for
+  the SPA, sidecar integration, SSE events, or cosheaf-specific gates
+  (e.g. `requireAdminFresh` on merge).
+- **Forgejo passthrough** (`/api/v1/w/:slug/forgejo/*`) is the **agent
+  surface**. Forgejo-trained bots reach Forgejo through it with cosheaf
+  handling auth (`Bearer cs_…` → `Sudo:`) and workspace scoping. Every call
+  is audited in `forgejo_passthrough_log`.
+
+Rules of thumb:
+
+- Don't add a typed wrapper that's a 1:1 Forgejo proxy with no logic — the
+  SPA can fetch through passthrough instead.
+- Don't expose a path through passthrough when a typed route guards it
+  (e.g. `pulls/:n/merge` is forbidden in passthrough because the typed
+  route runs `requireAdminFresh`).
+- Don't mirror Forgejo state into SQLite just to filter on it; Forgejo's
+  repo-scoped filters (`assigned_by`, `created_by`, `state`, `q`) are
+  what the typed routes should compose.
+
 Do not rewrite the app, build a generic CMS, add arbitrary document-format
 plugins, or move agent/prover logic into this repo as part of this direction.
 

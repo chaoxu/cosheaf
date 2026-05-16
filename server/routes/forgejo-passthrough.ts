@@ -11,8 +11,22 @@
 // stumble into another repo or /admin/*). Body and query are forwarded
 // verbatim; response status, content-type, and Link header are forwarded.
 //
-// This is an escape hatch, not a replacement for cosheaf-specific endpoints
-// (PUT /file, /search, /backlinks, etc.). Rate limiting is a follow-up.
+// Policy (intentional, see AGENTS.md):
+//
+// - **Passthrough is the agent surface.** Forgejo-trained bots talk through
+//   here. The typed routes (routes/pulls.ts, routes/issues.ts,
+//   routes/files.ts, routes/branches.ts, routes/notifications.ts) are the
+//   *human-UI surface* — they shape responses for the SPA, run validation,
+//   integrate with the SQLite sidecar, and emit SSE.
+// - **Don't add a typed route just to wrap a Forgejo endpoint 1:1.** If the
+//   SPA only needs raw Forgejo JSON, use passthrough from the client.
+// - **Don't add to passthrough what already has a typed route.** Merging is
+//   the canonical example: `pulls/:n/merge` is forbidden below because
+//   /pulls/:n/merge goes through `requireAdminFresh`. Same logic applies if
+//   we later add cosheaf-side checks to a typed route.
+//
+// Every call is recorded in `forgejo_passthrough_log` so it's visible which
+// agent ran what. Rate limiting is a follow-up.
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
