@@ -8,6 +8,7 @@ import { Button } from "../components/ui/button";
 import { api } from "../api";
 import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
 import { IssueBodyRender, type DocumentContext } from "../document-format/coflat-issue-render";
+import { formatRelativeTime } from "../lib/format-relative-time";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -375,7 +376,7 @@ export function IssueView({
             >
               <div className={cn("flex items-center gap-2 text-xs mb-2", muted)}>
                 <strong className="text-[var(--cf-fg)]">@{c.author}</strong>
-                <span>{formatRel(c.created_at)}</span>
+                <span>{formatRelativeTime(c.created_at)}</span>
                 {c.updated_at > c.created_at + 1000 && <span>(edited)</span>}
                 {isOwn && !editing && (
                   <span className="ml-auto flex gap-2">
@@ -599,7 +600,7 @@ function TimelineRow({
       <span aria-hidden>{desc.icon}</span>
       {e.author && <strong className="text-[var(--cf-fg)]">@{e.author}</strong>}
       <span>{desc.text(onOpenNumber)}</span>
-      <span className="ml-auto">{formatRel(e.created_at)}</span>
+      <span className="ml-auto">{formatRelativeTime(e.created_at)}</span>
     </div>
   );
 }
@@ -731,11 +732,3 @@ function FocusedTextarea({
   );
 }
 
-function formatRel(ms: number): string {
-  if (!ms) return "";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
-}

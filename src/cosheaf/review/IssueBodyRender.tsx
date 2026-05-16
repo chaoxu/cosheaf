@@ -17,6 +17,7 @@ import { useLayoutEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import { hydrateMath, renderToHtml, type DocumentContext } from "@chaoxu/coflat-editor/reader";
 import "katex/dist/katex.min.css";
+import { escapeAttr, escapeHtml } from "../lib/html-escape";
 
 interface RenderProps {
   text: string;
@@ -219,15 +220,3 @@ function injectPageRefTestIds(html: string): string {
   });
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}

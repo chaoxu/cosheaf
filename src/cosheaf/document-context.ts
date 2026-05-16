@@ -7,6 +7,7 @@
 
 import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
 import type { FileEntry } from "./api";
+import { escapeHtml } from "./lib/html-escape";
 
 export interface WorkspaceContextOptions {
   files: readonly FileEntry[] | null;
@@ -40,11 +41,3 @@ export function buildWorkspaceDocumentContext(opts: WorkspaceContextOptions): Do
   };
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}

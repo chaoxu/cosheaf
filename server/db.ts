@@ -2,31 +2,21 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Auto-load .env.dev from the repo root if present. Saves callers from having
-// to `set -a; source ./.env.dev; set +a` before every CLI / dev invocation.
-function loadDotenv(): void {
-  const candidates = [
-    path.resolve(__dirname, "..", ".env.dev"),
-    path.resolve(process.cwd(), ".env.dev"),
-  ];
-  for (const file of candidates) {
-    if (!existsSync(file)) continue;
-    const text = readFileSync(file, "utf8");
-    for (const raw of text.split(/\r?\n/)) {
-      const line = raw.trim();
-      if (!line || line.startsWith("#")) continue;
-      const eq = line.indexOf("=");
-      if (eq < 0) continue;
-      const key = line.slice(0, eq).trim();
-      const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-      if (process.env[key] === undefined) process.env[key] = value;
-    }
-    return; // first match wins
+// Auto-load .env.dev from the repo root or CWD if present, so CLI / dev
+// invocations don't need `set -a; source ./.env.dev; set +a`. Uses Node's
+// built-in process.loadEnvFile() (Node 21.7+). Existing process.env wins.
+for (const candidate of [
+  path.resolve(__dirname, "..", ".env.dev"),
+  path.resolve(process.cwd(), ".env.dev"),
+]) {
+  if (existsSync(candidate)) {
+    process.loadEnvFile(candidate);
+    break;
   }
 }
-loadDotenv();
 
 export interface Config {
   dataDir: string;

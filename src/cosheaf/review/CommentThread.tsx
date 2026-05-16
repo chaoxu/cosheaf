@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactElement } from "react";
+import { formatRelativeTime } from "../lib/format-relative-time";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import type { LineComment } from "../api";
@@ -105,7 +106,7 @@ function CommentRow({
     <div className={cn("p-2", showSeparator && "border-t border-[var(--cf-border)]")}>
       <div className={cn("flex items-center gap-2 mb-1 text-xs", muted)}>
         <strong className="text-[var(--cf-fg)]">@{comment.author_username}</strong>
-        <span>{formatRelative(comment.created_at)}</span>
+        <span>{formatRelativeTime(comment.created_at)}</span>
         {edited && <span className="text-[10px]">(edited)</span>}
         {comment.outdated && (
           <span className="px-1 rounded bg-yellow-500/20 text-yellow-700 text-[10px]">outdated</span>
@@ -221,11 +222,3 @@ function EditableTextarea({
   );
 }
 
-function formatRelative(ms: number): string {
-  if (!ms) return "";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
-}

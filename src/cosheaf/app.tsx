@@ -32,6 +32,7 @@ import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { cn } from "./lib/utils";
+import { formatRelativeTime } from "./lib/format-relative-time";
 import { PrHeader } from "./review/PrHeader";
 import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
@@ -1137,14 +1138,10 @@ function ApprovalsPanel({
   );
 }
 
-function formatTime(ms: number): string {
-  if (!ms) return "";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
-}
+// formatTime is the shared `formatRelativeTime` from lib (also used by
+// CommentThread and IssueView). Keep a local alias to avoid touching every
+// call site name in this large file.
+const formatTime = formatRelativeTime;
 
 function statusBadge(status: DocStatus): ReactElement {
   return <Badge variant={status}>{status}</Badge>;
