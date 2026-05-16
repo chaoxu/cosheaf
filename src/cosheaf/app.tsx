@@ -14,13 +14,13 @@ import {
   type ActivityRow,
   type ApprovalRecord,
   type Backlink,
-  type ChangeDiff,
+  type PullFiles,
   type Decision,
   type FileEntry,
   type IssueRow,
   type LineComment,
   type NotificationRow,
-  type OpenBranchRow,
+  type OpenPull,
   type PrMeta,
   type ReviewQueueEntry,
   type SearchResult,
@@ -766,7 +766,7 @@ function InboxOrActivity({
 }: {
   kind: "inbox" | "activity";
   queue: readonly ReviewQueueEntry[];
-  openPrs: readonly OpenBranchRow[];
+  openPrs: readonly OpenPull[];
   issues: readonly IssueRow[];
   pinned: readonly IssueRow[];
   activities: readonly ActivityRow[];
@@ -1204,7 +1204,7 @@ function WorkspaceView({
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
-  const [openBranches, setOpenBranches] = useState<OpenBranchRow[] | null>(null);
+  const [openBranches, setOpenBranches] = useState<OpenPull[] | null>(null);
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
@@ -1219,7 +1219,7 @@ function WorkspaceView({
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
   const [reviewState, setReviewState] = useState<{
     pr: PrMeta | null;
-    diff: ChangeDiff | null;
+    diff: PullFiles | null;
     comments: LineComment[];
     selectedPath: string | null;
     busy: boolean;

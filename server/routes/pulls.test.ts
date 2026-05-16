@@ -16,7 +16,8 @@ import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { _resetPermCacheForTests, _seedPermCacheForTests } from "../middleware.js";
-import { changes } from "./changes.js";
+import { pulls } from "./pulls.js";
+import { branches } from "./branches.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-pulls-test",
@@ -70,7 +71,8 @@ function appFor(db: Database.Database): Hono<AppEnv> {
     c.set("sse", new SSEHub());
     await next();
   });
-  app.route("/api/v1/w", changes);
+  app.route("/api/v1/w", pulls);
+  app.route("/api/v1/w", branches);
   return app;
 }
 

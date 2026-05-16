@@ -1,9 +1,9 @@
 import type { Role } from "../../shared/roles";
-import type { ChangeDiff, PrMeta, PrState, PullFile } from "../../shared/review";
+import type { PullFiles, PrMeta, PrState, PullFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 
 export type Decision = "approve" | "request_changes" | "comment";
-export type { Role, ChangeDiff, PullFile, PrMeta, PrState, LineComment, CommentSide };
+export type { Role, PullFiles, PullFile, PrMeta, PrState, LineComment, CommentSide };
 
 export interface User {
   id: number;
@@ -38,16 +38,10 @@ export interface Branch {
   commit_sha: string | null;
   updated_at: number;
 }
-/** @deprecated use Branch */
-export type Change = Branch;
-
-// Queue + open-PR rows are now thin views over the Forgejo PrMeta. Old
-// cosheaf-side fields (`id`, `author_user_id`, `state ∈ {review, changes_requested}`,
-// approvals) have been replaced by Forgejo's PR number, author_username,
-// open/closed + `merged: boolean`, and a derived approvals count fetched
-// alongside.
+// Open-PR list = Forgejo PrMeta as-is. Queue entries add cached approval
+// counts so the sidebar can render the gate without a per-row fetch.
+export type OpenPull = PrMeta;
 export type ReviewQueueEntry = PrMeta & { approvals: number; rejections: number };
-export type OpenBranchRow = PrMeta;
 
 export interface ApprovalRecord {
   username: string;
@@ -228,7 +222,7 @@ export const api = {
     jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/close`, { method: "POST" }),
 
   listPullFiles: (slug: string, prNumber: number) =>
-    jsonFetch<ChangeDiff>(`${w(slug)}/pulls/${prNumber}/files`),
+    jsonFetch<PullFiles>(`${w(slug)}/pulls/${prNumber}/files`),
   pullFile: (slug: string, prNumber: number, path: string, side: "base" | "head") =>
     jsonFetch<{ content: string }>(
       `${w(slug)}/pulls/${prNumber}/file?path=${encodeURIComponent(path)}&side=${side}`,

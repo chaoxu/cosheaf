@@ -11,7 +11,7 @@ export interface PullFile {
   patch: string;
 }
 
-export interface ChangeDiff {
+export interface PullFiles {
   files: PullFile[];
 }
 

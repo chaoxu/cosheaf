@@ -1,6 +1,6 @@
-// Pull-request and branch surface. All workflow state lives on Forgejo;
-// this route only translates Cosheaf-shaped paths to Forgejo REST calls and
-// shapes responses for the client.
+// Pull-request surface. All workflow state lives on Forgejo; this route
+// only translates cosheaf paths to Forgejo REST calls and shapes responses
+// for the client.
 //
 // Endpoints under /:slug/* :
 //   GET    /pulls?state=open|closed|all     — list PRs
@@ -20,12 +20,10 @@
 //   POST   /pulls/:n/draft-review/:rid/comments
 //   POST   /pulls/:n/draft-review/:rid/submit
 //
-//   GET    /branches/mine                   — your branches with no open PR
-//   POST   /branches                        — create a branch from main
-//   DELETE /branches/:name                  — delete branch
-//
 //   GET    /settings                        — { min_approvals }
 //   PUT    /settings                        — admin only
+//
+// Branches live in routes/branches.ts.
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
@@ -41,12 +39,11 @@ import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import type { LineComment } from "../../shared/comments.js";
 import type { PrMeta, PullFileStatus } from "../../shared/review.js";
-import { userBranchPrefix } from "../../shared/conventions.js";
 
-export const changes = new Hono<AppEnv>();
-changes.use("*", requireAuth);
-changes.use("/:slug/*", requireMembership());
-changes.use("/:slug/*", requireWriteOnMutation);
+export const pulls = new Hono<AppEnv>();
+pulls.use("*", requireAuth);
+pulls.use("/:slug/*", requireMembership());
+pulls.use("/:slug/*", requireWriteOnMutation);
 
 async function deleteBranchQuietly(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
   try {
@@ -164,65 +161,8 @@ function forgejoErrToResult(err: unknown): { ok: false; status: number; message:
   return { ok: false, status: 500, message: (err as Error)?.message ?? "merge failed" };
 }
 
-// ---------- branches ----------
 
-changes.get("/:slug/branches/mine", async (c) => {
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const [branches, pulls] = await Promise.all([
-    fj.listBranches(owner, repo),
-    fj.listPulls(owner, repo, "open"),
-  ]);
-  const openHeads = new Set(pulls.map((p) => p.head.ref));
-  // Identify "your branches" by the `user/<sudo>/` prefix we enforce on
-  // file PUT auto-create. This is deterministic — unlike scanning the
-  // latest commit's author/committer, which falls over after rebase,
-  // cherry-pick, or a web-UI edit attributed to a different user.
-  const prefix = userBranchPrefix(sudo);
-  const mine = branches
-    .filter((b) => b.name.startsWith(prefix) && !openHeads.has(b.name))
-    .map((b) => ({
-      name: b.name,
-      commit_sha: b.commit?.id ?? null,
-      updated_at: b.commit?.timestamp ? Date.parse(b.commit.timestamp) : 0,
-    }))
-    .sort((a, b) => b.updated_at - a.updated_at);
-  return c.json({ branches: mine });
-});
-
-changes.post("/:slug/branches", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { name?: string } | null;
-  if (
-    !body?.name ||
-    !/^[A-Za-z0-9._/-]+$/.test(body.name) ||
-    body.name === "main" ||
-    body.name.includes("..") ||
-    body.name.startsWith("/") ||
-    body.name.endsWith("/")
-  )
-    return c.json({ error: "valid branch name required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  try {
-    await fj.createBranch(owner, repo, { newBranchName: body.name, oldBranchName: "main", sudo });
-  } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409)
-      return c.json({ error: "branch already exists", code: "conflict" }, 409);
-    throw err;
-  }
-  return c.json({ name: body.name }, 201);
-});
-
-changes.delete("/:slug/branches/:name", async (c) => {
-  const name = c.req.param("name");
-  if (!name || name === "main")
-    return c.json({ error: "branch name required (not main)", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  await deleteBranchQuietly(fj, owner, repo, name);
-  return c.json({ ok: true });
-});
-
-// ---------- pulls ----------
-
-changes.get("/:slug/pulls", async (c) => {
+pulls.get("/:slug/pulls", async (c) => {
   const state = c.req.query("state") ?? "open";
   if (state !== "open" && state !== "closed" && state !== "all")
     return c.json({ error: "state must be open|closed|all", code: "validation" }, 400);
@@ -231,7 +171,7 @@ changes.get("/:slug/pulls", async (c) => {
   return c.json({ pulls: pulls.map(prMeta) });
 });
 
-changes.post("/:slug/pulls", async (c) => {
+pulls.post("/:slug/pulls", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     head?: string;
     base?: string;
@@ -264,7 +204,7 @@ changes.post("/:slug/pulls", async (c) => {
   }
 });
 
-changes.get("/:slug/pulls/:n", async (c) => {
+pulls.get("/:slug/pulls/:n", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -273,7 +213,7 @@ changes.get("/:slug/pulls/:n", async (c) => {
   return c.json(prMeta(pull));
 });
 
-changes.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
+pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -294,7 +234,7 @@ changes.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   return c.json({ ok: true });
 });
 
-changes.post("/:slug/pulls/:n/close", async (c) => {
+pulls.post("/:slug/pulls/:n/close", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
@@ -306,7 +246,7 @@ changes.post("/:slug/pulls/:n/close", async (c) => {
 
 // ---------- diff + raw file at a side ----------
 
-changes.get("/:slug/pulls/:n/files", async (c) => {
+pulls.get("/:slug/pulls/:n/files", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -330,7 +270,7 @@ changes.get("/:slug/pulls/:n/files", async (c) => {
   return c.json({ files });
 });
 
-changes.get("/:slug/pulls/:n/file", async (c) => {
+pulls.get("/:slug/pulls/:n/file", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const path = c.req.query("path");
@@ -360,7 +300,7 @@ const EVENT_MAP = {
   COMMENT: "COMMENT",
 } as const;
 
-changes.get("/:slug/pulls/:n/reviews", async (c) => {
+pulls.get("/:slug/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -382,7 +322,7 @@ changes.get("/:slug/pulls/:n/reviews", async (c) => {
   return c.json({ reviews: out, approvals: counts.approvals, rejections: counts.rejections });
 });
 
-changes.post("/:slug/pulls/:n/reviews", async (c) => {
+pulls.post("/:slug/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
@@ -433,7 +373,7 @@ async function resolveLinePosition(
   return pos;
 }
 
-changes.get("/:slug/pulls/:n/comments", async (c) => {
+pulls.get("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -464,7 +404,7 @@ changes.get("/:slug/pulls/:n/comments", async (c) => {
   return c.json({ comments: out });
 });
 
-changes.post("/:slug/pulls/:n/comments", async (c) => {
+pulls.post("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
@@ -489,7 +429,7 @@ changes.post("/:slug/pulls/:n/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-changes.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
+pulls.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
   const n = parsePr(c.req.param("n"));
   const cid = Number(c.req.param("cid"));
   if (n === null || !cid) return c.json({ error: "bad ids", code: "validation" }, 400);
@@ -501,7 +441,7 @@ changes.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
   return c.json({ ok: true });
 });
 
-changes.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
+pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
   const n = parsePr(c.req.param("n"));
   const cid = Number(c.req.param("cid"));
   const rid = Number(c.req.query("review_id"));
@@ -533,7 +473,7 @@ async function findOrCreatePendingReview(
   return created.id;
 }
 
-changes.post("/:slug/pulls/:n/draft-review", async (c) => {
+pulls.post("/:slug/pulls/:n/draft-review", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
@@ -545,7 +485,7 @@ changes.post("/:slug/pulls/:n/draft-review", async (c) => {
   return c.json({ review_id });
 });
 
-changes.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
+pulls.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = Number(c.req.param("rid"));
   if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);
@@ -565,7 +505,7 @@ changes.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-changes.post("/:slug/pulls/:n/draft-review/:rid/submit", async (c) => {
+pulls.post("/:slug/pulls/:n/draft-review/:rid/submit", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = Number(c.req.param("rid"));
   if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);
@@ -587,13 +527,13 @@ changes.post("/:slug/pulls/:n/draft-review/:rid/submit", async (c) => {
 
 // ---------- settings (min_approvals on main) ----------
 
-changes.get("/:slug/settings", async (c) => {
+pulls.get("/:slug/settings", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const bp = await fj.getBranchProtection(owner, repo, "main");
   return c.json({ min_approvals: bp?.required_approvals ?? 1 });
 });
 
-changes.put("/:slug/settings", requireAdminFresh, async (c) => {
+pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
   const body = (await c.req.json().catch(() => null)) as { min_approvals?: number } | null;
   if (!body || !Number.isInteger(body.min_approvals) || (body.min_approvals as number) < 1)
     return c.json({ error: "min_approvals must be >= 1", code: "validation" }, 400);
