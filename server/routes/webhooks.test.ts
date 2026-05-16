@@ -64,16 +64,18 @@ function signedPush(body: string, delivery = "delivery-1"): RequestInit {
 }
 
 describe("forgejo webhooks", () => {
-  it("does not dedupe a delivery whose reindex failed", async () => {
+  it("acks 200 + dedupes even when a per-path reindex fails (operator recovers via `cli workspace reindex`)", async () => {
+    // We used to throw 500 here, which left the webhook_log row unwritten and
+    // caused Forgejo to retry the delivery forever. Now we claim the dedupe
+    // row first, log the partial failure, and ack 200 — a retry storm of
+    // index work is worse than missing one path that a manual reindex fixes.
     const db = freshDb();
-    let attempts = 0;
     const forgejo = {
       getRawFile: vi.fn(async () => {
-        attempts += 1;
-        if (attempts === 1) throw new Error("temporary Forgejo failure");
-        return "# Recovered\n";
+        throw new Error("temporary Forgejo failure");
       }),
     } as unknown as Forgejo;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const app = appFor(db, forgejo);
     const body = JSON.stringify({
       ref: "refs/heads/main",
@@ -82,13 +84,16 @@ describe("forgejo webhooks", () => {
     });
 
     const first = await app.request("/api/v1/webhooks/forgejo", signedPush(body));
-    expect(first.status).toBe(500);
-    expect(db.prepare("SELECT count(*) AS count FROM webhook_log").get()).toEqual({ count: 0 });
+    expect(first.status).toBe(200);
+    expect(db.prepare("SELECT count(*) AS count FROM webhook_log").get()).toEqual({ count: 1 });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("webhook reindex partial failure"));
 
+    // A retry of the same delivery short-circuits — at-most-once.
     const second = await app.request("/api/v1/webhooks/forgejo", signedPush(body));
     expect(second.status).toBe(200);
-    expect(db.prepare("SELECT count(*) AS count FROM webhook_log").get()).toEqual({ count: 1 });
-    expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_id = 1").get()).toEqual({ path: "recovered.md" });
+    expect(await second.json()).toMatchObject({ dedup: true });
+    expect(forgejo.getRawFile).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 
   it("does not process an in-flight duplicate delivery twice", async () => {

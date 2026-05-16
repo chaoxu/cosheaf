@@ -81,8 +81,16 @@ webhooks.post("/forgejo", async (c) => {
 
   let deduped = false;
   await serializeWorkspace(ws.id, async () => {
-    const alreadyLogged = db.prepare("SELECT 1 FROM webhook_log WHERE delivery_id = ?").get(deliveryId) as unknown;
-    if (alreadyLogged) {
+    // Claim the delivery id first. Any later failure leaves the dedupe row in
+    // place so Forgejo's webhook retry doesn't stampede us — at-most-once
+    // beats a retry storm that re-runs the side effects. Per-path failures
+    // below are logged but do not propagate.
+    const claim = db
+      .prepare(
+        "INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)",
+      )
+      .run(deliveryId, Date.now(), event);
+    if (claim.changes === 0) {
       deduped = true;
       return;
     }
@@ -121,7 +129,9 @@ webhooks.post("/forgejo", async (c) => {
           indexPage(db, { workspaceId: ws.id, filePath: r.path, bodyText: r.body });
         }
         if (failures.length > 0) {
-          throw new Error(`reindex failed: ${failures.join("; ")}`);
+          // Don't throw — that would unwind the dedupe row and provoke a Forgejo
+          // retry storm. Log; an operator can rerun `pnpm cli workspace reindex`.
+          console.warn(`webhook reindex partial failure (delivery=${deliveryId}): ${failures.join("; ")}`);
         }
         // Per-path events let the frontend reload only the open file when needed.
         for (const path of touched) sse.publish(ws.slug, { type: "change", path });
@@ -166,9 +176,6 @@ webhooks.post("/forgejo", async (c) => {
         });
       }
     }
-    db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
-      deliveryId, Date.now(), event,
-    );
   });
   if (deduped) return c.json({ ok: true, dedup: true });
   return c.json({ ok: true });
