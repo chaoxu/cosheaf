@@ -66,6 +66,19 @@ export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+// Require the caller has at least `write` (i.e. `write` or `admin`) on the
+// workspace. Read-only members can still hit GET/HEAD routes, but any
+// mutation method is gated here. Uses the cached role from requireMembership.
+export const requireWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const m = c.req.method.toUpperCase();
+  if (m === "GET" || m === "HEAD" || m === "OPTIONS") return next();
+  const ws = c.get("workspace");
+  if (ws.role !== "write" && ws.role !== "admin") {
+    return c.json({ error: "write access required", code: "forbidden" }, 403);
+  }
+  await next();
+};
+
 async function fetchRole(
   fj: Forgejo,
   owner: string,

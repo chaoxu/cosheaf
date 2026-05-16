@@ -29,7 +29,12 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
+import {
+  requireAdminFresh,
+  requireAuth,
+  requireMembership,
+  requireWriteOnMutation,
+} from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoPull, type ForgejoReview } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -41,6 +46,7 @@ import { userBranchPrefix } from "../../shared/conventions.js";
 export const changes = new Hono<AppEnv>();
 changes.use("*", requireAuth);
 changes.use("/:slug/*", requireMembership());
+changes.use("/:slug/*", requireWriteOnMutation);
 
 async function deleteBranchQuietly(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
   try {

@@ -471,7 +471,18 @@ export class Forgejo {
   }
 
   async listReviews(owner: string, repo: string, index: number): Promise<ForgejoReview[]> {
-    return this.req<ForgejoReview[]>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`);
+    // Paginate. Forgejo's default page size is 50 but PRs with long review
+    // histories happen on busy workspaces; capping at the first page means
+    // approvalCounts misses the latest state for those PRs.
+    const all: ForgejoReview[] = [];
+    for (let page = 1; page < 50; page++) {
+      const batch = await this.req<ForgejoReview[]>(
+        `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews?page=${page}&limit=50`,
+      );
+      all.push(...batch);
+      if (batch.length < 50) break;
+    }
+    return all;
   }
 
   async createReview(owner: string, repo: string, index: number, opts: {

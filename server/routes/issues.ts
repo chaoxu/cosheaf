@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership } from "../middleware.js";
+import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { listIssues, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
@@ -35,6 +35,7 @@ async function syncIssue(
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
 issues.use("/:slug/*", requireMembership());
+issues.use("/:slug/*", requireWriteOnMutation);
 
 // GET /api/v1/w/:slug/issues?state=open|closed|all&filter=mine|assigned|all
 issues.get("/:slug/issues", (c) => {

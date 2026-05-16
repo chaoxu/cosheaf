@@ -1321,6 +1321,18 @@ function WorkspaceView({
     reviewingPullNumberRef.current = reviewingPullNumber;
   }, [reviewingPullNumber]);
 
+  // Hold the reload callbacks in refs so the SSE effect can stay mounted across
+  // PR switches and branch changes. Depending on `reloadTree` directly caused
+  // a tear-down/reconnect of the EventSource every time `activeBranchName`
+  // shifted, which kicked off a reconnect storm during reviews and saves.
+  const reloadTreeRef = useRef(reloadTree);
+  const reloadBranchesRef = useRef(reloadBranches);
+  const openQueueRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    reloadTreeRef.current = reloadTree;
+    reloadBranchesRef.current = reloadBranches;
+  }, [reloadTree, reloadBranches]);
+
   useEffect(() => {
     const url = `/api/v1/w/${encodeURIComponent(workspace.slug)}/events`;
     const es = new EventSource(url, { withCredentials: true });
@@ -1332,7 +1344,7 @@ function WorkspaceView({
         return;
       }
       if (event.type === "change" || event.type === "remove") {
-        reloadTree();
+        reloadTreeRef.current();
         if (event.path && event.path === openPathRef.current) {
           if (event.type === "remove") {
             setOpenPath(null);
@@ -1348,12 +1360,9 @@ function WorkspaceView({
           }
         }
       } else if (event.type === "pull" || event.type === "pull_reviewed") {
-        // PR opened/merged/closed/reviewed: refresh the open-list + queue.
-        openQueue();
-        reloadBranches();
-        reloadTree();
-        // If we're inside a review, refresh comments too — the broader
-        // category of pull/review events may include a comment landing.
+        openQueueRef.current();
+        reloadBranchesRef.current();
+        reloadTreeRef.current();
         if (reviewingPullNumberRef.current) {
           api
             .listComments(workspace.slug, reviewingPullNumberRef.current)
@@ -1363,7 +1372,7 @@ function WorkspaceView({
       }
     };
     return () => es.close();
-  }, [workspace.slug, reloadTree, reloadBranches]);
+  }, [workspace.slug]);
 
   const loadBacklinks = useCallback(
     (id: string | undefined) => {
@@ -1627,6 +1636,9 @@ function WorkspaceView({
       .then(setQueue)
       .catch(() => setQueue([]));
   }, [workspace.slug]);
+  useEffect(() => {
+    openQueueRef.current = openQueue;
+  }, [openQueue]);
 
   const refreshIssues = useCallback(
     (scope: "mine" | "all", panel: "inbox" | "activity", q: string) => {
@@ -1819,11 +1831,12 @@ function WorkspaceView({
   }, [reviewingPullNumber, workspace.slug, openQueue]);
 
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
+  // Each transition (enter, switch PR, exit) clears selectedPath + reviewBranchName
+  // first so a stale file or branch from the previous PR can't leak through.
   useEffect(() => {
-    if (!reviewingPullNumber) {
-      setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
-      return;
-    }
+    setReviewBranchName(null);
+    setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
+    if (!reviewingPullNumber) return;
     let cancelled = false;
     Promise.all([
       api.getPull(workspace.slug, reviewingPullNumber),
@@ -1838,7 +1851,7 @@ function WorkspaceView({
           pr,
           diff,
           comments,
-          selectedPath: s.selectedPath ?? diff.files[0]?.path ?? null,
+          selectedPath: diff.files[0]?.path ?? null,
         }));
       })
       .catch((err: unknown) => {
