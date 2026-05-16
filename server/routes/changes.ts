@@ -142,8 +142,16 @@ async function mergeWithRetry(
 
 function forgejoErrToResult(err: unknown): { ok: false; status: number; message: string } {
   if (err instanceof ForgejoError) {
-    // 4xx → caller violated a precondition (conflicts, missing approvals,
-    // branch protection): 409. 5xx → Forgejo upstream is sick: 502.
+    // Pass distinguishable 4xx through so the client can show the right
+    // affordance — auth/permission, missing target, validation, rate limit —
+    // instead of collapsing every Forgejo precondition failure into 409.
+    if (err.status === 401 || err.status === 403) return { ok: false, status: err.status, message: err.message };
+    if (err.status === 404) return { ok: false, status: 404, message: err.message };
+    if (err.status === 422) return { ok: false, status: 422, message: err.message };
+    if (err.status === 429) return { ok: false, status: 429, message: err.message };
+    // 405 (conflict: e.g. "Please try again later", "PR has conflicts"), 409,
+    // and any other 4xx we don't separate map to 409 — the caller violated a
+    // merge precondition. 5xx → Forgejo upstream is sick: 502.
     if (err.status >= 500) return { ok: false, status: 502, message: err.message };
     return { ok: false, status: 409, message: err.message };
   }

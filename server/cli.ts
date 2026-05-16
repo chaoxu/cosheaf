@@ -288,14 +288,21 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
   }
   const fj = await ensureForgejoProxy(db, forgejo, user);
   await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, fj, role);
-  if (role === "admin") {
-    // Admins can direct-push to main (branch protection has a push whitelist
-    // for direct-merge operations from the cosheaf UI).
-    const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
-    const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
-    if (!current.includes(fj)) {
-      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, fj]);
-    }
+  // Keep the branch-protection push whitelist in sync: admins can direct-push
+  // to main from the cosheaf UI; write/read users must not. Adjust on every
+  // role change (not just promotion) so a demotion actually revokes access.
+  const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
+  const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
+  const onList = current.includes(fj);
+  if (role === "admin" && !onList) {
+    await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, fj]);
+  } else if (role !== "admin" && onList) {
+    await forgejo.patchBranchProtectionPushWhitelist(
+      config.forgejoOwner,
+      ws.forgejo_repo,
+      "main",
+      current.filter((u) => u !== fj),
+    );
   }
   console.log(`set ${username} as ${role} in workspace ${slug}`);
 }
