@@ -1493,9 +1493,7 @@ function WorkspaceView({
   // avoids dual-dirty races where cosheaf's `onChange`-driven setDirty(true)
   // was clobbered by the editor's mount-time onDirtyChange(false).
   const currentBranchNameRef = useRef<string | null>(null);
-  const reviewingPullNumberRefForHost = useRef<number | null>(null);
   currentBranchNameRef.current = currentBranchName;
-  reviewingPullNumberRefForHost.current = reviewingPullNumber;
 
   const branchForWrite = useCallback(
     (): string =>
@@ -1510,7 +1508,7 @@ function WorkspaceView({
       save: async (payload) => {
         const path = openPathRef.current;
         if (!path) return { ok: false as const, error: "no file open" };
-        if (reviewingPullNumberRefForHost.current)
+        if (reviewingPullNumberRef.current)
           return { ok: false as const, error: "review mode is read-only" };
         const branch = branchForWrite();
         try {
@@ -1563,7 +1561,7 @@ function WorkspaceView({
       accept: (file) =>
         file.size > 25 * 1024 * 1024 ? { reject: "asset exceeds 25 MiB" } : null,
       upload: async (file) => {
-        if (reviewingPullNumberRefForHost.current)
+        if (reviewingPullNumberRef.current)
           return { error: "review mode is read-only" };
         const branch = branchForWrite();
         try {

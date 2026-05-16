@@ -1,9 +1,9 @@
 # Cosheaf
 
 Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
-hold the canonical markdown files, branches, pull requests, reviews, and issues;
-SQLite is a derived, rebuildable sidecar index for fast reads, sessions,
-memberships, and local auth state.
+hold the canonical markdown files, branches, pull requests, reviews, issues,
+and collaborator memberships; SQLite is a derived, rebuildable sidecar index
+for fast reads, sessions, and local auth state.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo/Gitea-style
 forge. Cosheaf should feel like a focused repository interface with custom
@@ -24,8 +24,8 @@ formats can be added cleanly later; touch that seam through the
 Don't add a second format until one is asked for.
 
 Agents (autoprover and friends) are out of scope here. They will live in a
-separate layer and participate as ordinary verifier/member users over the same
-HTTP API. Keep cosheaf's surface usable without any automation.
+separate layer and participate as ordinary Forgejo write-access collaborators
+over the same HTTP API. Keep cosheaf's surface usable without any automation.
 
 ## Shared file
 
@@ -47,8 +47,9 @@ HTTP API. Keep cosheaf's surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, branch/PR cache metadata, memberships, and sessions/tokens. The
-  page index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
+  links, FTS index, and sessions/tokens. Memberships, branches, and pull
+  requests live on Forgejo and are read on demand. The page index is
+  rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
@@ -138,7 +139,7 @@ pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
 pnpm issue -- mine
 pnpm cli user add <name>  # create a user (interactive password prompt)
 pnpm cli seed --user <name> --password <pw> --workspace <slug> --workspace-name <name>
-pnpm cli workspace member <slug> <user> <owner|verifier|member>
+pnpm cli workspace member <slug> <user> <admin|write|read>
 pnpm cli workspace reindex <slug>   # rebuild page index from Forgejo main
 pnpm typecheck            # tsc --noEmit (root)
 pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
@@ -166,16 +167,17 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `sessions(id, user_id, expires_at)` — cookie sessions
 - `tokens(id, user_id, name, token_hash)` — personal API tokens (`Bearer cs_…`)
 - `workspaces(id, slug, name, forgejo_repo)` — one Forgejo repo per workspace
-- `memberships(workspace_id, user_id, role)` — role ∈ `owner | verifier | member`
 - `doc_map(workspace_id, cosheaf_id, doc_type, forgejo_kind, forgejo_id, title)`
 - `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
 - `notes_fts` — FTS5 virtual table over title + body
 - `page_tags(workspace_id, cosheaf_id, tag)`
-- `branches(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title)` —
-  sidecar rows for the branch / pull-request workflow. Pre-existing dev DBs
-  with a legacy `changes` table are migrated in-place on startup (see
-  `renameChangesTable` in `server/db.ts`).
 - `webhook_log(delivery_id, delivered_at, event_type)`
+
+Workspace role (`admin | write | read`) is resolved from Forgejo's
+collaborator-permission API on each request, cached in-process for 30s.
+There is no SQLite `memberships` table. There is no sidecar `branches`
+table either — branches and pull requests live entirely on Forgejo and
+are queried on demand via `/branches/mine` and `/pulls`.
 
 ## Branch and pull request lifecycle
 
@@ -189,8 +191,9 @@ branch deleted or PR closed unmerged ──▶ closed/discarded
 
 - Edits are stored on Forgejo branches.
 - Opening a pull request submits a branch for review.
-- Owners can merge when Forgejo branch protection allows it; verifiers approve
-  or request changes through the same API surface.
+- Admins can merge when Forgejo branch protection allows it; any
+  write-access collaborator can approve or request changes through the
+  Forgejo review API.
 - Requesting changes keeps the pull request and branch open for more commits.
   Closing is the terminal non-merge path.
 - Webhooks reconcile Forgejo PR/review/file state into SQLite and notify open

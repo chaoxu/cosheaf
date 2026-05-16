@@ -339,7 +339,7 @@ function help(): void {
   cosheaf user passwd <username>
   cosheaf user list
   cosheaf user rm <username>
-  cosheaf workspace member <slug> <username> <role>   # role = owner|verifier|member
+  cosheaf workspace member <slug> <username> <role>   # role = admin|write|read
   cosheaf workspace reindex <slug>                     # rebuild sidecar index from Forgejo main
   cosheaf workspace rm <slug>                          # delete forgejo repo + sidecar
   cosheaf passthrough-log <slug>                       # last 50 /forgejo/* passthrough calls
