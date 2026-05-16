@@ -139,7 +139,11 @@ server/
     tokens.ts      # personal API tokens
     workspaces.ts  # list/create workspaces
     files.ts       # tree/file get/put/delete, search, backlinks, documents list
-    changes.ts     # branch / pull request / review API (filename is legacy; routes use branch/PR vocab)
+    pulls.ts       # pull request + review API (merge, reviews, comments, drafts, settings)
+    branches.ts    # branch list/create/delete
+    issues.ts      # issues, labels, milestones, comments, timeline (proxies Forgejo)
+    notifications.ts # notification feed
+    forgejo-passthrough.ts # /forgejo/* agent escape hatch (audited)
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   main.tsx        # React entry
@@ -192,7 +196,7 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `sessions(id, user_id, expires_at)` — cookie sessions
 - `tokens(id, user_id, name, token_hash)` — personal API tokens (`Bearer cs_…`)
 - `workspaces(id, slug, name, forgejo_repo)` — one Forgejo repo per workspace
-- `doc_map(workspace_id, cosheaf_id, doc_type, forgejo_kind, forgejo_id, title)`
+- `doc_map(workspace_id, cosheaf_id, forgejo_id, title, created_at)` — pages only; the prior polymorphic `doc_type`/`forgejo_kind` columns were dropped.
 - `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
 - `notes_fts` — FTS5 virtual table over title + body
 - `page_tags(workspace_id, cosheaf_id, tag)`
@@ -242,7 +246,7 @@ transitions, you usually need to touch in lockstep:
 
 1. `server/schema.sql` (CHECK constraints)
 2. `server/indexer.ts` (page indexing, links, tags, FTS)
-3. `server/routes/changes.ts` and `server/routes/webhooks.ts`
+3. `server/routes/pulls.ts`, `server/routes/branches.ts`, and `server/routes/webhooks.ts`
 4. `src/cosheaf/api.ts` (mirrored API types)
 5. UI in `src/cosheaf/app.tsx` if state gates a new affordance
 

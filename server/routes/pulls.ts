@@ -35,6 +35,7 @@ import {
 } from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoPull, type ForgejoReview } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
+import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import type { LineComment } from "../../shared/comments.js";
@@ -230,6 +231,10 @@ pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   }
   const pull = await fj.getPull(owner, repo, n);
   if (pull) await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
+  // Invalidate eagerly so the post-merge tree fetch sees the new main
+  // commit before the push webhook lands (in tests/dev the webhook may
+  // never fire, leaving stale entries up to the 5min TTL otherwise).
+  invalidateRepoTrees(owner, repo);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "merged" });
   return c.json({ ok: true });
 });
