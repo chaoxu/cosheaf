@@ -8,7 +8,7 @@
 import { useMemo } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../../lib/utils";
-import { MarkdownEditor } from "../../editor";
+import { MarkdownEditor } from "../../document-format/coflat-editor";
 import { diffLineNumbers } from "../diff-lines";
 import { lineTintExtension } from "../cm-line-tint";
 import { commentThreadExtension } from "../cm-comment-widgets";

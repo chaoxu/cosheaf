@@ -6,7 +6,7 @@
 import { useMemo } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../../lib/utils";
-import { MarkdownEditor } from "../../editor";
+import { MarkdownEditor } from "../../document-format/coflat-editor";
 import { commentThreadExtension } from "../cm-comment-widgets";
 import { useFileSide } from "../use-file-side";
 import type { LineComment } from "../../api";

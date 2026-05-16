@@ -7,8 +7,7 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
 import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
-import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
-import { IssueBodyRender } from "./IssueBodyRender";
+import { IssueBodyRender, type DocumentContext } from "../document-format/coflat-issue-render";
 
 const muted = "text-[var(--cf-muted)]";
 

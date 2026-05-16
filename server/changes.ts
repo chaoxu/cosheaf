@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { BranchState } from "../shared/change-lifecycle.js";
-import { generateDocId } from "./frontmatter.js";
+import { generateDocId } from "./ids.js";
 
 export interface BranchRow {
   id: string;

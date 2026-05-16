@@ -1,6 +1,5 @@
 import type { ReactElement } from "react";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MountedEditor } from "@chaoxu/coflat-editor";
 
 type OutlineEntry = {
   readonly level: 1 | 2 | 3 | 4 | 5 | 6;
@@ -38,11 +37,12 @@ import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
 import { ReviewActions } from "./review/ReviewActions";
 import { IssueView } from "./review/IssueView";
-import { buildWorkspaceDocumentContext } from "./document-context";
+import { buildWorkspaceDocumentContext } from "./document-format/coflat-context";
+import type { MountedEditor } from "./document-format/coflat-editor";
 import { SettingsPanel } from "./review/SettingsPanel";
 
 const MarkdownEditor = lazy(() =>
-  import("./editor").then((m) => ({ default: m.MarkdownEditor })),
+  import("./document-format/coflat-editor").then((m) => ({ default: m.MarkdownEditor })),
 );
 
 type View =

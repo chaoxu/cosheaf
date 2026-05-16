@@ -4,8 +4,8 @@
 
 import path from "node:path";
 import type Database from "better-sqlite3";
-import { extractReferences } from "@chaoxu/coflat-editor/parse";
-import { extractTitle, generateDocId, parseDocument, serializeDocument } from "./frontmatter.js";
+import { coflatMarkdownFormat, type DocumentLink } from "./document-format/coflat.js";
+import { generateDocId } from "./ids.js";
 
 export interface PageIngest {
   workspaceId: number;
@@ -21,7 +21,8 @@ export interface IngestPlan {
 }
 
 export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan {
-  const parsed = parseDocument(p.bodyText);
+  const format = coflatMarkdownFormat;
+  const parsed = format.parseDocument(p.bodyText);
   const fmId = typeof parsed.frontmatter.id === "string" && parsed.frontmatter.id.length > 0
     ? parsed.frontmatter.id
     : null;
@@ -45,7 +46,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
     typeof parsed.frontmatter.title === "string" && parsed.frontmatter.title.length > 0
       ? parsed.frontmatter.title
       : null;
-  const title = explicitTitle ?? extractTitle(parsed.body);
+  const title = explicitTitle ?? format.extractTitle(parsed.body);
 
   const commit = db.transaction(() => {
     const stalePath = db
@@ -74,7 +75,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
       "INSERT INTO notes_fts (workspace_id, cosheaf_id, doc_type, path, title, body) VALUES (?, ?, 'page', ?, ?, ?)",
     ).run(p.workspaceId, cosheafId, p.filePath, title ?? "", parsed.body);
     db.prepare("DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?").run(p.workspaceId, cosheafId);
-    for (const link of extractLinks(parsed.body)) {
+    for (const link of format.extractLinks(parsed.body)) {
       const targetId = resolveLinkTarget(db, p.workspaceId, p.filePath, link);
       db.prepare(
         "INSERT OR IGNORE INTO backlinks (workspace_id, src_id, src_path, target_id, target_label) VALUES (?, ?, ?, ?, ?)",
@@ -95,7 +96,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   if (fmId !== cosheafId) {
     const newFm = { ...parsed.frontmatter, id: cosheafId };
     if (title) newFm.title = title;
-    rewritten = serializeDocument(newFm, parsed.body);
+    rewritten = format.serializeDocument(newFm, parsed.body);
   }
 
   return { cosheafId, title, rewrittenContent: rewritten, commit };
@@ -124,34 +125,11 @@ export function deletePage(db: Database.Database, workspaceId: number, filePath:
   tx();
 }
 
-// ----- link extraction -----
-
-interface ExtractedLink {
-  kind: "id" | "path";
-  ref: string;
-  raw: string;
-}
-
-function extractLinks(body: string): ExtractedLink[] {
-  const out: ExtractedLink[] = [];
-  for (const ref of extractReferences(body)) {
-    if (ref.kind === "ref" && ref.mode === "bracketed" && ref.key) {
-      // Coflat's `raw` is `@key`; cosheaf's historical label is `[@key]`.
-      out.push({ kind: "id", ref: ref.key, raw: `[@${ref.key}]` });
-    } else if (ref.kind === "link" && ref.href) {
-      // Match only markdown links targeting .md pages (with optional fragment).
-      if (!/\.md(?:#[^)\s]+)?$/.test(ref.href)) continue;
-      out.push({ kind: "path", ref: ref.href, raw: ref.raw });
-    }
-  }
-  return out;
-}
-
 function resolveLinkTarget(
   db: Database.Database,
   workspaceId: number,
   srcPath: string,
-  link: ExtractedLink,
+  link: DocumentLink,
 ): string | null {
   if (link.kind === "id") {
     const row = db
