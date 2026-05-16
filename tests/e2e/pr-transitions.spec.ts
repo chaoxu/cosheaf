@@ -15,7 +15,18 @@ test.describe.serial("PR review state transitions", () => {
     await queueItem.click();
     await expect(page.getByTestId("pr-header")).toBeVisible();
     await page.getByTestId("review-approve").click();
-    await expect(page.getByTestId("pr-header")).toHaveCount(0, { timeout: 15000 });
+    // The PR no longer auto-transitions on approve — it just records the
+    // review. Verify the approval landed via the Forgejo-shape endpoint.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async (n) => {
+            const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`);
+            return ((await r.json()) as { approvals: number }).approvals;
+          }, prNumber),
+        { timeout: 15000 },
+      )
+      .toBeGreaterThanOrEqual(1);
 
     // Admin (chao) merges the now-approved PR.
     await loginAs(page, "chao");
@@ -47,10 +58,15 @@ test.describe.serial("PR review state transitions", () => {
     await page.getByTestId("review-comment").fill("Tighten the proof, please.");
     await page.getByTestId("review-request-changes").click();
 
-    const reviews = await page.evaluate(async (n) => {
-      const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`);
-      return (await r.json()) as { rejections: number };
-    }, prNumber);
-    expect(reviews.rejections).toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async (n) => {
+            const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`);
+            return ((await r.json()) as { rejections: number }).rejections;
+          }, prNumber),
+        { timeout: 15000 },
+      )
+      .toBeGreaterThanOrEqual(1);
   });
 });

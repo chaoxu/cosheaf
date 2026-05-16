@@ -2272,9 +2272,14 @@ function WorkspaceView({
                   comments={reviewState.comments}
                   currentForgejoUsername={user.forgejo_username}
                   onAddComment={
-                    workspace.role === "admin" || workspace.role === "write"
-                      ? addReviewComment
-                      : undefined
+                    // Hide the inline composer for the author of the PR — even
+                    // admins/writers can't review their own changes, so the
+                    // affordance would be misleading.
+                    reviewState.pr?.author_username === user.forgejo_username
+                      ? undefined
+                      : workspace.role === "admin" || workspace.role === "write"
+                        ? addReviewComment
+                        : undefined
                   }
                   onEditComment={editReviewComment}
                   onDeleteComment={deleteReviewComment}

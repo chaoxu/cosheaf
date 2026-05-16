@@ -29,7 +29,7 @@
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership } from "../middleware.js";
+import { requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError, type Forgejo, type ForgejoPull, type ForgejoReview } from "../forgejo.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
@@ -118,23 +118,33 @@ async function mergeWithRetry(
   prNumber: number,
   sudo: string,
   opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
-): Promise<unknown> {
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
   const Do = opts.Do ?? "squash";
   let lastErr: unknown;
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
       await fj.mergePull(owner, repo, prNumber, { Do, sudo, force: opts.force });
-      return null;
+      return { ok: true };
     } catch (err) {
       lastErr = err;
       if (err instanceof ForgejoError && err.status === 405 && /try again/i.test(err.bodyText)) {
         await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
         continue;
       }
-      return err;
+      return forgejoErrToResult(err);
     }
   }
-  return lastErr;
+  return forgejoErrToResult(lastErr);
+}
+
+function forgejoErrToResult(err: unknown): { ok: false; status: number; message: string } {
+  if (err instanceof ForgejoError) {
+    // 4xx → caller violated a precondition (conflicts, missing approvals,
+    // branch protection): 409. 5xx → Forgejo upstream is sick: 502.
+    if (err.status >= 500) return { ok: false, status: 502, message: err.message };
+    return { ok: false, status: 409, message: err.message };
+  }
+  return { ok: false, status: 500, message: (err as Error)?.message ?? "merge failed" };
 }
 
 // ---------- branches ----------
@@ -146,9 +156,13 @@ changes.get("/:slug/branches/mine", async (c) => {
     fj.listPulls(owner, repo, "open"),
   ]);
   const openHeads = new Set(pulls.map((p) => p.head.ref));
+  // Identify "your branches" by the `user/<sudo>/` prefix we enforce on
+  // file PUT auto-create. This is deterministic — unlike scanning the
+  // latest commit's author/committer, which falls over after rebase,
+  // cherry-pick, or a web-UI edit attributed to a different user.
+  const prefix = `user/${sudo}/`;
   const mine = branches
-    .filter((b) => b.name !== "main" && !openHeads.has(b.name))
-    .filter((b) => b.commit?.author?.username === sudo || b.commit?.committer?.username === sudo)
+    .filter((b) => b.name.startsWith(prefix) && !openHeads.has(b.name))
     .map((b) => ({
       name: b.name,
       commit_sha: b.commit?.id ?? null,
@@ -160,7 +174,14 @@ changes.get("/:slug/branches/mine", async (c) => {
 
 changes.post("/:slug/branches", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { name?: string } | null;
-  if (!body?.name || !/^[A-Za-z0-9._/-]+$/.test(body.name) || body.name === "main")
+  if (
+    !body?.name ||
+    !/^[A-Za-z0-9._/-]+$/.test(body.name) ||
+    body.name === "main" ||
+    body.name.includes("..") ||
+    body.name.startsWith("/") ||
+    body.name.endsWith("/")
+  )
     return c.json({ error: "valid branch name required", code: "validation" }, 400);
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   try {
@@ -228,9 +249,7 @@ changes.get("/:slug/pulls/:n", async (c) => {
   return c.json(prMeta(pull));
 });
 
-changes.post("/:slug/pulls/:n/merge", async (c) => {
-  const ws = c.get("workspace");
-  if (ws.role !== "admin") return c.json({ error: "admin required", code: "forbidden" }, 403);
+changes.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -240,11 +259,14 @@ changes.post("/:slug/pulls/:n/merge", async (c) => {
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   // Admins can bypass the required-approvals branch protection rule by
   // passing `force: true`. Callers default to false (normal review flow).
-  const err = await mergeWithRetry(fj, owner, repo, n, sudo, { Do: body.Do, force: body.force });
-  if (err) return c.json({ error: `merge failed: ${(err as Error).message}`, code: "conflict" }, 409);
+  const result = await mergeWithRetry(fj, owner, repo, n, sudo, { Do: body.Do, force: body.force });
+  if (!result.ok) {
+    const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
+    return c.json({ error: `merge failed: ${result.message}`, code }, result.status as 409 | 502 | 500);
+  }
   const pull = await fj.getPull(owner, repo, n);
   if (pull) await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
-  c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "merged" });
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "merged" });
   return c.json({ ok: true });
 });
 
@@ -556,9 +578,7 @@ changes.get("/:slug/settings", async (c) => {
   return c.json({ min_approvals: bp?.required_approvals ?? 1 });
 });
 
-changes.put("/:slug/settings", async (c) => {
-  const ws = c.get("workspace");
-  if (ws.role !== "admin") return c.json({ error: "admin required", code: "forbidden" }, 403);
+changes.put("/:slug/settings", requireAdminFresh, async (c) => {
   const body = (await c.req.json().catch(() => null)) as { min_approvals?: number } | null;
   if (!body || !Number.isInteger(body.min_approvals) || (body.min_approvals as number) < 1)
     return c.json({ error: "min_approvals must be >= 1", code: "validation" }, 400);

@@ -47,6 +47,25 @@ export function _seedPermCacheForTests(
   });
 }
 
+// Bypass the in-process role cache and re-fetch from Forgejo. Use on routes
+// that mutate shared state (merge, branch-protection settings) so a
+// freshly-demoted admin can't keep doing irreversible things for up to the
+// cache TTL.
+export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const ws = c.get("workspace");
+  const fj = c.get("forgejo");
+  const owner = c.get("config").forgejoOwner;
+  const fjName = c.get("forgejoUsername");
+  const fresh = await fj.getRepoPermission(owner, ws.forgejoRepo, fjName);
+  if (fresh !== "admin")
+    return c.json({ error: "admin required", code: "forbidden" }, 403);
+  PERM_CACHE.set(`${owner}/${ws.forgejoRepo}/${fjName}`, {
+    role: fresh,
+    expiresAt: Date.now() + PERM_TTL_MS,
+  });
+  await next();
+};
+
 async function fetchRole(
   fj: Forgejo,
   owner: string,
