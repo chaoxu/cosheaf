@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
@@ -141,15 +141,12 @@ function CommentRow({
       </div>
       {editing ? (
         <div className="flex flex-col gap-1">
-          <textarea
-            autoFocus
-            data-testid={`comment-edit-body-${comment.id}`}
+          <EditableTextarea
+            commentId={comment.id}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            setValue={setDraft}
             onKeyDown={onTextareaKey}
-            rows={2}
-            disabled={busy}
-            className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--cf-accent)]"
+            disabled={!!busy}
           />
           <div className="flex items-center gap-2 justify-end">
             <span className={cn("text-[10px] mr-auto", muted)}>Esc to cancel · ⌘↵ to save</span>
@@ -187,6 +184,40 @@ function CommentRow({
       )}
       {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
     </div>
+  );
+}
+
+// Programmatic focus on mount instead of the autoFocus attribute. The
+// editable textarea is only mounted when the user clicks Edit, so focusing
+// on mount matches user intent without the a11y issues of autoFocus.
+function EditableTextarea({
+  commentId,
+  value,
+  setValue,
+  onKeyDown,
+  disabled,
+}: {
+  commentId: number;
+  value: string;
+  setValue: (v: string) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
+  disabled: boolean;
+}): ReactElement {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return (
+    <textarea
+      ref={ref}
+      data-testid={`comment-edit-body-${commentId}`}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={onKeyDown}
+      rows={2}
+      disabled={disabled}
+      className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[var(--cf-accent)]"
+    />
   );
 }
 

@@ -172,6 +172,54 @@ function shortId(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
+// Focus-on-mount via ref instead of the `autoFocus` attribute. autoFocus
+// fires during render before assistive tech has settled on the new view;
+// programmatic focus after mount is the a11y-friendly equivalent.
+function useFocusOnMount<T extends HTMLElement>(): React.RefObject<T | null> {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return ref;
+}
+
+function SlugInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}): ReactElement {
+  const ref = useFocusOnMount<HTMLInputElement>();
+  return (
+    <Input
+      ref={ref}
+      placeholder="slug (lowercase, dashes)"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+function NewFilePathInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}): ReactElement {
+  const ref = useFocusOnMount<HTMLInputElement>();
+  return (
+    <Input
+      ref={ref}
+      placeholder="path/to/note.md"
+      data-testid="new-file-path"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
 const muted = "text-[var(--cf-muted)]";
 const borderColor = "border-[var(--cf-border)]";
 
@@ -345,6 +393,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const usernameRef = useFocusOnMount<HTMLInputElement>();
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -366,24 +415,26 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
         className={cn("flex w-80 flex-col gap-3 rounded-lg border p-7", borderColor)}
       >
         <h1 className="mb-2 text-[22px] font-semibold">cosheaf</h1>
-        <label className={cn("flex flex-col gap-1 text-xs", muted)}>
-          <span>username</span>
+        <div className={cn("flex flex-col gap-1 text-xs", muted)}>
+          <label htmlFor="login-username">username</label>
           <Input
-            autoFocus
+            id="login-username"
+            ref={usernameRef}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
           />
-        </label>
-        <label className={cn("flex flex-col gap-1 text-xs", muted)}>
-          <span>password</span>
+        </div>
+        <div className={cn("flex flex-col gap-1 text-xs", muted)}>
+          <label htmlFor="login-password">password</label>
           <Input
+            id="login-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
           />
-        </label>
+        </div>
         {error && <div className="py-2 text-red-600">{error}</div>}
         <Button type="submit" disabled={busy || !username || !password}>
           {busy ? "..." : "Sign in"}
@@ -463,12 +514,7 @@ function WorkspaceList({
 
         {creating && (
           <form onSubmit={handleCreate} className="mb-3 flex gap-2">
-            <Input
-              placeholder="slug (lowercase, dashes)"
-              value={newSlug}
-              onChange={(e) => setNewSlug(e.target.value)}
-              autoFocus
-            />
+            <SlugInput value={newSlug} onChange={setNewSlug} />
             <Input
               placeholder="display name"
               value={newName}
@@ -1061,9 +1107,9 @@ function ApprovalsPanel({
         {/* Activity timeline (only entries with body or verdict) */}
         {meaningful.length > 0 && (
           <ol className="flex flex-col gap-1.5 mt-1 border-t border-[var(--cf-border)] pt-1.5">
-            {meaningful.map((a, idx) => (
+            {meaningful.map((a) => (
               <li
-                key={`${a.username}-${a.created_at}-${idx}`}
+                key={`${a.username}-${a.created_at}`}
                 className="flex flex-col gap-0.5"
               >
                 <div className="flex items-center gap-1.5 text-xs">
@@ -2127,15 +2173,19 @@ function WorkspaceView({
                           <strong>{r.title ?? r.path}</strong>
                           <span className={cn("text-xs", muted)}>
                             {" "}
-                            {r.snippet.map((part, idx) =>
-                              part.match ? (
-                                <mark key={idx} className="bg-yellow-300/40 text-inherit">
+                            {r.snippet.map((part, idx) => {
+                              // Snippet parts are emitted in fixed order by the
+                              // server FTS path and never reorder/filter on the
+                              // client; index+match flag is a stable identity.
+                              const k = `${idx}-${part.match ? "m" : "t"}`;
+                              return part.match ? (
+                                <mark key={k} className="bg-yellow-300/40 text-inherit">
                                   {part.text}
                                 </mark>
                               ) : (
-                                <span key={idx}>{part.text}</span>
-                              ),
-                            )}
+                                <span key={k}>{part.text}</span>
+                              );
+                            })}
                           </span>
                         </FileRow>
                       </li>
@@ -2158,13 +2208,7 @@ function WorkspaceView({
                   </div>
                   {creating && (
                     <form onSubmit={create} className="flex gap-2 px-2 pb-2">
-                      <Input
-                        placeholder="path/to/note.md"
-                        data-testid="new-file-path"
-                        value={newPath}
-                        onChange={(e) => setNewPath(e.target.value)}
-                        autoFocus
-                      />
+                      <NewFilePathInput value={newPath} onChange={setNewPath} />
                       <Button type="submit" size="sm">
                         Add
                       </Button>

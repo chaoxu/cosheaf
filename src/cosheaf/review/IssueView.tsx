@@ -1,7 +1,7 @@
 // Issue detail surface: title, markdown body, threaded comments,
 // close/reopen, new-comment composer.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
@@ -404,10 +404,9 @@ export function IssueView({
               </div>
               {editing ? (
                 <div className="flex flex-col gap-1">
-                  <textarea
-                    autoFocus
+                  <FocusedTextarea
                     value={editDraft}
-                    onChange={(e) => setEditDraft(e.target.value)}
+                    onChange={setEditDraft}
                     rows={3}
                     className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 text-sm"
                   />
@@ -704,6 +703,32 @@ function describeEvent(e: TimelineEvent): { icon: string; text: (jump?: (n: numb
     default:
       return null;
   }
+}
+
+function FocusedTextarea({
+  value,
+  onChange,
+  rows,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rows: number;
+  className: string;
+}): ReactElement {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      rows={rows}
+      className={className}
+    />
+  );
 }
 
 function formatRel(ms: number): string {

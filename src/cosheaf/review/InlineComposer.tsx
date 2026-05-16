@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { Button } from "../components/ui/button";
 
@@ -14,13 +14,20 @@ export function InlineComposer({
   testId?: string;
 }): ReactElement {
   const [body, setBody] = useState("");
+  // Programmatic focus instead of the autoFocus attribute: AT users still
+  // expect focus to land here because the user just opened the composer,
+  // but `autoFocus` triggers it during render (before SR landmarks settle).
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
   return (
     <div
       data-testid={testId ?? "inline-composer"}
       className="mx-2 my-1 p-2 border rounded border-[var(--cf-border)] bg-[var(--cf-bg)] text-[13px]"
     >
       <textarea
-        autoFocus
+        ref={textareaRef}
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Add a comment…"
