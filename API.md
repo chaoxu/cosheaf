@@ -196,7 +196,75 @@ Forgejo owner to satisfy branch protection, and merges. Members and verifiers
 publish to review. Publishing a `changes_requested` change reuses the existing
 PR and returns it to `review`.
 
+## Forgejo-shape endpoints (preferred)
+
+These mirror Forgejo's REST API so that agents trained on Forgejo can speak to
+cosheaf with only an auth change. They take a Forgejo pull-request number
+`{n}`, look up the corresponding cosheaf change, and delegate to the same
+internal logic as the deprecated `/branch/{id}/...` routes below. Prefer these
+for any new integration.
+
+```http
+GET /w/:slug/pulls?state=open|closed|all
+→ { "changes": Change[] }
+```
+
+`state=open` returns `review` and `changes_requested`; `closed` returns
+`merged` and `closed`; `all` returns all four. Mirrors the deprecated
+`GET /branches/open`, just under a Forgejo-named path.
+
+```http
+GET /w/:slug/pulls/:n
+→ Forgejo PR JSON plus cosheaf extras
+```
+
+The body is Forgejo's PR object verbatim (so `number`, `title`, `head.sha`,
+`base.sha`, `additions`, `deletions`, `changed_files`, etc. are present) with
+these cosheaf-specific fields added at the top level:
+
+- `cosheaf_state: BranchState`
+- `author_user_id: number`
+- `author_username: string`
+- `head_sha`, `base_sha`, `head_ref`, `base_ref`
+- `additions_total`, `deletions_total`, `files_changed`
+
+Forgejo-trained callers ignore the extras; cosheaf callers can use either
+shape.
+
+```http
+GET /w/:slug/pulls/:n/files
+→ { "files": ChangeFile[] }
+```
+
+Same per-file split-patch shape as the deprecated `GET /branch/:id/diff`.
+
+```http
+POST /w/:slug/pulls/:n/reviews
+{ "event": "APPROVE" | "REQUEST_CHANGES" | "COMMENT", "body"?: string | null }
+→ DecisionResult | { ok, branchId, state }
+```
+
+Forgejo uses uppercase `event` strings. Internally this delegates to the same
+handlers as `/branch/:id/approve`, `/branch/:id/request-changes`, and
+`/branch/:id/comment`.
+
+```http
+GET /w/:slug/pulls/:n/reviews
+→ { "approvals": ApprovalRecord[] }
+```
+
+Same shape as the deprecated `GET /branch/:id/approvals`.
+
+All `/pulls/:n*` routes return `404 { "error": "not found", "code":
+"not_found" }` when `:n` does not match a known cosheaf change.
+
 ## Review
+
+`POST /change/:id/{approve,request-changes,comment}` and `GET
+/change/:id/approvals` are **deprecated**: new code should use the
+Forgejo-shape `/pulls/:n/reviews` endpoints documented above. They remain
+supported here for the existing cosheaf web UI; the Phase 4 cleanup will
+remove them.
 
 ```http
 GET /w/:slug/queue
@@ -212,15 +280,15 @@ interface QueueEntry {
   rejections: number;
 }
 
-POST /w/:slug/change/:id/approve
+POST /w/:slug/change/:id/approve  (deprecated, use POST /pulls/:n/reviews { event: "APPROVE" })
 { "comment"?: string | null }
 → DecisionResult
 
-POST /w/:slug/change/:id/request-changes
+POST /w/:slug/change/:id/request-changes  (deprecated, use POST /pulls/:n/reviews { event: "REQUEST_CHANGES" })
 { "comment"?: string | null }
 → DecisionResult
 
-POST /w/:slug/change/:id/comment
+POST /w/:slug/change/:id/comment  (deprecated, use POST /pulls/:n/reviews { event: "COMMENT" })
 { "comment"?: string | null }
 → { "ok": true, "branchId": string, "state": BranchState }
 

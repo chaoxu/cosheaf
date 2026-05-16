@@ -206,19 +206,28 @@ changes.post("/:slug/publish", async (c) => {
 
 // ---------- approve / request changes / comment / close ----------
 
-async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
+async function approve(
+  c: import("hono").Context<AppEnv>,
+  change: BranchRow | null = null,
+  commentOverride: string | null | undefined = undefined,
+): Promise<Response> {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
-  const id = c.req.param("id") ?? "";
-  const change = getBranchRow(c.get("db"), ws.id, id);
+  if (!change) {
+    const id = c.req.param("id") ?? "";
+    change = getBranchRow(c.get("db"), ws.id, id);
+  }
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.state !== "review" || !change.pr_number)
     return c.json({ error: "change is not in review", code: "conflict" }, 409);
   if (change.author_user_id === c.get("user").id)
     return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
-  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
+  const body =
+    commentOverride !== undefined
+      ? { comment: commentOverride }
+      : (((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null });
   const { fj, owner, repo, sudo } = c.get("repoCtx");
 
   await fj.createReview(owner, repo, change.pr_number, {
@@ -253,19 +262,28 @@ async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
   });
 }
 
-async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Response> {
+async function requestChanges(
+  c: import("hono").Context<AppEnv>,
+  change: BranchRow | null = null,
+  commentOverride: string | null | undefined = undefined,
+): Promise<Response> {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
-  const id = c.req.param("id") ?? "";
-  const change = getBranchRow(c.get("db"), ws.id, id);
+  if (!change) {
+    const id = c.req.param("id") ?? "";
+    change = getBranchRow(c.get("db"), ws.id, id);
+  }
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.state !== "review" || !change.pr_number)
     return c.json({ error: "change is not in review", code: "conflict" }, 409);
   if (change.author_user_id === c.get("user").id)
     return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
-  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
+  const body =
+    commentOverride !== undefined
+      ? { comment: commentOverride }
+      : (((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null });
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.createReview(owner, repo, change.pr_number, {
     event: "REQUEST_CHANGES",
@@ -285,19 +303,28 @@ async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Respon
   });
 }
 
-async function commentChange(c: import("hono").Context<AppEnv>): Promise<Response> {
+async function commentChange(
+  c: import("hono").Context<AppEnv>,
+  change: BranchRow | null = null,
+  commentOverride: string | null | undefined = undefined,
+): Promise<Response> {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
-  const id = c.req.param("id") ?? "";
-  const change = getBranchRow(c.get("db"), ws.id, id);
+  if (!change) {
+    const id = c.req.param("id") ?? "";
+    change = getBranchRow(c.get("db"), ws.id, id);
+  }
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if ((change.state !== "review" && change.state !== "changes_requested") || !change.pr_number)
     return c.json({ error: "change is not open for review", code: "conflict" }, 409);
   if (change.author_user_id === c.get("user").id)
     return c.json({ error: "cannot review your own change", code: "forbidden" }, 403);
 
-  const body = ((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null };
+  const body =
+    commentOverride !== undefined
+      ? { comment: commentOverride }
+      : (((await c.req.json().catch(() => ({}))) ?? {}) as { comment?: string | null });
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   await fj.createReview(owner, repo, change.pr_number, {
     event: "COMMENT",
@@ -787,6 +814,147 @@ changes.put("/:slug/settings", async (c) => {
     });
   }
   return c.json({ min_approvals: body.min_approvals });
+});
+
+// ---------- Forgejo-shape /pulls/{n}/* endpoints ----------
+//
+// These mirror Forgejo's REST API so that agents trained on Forgejo speak to
+// cosheaf with auth changes only. They look up the cosheaf branch row by PR
+// number and then delegate to the same handlers that back /branch/{id}/*.
+
+function parsePrNumber(raw: string | undefined): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function resolveByPr(c: import("hono").Context<AppEnv>): BranchRow | null {
+  const n = parsePrNumber(c.req.param("n"));
+  if (n === null) return null;
+  const ws = c.get("workspace");
+  return getBranchByPr(c.get("db"), ws.id, n);
+}
+
+// Forgejo: GET /repos/{owner}/{repo}/pulls?state=open|closed|all
+changes.get("/:slug/pulls", (c) => {
+  const ws = c.get("workspace");
+  const state = c.req.query("state") ?? "open";
+  let where: string;
+  if (state === "open") {
+    where = "state IN ('review', 'changes_requested')";
+  } else if (state === "closed") {
+    where = "state IN ('merged', 'closed')";
+  } else if (state === "all") {
+    where = "state IN ('review', 'changes_requested', 'merged', 'closed')";
+  } else {
+    return c.json({ error: "state must be open, closed, or all", code: "validation" }, 400);
+  }
+  const rows = c
+    .get("db")
+    .prepare(`SELECT * FROM branches WHERE workspace_id = ? AND ${where} ORDER BY updated_at DESC`)
+    .all(ws.id);
+  return c.json({ changes: rows });
+});
+
+// Forgejo: POST /repos/{owner}/{repo}/pulls/{n}/reviews { event, body }
+changes.post("/:slug/pulls/:n/reviews", async (c) => {
+  const change = resolveByPr(c);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  const payload = (await c.req.json().catch(() => ({}))) as { event?: string; body?: string | null };
+  const event = payload.event ?? "";
+  const comment = payload.body ?? null;
+  if (event === "APPROVE") return approve(c, change, comment);
+  if (event === "REQUEST_CHANGES") return requestChanges(c, change, comment);
+  if (event === "COMMENT") return commentChange(c, change, comment);
+  return c.json({ error: "event must be APPROVE, REQUEST_CHANGES, or COMMENT", code: "validation" }, 400);
+});
+
+// Forgejo: GET /repos/{owner}/{repo}/pulls/{n}/reviews
+changes.get("/:slug/pulls/:n/reviews", async (c) => {
+  const change = resolveByPr(c);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!change.pr_number) return c.json({ approvals: [] });
+  const { fj, owner, repo } = c.get("repoCtx");
+  const reviews = await fj.listReviews(owner, repo, change.pr_number);
+  const db = c.get("db");
+  const approvals = reviews
+    .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
+    .map((r) => {
+      const cs = db
+        .prepare("SELECT id, username FROM users WHERE forgejo_username = ?")
+        .get(r.user.login) as { id: number; username: string } | undefined;
+      return {
+        verifier_user_id: cs?.id ?? -1,
+        username: cs?.username ?? r.user.login,
+        decision:
+          r.state === "APPROVED"
+            ? ("approve" as const)
+            : r.state === "REQUEST_CHANGES"
+              ? ("request_changes" as const)
+              : ("comment" as const),
+        comment: r.body || null,
+        created_at: r.submitted_at ? Date.parse(r.submitted_at) : 0,
+      };
+    });
+  return c.json({ approvals });
+});
+
+// Forgejo: GET /repos/{owner}/{repo}/pulls/{n}
+// Returns the raw Forgejo PR object plus the cosheaf-specific extras the
+// existing /branch/:id/pr route exposes (state, author_user_id, *_sha, …).
+changes.get("/:slug/pulls/:n", async (c) => {
+  const change = resolveByPr(c);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!change.pr_number)
+    return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
+
+  const { fj, owner, repo } = c.get("repoCtx");
+  const pull = await fj.getPull(owner, repo, change.pr_number);
+  if (!pull) return c.json({ error: "pull not found upstream", code: "not_found" }, 404);
+
+  // Forgejo-shape PR object as the base; spread on top of an extras envelope
+  // so callers using either shape work.
+  const extras = {
+    cosheaf_state: change.state,
+    author_user_id: change.author_user_id,
+    author_username: pull.user.login,
+    head_sha: pull.head.sha,
+    base_sha: pull.base.sha,
+    head_ref: pull.head.ref,
+    base_ref: pull.base.ref,
+    additions_total: pull.additions ?? 0,
+    deletions_total: pull.deletions ?? 0,
+    files_changed: pull.changed_files ?? 0,
+  };
+  return c.json({ ...pull, ...extras });
+});
+
+// Forgejo: GET /repos/{owner}/{repo}/pulls/{n}/files
+// Returns the same per-file structured shape /branch/:id/diff returns today.
+changes.get("/:slug/pulls/:n/files", async (c) => {
+  const change = resolveByPr(c);
+  if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!change.pr_number)
+    return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
+
+  const { fj, owner, repo } = c.get("repoCtx");
+  const [metas, unified] = await Promise.all([
+    fj.listPullFiles(owner, repo, change.pr_number),
+    fj.getPullDiff(owner, repo, change.pr_number),
+  ]);
+  const patches = splitUnifiedDiff(unified);
+  const byPath = new Map(patches.map((p) => [p.path, p]));
+  const files = metas.map((m) => {
+    const slice = byPath.get(m.filename);
+    return {
+      path: m.filename,
+      previous_path: m.previous_filename ?? slice?.previous_path,
+      status: normalizeStatus(m.status),
+      additions: m.additions,
+      deletions: m.deletions,
+      patch: slice?.patch ?? "",
+    };
+  });
+  return c.json({ files });
 });
 
 // Webhook helper: when a PR push event arrives, transition the corresponding

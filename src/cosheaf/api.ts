@@ -193,16 +193,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ branchId, mode, title }),
     }),
+  /** @deprecated Use `api.submitReview(slug, prNumber, "APPROVE", body)` (Forgejo-shape). */
   approve: (slug: string, branchId: string, comment?: string) =>
     jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approve`, {
       method: "POST",
       body: JSON.stringify({ comment: comment ?? null }),
     }),
+  /** @deprecated Use `api.submitReview(slug, prNumber, "REQUEST_CHANGES", body)` (Forgejo-shape). */
   requestChanges: (slug: string, branchId: string, comment?: string) =>
     jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/request-changes`, {
       method: "POST",
       body: JSON.stringify({ comment: comment ?? null }),
     }),
+  /** @deprecated Use `api.submitReview(slug, prNumber, "COMMENT", body)` (Forgejo-shape). */
   comment: (slug: string, branchId: string, comment?: string) =>
     jsonFetch<{ ok: true; branchId: string; state: Branch["state"] }>(
       `${w(slug)}/branch/${encodeURIComponent(branchId)}/comment`,
@@ -213,18 +216,53 @@ export const api = {
       `${w(slug)}/branch/${encodeURIComponent(branchId)}/close`,
       { method: "POST" },
     ),
+  /** @deprecated Use `api.listReviews(slug, prNumber)` (Forgejo-shape). */
   approvals: (slug: string, branchId: string) =>
     jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approvals`).then((r) => r.approvals),
 
   reviewQueue: (slug: string) =>
     jsonFetch<{ queue: ReviewQueueEntry[] }>(`${w(slug)}/review-queue`).then((r) => r.queue),
+  /** @deprecated Use `api.listPulls(slug, "open")` (Forgejo-shape). */
   openBranches: (slug: string) =>
     jsonFetch<{ changes: OpenBranchRow[] }>(`${w(slug)}/branches/open`).then((r) => r.changes),
 
+  /** @deprecated Use `api.getPull(slug, prNumber)` (Forgejo-shape, returns raw Forgejo PR + cosheaf extras). */
   pr: (slug: string, branchId: string) =>
     jsonFetch<{ pr: PrMeta }>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/pr`).then((r) => r.pr),
+  /** @deprecated Use `api.listPullFiles(slug, prNumber)` (Forgejo-shape, same per-file body). */
   diff: (slug: string, branchId: string) =>
     jsonFetch<ChangeDiff>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/diff`),
+
+  // ---------- Forgejo-shape endpoints (preferred) ----------
+
+  /** POST /pulls/{n}/reviews — Forgejo-shape review submission. */
+  submitReview: (
+    slug: string,
+    prNumber: number,
+    event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+    body?: string | null,
+  ) =>
+    jsonFetch<unknown>(`${w(slug)}/pulls/${prNumber}/reviews`, {
+      method: "POST",
+      body: JSON.stringify({ event, body: body ?? null }),
+    }),
+  /** GET /pulls/{n}/reviews — same shape as the deprecated `api.approvals`. */
+  listReviews: (slug: string, prNumber: number) =>
+    jsonFetch<{ approvals: ApprovalRecord[] }>(`${w(slug)}/pulls/${prNumber}/reviews`).then(
+      (r) => r.approvals,
+    ),
+  /** GET /pulls/{n} — Forgejo PR object plus cosheaf extras (head_sha, base_sha, …). */
+  getPull: (slug: string, prNumber: number) =>
+    jsonFetch<Record<string, unknown>>(`${w(slug)}/pulls/${prNumber}`),
+  /** GET /pulls/{n}/files — same per-file split-patch shape as the deprecated `api.diff`. */
+  listPullFiles: (slug: string, prNumber: number) =>
+    jsonFetch<ChangeDiff>(`${w(slug)}/pulls/${prNumber}/files`),
+  /** GET /pulls?state=open|closed|all — Forgejo-shape PR listing (returns `{ changes }`). */
+  listPulls: (slug: string, state: "open" | "closed" | "all" = "open") =>
+    jsonFetch<{ changes: OpenBranchRow[] }>(`${w(slug)}/pulls?state=${state}`).then(
+      (r) => r.changes,
+    ),
+
   file: (slug: string, branchId: string, path: string, side: "base" | "head") =>
     jsonFetch<{ content: string }>(
       `${w(slug)}/branch/${encodeURIComponent(branchId)}/file?path=${encodeURIComponent(path)}&side=${side}`,
