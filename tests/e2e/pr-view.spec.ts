@@ -23,11 +23,12 @@ test.describe.serial("PR review surface", () => {
       await page.getByTestId(`view-shape-${shape}`).click();
       await expect(page.getByTestId(testId)).toBeVisible({ timeout: 5000 });
       if (shape !== "unified") {
-        // Source mode → react-diff-view (.diff table); Rich mode → CodeMirror.
+        // Source mode → react-diff-view (.diff table); Rich mode → reader
+        // HTML wrapped in `.cf-rich-diff` with `[data-source-line]` per block.
         const contentSelector =
           mode === "source"
             ? `[data-testid="${testId}"] .diff`
-            : `[data-testid="${testId}"] .cm-content`;
+            : `[data-testid="${testId}"] .cf-rich-diff`;
         await expect(page.locator(contentSelector).first()).toBeVisible({ timeout: 8000 });
       }
     }

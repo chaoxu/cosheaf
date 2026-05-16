@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @import "@chaoxu/coflat-editor/style.css";
 
+/* Rich diff tints. The reader emits `data-source-line` on every block;
+   RichDiffRender toggles these classes onto matching nodes. */
+[data-source-line].cf-diff-added {
+  background-color: rgba(34, 197, 94, 0.12);
+}
+[data-source-line].cf-diff-removed {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+.cf-comment-host {
+  margin: 0.25rem 0 0.5rem;
+}
+
 html,
 body {
   height: 100%;

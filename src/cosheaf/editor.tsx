@@ -9,6 +9,49 @@ import {
 } from "@chaoxu/coflat-editor";
 import "@chaoxu/coflat-editor/style.css";
 
+// The host-API types aren't surfaced as named exports on the main entry, so
+// mirror the minimal shape we use. coflat-editor v0.2.0 host-api contract.
+export interface SaveHandler {
+  save(payload: {
+    source: string;
+    reason: "manual" | "command" | "autosave";
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  autosaveDebounceMs?: number;
+  isBusy?(): boolean;
+}
+export interface StatusEvents {
+  onSaveStart?(): void;
+  onSaveSucceeded?(): void;
+  onSaveFailed?(e: { error: string }): void;
+  onDirtyChange?(dirty: boolean): void;
+  onAssetUploading?(e: { placeholderId: string; file: File; progress?: number }): void;
+  onAssetUploadSucceeded?(e: { placeholderId: string; path: string }): void;
+  onAssetUploadFailed?(e: { placeholderId: string; error: string }): void;
+}
+export interface AssetUploader {
+  upload(
+    file: File,
+    env: { from?: string },
+  ): Promise<{ path: string; alt?: string } | { error: string }>;
+  accept?(file: File): null | { reject: string };
+  cancel?(file: File): void;
+}
+export interface AutocompleteSuggestion {
+  id: string;
+  insert: string;
+  display: string;
+  description?: string;
+  icon?: string;
+}
+export interface AutocompleteSource {
+  trigger: string;
+  debounceMs?: number;
+  suggest(
+    prefix: string,
+    env: { from?: string; cursorPos: number; signal: AbortSignal },
+  ): Promise<readonly AutocompleteSuggestion[]>;
+}
+
 interface Props {
   value: string;
   mode: StandaloneEditorMode;
@@ -21,6 +64,14 @@ interface Props {
   readOnly?: boolean;
   /** Source-file path for relative-ref resolution (forwarded to coflat). */
   from?: string;
+  /** Cmd-S / autosave / triggerSave dispatch. */
+  saveHandler?: SaveHandler;
+  /** Fire-and-forget lifecycle events (save, dirty, asset upload). */
+  statusEvents?: StatusEvents;
+  /** Paste/drop binary handler. */
+  assetUploader?: AssetUploader;
+  /** Trigger-based suggestion sources, e.g. `[@`. */
+  autocompleteSources?: readonly AutocompleteSource[];
 }
 
 export function MarkdownEditor({
@@ -32,28 +83,72 @@ export function MarkdownEditor({
   extensions,
   readOnly,
   from,
+  saveHandler,
+  statusEvents,
+  assetUploader,
+  autocompleteSources,
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MountedEditor | null>(null);
   const onChangeRef = useRef(onChange);
-
+  // Host APIs are captured by refs and dispatched through stable wrappers,
+  // so prop updates don't force a remount of the underlying editor.
+  const saveRef = useRef(saveHandler);
+  const statusRef = useRef(statusEvents);
+  const assetRef = useRef(assetUploader);
+  const autocompleteRef = useRef(autocompleteSources);
   onChangeRef.current = onChange;
+  saveRef.current = saveHandler;
+  statusRef.current = statusEvents;
+  assetRef.current = assetUploader;
+  autocompleteRef.current = autocompleteSources;
 
   useEffect(() => {
     if (!containerRef.current) return;
     const mountExtensions: Extension[] = [...(extensions ?? [])];
     if (readOnly) mountExtensions.push(EditorView.editable.of(false));
-    // `from` is accepted as a prop so call sites can declare the source-file
-    // path, but coflat 0.2.0's MountEditorOptions doesn't expose it yet.
-    // Plumb-through is a no-op until coflat re-exports documentContextFacet
-    // or surfaces a documentContext option on mountEditor.
-    void from;
+
+    // Stable host-API wrappers that always read the latest prop value via ref.
+    const stableSaveHandler: SaveHandler = {
+      save: (payload) =>
+        saveRef.current?.save(payload) ??
+        Promise.resolve({ ok: false as const, error: "no save handler" }),
+      isBusy: () => saveRef.current?.isBusy?.() ?? false,
+    };
+    const stableStatusEvents: StatusEvents = {
+      onSaveStart: () => statusRef.current?.onSaveStart?.(),
+      onSaveSucceeded: () => statusRef.current?.onSaveSucceeded?.(),
+      onSaveFailed: (e) => statusRef.current?.onSaveFailed?.(e),
+      onDirtyChange: (d) => statusRef.current?.onDirtyChange?.(d),
+      onAssetUploading: (e) => statusRef.current?.onAssetUploading?.(e),
+      onAssetUploadSucceeded: (e) => statusRef.current?.onAssetUploadSucceeded?.(e),
+      onAssetUploadFailed: (e) => statusRef.current?.onAssetUploadFailed?.(e),
+    };
+    const stableAssetUploader: AssetUploader = {
+      upload: (file, env) =>
+        assetRef.current?.upload(file, env) ??
+        Promise.resolve({ error: "no uploader" as const }),
+      accept: (file) => assetRef.current?.accept?.(file) ?? null,
+      cancel: (file) => assetRef.current?.cancel?.(file),
+    };
+
     const editor = mountEditor({
       parent: containerRef.current,
       doc: value,
       mode,
       extensions: mountExtensions,
       onChange: (next) => onChangeRef.current(next),
+      // `from` is in the published .d.ts (v0.2.0) but accepting it via
+      // a type-narrow cast lets us forward it even if the local resolved
+      // module type doesn't yet surface it. Drop the cast when typecheck
+      // sees the field directly.
+      ...(from ? ({ from } as { from: string }) : {}),
+      ...(saveHandler ? { saveHandler: stableSaveHandler } : {}),
+      ...(statusEvents ? { statusEvents: stableStatusEvents } : {}),
+      ...(assetUploader ? { assetUploader: stableAssetUploader } : {}),
+      ...(autocompleteSources && autocompleteSources.length > 0
+        ? { autocompleteSources: autocompleteSources }
+        : {}),
     });
     editorRef.current = editor;
     onReady?.(editor);
@@ -61,6 +156,8 @@ export function MarkdownEditor({
       editor.unmount();
       editorRef.current = null;
     };
+  // Mount-time only. Host APIs use refs to avoid remount churn.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

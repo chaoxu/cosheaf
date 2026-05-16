@@ -1,13 +1,11 @@
-// Rich "Side-by-side" view: base and head rendered through coflat-editor.
-// Reader sees both versions of the page as they will appear, side by side.
-// Source mode for split is handled separately (SourceDiff in `viewType="split"`),
-// not via this component. This file is rich-only.
+// Rich "Side-by-side" review view: base and head rendered as HTML via the
+// coflat reader, side by side. Comment threads attach to source-line anchors;
+// CodeMirror is no longer involved on this surface.
 
-import { useMemo } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../../lib/utils";
-import { MarkdownEditor } from "../../document-format/coflat-editor";
-import { commentThreadExtension } from "../cm-comment-widgets";
+import { RichDiffRender } from "../RichDiffRender";
+import { diffLineNumbers } from "../diff-lines";
 import { useFileSide } from "../use-file-side";
 import type { LineComment } from "../../api";
 import type { DiffRendererProps } from "../diff-renderer-types";
@@ -28,19 +26,10 @@ export function SideBySideRendered({
 
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;
 
-  const shared = {
-    file,
-    comments,
-    currentForgejoUsername,
-    onEditComment,
-    onDeleteComment,
-  };
-
+  const shared = { file, comments, currentForgejoUsername, onEditComment, onDeleteComment };
   return (
     <div
       data-testid="diff-pane-split"
-      // Zero out coflat's sidenote gutter so each pane's rich content fills
-      // its column width.
       style={{ ["--cf-sidenote-width" as never]: "0px", ["--cf-content-max-width" as never]: "none" }}
       className="grid grid-cols-2 divide-x divide-[var(--cf-border)]"
     >
@@ -49,6 +38,7 @@ export function SideBySideRendered({
         label="base"
         side="old"
         content={base.content}
+        addedLines={diffLineNumbers(file.patch, "removed")}
         emptyLabel={file.status === "added" ? "(new file)" : null}
       />
       <Pane
@@ -56,6 +46,7 @@ export function SideBySideRendered({
         label="head"
         side="new"
         content={head.content}
+        addedLines={diffLineNumbers(file.patch, "added")}
         emptyLabel={file.status === "deleted" ? "(deleted)" : null}
       />
     </div>
@@ -68,7 +59,7 @@ function Pane({
   emptyLabel,
   comments,
   side,
-  file,
+  addedLines,
   currentForgejoUsername,
   onEditComment,
   onDeleteComment,
@@ -78,22 +69,12 @@ function Pane({
   emptyLabel: string | null;
   comments: readonly LineComment[];
   side: "new" | "old";
-  file: DiffRendererProps["file"];
+  addedLines: readonly number[];
   currentForgejoUsername?: string;
   onEditComment?: DiffRendererProps["onEditComment"];
   onDeleteComment?: DiffRendererProps["onDeleteComment"];
+  file: DiffRendererProps["file"];
 }): ReactElement {
-  const extensions = useMemo(
-    () => [
-      commentThreadExtension(comments, side, {
-        currentForgejoUsername,
-        onEdit: onEditComment,
-        onDelete: onDeleteComment,
-      }),
-    ],
-    [comments, side, currentForgejoUsername, onEditComment, onDeleteComment],
-  );
-
   return (
     <div className="flex flex-col min-h-0">
       <div className={cn("px-3 py-1 text-xs border-b border-[var(--cf-border)]", muted)}>
@@ -105,13 +86,12 @@ function Pane({
         ) : content === null ? (
           <div className={cn("p-3 text-sm", muted)}>Loading…</div>
         ) : (
-          <MarkdownEditor
-            key={`${label}-rich-${file.path}`}
-            value={content}
-            mode="rich"
-            onChange={() => undefined}
-            readOnly
-            extensions={extensions}
+          <RichDiffRender
+            source={content}
+            addedLines={addedLines}
+            comments={comments}
+            side={side}
+            actions={{ currentForgejoUsername, onEdit: onEditComment, onDelete: onDeleteComment }}
           />
         )}
       </div>

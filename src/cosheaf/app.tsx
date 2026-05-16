@@ -38,7 +38,13 @@ import { DiffArea } from "./review/DiffArea";
 import { ReviewActions } from "./review/ReviewActions";
 import { IssueView } from "./review/IssueView";
 import { buildWorkspaceDocumentContext } from "./document-format/coflat-context";
-import type { MountedEditor } from "./document-format/coflat-editor";
+import type {
+  EditorAssetUploader,
+  EditorAutocompleteSource,
+  EditorSaveHandler,
+  EditorStatusEvents,
+  MountedEditor,
+} from "./document-format/coflat-editor";
 import { SettingsPanel } from "./review/SettingsPanel";
 
 const MarkdownEditor = lazy(() =>
@@ -1434,39 +1440,128 @@ function WorkspaceView({
     return () => window.removeEventListener("popstate", handler);
   }, [workspace.slug, openPathFromSource]);
 
+  // Host APIs for the embedded MarkdownEditor. The editor owns dirty
+  // tracking (live doc vs last-saved baseline); cosheaf subscribes via
+  // `onDirtyChange`. The Save button routes through `editor.triggerSave()`,
+  // which dispatches to `saveHandler.save` — the single write path. This
+  // avoids dual-dirty races where cosheaf's `onChange`-driven setDirty(true)
+  // was clobbered by the editor's mount-time onDirtyChange(false).
+  const currentBranchNameRef = useRef<string | null>(null);
+  const reviewingPullNumberRefForHost = useRef<number | null>(null);
+  currentBranchNameRef.current = currentBranchName;
+  reviewingPullNumberRefForHost.current = reviewingPullNumber;
+
+  const branchForWrite = useCallback(
+    (): string =>
+      currentBranchNameRef.current ??
+      `user/${user.forgejo_username ?? user.username}/wip-${shortId()}`,
+    [user],
+  );
+
+  const editorSaveHandler = useMemo<EditorSaveHandler>(
+    () => ({
+      autosaveDebounceMs: 1500,
+      save: async (payload) => {
+        const path = openPathRef.current;
+        if (!path) return { ok: false as const, error: "no file open" };
+        if (reviewingPullNumberRefForHost.current)
+          return { ok: false as const, error: "review mode is read-only" };
+        const branch = branchForWrite();
+        try {
+          const r = await api.putFile(workspace.slug, path, payload.source, branch);
+          if (r.content !== undefined) setContent(r.content);
+          setOpenDoc(r.meta);
+          setCurrentBranchName(r.branch);
+          openFileBranchRef.current = r.branch;
+          loadBacklinks(r.meta.id);
+          void loadTree(r.branch);
+          return { ok: true as const };
+        } catch (err) {
+          return {
+            ok: false as const,
+            error: err instanceof ApiError ? err.message : "save failed",
+          };
+        }
+      },
+    }),
+    [branchForWrite, workspace.slug, loadTree, loadBacklinks],
+  );
+
+  const editorStatusEvents = useMemo<EditorStatusEvents>(
+    () => ({
+      onSaveStart: () => {
+        setBusy(true);
+        setStatus(null);
+      },
+      onSaveSucceeded: () => {
+        setBusy(false);
+        setStatus("saved");
+      },
+      onSaveFailed: (e) => {
+        setBusy(false);
+        setStatus(`save failed: ${e.error}`);
+      },
+      // Single source of truth: the editor's dirty tracker. We don't also
+      // set dirty=true from `onChange` — that would race the mount-time
+      // onDirtyChange(false) and lose typed keystrokes.
+      onDirtyChange: (d) => setDirty(d),
+      onAssetUploading: (e) => setStatus(`uploading ${e.file.name}…`),
+      onAssetUploadSucceeded: (e) => setStatus(`uploaded ${e.path}`),
+      onAssetUploadFailed: (e) => setStatus(`upload failed: ${e.error}`),
+    }),
+    [],
+  );
+
+  const editorAssetUploader = useMemo<EditorAssetUploader>(
+    () => ({
+      accept: (file) =>
+        file.size > 25 * 1024 * 1024 ? { reject: "asset exceeds 25 MiB" } : null,
+      upload: async (file) => {
+        if (reviewingPullNumberRefForHost.current)
+          return { error: "review mode is read-only" };
+        const branch = branchForWrite();
+        try {
+          const r = await api.uploadAsset(workspace.slug, branch, file);
+          if (!currentBranchNameRef.current) setCurrentBranchName(branch);
+          return { path: r.path };
+        } catch (err) {
+          return { error: err instanceof ApiError ? err.message : "upload failed" };
+        }
+      },
+    }),
+    [branchForWrite, workspace.slug],
+  );
+
+  const editorAutocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
+    () => [
+      {
+        trigger: "[@",
+        suggest: async (prefix, env) => {
+          if (env.signal.aborted) return [];
+          try {
+            const r = await api.suggest(workspace.slug, { trigger: "[@", prefix, limit: 10 });
+            return r.suggestions;
+          } catch (_err) {
+            // Best-effort autocomplete; network blips become empty results.
+            return [];
+          }
+        },
+      },
+    ],
+    [workspace.slug],
+  );
+
+  // Cosheaf Save-button entry point. Routes through editor.triggerSave so
+  // the editor's dirty baseline + autosave + Cmd-S all stay coherent with
+  // the manual button — a single write path.
   const save = useCallback(() => {
     if (!openPath) return;
     if (reviewingPullNumber) {
       setStatus("review mode is read-only");
       return;
     }
-    setBusy(true);
-    setStatus(null);
-    // Generate a per-user branch name on first save. Server enforces the
-    // `user/<sudo>/` prefix on auto-create.
-    const branch =
-      currentBranchName ?? `user/${user.forgejo_username ?? user.username}/wip-${shortId()}`;
-    api
-      .putFile(workspace.slug, openPath, content, branch)
-      .then((r) => {
-        if (r.content !== undefined) setContent(r.content);
-        setDirty(false);
-        setStatus(`saved on ${r.branch}`);
-        setOpenDoc(r.meta);
-        setCurrentBranchName(r.branch);
-        openFileBranchRef.current = r.branch;
-        loadBacklinks(r.meta.id);
-        void loadTree(r.branch);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof ApiError && err.status === 409) {
-          setStatus("conflict — file changed on server. Reload to discard.");
-        } else {
-          setStatus(err instanceof ApiError ? err.message : "Save failed");
-        }
-      })
-      .finally(() => setBusy(false));
-  }, [openPath, content, workspace.slug, currentBranchName, reviewingPullNumber, loadTree, loadBacklinks, user]);
+    void editorRef.current?.triggerSave("manual");
+  }, [openPath, reviewingPullNumber]);
 
   const openQueue = useCallback(() => {
     api
@@ -2236,10 +2331,15 @@ function WorkspaceView({
                     editor.outline.subscribe(setOutline);
                   }}
                   onChange={(next) => {
+                    // Just mirror content for save payload. Dirty tracking
+                    // is owned by the editor's statusEvents.onDirtyChange.
                     setContent(next);
-                    setDirty(true);
                     setStatus(null);
                   }}
+                  saveHandler={editorSaveHandler}
+                  statusEvents={editorStatusEvents}
+                  assetUploader={editorAssetUploader}
+                  autocompleteSources={editorAutocompleteSources}
                 />
               </Suspense>
               {openDoc?.id && backlinks.length > 0 && (

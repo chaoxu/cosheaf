@@ -298,10 +298,24 @@ export class Forgejo {
     message: string;
     sudo: string;
   }): Promise<ForgejoFileResponse> {
+    return this.putFileBytes(owner, repo, {
+      ...opts,
+      content: Buffer.from(opts.content, "utf8"),
+    });
+  }
+
+  async putFileBytes(owner: string, repo: string, opts: {
+    branch: string;
+    path: string;
+    content: Buffer; // raw bytes; will be base64-encoded
+    sha?: string;
+    message: string;
+    sudo: string;
+  }): Promise<ForgejoFileResponse> {
     const isUpdate = !!opts.sha;
     const body = {
       branch: opts.branch,
-      content: Buffer.from(opts.content, "utf8").toString("base64"),
+      content: opts.content.toString("base64"),
       message: opts.message,
       ...(isUpdate ? { sha: opts.sha } : {}),
     };

@@ -201,6 +201,64 @@ files.put("/:slug/file", async (c) => {
   });
 });
 
+files.post("/:slug/assets", async (c) => {
+  const branch = c.req.query("branch")?.trim();
+  if (!branch)
+    return c.json({ error: "branch required", code: "validation" }, 400);
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get("file");
+  if (!(file instanceof File))
+    return c.json({ error: "file field required", code: "validation" }, 400);
+  if (file.size > 25 * 1024 * 1024)
+    return c.json({ error: "asset exceeds 25 MiB", code: "validation" }, 400);
+  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const ensured = await ensureBranch(c, branch);
+  if (ensured === "forbidden")
+    return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
+  // Random-prefixed under assets/ so two simultaneous uploads of the same
+  // filename don't collide. We don't try to dedupe by content hash here;
+  // git already deduplicates blobs server-side.
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-64) || "asset";
+  const rand = Math.random().toString(36).slice(2, 10);
+  const assetPath = `assets/${rand}-${safeName}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  await fj.putFileBytes(owner, repo, {
+    branch,
+    path: assetPath,
+    content: bytes,
+    message: `upload ${safeName}`,
+    sudo,
+  });
+  return c.json({ path: assetPath });
+});
+
+files.get("/:slug/suggest", (c) => {
+  const prefix = c.req.query("prefix")?.trim() ?? "";
+  const trigger = c.req.query("trigger") ?? "[@";
+  const limit = Math.max(1, Math.min(20, Number(c.req.query("limit") ?? 10)));
+  const ws = c.get("workspace");
+  // For `[@` trigger we suggest from doc_map (cross-ref ids + titles).
+  // Other triggers return empty until we add e.g. tag completion.
+  if (trigger !== "[@") return c.json({ suggestions: [] });
+  const term = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+  const rows = c
+    .get("db")
+    .prepare(
+      "SELECT cosheaf_id AS id, title FROM doc_map " +
+        "WHERE workspace_id = ? AND doc_type = 'page' AND " +
+        "(cosheaf_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') " +
+        "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
+    )
+    .all(ws.id, term, term, limit) as Array<{ id: string; title: string | null }>;
+  return c.json({
+    suggestions: rows.map((r) => ({
+      id: r.id,
+      insert: `${r.id}]`,
+      display: r.title ? `${r.id} — ${r.title}` : r.id,
+    })),
+  });
+});
+
 files.delete("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))

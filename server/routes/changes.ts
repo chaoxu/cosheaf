@@ -234,8 +234,15 @@ changes.post("/:slug/pulls", async (c) => {
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
     return c.json(prMeta(pr), 201);
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409)
-      return c.json({ error: "no diff vs base", code: "conflict" }, 409);
+    // Forgejo POST /pulls returns 409 for several reasons — empty diff,
+    // an already-open PR for this head→base, or a duplicate title — and
+    // 422 for validation. Pass the actual message through so the client
+    // can show something useful.
+    if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
+      // Pass the Forgejo message through (empty diff, duplicate-PR, etc.)
+      // rather than collapsing every 4xx to "no diff vs base".
+      return c.json({ error: err.message, code: "conflict" }, 409);
+    }
     throw err;
   }
 });

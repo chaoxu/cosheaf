@@ -156,6 +156,36 @@ export const api = {
       method: "DELETE",
     }),
 
+  uploadAsset: async (slug: string, branch: string, file: File): Promise<{ path: string }> => {
+    const form = new FormData();
+    form.set("file", file);
+    const res = await fetch(`${w(slug)}/assets${qs({ branch })}`, {
+      method: "POST",
+      body: form,
+      credentials: "same-origin",
+    });
+    if (!res.ok) {
+      let msg = `asset upload ${res.status}`;
+      try {
+        const data = (await res.json()) as { error?: string };
+        if (data.error) msg = data.error;
+      } catch (_err) {
+        /* body wasn't JSON; keep the generic status message */
+      }
+      throw new ApiError(res.status, msg);
+    }
+    return (await res.json()) as { path: string };
+  },
+
+  suggest: (slug: string, params: { trigger: string; prefix: string; limit?: number }) =>
+    jsonFetch<{ suggestions: Array<{ id: string; insert: string; display: string }> }>(
+      `${w(slug)}/suggest${qs({
+        trigger: params.trigger,
+        prefix: params.prefix,
+        limit: params.limit?.toString(),
+      })}`,
+    ),
+
   backlinks: (slug: string, id: string) =>
     jsonFetch<{ backlinks: Backlink[] }>(`${w(slug)}/backlinks${qs({ id })}`).then((r) => r.backlinks),
   search: (slug: string, q: string) =>
