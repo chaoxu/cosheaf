@@ -57,8 +57,11 @@ HTTP API. Keep cosheaf's surface usable without any automation.
 
 ## Future direction
 
-Track the Forgejo-shell direction in issue #1595. Future work should move in
-small, reversible steps:
+The Forgejo-shell direction is tracked across two open umbrella issues:
+**#11** (branch-native + Forgejo terminology) and **#12** (API mirrors
+Forgejo shape where divergence is cosmetic). #7 captured the original
+architectural pivot and is substantially executed. Future work should
+move in small, reversible steps:
 
 - Make editing branch-native: use real branch names as the primary identity for
   work in progress; keep local branch ids only as transitional/cache details.
@@ -73,10 +76,9 @@ small, reversible steps:
   transitional when replacing them.
 - Treat webhooks and repair/reindex commands as the reconciliation path from
   Forgejo into SQLite.
-- Document Forgejo-vs-Gitea compatibility only after testing. Many APIs are
-  Gitea-family APIs, but webhooks, branch protection, pinned issues,
-  dependencies/blocks, activity feeds, notifications, and PR review drafts may
-  be version-sensitive.
+
+Forgejo-only: Gitea is not a supported target. Don't add Gitea-compatibility
+hedging or version-sensitivity caveats; assume Forgejo behavior.
 
 Do not rewrite the app, build a generic CMS, add arbitrary document-format
 plugins, or move agent/prover logic into this repo as part of this direction.
