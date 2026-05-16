@@ -88,11 +88,11 @@ CREATE TABLE IF NOT EXISTS webhook_log (
   event_type TEXT NOT NULL
 );
 
--- Sidecar rows for the branch / pull-request workflow. The table is
--- legacy-named `changes`; routes, types, and UI now use branch / PR
--- vocabulary on the wire. Lifecycle: draft → review → changes_requested →
--- review → merged, or closed terminal state.
-CREATE TABLE IF NOT EXISTS changes (
+-- Sidecar rows for the branch / pull-request workflow. Lifecycle:
+-- draft → review → changes_requested → review → merged, or closed terminal
+-- state. (The state literal `changes_requested` mirrors Forgejo's
+-- REQUEST_CHANGES review event and is intentionally retained.)
+CREATE TABLE IF NOT EXISTS branches (
   id TEXT PRIMARY KEY,
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   author_user_id INTEGER NOT NULL REFERENCES users(id),
@@ -104,12 +104,12 @@ CREATE TABLE IF NOT EXISTS changes (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_changes_workspace_state ON changes (workspace_id, state);
-CREATE INDEX IF NOT EXISTS idx_changes_author_state ON changes (workspace_id, author_user_id, state);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_changes_branch ON changes (workspace_id, branch_name);
-CREATE INDEX IF NOT EXISTS idx_changes_pr ON changes (workspace_id, pr_number);
+CREATE INDEX IF NOT EXISTS idx_branches_workspace_state ON branches (workspace_id, state);
+CREATE INDEX IF NOT EXISTS idx_branches_author_state ON branches (workspace_id, author_user_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_branch ON branches (workspace_id, branch_name);
+CREATE INDEX IF NOT EXISTS idx_branches_pr ON branches (workspace_id, pr_number);
 
--- Issues mirror Forgejo issues. They live alongside changes in the same
+-- Issues mirror Forgejo issues. They live alongside branches in the same
 -- Forgejo repo; here we cache the metadata for fast listing + author/assignee
 -- lookups. Bodies and comments are fetched on demand from Forgejo.
 CREATE TABLE IF NOT EXISTS issues (

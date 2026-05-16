@@ -134,7 +134,7 @@ describe("forgejo webhooks", () => {
       "INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (1, 'alice', 'hash', 'cs-alice', 0)",
     ).run();
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('needs-work', 1, 1, 'change/needs-work', 'review', 12, 0, 0)",
     ).run();
     const app = appFor(db, {} as Forgejo);
@@ -147,7 +147,7 @@ describe("forgejo webhooks", () => {
     const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "review-1"));
 
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'needs-work'").get()).toEqual({ state: "changes_requested" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'needs-work'").get()).toEqual({ state: "changes_requested" });
   });
 
   it("syncs Forgejo approval reviews through merge when blockers are resolved", async () => {
@@ -156,7 +156,7 @@ describe("forgejo webhooks", () => {
       "INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (1, 'alice', 'hash', 'cs-alice', 0)",
     ).run();
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('approve-me', 1, 1, 'change/approve-me', 'review', 13, 0, 0)",
     ).run();
     const forgejo = {
@@ -178,7 +178,7 @@ describe("forgejo webhooks", () => {
     const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "review-2"));
 
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'approve-me'").get()).toEqual({ state: "merged" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'approve-me'").get()).toEqual({ state: "merged" });
     expect(forgejo.mergePull).toHaveBeenCalledWith("owner", "repo", 13, { Do: "squash", sudo: "owner" });
     expect(forgejo.deleteBranch).toHaveBeenCalledWith("owner", "repo", "change/approve-me");
   });

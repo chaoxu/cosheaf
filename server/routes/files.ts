@@ -5,12 +5,12 @@ import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { planIndexPage } from "../indexer.js";
 import {
-  createChange,
-  getChange,
+  createBranchRow,
+  getBranchRow,
   listOpenDraftsForUser,
   listWritableForUser,
-  setChangeState,
-  type ChangeRow,
+  setBranchState,
+  type BranchRow,
 } from "../changes.js";
 
 export const files = new Hono<AppEnv>();
@@ -24,10 +24,10 @@ function safeRel(p: string | undefined): string | null {
 }
 
 // Resolve which change to write to. Rules:
-// - explicit change_id → that change (must be writable, must belong to user)
-// - no change_id, zero writable changes → lazily create one
-// - no change_id, exactly one writable change → use it
-// - no change_id, multiple writable changes → 400 ambiguous
+// - explicit branchId → that change (must be writable, must belong to user)
+// - no branchId, zero writable changes → lazily create one
+// - no branchId, exactly one writable change → use it
+// - no branchId, multiple writable changes → 400 ambiguous
 type ResolveError = { error: string; code: "not_found" | "forbidden" | "conflict" | "ambiguous" };
 
 const STATUS_FOR_CODE: Record<ResolveError["code"], 400 | 403 | 404 | 409> = {
@@ -77,13 +77,13 @@ function plainSnippet(row: { title: string | null; body: string }, terms: string
   return parts;
 }
 
-async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<ChangeRow | ResolveError> {
+async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<BranchRow | ResolveError> {
   const ws = c.get("workspace");
   const user = c.get("user");
   const db = c.get("db");
-  const explicit = c.req.query("change_id");
+  const explicit = c.req.query("branchId");
   if (explicit) {
-    const change = getChange(db, ws.id, explicit);
+    const change = getBranchRow(db, ws.id, explicit);
     if (!change) return { error: "change not found", code: "not_found" };
     if (change.state !== "draft" && change.state !== "changes_requested")
       return { error: `change is ${change.state}; cannot write`, code: "conflict" };
@@ -97,14 +97,14 @@ async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<Ch
   }
   if (writable.length > 1) {
     return {
-      error: `multiple writable changes (${writable.map((d) => d.id).join(", ")}); pass change_id explicitly`,
+      error: `multiple writable changes (${writable.map((d) => d.id).join(", ")}); pass branchId explicitly`,
       code: "ambiguous",
     };
   }
   // Zero writable changes → create one. Branch is created lazily on first putFile below.
   const { fj, owner, repo } = c.get("repoCtx");
   const mainBranch = await fj.getBranch(owner, repo, "main");
-  return createChange(db, {
+  return createBranchRow(db, {
     workspaceId: ws.id,
     authorUserId: user.id,
     baseSha: mainBranch?.commit?.id ?? null,
@@ -112,16 +112,16 @@ async function resolveWriteChange(c: import("hono").Context<AppEnv>): Promise<Ch
 }
 
 // For reads (get/tree): resolve the ref to read from.
-// - explicit change_id → that change's branch
+// - explicit branchId → that change's branch
 // - else if user has exactly one open draft → that draft's branch (the historical "working branch" feel)
 // - else → main
-async function resolveReadRef(c: import("hono").Context<AppEnv>): Promise<{ ref: string; change: ChangeRow | null }> {
+async function resolveReadRef(c: import("hono").Context<AppEnv>): Promise<{ ref: string; change: BranchRow | null }> {
   const ws = c.get("workspace");
   const user = c.get("user");
   const db = c.get("db");
-  const explicit = c.req.query("change_id");
+  const explicit = c.req.query("branchId");
   if (explicit) {
-    const change = getChange(db, ws.id, explicit);
+    const change = getBranchRow(db, ws.id, explicit);
     if (change && (change.state === "draft" || change.state === "review" || change.state === "changes_requested")) {
       if (change.state === "draft" && change.author_user_id !== user.id) {
         return { ref: "main", change: null };
@@ -152,7 +152,7 @@ async function resolveReadRef(c: import("hono").Context<AppEnv>): Promise<{ ref:
 
 async function ensureChangeBranch(
   c: import("hono").Context<AppEnv>,
-  change: ChangeRow,
+  change: BranchRow,
 ): Promise<void> {
   const { fj, owner, repo, sudo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, change.branch_name);
@@ -262,10 +262,10 @@ files.put("/:slug/file", async (c) => {
       return c.json({ error: "conflict on push", code: "conflict" }, 409);
     throw err;
   }
-  setChangeState(db, ws.id, change.id, change.state); // bumps updated_at
+  setBranchState(db, ws.id, change.id, change.state); // bumps updated_at
   return c.json({
     ok: true,
-    change_id: change.id,
+    branchId: change.id,
     meta: { id: plan.cosheafId, type: "page", status: "golden", title: plan.title },
     content: plan.rewrittenContent ?? undefined,
     commit: r.commit?.sha,
@@ -292,8 +292,8 @@ files.delete("/:slug/file", async (c) => {
     message: `delete ${rel}`,
     sudo,
   });
-  setChangeState(c.get("db"), ws.id, change.id, change.state);
-  return c.json({ ok: true, change_id: change.id, pending: true });
+  setBranchState(c.get("db"), ws.id, change.id, change.state);
+  return c.json({ ok: true, branchId: change.id, pending: true });
 });
 
 files.get("/:slug/search", (c) => {

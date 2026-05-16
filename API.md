@@ -14,7 +14,7 @@ personal tokens.
 
 ```ts
 type Role = "owner" | "verifier" | "member";
-type ChangeState = "draft" | "review" | "changes_requested" | "merged" | "closed";
+type BranchState = "draft" | "review" | "changes_requested" | "merged" | "closed";
 
 interface User {
   id: number;
@@ -46,7 +46,7 @@ interface Change {
   workspace_id: number;
   author_user_id: number;
   branch_name: string;      // change/<id>
-  state: ChangeState;
+  state: BranchState;
   pr_number: number | null;
   base_sha: string | null;
   title: string | null;
@@ -105,22 +105,22 @@ protection, webhook, `.gitattributes`, and the initial sidecar index.
 Workspace routes require membership.
 
 ```http
-GET /w/:slug/tree?change_id=<id>
+GET /w/:slug/tree?branchId=<id>
 → { "files": FileEntry[] }
 
-GET /w/:slug/file?path=<path>&change_id=<id>
+GET /w/:slug/file?path=<path>&branchId=<id>
 → { "content": string }
 
-PUT /w/:slug/file?path=<path>&change_id=<id>
+PUT /w/:slug/file?path=<path>&branchId=<id>
 { "content": string }
-→ { "ok": true, "change_id": string, "meta": DocumentMeta, "content"?: string, "pending"?: boolean }
+→ { "ok": true, "branchId": string, "meta": DocumentMeta, "content"?: string, "pending"?: boolean }
 
-DELETE /w/:slug/file?path=<path>&change_id=<id>
-→ { "ok": true, "change_id": string, "pending": boolean }
+DELETE /w/:slug/file?path=<path>&branchId=<id>
+→ { "ok": true, "branchId": string, "pending": boolean }
 ```
 
 Writes target the author's `draft` or `changes_requested` change branch. If
-`change_id` is omitted, the server creates or reuses the caller's open draft
+`branchId` is omitted, the server creates or reuses the caller's open draft
 change.
 
 ## Search And Backlinks
@@ -179,13 +179,13 @@ the review close route to terminate a published change.
 
 ```http
 POST /w/:slug/publish
-{ "change_id": string, "mode"?: "direct" | "review", "title"?: string, "body"?: string }
+{ "branchId": string, "mode"?: "direct" | "review", "title"?: string, "body"?: string }
 → PublishResult
 
 interface PublishResult {
   ok: boolean;
   mode?: "direct" | "review";
-  change_id?: string;
+  branchId?: string;
   pr_number?: number;
   message?: string;
 }
@@ -222,15 +222,15 @@ POST /w/:slug/change/:id/request-changes
 
 POST /w/:slug/change/:id/comment
 { "comment"?: string | null }
-→ { "ok": true, "change_id": string, "state": ChangeState }
+→ { "ok": true, "branchId": string, "state": BranchState }
 
 POST /w/:slug/change/:id/close
-→ { "ok": true, "change_id": string, "state": "closed" }
+→ { "ok": true, "branchId": string, "state": "closed" }
 
 interface DecisionResult {
   decision: "approve" | "request_changes";
-  change_id: string;
-  state: ChangeState;
+  branchId: string;
+  state: BranchState;
   approvals: number;
   rejections: number;
 }

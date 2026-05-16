@@ -35,7 +35,7 @@ async function seedReviewablePr(): Promise<void> {
     },
   );
   if (!put.ok) throw new Error(`seedReviewablePr putFile: ${put.status}`);
-  const { change_id } = (await put.json()) as { change_id: string };
+  const { branchId } = (await put.json()) as { branchId: string };
 
   const put2 = await fetch(
     "http://localhost:3030/api/v1/w/flushing-coin/file?path=demo2.md",
@@ -54,7 +54,7 @@ async function seedReviewablePr(): Promise<void> {
     {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ change_id, mode: "review" }),
+      body: JSON.stringify({ branchId, mode: "review" }),
     },
   );
   if (!pub.ok) throw new Error(`seedReviewablePr publish: ${pub.status}`);
@@ -68,7 +68,7 @@ async function seedReviewablePr(): Promise<void> {
   });
   const vcookie = vlogin.headers.get("set-cookie") ?? "";
   const cmt = await fetch(
-    `http://localhost:3030/api/v1/w/flushing-coin/branch/${change_id}/comments`,
+    `http://localhost:3030/api/v1/w/flushing-coin/branch/${branchId}/comments`,
     {
       method: "POST",
       headers: { "content-type": "application/json", cookie: vcookie },

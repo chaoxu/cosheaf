@@ -1227,7 +1227,7 @@ function WorkspaceView({
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const reviewingBranchIdRef = useRef<string | null>(null);
-  // Tracks the change_id the currently-open file was last fetched against, so
+  // Tracks the branchId the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
   // branch even after currentBranchId is nulled by publish.
   const openFileBranchIdRef = useRef<string | null>(null);
@@ -1267,7 +1267,7 @@ function WorkspaceView({
               .catch(() => undefined);
           }
         }
-      } else if (event.type === "queue" || event.type.startsWith("change_")) {
+      } else if (event.type === "queue" || event.type.startsWith("branch_")) {
         // PR opened/merged/closed/reviewed: refresh the queue list so any
         // open queue tab updates without a manual click.
         api
@@ -1333,7 +1333,7 @@ function WorkspaceView({
       const requestId = openRequestRef.current + 1;
       openRequestRef.current = requestId;
       // Prefer an explicit option; otherwise the live activeBranchId; otherwise
-      // the change_id this file was last loaded against, so SSE-triggered
+      // the branchId this file was last loaded against, so SSE-triggered
       // re-opens after a publish (which nulls activeBranchId) keep hitting the
       // same branch instead of 404ing against main.
       const fallback = path === openPathRef.current ? openFileBranchIdRef.current : null;
@@ -1423,8 +1423,8 @@ function WorkspaceView({
         setDirty(false);
         setStatus("saved on branch");
         setOpenDoc(r.meta);
-        setCurrentBranchId(r.change_id);
-        openFileBranchIdRef.current = r.change_id;
+        setCurrentBranchId(r.branchId);
+        openFileBranchIdRef.current = r.branchId;
         loadBacklinks(r.meta.id);
         reloadTree();
       })
@@ -1773,8 +1773,8 @@ function WorkspaceView({
         setOpenPath(path);
         setContent(r.content ?? `# ${path.replace(/\.md$/, "")}\n`);
         setOpenDoc(r.meta);
-        setCurrentBranchId(r.change_id);
-        openFileBranchIdRef.current = r.change_id;
+        setCurrentBranchId(r.branchId);
+        openFileBranchIdRef.current = r.branchId;
         setStatus("saved on branch");
         setDirty(false);
         setNewPath("");

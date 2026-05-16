@@ -1,13 +1,13 @@
 import type Database from "better-sqlite3";
-import type { ChangeState } from "../shared/change-lifecycle.js";
+import type { BranchState } from "../shared/change-lifecycle.js";
 import { generateDocId } from "./frontmatter.js";
 
-export interface ChangeRow {
+export interface BranchRow {
   id: string;
   workspace_id: number;
   author_user_id: number;
   branch_name: string;
-  state: ChangeState;
+  state: BranchState;
   pr_number: number | null;
   base_sha: string | null;
   title: string | null;
@@ -15,21 +15,21 @@ export interface ChangeRow {
   updated_at: number;
 }
 
-export function branchForChange(id: string): string {
+export function branchNameForId(id: string): string {
   return `change/${id}`;
 }
 
-export function getChange(db: Database.Database, workspaceId: number, id: string): ChangeRow | null {
+export function getBranchRow(db: Database.Database, workspaceId: number, id: string): BranchRow | null {
   const row = db
-    .prepare("SELECT * FROM changes WHERE workspace_id = ? AND id = ?")
-    .get(workspaceId, id) as ChangeRow | undefined;
+    .prepare("SELECT * FROM branches WHERE workspace_id = ? AND id = ?")
+    .get(workspaceId, id) as BranchRow | undefined;
   return row ?? null;
 }
 
-export function getChangeByPr(db: Database.Database, workspaceId: number, prNumber: number): ChangeRow | null {
+export function getBranchByPr(db: Database.Database, workspaceId: number, prNumber: number): BranchRow | null {
   const row = db
-    .prepare("SELECT * FROM changes WHERE workspace_id = ? AND pr_number = ?")
-    .get(workspaceId, prNumber) as ChangeRow | undefined;
+    .prepare("SELECT * FROM branches WHERE workspace_id = ? AND pr_number = ?")
+    .get(workspaceId, prNumber) as BranchRow | undefined;
   return row ?? null;
 }
 
@@ -37,66 +37,66 @@ export function listOpenDraftsForUser(
   db: Database.Database,
   workspaceId: number,
   userId: number,
-): ChangeRow[] {
+): BranchRow[] {
   return db
     .prepare(
-      "SELECT * FROM changes WHERE workspace_id = ? AND author_user_id = ? AND state = 'draft' ORDER BY updated_at DESC",
+      "SELECT * FROM branches WHERE workspace_id = ? AND author_user_id = ? AND state = 'draft' ORDER BY updated_at DESC",
     )
-    .all(workspaceId, userId) as ChangeRow[];
+    .all(workspaceId, userId) as BranchRow[];
 }
 
 export function listWritableForUser(
   db: Database.Database,
   workspaceId: number,
   userId: number,
-): ChangeRow[] {
+): BranchRow[] {
   return db
     .prepare(
-      "SELECT * FROM changes WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'changes_requested') ORDER BY updated_at DESC",
+      "SELECT * FROM branches WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'changes_requested') ORDER BY updated_at DESC",
     )
-    .all(workspaceId, userId) as ChangeRow[];
+    .all(workspaceId, userId) as BranchRow[];
 }
 
 export function listOpenForUser(
   db: Database.Database,
   workspaceId: number,
   userId: number,
-): ChangeRow[] {
+): BranchRow[] {
   return db
     .prepare(
-      "SELECT * FROM changes WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'review', 'changes_requested') ORDER BY updated_at DESC",
+      "SELECT * FROM branches WHERE workspace_id = ? AND author_user_id = ? AND state IN ('draft', 'review', 'changes_requested') ORDER BY updated_at DESC",
     )
-    .all(workspaceId, userId) as ChangeRow[];
+    .all(workspaceId, userId) as BranchRow[];
 }
 
-export function listInReview(db: Database.Database, workspaceId: number): ChangeRow[] {
+export function listInReview(db: Database.Database, workspaceId: number): BranchRow[] {
   return db
     .prepare(
-      "SELECT * FROM changes WHERE workspace_id = ? AND state = 'review' ORDER BY updated_at DESC",
+      "SELECT * FROM branches WHERE workspace_id = ? AND state = 'review' ORDER BY updated_at DESC",
     )
-    .all(workspaceId) as ChangeRow[];
+    .all(workspaceId) as BranchRow[];
 }
 
-export function createChange(db: Database.Database, opts: {
+export function createBranchRow(db: Database.Database, opts: {
   workspaceId: number;
   authorUserId: number;
   baseSha: string | null;
   title?: string | null;
-}): ChangeRow {
+}): BranchRow {
   const id = generateDocId();
   const now = Date.now();
   db.prepare(
-    `INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, base_sha, title, created_at, updated_at)
+    `INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, base_sha, title, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
-  ).run(id, opts.workspaceId, opts.authorUserId, branchForChange(id), opts.baseSha, opts.title ?? null, now, now);
-  return getChange(db, opts.workspaceId, id) as ChangeRow;
+  ).run(id, opts.workspaceId, opts.authorUserId, branchNameForId(id), opts.baseSha, opts.title ?? null, now, now);
+  return getBranchRow(db, opts.workspaceId, id) as BranchRow;
 }
 
-export function setChangeState(
+export function setBranchState(
   db: Database.Database,
   workspaceId: number,
   id: string,
-  state: ChangeState,
+  state: BranchState,
   patch?: { pr_number?: number | null; title?: string | null },
 ): void {
   const sets: string[] = ["state = ?", "updated_at = ?"];
@@ -104,9 +104,9 @@ export function setChangeState(
   if (patch && "pr_number" in patch) { sets.push("pr_number = ?"); args.push(patch.pr_number); }
   if (patch && "title" in patch) { sets.push("title = ?"); args.push(patch.title); }
   args.push(workspaceId, id);
-  db.prepare(`UPDATE changes SET ${sets.join(", ")} WHERE workspace_id = ? AND id = ?`).run(...args);
+  db.prepare(`UPDATE branches SET ${sets.join(", ")} WHERE workspace_id = ? AND id = ?`).run(...args);
 }
 
-export function deleteChange(db: Database.Database, workspaceId: number, id: string): void {
-  db.prepare("DELETE FROM changes WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
+export function deleteBranchRow(db: Database.Database, workspaceId: number, id: string): void {
+  db.prepare("DELETE FROM branches WHERE workspace_id = ? AND id = ?").run(workspaceId, id);
 }

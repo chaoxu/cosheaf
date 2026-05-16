@@ -52,7 +52,7 @@ function seed(db: Database.Database): { token: string } {
 
 function seedChange(db: Database.Database, id: string, prNumber: number | null, state: string): void {
   db.prepare(
-    "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+    "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
       "VALUES (?, 1, 1, ?, ?, ?, 0, 0)",
   ).run(id, `change/${id}`, state, prNumber);
 }

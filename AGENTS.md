@@ -130,8 +130,10 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
 - `notes_fts` — FTS5 virtual table over title + body
 - `page_tags(workspace_id, cosheaf_id, tag)`
-- `branches(...)` — sidecar rows for the branch / pull-request workflow.
-  Legacy SQL table name: `changes(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title)`.
+- `branches(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title)` —
+  sidecar rows for the branch / pull-request workflow. Pre-existing dev DBs
+  with a legacy `changes` table are migrated in-place on startup (see
+  `renameChangesTable` in `server/db.ts`).
 - `webhook_log(delivery_id, delivered_at, event_type)`
 
 ## Branch and pull request lifecycle

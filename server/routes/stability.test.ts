@@ -117,12 +117,12 @@ describe("route stability boundaries", () => {
     seedUser(db, 1, "alice", "member");
     const bobToken = seedUser(db, 2, "bob", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
         "VALUES ('abc', 1, 1, 'change/abc', 'draft', 0, 0)",
     ).run();
     const app = appFor(db, fakeForgejo());
 
-    const res = await app.request("/api/v1/w/w/file?path=a.md&change_id=abc", {
+    const res = await app.request("/api/v1/w/w/file?path=a.md&branchId=abc", {
       headers: { authorization: `Bearer ${bobToken}` },
     });
 
@@ -151,7 +151,7 @@ describe("route stability boundaries", () => {
     seedWorkspace(db);
     const token = seedUser(db, 1, "alice", "owner");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
         "VALUES ('empty', 1, 1, 'change/empty', 'draft', 0, 0)",
     ).run();
     const app = appFor(db, fakeForgejo());
@@ -159,11 +159,11 @@ describe("route stability boundaries", () => {
     const res = await app.request("/api/v1/w/w/publish", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ change_id: "empty", mode: "direct" }),
+      body: JSON.stringify({ branchId: "empty", mode: "direct" }),
     });
 
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'empty'").get()).toEqual({ state: "closed" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'empty'").get()).toEqual({ state: "closed" });
   });
 
   it("rejects non-owner self-review", async () => {
@@ -171,7 +171,7 @@ describe("route stability boundaries", () => {
     seedWorkspace(db);
     const token = seedUser(db, 1, "alice", "verifier");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('self', 1, 1, 'change/self', 'review', 7, 0, 0)",
     ).run();
     const forgejo = fakeForgejo();
@@ -193,7 +193,7 @@ describe("route stability boundaries", () => {
     seedUser(db, 1, "alice", "member");
     const verifierToken = seedUser(db, 2, "vera", "verifier");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('needs-work', 1, 1, 'change/needs-work', 'review', 9, 0, 0)",
     ).run();
     const forgejo = fakeForgejo();
@@ -206,7 +206,7 @@ describe("route stability boundaries", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'needs-work'").get()).toEqual({ state: "changes_requested" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'needs-work'").get()).toEqual({ state: "changes_requested" });
     expect(forgejo.createReview).toHaveBeenCalledWith("owner", "repo", 9, {
       event: "REQUEST_CHANGES",
       body: "please repair",
@@ -222,7 +222,7 @@ describe("route stability boundaries", () => {
     seedUser(db, 1, "alice", "member");
     const verifierToken = seedUser(db, 2, "vera", "verifier");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('approve-me', 1, 1, 'change/abc', 'review', 5, 0, 0)",
     ).run();
     const forgejo = fakeForgejo() as Forgejo & {
@@ -246,7 +246,7 @@ describe("route stability boundaries", () => {
 
     expect(res.status).toBe(200);
     expect(forgejo.mergePull).toHaveBeenCalledTimes(4);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'approve-me'").get()).toEqual({ state: "merged" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'approve-me'").get()).toEqual({ state: "merged" });
     expect(forgejo.deleteBranch).toHaveBeenCalledWith("owner", "repo", "change/abc");
   });
 
@@ -256,7 +256,7 @@ describe("route stability boundaries", () => {
     seedUser(db, 1, "alice", "member");
     const verifierToken = seedUser(db, 2, "vera", "verifier");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('comment-me', 1, 1, 'change/abc', 'review', 5, 0, 0)",
     ).run();
     const forgejo = fakeForgejo() as Forgejo & { listReviews: ReturnType<typeof vi.fn> };
@@ -271,7 +271,7 @@ describe("route stability boundaries", () => {
       body: JSON.stringify({ comment: "note only" }),
     });
     expect(comment.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'comment-me'").get()).toEqual({ state: "review" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'comment-me'").get()).toEqual({ state: "review" });
     expect(forgejo.createReview).toHaveBeenCalledWith("owner", "repo", 5, {
       event: "COMMENT",
       body: "note only",
@@ -299,13 +299,13 @@ describe("route stability boundaries", () => {
     seedWorkspace(db);
     const authorToken = seedUser(db, 1, "alice", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 0, 0)",
     ).run();
     const forgejo = fakeForgejo();
     const app = appFor(db, forgejo);
 
-    const write = await app.request("/api/v1/w/w/file?path=a.md&change_id=repair-me", {
+    const write = await app.request("/api/v1/w/w/file?path=a.md&branchId=repair-me", {
       method: "PUT",
       headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
       body: JSON.stringify({ content: "# Repaired\n" }),
@@ -316,19 +316,19 @@ describe("route stability boundaries", () => {
     const publish = await app.request("/api/v1/w/w/publish", {
       method: "POST",
       headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ change_id: "repair-me", mode: "review" }),
+      body: JSON.stringify({ branchId: "repair-me", mode: "review" }),
     });
     expect(publish.status).toBe(200);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'repair-me'").get()).toEqual({ state: "review" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'repair-me'").get()).toEqual({ state: "review" });
     expect(forgejo.createPull).not.toHaveBeenCalled();
   });
 
-  it("reuses a single changes_requested change for omitted change_id writes", async () => {
+  it("reuses a single changes_requested change for omitted branchId writes", async () => {
     const db = freshDb();
     seedWorkspace(db);
     const authorToken = seedUser(db, 1, "alice", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 0, 0)",
     ).run();
     const forgejo = fakeForgejo();
@@ -341,23 +341,23 @@ describe("route stability boundaries", () => {
     });
 
     expect(write.status).toBe(200);
-    await expect(write.json()).resolves.toMatchObject({ change_id: "repair-me" });
+    await expect(write.json()).resolves.toMatchObject({ branchId: "repair-me" });
     expect(forgejo.putFile).toHaveBeenCalledWith("owner", "repo", expect.objectContaining({
       branch: "change/abc",
       path: "a.md",
     }));
   });
 
-  it("requires explicit change_id when draft and changes_requested writes are ambiguous", async () => {
+  it("requires explicit branchId when draft and changes_requested writes are ambiguous", async () => {
     const db = freshDb();
     seedWorkspace(db);
     const authorToken = seedUser(db, 1, "alice", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, created_at, updated_at) " +
         "VALUES ('draft-one', 1, 1, 'change/draft-one', 'draft', 0, 0)",
     ).run();
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 1, 1)",
     ).run();
     const forgejo = fakeForgejo();
@@ -380,12 +380,12 @@ describe("route stability boundaries", () => {
     seedUser(db, 1, "alice", "member");
     const bobToken = seedUser(db, 2, "bob", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 0, 0)",
     ).run();
     const app = appFor(db, fakeForgejo());
 
-    const res = await app.request("/api/v1/w/w/file?path=a.md&change_id=repair-me", {
+    const res = await app.request("/api/v1/w/w/file?path=a.md&branchId=repair-me", {
       headers: { authorization: `Bearer ${bobToken}` },
     });
 
@@ -399,7 +399,7 @@ describe("route stability boundaries", () => {
     seedUser(db, 1, "alice", "member");
     const verifierToken = seedUser(db, 2, "vera", "verifier");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, created_at, updated_at) " +
         "VALUES ('review-me', 1, 1, 'change/abc', 'review', 5, 0, 0)",
     ).run();
     const forgejo = fakeForgejo();
@@ -411,7 +411,7 @@ describe("route stability boundaries", () => {
     });
 
     expect(res.status).toBe(403);
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'review-me'").get()).toEqual({ state: "review" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'review-me'").get()).toEqual({ state: "review" });
     expect(forgejo.editPull).not.toHaveBeenCalled();
     expect(forgejo.deleteBranch).not.toHaveBeenCalled();
   });
@@ -421,7 +421,7 @@ describe("route stability boundaries", () => {
     seedWorkspace(db);
     const authorToken = seedUser(db, 1, "alice", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, title, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, title, created_at, updated_at) " +
         "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 'old title', 0, 0)",
     ).run();
     const forgejo = fakeForgejo();
@@ -430,12 +430,12 @@ describe("route stability boundaries", () => {
     const publish = await app.request("/api/v1/w/w/publish", {
       method: "POST",
       headers: { authorization: `Bearer ${authorToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ change_id: "repair-me", mode: "review", title: "new title", body: "new body" }),
+      body: JSON.stringify({ branchId: "repair-me", mode: "review", title: "new title", body: "new body" }),
     });
 
     expect(publish.status).toBe(200);
     expect(forgejo.editPull).toHaveBeenCalledWith("owner", "repo", 5, { title: "new title", body: "new body" }, "cs-alice");
-    expect(db.prepare("SELECT state FROM changes WHERE id = 'repair-me'").get()).toEqual({ state: "review" });
+    expect(db.prepare("SELECT state FROM branches WHERE id = 'repair-me'").get()).toEqual({ state: "review" });
   });
 
   it("keeps changes_requested out of the review queue but visible to the author", async () => {
@@ -443,7 +443,7 @@ describe("route stability boundaries", () => {
     seedWorkspace(db);
     const authorToken = seedUser(db, 1, "alice", "member");
     db.prepare(
-      "INSERT INTO changes (id, workspace_id, author_user_id, branch_name, state, pr_number, title, created_at, updated_at) " +
+      "INSERT INTO branches (id, workspace_id, author_user_id, branch_name, state, pr_number, title, created_at, updated_at) " +
         "VALUES ('repair-me', 1, 1, 'change/abc', 'changes_requested', 5, 'Repair me', 0, 0)",
     ).run();
     const app = appFor(db, fakeForgejo());

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { ReactElement } from "react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
-import type { ChangeState, Decision, Role } from "../api";
+import type { BranchState, Decision, Role } from "../api";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -16,7 +16,7 @@ export function ReviewActions({
   draftReviewActive,
   onToggleDraftReview,
 }: {
-  state: ChangeState;
+  state: BranchState;
   role: Role;
   isAuthor: boolean;
   onSubmit: (decision: Decision, body: string) => void | Promise<void>;

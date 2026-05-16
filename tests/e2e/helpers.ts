@@ -51,24 +51,24 @@ export async function createPrAsMeri(page: Page): Promise<{ changeId: string; pr
     return { status: r.status, body: await r.text() };
   }, fileName);
   if (result.status !== 200) throw new Error(`putFile: ${result.status} ${result.body.slice(0, 200)}`);
-  const { change_id } = JSON.parse(result.body);
+  const { branchId } = JSON.parse(result.body);
   const pub = await page.evaluate(async (id) => {
     const r = await fetch(`/api/v1/w/flushing-coin/publish`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ change_id: id, mode: "review" }),
+      body: JSON.stringify({ branchId: id, mode: "review" }),
     });
     return { status: r.status, body: await r.text() };
-  }, change_id);
+  }, branchId);
   if (pub.status !== 200) throw new Error(`publish: ${pub.status} ${pub.body.slice(0, 200)}`);
   const { pr_number } = JSON.parse(pub.body);
-  return { changeId: change_id, prNumber: pr_number };
+  return { changeId: branchId, prNumber: pr_number };
 }
 
 export function changeStateInDb(changeId: string): string {
   const out = spawnSync("sqlite3", [
     "/Users/chaoxu/playground/mathhub/db.sqlite",
-    `SELECT state FROM changes WHERE id='${changeId}';`,
+    `SELECT state FROM branches WHERE id='${changeId}';`,
   ]);
   return String(out.stdout).trim();
 }

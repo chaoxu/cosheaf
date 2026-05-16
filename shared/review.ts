@@ -1,6 +1,6 @@
 // Types shared by server and client for the PR review surface.
 
-import type { ChangeState } from "./change-lifecycle.js";
+import type { BranchState } from "./change-lifecycle.js";
 
 export type PullFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
 
@@ -21,7 +21,7 @@ export interface PrMeta {
   number: number;
   title: string;
   body: string;
-  state: ChangeState;
+  state: BranchState;
   author_user_id: number;
   author_username: string;
   created_at: number;

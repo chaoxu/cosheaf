@@ -3,7 +3,9 @@ import type { Role } from "../../shared/roles";
 import type { ChangeDiff, PrMeta, PullFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 
-export type { BranchState, ChangeState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineComment, CommentSide };
+export type { BranchState, Decision, Role, ChangeDiff, PullFile, PrMeta, LineComment, CommentSide };
+/** @deprecated use BranchState */
+export type { ChangeState };
 
 export interface User {
   id: number;
@@ -35,18 +37,20 @@ export interface NoteContent {
   content: string;
 }
 
-export interface Change {
+export interface Branch {
   id: string;
   workspace_id: number;
   author_user_id: number;
   branch_name: string;
-  state: ChangeState;
+  state: BranchState;
   pr_number: number | null;
   base_sha: string | null;
   title: string | null;
   created_at: number;
   updated_at: number;
 }
+/** @deprecated use Branch */
+export type Change = Branch;
 
 export interface ReviewQueueEntry {
   id: string;
@@ -95,15 +99,15 @@ export interface TokenInfo {
 export interface PublishResult {
   ok: boolean;
   mode?: "direct" | "review";
-  change_id?: string;
+  branchId?: string;
   pr_number?: number;
   message?: string;
 }
 
 export interface DecisionResult {
   decision: Exclude<Decision, "comment">;
-  change_id: string;
-  state: ChangeState;
+  branchId: string;
+  state: BranchState;
   approvals: number;
   rejections: number;
 }
@@ -153,19 +157,19 @@ export const api = {
       body: JSON.stringify({ slug, name }),
     }),
 
-  tree: (slug: string, change_id?: string) =>
-    jsonFetch<{ files: FileEntry[] }>(`${w(slug)}/tree${qs({ change_id })}`).then((r) => r.files),
+  tree: (slug: string, branchId?: string) =>
+    jsonFetch<{ files: FileEntry[] }>(`${w(slug)}/tree${qs({ branchId })}`).then((r) => r.files),
 
-  getFile: (slug: string, path: string, change_id?: string) =>
-    jsonFetch<NoteContent>(`${w(slug)}/file${qs({ path, change_id })}`),
-  putFile: (slug: string, path: string, content: string, change_id?: string) =>
-    jsonFetch<{ ok: true; change_id: string; meta: DocumentMeta; content?: string; pending?: boolean }>(
-      `${w(slug)}/file${qs({ path, change_id })}`,
+  getFile: (slug: string, path: string, branchId?: string) =>
+    jsonFetch<NoteContent>(`${w(slug)}/file${qs({ path, branchId })}`),
+  putFile: (slug: string, path: string, content: string, branchId?: string) =>
+    jsonFetch<{ ok: true; branchId: string; meta: DocumentMeta; content?: string; pending?: boolean }>(
+      `${w(slug)}/file${qs({ path, branchId })}`,
       { method: "PUT", body: JSON.stringify({ content }) },
     ),
-  deleteFile: (slug: string, path: string, change_id?: string) =>
-    jsonFetch<{ ok: true; change_id: string; pending: boolean }>(
-      `${w(slug)}/file${qs({ path, change_id })}`,
+  deleteFile: (slug: string, path: string, branchId?: string) =>
+    jsonFetch<{ ok: true; branchId: string; pending: boolean }>(
+      `${w(slug)}/file${qs({ path, branchId })}`,
       { method: "DELETE" },
     ),
 
@@ -176,9 +180,9 @@ export const api = {
 
   // Branches / pull requests
   branches: (slug: string) =>
-    jsonFetch<{ changes: Change[] }>(`${w(slug)}/branches`).then((r) => r.changes),
+    jsonFetch<{ changes: Branch[] }>(`${w(slug)}/branches`).then((r) => r.changes),
   createBranch: (slug: string, title?: string) =>
-    jsonFetch<Change>(`${w(slug)}/branch`, {
+    jsonFetch<Branch>(`${w(slug)}/branch`, {
       method: "POST",
       body: JSON.stringify({ title }),
     }),
@@ -187,9 +191,7 @@ export const api = {
   publish: (slug: string, branchId: string, mode?: "direct" | "review", title?: string) =>
     jsonFetch<PublishResult>(`${w(slug)}/publish`, {
       method: "POST",
-      // The publish endpoint still reads `change_id` from the body (legacy
-      // server-side field; not renamed alongside the JS surface).
-      body: JSON.stringify({ change_id: branchId, mode, title }),
+      body: JSON.stringify({ branchId, mode, title }),
     }),
   approve: (slug: string, branchId: string, comment?: string) =>
     jsonFetch<DecisionResult>(`${w(slug)}/branch/${encodeURIComponent(branchId)}/approve`, {
@@ -202,12 +204,12 @@ export const api = {
       body: JSON.stringify({ comment: comment ?? null }),
     }),
   comment: (slug: string, branchId: string, comment?: string) =>
-    jsonFetch<{ ok: true; change_id: string; state: Change["state"] }>(
+    jsonFetch<{ ok: true; branchId: string; state: Branch["state"] }>(
       `${w(slug)}/branch/${encodeURIComponent(branchId)}/comment`,
       { method: "POST", body: JSON.stringify({ comment: comment ?? null }) },
     ),
   close: (slug: string, branchId: string) =>
-    jsonFetch<{ ok: true; change_id: string; state: Change["state"] }>(
+    jsonFetch<{ ok: true; branchId: string; state: Branch["state"] }>(
       `${w(slug)}/branch/${encodeURIComponent(branchId)}/close`,
       { method: "POST" },
     ),

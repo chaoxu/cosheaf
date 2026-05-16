@@ -1,7 +1,8 @@
 // Manages branch / pull-request workflow: list/create/discard, publish
-// (direct/review), approve/request-changes/comment/close. The SQL table
-// behind these rows is legacy-named `changes`; routes and types now use
-// branch / pull-request vocabulary on the wire.
+// (direct/review), approve/request-changes/comment/close. The filename is
+// `changes.ts` for git-blame continuity; the workflow vocabulary is
+// branch / pull-request throughout (table is `branches`, types are Branch /
+// BranchState).
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
@@ -11,14 +12,14 @@ import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import type { LineComment } from "../../shared/comments.js";
 import {
-  createChange,
-  deleteChange,
-  getChange,
-  getChangeByPr,
+  createBranchRow,
+  deleteBranchRow,
+  getBranchRow,
+  getBranchByPr,
   listInReview,
   listOpenForUser,
-  setChangeState,
-  type ChangeRow,
+  setBranchState,
+  type BranchRow,
 } from "../changes.js";
 
 // Best-effort branch delete; ignores 404s (branch already gone).
@@ -71,7 +72,7 @@ changes.get("/:slug/branches/open", (c) => {
   const rows = c
     .get("db")
     .prepare(
-      "SELECT * FROM changes WHERE workspace_id = ? AND state IN ('review', 'changes_requested') ORDER BY updated_at DESC",
+      "SELECT * FROM branches WHERE workspace_id = ? AND state IN ('review', 'changes_requested') ORDER BY updated_at DESC",
     )
     .all(ws.id);
   return c.json({ changes: rows });
@@ -83,7 +84,7 @@ changes.post("/:slug/branch", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { title?: string };
   const { fj, owner, repo } = c.get("repoCtx");
   const mainBranch = await fj.getBranch(owner, repo, "main");
-  const change = createChange(c.get("db"), {
+  const change = createBranchRow(c.get("db"), {
     workspaceId: ws.id,
     authorUserId: user.id,
     baseSha: mainBranch?.commit?.id ?? null,
@@ -96,7 +97,7 @@ changes.delete("/:slug/branch/:id", async (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");
   const id = c.req.param("id");
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.author_user_id !== user.id)
     return c.json({ error: "not your change", code: "forbidden" }, 403);
@@ -105,8 +106,8 @@ changes.delete("/:slug/branch/:id", async (c) => {
 
   const { fj, owner, repo } = c.get("repoCtx");
   await deleteBranchQuietly(fj, owner, repo, change.branch_name, "deleteBranch on discard");
-  setChangeState(c.get("db"), ws.id, change.id, "closed");
-  c.get("sse").publish(ws.slug, { type: "change_closed", id: change.id });
+  setBranchState(c.get("db"), ws.id, change.id, "closed");
+  c.get("sse").publish(ws.slug, { type: "branch_closed", id: change.id });
   return c.json({ ok: true });
 });
 
@@ -116,13 +117,13 @@ changes.post("/:slug/publish", async (c) => {
   const ws = c.get("workspace");
   const user = c.get("user");
   const body = (await c.req.json().catch(() => ({}))) as {
-    change_id?: string;
+    branchId?: string;
     mode?: "direct" | "review";
     title?: string;
     body?: string;
   };
-  if (!body.change_id) return c.json({ error: "change_id required", code: "validation" }, 400);
-  const change = getChange(c.get("db"), ws.id, body.change_id);
+  if (!body.branchId) return c.json({ error: "branchId required", code: "validation" }, 400);
+  const change = getBranchRow(c.get("db"), ws.id, body.branchId);
   if (!change) return c.json({ error: "change not found", code: "not_found" }, 404);
   if (change.author_user_id !== user.id)
     return c.json({ error: "not your change", code: "forbidden" }, 403);
@@ -139,7 +140,7 @@ changes.post("/:slug/publish", async (c) => {
   // POST /change but never saved anything).
   const branchExists = await fj.getBranch(owner, repo, change.branch_name);
   if (!branchExists) {
-    setChangeState(c.get("db"), ws.id, change.id, "closed");
+    setBranchState(c.get("db"), ws.id, change.id, "closed");
     return c.json({ ok: true, message: "nothing to publish (no commits)" });
   }
 
@@ -155,12 +156,12 @@ changes.post("/:slug/publish", async (c) => {
         sudo,
       });
       prNumber = pr.number;
-      setChangeState(c.get("db"), ws.id, change.id, change.state, { pr_number: prNumber });
+      setBranchState(c.get("db"), ws.id, change.id, change.state, { pr_number: prNumber });
     } catch (err) {
       if (err instanceof ForgejoError && err.status === 409) {
         // No diff vs main → nothing to publish; clean up the empty branch.
         await deleteBranchQuietly(fj, owner, repo, change.branch_name);
-        setChangeState(c.get("db"), ws.id, change.id, "closed");
+        setBranchState(c.get("db"), ws.id, change.id, "closed");
         return c.json({ ok: true, message: "nothing to publish" });
       }
       throw err;
@@ -175,9 +176,9 @@ changes.post("/:slug/publish", async (c) => {
   }
 
   if (mode === "review") {
-    setChangeState(c.get("db"), ws.id, change.id, "review");
-    c.get("sse").publish(ws.slug, { type: "change_review", id: change.id, pr: prNumber });
-    return c.json({ ok: true, mode, change_id: change.id, pr_number: prNumber });
+    setBranchState(c.get("db"), ws.id, change.id, "review");
+    c.get("sse").publish(ws.slug, { type: "branch_review", id: change.id, pr: prNumber });
+    return c.json({ ok: true, mode, branchId: change.id, pr_number: prNumber });
   }
 
   // direct: auto-approve as cosheaf-admin to satisfy required_approvals (Forgejo's
@@ -198,9 +199,9 @@ changes.post("/:slug/publish", async (c) => {
     return c.json({ error: `merge failed: ${(mergeErr as Error).message}`, code: "conflict", pr_number: prNumber }, 409);
   }
   await deleteBranchQuietly(fj, owner, repo, change.branch_name, "deleteBranch after merge");
-  setChangeState(c.get("db"), ws.id, change.id, "merged");
-  c.get("sse").publish(ws.slug, { type: "change_merged", id: change.id });
-  return c.json({ ok: true, mode, change_id: change.id, pr_number: prNumber });
+  setBranchState(c.get("db"), ws.id, change.id, "merged");
+  c.get("sse").publish(ws.slug, { type: "branch_merged", id: change.id });
+  return c.json({ ok: true, mode, branchId: change.id, pr_number: prNumber });
 });
 
 // ---------- approve / request changes / comment / close ----------
@@ -210,7 +211,7 @@ async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
   const id = c.req.param("id") ?? "";
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.state !== "review" || !change.pr_number)
     return c.json({ error: "change is not in review", code: "conflict" }, 409);
@@ -233,19 +234,19 @@ async function approve(c: import("hono").Context<AppEnv>): Promise<Response> {
     const mergeErr = await mergeWithRetry(fj, owner, repo, change.pr_number, owner);
     if (!mergeErr) {
       await deleteBranchQuietly(fj, owner, repo, change.branch_name);
-      setChangeState(c.get("db"), ws.id, change.id, "merged");
-      c.get("sse").publish(ws.slug, { type: "change_merged", id: change.id });
+      setBranchState(c.get("db"), ws.id, change.id, "merged");
+      c.get("sse").publish(ws.slug, { type: "branch_merged", id: change.id });
     } else {
       console.warn(`merge failed: ${(mergeErr as Error).message}`);
     }
   }
-  c.get("sse").publish(ws.slug, { type: "change_approved", id: change.id });
+  c.get("sse").publish(ws.slug, { type: "branch_approved", id: change.id });
 
-  const after = getChange(c.get("db"), ws.id, change.id) as ChangeRow;
+  const after = getBranchRow(c.get("db"), ws.id, change.id) as BranchRow;
   const afterCounts = await approvalCounts(fj, owner, repo, change.pr_number);
   return c.json({
     decision: "approve",
-    change_id: change.id,
+    branchId: change.id,
     state: after.state,
     approvals: afterCounts.approvals,
     rejections: afterCounts.rejections,
@@ -257,7 +258,7 @@ async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Respon
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
   const id = c.req.param("id") ?? "";
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.state !== "review" || !change.pr_number)
     return c.json({ error: "change is not in review", code: "conflict" }, 409);
@@ -271,13 +272,13 @@ async function requestChanges(c: import("hono").Context<AppEnv>): Promise<Respon
     body: body.comment ?? "",
     sudo,
   });
-  setChangeState(c.get("db"), ws.id, change.id, "changes_requested");
-  c.get("sse").publish(ws.slug, { type: "change_changes_requested", id: change.id });
+  setBranchState(c.get("db"), ws.id, change.id, "changes_requested");
+  c.get("sse").publish(ws.slug, { type: "branch_changes_requested", id: change.id });
 
   const counts = await approvalCounts(fj, owner, repo, change.pr_number);
   return c.json({
     decision: "request_changes",
-    change_id: change.id,
+    branchId: change.id,
     state: "changes_requested",
     approvals: counts.approvals,
     rejections: counts.rejections,
@@ -289,7 +290,7 @@ async function commentChange(c: import("hono").Context<AppEnv>): Promise<Respons
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "verifier role required", code: "forbidden" }, 403);
   const id = c.req.param("id") ?? "";
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if ((change.state !== "review" && change.state !== "changes_requested") || !change.pr_number)
     return c.json({ error: "change is not open for review", code: "conflict" }, 409);
@@ -303,15 +304,15 @@ async function commentChange(c: import("hono").Context<AppEnv>): Promise<Respons
     body: body.comment ?? "",
     sudo,
   });
-  c.get("sse").publish(ws.slug, { type: "change_commented", id: change.id });
-  return c.json({ ok: true, change_id: change.id, state: change.state });
+  c.get("sse").publish(ws.slug, { type: "branch_commented", id: change.id });
+  return c.json({ ok: true, branchId: change.id, state: change.state });
 }
 
 async function closeChange(c: import("hono").Context<AppEnv>): Promise<Response> {
   const ws = c.get("workspace");
   const user = c.get("user");
   const id = c.req.param("id") ?? "";
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (change.state === "merged" || change.state === "closed")
     return c.json({ error: `change is ${change.state}`, code: "conflict" }, 409);
@@ -327,9 +328,9 @@ async function closeChange(c: import("hono").Context<AppEnv>): Promise<Response>
     }
   }
   await deleteBranchQuietly(fj, owner, repo, change.branch_name, "deleteBranch on close");
-  setChangeState(c.get("db"), ws.id, change.id, "closed");
-  c.get("sse").publish(ws.slug, { type: "change_closed", id: change.id });
-  return c.json({ ok: true, change_id: change.id, state: "closed" });
+  setBranchState(c.get("db"), ws.id, change.id, "closed");
+  c.get("sse").publish(ws.slug, { type: "branch_closed", id: change.id });
+  return c.json({ ok: true, branchId: change.id, state: "closed" });
 }
 
 async function approvalCounts(
@@ -369,7 +370,7 @@ changes.post("/:slug/branch/:id/close", (c) => closeChange(c));
 changes.get("/:slug/branch/:id/approvals", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id") ?? "";
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change || !change.pr_number) return c.json({ approvals: [] });
   const { fj, owner, repo } = c.get("repoCtx");
   const reviews = await fj.listReviews(owner, repo, change.pr_number);
@@ -401,7 +402,7 @@ changes.get("/:slug/branch/:id/approvals", async (c) => {
 changes.get("/:slug/branch/:id/pr", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
@@ -434,7 +435,7 @@ changes.get("/:slug/branch/:id/pr", async (c) => {
 changes.get("/:slug/branch/:id/diff", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
@@ -470,7 +471,7 @@ changes.get("/:slug/branch/:id/file", async (c) => {
   if (side !== "base" && side !== "head")
     return c.json({ error: "side must be base or head", code: "validation" }, 400);
 
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
@@ -493,7 +494,7 @@ changes.get("/:slug/branch/:id/file", async (c) => {
 changes.get("/:slug/branch/:id/comments", async (c) => {
   const ws = c.get("workspace");
   const id = c.req.param("id");
-  const change = getChange(c.get("db"), ws.id, id);
+  const change = getBranchRow(c.get("db"), ws.id, id);
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
@@ -554,8 +555,8 @@ function parseCommentInput(raw: unknown): CommentInput | null {
 
 function gateReviewerWrite(
   c: import("hono").Context<AppEnv>,
-  change: ChangeRow | null | undefined,
-): Response | { change: ChangeRow & { pr_number: number } } {
+  change: BranchRow | null | undefined,
+): Response | { change: BranchRow & { pr_number: number } } {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "only owners and verifiers can comment", code: "forbidden" }, 403);
@@ -564,7 +565,7 @@ function gateReviewerWrite(
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
   if (c.get("user").id === change.author_user_id)
     return c.json({ error: "authors cannot review their own change", code: "forbidden" }, 403);
-  return { change: change as ChangeRow & { pr_number: number } };
+  return { change: change as BranchRow & { pr_number: number } };
 }
 
 async function resolveLinePosition(
@@ -583,7 +584,7 @@ async function resolveLinePosition(
 }
 
 changes.post("/:slug/branch/:id/comments", async (c) => {
-  const gate = gateReviewerWrite(c, getChange(c.get("db"), c.get("workspace").id, c.req.param("id")));
+  const gate = gateReviewerWrite(c, getBranchRow(c.get("db"), c.get("workspace").id, c.req.param("id")));
   if (gate instanceof Response) return gate;
   const { change } = gate;
 
@@ -607,7 +608,7 @@ changes.post("/:slug/branch/:id/comments", async (c) => {
 
 changes.patch("/:slug/branch/:id/comments/:commentId", async (c) => {
   const ws = c.get("workspace");
-  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  const change = getBranchRow(c.get("db"), ws.id, c.req.param("id"));
   if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
   const commentId = Number(c.req.param("commentId"));
   if (!commentId) return c.json({ error: "bad commentId", code: "validation" }, 400);
@@ -623,7 +624,7 @@ changes.patch("/:slug/branch/:id/comments/:commentId", async (c) => {
 
 changes.delete("/:slug/branch/:id/comments/:commentId", async (c) => {
   const ws = c.get("workspace");
-  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  const change = getBranchRow(c.get("db"), ws.id, c.req.param("id"));
   if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
   const commentId = Number(c.req.param("commentId"));
   const reviewId = Number(c.req.query("review_id"));
@@ -665,7 +666,7 @@ changes.post("/:slug/branch/:id/draft-review", async (c) => {
   const ws = c.get("workspace");
   if (ws.role !== "owner" && ws.role !== "verifier")
     return c.json({ error: "only owners and verifiers can review", code: "forbidden" }, 403);
-  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  const change = getBranchRow(c.get("db"), ws.id, c.req.param("id"));
   if (!change) return c.json({ error: "not found", code: "not_found" }, 404);
   if (!change.pr_number)
     return c.json({ error: "change has no pull request yet", code: "conflict" }, 409);
@@ -678,7 +679,7 @@ changes.post("/:slug/branch/:id/draft-review", async (c) => {
 });
 
 changes.post("/:slug/branch/:id/draft-review/:reviewId/comments", async (c) => {
-  const gate = gateReviewerWrite(c, getChange(c.get("db"), c.get("workspace").id, c.req.param("id")));
+  const gate = gateReviewerWrite(c, getBranchRow(c.get("db"), c.get("workspace").id, c.req.param("id")));
   if (gate instanceof Response) return gate;
   const { change } = gate;
   const reviewId = Number(c.req.param("reviewId"));
@@ -704,7 +705,7 @@ changes.post("/:slug/branch/:id/draft-review/:reviewId/comments", async (c) => {
 
 changes.post("/:slug/branch/:id/draft-review/:reviewId/submit", async (c) => {
   const ws = c.get("workspace");
-  const change = getChange(c.get("db"), ws.id, c.req.param("id"));
+  const change = getBranchRow(c.get("db"), ws.id, c.req.param("id"));
   if (!change?.pr_number) return c.json({ error: "not found", code: "not_found" }, 404);
   const reviewId = Number(c.req.param("reviewId"));
   const body = (await c.req.json().catch(() => null)) as {
@@ -790,23 +791,23 @@ changes.put("/:slug/settings", async (c) => {
 
 // Webhook helper: when a PR push event arrives, transition the corresponding
 // change. Used from routes/webhooks.ts.
-export function syncChangeFromPr(
+export function syncBranchFromPr(
   db: import("better-sqlite3").Database,
   workspaceId: number,
   prNumber: number,
   prState: "open" | "closed",
   prMerged: boolean,
 ): void {
-  const change = getChangeByPr(db, workspaceId, prNumber);
+  const change = getBranchByPr(db, workspaceId, prNumber);
   if (!change) return;
-  if (prMerged) setChangeState(db, workspaceId, change.id, "merged");
+  if (prMerged) setBranchState(db, workspaceId, change.id, "merged");
   else if (prState === "closed") {
     if (change.state === "review" || change.state === "changes_requested")
-      setChangeState(db, workspaceId, change.id, "closed");
+      setBranchState(db, workspaceId, change.id, "closed");
   }
 }
 
-export async function syncChangeFromReview(
+export async function syncBranchFromReview(
   db: import("better-sqlite3").Database,
   workspaceId: number,
   fj: Forgejo,
@@ -814,13 +815,13 @@ export async function syncChangeFromReview(
   repo: string,
   prNumber: number,
   reviewState: string,
-): Promise<{ id: string; state: ChangeRow["state"] } | null> {
-  const change = getChangeByPr(db, workspaceId, prNumber);
+): Promise<{ id: string; state: BranchRow["state"] } | null> {
+  const change = getBranchByPr(db, workspaceId, prNumber);
   if (!change) return null;
   if (change.state === "merged" || change.state === "closed") return null;
 
   if (reviewState === "REQUEST_CHANGES") {
-    if (change.state === "review") setChangeState(db, workspaceId, change.id, "changes_requested");
+    if (change.state === "review") setBranchState(db, workspaceId, change.id, "changes_requested");
     return { id: change.id, state: "changes_requested" };
   }
   if (reviewState !== "APPROVED" || change.state !== "review") return { id: change.id, state: change.state };
@@ -832,7 +833,7 @@ export async function syncChangeFromReview(
     const mergeErr = await mergeWithRetry(fj, owner, repo, prNumber, owner);
     if (!mergeErr) {
       await deleteBranchQuietly(fj, owner, repo, change.branch_name);
-      setChangeState(db, workspaceId, change.id, "merged");
+      setBranchState(db, workspaceId, change.id, "merged");
       return { id: change.id, state: "merged" };
     }
     console.warn(`merge failed: ${(mergeErr as Error).message}`);
@@ -840,4 +841,4 @@ export async function syncChangeFromReview(
   return { id: change.id, state: "review" };
 }
 
-export { deleteChange };
+export { deleteBranchRow };

@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
-import { syncChangeFromPr, syncChangeFromReview } from "./changes.js";
+import { syncBranchFromPr, syncBranchFromReview } from "./changes.js";
 import { deleteIssue, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssue } from "../forgejo.js";
 
@@ -124,7 +124,7 @@ webhooks.post("/forgejo", async (c) => {
         const number = pr.number as number;
         const merged = !!pr.merged;
         const state = pr.state as "open" | "closed";
-        syncChangeFromPr(db, ws.id, number, state, merged);
+        syncBranchFromPr(db, ws.id, number, state, merged);
         sse.publish(ws.slug, { type: "queue" });
       }
     } else if (event === "pull_request_review") {
@@ -133,15 +133,15 @@ webhooks.post("/forgejo", async (c) => {
       const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
       const state = String(review?.state ?? "");
       if (Number.isFinite(number) && state) {
-        const synced = await syncChangeFromReview(db, ws.id, fj, owner, ws.forgejo_repo, number, state);
+        const synced = await syncBranchFromReview(db, ws.id, fj, owner, ws.forgejo_repo, number, state);
         if (synced?.state === "changes_requested") {
-          sse.publish(ws.slug, { type: "change_changes_requested", id: synced.id });
+          sse.publish(ws.slug, { type: "branch_changes_requested", id: synced.id });
         } else if (synced?.state === "merged") {
-          sse.publish(ws.slug, { type: "change_merged", id: synced.id });
+          sse.publish(ws.slug, { type: "branch_merged", id: synced.id });
         } else if (state === "APPROVED" && synced) {
-          sse.publish(ws.slug, { type: "change_approved", id: synced.id });
+          sse.publish(ws.slug, { type: "branch_approved", id: synced.id });
         } else if (state === "COMMENT" && synced) {
-          sse.publish(ws.slug, { type: "change_commented", id: synced.id });
+          sse.publish(ws.slug, { type: "branch_commented", id: synced.id });
         }
       }
       sse.publish(ws.slug, { type: "queue" });
@@ -181,7 +181,7 @@ webhooks.post("/forgejo", async (c) => {
               : null;
       if (type && Number.isFinite(number)) {
         const row = db
-          .prepare("SELECT id FROM changes WHERE workspace_id = ? AND pr_number = ?")
+          .prepare("SELECT id FROM branches WHERE workspace_id = ? AND pr_number = ?")
           .get(ws.id, number) as { id: string } | undefined;
         if (row) sse.publish(ws.slug, { type, id: row.id });
       }

@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHANGE_STATES, sqlInList } from "../shared/change-lifecycle.js";
+import { BRANCH_STATES, sqlInList } from "../shared/change-lifecycle.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -94,17 +94,41 @@ function ensureTrigramFts(db: Database.Database): void {
   `);
 }
 
-function ensureChangeStateCheck(db: Database.Database): void {
+// Pre-existing dev DBs have a `changes` table (with old `idx_changes_*`
+// indices). Rename it to `branches` before schema.sql runs; otherwise the
+// schema's `CREATE TABLE IF NOT EXISTS branches` would create an empty table
+// alongside the still-populated legacy one. SQLite has no `ALTER INDEX
+// RENAME`, so we drop the old indices and let schema.sql recreate them under
+// their new names.
+function renameChangesTable(db: Database.Database): void {
+  const old = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'changes'")
+    .get() as { name: string } | undefined;
+  if (!old) return;
+  const already = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'branches'")
+    .get() as { name: string } | undefined;
+  if (already) return; // both shouldn't coexist; bail rather than risk data
+  db.exec(`
+    ALTER TABLE changes RENAME TO branches;
+    DROP INDEX IF EXISTS idx_changes_workspace_state;
+    DROP INDEX IF EXISTS idx_changes_author_state;
+    DROP INDEX IF EXISTS idx_changes_branch;
+    DROP INDEX IF EXISTS idx_changes_pr;
+  `);
+}
+
+function ensureBranchStateCheck(db: Database.Database): void {
   const row = db
-    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'changes'")
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'branches'")
     .get() as { sql: string } | undefined;
   if (!row) return;
-  const expectedCheck = `state IN ${sqlInList(CHANGE_STATES)}`;
+  const expectedCheck = `state IN ${sqlInList(BRANCH_STATES)}`;
   if (row.sql.includes(expectedCheck)) return;
 
   db.exec(`
     PRAGMA foreign_keys = OFF;
-    CREATE TABLE changes_new (
+    CREATE TABLE branches_new (
       id TEXT PRIMARY KEY,
       workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       author_user_id INTEGER NOT NULL REFERENCES users(id),
@@ -116,13 +140,13 @@ function ensureChangeStateCheck(db: Database.Database): void {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-    INSERT INTO changes_new(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title, created_at, updated_at)
+    INSERT INTO branches_new(id, workspace_id, author_user_id, branch_name, state, pr_number, base_sha, title, created_at, updated_at)
       SELECT id, workspace_id, author_user_id, branch_name,
              CASE state WHEN 'rejected' THEN 'closed' WHEN 'abandoned' THEN 'closed' ELSE state END,
              pr_number, base_sha, title, created_at, updated_at
-        FROM changes;
-    DROP TABLE changes;
-    ALTER TABLE changes_new RENAME TO changes;
+        FROM branches;
+    DROP TABLE branches;
+    ALTER TABLE branches_new RENAME TO branches;
     PRAGMA foreign_keys = ON;
   `);
   db.exec(readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
@@ -134,9 +158,12 @@ export function getDb(config: Config): Database.Database {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // Migrate legacy `changes` table → `branches` before applying the schema,
+  // so the schema's CREATE IF NOT EXISTS doesn't shadow legacy data.
+  renameChangesTable(db);
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
-  ensureChangeStateCheck(db);
+  ensureBranchStateCheck(db);
   ensureTrigramFts(db);
   dbInstance = db;
   return db;
