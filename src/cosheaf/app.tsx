@@ -340,7 +340,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -415,7 +415,7 @@ function WorkspaceList({
 
   useEffect(load, [load]);
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     api
       .createWorkspace(newSlug, newName)
@@ -532,7 +532,7 @@ function TokensScreen({
   }, []);
   useEffect(reload, [reload]);
 
-  const create = (e: React.FormEvent) => {
+  const create = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!name.trim()) return;
     api
@@ -1802,7 +1802,7 @@ function WorkspaceView({
     return () => window.removeEventListener("keydown", handler);
   }, [openPath, dirty, save, busy, publish]);
 
-  const create = (e: React.FormEvent) => {
+  const create = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     let path = newPath.trim();
     if (!path) return;

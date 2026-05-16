@@ -43,7 +43,7 @@ function LabelsManager({ workspaceSlug }: { workspaceSlug: string }): ReactEleme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSlug]);
 
-  async function submit(e: FormEvent) {
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
@@ -138,7 +138,7 @@ function MilestonesManager({ workspaceSlug }: { workspaceSlug: string }): ReactE
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceSlug, showClosed]);
 
-  async function submit(e: FormEvent) {
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!title.trim()) return;
     setBusy(true);
