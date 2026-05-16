@@ -136,3 +136,20 @@ CREATE TABLE IF NOT EXISTS issue_assignees (
   PRIMARY KEY (workspace_id, number, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_issue_assignees_user ON issue_assignees (user_id, workspace_id);
+
+-- Audit log for the Forgejo passthrough escape hatch. One row per
+-- /api/v1/w/{slug}/forgejo/... call. We log the request shape and outcome
+-- only; bodies are intentionally omitted (size + cross-agent privacy).
+CREATE TABLE IF NOT EXISTS forgejo_passthrough_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  query TEXT,
+  status INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_passthrough_log_workspace ON forgejo_passthrough_log (workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_passthrough_log_user ON forgejo_passthrough_log (user_id, created_at DESC);

@@ -1,0 +1,153 @@
+// Forgejo REST passthrough.
+//
+// Agents trained on Forgejo's API can hit Forgejo directly through cosheaf:
+//
+//   {METHOD} /api/v1/w/{slug}/forgejo/{tail}
+//   -> {METHOD} {forgejoUrl}/api/v1/repos/{owner}/{repo}/{tail}
+//   with `Authorization: token <admin>` + `Sudo: <user's forgejo proxy>`.
+//
+// Cosheaf handles auth (Bearer cs_… → workspace user → Sudo) and workspace
+// scoping (path is anchored at the workspace's repo so an agent cannot
+// stumble into another repo or /admin/*). Body and query are forwarded
+// verbatim; response status, content-type, and Link header are forwarded.
+//
+// This is an escape hatch, not a replacement for cosheaf-specific endpoints
+// (PUT /file, /search, /backlinks, etc.). Rate limiting is a follow-up.
+
+import { Hono } from "hono";
+import type { AppEnv } from "../types.js";
+import { requireAuth, requireMembership } from "../middleware.js";
+
+// Tail prefixes we forward. Each entry matches either the exact segment
+// (e.g. `pulls`) or anything under it (`pulls/`). Anything else: 403.
+const ALLOWED_PREFIXES = [
+  "pulls",
+  "issues",
+  "labels",
+  "milestones",
+  "branches",
+  "commits",
+  "contents",
+  "reviews",
+  "activities/feeds",
+] as const;
+
+function isAllowedTail(tail: string): boolean {
+  for (const p of ALLOWED_PREFIXES) {
+    if (tail === p) return true;
+    if (tail.startsWith(p + "/")) return true;
+    if (tail.startsWith(p + "?")) return true;
+  }
+  return false;
+}
+
+// Cheap path-traversal / cross-repo guard. The wildcard already strips the
+// `/api/v1/w/{slug}/forgejo/` prefix, so `tail` is whatever the agent put
+// after `/forgejo/`. We reject anything that could climb out of the repo's
+// namespace or smuggle a leading slash.
+function isSafeTail(tail: string): boolean {
+  if (tail.length === 0) return false;
+  if (tail.startsWith("/")) return false;
+  // Disallow `..` as a path segment anywhere (handles "..", "a/..", "../x").
+  const segs = tail.split("?")[0].split("/");
+  if (segs.some((s) => s === "..")) return false;
+  // No re-anchoring into another repo or admin path. These are caught by
+  // the whitelist too, but be explicit for defense in depth.
+  if (tail.startsWith("repos/")) return false;
+  if (tail.startsWith("admin/") || tail === "admin") return false;
+  return true;
+}
+
+export const forgejoPassthrough = new Hono<AppEnv>();
+forgejoPassthrough.use("*", requireAuth);
+forgejoPassthrough.use("/:slug/*", requireMembership());
+
+forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
+  const slug = c.req.param("slug");
+  const config = c.get("config");
+  const { owner, repo, sudo } = c.get("repoCtx");
+  const ws = c.get("workspace");
+  const user = c.get("user");
+  const db = c.get("db");
+
+  // Extract tail from the URL. Use c.req.url so we get the original
+  // (decoded-by-fetch) pathname + query exactly as the client sent them.
+  const reqUrl = new URL(c.req.url);
+  const prefix = `/api/v1/w/${slug}/forgejo/`;
+  if (!reqUrl.pathname.startsWith(prefix)) {
+    return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
+  }
+  const tailPath = reqUrl.pathname.slice(prefix.length);
+  const queryString = reqUrl.search; // includes leading "?" or ""
+
+  if (!isSafeTail(tailPath) || !isAllowedTail(tailPath)) {
+    return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
+  }
+
+  // Build the Forgejo URL.
+  const target = new URL(
+    `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${tailPath}${queryString}`,
+    config.forgejoUrl,
+  );
+
+  // Forward headers: only the ones that affect Forgejo's request handling.
+  // Strip the cosheaf Authorization (which is a cs_ token, not a Forgejo
+  // token) and replace with the admin token + Sudo.
+  const fwdHeaders: Record<string, string> = {
+    authorization: `token ${config.forgejoToken}`,
+    sudo,
+    accept: c.req.header("accept") ?? "application/json",
+  };
+  const ct = c.req.header("content-type");
+  if (ct) fwdHeaders["content-type"] = ct;
+
+  // Buffer the request body. Fine for v1 — agents are not pushing huge
+  // payloads through here.
+  const method = c.req.method.toUpperCase();
+  const hasBody = method !== "GET" && method !== "HEAD";
+  const body = hasBody ? await c.req.raw.arrayBuffer() : undefined;
+
+  const start = Date.now();
+  let status = 0;
+  let respBody: ArrayBuffer = new ArrayBuffer(0);
+  let respContentType: string | null = null;
+  let respLink: string | null = null;
+  try {
+    const res = await fetch(target, {
+      method,
+      headers: fwdHeaders,
+      body: body && body.byteLength > 0 ? body : undefined,
+    });
+    status = res.status;
+    respContentType = res.headers.get("content-type");
+    respLink = res.headers.get("link");
+    respBody = await res.arrayBuffer();
+  } catch (err) {
+    status = 502;
+    respContentType = "application/json";
+    respBody = new TextEncoder().encode(
+      JSON.stringify({ error: "forgejo unreachable", code: "bad_gateway", detail: (err as Error).message }),
+    ).buffer as ArrayBuffer;
+  }
+  const durationMs = Date.now() - start;
+
+  // Audit log.
+  db.prepare(
+    "INSERT INTO forgejo_passthrough_log (workspace_id, user_id, method, path, query, status, duration_ms, created_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    ws.id,
+    user.id,
+    method,
+    tailPath,
+    queryString ? queryString.slice(1) : null,
+    status,
+    durationMs,
+    Date.now(),
+  );
+
+  const outHeaders: Record<string, string> = {};
+  if (respContentType) outHeaders["content-type"] = respContentType;
+  if (respLink) outHeaders.link = respLink;
+  return new Response(respBody, { status, headers: outHeaders });
+});

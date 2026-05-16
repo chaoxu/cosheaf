@@ -301,6 +301,39 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
   console.log(`set ${username} as ${role} in workspace ${slug}`);
 }
 
+function passthroughLog(slug: string): void {
+  const { db } = ctx();
+  const ws = db.prepare("SELECT id FROM workspaces WHERE slug = ?").get(slug) as
+    | { id: number }
+    | undefined;
+  if (!ws) {
+    console.error(`workspace '${slug}' not found`);
+    process.exit(1);
+  }
+  const rows = db
+    .prepare(
+      "SELECT l.created_at, l.method, l.path, l.query, l.status, l.duration_ms, u.username " +
+        "FROM forgejo_passthrough_log l JOIN users u ON u.id = l.user_id " +
+        "WHERE l.workspace_id = ? ORDER BY l.created_at DESC LIMIT 50",
+    )
+    .all(ws.id) as Array<{
+    created_at: number;
+    method: string;
+    path: string;
+    query: string | null;
+    status: number;
+    duration_ms: number;
+    username: string;
+  }>;
+  for (const row of rows) {
+    const ts = new Date(row.created_at).toISOString();
+    const qs = row.query ? `?${row.query}` : "";
+    console.log(
+      `${ts}\t${row.username}\t${row.method}\t${row.path}${qs}\t${row.status}\t${row.duration_ms}ms`,
+    );
+  }
+}
+
 function help(): void {
   console.log(`Usage:
   cosheaf seed --user <username> --password <password> --workspace <slug> --workspace-name <name>
@@ -312,6 +345,7 @@ function help(): void {
   cosheaf workspace member <slug> <username> <role>   # role = owner|verifier|member
   cosheaf workspace reindex <slug>                     # rebuild sidecar index from Forgejo main
   cosheaf workspace rm <slug>                          # delete forgejo repo + sidecar
+  cosheaf passthrough-log <slug>                       # last 50 /forgejo/* passthrough calls
 `);
 }
 
@@ -325,6 +359,7 @@ async function main(): Promise<void> {
   if (cmd === "user" && sub === "passwd" && rest[0]) return userPasswd(rest[0]);
   if (cmd === "user" && sub === "list") return userList();
   if (cmd === "user" && sub === "rm" && rest[0]) return userRm(rest[0]);
+  if (cmd === "passthrough-log" && sub) return passthroughLog(sub);
   if (cmd === "workspace" && sub === "reindex" && rest[0]) return workspaceReindex(rest[0]);
   if (cmd === "workspace" && sub === "rm" && rest[0]) return workspaceRm(rest[0]);
   if (cmd === "workspace" && sub === "member" && rest[0] && rest[1] && rest[2]) {

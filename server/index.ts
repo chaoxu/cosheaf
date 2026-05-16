@@ -12,6 +12,7 @@ import { changes } from "./routes/changes.js";
 import { issues } from "./routes/issues.js";
 import { notifications } from "./routes/notifications.js";
 import { webhooks } from "./routes/webhooks.js";
+import { forgejoPassthrough } from "./routes/forgejo-passthrough.js";
 
 const config = loadConfig();
 const db = getDb(config);
@@ -36,6 +37,7 @@ app.route("/api/v1/w", files);
 app.route("/api/v1/w", changes);
 app.route("/api/v1/w", issues);
 app.route("/api/v1/w", notifications);
+app.route("/api/v1/w", forgejoPassthrough);
 app.route("/api/v1/webhooks", webhooks);
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
