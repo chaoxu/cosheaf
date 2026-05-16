@@ -15,6 +15,7 @@ import {
   requireWriteOnMutation,
 } from "../middleware.js";
 import { ForgejoError, type Forgejo } from "../forgejo.js";
+import { invalidateRepoTrees } from "../tree-cache.js";
 import { userBranchPrefix } from "../../shared/conventions.js";
 
 export const branches = new Hono<AppEnv>();
@@ -74,6 +75,7 @@ branches.post("/:slug/branches", async (c) => {
       return c.json({ error: "branch already exists", code: "conflict" }, 409);
     throw err;
   }
+  invalidateRepoTrees(owner, repo);
   return c.json({ name: body.name }, 201);
 });
 
@@ -83,5 +85,6 @@ branches.delete("/:slug/branches/:name", async (c) => {
     return c.json({ error: "branch name required (not main)", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   await deleteBranchQuietly(fj, owner, repo, name);
+  invalidateRepoTrees(owner, repo);
   return c.json({ ok: true });
 });

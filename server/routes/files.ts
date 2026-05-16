@@ -4,6 +4,7 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { planIndexPage } from "../indexer.js";
+import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
@@ -95,22 +96,26 @@ files.get("/:slug/tree", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
-  let tree;
-  try {
-    tree = await fj.getTree(owner, repo, ref, true);
-  } catch (err) {
-    // Forgejo returns 404 for a missing ref *or* 400 with "sha not found"
-    // for a branch that was deleted while a client still held its name
-    // (e.g. squash-merge dropped the head branch). Either way, fall back
-    // to main so a stale tab keeps rendering.
-    const missing =
-      err instanceof ForgejoError &&
-      (err.status === 404 || (err.status === 400 && /sha not found/i.test(err.bodyText)));
-    if (missing && ref !== "main") {
-      tree = await fj.getTree(owner, repo, "main", true);
-    } else {
-      throw err;
+  let tree = getCachedTree(owner, repo, ref);
+  if (!tree) {
+    try {
+      tree = await fj.getTree(owner, repo, ref, true);
+    } catch (err) {
+      // Forgejo returns 404 for a missing ref *or* 400 with "sha not found"
+      // for a branch that was deleted while a client still held its name
+      // (e.g. squash-merge dropped the head branch). Either way, fall back
+      // to main so a stale tab keeps rendering.
+      const missing =
+        err instanceof ForgejoError &&
+        (err.status === 404 || (err.status === 400 && /sha not found/i.test(err.bodyText)));
+      if (missing && ref !== "main") {
+        tree = getCachedTree(owner, repo, "main") ?? (await fj.getTree(owner, repo, "main", true));
+        setCachedTree(owner, repo, "main", tree);
+      } else {
+        throw err;
+      }
     }
+    setCachedTree(owner, repo, ref, tree);
   }
   const out = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
@@ -197,6 +202,7 @@ files.put("/:slug/file", async (c) => {
       return c.json({ error: "conflict on push", code: "conflict" }, 409);
     throw err;
   }
+  invalidateBranchTree(owner, repo, branch);
   return c.json({
     ok: true,
     branch,
@@ -234,6 +240,7 @@ files.post("/:slug/assets", async (c) => {
     message: `upload ${safeName}`,
     sudo,
   });
+  invalidateBranchTree(owner, repo, branch);
   return c.json({ path: assetPath });
 });
 
@@ -284,6 +291,7 @@ files.delete("/:slug/file", async (c) => {
     message: `delete ${rel}`,
     sudo,
   });
+  invalidateBranchTree(owner, repo, branch);
   return c.json({ ok: true, branch });
 });
 

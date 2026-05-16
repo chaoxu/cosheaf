@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
+import { invalidateRepoTrees } from "../tree-cache.js";
 import { deleteIssue, upsertIssue } from "../issues-indexer.js";
 import type { ForgejoIssue } from "../forgejo.js";
 
@@ -96,6 +97,9 @@ webhooks.post("/forgejo", async (c) => {
     }
     if (event === "push") {
       const ref = payload.ref as string | undefined;
+      // Any push moves at least one ref — drop the repo's cached trees so the
+      // next /tree fetch re-pulls from Forgejo. Cheaper than diffing refs.
+      invalidateRepoTrees(owner, ws.forgejo_repo);
       if (ref === "refs/heads/main") {
         const commits = (payload.commits ?? []) as Array<{ added?: string[]; modified?: string[]; removed?: string[] }>;
         const touched = new Set<string>();
