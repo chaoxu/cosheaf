@@ -45,22 +45,13 @@ export default defineConfig({
       "@codemirror/search",
       "@lezer/common",
       "@lezer/highlight",
-      // Citation-js packages are CJS; coflat-editor 0.1.13's bundled .mjs does
-      // named imports (`import { parse } from '@citation-js/name'`) which fail
-      // unless Vite pre-bundles them into ESM.
-      "@citation-js/core",
-      "@citation-js/name",
-      "@citation-js/date",
-      "@citation-js/plugin-bibtex",
-      "@citation-js/plugin-csl",
       // PR-review surface deps — pre-bundle so the first visit to a PR
       // doesn't trigger a 5–15s optimize pause.
       "parse-diff",
       "react-diff-view",
-      "react-markdown",
-      "remark-gfm",
-      "remark-math",
-      "rehype-katex",
+      // Coflat reader/parse subpaths used outside the editor surface.
+      "@chaoxu/coflat-editor/reader",
+      "@chaoxu/coflat-editor/parse",
     ],
     // The editor package is already a single bundled .mjs; Vite's optimizer
     // chokes on its `import("pdfjs-dist/.../pdf.worker.min.mjs?url")` line.
