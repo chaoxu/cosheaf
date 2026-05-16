@@ -68,10 +68,17 @@ export async function provisionWorkspace(
     createdRepo = true;
   }
 
+  // Provisioning is a sequence with side effects in different stores (Forgejo
+  // + local DB). If any required step fails after we create the Forgejo repo
+  // / local row, roll both back so a retry sees a clean slate. The optional
+  // reindex is best-effort.
   let workspace: WorkspaceRow;
-  try {
-    workspace = upsertWorkspace(db, options, repoName);
-  } catch (err) {
+  const rollback = async (err: unknown): Promise<never> => {
+    try {
+      db.prepare("DELETE FROM workspaces WHERE slug = ?").run(options.slug);
+    } catch (cleanupErr) {
+      console.warn(`rollback local delete failed: ${(cleanupErr as Error).message}`);
+    }
     if (createdRepo && options.rollbackCreatedRepoOnLocalFailure) {
       try {
         await forgejo.deleteRepo(owner, repoName);
@@ -80,17 +87,31 @@ export async function provisionWorkspace(
       }
     }
     throw err;
+  };
+
+  try {
+    workspace = upsertWorkspace(db, options, repoName);
+  } catch (err) {
+    return rollback(err);
   }
 
-  await ensureWorkspacePermissions(forgejo, config, repoName, options.forgejoUsername);
-  await ensureWorkspaceWebhook(forgejo, config, repoName);
-  if (!repoExisted) {
-    await ensureWorkspaceFile(forgejo, config, repoName, options.forgejoUsername, {
-      path: ".gitattributes",
-      content: "*.md text eol=lf -text\n",
-      message: "chore: lock byte-exactness for .md",
-    });
+  try {
+    await ensureWorkspacePermissions(forgejo, config, repoName, options.forgejoUsername);
+    // Webhook setup is required — without it, the sidecar will diverge from
+    // Forgejo silently. Let failures roll the workspace back so the operator
+    // can retry instead of finding out via stale data weeks later.
+    await ensureWorkspaceWebhookOrThrow(forgejo, config, repoName);
+    if (!repoExisted) {
+      await ensureWorkspaceFile(forgejo, config, repoName, options.forgejoUsername, {
+        path: ".gitattributes",
+        content: "*.md text eol=lf -text\n",
+        message: "chore: lock byte-exactness for .md",
+      });
+    }
+  } catch (err) {
+    return rollback(err);
   }
+
   try {
     await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
   } catch (err) {
@@ -160,25 +181,21 @@ export async function ensureWorkspacePermissions(
   }
 }
 
-async function ensureWorkspaceWebhook(
+async function ensureWorkspaceWebhookOrThrow(
   forgejo: Forgejo,
   config: Config,
   repoName: string,
 ): Promise<void> {
-  try {
-    const hooks = await forgejo.listRepoHooks(config.forgejoOwner, repoName);
-    const hasOurHook = hooks.some((h) => Array.isArray(h.events) && h.events.includes("push"));
-    if (!hasOurHook) {
-      await forgejo.createRepoHook(
-        config.forgejoOwner,
-        repoName,
-        config.webhookUrl,
-        config.webhookSecret,
-        WEBHOOK_EVENTS,
-      );
-    }
-  } catch (err) {
-    console.warn(`webhook setup failed: ${(err as Error).message}`);
+  const hooks = await forgejo.listRepoHooks(config.forgejoOwner, repoName);
+  const hasOurHook = hooks.some((h) => Array.isArray(h.events) && h.events.includes("push"));
+  if (!hasOurHook) {
+    await forgejo.createRepoHook(
+      config.forgejoOwner,
+      repoName,
+      config.webhookUrl,
+      config.webhookSecret,
+      WEBHOOK_EVENTS,
+    );
   }
 }
 
