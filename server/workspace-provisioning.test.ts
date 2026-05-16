@@ -125,11 +125,10 @@ describe("workspace provisioning", () => {
     db.prepare("INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'w', 0)").run();
     const forgejo = fakeForgejo({ "keep.md": "# Keep\n" });
     db.prepare(
-      "INSERT INTO doc_map (cosheaf_id, workspace_id, doc_type, forgejo_kind, forgejo_id, title, created_at) " +
-        "VALUES ('gone', 1, 'page', 'file', 'gone.md', 'Gone', 0)",
+      "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES ('gone', 1, 'gone.md', 'Gone', 0)",
     ).run();
     db.prepare(
-      "INSERT INTO notes_fts (workspace_id, cosheaf_id, doc_type, path, title, body) VALUES (1, 'gone', 'page', 'gone.md', 'Gone', 'Gone')",
+      "INSERT INTO notes_fts (workspace_id, cosheaf_id, path, title, body) VALUES (1, 'gone', 'gone.md', 'Gone', 'Gone')",
     ).run();
 
     const count = await reindexWorkspaceFromForgejo(db, forgejo, config, { id: 1, forgejo_repo: "w" });

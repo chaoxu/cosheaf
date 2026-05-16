@@ -20,8 +20,6 @@ export interface Workspace {
 
 export interface DocumentMeta {
   id: string;
-  type: "page";
-  status: "golden";
   title: string | null;
 }
 

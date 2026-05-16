@@ -120,14 +120,14 @@ files.get("/:slug/tree", async (c) => {
   const docs = c
     .get("db")
     .prepare(
-      "SELECT cosheaf_id AS id, forgejo_id AS path, title FROM doc_map WHERE workspace_id = ? AND doc_type = 'page'",
+      "SELECT cosheaf_id AS id, forgejo_id AS path, title FROM doc_map WHERE workspace_id = ?",
     )
     .all(ws.id) as Array<{ id: string; path: string; title: string | null }>;
   const byPath = new Map(docs.map((d) => [d.path, d]));
   const merged = out.map((f) => {
     const meta = byPath.get(f.path);
     return meta
-      ? { ...f, doc: { id: meta.id, type: "page" as const, status: "golden" as const, title: meta.title } }
+      ? { ...f, doc: { id: meta.id, title: meta.title } }
       : f;
   });
   return c.json({ files: merged });
@@ -200,7 +200,7 @@ files.put("/:slug/file", async (c) => {
   return c.json({
     ok: true,
     branch,
-    meta: { id: plan.cosheafId, type: "page", status: "golden", title: plan.title },
+    meta: { id: plan.cosheafId, title: plan.title },
     content: plan.rewrittenContent ?? undefined,
     commit: r.commit?.sha,
   });
@@ -250,7 +250,7 @@ files.get("/:slug/suggest", (c) => {
     .get("db")
     .prepare(
       "SELECT cosheaf_id AS id, title FROM doc_map " +
-        "WHERE workspace_id = ? AND doc_type = 'page' AND " +
+        "WHERE workspace_id = ? AND " +
         "(cosheaf_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') " +
         "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
     )
@@ -296,14 +296,12 @@ files.get("/:slug/search", (c) => {
   const terms = searchTerms(q);
   const ftsQuery = buildFtsQuery(q);
   if (!ftsQuery) return c.json({ results: [] });
-  let rows: Array<{ doc_id: string; path: string; title: string | null; type: string; body: string; rank: number }>;
+  let rows: Array<{ doc_id: string; path: string; title: string | null; body: string; rank: number }>;
   try {
     rows = c
       .get("db")
       .prepare(
-        `SELECT cosheaf_id AS doc_id, path, title,
-                doc_type AS type, body,
-                bm25(notes_fts) AS rank
+        `SELECT cosheaf_id AS doc_id, path, title, body, bm25(notes_fts) AS rank
            FROM notes_fts
           WHERE workspace_id = ? AND notes_fts MATCH ?
           ORDER BY rank LIMIT ?`,
@@ -322,20 +320,13 @@ files.get("/:slug/search", (c) => {
       const fallbackRows = c
         .get("db")
         .prepare(
-          `SELECT cosheaf_id AS doc_id, path, title, doc_type AS type, body
+          `SELECT cosheaf_id AS doc_id, path, title, body
              FROM notes_fts
             WHERE workspace_id = ? AND (${where})
             ORDER BY path LIMIT ?`,
         )
-        .all(ws.id, ...args, limit) as Array<{ doc_id: string; path: string; title: string | null; type: string; body: string }>;
-      rows = fallbackRows.map((r) => ({
-        doc_id: r.doc_id,
-        path: r.path,
-        title: r.title,
-        type: r.type,
-        body: r.body,
-        rank: 0,
-      }));
+        .all(ws.id, ...args, limit) as Array<{ doc_id: string; path: string; title: string | null; body: string }>;
+      rows = fallbackRows.map((r) => ({ ...r, rank: 0 }));
     }
   }
   return c.json({
@@ -343,9 +334,6 @@ files.get("/:slug/search", (c) => {
       doc_id: r.doc_id,
       path: r.path,
       title: r.title,
-      type: r.type,
-      status: "golden",
-      target_id: null,
       snippet: plainSnippet(r, terms),
       rank: r.rank,
     })),

@@ -28,7 +28,6 @@ import {
   type User,
   type Workspace,
 } from "./api";
-import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { cn } from "./lib/utils";
@@ -63,8 +62,6 @@ type View =
   | { kind: "workspaces"; user: User }
   | { kind: "tokens"; user: User }
   | { kind: "workspace"; user: User; workspace: Workspace };
-
-type DocStatus = NonNullable<FileEntry["doc"]>["status"];
 
 function SidebarTab({
   active,
@@ -1148,21 +1145,15 @@ function ApprovalsPanel({
 // call site name in this large file.
 const formatTime = formatRelativeTime;
 
-function statusBadge(status: DocStatus): ReactElement {
-  return <Badge variant={status}>{status}</Badge>;
-}
-
 function FileRow({
   active,
   title,
-  doc,
   onClick,
   children,
   testId,
 }: {
   active?: boolean;
   title?: string;
-  doc?: FileEntry["doc"];
   onClick: () => void;
   children: React.ReactNode;
   testId?: string;
@@ -1179,8 +1170,7 @@ function FileRow({
       )}
     >
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {doc && doc.type !== "page" && statusBadge(doc.status)}
-    </button>
+          </button>
   );
 }
 
@@ -2237,7 +2227,6 @@ function WorkspaceView({
                         <FileRow
                           active={f.path === openPath}
                           title={f.doc?.id ? `id: ${f.doc.id}` : "unindexed"}
-                          doc={f.doc}
                           onClick={() => open(f)}
                           testId={`file-${f.path}`}
                         >
@@ -2478,8 +2467,7 @@ function WorkspaceView({
               {openPath ? (
                 <>
                   <span className="truncate">{openPath}</span>
-                  {openDoc && openDoc.type !== "page" && statusBadge(openDoc.status)}
-                  {dirty && <span className="text-[var(--cf-accent)]">●</span>}
+                                    {dirty && <span className="text-[var(--cf-accent)]">●</span>}
                 </>
               ) : reviewingPullNumber ? null : (
                 <span>no file open</span>

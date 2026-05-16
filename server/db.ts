@@ -59,27 +59,39 @@ export function loadConfig(): Config {
 
 let dbInstance: Database.Database | null = null;
 
-function ensureTrigramFts(db: Database.Database): void {
-  const row = db
+// Drop legacy doc_type/forgejo_kind columns and the doc_type FTS column on
+// existing DBs. The sidecar is rebuildable; we don't preserve FTS content —
+// `pnpm cli workspace reindex <slug>` regenerates it from Forgejo. The
+// migration is idempotent: it only runs if the columns are still present.
+function migrateDropDocKindColumns(db: Database.Database): void {
+  const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
+  const hasLegacyDocMapCols = docMapCols.some((c) => c.name === "doc_type" || c.name === "forgejo_kind");
+  if (hasLegacyDocMapCols) {
+    db.exec(`
+      ALTER TABLE doc_map DROP COLUMN doc_type;
+      ALTER TABLE doc_map DROP COLUMN forgejo_kind;
+    `);
+  }
+  const ftsRow = db
     .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts'")
     .get() as { sql: string } | undefined;
-  if (!row || /tokenize\s*=\s*'?trigram'?/i.test(row.sql)) return;
-
-  db.exec(`
-    CREATE VIRTUAL TABLE notes_fts_new USING fts5(
-      workspace_id UNINDEXED,
-      cosheaf_id UNINDEXED,
-      doc_type UNINDEXED,
-      path,
-      title,
-      body,
-      tokenize='trigram'
-    );
-    INSERT INTO notes_fts_new(rowid, workspace_id, cosheaf_id, doc_type, path, title, body)
-      SELECT rowid, workspace_id, cosheaf_id, doc_type, path, title, body FROM notes_fts;
-    DROP TABLE notes_fts;
-    ALTER TABLE notes_fts_new RENAME TO notes_fts;
-  `);
+  const ftsNeedsRebuild =
+    !ftsRow ||
+    !/tokenize\s*=\s*'?trigram'?/i.test(ftsRow.sql) ||
+    /\bdoc_type\b/i.test(ftsRow.sql);
+  if (ftsRow && ftsNeedsRebuild) {
+    db.exec(`
+      DROP TABLE notes_fts;
+      CREATE VIRTUAL TABLE notes_fts USING fts5(
+        workspace_id UNINDEXED,
+        cosheaf_id UNINDEXED,
+        path,
+        title,
+        body,
+        tokenize='trigram'
+      );
+    `);
+  }
 }
 
 export function getDb(config: Config): Database.Database {
@@ -90,7 +102,7 @@ export function getDb(config: Config): Database.Database {
   db.pragma("foreign_keys = ON");
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
-  ensureTrigramFts(db);
+  migrateDropDocKindColumns(db);
   dbInstance = db;
   return db;
 }

@@ -20,6 +20,24 @@ export interface IngestPlan {
   commit: () => void; // commits sidecar transaction; call only after the canonical write succeeds
 }
 
+// Prepared-statement cache. `better-sqlite3` does not cache by SQL string, so
+// without this we'd re-parse the same ~10 statements on every indexed page
+// (hot during bulk reindex and webhook bursts).
+const stmtCache = new WeakMap<Database.Database, Map<string, Database.Statement>>();
+function prep(db: Database.Database, sql: string): Database.Statement {
+  let bySql = stmtCache.get(db);
+  if (!bySql) {
+    bySql = new Map();
+    stmtCache.set(db, bySql);
+  }
+  let s = bySql.get(sql);
+  if (!s) {
+    s = db.prepare(sql);
+    bySql.set(sql, s);
+  }
+  return s;
+}
+
 export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan {
   const format = coflatMarkdownFormat;
   const parsed = format.parseDocument(p.bodyText);
@@ -27,19 +45,17 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
     ? parsed.frontmatter.id
     : null;
 
-  const existingByPath = db
-    .prepare(
-      "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page' AND forgejo_id = ?",
-    )
-    .get(p.workspaceId, p.filePath) as { cosheaf_id: string } | undefined;
+  const existingByPath = prep(
+    db,
+    "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND forgejo_id = ?",
+  ).get(p.workspaceId, p.filePath) as { cosheaf_id: string } | undefined;
 
   let cosheafId = fmId ?? existingByPath?.cosheaf_id ?? generateDocId();
 
-  const collision = db
-    .prepare(
-      "SELECT forgejo_id FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ? AND NOT (doc_type = 'page' AND forgejo_id = ?)",
-    )
-    .get(p.workspaceId, cosheafId, p.filePath) as { forgejo_id: string } | undefined;
+  const collision = prep(
+    db,
+    "SELECT forgejo_id FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ? AND forgejo_id != ?",
+  ).get(p.workspaceId, cosheafId, p.filePath) as { forgejo_id: string } | undefined;
   if (collision) cosheafId = generateDocId();
 
   const explicitTitle =
@@ -49,45 +65,51 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   const title = explicitTitle ?? format.extractTitle(parsed.body);
 
   const commit = db.transaction(() => {
-    const stalePath = db
-      .prepare(
-        "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page' AND forgejo_id = ? AND cosheaf_id != ?",
-      )
-      .get(p.workspaceId, p.filePath, cosheafId) as { cosheaf_id: string } | undefined;
+    const stalePath = prep(
+      db,
+      "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND forgejo_id = ? AND cosheaf_id != ?",
+    ).get(p.workspaceId, p.filePath, cosheafId) as { cosheaf_id: string } | undefined;
     if (stalePath) {
-      db.prepare("DELETE FROM notes_fts WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
-      db.prepare("DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
-      db.prepare("DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
-      db.prepare("DELETE FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, stalePath.cosheaf_id);
+      deletePageRows(db, p.workspaceId, stalePath.cosheaf_id);
     }
 
-    const exists = db.prepare("SELECT 1 FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?").get(p.workspaceId, cosheafId);
+    const exists = prep(db, "SELECT 1 FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?")
+      .get(p.workspaceId, cosheafId);
     if (exists) {
-      db.prepare("UPDATE doc_map SET forgejo_id = ?, title = ? WHERE workspace_id = ? AND cosheaf_id = ?")
+      prep(db, "UPDATE doc_map SET forgejo_id = ?, title = ? WHERE workspace_id = ? AND cosheaf_id = ?")
         .run(p.filePath, title, p.workspaceId, cosheafId);
     } else {
-      db.prepare(
-        "INSERT INTO doc_map (cosheaf_id, workspace_id, doc_type, forgejo_kind, forgejo_id, title, created_at) VALUES (?, ?, 'page', 'file', ?, ?, ?)",
+      prep(
+        db,
+        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
       ).run(cosheafId, p.workspaceId, p.filePath, title, Date.now());
     }
-    db.prepare("DELETE FROM notes_fts WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, cosheafId);
-    db.prepare(
-      "INSERT INTO notes_fts (workspace_id, cosheaf_id, doc_type, path, title, body) VALUES (?, ?, 'page', ?, ?, ?)",
+    prep(db, "DELETE FROM notes_fts WHERE workspace_id = ? AND cosheaf_id = ?")
+      .run(p.workspaceId, cosheafId);
+    prep(
+      db,
+      "INSERT INTO notes_fts (workspace_id, cosheaf_id, path, title, body) VALUES (?, ?, ?, ?, ?)",
     ).run(p.workspaceId, cosheafId, p.filePath, title ?? "", parsed.body);
-    db.prepare("DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?").run(p.workspaceId, cosheafId);
+    prep(db, "DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?")
+      .run(p.workspaceId, cosheafId);
+    const insertBacklink = prep(
+      db,
+      "INSERT OR IGNORE INTO backlinks (workspace_id, src_id, src_path, target_id, target_label) VALUES (?, ?, ?, ?, ?)",
+    );
     for (const link of format.extractLinks(parsed.body)) {
       const targetId = resolveLinkTarget(db, p.workspaceId, p.filePath, link);
-      db.prepare(
-        "INSERT OR IGNORE INTO backlinks (workspace_id, src_id, src_path, target_id, target_label) VALUES (?, ?, ?, ?, ?)",
-      ).run(p.workspaceId, cosheafId, p.filePath, targetId, link.raw);
+      insertBacklink.run(p.workspaceId, cosheafId, p.filePath, targetId, link.raw);
     }
-    db.prepare("DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?").run(p.workspaceId, cosheafId);
+    prep(db, "DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?")
+      .run(p.workspaceId, cosheafId);
     const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags : [];
+    const insertTag = prep(
+      db,
+      "INSERT OR IGNORE INTO page_tags (workspace_id, cosheaf_id, tag) VALUES (?, ?, ?)",
+    );
     for (const t of tags) {
       if (typeof t === "string" && t.length > 0) {
-        db.prepare(
-          "INSERT OR IGNORE INTO page_tags (workspace_id, cosheaf_id, tag) VALUES (?, ?, ?)",
-        ).run(p.workspaceId, cosheafId, t);
+        insertTag.run(p.workspaceId, cosheafId, t);
       }
     }
   });
@@ -109,20 +131,20 @@ export function indexPage(db: Database.Database, p: PageIngest): IngestPlan {
   return plan;
 }
 
+function deletePageRows(db: Database.Database, workspaceId: number, cosheafId: string): void {
+  prep(db, "DELETE FROM notes_fts WHERE workspace_id = ? AND cosheaf_id = ?").run(workspaceId, cosheafId);
+  prep(db, "DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?").run(workspaceId, cosheafId);
+  prep(db, "DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?").run(workspaceId, cosheafId);
+  prep(db, "DELETE FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?").run(workspaceId, cosheafId);
+}
+
 export function deletePage(db: Database.Database, workspaceId: number, filePath: string): void {
-  const row = db
-    .prepare(
-      "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page' AND forgejo_id = ?",
-    )
-    .get(workspaceId, filePath) as { cosheaf_id: string } | undefined;
+  const row = prep(
+    db,
+    "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND forgejo_id = ?",
+  ).get(workspaceId, filePath) as { cosheaf_id: string } | undefined;
   if (!row) return;
-  const tx = db.transaction(() => {
-    db.prepare("DELETE FROM notes_fts WHERE workspace_id = ? AND cosheaf_id = ?").run(workspaceId, row.cosheaf_id);
-    db.prepare("DELETE FROM backlinks WHERE workspace_id = ? AND src_id = ?").run(workspaceId, row.cosheaf_id);
-    db.prepare("DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?").run(workspaceId, row.cosheaf_id);
-    db.prepare("DELETE FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?").run(workspaceId, row.cosheaf_id);
-  });
-  tx();
+  db.transaction(() => deletePageRows(db, workspaceId, row.cosheaf_id))();
 }
 
 function resolveLinkTarget(
@@ -132,8 +154,7 @@ function resolveLinkTarget(
   link: DocumentLink,
 ): string | null {
   if (link.kind === "id") {
-    const row = db
-      .prepare("SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?")
+    const row = prep(db, "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND cosheaf_id = ?")
       .get(workspaceId, link.ref) as { cosheaf_id: string } | undefined;
     return row?.cosheaf_id ?? link.ref;
   }
@@ -141,10 +162,9 @@ function resolveLinkTarget(
   if (!linkPath) return null;
   const dir = path.posix.dirname(srcPath);
   const resolved = path.posix.normalize(path.posix.join(dir, linkPath));
-  const row = db
-    .prepare(
-      "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page' AND forgejo_id = ?",
-    )
-    .get(workspaceId, resolved) as { cosheaf_id: string } | undefined;
+  const row = prep(
+    db,
+    "SELECT cosheaf_id FROM doc_map WHERE workspace_id = ? AND forgejo_id = ?",
+  ).get(workspaceId, resolved) as { cosheaf_id: string } | undefined;
   return row?.cosheaf_id ?? null;
 }

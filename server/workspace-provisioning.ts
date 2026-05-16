@@ -245,7 +245,7 @@ export async function reindexWorkspaceFromForgejo(
   }
 
   const indexed = db
-    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_id = ? AND doc_type = 'page'")
+    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_id = ?")
     .all(workspace.id) as Array<{ forgejo_id: string }>;
   for (const row of indexed) {
     if (!seen.has(row.forgejo_id)) deletePage(db, workspace.id, row.forgejo_id);
