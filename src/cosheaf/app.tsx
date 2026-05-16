@@ -1796,14 +1796,7 @@ function WorkspaceView({
         setNewPath("");
         setCreating(false);
         navigate({ kind: "workspace", slug: workspace.slug, filePath: path });
-        // Refresh the tree against the *just-saved* branch. Doing this twice
-        // — immediate + microtask — covers both the React-state-not-yet-
-        // propagated race and a slower path where Forgejo's tree endpoint
-        // hasn't picked up the commit on the immediate call.
-        const refreshTree = () =>
-          api.tree(workspace.slug, r.branch).then(setFiles).catch(() => undefined);
-        refreshTree();
-        setTimeout(refreshTree, 100);
+        api.tree(workspace.slug, r.branch).then(setFiles).catch(() => undefined);
       })
       .catch((err: unknown) =>
         setStatus(err instanceof ApiError ? err.message : "Create failed"),
