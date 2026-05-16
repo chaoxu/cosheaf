@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MountedEditor } from "@chaoxu/coflat-editor";
 
 type OutlineEntry = {
@@ -38,6 +38,7 @@ import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
 import { ReviewActions } from "./review/ReviewActions";
 import { IssueView } from "./review/IssueView";
+import { buildWorkspaceDocumentContext } from "./document-context";
 import { SettingsPanel } from "./review/SettingsPanel";
 
 const MarkdownEditor = lazy(() =>
@@ -1145,6 +1146,7 @@ function WorkspaceView({
   onLogout: () => void;
 }): ReactElement {
   const [files, setFiles] = useState<FileEntry[] | null>(null);
+  const workspaceCtx = useMemo(() => buildWorkspaceDocumentContext({ files }), [files]);
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [openDoc, setOpenDoc] = useState<FileEntry["doc"] | undefined>(undefined);
   const [content, setContent] = useState("");
@@ -2091,6 +2093,7 @@ function WorkspaceView({
             <IssueView
               workspaceSlug={workspace.slug}
               number={viewingIssue}
+              documentContext={workspaceCtx}
               currentForgejoUsername={user.forgejo_username}
               canManageLabels={workspace.role === "owner"}
               canPin={workspace.role === "owner"}
@@ -2201,8 +2204,10 @@ function WorkspaceView({
             <>
               <Suspense fallback={<div className="flex-1" />}>
                 <MarkdownEditor
+                  key={openPath}
                   value={content}
                   mode={editorMode}
+                  from={openPath ?? undefined}
                   testId="editor"
                   onReady={(editor) => {
                     editorRef.current = editor;

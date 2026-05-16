@@ -19,6 +19,8 @@ interface Props {
   // unmount/remount to pick up new extensions (typically via key=...).
   extensions?: readonly Extension[];
   readOnly?: boolean;
+  /** Source-file path for relative-ref resolution (forwarded to coflat). */
+  from?: string;
 }
 
 export function MarkdownEditor({
@@ -29,6 +31,7 @@ export function MarkdownEditor({
   testId,
   extensions,
   readOnly,
+  from,
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MountedEditor | null>(null);
@@ -45,6 +48,7 @@ export function MarkdownEditor({
       doc: value,
       mode,
       extensions: mountExtensions,
+      from,
       onChange: (next) => onChangeRef.current(next),
     });
     editorRef.current = editor;

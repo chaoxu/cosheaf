@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
 import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
+import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
 import { IssueBodyRender } from "./IssueBodyRender";
 
 const muted = "text-[var(--cf-muted)]";
@@ -23,6 +24,7 @@ export function IssueView({
   onOpenPageById,
   onOpenPath,
   onOpenNumber,
+  documentContext,
 }: {
   workspaceSlug: string;
   number: number;
@@ -35,6 +37,7 @@ export function IssueView({
   onOpenPageById?: (id: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
   onOpenNumber?: (n: number) => void;
+  documentContext?: DocumentContext;
 }): ReactElement {
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<IssueComment[]>([]);
@@ -305,6 +308,7 @@ export function IssueView({
             {issue.body ? (
               <IssueBodyRender
                 text={issue.body}
+                ctx={documentContext}
                 onOpenPageById={onOpenPageById}
                 onOpenPath={onOpenPath}
                 onOpenNumber={(n) => {
@@ -433,6 +437,7 @@ export function IssueView({
                 <div className="text-sm">
                   <IssueBodyRender
                     text={c.body}
+                    ctx={documentContext}
                     onOpenPageById={onOpenPageById}
                     onOpenPath={onOpenPath}
                     onOpenNumber={onOpenNumber}

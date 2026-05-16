@@ -23,6 +23,8 @@ interface RenderProps {
   onOpenPageById?: (cosheafId: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
   onOpenNumber?: (n: number) => void;
+  /** Workspace-scoped DocumentContext (shared with the editor surface). */
+  ctx?: DocumentContext;
 }
 
 const REF_PAGE_CLASS = "cosheaf-ref-page";
@@ -38,17 +40,17 @@ export function IssueBodyRender({
   onOpenPageById,
   onOpenPath,
   onOpenNumber,
+  ctx,
 }: RenderProps): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handlersRef = useRef({ onOpenPageById, onOpenPath, onOpenNumber });
   handlersRef.current = { onOpenPageById, onOpenPath, onOpenNumber };
 
-  const ctx: DocumentContext = {
+  // Fall back to a minimal local resolver so the surface still works without
+  // a workspace-scoped ctx (unit tests, isolated previews).
+  const effectiveCtx: DocumentContext = ctx ?? {
     refResolver: {
       resolve(key, _mode) {
-        // Visible text is `[@key]`. Click handling is delegated to the
-        // container-level listener; we tag the span via inline attrs in
-        // the sanitized content so it survives React re-renders.
         return {
           content: `[@${escapeHtml(key)}]`,
           className: `${REF_PAGE_CLASS} ${REF_BUTTON_CLASS}`,
@@ -57,7 +59,7 @@ export function IssueBodyRender({
     },
   };
 
-  const { html: rendered } = renderToHtml(text, ctx);
+  const { html: rendered } = renderToHtml(text, effectiveCtx);
   const html = injectPageRefTestIds(rewriteBareRefsInHtml(rendered));
 
   // Own the DOM directly so React never overwrites our hydrated math.
