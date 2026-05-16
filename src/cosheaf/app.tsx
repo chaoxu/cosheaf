@@ -1208,13 +1208,17 @@ function WorkspaceView({
   }, [files]);
 
   // "My branches" = branches I authored that don't have an open PR yet.
-  // Auto-select when there's exactly one so save lands on it without prompting.
+  // Auto-select when there's exactly one; keep an already-selected branch if
+  // it still appears in the list (don't clobber a freshly-created one).
   const reloadBranches = useCallback((markReady = false) => {
     if (markReady) setChangesReady(false);
     api
       .myBranches(workspace.slug)
       .then((branches) => {
-        setCurrentBranchName(branches.length === 1 ? (branches[0]?.name ?? null) : null);
+        setCurrentBranchName((current) => {
+          if (current && branches.some((b) => b.name === current)) return current;
+          return branches.length === 1 ? (branches[0]?.name ?? null) : null;
+        });
       })
       .catch(() => undefined)
       .finally(() => {
@@ -1330,14 +1334,12 @@ function WorkspaceView({
       const requestId = openRequestRef.current + 1;
       openRequestRef.current = requestId;
       // Prefer the explicit option; otherwise the live activeBranchName;
-      // otherwise the branch this file was last loaded against, so SSE-driven
-      // re-opens after a publish keep hitting the same branch instead of
-      // falling back to main.
-      const fallback = path === openPathRef.current ? openFileBranchRef.current : null;
+      // otherwise the last-loaded branch (kept in a ref so a just-set value
+      // from create() / save() wins races against state propagation).
       const branch =
         "branch" in options
           ? (options.branch ?? undefined)
-          : (activeBranchName ?? fallback ?? undefined);
+          : (activeBranchName ?? openFileBranchRef.current ?? undefined);
       setBusy(true);
       setStatus(null);
       api
@@ -1794,9 +1796,14 @@ function WorkspaceView({
         setNewPath("");
         setCreating(false);
         navigate({ kind: "workspace", slug: workspace.slug, filePath: path });
-        // reloadTree's closure may still have stale activeBranchName; query
-        // the freshly-saved branch directly so the new file shows up.
-        api.tree(workspace.slug, r.branch).then(setFiles).catch(() => undefined);
+        // Refresh the tree against the *just-saved* branch. Doing this twice
+        // — immediate + microtask — covers both the React-state-not-yet-
+        // propagated race and a slower path where Forgejo's tree endpoint
+        // hasn't picked up the commit on the immediate call.
+        const refreshTree = () =>
+          api.tree(workspace.slug, r.branch).then(setFiles).catch(() => undefined);
+        refreshTree();
+        setTimeout(refreshTree, 100);
       })
       .catch((err: unknown) =>
         setStatus(err instanceof ApiError ? err.message : "Create failed"),
