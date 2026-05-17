@@ -513,6 +513,55 @@ async function inspectWorkspace(slug: string): Promise<void> {
   if (userBranches.length > 20) console.log(`  … ${userBranches.length - 20} more`);
 }
 
+// ------------------------------- drift-check -------------------------------
+
+// Diagnostic-only: compares `doc_map` against Forgejo's `main` tree for the
+// given workspace. No auto-repair. Exit 1 if drift detected so the command
+// is scriptable (e.g. periodic check, CI sanity).
+async function workspaceDriftCheck(slug: string): Promise<void> {
+  const { config, db, forgejo } = ctx();
+  const ws = db
+    .prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?")
+    .get(slug) as { id: number; forgejo_repo: string } | undefined;
+  if (!ws) {
+    console.error(`workspace '${slug}' not found`);
+    process.exit(1);
+  }
+
+  const sidecarPaths = new Set(
+    (
+      db
+        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_id = ?")
+        .all(ws.id) as Array<{ path: string }>
+    ).map((r) => r.path),
+  );
+  let forgejoPaths: Set<string>;
+  try {
+    const tree = await forgejo.getTree(config.forgejoOwner, ws.forgejo_repo, "main", true);
+    forgejoPaths = new Set(
+      tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).map((e) => e.path),
+    );
+  } catch (err) {
+    console.error(`drift-check: getTree failed: ${(err as Error).message}`);
+    process.exit(2);
+  }
+
+  const onlySidecar = [...sidecarPaths].filter((p) => !forgejoPaths.has(p)).sort();
+  const onlyForgejo = [...forgejoPaths].filter((p) => !sidecarPaths.has(p)).sort();
+  const inSync = sidecarPaths.size + forgejoPaths.size - onlySidecar.length - onlyForgejo.length;
+
+  if (onlySidecar.length === 0 && onlyForgejo.length === 0) {
+    console.log(`drift-check ${slug}: clean (${inSync} pages in sync)`);
+    return;
+  }
+
+  console.log(`drift-check ${slug}: DRIFT (${inSync} in sync, ${onlySidecar.length} sidecar-only, ${onlyForgejo.length} forgejo-only)`);
+  for (const p of onlySidecar) console.log(`  sidecar-only: ${p}`);
+  for (const p of onlyForgejo) console.log(`  forgejo-only: ${p}`);
+  console.log(`\nrun \`pnpm cli workspace reindex ${slug}\` to rebuild from Forgejo`);
+  process.exit(1);
+}
+
 // ---------------------------------- repl ----------------------------------
 
 function startRepl(): void {
@@ -620,6 +669,10 @@ function buildProgram(): Command {
     .command("inspect <slug>")
     .description("show sidecar vs forgejo drift, recent webhook deliveries, open PRs, user branches")
     .action(inspectWorkspace);
+  workspace
+    .command("drift-check <slug>")
+    .description("diagnostic: report differences between doc_map and Forgejo's main tree (exit 1 on drift)")
+    .action(workspaceDriftCheck);
 
   program
     .command("passthrough-log <slug>")
