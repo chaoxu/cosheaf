@@ -16,7 +16,12 @@ files.use("*", requireAuth);
 files.use("/:slug/*", requireMembership());
 files.use("/:slug/*", requireWriteOnMutation);
 
-function safeRel(p: string | undefined): string | null {
+// Repository-relative path validator. Rejects absolute paths, traversal
+// segments (`..`), empty segments, backslashes (Forgejo treats `/` as the
+// only separator), control characters, and encoded-traversal forms. Exported
+// so other typed routes (e.g. PR review-comment paths) can apply the same
+// shape check.
+export function safeRel(p: string | undefined): string | null {
   if (!p) return null;
   if (p.startsWith("/") || p.startsWith("\\")) return null;
   for (let i = 0; i < p.length; i++) {

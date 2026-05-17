@@ -27,7 +27,7 @@ interface Props {
   ctx?: DocumentContext;
   addedLines: readonly number[];
   comments: readonly LineComment[];
-  side: "new" | "old";
+  side: "head" | "base";
   actions?: CommentActions;
   /** Test id on the outer container, for Playwright. */
   testId?: string;
@@ -80,7 +80,7 @@ export function RichDiffRender({
     const root = containerRef.current;
     if (!root) return;
     const set = new Set(addedLines);
-    const tintClass = side === "new" ? "cf-diff-added" : "cf-diff-removed";
+    const tintClass = side === "head" ? "cf-diff-added" : "cf-diff-removed";
     for (const el of root.querySelectorAll<HTMLElement>("[data-source-line]")) {
       const line = Number(el.dataset.sourceLine);
       el.classList.toggle(tintClass, set.has(line));
@@ -143,7 +143,7 @@ export function RichDiffRender({
   return <div ref={containerRef} data-testid={testId} className="cf-rich-diff prose max-w-none px-4 py-3" />;
 }
 
-// Minimal CSS.escape that's safe for our key shape (`new:42`).
+// Minimal CSS.escape that's safe for our key shape (`head:42`).
 function cssEscape(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, (m) => `\\${m}`);
 }

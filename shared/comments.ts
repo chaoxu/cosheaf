@@ -1,6 +1,10 @@
 // Line-level review comments for the PR view. Shared by server and client.
 
-export type CommentSide = "new" | "old";
+// PR-native side vocabulary: `base` = the PR's base ref (left side of diff,
+// pre-change line); `head` = the PR's head ref (right side, post-change line).
+// Forgejo's review-comment write API consumes new_position/old_position
+// integers — head maps to new_position, base maps to old_position.
+export type CommentSide = "base" | "head";
 
 export interface LineComment {
   id: number;

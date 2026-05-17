@@ -36,6 +36,7 @@ import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
+import { safeRel } from "./files.js";
 import { allDocumentFormats } from "../format-registry.js";
 import { reindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
 import type { LineComment } from "../../shared/comments.js";
@@ -339,12 +340,20 @@ pulls.post("/:slug/pulls/:n/reviews", async (c) => {
 
 // ---------- line comments ----------
 
-interface CommentInput { path: string; line: number; side: "new" | "old"; body: string }
+interface CommentInput { path: string; line: number; side: "base" | "head"; body: string }
 
+// Strict shape check: safe relative path, positive integer line, valid side,
+// non-empty body. Anything else returns null and the caller responds 400.
 function parseCommentInput(raw: unknown): CommentInput | null {
   const v = raw as Partial<CommentInput> | null;
-  if (!v?.path || !v.line || !v.body || (v.side !== "new" && v.side !== "old")) return null;
-  return { path: v.path, line: v.line, side: v.side, body: v.body };
+  if (!v || typeof v !== "object") return null;
+  if (typeof v.path !== "string") return null;
+  const path = safeRel(v.path);
+  if (!path) return null;
+  if (!Number.isInteger(v.line) || (v.line as number) < 1) return null;
+  if (v.side !== "base" && v.side !== "head") return null;
+  if (typeof v.body !== "string" || v.body.trim() === "") return null;
+  return { path, line: v.line as number, side: v.side, body: v.body };
 }
 
 async function resolveLinePosition(
@@ -382,7 +391,7 @@ pulls.get("/:slug/pulls/:n/comments", async (c) => {
       review_id: cm.pull_request_review_id,
       path: cm.path,
       line: mapped?.line ?? null,
-      side: mapped?.side ?? (status.get(cm.path) === "deleted" ? "old" : "new"),
+      side: mapped?.side ?? (status.get(cm.path) === "deleted" ? "base" : "head"),
       body: cm.body,
       author_username: cm.user?.login ?? DELETED_USER_LOGIN,
       created_at: Date.parse(cm.created_at) || 0,
@@ -396,15 +405,23 @@ pulls.get("/:slug/pulls/:n/comments", async (c) => {
 pulls.post("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  // Validate the body BEFORE touching Forgejo so malformed requests don't
+  // burn a getPull call.
+  const input = parseCommentInput(await c.req.json().catch(() => null));
+  if (!input)
+    return c.json(
+      {
+        error: "path, line, side, body required (path must be safe relative, line a positive integer, side 'base'|'head', body non-empty)",
+        code: "validation",
+      },
+      400,
+    );
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
   if (pull.user?.login === c.get("user").username)
     return c.json({ error: "cannot comment on your own pull request", code: "forbidden" }, 403);
-
-  const input = parseCommentInput(await c.req.json().catch(() => null));
-  if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
   if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
 

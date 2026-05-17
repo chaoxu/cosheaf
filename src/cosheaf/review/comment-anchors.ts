@@ -2,7 +2,7 @@
 
 import type { LineComment } from "../api";
 
-export type LineKey = `new:${number}` | `old:${number}`;
+export type LineKey = `head:${number}` | `base:${number}`;
 
 export function groupCommentsByLine(comments: readonly LineComment[]): Map<LineKey, LineComment[]> {
   const byLine = new Map<LineKey, LineComment[]>();

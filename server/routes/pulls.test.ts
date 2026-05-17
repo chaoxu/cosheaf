@@ -222,9 +222,33 @@ describe("pulls + branches routes", () => {
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ path: "x.md", line: 1, side: "new", body: "hi" }),
+        body: JSON.stringify({ path: "x.md", line: 1, side: "head", body: "hi" }),
       });
       expect(res.status).toBe(403);
+    });
+
+    it("POST /pulls/:n/comments rejects bad shapes before reaching Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      const post = (body: unknown) =>
+        appFor(db).request("/api/v1/w/w/pulls/42/comments", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      // invalid side (the old "new"/"old" vocab is no longer accepted)
+      expect((await post({ path: "x.md", line: 1, side: "new", body: "hi" })).status).toBe(400);
+      // line must be a positive integer
+      expect((await post({ path: "x.md", line: 0, side: "head", body: "hi" })).status).toBe(400);
+      expect((await post({ path: "x.md", line: 1.5, side: "head", body: "hi" })).status).toBe(400);
+      // path must pass the shared repo-path validator
+      expect((await post({ path: "../etc/passwd", line: 1, side: "head", body: "hi" })).status).toBe(400);
+      expect((await post({ path: "", line: 1, side: "head", body: "hi" })).status).toBe(400);
+      // body must be non-empty
+      expect((await post({ path: "x.md", line: 1, side: "head", body: "  \n" })).status).toBe(400);
+      // No fetch should have been made — all rejections happen at parse time.
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 

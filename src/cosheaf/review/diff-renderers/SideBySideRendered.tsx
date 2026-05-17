@@ -36,7 +36,7 @@ export function SideBySideRendered({
       <Pane
         {...shared}
         label="base"
-        side="old"
+        side="base"
         content={base.content}
         addedLines={diffLineNumbers(file.patch, "removed")}
         emptyLabel={file.status === "added" ? "(new file)" : null}
@@ -44,7 +44,7 @@ export function SideBySideRendered({
       <Pane
         {...shared}
         label="head"
-        side="new"
+        side="head"
         content={head.content}
         addedLines={diffLineNumbers(file.patch, "added")}
         emptyLabel={file.status === "deleted" ? "(deleted)" : null}
@@ -68,7 +68,7 @@ function Pane({
   content: string | null;
   emptyLabel: string | null;
   comments: readonly LineComment[];
-  side: "new" | "old";
+  side: "head" | "base";
   addedLines: readonly number[];
   currentForgejoUsername?: string;
   onEditComment?: DiffRendererProps["onEditComment"];

@@ -47,9 +47,9 @@ describe("positionToFileLine", () => {
   });
 
   it("maps a pure-added file (Forgejo: @@ -0,0 +1,3 @@)", () => {
-    expect(positionToFileLine(addedFile, 1)).toEqual({ line: 1, side: "new" });
-    expect(positionToFileLine(addedFile, 2)).toEqual({ line: 2, side: "new" });
-    expect(positionToFileLine(addedFile, 3)).toEqual({ line: 3, side: "new" });
+    expect(positionToFileLine(addedFile, 1)).toEqual({ line: 1, side: "head" });
+    expect(positionToFileLine(addedFile, 2)).toEqual({ line: 2, side: "head" });
+    expect(positionToFileLine(addedFile, 3)).toEqual({ line: 3, side: "head" });
   });
 
   it("maps mixed +/- with context", () => {
@@ -60,47 +60,47 @@ describe("positionToFileLine", () => {
     // 4: "+new-three"    → new line 3
     // 5: " context-three"→ new line 4
     // 6: " context-four" → new line 5
-    expect(positionToFileLine(modified, 1)).toEqual({ line: 1, side: "new" });
-    expect(positionToFileLine(modified, 2)).toEqual({ line: 2, side: "old" });
-    expect(positionToFileLine(modified, 3)).toEqual({ line: 2, side: "new" });
-    expect(positionToFileLine(modified, 4)).toEqual({ line: 3, side: "new" });
-    expect(positionToFileLine(modified, 5)).toEqual({ line: 4, side: "new" });
-    expect(positionToFileLine(modified, 6)).toEqual({ line: 5, side: "new" });
+    expect(positionToFileLine(modified, 1)).toEqual({ line: 1, side: "head" });
+    expect(positionToFileLine(modified, 2)).toEqual({ line: 2, side: "base" });
+    expect(positionToFileLine(modified, 3)).toEqual({ line: 2, side: "head" });
+    expect(positionToFileLine(modified, 4)).toEqual({ line: 3, side: "head" });
+    expect(positionToFileLine(modified, 5)).toEqual({ line: 4, side: "head" });
+    expect(positionToFileLine(modified, 6)).toEqual({ line: 5, side: "head" });
   });
 
   it("position numbering restarts per hunk", () => {
     // First hunk body has 3 lines, second hunk body has 3 lines.
     // Position 1 in *first* hunk = line 1 new.
     // Position 1 should NOT silently address the second hunk.
-    expect(positionToFileLine(multiHunk, 1)).toEqual({ line: 1, side: "new" });
-    expect(positionToFileLine(multiHunk, 2)).toEqual({ line: 2, side: "new" });
-    expect(positionToFileLine(multiHunk, 3)).toEqual({ line: 3, side: "new" });
+    expect(positionToFileLine(multiHunk, 1)).toEqual({ line: 1, side: "head" });
+    expect(positionToFileLine(multiHunk, 2)).toEqual({ line: 2, side: "head" });
+    expect(positionToFileLine(multiHunk, 3)).toEqual({ line: 3, side: "head" });
   });
 });
 
 describe("fileLineToWritePosition", () => {
   it("maps lines in an added file", () => {
-    expect(fileLineToWritePosition(addedFile, 1, "new")).toEqual({ new_position: 1 });
-    expect(fileLineToWritePosition(addedFile, 3, "new")).toEqual({ new_position: 3 });
-    expect(fileLineToWritePosition(addedFile, 1, "old")).toBeNull();
+    expect(fileLineToWritePosition(addedFile, 1, "head")).toEqual({ new_position: 1 });
+    expect(fileLineToWritePosition(addedFile, 3, "head")).toEqual({ new_position: 3 });
+    expect(fileLineToWritePosition(addedFile, 1, "base")).toBeNull();
   });
 
   it("maps old-side lines", () => {
-    expect(fileLineToWritePosition(modified, 2, "old")).toEqual({ old_position: 2 });
+    expect(fileLineToWritePosition(modified, 2, "base")).toEqual({ old_position: 2 });
   });
 
   it("maps new-side lines including context", () => {
-    expect(fileLineToWritePosition(modified, 1, "new")).toEqual({ new_position: 1 });
-    expect(fileLineToWritePosition(modified, 2, "new")).toEqual({ new_position: 3 });
-    expect(fileLineToWritePosition(modified, 3, "new")).toEqual({ new_position: 4 });
-    expect(fileLineToWritePosition(modified, 5, "new")).toEqual({ new_position: 6 });
+    expect(fileLineToWritePosition(modified, 1, "head")).toEqual({ new_position: 1 });
+    expect(fileLineToWritePosition(modified, 2, "head")).toEqual({ new_position: 3 });
+    expect(fileLineToWritePosition(modified, 3, "head")).toEqual({ new_position: 4 });
+    expect(fileLineToWritePosition(modified, 5, "head")).toEqual({ new_position: 6 });
   });
 
   it("returns null for lines outside the patch", () => {
-    expect(fileLineToWritePosition(modified, 999, "new")).toBeNull();
+    expect(fileLineToWritePosition(modified, 999, "head")).toBeNull();
     // Old-side line 2 was deleted, so commenting on old-2 is valid; check
     // an absent old-side line instead.
-    expect(fileLineToWritePosition(modified, 999, "old")).toBeNull();
+    expect(fileLineToWritePosition(modified, 999, "base")).toBeNull();
   });
 });
 

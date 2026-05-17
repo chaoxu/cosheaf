@@ -31,7 +31,7 @@ export function HeadWithTint({
         source={content}
         addedLines={diffLineNumbers(file.patch, "added")}
         comments={comments}
-        side="new"
+        side="head"
         actions={{ currentForgejoUsername, onEdit: onEditComment, onDelete: onDeleteComment }}
       />
     </div>

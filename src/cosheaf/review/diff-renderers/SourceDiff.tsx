@@ -71,13 +71,13 @@ export function SourceDiff({
     for (const change of hunk.changes) {
       const pc = change as unknown as ParsedChange;
       const { newLine, oldLine } = lineFor(pc);
-      const newThread = newLine !== undefined ? byLine.get(`new:${newLine}`) : undefined;
-      const oldThread = oldLine !== undefined ? byLine.get(`old:${oldLine}`) : undefined;
+      const newThread = newLine !== undefined ? byLine.get(`head:${newLine}`) : undefined;
+      const oldThread = oldLine !== undefined ? byLine.get(`base:${oldLine}`) : undefined;
       const target =
         newLine !== undefined
-          ? { line: newLine, side: "new" as const }
+          ? { line: newLine, side: "head" as const }
           : oldLine !== undefined
-            ? { line: oldLine, side: "old" as const }
+            ? { line: oldLine, side: "base" as const }
             : null;
       const composerHere =
         composerAt && target && composerAt.line === target.line && composerAt.side === target.side;
@@ -135,9 +135,9 @@ export function SourceDiff({
           const { newLine, oldLine } = lineFor(c);
           const target =
             newLine !== undefined
-              ? { line: newLine, side: "new" as const }
+              ? { line: newLine, side: "head" as const }
               : oldLine !== undefined
-                ? { line: oldLine, side: "old" as const }
+                ? { line: oldLine, side: "base" as const }
                 : null;
           if (!onAddComment || !target) return renderDefault();
           return (

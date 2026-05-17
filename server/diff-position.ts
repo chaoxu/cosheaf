@@ -9,7 +9,11 @@
 
 import parseDiffLib from "parse-diff";
 
-export type Side = "new" | "old";
+// PR-native side vocabulary: `head` = PR's head ref (added/context lines,
+// right side of diff); `base` = PR's base ref (deleted lines, left side).
+// Forgejo's review-comment write API uses `new_position` / `old_position`
+// integers — head maps to new_position, base maps to old_position.
+export type Side = "base" | "head";
 
 interface ParsedChange {
   type: "add" | "del" | "normal";
@@ -48,9 +52,9 @@ export function positionToFileLine(patch: string, position: number): { line: num
       offset++;
       if (offset === position) {
         const { oldLine, newLine } = changeLines(change);
-        if (change.type === "add") return { line: newLine as number, side: "new" };
-        if (change.type === "del") return { line: oldLine as number, side: "old" };
-        return { line: newLine as number, side: "new" };
+        if (change.type === "add") return { line: newLine as number, side: "head" };
+        if (change.type === "del") return { line: oldLine as number, side: "base" };
+        return { line: newLine as number, side: "head" };
       }
     }
   }
@@ -72,8 +76,8 @@ export function fileLineToWritePosition(
       if (change.content.startsWith("\\")) continue;
       position++;
       const { oldLine, newLine } = changeLines(change);
-      if (side === "new" && newLine === line) return { new_position: position };
-      if (side === "old" && oldLine === line) return { old_position: position };
+      if (side === "head" && newLine === line) return { new_position: position };
+      if (side === "base" && oldLine === line) return { old_position: position };
     }
   }
   return null;

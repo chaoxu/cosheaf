@@ -1841,7 +1841,7 @@ function WorkspaceView({
   }, [reviewingPullNumber, workspace.slug]);
 
   const addReviewComment = useCallback(
-    async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {
+    async (target: { path: string; line: number; side: "head" | "base" }, body: string) => {
       const n = reviewingPullNumber;
       if (!n) return;
       const pendingId = reviewState.pendingReviewId;
