@@ -3,6 +3,11 @@ import type { PrFiles, PrMeta, PrState, PrFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 import type { WorkspaceValidation } from "../../shared/validation";
 import type { DocumentFormatId } from "../../shared/document-format";
+import type {
+  ForgejoIssueCommentRaw,
+  ForgejoMilestoneRef,
+  ForgejoPullRaw,
+} from "../../shared/forgejo-shapes";
 
 export type Decision = "approve" | "request_changes" | "comment";
 export type { Role, PrFiles, PrFile, PrMeta, PrState, LineComment, CommentSide };
@@ -118,16 +123,6 @@ const qs = (params: Record<string, string | undefined>): string => {
   return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&")}` : "";
 };
 
-interface ForgejoMilestoneRef {
-  id: number;
-  title: string;
-  description?: string;
-  state: "open" | "closed";
-  open_issues: number;
-  closed_issues: number;
-  due_on?: string | null;
-}
-
 function milestoneFromForgejo(m: ForgejoMilestoneRef): Milestone {
   return {
     id: m.id,
@@ -140,14 +135,6 @@ function milestoneFromForgejo(m: ForgejoMilestoneRef): Milestone {
   };
 }
 
-interface ForgejoIssueCommentRaw {
-  id: number;
-  body: string;
-  user?: { login?: string } | null;
-  created_at: string;
-  updated_at: string;
-}
-
 function issueCommentFromForgejo(cm: ForgejoIssueCommentRaw): IssueComment {
   return {
     id: cm.id,
@@ -156,23 +143,6 @@ function issueCommentFromForgejo(cm: ForgejoIssueCommentRaw): IssueComment {
     created_at: Date.parse(cm.created_at) || 0,
     updated_at: Date.parse(cm.updated_at) || 0,
   };
-}
-
-interface ForgejoPullRaw {
-  number: number;
-  title: string;
-  body?: string | null;
-  state: "open" | "closed" | string;
-  merged?: boolean | null;
-  user?: { login?: string } | null;
-  created_at: string;
-  merged_at?: string | null;
-  mergeable?: boolean | null;
-  head: { ref: string; sha: string };
-  base: { ref: string; sha: string };
-  additions?: number | null;
-  deletions?: number | null;
-  changed_files?: number | null;
 }
 
 const DELETED_USER_LOGIN = "Ghost";
