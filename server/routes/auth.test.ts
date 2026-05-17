@@ -102,10 +102,13 @@ describe("POST /api/v1/auth/login", () => {
     expect(db.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 0 });
   });
 
-  it("422 (token name taken) → delete then retry → success", async () => {
+  it.each([
+    [422, "token name in use"],
+    [400, "access token name has been used already"],
+  ])("%i name-already-used → delete then retry → success", async (status, message) => {
     const db = freshDb();
     fetchMock
-      .mockResolvedValueOnce(failure(422, { message: "token name in use" }))
+      .mockResolvedValueOnce(failure(status, { message }))
       .mockResolvedValueOnce(new Response(null, { status: 204 })) // DELETE
       .mockResolvedValueOnce(ok({ sha1: "pat-fresh" }));         // POST retry
     const res = await login(db, "carol", "secret");
@@ -117,10 +120,20 @@ describe("POST /api/v1/auth/login", () => {
     expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe("DELETE");
   });
 
-  it("422 + delete fails → 502 forgejo unavailable", async () => {
+  it("400 without name-in-use marker is a real error → 502", async () => {
+    // Generic Forgejo 400 (e.g. invalid scope, password complexity rejected
+    // at PAT-creation time) must not loop into the delete-retry path.
+    const db = freshDb();
+    fetchMock.mockResolvedValueOnce(failure(400, { message: "PasswordComplexityTooLow" }));
+    const res = await login(db, "carol", "secret");
+    expect(res.status).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
+  });
+
+  it("name-in-use + delete fails → 502 forgejo unavailable", async () => {
     const db = freshDb();
     fetchMock
-      .mockResolvedValueOnce(failure(422))
+      .mockResolvedValueOnce(failure(400, { message: "name has been used" }))
       .mockResolvedValueOnce(failure(500));                      // DELETE blew up
     const res = await login(db, "dan", "secret");
     expect(res.status).toBe(502);

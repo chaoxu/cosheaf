@@ -82,17 +82,23 @@ async function exchangeForgejoCredsForPatRaw(
   };
   const body = JSON.stringify({ name: TOKEN_NAME, scopes: TOKEN_SCOPES });
 
+  // Forgejo returns 400 (current) or 422 (older) when the token name is
+  // already taken; either way we want to delete the existing `cosheaf` token
+  // and retry. Sniff the body so we don't also retry on unrelated 400s.
   const create = async () => fetch(url, { method: "POST", headers, body });
   let res: Response;
   try {
     res = await create();
-    if (res.status === 422) {
-      // Name already in use from a previous session — delete and retry.
-      const del = await fetch(`${url}/${TOKEN_NAME}`, { method: "DELETE", headers });
-      if (!del.ok && del.status !== 404) {
-        return { kind: "upstream_unavailable", detail: `delete token: ${del.status}` };
+    if (res.status === 400 || res.status === 422) {
+      const bodyText = await res.clone().text();
+      const nameInUse = /name.*(?:has been used|already|in use)/i.test(bodyText);
+      if (nameInUse) {
+        const del = await fetch(`${url}/${TOKEN_NAME}`, { method: "DELETE", headers });
+        if (!del.ok && del.status !== 404) {
+          return { kind: "upstream_unavailable", detail: `delete token: ${del.status}` };
+        }
+        res = await create();
       }
-      res = await create();
     }
   } catch (err) {
     return { kind: "upstream_unavailable", detail: (err as Error).message };
