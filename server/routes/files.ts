@@ -188,7 +188,15 @@ files.put("/:slug/file", async (c) => {
   const ws = c.get("workspace");
   const db = c.get("db");
 
-  const plan = planIndexPage(db, { workspaceId: ws.id, filePath: rel, bodyText: body.content });
+  // Pass the workspace's declared markdown format explicitly so passthrough
+  // workspaces don't inherit coflat indexing behavior (e.g. backlink
+  // extraction for `[@id]` references). #25.
+  const plan = planIndexPage(db, {
+    workspaceId: ws.id,
+    filePath: rel,
+    bodyText: body.content,
+    formatId: ws.defaultMdFormat,
+  });
   const finalContent = plan.rewrittenContent ?? body.content;
 
   const existing = await fj.getFileMeta(owner, repo, branch, rel);

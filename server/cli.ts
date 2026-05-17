@@ -14,7 +14,7 @@ import {
   provisionWorkspace,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
-import { COFLAT_FORMAT_ID, isDocumentFormatId, type DocumentFormatId } from "../shared/document-format.js";
+import { DEFAULT_DOCUMENT_FORMAT_ID, isDocumentFormatId, type DocumentFormatId } from "../shared/document-format.js";
 
 interface SeedOptions {
   user: string;
@@ -92,7 +92,7 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   const password = valueFlag(args, "--password");
   const workspace = valueFlag(args, "--workspace");
   const workspaceName = valueFlag(args, "--workspace-name") ?? workspace;
-  const formatRaw = valueFlag(args, "--default-md-format") ?? COFLAT_FORMAT_ID;
+  const formatRaw = valueFlag(args, "--default-md-format") ?? DEFAULT_DOCUMENT_FORMAT_ID;
   const missing = [
     ["--user", user],
     ["--password", password],

@@ -134,6 +134,35 @@ describe("indexPage", () => {
     expect(tags.map((t) => t.tag)).toEqual(["geometry", "lemma"]);
   });
 
+  it("forgejo-passthrough format extracts no backlinks for `[@id]` syntax (#25)", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceId: 1,
+      filePath: "src.md",
+      bodyText: "# Source\n\n[@targetid] and [link](other.md).\n",
+      formatId: "forgejo-passthrough",
+    });
+    // doc_map row still created (page metadata) — but no backlinks.
+    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 1 });
+    expect(db.prepare("SELECT count(*) AS c FROM backlinks WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+    // FTS still indexed (search works regardless of format).
+    expect(db.prepare("SELECT count(*) AS c FROM notes_fts WHERE workspace_id = 1").get()).toEqual({ c: 1 });
+  });
+
+  it("coflat format extracts both `[@id]` and `[link](path.md)` backlinks (#25)", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceId: 1,
+      filePath: "src.md",
+      bodyText: "# Source\n\n[@targetid] and [link](other.md).\n",
+      formatId: "coflat",
+    });
+    const labels = (db
+      .prepare("SELECT target_label FROM backlinks WHERE workspace_id = 1 ORDER BY target_label")
+      .all() as Array<{ target_label: string }>).map((r) => r.target_label);
+    expect(labels).toEqual(["[@targetid]", "[link](other.md)"]);
+  });
+
   it("indexes with trigram tokenizer for CJK search", () => {
     const db = freshDb();
     indexPage(db, {

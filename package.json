@@ -8,7 +8,7 @@
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
     "dev:worktree": "node scripts/dev-worktree.mjs",
-    "setup:dev": "tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace flushing-coin --workspace-name \"Flushing Coin\"",
+    "setup:dev": "tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace flushing-coin --workspace-name \"Flushing Coin\" --default-md-format coflat",
     "setup:dev:review": "pnpm setup:dev && tsx server/cli.ts user create vera Cosheaf123! && tsx server/cli.ts user create meri Cosheaf123! && tsx server/cli.ts workspace member flushing-coin vera write && tsx server/cli.ts workspace member flushing-coin meri write",
     "server": "tsx watch server/index.ts",
     "server:start": "tsx server/index.ts",

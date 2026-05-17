@@ -14,7 +14,7 @@ describe("cli seed parsing", () => {
       password: "123123",
       workspace: "notes",
       workspaceName: "notes",
-      defaultMdFormat: "coflat",
+      defaultMdFormat: "forgejo-passthrough",
     });
   });
 
