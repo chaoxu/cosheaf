@@ -171,6 +171,13 @@ GET /w/:slug/backlinks?id=<doc_id>
 
 GET /w/:slug/suggest?trigger=<trigger>&prefix=<prefix>&limit=<n>
 → { "suggestions": Array<{ id: string, insert: string, display: string }> }
+
+GET /w/:slug/validation
+→ WorkspaceValidation     # broken-reference report consumed by the linter tab
+
+GET /w/:slug/activities?limit=<n>
+→ { "activities": ActivityRow[] }   # normalized over Forgejo's activity-feed
+                                    # JSON (which encodes refs in opaque strings)
 ```
 
 `snippet` values in search results are structured plain text. Render segments
@@ -281,12 +288,13 @@ POST /w/:slug/issues
 { "title": string, "body": string }
 → { "number": number, "title": string, "state": "open" | "closed" }
 
-GET /w/:slug/issues/:n/comments
-→ { "comments": IssueComment[] }
-
-POST /w/:slug/issues/:n/comments
-{ "body": string }
-→ IssueComment
+# Issue comment list/create/edit/delete go through passthrough
+# (these were typed routes; they're now pure Forgejo shape with the
+# SPA normalizing timestamps client-side):
+#   GET    /w/:slug/forgejo/issues/:n/comments
+#   POST   /w/:slug/forgejo/issues/:n/comments
+#   PATCH  /w/:slug/forgejo/issues/comments/:id
+#   DELETE /w/:slug/forgejo/issues/comments/:id
 
 GET /w/:slug/issues/:n/timeline
 → { "events": TimelineEvent[] }
