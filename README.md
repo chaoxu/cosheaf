@@ -26,7 +26,7 @@ collaborators through Cosheaf's HTTP API.
 - **Branch workflow** — edits live on ordinary Forgejo branches. Opening a pull
   request submits the branch for review; merging the pull request makes it
   canonical.
-- **Pull request review** — owners and verifiers review pull requests through
+- **Pull request review** — admins and write collaborators review pull requests through
   the Cosheaf UI/API while Forgejo remains the durable record.
 - **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the
   body is full-text searchable.
@@ -109,7 +109,7 @@ pnpm dev              # Vite only
 pnpm build            # Vite production build
 pnpm preview          # Serve the built bundle on 0.0.0.0
 pnpm test             # vitest run
-pnpm check:stability  # unit/API tests plus browser open/create/publish flows
+pnpm check:stability  # unit/API tests plus browser open/create/PR flows
 pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```

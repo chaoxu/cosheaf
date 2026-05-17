@@ -7,14 +7,15 @@ client types in `src/cosheaf/api.ts`.
 Base path: `/api/v1`
 
 All JSON routes return `{ error, code }` on expected failures. Browser sessions
-use the `sid` cookie. Bot/client access can use `Authorization: Bearer cs_...`
-personal tokens.
+use the `sid` cookie. Bot/client access uses a direct Forgejo personal access
+token as `Authorization: Bearer <Forgejo PAT>`. Cosheaf validates the PAT,
+resolves workspace membership through Forgejo, and forwards the caller's own
+Forgejo identity on Forgejo-backed operations.
 
 ## Core Types
 
 ```ts
-type Role = "owner" | "verifier" | "member";
-type BranchState = "draft" | "review" | "changes_requested" | "merged" | "closed";
+type Role = "admin" | "write" | "read";
 
 interface User {
   id: number;
@@ -30,8 +31,6 @@ interface Workspace {
 
 interface DocumentMeta {
   id: string;
-  type: "page";
-  status: "golden";
   title: string | null;
 }
 
@@ -41,24 +40,19 @@ interface FileEntry {
   doc?: DocumentMeta;
 }
 
-interface Change {
-  id: string;
-  workspace_id: number;
-  author_user_id: number;
-  branch_name: string;      // change/<id>
-  state: BranchState;
-  pr_number: number | null;
-  base_sha: string | null;
-  title: string | null;
-  created_at: number;
+interface Branch {
+  name: string;
+  commit_sha: string | null;
   updated_at: number;
 }
 ```
 
-`DocumentMeta.status` is currently always `"golden"` for indexed pages on
-Forgejo `main`; draft/review state lives on `Change`, not page frontmatter.
-
 ## Auth
+
+Cosheaf owns the login UX so users do not need to know Forgejo is the backend.
+Login exchanges Forgejo username/password credentials for a Cosheaf-managed
+Forgejo PAT and stores it encrypted for the browser session. API clients can
+skip login and send their own Forgejo PAT as bearer auth.
 
 ```http
 POST /login
@@ -72,19 +66,7 @@ GET /me
 → { "user": User | null }
 ```
 
-## Personal Tokens
-
-```http
-GET /tokens
-→ { "tokens": Array<{ id: number, name: string, created_at: number }> }
-
-POST /tokens
-{ "name": string }
-→ { "id": number, "name": string, "token": string }
-
-DELETE /tokens/:id
-→ { "ok": true }
-```
+There is no Cosheaf personal-token API. Create and revoke PATs in Forgejo.
 
 ## Workspaces
 
@@ -97,234 +79,240 @@ POST /workspaces
 → 201 Workspace
 ```
 
-Creating a workspace provisions a Forgejo repository, owner membership, branch
-protection, webhook, `.gitattributes`, and the initial sidecar index.
+Creating a workspace provisions a Forgejo repository, branch protection,
+webhook, `.gitattributes`, and the initial sidecar index.
+
+## Forgejo Passthrough
+
+The agent/default Forgejo surface is:
+
+```http
+{METHOD} /w/:slug/forgejo/:tail
+```
+
+Cosheaf anchors `:tail` under the workspace repository:
+
+```http
+/api/v1/repos/{owner}/{repo}/:tail
+```
+
+The caller supplies `Authorization: Bearer <Forgejo PAT>` to Cosheaf. Cosheaf
+validates membership, forwards the request to Forgejo with the caller's PAT, and
+audits the call in `forgejo_passthrough_log`.
+
+Allowed repo-scoped passthrough prefixes:
+
+- `pulls` with `GET`, `POST`, `PATCH`
+- `issues` with `GET`, `POST`, `PATCH`, `PUT`, `DELETE`
+- `labels` with `GET`, `POST`, `PATCH`, `DELETE`
+- `milestones` with `GET`, `POST`, `PATCH`, `DELETE`
+- `branches` with `GET`
+- `commits` with `GET`
+- `contents` with `GET`
+- `reviews` with `GET`, `POST`
+- `activities/feeds` with `GET`
+- `notifications` with `GET`, `PUT`
+
+`pulls/:n/merge` is intentionally blocked in passthrough. Use the typed merge
+route so Cosheaf can run its fresh-admin gate. `contents` and `branches` are
+read-only in passthrough because typed file/branch routes enforce Cosheaf's
+path, branch, frontmatter, and indexing rules.
+
+Examples:
+
+```http
+GET /w/flushing-coin/forgejo/issues?state=open
+PATCH /w/flushing-coin/forgejo/issues/42
+PUT /w/flushing-coin/forgejo/issues/42/labels
+GET /w/flushing-coin/forgejo/pulls?state=open
+GET /w/flushing-coin/forgejo/labels
+GET /w/flushing-coin/forgejo/milestones?state=open
+GET /w/flushing-coin/forgejo/contents/hello.md
+GET /w/flushing-coin/forgejo/notifications?status=unread
+```
 
 ## Files
 
-Workspace routes require membership.
+Workspace routes require membership. File reads and writes use typed routes
+when callers need Cosheaf document behavior: path validation, Coflat
+frontmatter/id handling, branch naming, synchronous reindexing, backlinks/FTS,
+and SSE updates.
 
 ```http
-GET /w/:slug/tree?branchId=<id>
+GET /w/:slug/tree?branch=<branch>
 → { "files": FileEntry[] }
 
-GET /w/:slug/file?path=<path>&branchId=<id>
+GET /w/:slug/file?path=<path>&branch=<branch>
 → { "content": string }
 
-PUT /w/:slug/file?path=<path>&branchId=<id>
+PUT /w/:slug/file?path=<path>&branch=<branch>
 { "content": string }
-→ { "ok": true, "branchId": string, "meta": DocumentMeta, "content"?: string, "pending"?: boolean }
+→ { "ok": true, "branch": string, "meta": DocumentMeta, "content"?: string, "commit"?: string }
 
-DELETE /w/:slug/file?path=<path>&branchId=<id>
-→ { "ok": true, "branchId": string, "pending": boolean }
+DELETE /w/:slug/file?path=<path>&branch=<branch>
+→ { "ok": true, "branch": string }
 ```
 
-Writes target the author's `draft` or `changes_requested` change branch. If
-`branchId` is omitted, the server creates or reuses the caller's open draft
-change.
+A Markdown write through Forgejo `contents` passthrough is treated as an
+external repository edit. It reaches SQLite through webhook or
+`pnpm cli workspace reindex <slug>` reconciliation, not through immediate typed
+file-route indexing.
 
-## Search And Backlinks
+## Search, Backlinks, Suggestions
 
 ```http
-GET /w/:slug/search?q=<query>&limit=<n>
+GET /w/:slug/search?q=<query>
 → { "results": SearchResult[] }
 
-interface SearchResult {
-  doc_id: string;
-  path: string;
-  title: string | null;
-  type: string;
-  status: string;
-  target_id: string | null;
-  snippet: Array<{ text: string, match: boolean }>;
-  rank: number;
-}
-```
-
-`snippet` is structured plain text. Render segments with `match: true` as
-highlighted text; clients should not treat snippets as HTML.
-
-```http
 GET /w/:slug/backlinks?id=<doc_id>
 → { "backlinks": Backlink[] }
 
-interface Backlink {
-  src_id: string;
-  src_path: string;
-  src_title: string | null;
-  target_label: string;
-}
+GET /w/:slug/suggest?trigger=<trigger>&prefix=<prefix>&limit=<n>
+→ { "suggestions": Array<{ id: string, insert: string, display: string }> }
 ```
 
-Indexed links are `[@id]` and `[text](relative.md[#fragment])`.
+`snippet` values in search results are structured plain text. Render segments
+with `match: true` as highlighted text; clients should not treat snippets as
+HTML. Indexed links are `[@id]` and `[text](relative.md[#fragment])`.
 
-## Changes
+## Branches
 
 ```http
-GET /w/:slug/changes
-→ { "changes": Change[] }
+GET /w/:slug/branches/mine
+→ { "branches": Branch[] }
 
-POST /w/:slug/change
-{ "title"?: string }
-→ 201 Change
+POST /w/:slug/branches
+{ "name": string }
+→ { "name": string }
 
-DELETE /w/:slug/change/:id
+DELETE /w/:slug/branches/:name
 → { "ok": true }
 ```
 
-`/changes` is author-facing and returns the caller's `draft`, `review`, and
-`changes_requested` changes. Only the change author can discard a `draft`
-change via DELETE; the branch is removed and the change moves to `closed`. Use
-the review close route to terminate a published change.
+`branches/mine` lists the caller's in-progress branches that do not have an
+open pull request. Branches and pull requests live in Forgejo; SQLite does not
+mirror them.
 
-```http
-POST /w/:slug/publish
-{ "branchId": string, "mode"?: "direct" | "review", "title"?: string, "body"?: string }
-→ PublishResult
-
-interface PublishResult {
-  ok: boolean;
-  mode?: "direct" | "review";
-  branchId?: string;
-  pr_number?: number;
-  message?: string;
-}
-```
-
-Owners may publish directly, which opens/reuses a PR, auto-approves as the
-Forgejo owner to satisfy branch protection, and merges. Members and verifiers
-publish to review. Publishing a `changes_requested` change reuses the existing
-PR and returns it to `review`.
-
-## Forgejo-shape endpoints (preferred)
-
-These mirror Forgejo's REST API so that agents trained on Forgejo can speak to
-cosheaf with only an auth change. They take a Forgejo pull-request number
-`{n}`, look up the corresponding cosheaf change, and delegate to the same
-internal logic as the deprecated `/branch/{id}/...` routes below. Prefer these
-for any new integration.
+## Pull Requests
 
 ```http
 GET /w/:slug/pulls?state=open|closed|all
-→ { "changes": Change[] }
-```
+→ { "pulls": PrMeta[] }
 
-`state=open` returns `review` and `changes_requested`; `closed` returns
-`merged` and `closed`; `all` returns all four. Mirrors the deprecated
-`GET /branches/open`, just under a Forgejo-named path.
+POST /w/:slug/pulls
+{ "head": string, "base"?: string, "title"?: string, "body"?: string }
+→ PrMeta
 
-```http
 GET /w/:slug/pulls/:n
-→ Forgejo PR JSON plus cosheaf extras
+→ PrMeta
+
+POST /w/:slug/pulls/:n/merge
+{ "Do"?: "squash" | "merge" | "rebase", "force"?: boolean }
+→ { "ok": true }
+
+POST /w/:slug/pulls/:n/close
+→ { "ok": true }
 ```
 
-The body is Forgejo's PR object verbatim (so `number`, `title`, `head.sha`,
-`base.sha`, `additions`, `deletions`, `changed_files`, etc. are present) with
-these cosheaf-specific fields added at the top level:
+`PrMeta` is the Forgejo pull request identity normalized for the SPA:
+`number`, `title`, `body`, `state`, `merged`, author, head/base refs and SHAs,
+timestamps, mergeability, and changed-file counts.
 
-- `cosheaf_state: BranchState`
-- `author_user_id: number`
-- `author_username: string`
-- `head_sha`, `base_sha`, `head_ref`, `base_ref`
-- `additions_total`, `deletions_total`, `files_changed`
-
-Forgejo-trained callers ignore the extras; cosheaf callers can use either
-shape.
+## Pull Request Reviews And Comments
 
 ```http
 GET /w/:slug/pulls/:n/files
-→ { "files": ChangeFile[] }
-```
+→ { "files": PullFile[] }
 
-Same per-file split-patch shape as the deprecated `GET /branch/:id/diff`.
+GET /w/:slug/pulls/:n/file?path=<path>&side=base|head
+→ { "content": string }
 
-```http
 POST /w/:slug/pulls/:n/reviews
 { "event": "APPROVE" | "REQUEST_CHANGES" | "COMMENT", "body"?: string | null }
-→ DecisionResult | { ok, branchId, state }
-```
+→ { "ok": true, "approvals": number, "rejections": number }
 
-Forgejo uses uppercase `event` strings. Internally this delegates to the same
-handlers as `/branch/:id/approve`, `/branch/:id/request-changes`, and
-`/branch/:id/comment`.
-
-```http
 GET /w/:slug/pulls/:n/reviews
-→ { "approvals": ApprovalRecord[] }
+→ { "reviews": ApprovalRecord[], "approvals": number, "rejections": number }
+
+GET /w/:slug/pulls/:n/comments
+→ { "comments": LineComment[] }
+
+POST /w/:slug/pulls/:n/comments
+{ "path": string, "line": number, "side": "base" | "head", "body": string }
+→ { "ok": true }
 ```
 
-Same shape as the deprecated `GET /branch/:id/approvals`.
-
-All `/pulls/:n*` routes return `404 { "error": "not found", "code":
-"not_found" }` when `:n` does not match a known cosheaf change.
-
-## Review
-
-`POST /change/:id/{approve,request-changes,comment}` and `GET
-/change/:id/approvals` are **deprecated**: new code should use the
-Forgejo-shape `/pulls/:n/reviews` endpoints documented above. They remain
-supported here for the existing cosheaf web UI; the Phase 4 cleanup will
-remove them.
+Draft review helpers exist because Forgejo represents pending reviews
+separately:
 
 ```http
-GET /w/:slug/queue
-→ { "queue": QueueEntry[] }
+POST /w/:slug/pulls/:n/draft-review
+→ { "review_id": number }
 
-interface QueueEntry {
-  id: string;
-  title: string;
-  pr_number: number | null;
-  author_user_id: number;
-  created_at: number;
-  approvals: number;
-  rejections: number;
-}
+POST /w/:slug/pulls/:n/draft-review/:reviewId/comments
+{ "path": string, "line": number, "side": "base" | "head", "body": string }
+→ { "ok": true }
 
-POST /w/:slug/change/:id/approve  (deprecated, use POST /pulls/:n/reviews { event: "APPROVE" })
-{ "comment"?: string | null }
-→ DecisionResult
-
-POST /w/:slug/change/:id/request-changes  (deprecated, use POST /pulls/:n/reviews { event: "REQUEST_CHANGES" })
-{ "comment"?: string | null }
-→ DecisionResult
-
-POST /w/:slug/change/:id/comment  (deprecated, use POST /pulls/:n/reviews { event: "COMMENT" })
-{ "comment"?: string | null }
-→ { "ok": true, "branchId": string, "state": BranchState }
-
-POST /w/:slug/change/:id/close
-→ { "ok": true, "branchId": string, "state": "closed" }
-
-interface DecisionResult {
-  decision: "approve" | "request_changes";
-  branchId: string;
-  state: BranchState;
-  approvals: number;
-  rejections: number;
-}
-
-GET /w/:slug/change/:id/approvals
-→ { "approvals": ApprovalRecord[] }
-
-interface ApprovalRecord {
-  verifier_user_id: number;
-  username: string;
-  decision: "approve" | "request_changes" | "comment";
-  comment: string | null;
-  created_at: number;
-}
+POST /w/:slug/pulls/:n/draft-review/:reviewId/submit
+{ "event": "approve" | "request_changes" | "comment", "body"?: string }
+→ { "ok": true }
 ```
 
-`/queue` is review-facing and includes only changes currently in `review`.
+## Issues
 
-Approvals and request-changes decisions are Forgejo pull-request reviews.
-`request-changes` moves the change to `changes_requested`, keeps the PR open,
-and keeps the branch for repair. When approvals meet the branch-protection
-threshold and there are no outstanding request-changes reviews, the server
-attempts to merge and marks the change `merged`. `POST /close` (author or
-workspace owner) terminates a non-merged change at any state and sets it to
-`closed`. Request-changes reviews are resolved by a later approval from that
-same verifier; an explicit owner override endpoint is not implemented yet.
+Typed issue routes remain where the SPA needs normalized DTOs, SSE behavior, or
+multi-call composition. Plain Forgejo issue operations should use passthrough.
+
+```http
+GET /w/:slug/issues?state=open|closed|all&filter=mine|assigned|all&q=<query>
+→ { "issues": IssueRow[] }
+
+GET /w/:slug/issues/pinned
+→ { "issues": IssueRow[] }
+
+GET /w/:slug/issues/:n
+→ IssueDetail
+
+POST /w/:slug/issues
+{ "title": string, "body": string }
+→ { "number": number, "title": string, "state": "open" | "closed" }
+
+GET /w/:slug/issues/:n/comments
+→ { "comments": IssueComment[] }
+
+POST /w/:slug/issues/:n/comments
+{ "body": string }
+→ IssueComment
+
+GET /w/:slug/issues/:n/timeline
+→ { "events": TimelineEvent[] }
+
+GET /w/:slug/issues/:n/dependencies
+→ { "issues": DependencyRow[] }
+
+GET /w/:slug/issues/:n/blocks
+→ { "issues": DependencyRow[] }
+```
+
+Labels, milestones, pin/unpin, issue state changes, and raw issue edits use
+`/w/:slug/forgejo/*`.
+
+## Notifications
+
+```http
+GET /w/:slug/notifications
+→ { "notifications": NotificationRow[] }
+
+POST /w/:slug/notifications/:id/read
+→ { "ok": true }
+
+POST /w/:slug/notifications/read-all
+→ { "ok": true }
+```
+
+Repo-scoped notification list and mark-all operations are also available
+through passthrough. The single-thread mark-read route stays typed because the
+Forgejo endpoint is not repo-anchored.
 
 ## Settings
 
@@ -338,7 +326,7 @@ PUT /w/:slug/settings
 ```
 
 Settings map to Forgejo branch protection on `main`. Updating settings requires
-the `owner` role.
+admin permission.
 
 ## Events
 
@@ -346,7 +334,7 @@ the `owner` role.
 GET /w/:slug/events
 ```
 
-Server-sent events stream JSON messages. Current event types include file
-changes, file removals, and change lifecycle updates such as
-`change_review`, `change_approved`, `change_changes_requested`,
-`change_commented`, `change_merged`, and `change_closed`.
+Server-sent events stream JSON messages for file changes/removals, pull
+request updates, reviews, issue updates, and issue comments. Events are
+workspace-scoped hints; Forgejo and the typed read routes remain the source of
+truth after reconnect.
