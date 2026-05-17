@@ -38,7 +38,10 @@ function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
 // user in this workspace's Forgejo repo.
 notifications.get("/:slug/notifications", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
-  const threads = await fj.listRepoNotifications(owner, repo);
+  const threads = await fj.listRepoNotifications(owner, repo, {
+    statusTypes: ["unread"],
+    subjectTypes: ["Issue", "Pull"],
+  });
   const mapped = threads
     .map(mapThread)
     .filter((x): x is NonNullable<ReturnType<typeof mapThread>> => x !== null)

@@ -53,9 +53,9 @@ describe("coflatMarkdownFormat", () => {
     );
 
     expect(links).toEqual([
-      { kind: "id", ref: "target", raw: "[@target]" },
-      { kind: "path", ref: "page.md", raw: "[plain](page.md)" },
-      { kind: "path", ref: "dir/page.md#frag", raw: "[section](dir/page.md#frag)" },
+      expect.objectContaining({ kind: "id", ref: "target", raw: "[@target]" }),
+      expect.objectContaining({ kind: "path", ref: "page.md", raw: "[plain](page.md)" }),
+      expect.objectContaining({ kind: "path", ref: "dir/page.md#frag", raw: "[section](dir/page.md#frag)" }),
     ]);
   });
 
@@ -65,5 +65,23 @@ describe("coflatMarkdownFormat", () => {
     );
 
     expect(links).toEqual([]);
+  });
+
+  it("uses the coflat parser for refs, so code spans and escaped refs are ignored", () => {
+    const links = format.extractLinks(
+      "See [@real] but ignore `[@code]`, \\[@escaped\\], and `[link](fake.md)`.\n",
+    );
+
+    expect(links).toEqual([expect.objectContaining({ kind: "id", ref: "real", raw: "[@real]" })]);
+  });
+
+  it("extracts all bracketed refs from one citation cluster in source order", () => {
+    const links = format.extractLinks("See [@first; @second] and [page](target.md).\n");
+
+    expect(links).toEqual([
+      expect.objectContaining({ kind: "id", ref: "first", raw: "[@first]" }),
+      expect.objectContaining({ kind: "id", ref: "second", raw: "[@second]" }),
+      expect.objectContaining({ kind: "path", ref: "target.md", raw: "[page](target.md)" }),
+    ]);
   });
 });

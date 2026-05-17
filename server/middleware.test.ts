@@ -2,7 +2,6 @@
 // resolution, in-process cache, none → 404, and the cache-bypassing
 // admin-fresh middleware.
 
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,8 +12,8 @@ import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import type { AppEnv } from "./types.js";
-import { _resetPermCacheForTests, requireAdminFresh, requireAuth, requireMembership } from "./middleware.js";
-import { encryptPat } from "./pat-crypto.js";
+import { _resetBearerAuthCacheForTests, _resetPermCacheForTests, requireAdminFresh, requireAuth, requireMembership } from "./middleware.js";
+import { seedAuthUser } from "./test-helpers.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-middleware-test",
@@ -36,22 +35,8 @@ function freshDb(): Database.Database {
   return db;
 }
 
-function sha256Hex(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
-}
-
 function seedUser(db: Database.Database, username: string): string {
-  const token = `cs_${username}`;
-  const blob = encryptPat(`fake-pat-${username}`, config.sessionSecret);
-  db.prepare(
-    "INSERT INTO users (username, forgejo_token_ciphertext, created_at) VALUES (?, ?, 0)",
-  ).run(username, blob);
-  const userId = (db.prepare("SELECT id FROM users WHERE username = ?").get(username) as { id: number }).id;
-  db.prepare("INSERT INTO tokens (user_id, name, token_hash, created_at) VALUES (?, 'test', ?, 0)").run(
-    userId,
-    sha256Hex(token),
-  );
-  return token;
+  return seedAuthUser(db, config, { username });
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
@@ -75,6 +60,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   _resetPermCacheForTests();
+  _resetBearerAuthCacheForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -94,6 +80,26 @@ function notFound(): Response {
 }
 
 describe("requireMembership", () => {
+  it("accepts a Forgejo PAT bearer by resolving /api/v1/user", async () => {
+    const db = freshDb();
+    db.prepare(
+      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+    ).run();
+    fetchMock
+      .mockResolvedValueOnce(ok({ login: "alice" }))
+      .mockResolvedValueOnce(ok({ permission: "write" }));
+
+    const res = await appFor(db).request("/w/w/probe", {
+      headers: { authorization: "Bearer forgejo-pat-alice" },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, role: "write" });
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/user");
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      authorization: "token forgejo-pat-alice",
+    });
+  });
+
   it("resolves Forgejo collaborator permission and sets ws.role", async () => {
     const db = freshDb();
     db.prepare(

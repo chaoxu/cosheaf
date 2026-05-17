@@ -14,8 +14,8 @@ export function ReviewActions({
   onSubmit,
   onClose,
   busy,
-  draftReviewActive,
-  onToggleDraftReview,
+  pendingReviewActive,
+  onTogglePendingReview,
 }: {
   state: PrState;
   merged: boolean;
@@ -24,8 +24,8 @@ export function ReviewActions({
   onSubmit: (decision: Decision, body: string) => void | Promise<void>;
   onClose: () => void | Promise<void>;
   busy?: boolean;
-  draftReviewActive?: boolean;
-  onToggleDraftReview?: () => void | Promise<void>;
+  pendingReviewActive?: boolean;
+  onTogglePendingReview?: () => void | Promise<void>;
 }): ReactElement | null {
   const [body, setBody] = useState("");
   const isTerminal = merged || state === "closed";
@@ -68,27 +68,27 @@ export function ReviewActions({
         className="w-full resize-y rounded-md border border-[var(--cf-border)] bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--cf-accent)] disabled:opacity-60"
       />
       <div className="flex items-center gap-2">
-        {onToggleDraftReview && canDecide && (
+        {onTogglePendingReview && canDecide && (
           <Button
-            data-testid="review-toggle-draft"
-            variant={draftReviewActive ? "default" : "outline"}
+            data-testid="review-toggle-pending"
+            variant={pendingReviewActive ? "default" : "outline"}
             size="sm"
             disabled={busy}
-            onClick={onToggleDraftReview}
+            onClick={onTogglePendingReview}
             title={
-              draftReviewActive
-                ? "Comments are batched into a draft review; submit with Approve/Request changes/Comment."
+              pendingReviewActive
+                ? "Comments are batched into a pending review; submit with Approve/Request changes/Comment."
                 : "Batch line comments before submitting one review."
             }
           >
-            {draftReviewActive ? "Draft active" : "Start a review"}
+            {pendingReviewActive ? "Pending review active" : "Start a review"}
           </Button>
         )}
         <Button
           data-testid="review-comment-submit"
           variant="outline"
           size="sm"
-          disabled={!canDecide || busy || (body.trim().length === 0 && !draftReviewActive)}
+          disabled={!canDecide || busy || (body.trim().length === 0 && !pendingReviewActive)}
           onClick={async () => {
             await onSubmit("comment", body);
             setBody("");

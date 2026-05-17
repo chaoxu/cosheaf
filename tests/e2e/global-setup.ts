@@ -18,15 +18,15 @@ async function seedReviewablePr(): Promise<void> {
   const login = await fetch("http://localhost:3030/api/v1/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "meri", password: "123123" }),
+    body: JSON.stringify({ username: "meri", password: "Cosheaf123!" }),
   });
   const cookie = login.headers.get("set-cookie") ?? "";
 
-  const branch = "user/cs-meri/e2e-demo";
+  const branch = "user/meri/e2e-demo";
 
   for (const file of [
     { path: "demo.md", content: "# Pythagoras\n\nIn a right triangle, a^2 + b^2 = c^2.\n\nProof: similar triangles.\n" },
-    { path: "demo2.md", content: "# Companion\n\nA second file in the same change.\n" },
+    { path: "demo2.md", content: "# Companion\n\nA second file on the same branch.\n" },
   ]) {
     const put = await fetch(
       `http://localhost:3030/api/v1/w/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
@@ -50,21 +50,26 @@ async function seedReviewablePr(): Promise<void> {
   const vlogin = await fetch("http://localhost:3030/api/v1/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "vera", password: "123123" }),
+    body: JSON.stringify({ username: "vera", password: "Cosheaf123!" }),
   });
   const vcookie = vlogin.headers.get("set-cookie") ?? "";
-  const cmt = await fetch(
-    `http://localhost:3030/api/v1/w/flushing-coin/pulls/${prNumber}/comments`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie: vcookie },
-      body: JSON.stringify({
-        path: "demo.md",
-        line: 5,
-        side: "new",
-        body: "Should we cite Euclid's Elements I.47?",
-      }),
-    },
-  );
-  if (!cmt.ok) throw new Error(`seedReviewablePr comment: ${cmt.status}`);
+  for (const comment of [
+    { path: "demo.md", line: 5, body: "Should we cite Euclid's Elements I.47?" },
+    { path: "demo2.md", line: 3, body: "This companion note needs a source." },
+  ]) {
+    const cmt = await fetch(
+      `http://localhost:3030/api/v1/w/flushing-coin/pulls/${prNumber}/comments`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: vcookie },
+        body: JSON.stringify({
+          path: comment.path,
+          line: comment.line,
+          side: "new",
+          body: comment.body,
+        }),
+      },
+    );
+    if (!cmt.ok) throw new Error(`seedReviewablePr comment ${comment.path}: ${cmt.status}`);
+  }
 }

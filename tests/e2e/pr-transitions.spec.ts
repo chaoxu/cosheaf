@@ -10,9 +10,9 @@ test.describe.serial("PR review state transitions", () => {
 
     await loginAs(page, "vera");
     await page.getByTestId("sidebar-tab-inbox").click();
-    const queueItem = page.getByTestId(`review-queue-pull-${prNumber}`);
-    await expect(queueItem).toBeVisible({ timeout: 8000 });
-    await queueItem.click();
+    const reviewPullItem = page.getByTestId(`review-pull-${prNumber}`);
+    await expect(reviewPullItem).toBeVisible({ timeout: 8000 });
+    await reviewPullItem.click();
     await expect(page.getByTestId("pr-header")).toBeVisible();
     await page.getByTestId("review-approve").click();
     // The PR no longer auto-transitions on approve — it just records the
@@ -51,9 +51,9 @@ test.describe.serial("PR review state transitions", () => {
 
     await loginAs(page, "vera");
     await page.getByTestId("sidebar-tab-inbox").click();
-    const queueItem = page.getByTestId(`review-queue-pull-${prNumber}`);
-    await expect(queueItem).toBeVisible({ timeout: 8000 });
-    await queueItem.click();
+    const reviewPullItem = page.getByTestId(`review-pull-${prNumber}`);
+    await expect(reviewPullItem).toBeVisible({ timeout: 8000 });
+    await reviewPullItem.click();
     await expect(page.getByTestId("pr-header")).toBeVisible();
     await page.getByTestId("review-comment").fill("Tighten the proof, please.");
     await page.getByTestId("review-request-changes").click();

@@ -15,7 +15,7 @@ export interface WorkspaceContext {
 
 // Per-request bundle handed to workspace-scoped routes. `fj` is bound to the
 // authenticated user's Forgejo PAT — there is no admin token at runtime and
-// no Sudo header to forget.
+// no impersonation header to forget.
 export interface RepoCtx {
   fj: Forgejo;
   owner: string;
@@ -34,6 +34,7 @@ export interface AppEnv {
     // Forgejo client bound to the authenticated user's PAT. Set by
     // requireAuth; used by every workspace route via repoCtx.fj.
     fjUser: Forgejo;
+    forgejoToken: string;
     workspace: WorkspaceContext;
     repoCtx: RepoCtx;
   };

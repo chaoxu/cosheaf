@@ -11,20 +11,20 @@ Coflat markdown is designed to be comfortable for mathematical writing, with
 math syntax, theorem-style blocks, cross-references, citations, and LaTeX export
 conventions. Cosheaf does not model mathematical objects as a separate graph:
 the durable unit is still the markdown page, and the sidecar index stores only
-page metadata, links, tags, search text, and workflow state.
+page metadata, links, tags, and search text.
 
 Coflat is the only supported document format today. The architecture should not
 pretend that formats are pluggable yet, though future work may allow a workspace
 to choose another markdown profile or document format.
 
 Cosheaf is meant to be useful with only human users. Autonomous agents can
-participate later through the same HTTP API as ordinary members or verifiers.
+participate later through the same HTTP API as ordinary Forgejo collaborators.
 
 ## Core Philosophy
 
 - **Forgejo is the source of truth.** Workspace content lives in a Forgejo repo.
-  SQLite is a sidecar for fast reads, sessions, memberships, change metadata,
-  search, backlinks, and tags.
+  SQLite is a sidecar for fast reads, browser sessions, workspace mapping,
+  search, backlinks, tags, webhook logs, and passthrough audit logs.
 - **Use Forgejo terms directly.** Cosheaf should mirror Forgejo's branch, pull
   request, review, issue, merge, and close model instead of inventing parallel
   workflow concepts. A user should be able to perform the same durable
@@ -49,9 +49,8 @@ title: Compactness
 ---
 ```
 
-Only `page` documents are currently indexed as first-class documents. The
-indexed page status is reported as `golden` for API compatibility, but durable
-review state lives on `Change`, not page frontmatter.
+Only `page` documents are currently indexed as first-class documents. Durable
+review state lives on Forgejo pull requests and reviews, not page frontmatter.
 
 Cosheaf indexes:
 
@@ -88,19 +87,22 @@ review, merge, close, issue.
 
 Workspace roles:
 
-- `owner`: create/configure workspace, direct publish, approve, request changes, close, merge.
-- `verifier`: author changes and approve/request changes reviewed changes.
-- `member`: author changes and publish for review.
+- `admin`: create/configure workspace, push branches, open pull requests,
+  review, close, and merge when Forgejo branch protection allows it.
+- `write`: push branches, open pull requests, review, and comment.
+- `read`: view workspace content and Forgejo pull request/issue state.
 
-Review decisions are Forgejo pull-request reviews. SQLite mirrors enough pull
-request state for the queue and UI, but Forgejo remains the durable review record.
+Review decisions are Forgejo pull-request reviews. SQLite does not mirror pull
+requests, reviews, memberships, labels, milestones, or issues as durable state.
+The UI queries Forgejo and only shapes responses where Cosheaf adds a human
+knowledge-base view.
 `min_approvals` maps to Forgejo branch protection on `main`.
 
 ## Reconciliation
 
 Forgejo webhooks notify Cosheaf about pushes, pull requests, reviews, comments,
 and issues. Webhook handlers reindex markdown files from Forgejo raw content,
-update change state, and publish SSE events to open browsers.
+invalidate derived views, and publish SSE events to open browsers.
 
 If webhooks are missed, `pnpm cli workspace reindex <slug>` rebuilds the page
 index from Forgejo `main` and removes stale page index rows.
@@ -109,10 +111,10 @@ index from Forgejo `main` and removes stale page index rows.
 
 The autoprover layer is intentionally out of this repo. It will:
 
-- authenticate via personal API tokens
+- authenticate with ordinary Forgejo PATs through Cosheaf bearer auth
 - subscribe to SSE events
 - read pages, search, and walk backlinks
-- create changes, publish them, and participate in review
+- push branches, open pull requests, and participate in reviews
 
 Cosheaf will not import or call agent code. If an agent needs a capability,
 that should become an HTTP API feature usable by humans too.

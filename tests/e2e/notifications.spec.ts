@@ -11,7 +11,7 @@ test.describe.serial("Notifications inbox", () => {
     );
 
     const probeTitle = `Notification probe ${Date.now()}`;
-    // meri opens an issue that @-mentions cs-chao. Forgejo creates a
+    // meri opens an issue that @-mentions chao. Forgejo creates a
     // notification for chao automatically.
     await loginAs(page, "meri");
     await page.getByTestId("sidebar-tab-inbox").click();
@@ -19,7 +19,7 @@ test.describe.serial("Notifications inbox", () => {
     await page.getByTestId("new-issue-title").fill(probeTitle);
     await page
       .getByTestId("new-issue-body")
-      .fill("Hey @cs-chao, can you take a look at the Pythagoras sketch?");
+      .fill("Hey @chao, can you take a look at the Pythagoras sketch?");
     await page.getByTestId("new-issue-submit").click();
     await expect(page.getByTestId("issue-view")).toBeVisible({ timeout: 8000 });
 
@@ -62,7 +62,7 @@ test.describe.serial("Notifications inbox", () => {
     await page.getByTestId("new-issue-title").fill(`Second mention ${Date.now()}`);
     await page
       .getByTestId("new-issue-body")
-      .fill("Another ping @cs-chao — confirm the lemma statement.");
+      .fill("Another ping @chao — confirm the lemma statement.");
     await page.getByTestId("new-issue-submit").click();
     await expect(page.getByTestId("issue-view")).toBeVisible({ timeout: 8000 });
 

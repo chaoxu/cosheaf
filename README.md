@@ -16,8 +16,8 @@ profiles or document formats may make sense later, but it is not part of the
 current product surface.
 
 The substrate is fully usable by humans alone. Automated agents
-(an `autoprover` layer, planned separately) participate as additional users
-through the same HTTP API.
+(an `autoprover` layer, planned separately) participate as ordinary Forgejo
+collaborators through Cosheaf's HTTP API.
 
 ## What it gives you
 
@@ -26,14 +26,40 @@ through the same HTTP API.
 - **Branch workflow** — edits live on ordinary Forgejo branches. Opening a pull
   request submits the branch for review; merging the pull request makes it
   canonical.
-- **Pull request review** — owners and verifiers review pull requests through
+- **Pull request review** — admins and write collaborators review pull requests through
   the Cosheaf UI/API while Forgejo remains the durable record.
 - **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the
   body is full-text searchable.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
   stream updates over SSE to open browsers.
-- **Personal API tokens** — humans and bots authenticate via cookie session
-  or `Authorization: Bearer cs_…` token.
+- **Forgejo-native API auth** — humans use cookie sessions; agents can send a
+  Forgejo PAT as `Authorization: Bearer <token>`.
+- **Passthrough-first agent API** — agents use
+  `/api/v1/w/:slug/forgejo/*` for Forgejo-shaped branch, pull request, issue,
+  label, milestone, notification, review, and read-only contents operations.
+
+## API shape
+
+Agents should use the Forgejo passthrough first. Cosheaf validates direct
+Forgejo PAT bearer auth, scopes the request to the workspace repository, and
+audits passthrough calls.
+
+Use typed routes when the caller needs Cosheaf behavior rather than raw Forgejo
+behavior: Coflat page reads/writes with frontmatter/id handling, path
+validation, synchronous sidecar indexing, backlinks, FTS search, document
+lists, SSE updates, or merge/admin gates.
+
+File writes have a clear boundary. A Markdown write through Forgejo contents
+API passthrough is treated as an external repo edit and reaches the SQLite
+index through webhook/reindex reconciliation. A Markdown write that needs
+immediate Cosheaf document/index behavior should use the typed file route.
+
+Example passthrough calls, all with `Authorization: Bearer <Forgejo PAT>`:
+`GET /api/v1/w/flushing-coin/forgejo/issues?state=open`,
+`GET /api/v1/w/flushing-coin/forgejo/pulls?state=open`,
+`GET /api/v1/w/flushing-coin/forgejo/labels`,
+`GET /api/v1/w/flushing-coin/forgejo/milestones?state=open`, and
+`GET /api/v1/w/flushing-coin/forgejo/contents/hello.md`.
 
 ## Quick start
 
@@ -63,9 +89,9 @@ to the server.
 ## Project layout
 
 ```
-server/        Hono API, Forgejo client, SQLite sidecar index, change workflow
+server/        Hono API, Forgejo client, SQLite sidecar index, pull request workflow
 src/cosheaf/   React UI (login, workspace, file tree, editor, review surfaces)
-scripts/       dev:all spawner, lefthook checks, Gitea issue + worker-branch tools
+scripts/       dev:all spawner, lefthook checks, Forgejo issue + worker-branch tools
 FORMAT.md      Coflat document format reference
 API.md         HTTP API contract (v1) — endpoints, error codes, SSE shape
 AGENTS.md      Repository conventions, commands, debug helpers
@@ -83,7 +109,7 @@ pnpm dev              # Vite only
 pnpm build            # Vite production build
 pnpm preview          # Serve the built bundle on 0.0.0.0
 pnpm test             # vitest run
-pnpm check:stability  # unit/API tests plus browser open/create/publish flows
+pnpm check:stability  # unit/API tests plus browser open/create/PR flows
 pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```

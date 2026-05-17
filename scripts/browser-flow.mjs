@@ -1,6 +1,6 @@
 // Browser-level workflow smoke test for the seeded Cosheaf dev fixture.
-// Creates a unique page through the UI, verifies publish controls appear, and
-// direct-publishes it. Defaults match `pnpm setup:dev`.
+// Creates a unique page through the UI, verifies pull request controls appear, and
+// direct-merges it. Defaults match `pnpm setup:dev`.
 
 import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
 
@@ -9,7 +9,7 @@ const chromium = await loadChromium();
 const URL = process.env.URL ?? "http://localhost:5173/";
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-flow.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "123123";
+const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const FLOW_PATH = process.env.COSHEAF_FLOW_PATH ?? `smoke-flow-${Date.now()}.md`;
 
@@ -39,14 +39,14 @@ try {
 
   await page.getByTestId(`file-${FLOW_PATH}`).waitFor({ state: "visible", timeout: 15000 });
   await page.waitForURL(`**/w/${WORKSPACE_SLUG}/${FLOW_PATH}`, { timeout: 8000 });
-  await page.getByTestId("publish-direct").waitFor({ state: "visible", timeout: 8000 });
-  const unpublishedStatus = await textOfTestId("statusbar");
-  if (!unpublishedStatus.includes(FLOW_PATH)) {
-    throw new Error(`expected created file in statusbar, got: ${unpublishedStatus}`);
+  await page.getByTestId("merge-branch").waitFor({ state: "visible", timeout: 8000 });
+  const branchStatus = await textOfTestId("statusbar");
+  if (!branchStatus.includes(FLOW_PATH)) {
+    throw new Error(`expected created file in statusbar, got: ${branchStatus}`);
   }
 
-  await page.getByTestId("publish-direct").click();
-  await page.getByTestId("publish-direct").waitFor({ state: "detached", timeout: 30000 });
+  await page.getByTestId("merge-branch").click();
+  await page.getByTestId("merge-branch").waitFor({ state: "detached", timeout: 30000 });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("editor").waitFor({ state: "visible", timeout: 12000 });
 

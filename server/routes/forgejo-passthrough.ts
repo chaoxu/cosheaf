@@ -4,10 +4,10 @@
 //
 //   {METHOD} /api/v1/w/{slug}/forgejo/{tail}
 //   -> {METHOD} {forgejoUrl}/api/v1/repos/{owner}/{repo}/{tail}
-//   with `Authorization: token <caller's encrypted PAT>`.
+//   with `Authorization: token <caller Forgejo PAT>`.
 //
-// Cosheaf handles auth (cookie session or `Bearer cs_…` → workspace user →
-// decrypted Forgejo PAT) and workspace scoping (path is anchored at the
+// Cosheaf handles auth (cookie session or `Bearer <Forgejo PAT>`) and
+// workspace scoping (path is anchored at the
 // workspace's repo so an agent cannot stumble into another repo or /admin/*).
 // Body and query are forwarded verbatim; response status, content-type, and
 // Link header are forwarded.
@@ -32,7 +32,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
-import { getStoredPat } from "../users.js";
 
 // Tail prefixes we forward. `methods` lists which HTTP verbs are allowed
 // for that prefix.
@@ -44,7 +43,7 @@ import { getStoredPat } from "../users.js";
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [
   { prefix: "pulls",            methods: new Set<Method>(["GET", "POST", "PATCH"]) },
-  { prefix: "issues",           methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
+  { prefix: "issues",           methods: new Set<Method>(["GET", "POST", "PATCH", "PUT", "DELETE"]) },
   { prefix: "labels",           methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
   { prefix: "milestones",       methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
   { prefix: "branches",         methods: new Set<Method>(["GET"]) },
@@ -52,11 +51,12 @@ const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [
   { prefix: "contents",         methods: new Set<Method>(["GET"]) },
   { prefix: "reviews",          methods: new Set<Method>(["GET", "POST"]) },
   { prefix: "activities/feeds", methods: new Set<Method>(["GET"]) },
+  { prefix: "notifications",    methods: new Set<Method>(["GET", "PUT"]) },
 ];
 
 // Tails that, no matter what prefix matched, must never be forwarded.
 // `pulls/*/merge` bypasses `requireAdminFresh`; admins should merge
-// through cosheaf's `/changes/:n/merge` route, not raw passthrough.
+// through cosheaf's typed `/pulls/:n/merge` route, not raw passthrough.
 const FORBIDDEN_RE = [/^pulls\/\d+\/merge(\/|\?|$)/];
 
 function classifyTail(tail: string, method: string): "ok" | "method" | "forbidden" {
@@ -130,12 +130,10 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   );
 
   // Forward with the caller's own Forgejo PAT — same trust model as the
-  // typed routes. Strip the cosheaf Authorization (which is a cs_ token, not
-  // a Forgejo token) and replace with the user's decrypted PAT.
-  const pat = getStoredPat(db, user.id, config.sessionSecret);
-  if (!pat) return c.json({ error: "forgejo credentials expired", code: "unauthorized" }, 401);
+  // typed routes. Browser sessions use the encrypted PAT recovered by
+  // requireAuth; bearer clients already supplied a Forgejo PAT directly.
   const fwdHeaders: Record<string, string> = {
-    authorization: `token ${pat}`,
+    authorization: `token ${c.get("forgejoToken")}`,
     accept: c.req.header("accept") ?? "application/json",
   };
   const ct = c.req.header("content-type");
@@ -188,5 +186,6 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   const outHeaders: Record<string, string> = {};
   if (respContentType) outHeaders["content-type"] = respContentType;
   if (respLink) outHeaders.link = respLink;
-  return new Response(respBody, { status, headers: outHeaders });
+  const outBody = status === 204 || status === 304 ? null : respBody;
+  return new Response(outBody, { status, headers: outHeaders });
 });

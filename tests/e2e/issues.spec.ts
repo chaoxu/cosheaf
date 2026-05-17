@@ -47,7 +47,7 @@ test.describe.serial("Issues", () => {
     // chao defines a label via API then opens the prior issue + applies it.
     await loginAs(page, "chao");
     await page.evaluate(async () => {
-      await fetch("/api/v1/w/flushing-coin/labels", {
+      await fetch("/api/v1/w/flushing-coin/forgejo/labels", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: "needs-review", color: "facc15" }),
@@ -197,7 +197,7 @@ test.describe.serial("Issues", () => {
     await loginAs(page, "chao");
     // Create milestone server-side (no full UI for create yet)
     await page.evaluate(async () => {
-      await fetch("/api/v1/w/flushing-coin/milestones", {
+      await fetch("/api/v1/w/flushing-coin/forgejo/milestones", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "v1 polish" }),
@@ -244,9 +244,9 @@ test.describe.serial("Issues", () => {
   test("Activity lists open PRs alongside issues; issue body renders markdown", async ({ page }) => {
     await loginAs(page, "meri");
     await page.getByTestId("sidebar-tab-activity").click();
-    // The global-setup publishes one PR — it should show in Activity.
+    // The global-setup opens one PR — it should show in Activity.
     await expect.poll(async () =>
-      page.locator('[data-testid^="review-queue-pull-"]').count(), { timeout: 8000 }
+      page.locator('[data-testid^="review-pull-"]').count(), { timeout: 8000 }
     ).toBeGreaterThanOrEqual(1);
 
     // Issue body markdown: headings, lists, code, math all render.

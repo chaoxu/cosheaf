@@ -42,7 +42,7 @@ webhooks.post("/forgejo", async (c) => {
   const config = c.get("config");
   const raw = await c.req.text();
   const rawSignature = c.req.header("x-forgejo-signature") ?? c.req.header("x-gitea-signature") ?? "";
-  // Strip optional "sha256=" prefix some Gitea versions include.
+  // Strip optional "sha256=" prefix used by Forgejo webhook signatures.
   const signature = rawSignature.replace(/^sha256=/, "");
   if (!signature || !/^[0-9a-fA-F]+$/.test(signature)) {
     return c.json({ error: "missing or malformed signature", code: "unauthorized" }, 401);

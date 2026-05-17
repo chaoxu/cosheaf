@@ -16,9 +16,9 @@
 //   POST   /pulls/:n/comments               — add a single line-comment
 //   PATCH  /pulls/:n/comments/:cid          — edit a comment body
 //   DELETE /pulls/:n/comments/:cid?review_id=
-//   POST   /pulls/:n/draft-review           — find-or-create PENDING review
-//   POST   /pulls/:n/draft-review/:rid/comments
-//   POST   /pulls/:n/draft-review/:rid/submit
+//   POST   /pulls/:n/pending-review           — find-or-create PENDING review
+//   POST   /pulls/:n/pending-review/:rid/comments
+//   POST   /pulls/:n/pending-review/:rid/submit
 //
 //   GET    /settings                        — { min_approvals }
 //   PUT    /settings                        — admin only
@@ -454,7 +454,7 @@ pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- draft (PENDING) reviews ----------
+// ---------- pending reviews ----------
 
 async function findOrCreatePendingReview(
   fj: Forgejo,
@@ -468,12 +468,12 @@ async function findOrCreatePendingReview(
   if (existing) return existing.id;
   const created = await fj.createReview(owner, repo, n, {
     event: "PENDING",
-    body: "(draft)",
+    body: "(pending)",
   });
   return created.id;
 }
 
-pulls.post("/:slug/pulls/:n/draft-review", async (c) => {
+pulls.post("/:slug/pulls/:n/pending-review", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -485,7 +485,7 @@ pulls.post("/:slug/pulls/:n/draft-review", async (c) => {
   return c.json({ review_id });
 });
 
-pulls.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
+pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = Number(c.req.param("rid"));
   if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);
@@ -504,7 +504,7 @@ pulls.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-pulls.post("/:slug/pulls/:n/draft-review/:rid/submit", async (c) => {
+pulls.post("/:slug/pulls/:n/pending-review/:rid/submit", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = Number(c.req.param("rid"));
   if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);

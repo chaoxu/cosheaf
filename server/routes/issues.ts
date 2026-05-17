@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { requireAdmin, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { DELETED_USER_LOGIN, type ForgejoIssue } from "../forgejo-types.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
 import type {
@@ -9,7 +9,6 @@ import type {
   IssueComment,
   IssueDetail,
   IssueRow,
-  Milestone,
   TimelineEvent,
 } from "../../shared/issues.js";
 
@@ -31,7 +30,8 @@ issues.use("*", requireAuth);
 issues.use("/:slug/*", requireMembership());
 issues.use("/:slug/*", requireWriteOnMutation);
 
-// GET /api/v1/w/:slug/issues?state=open|closed|all&filter=mine|assigned|all
+// Typed because the SPA needs an issue-only row shape and "mine" composes two
+// Forgejo filters (created_by OR assigned_by).
 issues.get("/:slug/issues", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const stateRaw = c.req.query("state");
@@ -39,6 +39,7 @@ issues.get("/:slug/issues", async (c) => {
     stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
   const filter = c.req.query("filter");
   const q = c.req.query("q") ?? undefined;
+  const username = c.get("user").username;
   // The sidecar used to compute these locally; Forgejo's repo-scoped /issues
   // already supports the same filters. The caller's PAT is what the Forgejo
   // client is bound to, so created_by/assigned_by use their identity.
@@ -46,8 +47,8 @@ issues.get("/:slug/issues", async (c) => {
     // "mine" = authored OR assigned. Forgejo doesn't OR these server-side,
     // so two calls + dedupe. They're cheap and the response is small.
     const [authored, assigned] = await Promise.all([
-      fj.listIssues(owner, repo, { state, q }),
-      fj.listIssues(owner, repo, { state, q }),
+      fj.listIssues(owner, repo, { state, q, created_by: username }),
+      fj.listIssues(owner, repo, { state, q, assigned_by: username }),
     ]);
     const byNum = new Map<number, IssueRow>();
     for (const i of [...authored, ...assigned]) {
@@ -59,12 +60,13 @@ issues.get("/:slug/issues", async (c) => {
   const list = await fj.listIssues(owner, repo, {
     state,
     q,
-    ...(filter === "assigned" ? {  } : {}),
+    ...(filter === "assigned" ? { assigned_by: username } : {}),
   });
   return c.json({ issues: list.filter((i) => !i.pull_request).map(toIssueRow) });
 });
 
-// GET /api/v1/w/:slug/issues/pinned — must come before :number routes.
+// Typed because Forgejo returns raw issues/PRs; the SPA wants issue-only rows.
+// Must come before :number routes.
 issues.get("/:slug/issues/pinned", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listPinnedIssues(owner, repo);
@@ -81,31 +83,8 @@ issues.get("/:slug/issues/pinned", async (c) => {
   });
 });
 
-// POST /api/v1/w/:slug/issues/:number/pin — owner-only (Forgejo enforces too)
-issues.post("/:slug/issues/:number/pin", requireAdmin, async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  // Forgejo restricts pinning to repo owner/admin; the calling user is gated
-  // by requireAdmin above, so their PAT has the required permission.
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.pinIssue(owner, repo, number);
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: "pinned" });
-  return c.json({ ok: true });
-});
-
-// DELETE /api/v1/w/:slug/issues/:number/pin — owner-only
-issues.delete("/:slug/issues/:number/pin", requireAdmin, async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.unpinIssue(owner, repo, number);
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: "unpinned" });
-  return c.json({ ok: true });
-});
-
-// GET /api/v1/w/:slug/issues/:number — full issue from Forgejo (body + meta)
+// Typed because the SPA consumes a stable IssueDetail DTO with deleted-user
+// fallback and normalized timestamps.
 issues.get("/:slug/issues/:number", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const number = Number(c.req.param("number"));
@@ -133,7 +112,8 @@ issues.get("/:slug/issues/:number", async (c) => {
   }
 });
 
-// POST /api/v1/w/:slug/issues — create
+// Typed because issue creation emits workspace SSE and returns the compact row
+// shape used by the human UI. Plain Forgejo callers can use passthrough.
 issues.post("/:slug/issues", async (c) => {
   const ws = c.get("workspace");
   const body = (await c.req.json().catch(() => null)) as {
@@ -153,64 +133,8 @@ issues.post("/:slug/issues", async (c) => {
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
 });
 
-// GET /api/v1/w/:slug/labels
-issues.get("/:slug/labels", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
-  const labels = await fj.listLabels(owner, repo);
-  return c.json({ labels });
-});
-
-// POST /api/v1/w/:slug/labels — owners only
-issues.post("/:slug/labels", requireAdmin, async (c) => {
-  const body = (await c.req.json().catch(() => null)) as {
-    name?: string;
-    color?: string;
-    description?: string;
-  } | null;
-  if (!body?.name || !body.color)
-    return c.json({ error: "name and color required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const created = await fj.createLabel(owner, repo, {
-    name: body.name.trim(),
-    color: body.color.replace(/^#/, ""),
-    description: body.description,
-  });
-  return c.json(created, 201);
-});
-
-// PUT /api/v1/w/:slug/issues/:n/labels — replace label set
-issues.put("/:slug/issues/:number/labels", async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  const body = (await c.req.json().catch(() => null)) as { labels?: number[] } | null;
-  if (!body || !Array.isArray(body.labels))
-    return c.json({ error: "labels (number[]) required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const labels = await fj.setIssueLabels(owner, repo, number, body.labels);
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: "labeled" });
-  return c.json({ labels });
-});
-
-// POST /api/v1/w/:slug/issues/:number/close|reopen
-issues.post("/:slug/issues/:number/close", async (c) => transitionIssue(c, "closed"));
-issues.post("/:slug/issues/:number/reopen", async (c) => transitionIssue(c, "open"));
-
-async function transitionIssue(
-  c: import("hono").Context<import("../types.js").AppEnv>,
-  state: "open" | "closed",
-): Promise<Response> {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const updated = await fj.editIssue(owner, repo, number, {
-    state,
-  });
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: state });
-  return c.json({ ok: true, state: updated.state });
-}
-
-// POST /api/v1/w/:slug/issues/:number/comments — create comment
+// Typed comments keep body validation, SSE, deleted-user fallback, and
+// timestamp normalization for the SPA.
 issues.post("/:slug/issues/:number/comments", async (c) => {
   const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
@@ -262,64 +186,13 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- milestones ----------
-
-issues.get("/:slug/milestones", async (c) => {
-  const stateRaw = c.req.query("state");
-  const state: "open" | "closed" | "all" =
-    stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
-  const { fj, owner, repo } = c.get("repoCtx");
-  const list = await fj.listMilestones(owner, repo, state);
-  return c.json({
-    milestones: (list ?? []).map<Milestone>((m) => ({
-      id: m.id,
-      title: m.title,
-      description: m.description ?? "",
-      state: m.state,
-      open_issues: m.open_issues,
-      closed_issues: m.closed_issues,
-      due_on: m.due_on ? new Date(m.due_on).getTime() : null,
-    })),
-  });
-});
-
-issues.post("/:slug/milestones", requireAdmin, async (c) => {
-  const body = (await c.req.json().catch(() => null)) as {
-    title?: string;
-    description?: string;
-  } | null;
-  if (!body?.title || !body.title.trim())
-    return c.json({ error: "title required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const m = await fj.createMilestone(owner, repo, {
-    title: body.title.trim(),
-    description: body.description,
-  });
-  return c.json({ id: m.id, title: m.title, state: m.state }, 201);
-});
-
-// PUT /api/v1/w/:slug/issues/:n/milestone (body: { id: number | null })
-issues.put("/:slug/issues/:number/milestone", async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const body = (await c.req.json().catch(() => null)) as { id?: number | null } | null;
-  if (body === null) return c.json({ error: "body required", code: "validation" }, 400);
-  const milestoneId = body.id ?? null;
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.editIssue(owner, repo, number, {
-    milestone: milestoneId,
-  });
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: "milestone" });
-  return c.json({ ok: true });
-});
-
 // ---------- dependencies ----------
 
 function depRow(i: { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }): DependencyRow {
   return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
 }
 
+// Typed because the UI uses one normalized DependencyRow for issues and PRs.
 issues.get("/:slug/issues/:number/dependencies", async (c) => {
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
@@ -328,6 +201,7 @@ issues.get("/:slug/issues/:number/dependencies", async (c) => {
   return c.json({ issues: (list ?? []).map(depRow) });
 });
 
+// Typed because the UI uses one normalized DependencyRow for issues and PRs.
 issues.get("/:slug/issues/:number/blocks", async (c) => {
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
@@ -336,6 +210,8 @@ issues.get("/:slug/issues/:number/blocks", async (c) => {
   return c.json({ issues: (list ?? []).map(depRow) });
 });
 
+// Typed dependency writes currently emit SSE and hide Forgejo's cross-repo body
+// fields from the SPA. Raw Forgejo callers can use passthrough if needed.
 issues.post("/:slug/issues/:number/dependencies", async (c) => {
   const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
@@ -360,7 +236,8 @@ issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
   return c.json({ ok: true });
 });
 
-// GET /api/v1/w/:slug/activities — workspace event feed
+// Typed because Forgejo activities encode references in JSON-ish strings; the
+// SPA gets parsed issue refs and normalized timestamps.
 issues.get("/:slug/activities", async (c) => {
   const limit = Math.min(Number(c.req.query("limit") ?? 50), 100);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -403,7 +280,8 @@ issues.get("/:slug/activities", async (c) => {
   });
 });
 
-// GET /api/v1/w/:slug/issues/:number/timeline — full event log
+// Typed because the SPA timeline uses a narrowed event DTO with normalized
+// label/milestone/dependency references.
 issues.get("/:slug/issues/:number/timeline", async (c) => {
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
@@ -435,7 +313,8 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
   });
 });
 
-// GET /api/v1/w/:slug/issues/:number/comments
+// Typed comments keep the human UI response stable; agents can use Forgejo
+// issue comments through passthrough for raw API behavior.
 issues.get("/:slug/issues/:number/comments", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const number = Number(c.req.param("number"));

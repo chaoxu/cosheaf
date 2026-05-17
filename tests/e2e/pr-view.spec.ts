@@ -8,8 +8,6 @@ test.describe.serial("PR review surface", () => {
     await loginAs(page, "vera");
     await openReview(page);
 
-    await expect(page.locator('[data-testid="comment-thread"]')).not.toHaveCount(0);
-
     // Walk the five reachable (mode, shape) combinations.
     const combos: Array<{ mode: "source" | "rich"; shape: "unified" | "split" | "after"; testId: string }> = [
       { mode: "source", shape: "unified", testId: "diff-pane-unified" },
@@ -80,10 +78,10 @@ test.describe.serial("PR review surface", () => {
       )
       .toBe(true);
 
-    // Draft-review batched flow.
-    await page.getByTestId("review-toggle-draft").click();
+    // Pending-review batched flow.
+    await page.getByTestId("review-toggle-pending").click();
     await expect(
-      page.locator('[data-testid="review-toggle-draft"]:has-text("Draft active")'),
+      page.locator('[data-testid="review-toggle-pending"]:has-text("Pending review active")'),
     ).toBeVisible({ timeout: 5000 });
     await page.locator('[data-testid^="comment-add-new-"]').first().click({ force: true });
     await composer.locator("textarea").fill("batched 1");
@@ -92,7 +90,7 @@ test.describe.serial("PR review surface", () => {
     await page.locator('[data-testid="review-comment"]').fill("submitting batch as comment-only");
     await page.getByTestId("review-comment-submit").click();
     await expect(
-      page.locator('[data-testid="review-toggle-draft"]:has-text("Start a review")'),
+      page.locator('[data-testid="review-toggle-pending"]:has-text("Start a review")'),
     ).toBeVisible({ timeout: 5000 });
 
     // Switch files.

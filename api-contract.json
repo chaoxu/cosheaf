@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "basePath": "/api/v1",
+  "auth": {
+    "browser": "sid cookie",
+    "bearer": "Forgejo PAT"
+  },
+  "passthrough": {
+    "mount": "/api/v1/w/:slug/forgejo/*",
+    "target": "/api/v1/repos/:owner/:repo/*",
+    "forbidden": ["pulls/:number/merge"],
+    "allowed": [
+      { "prefix": "pulls", "methods": ["GET", "POST", "PATCH"] },
+      { "prefix": "issues", "methods": ["GET", "POST", "PATCH", "PUT", "DELETE"] },
+      { "prefix": "labels", "methods": ["GET", "POST", "PATCH", "DELETE"] },
+      { "prefix": "milestones", "methods": ["GET", "POST", "PATCH", "DELETE"] },
+      { "prefix": "branches", "methods": ["GET"] },
+      { "prefix": "commits", "methods": ["GET"] },
+      { "prefix": "contents", "methods": ["GET"] },
+      { "prefix": "reviews", "methods": ["GET", "POST"] },
+      { "prefix": "activities/feeds", "methods": ["GET"] },
+      { "prefix": "notifications", "methods": ["GET", "PUT"] }
+    ]
+  },
+  "typedRouteRationale": {
+    "/w/:slug/file": "Coflat frontmatter/id handling, path validation, branch naming, synchronous indexing, SSE",
+    "/w/:slug/tree": "frontmatter-parsed page tree",
+    "/w/:slug/search": "SQLite FTS sidecar",
+    "/w/:slug/backlinks": "SQLite backlink sidecar",
+    "/w/:slug/validation": "SQLite backlink/doc_map consistency checks for broken references and orphan ids",
+    "/w/:slug/suggest": "Cosheaf document id autocomplete",
+    "/w/:slug/events": "workspace SSE",
+    "/w/:slug/branches": "user branch prefix and branch cleanup gates",
+    "/w/:slug/pulls/:n/merge": "fresh admin gate before Forgejo merge",
+    "/w/:slug/pulls/:n/files": "Forgejo diff position and SPA file shape",
+    "/w/:slug/pulls/:n/comments": "line-position mapping for PR review comments",
+    "/w/:slug/pulls/:n/pending-review": "Forgejo PENDING review helper for batched PR review comments",
+    "/w/:slug/issues": "issue-only SPA rows, mine filter composition, SSE on typed create/comment/dependency routes",
+    "/w/:slug/notifications/:id/read": "Forgejo thread endpoint is not repo-scoped"
+  }
+}

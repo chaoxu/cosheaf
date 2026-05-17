@@ -17,6 +17,8 @@ export interface DocumentLink {
   kind: "id" | "path";
   ref: string;
   raw: string;
+  from: number;
+  to: number;
 }
 
 export interface DocumentFormat {

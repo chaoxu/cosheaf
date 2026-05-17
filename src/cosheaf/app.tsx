@@ -22,11 +22,11 @@ import {
   type NotificationRow,
   type OpenPull,
   type PrMeta,
-  type ReviewQueueEntry,
+  type PullReviewEntry,
   type SearchResult,
-  type TokenInfo,
   type User,
   type Workspace,
+  type WorkspaceValidation,
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -60,7 +60,6 @@ type View =
   | { kind: "loading" }
   | { kind: "login" }
   | { kind: "workspaces"; user: User }
-  | { kind: "tokens"; user: User }
   | { kind: "workspace"; user: User; workspace: Workspace };
 
 function SidebarTab({
@@ -159,7 +158,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }): Rea
             type="button"
             onClick={() => {
               setOpen(false);
-              api.logout().then(onLogout);
+              onLogout();
             }}
             className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--cf-hover)]"
           >
@@ -227,15 +226,13 @@ const muted = "text-[var(--cf-muted)]";
 const borderColor = "border-[var(--cf-border)]";
 
 // URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
-// workspace switching, tokens, and workspaces list participate in browser history.
+// workspace switching and the workspaces list participate in browser history.
 type RoutePath =
   | { kind: "workspaces" }
-  | { kind: "tokens" }
   | { kind: "workspace"; slug: string; filePath: string | null };
 
 function parseRoute(): RoutePath {
   const path = window.location.pathname;
-  if (path === "/tokens") return { kind: "tokens" };
   const m = /^\/w\/([^/]+)(?:\/(.*))?$/.exec(path);
   if (m) {
     const filePath = m[2] ? decodeURIComponent(m[2]) : null;
@@ -245,7 +242,6 @@ function parseRoute(): RoutePath {
 }
 
 function routeUrl(r: RoutePath): string {
-  if (r.kind === "tokens") return "/tokens";
   if (r.kind === "workspaces") return "/";
   if (r.filePath) return `/w/${r.slug}/${r.filePath.split("/").map(encodeURIComponent).join("/")}`;
   return `/w/${r.slug}`;
@@ -260,6 +256,12 @@ function navigate(r: RoutePath, mode: "push" | "replace" = "push"): void {
 
 export function CosheafApp(): ReactElement {
   const [view, setView] = useState<View>({ kind: "loading" });
+  const handleLogout = useCallback(() => {
+    api.logout().finally(() => {
+      navigate({ kind: "workspaces" }, "replace");
+      setView({ kind: "login" });
+    });
+  }, []);
 
   useEffect(() => {
     api
@@ -271,17 +273,21 @@ export function CosheafApp(): ReactElement {
         }
         // Restore the route from the current URL (deep-link friendly).
         const r = parseRoute();
-        if (r.kind === "tokens") {
-          setView({ kind: "tokens", user });
-        } else if (r.kind === "workspace") {
-          api.listWorkspaces().then((wss) => {
-            const ws = wss.find((w) => w.slug === r.slug);
-            if (ws) setView({ kind: "workspace", user, workspace: ws });
-            else {
+        if (r.kind === "workspace") {
+          api
+            .listWorkspaces()
+            .then((wss) => {
+              const ws = wss.find((w) => w.slug === r.slug);
+              if (ws) setView({ kind: "workspace", user, workspace: ws });
+              else {
+                navigate({ kind: "workspaces" }, "replace");
+                setView({ kind: "workspaces", user });
+              }
+            })
+            .catch(() => {
               navigate({ kind: "workspaces" }, "replace");
               setView({ kind: "workspaces", user });
-            }
-          });
+            });
         } else {
           setView({ kind: "workspaces", user });
         }
@@ -295,15 +301,20 @@ export function CosheafApp(): ReactElement {
     const handler = (): void => {
       if (view.kind === "loading" || view.kind === "login") return;
       const r = parseRoute();
-      if (r.kind === "tokens") setView({ kind: "tokens", user: view.user });
-      else if (r.kind === "workspaces") setView({ kind: "workspaces", user: view.user });
+      if (r.kind === "workspaces") setView({ kind: "workspaces", user: view.user });
       else if (r.kind === "workspace") {
         if (view.kind === "workspace" && view.workspace.slug === r.slug) return;
-        api.listWorkspaces().then((wss) => {
-          const ws = wss.find((w) => w.slug === r.slug);
-          if (ws) setView({ kind: "workspace", user: view.user, workspace: ws });
-          else setView({ kind: "workspaces", user: view.user });
-        });
+        api
+          .listWorkspaces()
+          .then((wss) => {
+            const ws = wss.find((w) => w.slug === r.slug);
+            if (ws) setView({ kind: "workspace", user: view.user, workspace: ws });
+            else setView({ kind: "workspaces", user: view.user });
+          })
+          .catch(() => {
+            navigate({ kind: "workspaces" }, "replace");
+            setView({ kind: "workspaces", user: view.user });
+          });
       }
     };
     window.addEventListener("popstate", handler);
@@ -331,29 +342,7 @@ export function CosheafApp(): ReactElement {
           navigate({ kind: "workspace", slug: workspace.slug, filePath: null });
           setView({ kind: "workspace", user: view.user, workspace });
         }}
-        onTokens={() => {
-          navigate({ kind: "tokens" });
-          setView({ kind: "tokens", user: view.user });
-        }}
-        onLogout={() => {
-          navigate({ kind: "workspaces" }, "replace");
-          setView({ kind: "login" });
-        }}
-      />
-    );
-  }
-  if (view.kind === "tokens") {
-    return (
-      <TokensScreen
-        user={view.user}
-        onBack={() => {
-          navigate({ kind: "workspaces" });
-          setView({ kind: "workspaces", user: view.user });
-        }}
-        onLogout={() => {
-          navigate({ kind: "workspaces" }, "replace");
-          setView({ kind: "login" });
-        }}
+        onLogout={handleLogout}
       />
     );
   }
@@ -365,10 +354,7 @@ export function CosheafApp(): ReactElement {
         navigate({ kind: "workspaces" });
         setView({ kind: "workspaces", user: view.user });
       }}
-      onLogout={() => {
-        navigate({ kind: "workspaces" }, "replace");
-        setView({ kind: "login" });
-      }}
+      onLogout={handleLogout}
     />
   );
 }
@@ -400,10 +386,13 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (busy) return;
+    const loginUsername = username.trim();
+    if (!loginUsername || !password) return;
     setBusy(true);
     setError(null);
     api
-      .login(username, password)
+      .login(loginUsername, password)
       .then(onLoggedIn)
       .catch((err: unknown) =>
         setError(err instanceof ApiError ? err.message : "Login failed"),
@@ -439,7 +428,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
           />
         </div>
         {error && <div className="py-2 text-red-600">{error}</div>}
-        <Button type="submit" disabled={busy || !username || !password}>
+        <Button type="submit" disabled={busy || !username.trim() || !password}>
           {busy ? "..." : "Sign in"}
         </Button>
       </form>
@@ -450,12 +439,10 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
 function WorkspaceList({
   user,
   onPick,
-  onTokens,
   onLogout,
 }: {
   user: User;
   onPick: (workspace: Workspace) => void;
-  onTokens: () => void;
   onLogout: () => void;
 }): ReactElement {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
@@ -496,13 +483,10 @@ function WorkspaceList({
         <strong>cosheaf</strong>
         <span className="flex-1" />
         <span className={muted}>{user.username}</span>
-        <Button variant="ghost" size="sm" onClick={onTokens}>
-          Tokens
-        </Button>
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => api.logout().then(onLogout)}
+          onClick={onLogout}
         >
           Sign out
         </Button>
@@ -554,127 +538,6 @@ function WorkspaceList({
                     {ws.role}
                   </span>
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </ContentPane>
-    </Screen>
-  );
-}
-
-function TokensScreen({
-  user,
-  onBack,
-  onLogout,
-}: {
-  user: User;
-  onBack: () => void;
-  onLogout: () => void;
-}): ReactElement {
-  const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
-  const [name, setName] = useState("");
-  const [created, setCreated] = useState<{ id: number; name: string; token: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = useCallback(() => {
-    api
-      .listTokens()
-      .then(setTokens)
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : "Failed to load"),
-      );
-  }, []);
-  useEffect(reload, [reload]);
-
-  const create = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    api
-      .createToken(name.trim())
-      .then((t) => {
-        setCreated(t);
-        setName("");
-        reload();
-      })
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : "Create failed"),
-      );
-  };
-
-  const revoke = (id: number) => {
-    api
-      .revokeToken(id)
-      .then(reload)
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : "Revoke failed"),
-      );
-  };
-
-  return (
-    <Screen>
-      <Topbar>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          ← Workspaces
-        </Button>
-        <strong>Tokens</strong>
-        <span className="flex-1" />
-        <span className={muted}>{user.username}</span>
-        <Button variant="ghost" size="sm" onClick={() => api.logout().then(onLogout)}>
-          Sign out
-        </Button>
-      </Topbar>
-      <ContentPane>
-        <p className={cn("text-xs", muted)}>
-          Personal access tokens authenticate as you (humans or agents) via{" "}
-          <code>Authorization: Bearer &lt;token&gt;</code>. The token value is shown once at
-          creation; copy it now.
-        </p>
-        <form onSubmit={create} className="mt-3 flex gap-2">
-          <Input
-            placeholder="token name (e.g., 'my-agent')"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Button type="submit" disabled={!name.trim()}>
-            Create token
-          </Button>
-        </form>
-
-        {created && (
-          <div
-            className={cn(
-              "my-3 flex flex-col gap-2 rounded-md border border-[var(--cf-fg)] p-3",
-            )}
-          >
-            <div className={cn("text-xs", muted)}>
-              {created.name}: copy this now, it won't be shown again:
-            </div>
-            <code className="select-all break-all rounded border border-[var(--cf-border)] p-2 font-mono">
-              {created.token}
-            </code>
-            <Button variant="ghost" size="sm" onClick={() => setCreated(null)}>
-              Dismiss
-            </Button>
-          </div>
-        )}
-
-        {error && <div className="py-2 text-red-600">{error}</div>}
-        {tokens && tokens.length === 0 && <div className={muted}>No tokens yet.</div>}
-        {tokens && tokens.length > 0 && (
-          <ul className="mt-3 space-y-1.5">
-            {tokens.map((t) => (
-              <li key={t.id}>
-                <div className="flex w-full items-center gap-2.5 rounded-md px-4 py-3">
-                  <strong>{t.name}</strong>
-                  <span className={cn("text-xs", muted)}>
-                    created {new Date(t.created_at).toISOString().slice(0, 10)}
-                  </span>
-                  <span className="flex-1" />
-                  <Button variant="outline" size="sm" onClick={() => revoke(t.id)}>
-                    Revoke
-                  </Button>
-                </div>
               </li>
             ))}
           </ul>
@@ -743,10 +606,83 @@ function BacklinksPanel({
   );
 }
 
+function LinterPanel({
+  result,
+  onRefresh,
+  onOpenPath,
+}: {
+  result: WorkspaceValidation | null;
+  onRefresh: () => void;
+  onOpenPath: (path: string, line: number | null) => void;
+}): ReactElement {
+  const broken = result?.broken_refs ?? [];
+  const orphans = result?.orphan_labels ?? [];
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-3 px-2 py-1">
+        <strong>Linter</strong>
+        <Button variant="ghost" size="icon" onClick={onRefresh} aria-label="Refresh linter">↻</Button>
+      </div>
+      {!result ? (
+        <div className={cn("px-3 py-2 text-xs", muted)}>Checking references…</div>
+      ) : broken.length === 0 && orphans.length === 0 ? (
+        <div className={cn("px-3 py-2 text-xs", muted)}>No reference issues.</div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {broken.length > 0 && (
+            <>
+              <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+                Broken references
+              </div>
+              <ul className="m-0 p-0">
+                {broken.map((r) => (
+                  <li key={`${r.source_id}-${r.target_label}`}>
+                    <FileRow
+                      onClick={() => onOpenPath(r.source_path, r.line)}
+                      testId={`lint-broken-${r.source_id}-${r.target_label}`}
+                    >
+                      <strong>{r.target_label}</strong>
+                      <span className={cn("text-xs", muted)}>
+                        {` in ${r.source_title ?? r.source_path}${r.line ? `:${r.line}` : ""}`}
+                      </span>
+                    </FileRow>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {orphans.length > 0 && (
+            <>
+              <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+                Orphan ids
+              </div>
+              <ul className="m-0 p-0">
+                {orphans.map((o) => (
+                  <li key={o.id}>
+                    <FileRow
+                      onClick={() => onOpenPath(o.path, null)}
+                      testId={`lint-orphan-${o.id}`}
+                    >
+                      <strong>{o.id}</strong>
+                      <span className={cn("text-xs", muted)}>
+                        {` ${o.title ?? o.path}`}
+                      </span>
+                    </FileRow>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function InboxOrActivity({
   kind,
-  queue,
+  reviewPulls,
   openPrs,
   issues,
   pinned,
@@ -757,7 +693,7 @@ function InboxOrActivity({
   query,
   setQuery,
   onRefresh,
-  onReviewChange,
+  onOpenPullReview,
   onOpenIssue,
   onOpenPr,
   onMarkNotifRead,
@@ -765,7 +701,7 @@ function InboxOrActivity({
   onNewIssue,
 }: {
   kind: "inbox" | "activity";
-  queue: readonly ReviewQueueEntry[];
+  reviewPulls: readonly PullReviewEntry[];
   openPrs: readonly OpenPull[];
   issues: readonly IssueRow[];
   pinned: readonly IssueRow[];
@@ -776,7 +712,7 @@ function InboxOrActivity({
   query: string;
   setQuery: (q: string) => void;
   onRefresh: () => void;
-  onReviewChange: (entry: ReviewQueueEntry) => void;
+  onOpenPullReview: (entry: PullReviewEntry) => void;
   onOpenIssue: (number: number) => void;
   onOpenPr: (number: number) => void;
   onMarkNotifRead: (id: number) => void;
@@ -784,16 +720,16 @@ function InboxOrActivity({
   onNewIssue: () => void;
 }): ReactElement {
   const isInbox = kind === "inbox";
-  // In Inbox+Mine: only PRs awaiting your review (queue).
+  // In Inbox+Mine: only PRs awaiting your review.
   // In Inbox+All or Activity: every open PR in the workspace.
   const useOpenList = !isInbox || scope === "all";
   const q = query.trim().toLowerCase();
-  const sourceQueue: ReviewQueueEntry[] = useOpenList
+  const sourcePulls: PullReviewEntry[] = useOpenList
     ? openPrs.map((p) => ({ ...p, approvals: 0, rejections: 0 }))
-    : [...queue];
-  const visibleQueue = q
-    ? sourceQueue.filter((qe) => qe.title.toLowerCase().includes(q))
-    : sourceQueue;
+    : [...reviewPulls];
+  const visiblePulls = q
+    ? sourcePulls.filter((qe) => qe.title.toLowerCase().includes(q))
+    : sourcePulls;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-2 py-1">
@@ -838,7 +774,7 @@ function InboxOrActivity({
           className="h-7 text-xs"
         />
       </div>
-      {visibleQueue.length === 0 && issues.length === 0 && notifications.length === 0 && (
+      {visiblePulls.length === 0 && issues.length === 0 && notifications.length === 0 && (
         <div className={cn("px-3 py-2 text-xs", muted)}>
           {isInbox ? "Nothing waiting on you." : "No open activity."}
         </div>
@@ -886,15 +822,15 @@ function InboxOrActivity({
           </ul>
         </>
       )}
-      {visibleQueue.length > 0 && (
+      {visiblePulls.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
           {useOpenList ? "Open pull requests" : "Pull requests awaiting your review"}
         </div>
       )}
       <ul className="m-0 p-0">
-        {visibleQueue.map((entry) => (
+        {visiblePulls.map((entry) => (
           <li key={`pr-${entry.number}`}>
-            <FileRow onClick={() => onReviewChange(entry)} testId={`review-queue-pull-${entry.number}`}>
+            <FileRow onClick={() => onOpenPullReview(entry)} testId={`review-pull-${entry.number}`}>
               <span className="text-[10px] uppercase tracking-wide bg-blue-500/15 text-blue-700 rounded px-1 mr-1">PR</span>
               <strong>{entry.title}</strong>
               <span className={cn("text-xs", muted)}>
@@ -1198,16 +1134,18 @@ function WorkspaceView({
   const [newPath, setNewPath] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-  const [queue, setQueue] = useState<ReviewQueueEntry[] | null>(null);
+  const [reviewPulls, setReviewPulls] = useState<PullReviewEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
-  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "settings">("pages");
+  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "linter" | "settings">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
-  const [openBranches, setOpenBranches] = useState<OpenPull[] | null>(null);
+  const [openPrs, setOpenPrs] = useState<OpenPull[] | null>(null);
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
+  const [validation, setValidation] = useState<WorkspaceValidation | null>(null);
+  const [pendingScroll, setPendingScroll] = useState<{ path: string; line: number } | null>(null);
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
@@ -1223,14 +1161,13 @@ function WorkspaceView({
     comments: LineComment[];
     selectedPath: string | null;
     busy: boolean;
-    draftReviewId: number | null;
-  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
-  // The active writable change id; set synchronously from each save response.
-  // We track only the id to avoid a stale-state race between setHasPending
-  // and a separate listChanges round-trip.
+    pendingReviewId: number | null;
+  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, pendingReviewId: null });
+  // The active writable branch, set synchronously from save responses to avoid
+  // racing a separate branch-list refresh.
   const [currentBranchName, setCurrentBranchName] = useState<string | null>(null);
   const [reviewBranchName, setReviewBranchName] = useState<string | null>(null);
-  const [changesReady, setChangesReady] = useState(false);
+  const [branchesReady, setBranchesReady] = useState(false);
   // Tree + file reads run against whichever branch is "active": the review's
   // head when in review mode, otherwise the user's working branch (or main).
   const activeBranchName = reviewBranchName ?? currentBranchName;
@@ -1270,7 +1207,7 @@ function WorkspaceView({
   // Auto-select when there's exactly one; keep an already-selected branch if
   // it still appears in the list (don't clobber a freshly-created one).
   const reloadBranches = useCallback((markReady = false) => {
-    if (markReady) setChangesReady(false);
+    if (markReady) setBranchesReady(false);
     api
       .myBranches(workspace.slug)
       .then((branches) => {
@@ -1278,7 +1215,7 @@ function WorkspaceView({
           // If the user has an explicit branch selected, keep it. Forgejo's
           // branch listing is eventually consistent — a branch we just
           // created via PUT /file may take a beat to appear in /branches/mine,
-          // and clearing the selection in the interim wipes the publish
+          // and clearing the selection in the interim wipes the open-pull-request
           // affordance and the post-save tree refresh.
           if (current) return current;
           return branches.length === 1 ? (branches[0]?.name ?? null) : null;
@@ -1286,7 +1223,7 @@ function WorkspaceView({
       })
       .catch(() => undefined)
       .finally(() => {
-        if (markReady) setChangesReady(true);
+        if (markReady) setBranchesReady(true);
       });
   }, [workspace.slug]);
 
@@ -1297,9 +1234,9 @@ function WorkspaceView({
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const reviewingPullNumberRef = useRef<number | null>(null);
-  // Tracks the branchId the currently-open file was last fetched against, so
+  // Tracks the branch the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
-  // branch even after currentBranchName is nulled by publish.
+  // branch even after currentBranchName is nulled by opening a pull request.
   const openFileBranchRef = useRef<string | null>(null);
   useEffect(() => {
     openPathRef.current = openPath;
@@ -1317,7 +1254,7 @@ function WorkspaceView({
   // shifted, which kicked off a reconnect storm during reviews and saves.
   const reloadTreeRef = useRef(reloadTree);
   const reloadBranchesRef = useRef(reloadBranches);
-  const openQueueRef = useRef<() => void>(() => {});
+  const refreshPullsRef = useRef<() => void>(() => {});
   useEffect(() => {
     reloadTreeRef.current = reloadTree;
     reloadBranchesRef.current = reloadBranches;
@@ -1350,7 +1287,7 @@ function WorkspaceView({
           }
         }
       } else if (event.type === "pull" || event.type === "pull_reviewed") {
-        openQueueRef.current();
+        refreshPullsRef.current();
         reloadBranchesRef.current();
         reloadTreeRef.current();
         if (reviewingPullNumberRef.current) {
@@ -1377,6 +1314,13 @@ function WorkspaceView({
     },
     [workspace.slug],
   );
+
+  const refreshValidation = useCallback(() => {
+    api
+      .validateWorkspace(workspace.slug)
+      .then(setValidation)
+      .catch(() => setValidation({ broken_refs: [], orphan_labels: [] }));
+  }, [workspace.slug]);
 
   // Approvals only exist for an open/closed PR. We pass the PR number when we
   // know we're inside a review; otherwise clear.
@@ -1456,14 +1400,14 @@ function WorkspaceView({
   // the file and wipe `dirty=true` from any local edits in flight.
   const initialOpenRef = useRef(false);
   useEffect(() => {
-    if (!changesReady || initialOpenRef.current) return;
+    if (!branchesReady || initialOpenRef.current) return;
     const r = parseRoute();
     if (r.kind === "workspace" && r.slug === workspace.slug && r.filePath) {
       initialOpenRef.current = true;
       openPathFromSource(r.filePath, { push: false, force: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional, see comment above
-  }, [changesReady, workspace.slug]);
+  }, [branchesReady, workspace.slug]);
 
   useEffect(() => {
     const handler = (): void => {
@@ -1608,7 +1552,7 @@ function WorkspaceView({
     void editorRef.current?.triggerSave("manual");
   }, [openPath, reviewingPullNumber]);
 
-  const openQueue = useCallback(() => {
+  const refreshPulls = useCallback(() => {
     api
       .listPulls(workspace.slug, "open")
       .then((pulls) =>
@@ -1619,16 +1563,16 @@ function WorkspaceView({
               rejections: 0,
               reviews: [] as ApprovalRecord[],
             }));
-            return { ...p, approvals: r.approvals, rejections: r.rejections } as ReviewQueueEntry;
+            return { ...p, approvals: r.approvals, rejections: r.rejections } as PullReviewEntry;
           }),
         ),
       )
-      .then(setQueue)
-      .catch(() => setQueue([]));
+      .then(setReviewPulls)
+      .catch(() => setReviewPulls([]));
   }, [workspace.slug]);
   useEffect(() => {
-    openQueueRef.current = openQueue;
-  }, [openQueue]);
+    refreshPullsRef.current = refreshPulls;
+  }, [refreshPulls]);
 
   const refreshIssues = useCallback(
     (scope: "mine" | "all", panel: "inbox" | "activity", q: string) => {
@@ -1677,8 +1621,8 @@ function WorkspaceView({
   useEffect(() => {
     api
       .listPulls(workspace.slug, "open")
-      .then(setOpenBranches)
-      .catch(() => setOpenBranches([]));
+      .then(setOpenPrs)
+      .catch(() => setOpenPrs([]));
   }, [workspace.slug]);
 
   const refreshPinned = useCallback(async () => {
@@ -1711,8 +1655,13 @@ function WorkspaceView({
     };
   }, [sidebarView, workspace.slug]);
 
-  const reviewChange = useCallback(
-    (entry: ReviewQueueEntry) => {
+  useEffect(() => {
+    if (sidebarView !== "linter") return;
+    refreshValidation();
+  }, [sidebarView, refreshValidation]);
+
+  const openPullReview = useCallback(
+    (entry: PullReviewEntry) => {
       setReviewingPullNumber(entry.number);
       setReviewBranchName(entry.head_ref);
       setCurrentBranchName(null);
@@ -1723,7 +1672,7 @@ function WorkspaceView({
     [loadApprovals],
   );
 
-  const publish = useCallback(
+  const openPullRequest = useCallback(
     (mode?: "direct" | "review") => {
       if (!currentBranchName) {
         setStatus("nothing on this branch to merge or review");
@@ -1745,7 +1694,7 @@ function WorkspaceView({
             setStatus(`pull request #${pr.number} opened`);
           }
           setCurrentBranchName(null);
-          openQueue();
+          refreshPulls();
           void loadTree();
         } catch (err) {
           setStatus(err instanceof ApiError ? err.message : "Open pull request failed");
@@ -1754,7 +1703,7 @@ function WorkspaceView({
         }
       })();
     },
-    [workspace.slug, currentBranchName, openQueue],
+    [workspace.slug, currentBranchName, refreshPulls],
   );
 
   // Submit a review decision (approve, request_changes, or comment-only) on
@@ -1764,11 +1713,11 @@ function WorkspaceView({
       const n = reviewingPullNumber;
       if (!n) return;
       const comment = body.trim() || undefined;
-      const draftId = reviewState.draftReviewId;
+      const pendingId = reviewState.pendingReviewId;
       setReviewState((s) => ({ ...s, busy: true }));
       try {
-        if (draftId) {
-          await api.submitDraftReview(workspace.slug, n, draftId, {
+        if (pendingId) {
+          await api.submitPendingReview(workspace.slug, n, pendingId, {
             event: decision,
             body: comment,
           });
@@ -1783,10 +1732,10 @@ function WorkspaceView({
           setStatus(decision === "approve" ? "approved" : decision === "request_changes" ? "changes requested" : "commented");
         }
         loadApprovals(n);
-        openQueue();
+        refreshPulls();
         const pr = await api.getPull(workspace.slug, n).catch(() => null);
         if (pr) {
-          setReviewState((s) => ({ ...s, pr, draftReviewId: null }));
+          setReviewState((s) => ({ ...s, pr, pendingReviewId: null }));
           if (pr.merged || pr.state === "closed") {
             setReviewingPullNumber(null);
             setReviewBranchName(null);
@@ -1799,10 +1748,10 @@ function WorkspaceView({
         setReviewState((s) => ({ ...s, busy: false }));
       }
     },
-    [reviewingPullNumber, workspace.slug, reviewState.draftReviewId, loadApprovals, openQueue],
+    [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId, loadApprovals, refreshPulls],
   );
 
-  const closeReviewedChange = useCallback(async () => {
+  const closeReviewedPull = useCallback(async () => {
     const n = reviewingPullNumber;
     if (!n) return;
     setReviewState((s) => ({ ...s, busy: true }));
@@ -1811,21 +1760,21 @@ function WorkspaceView({
       setStatus("Pull request closed");
       setReviewingPullNumber(null);
       setReviewBranchName(null);
-      openQueue();
+      refreshPulls();
       void loadTree();
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : "close failed");
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
-  }, [reviewingPullNumber, workspace.slug, openQueue]);
+  }, [reviewingPullNumber, workspace.slug, refreshPulls]);
 
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
   // Each transition (enter, switch PR, exit) clears selectedPath + reviewBranchName
   // first so a stale file or branch from the previous PR can't leak through.
   useEffect(() => {
     setReviewBranchName(null);
-    setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
+    setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, pendingReviewId: null });
     if (!reviewingPullNumber) return;
     let cancelled = false;
     Promise.all([
@@ -1874,15 +1823,15 @@ function WorkspaceView({
     async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {
       const n = reviewingPullNumber;
       if (!n) return;
-      const draftId = reviewState.draftReviewId;
-      if (draftId) {
-        await api.addDraftReviewComment(workspace.slug, n, draftId, { ...target, body });
+      const pendingId = reviewState.pendingReviewId;
+      if (pendingId) {
+        await api.addPendingReviewComment(workspace.slug, n, pendingId, { ...target, body });
       } else {
         await api.addComment(workspace.slug, n, { ...target, body });
       }
       refreshReviewComments();
     },
-    [reviewingPullNumber, workspace.slug, reviewState.draftReviewId, refreshReviewComments],
+    [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId, refreshReviewComments],
   );
 
   const editReviewComment = useCallback(
@@ -1905,25 +1854,25 @@ function WorkspaceView({
     [reviewingPullNumber, workspace.slug, refreshReviewComments],
   );
 
-  const toggleDraftReview = useCallback(async () => {
+  const togglePendingReview = useCallback(async () => {
     const n = reviewingPullNumber;
     if (!n) return;
-    if (reviewState.draftReviewId) {
+    if (reviewState.pendingReviewId) {
       // Cancel local batch — Forgejo keeps the PENDING review server-side
       // for reuse; we just stop sending into it.
-      setReviewState((s) => ({ ...s, draftReviewId: null }));
+      setReviewState((s) => ({ ...s, pendingReviewId: null }));
       return;
     }
     setReviewState((s) => ({ ...s, busy: true }));
     try {
-      const { review_id } = await api.startDraftReview(workspace.slug, n);
-      setReviewState((s) => ({ ...s, draftReviewId: review_id }));
+      const { review_id } = await api.startPendingReview(workspace.slug, n);
+      setReviewState((s) => ({ ...s, pendingReviewId: review_id }));
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : "could not start a pending review");
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
-  }, [reviewingPullNumber, workspace.slug, reviewState.draftReviewId]);
+  }, [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId]);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1939,12 +1888,12 @@ function WorkspaceView({
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
-        if (!busy) publish();
+        if (!busy) openPullRequest();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [openPath, dirty, save, busy, publish]);
+  }, [openPath, dirty, save, busy, openPullRequest]);
 
   const create = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -2001,7 +1950,7 @@ function WorkspaceView({
               ☰
             </Button>
           </div>
-          <div className={cn("flex items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
+          <div className={cn("flex flex-wrap items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
             <SidebarTab
               active={sidebarView === "pages"}
               onClick={() => setSidebarView("pages")}
@@ -2013,7 +1962,7 @@ function WorkspaceView({
               active={sidebarView === "inbox"}
               onClick={() => {
                 setSidebarView("inbox");
-                openQueue();
+                refreshPulls();
               }}
               testId="sidebar-tab-inbox"
             >
@@ -2032,6 +1981,13 @@ function WorkspaceView({
               disabled={!openPath}
             >
               Outline
+            </SidebarTab>
+            <SidebarTab
+              active={sidebarView === "linter"}
+              onClick={() => setSidebarView("linter")}
+              testId="sidebar-tab-linter"
+            >
+              Linter
             </SidebarTab>
             {workspace.role === "admin" && (
               <SidebarTab
@@ -2052,10 +2008,25 @@ function WorkspaceView({
               entries={outline}
               onPick={(line) => editorRef.current?.scrollToLine(line, { center: true })}
             />
+          ) : sidebarView === "linter" ? (
+            <LinterPanel
+              result={validation}
+              onRefresh={refreshValidation}
+              onOpenPath={(path, line) => {
+                setViewingIssue(null);
+                setNewIssueOpen(false);
+                if (line && path === openPath) {
+                  editorRef.current?.scrollToLine(line, { center: true });
+                } else if (line) {
+                  setPendingScroll({ path, line });
+                }
+                openPathFromSource(path);
+              }}
+            />
           ) : sidebarView === "inbox" || sidebarView === "activity" ? (
             <InboxOrActivity
               kind={sidebarView}
-              queue={queue ?? []}
+              reviewPulls={reviewPulls ?? []}
               issues={issues ?? []}
               pinned={pinnedIssues}
               activities={activities}
@@ -2064,7 +2035,7 @@ function WorkspaceView({
               query={inboxQuery}
               setQuery={setInboxQuery}
               onRefresh={() => {
-                openQueue();
+                refreshPulls();
                 refreshPinned();
                 if (sidebarView === "inbox") refreshNotifs();
                 if (sidebarView === "inbox" || sidebarView === "activity") {
@@ -2080,16 +2051,16 @@ function WorkspaceView({
                     .catch(() => undefined);
                 }
               }}
-              openPrs={openBranches ?? []}
+              openPrs={openPrs ?? []}
               notifications={notifs}
-              onReviewChange={reviewChange}
+              onOpenPullReview={openPullReview}
               onOpenIssue={(n) => {
                 setNewIssueOpen(false);
                 setViewingIssue(n);
               }}
               onOpenPr={(prNumber) => {
-                const row = (openBranches ?? []).find((r) => r.number === prNumber);
-                if (row) reviewChange({ ...row, approvals: 0, rejections: 0 });
+                const row = (openPrs ?? []).find((r) => r.number === prNumber);
+                if (row) openPullReview({ ...row, approvals: 0, rejections: 0 });
               }}
               onMarkNotifRead={(id) => {
                 setNotifs((prev) => prev.filter((x) => x.id !== id));
@@ -2288,10 +2259,10 @@ function WorkspaceView({
                 // PR and issue numbers share a single sequence in Forgejo.
                 // If we already know about a PR with this number, open it
                 // as a review; otherwise treat the number as an issue.
-                const pr = (openBranches ?? []).find((c) => c.number === n) ?? (queue ?? []).find((c) => c.number === n);
+                const pr = (openPrs ?? []).find((c) => c.number === n) ?? (reviewPulls ?? []).find((c) => c.number === n);
                 if (pr) {
                   setViewingIssue(null);
-                  reviewChange({ ...pr, approvals: 0, rejections: 0 });
+                  openPullReview({ ...pr, approvals: 0, rejections: 0 });
                 } else {
                   setViewingIssue(n);
                 }
@@ -2308,7 +2279,7 @@ function WorkspaceView({
                 data-testid="new-issue-title"
               />
               <textarea
-                placeholder="Describe the question, problem, or proposal…"
+                placeholder="Describe the question, problem, or idea…"
                 value={newIssueBody}
                 onChange={(e) => setNewIssueBody(e.target.value)}
                 rows={10}
@@ -2376,6 +2347,10 @@ function WorkspaceView({
                     editorRef.current = editor;
                     setOutline(editor.outline.get());
                     editor.outline.subscribe(setOutline);
+                    if (pendingScroll && pendingScroll.path === openPath) {
+                      editor.scrollToLine(pendingScroll.line, { center: true });
+                      setPendingScroll(null);
+                    }
                   }}
                   onChange={(next) => {
                     // Just mirror content for save payload. Dirty tracking
@@ -2443,16 +2418,16 @@ function WorkspaceView({
                   role={workspace.role}
                   isAuthor={reviewState.pr.author_username === user.username}
                   onSubmit={submitReview}
-                  onClose={closeReviewedChange}
+                  onClose={closeReviewedPull}
                   busy={reviewState.busy}
-                  draftReviewActive={reviewState.draftReviewId !== null}
-                  onToggleDraftReview={toggleDraftReview}
+                  pendingReviewActive={reviewState.pendingReviewId !== null}
+                  onTogglePendingReview={togglePendingReview}
                 />
               )}
             </>
           )}
           {activeBranchName && (
-            <span data-testid="active-branch-id" hidden>{activeBranchName}</span>
+            <span data-testid="active-branch" hidden>{activeBranchName}</span>
           )}
           <div
             data-statusbar
@@ -2503,8 +2478,8 @@ function WorkspaceView({
                       {workspace.role === "admin" && (
                         <button
                           type="button"
-                          data-testid="publish-direct"
-                          onClick={() => publish("direct")}
+                          data-testid="merge-branch"
+                          onClick={() => openPullRequest("direct")}
                           disabled={busy}
                           title="Squash-merge this branch into main (⇧⌘P)"
                           className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
@@ -2514,8 +2489,8 @@ function WorkspaceView({
                       )}
                       <button
                         type="button"
-                        data-testid="publish-review"
-                        onClick={() => publish("review")}
+                        data-testid="open-pull-request"
+                        onClick={() => openPullRequest("review")}
                         disabled={busy}
                         title="Open a pull request for this branch"
                         className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
