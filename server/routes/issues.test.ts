@@ -108,4 +108,34 @@ describe("issues routes", () => {
     expect(res.status).toBe(500);
     expect(await res.text()).not.toContain("not_found");
   });
+
+  it("fills Forgejo owner/repo when adding an issue dependency", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok({
+      number: 7,
+      title: "Theorem",
+      state: "open",
+      pull_request: null,
+    }));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 9 }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/repo/issues/7/dependencies",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      index: 9,
+      owner: "owner",
+      repo: "repo",
+    });
+    expect(await res.json()).toEqual({
+      issue: { number: 7, title: "Theorem", state: "open", is_pr: false },
+    });
+  });
 });

@@ -5,6 +5,7 @@ import { ForgejoError } from "../forgejo.js";
 import { DELETED_USER_LOGIN, type ForgejoIssue } from "../forgejo-types.js";
 import type {
   ActivityRow,
+  DependencyRow,
   IssueDetail,
   IssueRow,
   TimelineEvent,
@@ -20,6 +21,15 @@ function toIssueRow(i: ForgejoIssue): IssueRow {
     comment_count: i.comments,
     created_at: new Date(i.created_at).getTime(),
     updated_at: new Date(i.updated_at).getTime(),
+  };
+}
+
+function toDependencyRow(i: ForgejoIssue): DependencyRow {
+  return {
+    number: i.number,
+    title: i.title,
+    state: i.state,
+    is_pr: !!i.pull_request,
   };
 }
 
@@ -138,8 +148,49 @@ issues.post("/:slug/issues", async (c) => {
 // The SPA hits /forgejo/issues/:n/comments and /forgejo/issues/comments/:id
 // and normalizes the response shape client-side.
 
-// Dependencies/blocks are Forgejo-native; the SPA calls them through the
-// passthrough at /forgejo/issues/:n/dependencies and derives is_pr client-side.
+// Typed because Forgejo's dependency mutation body redundantly requires the
+// owner/repo, which the SPA should not know.
+issues.get("/:slug/issues/:number/dependencies", async (c) => {
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listIssueDependencies(owner, repo, number);
+  return c.json({ issues: list.map(toDependencyRow) });
+});
+
+issues.get("/:slug/issues/:number/blocks", async (c) => {
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listIssueBlocks(owner, repo, number);
+  return c.json({ issues: list.map(toDependencyRow) });
+});
+
+issues.post("/:slug/issues/:number/dependencies", async (c) => {
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
+  const index = Number(body?.index);
+  if (!Number.isFinite(index) || index <= 0) {
+    return c.json({ error: "dependency issue number required", code: "validation" }, 400);
+  }
+  const { fj, owner, repo } = c.get("repoCtx");
+  const updated = await fj.addIssueDependency(owner, repo, number, index);
+  return c.json({ issue: toDependencyRow(updated) }, 201);
+});
+
+issues.delete("/:slug/issues/:number/dependencies", async (c) => {
+  const number = Number(c.req.param("number"));
+  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
+  const index = Number(body?.index);
+  if (!Number.isFinite(index) || index <= 0) {
+    return c.json({ error: "dependency issue number required", code: "validation" }, 400);
+  }
+  const { fj, owner, repo } = c.get("repoCtx");
+  const updated = await fj.removeIssueDependency(owner, repo, number, index);
+  return c.json({ issue: toDependencyRow(updated) });
+});
 
 // Typed because Forgejo activities encode references in JSON-ish strings; the
 // SPA gets parsed issue refs and normalized timestamps.
@@ -217,4 +268,3 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
     })),
   });
 });
-

@@ -590,6 +590,31 @@ export class Forgejo {
     return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
   }
 
+  async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
+    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`);
+  }
+
+  async listIssueBlocks(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
+    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`);
+  }
+
+  async addIssueDependency(
+    owner: string, repo: string, number: number, dependencyIndex: number,
+  ): Promise<ForgejoIssue> {
+    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
+      method: "POST",
+      body: { index: dependencyIndex, owner, repo },
+    });
+  }
+
+  async removeIssueDependency(
+    owner: string, repo: string, number: number, dependencyIndex: number,
+  ): Promise<ForgejoIssue> {
+    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
+      method: "DELETE",
+      body: { index: dependencyIndex, owner, repo },
+    });
+  }
 
   async removeIssueBlock(
     owner: string, repo: string, number: number, blockIndex: number,
