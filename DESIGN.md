@@ -79,9 +79,9 @@ protection allows it. A request-changes review is non-terminal feedback: the PR
 stays open, the branch is kept, and the author pushes more commits to the same
 branch.
 
-Cosheaf may keep compatibility names in code while the implementation catches
-up, but the product language should follow Forgejo: branch, pull request,
-review, merge, close, issue.
+Older compatibility names should be retired as Forgejo-native routes land. The
+product and implementation language should follow Forgejo: branch, pull
+request, review, merge, close, issue.
 
 ## Trust Model
 
