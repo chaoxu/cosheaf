@@ -95,4 +95,17 @@ describe("issues routes", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain("assigned_by=alice");
   });
+
+  it("does not mask Forgejo upstream failures as missing issues", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(new Response("forgejo down", { status: 503 }));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.text()).not.toContain("not_found");
+  });
 });

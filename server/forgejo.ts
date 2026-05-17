@@ -541,7 +541,12 @@ export class Forgejo {
       const nested = await Promise.all(
         reviews
           .filter((r) => r.id > 0)
-          .map((r) => this.listReviewComments(owner, repo, index, r.id).catch(() => [])),
+          .map((r) =>
+            this.listReviewComments(owner, repo, index, r.id).catch((commentErr) => {
+              if (commentErr instanceof ForgejoError && commentErr.status === 404) return [];
+              throw commentErr;
+            }),
+          ),
       );
       return nested.flat();
     }

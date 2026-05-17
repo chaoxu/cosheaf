@@ -380,7 +380,7 @@ pulls.get("/:slug/pulls/:n/comments", async (c) => {
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   const [allComments, metas, unified] = await Promise.all([
-    fj.listPullComments(owner, repo, n).catch(() => []),
+    fj.listPullComments(owner, repo, n),
     fj.listPullFiles(owner, repo, n),
     fj.getPullDiff(owner, repo, n),
   ]);

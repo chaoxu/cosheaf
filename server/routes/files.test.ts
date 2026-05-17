@@ -111,3 +111,20 @@ describe("files validation route", () => {
     });
   });
 });
+
+describe("files mutation gates", () => {
+  it("rejects read-only users before forwarding file writes to Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+
+    const res = await appFor(db).request("/api/v1/w/w/file?path=notes.md&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: "# Notes\n" }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "write access required", code: "forbidden" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

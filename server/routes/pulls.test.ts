@@ -327,4 +327,42 @@ describe("pulls + branches routes", () => {
       expect(body.reviews.find((r) => r.username === "bob")?.decision).toBe("comment");
     });
   });
+
+  describe("line comments", () => {
+    it("does not hide Forgejo failures as an empty comments list", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(new Response("forgejo down", { status: 503 }))
+        .mockResolvedValueOnce(ok([]))
+        .mockResolvedValueOnce(new Response("", { status: 200 }));
+
+      const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(500);
+      expect(await res.text()).not.toContain("\"comments\":[]");
+    });
+
+    it("does not hide per-review comment failures in the aggregate fallback", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(new Response("not found", { status: 404 })) // aggregate comments endpoint absent
+        .mockResolvedValueOnce(ok([])) // files
+        .mockResolvedValueOnce(new Response("", { status: 200 })) // diff
+        .mockResolvedValueOnce(ok([{ id: 11, state: "COMMENT", body: "", user: { login: "bob" } }])) // reviews
+        .mockResolvedValueOnce(new Response("forgejo down", { status: 503 })); // per-review comments
+
+      const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(500);
+      expect(await res.text()).not.toContain("\"comments\":[]");
+    });
+  });
 });

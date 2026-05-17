@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership } from "../middleware.js";
+import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { planIndexPage } from "../indexer.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -15,6 +15,7 @@ import type { WorkspaceValidation } from "../../shared/validation.js";
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
 files.use("/:slug/*", requireMembership());
+files.use("/:slug/*", requireWriteOnMutation);
 
 function safeRel(p: string | undefined): string | null {
   if (!p) return null;

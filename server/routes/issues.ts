@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import { ForgejoError } from "../forgejo.js";
 import { DELETED_USER_LOGIN, type ForgejoIssue } from "../forgejo-types.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
 import type {
@@ -107,8 +108,11 @@ issues.get("/:slug/issues/:number", async (c) => {
       closed_at: issue.closed_at ? new Date(issue.closed_at).getTime() : null,
     };
     return c.json(detail);
-  } catch (_err) {
-    return c.json({ error: "not found", code: "not_found" }, 404);
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 404) {
+      return c.json({ error: "not found", code: "not_found" }, 404);
+    }
+    throw err;
   }
 });
 
