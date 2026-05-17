@@ -20,6 +20,7 @@
     "typecheck:watch": "tsc --noEmit --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:fast": "pnpm typecheck && pnpm test",
     "lint": "pnpm check:lint",
     "lint:errors": "node scripts/check-bare-catch.mjs",
     "lint:boundaries": "node scripts/check-plugin-render-boundary.mjs",

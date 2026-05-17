@@ -29,10 +29,16 @@ export interface Config {
   webhookUrl: string;
 }
 
+const DEFAULT_SESSION_SECRET = "dev-secret-change-me";
+
 function required(name: string): string {
   const v = process.env[name];
   if (!v) {
-    console.error(`missing required env: ${name}`);
+    console.error(
+      `missing required env var: ${name}\n` +
+        "  Did you copy .env.example to .env.dev and load it?\n" +
+        "  cosheaf reads .env.dev (or whatever NODE_ENV points to) via process.loadEnvFile.",
+    );
     process.exit(1);
   }
   return v;
@@ -45,10 +51,25 @@ function withDefault(name: string, fallback: string): string {
 export function loadConfig(): Config {
   const dataDir = process.env.COSHEAF_DATA_DIR ?? path.resolve(process.cwd(), "data");
   mkdirSync(dataDir, { recursive: true });
+  const sessionSecret = process.env.COSHEAF_SESSION_SECRET ?? DEFAULT_SESSION_SECRET;
+  // The session secret derives the AES key that encrypts stored Forgejo PATs.
+  // If it changes between restarts (e.g. default → real value), every stored
+  // PAT becomes undecryptable and users get force-logged-out. In production
+  // that's a foot-gun; warn loudly. In tests the default is fine.
+  if (sessionSecret === DEFAULT_SESSION_SECRET && process.env.NODE_ENV === "production") {
+    console.error("COSHEAF_SESSION_SECRET is unset in production; refusing to start.");
+    process.exit(1);
+  }
+  if (sessionSecret === DEFAULT_SESSION_SECRET && process.env.NODE_ENV !== "test") {
+    console.warn(
+      "WARN: COSHEAF_SESSION_SECRET is unset; using the dev default. " +
+        "All stored Forgejo PATs are tied to this secret — changing it later forces every user to re-log-in.",
+    );
+  }
   return {
     dataDir,
     port: Number(process.env.COSHEAF_PORT ?? 3030),
-    sessionSecret: process.env.COSHEAF_SESSION_SECRET ?? "dev-secret-change-me",
+    sessionSecret,
     forgejoUrl: withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002"),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoOwner: withDefault("COSHEAF_FORGEJO_OWNER", "cosheaf-admin"),
@@ -91,11 +112,25 @@ function migrateUsersToForgejoAuth(db: Database.Database): void {
 
 function migrateDropDocKindColumns(db: Database.Database): void {
   const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
-  const hasLegacyDocMapCols = docMapCols.some((c) => c.name === "doc_type" || c.name === "forgejo_kind");
-  if (hasLegacyDocMapCols) {
+  const has = (name: string): boolean => docMapCols.some((c) => c.name === name);
+  if (has("doc_type") || has("forgejo_kind")) {
+    // Can't ALTER DROP COLUMN: the legacy `UNIQUE (workspace_id, forgejo_kind,
+    // forgejo_id)` constraint references the column we're dropping. Recreate
+    // the table with the current shape and copy what's there.
     db.exec(`
-      ALTER TABLE doc_map DROP COLUMN doc_type;
-      ALTER TABLE doc_map DROP COLUMN forgejo_kind;
+      CREATE TABLE doc_map_new (
+        cosheaf_id TEXT NOT NULL,
+        workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        forgejo_id TEXT NOT NULL,
+        title TEXT,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (workspace_id, cosheaf_id),
+        UNIQUE (workspace_id, forgejo_id)
+      );
+      INSERT INTO doc_map_new (cosheaf_id, workspace_id, forgejo_id, title, created_at)
+        SELECT cosheaf_id, workspace_id, forgejo_id, title, created_at FROM doc_map;
+      DROP TABLE doc_map;
+      ALTER TABLE doc_map_new RENAME TO doc_map;
     `);
   }
   const ftsRow = db

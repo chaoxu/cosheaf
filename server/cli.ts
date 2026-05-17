@@ -1,9 +1,12 @@
 import { createInterface } from "node:readline/promises";
+import { existsSync, unlinkSync } from "node:fs";
+import path from "node:path";
+import repl from "node:repl";
 import { stdin, stdout } from "node:process";
 import { Command, InvalidArgumentError } from "commander";
 import { WORKSPACE_SLUG_RE } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
-import { findUserByUsername, upsertUserFromForgejo } from "./users.js";
+import { createToken, findUserByUsername, upsertUserFromForgejo } from "./users.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
 import {
@@ -314,6 +317,276 @@ function passthroughLog(slug: string): void {
   }
 }
 
+// --------------------------------- doctor ---------------------------------
+
+interface CheckResult { name: string; ok: boolean; detail: string }
+
+async function check(name: string, fn: () => Promise<string>): Promise<CheckResult> {
+  try {
+    const detail = await fn();
+    return { name, ok: true, detail };
+  } catch (err) {
+    return { name, ok: false, detail: (err as Error).message };
+  }
+}
+
+async function doctor(): Promise<void> {
+  const { config, db, forgejo } = ctx();
+  const results: CheckResult[] = [];
+
+  results.push(
+    await check("forgejo reachable", async () => {
+      // Some Forgejo deployments require auth even on /version, so send the
+      // admin token. We'll check admin-scope separately below.
+      const r = await fetch(`${config.forgejoUrl}/api/v1/version`, {
+        headers: { authorization: `token ${config.forgejoToken}` },
+      });
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText} from ${config.forgejoUrl}`);
+      const v = (await r.json()) as { version?: string };
+      return `${config.forgejoUrl} → ${v.version ?? "unknown version"}`;
+    }),
+  );
+
+  results.push(
+    await check("admin token has admin scope", async () => {
+      // /admin/users requires admin permission; a 200 means the token works
+      // for provisioning. 401/403 → wrong token. 404 → ancient Forgejo.
+      const r = await fetch(`${config.forgejoUrl}/api/v1/admin/users?limit=1`, {
+        headers: { authorization: `token ${config.forgejoToken}` },
+      });
+      if (r.status === 401 || r.status === 403) throw new Error("token rejected (not admin?)");
+      if (!r.ok) throw new Error(`unexpected ${r.status}`);
+      return "ok";
+    }),
+  );
+
+  results.push(
+    await check("admin user exists in forgejo", async () => {
+      const u = await forgejo.getUserByName(config.forgejoOwner);
+      if (!u) throw new Error(`COSHEAF_FORGEJO_OWNER=${config.forgejoOwner} not found`);
+      return u.login;
+    }),
+  );
+
+  results.push(
+    await check("data dir writable", async () => {
+      const probe = path.join(config.dataDir, ".doctor-probe");
+      const fs = await import("node:fs/promises");
+      await fs.writeFile(probe, "x");
+      await fs.unlink(probe);
+      return config.dataDir;
+    }),
+  );
+
+  results.push(
+    await check("schema applied (users + workspaces tables exist)", async () => {
+      db.prepare("SELECT 1 FROM users LIMIT 1").get();
+      db.prepare("SELECT 1 FROM workspaces LIMIT 1").get();
+      return "ok";
+    }),
+  );
+
+  // Per-workspace checks
+  const workspaces = db
+    .prepare("SELECT id, slug, forgejo_repo FROM workspaces ORDER BY slug")
+    .all() as Array<{ id: number; slug: string; forgejo_repo: string }>;
+  for (const ws of workspaces) {
+    results.push(
+      await check(`workspace ${ws.slug}: forgejo repo exists`, async () => {
+        const r = await forgejo.getRepo(config.forgejoOwner, ws.forgejo_repo);
+        if (!r) throw new Error(`repo ${config.forgejoOwner}/${ws.forgejo_repo} missing`);
+        return r.full_name;
+      }),
+    );
+    results.push(
+      await check(`workspace ${ws.slug}: webhook installed`, async () => {
+        const hooks = await forgejo.listRepoHooks(config.forgejoOwner, ws.forgejo_repo);
+        const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
+        if (!ours) throw new Error("no push webhook on repo");
+        return `hook id=${ours.id}`;
+      }),
+    );
+    const lastDelivery = db
+      .prepare(
+        "SELECT delivered_at, event_type FROM webhook_log ORDER BY delivered_at DESC LIMIT 1",
+      )
+      .get() as { delivered_at: number; event_type: string } | undefined;
+    results.push({
+      name: `workspace ${ws.slug}: recent webhook activity`,
+      ok: lastDelivery !== undefined,
+      detail: lastDelivery
+        ? `last ${lastDelivery.event_type} at ${new Date(lastDelivery.delivered_at).toISOString()}`
+        : "no webhook deliveries logged yet",
+    });
+  }
+
+  let failed = 0;
+  for (const r of results) {
+    const mark = r.ok ? "OK" : "FAIL";
+    console.log(`[${mark}] ${r.name} — ${r.detail}`);
+    if (!r.ok) failed++;
+  }
+  if (failed > 0) {
+    console.error(`\n${failed} check${failed === 1 ? "" : "s"} failed`);
+    process.exit(1);
+  }
+  console.log(`\nall ${results.length} checks passed`);
+}
+
+// ---------------------------- inspect workspace ----------------------------
+
+async function inspectWorkspace(slug: string): Promise<void> {
+  const { config, db, forgejo } = ctx();
+  const ws = db
+    .prepare("SELECT id, slug, name, forgejo_repo FROM workspaces WHERE slug = ?")
+    .get(slug) as { id: number; slug: string; name: string; forgejo_repo: string } | undefined;
+  if (!ws) {
+    console.error(`workspace '${slug}' not found`);
+    process.exit(1);
+  }
+
+  console.log(`workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.forgejo_repo}\n`);
+
+  const sidecarPaths = new Set(
+    (
+      db
+        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_id = ?")
+        .all(ws.id) as Array<{ path: string }>
+    ).map((r) => r.path),
+  );
+  let forgejoPaths: Set<string>;
+  try {
+    const tree = await forgejo.getTree(config.forgejoOwner, ws.forgejo_repo, "main", true);
+    forgejoPaths = new Set(
+      tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).map((e) => e.path),
+    );
+  } catch (err) {
+    console.error(`getTree failed: ${(err as Error).message}`);
+    process.exit(1);
+  }
+
+  const onlySidecar = [...sidecarPaths].filter((p) => !forgejoPaths.has(p)).sort();
+  const onlyForgejo = [...forgejoPaths].filter((p) => !sidecarPaths.has(p)).sort();
+  const both = sidecarPaths.size + forgejoPaths.size - onlySidecar.length - onlyForgejo.length;
+
+  console.log(`pages: ${both} in sync, ${onlySidecar.length} sidecar-only, ${onlyForgejo.length} forgejo-only`);
+  for (const p of onlySidecar) console.log(`  - sidecar-only: ${p}   (run \`workspace reindex\`)`);
+  for (const p of onlyForgejo) console.log(`  - forgejo-only: ${p}   (webhook missed it; reindex)`);
+
+  console.log();
+  const recentHooks = db
+    .prepare(
+      "SELECT delivered_at, event_type, delivery_id FROM webhook_log ORDER BY delivered_at DESC LIMIT 10",
+    )
+    .all() as Array<{ delivered_at: number; event_type: string; delivery_id: string }>;
+  if (recentHooks.length === 0) {
+    console.log("webhook_log: empty (no deliveries yet)");
+  } else {
+    console.log(`webhook_log (last ${recentHooks.length}):`);
+    for (const h of recentHooks) {
+      console.log(`  ${new Date(h.delivered_at).toISOString()}  ${h.event_type.padEnd(20)} ${h.delivery_id}`);
+    }
+  }
+
+  console.log();
+  const pulls = await forgejo.listPulls(config.forgejoOwner, ws.forgejo_repo, "open");
+  console.log(`open PRs (${pulls.length}):`);
+  for (const p of pulls) {
+    console.log(`  #${p.number} ${p.title.slice(0, 60)}  by ${p.user?.login ?? "(deleted)"}  head=${p.head.ref}`);
+  }
+
+  console.log();
+  const branches = await forgejo.listBranches(config.forgejoOwner, ws.forgejo_repo);
+  const userBranches = branches.filter((b) => b.name.startsWith("user/"));
+  console.log(`user/* branches (${userBranches.length}):`);
+  for (const b of userBranches.slice(0, 20)) {
+    console.log(`  ${b.name}  @${b.commit?.id?.slice(0, 8) ?? "?"}`);
+  }
+  if (userBranches.length > 20) console.log(`  … ${userBranches.length - 20} more`);
+}
+
+// --------------------------------- token ---------------------------------
+
+function mintToken(username: string, name: string): void {
+  const { db } = ctx();
+  const user = findUserByUsername(db, username);
+  if (!user) {
+    console.error(`user '${username}' not found in cosheaf DB`);
+    process.exit(1);
+  }
+  const { token } = createToken(db, user.id, name);
+  console.log(token);
+  console.error(
+    "\nWARNING: this cs_ token authenticates as the user and will use their\n" +
+      "encrypted Forgejo PAT on every workspace call. Treat it like a Forgejo\n" +
+      "password — full repo + issue + notification scope.\n",
+  );
+}
+
+// ---------------------------------- repl ----------------------------------
+
+function startRepl(): void {
+  const { config, db, forgejo } = ctx();
+  console.log(
+    "cosheaf repl — bindings: db (better-sqlite3), forgejo (admin Forgejo client), config\n" +
+      "  e.g.  db.prepare('SELECT * FROM workspaces').all()\n" +
+      "        await forgejo.getRepo(config.forgejoOwner, 'notes')\n",
+  );
+  const r = repl.start({ prompt: "cosheaf> ", useGlobal: true, breakEvalOnSigint: true });
+  r.context.db = db;
+  r.context.forgejo = forgejo;
+  r.context.config = config;
+}
+
+// ------------------------------- reset-dev -------------------------------
+
+async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<void> {
+  const { config, db, forgejo } = ctx();
+  const workspaces = db
+    .prepare("SELECT slug, forgejo_repo FROM workspaces")
+    .all() as Array<{ slug: string; forgejo_repo: string }>;
+  const repos = workspaces.map((w) => `${config.forgejoOwner}/${w.forgejo_repo}`);
+
+  console.error("This will:");
+  console.error(`  - delete ${path.join(config.dataDir, "db.sqlite")} (+ -shm/-wal)`);
+  if (!opts.keepForgejo) {
+    for (const r of repos) console.error(`  - delete forgejo repo ${r}`);
+  } else {
+    console.error("  - keep all forgejo repos (--keep-forgejo)");
+  }
+  console.error(`  - re-seed via pnpm setup:dev defaults`);
+  if (!opts.yes) {
+    const rl = createInterface({ input: stdin, output: stdout });
+    const ans = (await rl.question("continue? [y/N] ")).trim().toLowerCase();
+    rl.close();
+    if (ans !== "y" && ans !== "yes") {
+      console.error("aborted");
+      process.exit(1);
+    }
+  }
+
+  if (!opts.keepForgejo) {
+    for (const w of workspaces) {
+      try {
+        await forgejo.deleteRepo(config.forgejoOwner, w.forgejo_repo);
+        console.error(`deleted forgejo repo ${w.forgejo_repo}`);
+      } catch (err) {
+        if (!(err instanceof ForgejoError && err.status === 404)) {
+          console.error(`warning: deleteRepo ${w.forgejo_repo} failed: ${(err as Error).message}`);
+        }
+      }
+    }
+  }
+
+  // Close DB before unlinking — better-sqlite3 holds the handle.
+  db.close();
+  for (const suffix of ["", "-shm", "-wal"]) {
+    const file = path.join(config.dataDir, `db.sqlite${suffix}`);
+    if (existsSync(file)) unlinkSync(file);
+  }
+  console.error("wiped local DB; run `pnpm setup:dev` to reseed.");
+}
+
 function parseRole(value: string): Role {
   if (!(ROLES as readonly string[]).includes(value))
     throw new InvalidArgumentError(`role must be ${ROLES.join("|")}`);
@@ -353,11 +626,38 @@ function buildProgram(): Command {
     .command("rm <slug>")
     .description("delete the Forgejo repo and the SQLite sidecar")
     .action(workspaceRm);
+  workspace
+    .command("inspect <slug>")
+    .description("show sidecar vs forgejo drift, recent webhook deliveries, open PRs, user branches")
+    .action(inspectWorkspace);
 
   program
     .command("passthrough-log <slug>")
     .description("last 50 /forgejo/* passthrough calls")
     .action(passthroughLog);
+
+  program
+    .command("doctor")
+    .description("check that forgejo, admin token, schema, and per-workspace state are sane")
+    .action(doctor);
+
+  program
+    .command("token <username>")
+    .description("mint a cs_ bearer token for a cosheaf user (scripted-client use)")
+    .option("--name <name>", "token name shown in the user's token list", "cli")
+    .action((username, opts) => mintToken(username, opts.name));
+
+  program
+    .command("repl")
+    .description("Node REPL with db, forgejo (admin), and config preloaded")
+    .action(startRepl);
+
+  program
+    .command("reset-dev")
+    .description("wipe the local DB and (optionally) the workspace forgejo repos, then reseed")
+    .option("--keep-forgejo", "do not delete forgejo repos", false)
+    .option("-y, --yes", "skip the confirmation prompt", false)
+    .action(resetDev);
 
   return program;
 }
