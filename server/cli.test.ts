@@ -14,7 +14,22 @@ describe("cli seed parsing", () => {
       password: "123123",
       workspace: "notes",
       workspaceName: "notes",
+      defaultMdFormat: "coflat",
     });
+  });
+
+  it("accepts --default-md-format=forgejo-passthrough", () => {
+    expect(parseSeedOptions([
+      "--user", "chao", "--password=pw", "--workspace", "notes",
+      "--default-md-format", "forgejo-passthrough",
+    ])).toMatchObject({ defaultMdFormat: "forgejo-passthrough" });
+  });
+
+  it("rejects unknown markdown formats", () => {
+    expect(() => parseSeedOptions([
+      "--user", "chao", "--password=pw", "--workspace", "notes",
+      "--default-md-format", "bogus",
+    ])).toThrow("--default-md-format must be a known DocumentFormatId");
   });
 
   it("rejects missing values and invalid workspace slugs", () => {

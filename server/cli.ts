@@ -14,13 +14,14 @@ import {
   provisionWorkspace,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
-import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
+import { COFLAT_FORMAT_ID, isDocumentFormatId, type DocumentFormatId } from "../shared/document-format.js";
 
 interface SeedOptions {
   user: string;
   password: string;
   workspace: string;
   workspaceName: string;
+  defaultMdFormat: DocumentFormatId;
 }
 
 async function readPassword(prompt: string): Promise<string> {
@@ -91,6 +92,7 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   const password = valueFlag(args, "--password");
   const workspace = valueFlag(args, "--workspace");
   const workspaceName = valueFlag(args, "--workspace-name") ?? workspace;
+  const formatRaw = valueFlag(args, "--default-md-format") ?? COFLAT_FORMAT_ID;
   const missing = [
     ["--user", user],
     ["--password", password],
@@ -105,11 +107,15 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   if (!WORKSPACE_SLUG_RE.test(workspace ?? "")) {
     throw new Error(`workspace must match ${WORKSPACE_SLUG_RE}`);
   }
+  if (!isDocumentFormatId(formatRaw)) {
+    throw new Error(`--default-md-format must be a known DocumentFormatId, got: ${formatRaw}`);
+  }
   return {
     user: user as string,
     password: password as string,
     workspace: workspace as string,
     workspaceName: workspaceName as string,
+    defaultMdFormat: formatRaw,
   };
 }
 
@@ -165,7 +171,7 @@ async function seed(args: string[]): Promise<void> {
     user,
     forgejoUsername: options.user,
     allowExistingLocal: true,
-    defaultMdFormat: COFLAT_FORMAT_ID,
+    defaultMdFormat: options.defaultMdFormat,
   });
   console.log(`${createdRepo ? "created" : "ensured"} workspace ${options.workspace}`);
 
