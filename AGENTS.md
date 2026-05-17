@@ -56,7 +56,10 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
 - **Workflow as trust, not automation.** Branches, pull requests, reviews, and
-  merges are the same whether the proposer is a human or a bot.
+  merges are the same whether the proposer is a human or a bot. Cosheaf does
+  not distinguish service-account PATs from human PATs: an agent's review
+  counts identically to a human's for required-approvals gating, and an
+  agent's commit attribution is whatever Forgejo records.
 
 ## Future direction
 
@@ -123,6 +126,11 @@ including via passthrough, is an external repository write from Cosheaf's point
 of view. Webhooks and `pnpm cli workspace reindex <slug>` reconcile those
 writes into SQLite. A Markdown write that needs immediate Cosheaf
 frontmatter/index/SSE behavior should go through the typed file route.
+
+Cosheaf does not synchronously run the indexer or emit SSE on passthrough
+writes. Reconciliation is webhook-only. Callers (including agents) that need
+read-after-write consistency through cosheaf's typed routes must wait for the
+webhook to land or use the typed file route in the first place.
 
 Examples for agents using a Forgejo PAT:
 
