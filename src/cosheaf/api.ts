@@ -67,20 +67,6 @@ export interface SearchResult {
   rank: number;
 }
 
-export interface TokenInfo {
-  id: number;
-  name: string;
-  created_at: number;
-}
-
-export interface PublishResult {
-  ok: boolean;
-  mode?: "direct" | "review";
-  branchId?: string;
-  pr_number?: number;
-  message?: string;
-}
-
 export interface DecisionResult {
   ok: true;
   approvals: number;
@@ -106,14 +92,39 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new ApiError(res.status, err.error ?? `HTTP ${res.status}`);
   }
-  return (await res.json()) as T;
+  if (res.status === 204 || res.status === 304) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 const w = (slug: string): string => `/api/v1/w/${encodeURIComponent(slug)}`;
+const forgejo = (slug: string, path: string): string => `${w(slug)}/forgejo/${path}`;
 const qs = (params: Record<string, string | undefined>): string => {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined);
   return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&")}` : "";
 };
+
+interface ForgejoMilestoneRef {
+  id: number;
+  title: string;
+  description?: string;
+  state: "open" | "closed";
+  open_issues: number;
+  closed_issues: number;
+  due_on?: string | null;
+}
+
+function milestoneFromForgejo(m: ForgejoMilestoneRef): Milestone {
+  return {
+    id: m.id,
+    title: m.title,
+    description: m.description ?? "",
+    state: m.state,
+    open_issues: m.open_issues,
+    closed_issues: m.closed_issues,
+    due_on: m.due_on ? new Date(m.due_on).getTime() : null,
+  };
+}
 
 export const api = {
   me: () => jsonFetch<{ user: User | null }>("/api/v1/me"),
@@ -298,16 +309,6 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  listTokens: () =>
-    jsonFetch<{ tokens: TokenInfo[] }>("/api/v1/tokens").then((r) => r.tokens),
-  createToken: (name: string) =>
-    jsonFetch<{ id: number; name: string; token: string }>("/api/v1/tokens", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-  revokeToken: (id: number) =>
-    jsonFetch<{ ok: true }>(`/api/v1/tokens/${id}`, { method: "DELETE" }),
-
   // ---- issues ----
   listIssues: (
     slug: string,
@@ -330,9 +331,17 @@ export const api = {
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     ),
   closeIssue: (slug: string, number: number) =>
-    jsonFetch<{ ok: true; state: "closed" }>(`${w(slug)}/issues/${number}/close`, { method: "POST" }),
+    jsonFetch<{ state: "open" | "closed" }>(forgejo(slug, `issues/${number}`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state: "closed" }),
+    }).then((issue) => ({ ok: true as const, state: issue.state as "closed" })),
   reopenIssue: (slug: string, number: number) =>
-    jsonFetch<{ ok: true; state: "open" }>(`${w(slug)}/issues/${number}/reopen`, { method: "POST" }),
+    jsonFetch<{ state: "open" | "closed" }>(forgejo(slug, `issues/${number}`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state: "open" }),
+    }).then((issue) => ({ ok: true as const, state: issue.state as "open" })),
   createIssueComment: (slug: string, number: number, body: string) =>
     jsonFetch<IssueComment>(`${w(slug)}/issues/${number}/comments`, {
       method: "POST",
@@ -347,25 +356,25 @@ export const api = {
   deleteIssueComment: (slug: string, number: number, id: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/comments/${id}`, { method: "DELETE" }),
   listLabels: (slug: string) =>
-    jsonFetch<{ labels: Label[] }>(`${w(slug)}/labels`),
+    jsonFetch<Label[]>(forgejo(slug, "labels")).then((labels) => ({ labels })),
   createLabel: (slug: string, body: { name: string; color: string; description?: string }) =>
-    jsonFetch<Label>(`${w(slug)}/labels`, {
+    jsonFetch<Label>(forgejo(slug, "labels"), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, color: body.color.replace(/^#/, "") }),
     }),
   setIssueLabels: (slug: string, number: number, labels: number[]) =>
-    jsonFetch<{ labels: Label[] }>(`${w(slug)}/issues/${number}/labels`, {
+    jsonFetch<Label[]>(forgejo(slug, `issues/${number}/labels`), {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ labels }),
-    }),
+    }).then((labels) => ({ labels })),
   listPinnedIssues: (slug: string) =>
     jsonFetch<{ issues: IssueRow[] }>(`${w(slug)}/issues/pinned`),
   pinIssue: (slug: string, number: number) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "POST" }),
+    jsonFetch<void>(forgejo(slug, `issues/${number}/pin`), { method: "POST" }).then(() => ({ ok: true as const })),
   unpinIssue: (slug: string, number: number) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "DELETE" }),
+    jsonFetch<void>(forgejo(slug, `issues/${number}/pin`), { method: "DELETE" }).then(() => ({ ok: true as const })),
   getIssueTimeline: (slug: string, number: number) =>
     jsonFetch<{ events: TimelineEvent[] }>(`${w(slug)}/issues/${number}/timeline`),
   listActivities: (slug: string, limit = 50) =>
@@ -383,19 +392,21 @@ export const api = {
   removeIssueDependency: (slug: string, number: number, index: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/dependencies/${index}`, { method: "DELETE" }),
   listMilestones: (slug: string, state: "open" | "closed" | "all" = "open") =>
-    jsonFetch<{ milestones: Milestone[] }>(`${w(slug)}/milestones?state=${state}`),
+    jsonFetch<ForgejoMilestoneRef[]>(forgejo(slug, `milestones?state=${state}`)).then((milestones) => ({
+      milestones: milestones.map(milestoneFromForgejo),
+    })),
   createMilestone: (slug: string, body: { title: string; description?: string }) =>
-    jsonFetch<{ id: number; title: string; state: "open" | "closed" }>(`${w(slug)}/milestones`, {
+    jsonFetch<{ id: number; title: string; state: "open" | "closed" }>(forgejo(slug, "milestones"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
   setIssueMilestone: (slug: string, number: number, id: number | null) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/milestone`, {
-      method: "PUT",
+    jsonFetch<unknown>(forgejo(slug, `issues/${number}`), {
+      method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id }),
-    }),
+      body: JSON.stringify({ milestone: id ?? 0 }),
+    }).then(() => ({ ok: true as const })),
 
   // ---- notifications ----
   listNotifications: (slug: string) =>
@@ -432,4 +443,3 @@ export type {
   NotificationRow,
   TimelineEvent,
 };
-

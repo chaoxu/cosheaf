@@ -24,7 +24,6 @@ import {
   type PrMeta,
   type ReviewQueueEntry,
   type SearchResult,
-  type TokenInfo,
   type User,
   type Workspace,
 } from "./api";
@@ -60,7 +59,6 @@ type View =
   | { kind: "loading" }
   | { kind: "login" }
   | { kind: "workspaces"; user: User }
-  | { kind: "tokens"; user: User }
   | { kind: "workspace"; user: User; workspace: Workspace };
 
 function SidebarTab({
@@ -159,7 +157,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }): Rea
             type="button"
             onClick={() => {
               setOpen(false);
-              api.logout().then(onLogout);
+              onLogout();
             }}
             className="block w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--cf-hover)]"
           >
@@ -227,15 +225,13 @@ const muted = "text-[var(--cf-muted)]";
 const borderColor = "border-[var(--cf-border)]";
 
 // URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
-// workspace switching, tokens, and workspaces list participate in browser history.
+// workspace switching and the workspaces list participate in browser history.
 type RoutePath =
   | { kind: "workspaces" }
-  | { kind: "tokens" }
   | { kind: "workspace"; slug: string; filePath: string | null };
 
 function parseRoute(): RoutePath {
   const path = window.location.pathname;
-  if (path === "/tokens") return { kind: "tokens" };
   const m = /^\/w\/([^/]+)(?:\/(.*))?$/.exec(path);
   if (m) {
     const filePath = m[2] ? decodeURIComponent(m[2]) : null;
@@ -245,7 +241,6 @@ function parseRoute(): RoutePath {
 }
 
 function routeUrl(r: RoutePath): string {
-  if (r.kind === "tokens") return "/tokens";
   if (r.kind === "workspaces") return "/";
   if (r.filePath) return `/w/${r.slug}/${r.filePath.split("/").map(encodeURIComponent).join("/")}`;
   return `/w/${r.slug}`;
@@ -260,6 +255,12 @@ function navigate(r: RoutePath, mode: "push" | "replace" = "push"): void {
 
 export function CosheafApp(): ReactElement {
   const [view, setView] = useState<View>({ kind: "loading" });
+  const handleLogout = useCallback(() => {
+    api.logout().finally(() => {
+      navigate({ kind: "workspaces" }, "replace");
+      setView({ kind: "login" });
+    });
+  }, []);
 
   useEffect(() => {
     api
@@ -271,17 +272,21 @@ export function CosheafApp(): ReactElement {
         }
         // Restore the route from the current URL (deep-link friendly).
         const r = parseRoute();
-        if (r.kind === "tokens") {
-          setView({ kind: "tokens", user });
-        } else if (r.kind === "workspace") {
-          api.listWorkspaces().then((wss) => {
-            const ws = wss.find((w) => w.slug === r.slug);
-            if (ws) setView({ kind: "workspace", user, workspace: ws });
-            else {
+        if (r.kind === "workspace") {
+          api
+            .listWorkspaces()
+            .then((wss) => {
+              const ws = wss.find((w) => w.slug === r.slug);
+              if (ws) setView({ kind: "workspace", user, workspace: ws });
+              else {
+                navigate({ kind: "workspaces" }, "replace");
+                setView({ kind: "workspaces", user });
+              }
+            })
+            .catch(() => {
               navigate({ kind: "workspaces" }, "replace");
               setView({ kind: "workspaces", user });
-            }
-          });
+            });
         } else {
           setView({ kind: "workspaces", user });
         }
@@ -295,15 +300,20 @@ export function CosheafApp(): ReactElement {
     const handler = (): void => {
       if (view.kind === "loading" || view.kind === "login") return;
       const r = parseRoute();
-      if (r.kind === "tokens") setView({ kind: "tokens", user: view.user });
-      else if (r.kind === "workspaces") setView({ kind: "workspaces", user: view.user });
+      if (r.kind === "workspaces") setView({ kind: "workspaces", user: view.user });
       else if (r.kind === "workspace") {
         if (view.kind === "workspace" && view.workspace.slug === r.slug) return;
-        api.listWorkspaces().then((wss) => {
-          const ws = wss.find((w) => w.slug === r.slug);
-          if (ws) setView({ kind: "workspace", user: view.user, workspace: ws });
-          else setView({ kind: "workspaces", user: view.user });
-        });
+        api
+          .listWorkspaces()
+          .then((wss) => {
+            const ws = wss.find((w) => w.slug === r.slug);
+            if (ws) setView({ kind: "workspace", user: view.user, workspace: ws });
+            else setView({ kind: "workspaces", user: view.user });
+          })
+          .catch(() => {
+            navigate({ kind: "workspaces" }, "replace");
+            setView({ kind: "workspaces", user: view.user });
+          });
       }
     };
     window.addEventListener("popstate", handler);
@@ -331,29 +341,7 @@ export function CosheafApp(): ReactElement {
           navigate({ kind: "workspace", slug: workspace.slug, filePath: null });
           setView({ kind: "workspace", user: view.user, workspace });
         }}
-        onTokens={() => {
-          navigate({ kind: "tokens" });
-          setView({ kind: "tokens", user: view.user });
-        }}
-        onLogout={() => {
-          navigate({ kind: "workspaces" }, "replace");
-          setView({ kind: "login" });
-        }}
-      />
-    );
-  }
-  if (view.kind === "tokens") {
-    return (
-      <TokensScreen
-        user={view.user}
-        onBack={() => {
-          navigate({ kind: "workspaces" });
-          setView({ kind: "workspaces", user: view.user });
-        }}
-        onLogout={() => {
-          navigate({ kind: "workspaces" }, "replace");
-          setView({ kind: "login" });
-        }}
+        onLogout={handleLogout}
       />
     );
   }
@@ -365,10 +353,7 @@ export function CosheafApp(): ReactElement {
         navigate({ kind: "workspaces" });
         setView({ kind: "workspaces", user: view.user });
       }}
-      onLogout={() => {
-        navigate({ kind: "workspaces" }, "replace");
-        setView({ kind: "login" });
-      }}
+      onLogout={handleLogout}
     />
   );
 }
@@ -400,10 +385,13 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (busy) return;
+    const loginUsername = username.trim();
+    if (!loginUsername || !password) return;
     setBusy(true);
     setError(null);
     api
-      .login(username, password)
+      .login(loginUsername, password)
       .then(onLoggedIn)
       .catch((err: unknown) =>
         setError(err instanceof ApiError ? err.message : "Login failed"),
@@ -439,7 +427,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
           />
         </div>
         {error && <div className="py-2 text-red-600">{error}</div>}
-        <Button type="submit" disabled={busy || !username || !password}>
+        <Button type="submit" disabled={busy || !username.trim() || !password}>
           {busy ? "..." : "Sign in"}
         </Button>
       </form>
@@ -450,12 +438,10 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: (user: User) => void }): Reac
 function WorkspaceList({
   user,
   onPick,
-  onTokens,
   onLogout,
 }: {
   user: User;
   onPick: (workspace: Workspace) => void;
-  onTokens: () => void;
   onLogout: () => void;
 }): ReactElement {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
@@ -496,13 +482,10 @@ function WorkspaceList({
         <strong>cosheaf</strong>
         <span className="flex-1" />
         <span className={muted}>{user.username}</span>
-        <Button variant="ghost" size="sm" onClick={onTokens}>
-          Tokens
-        </Button>
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => api.logout().then(onLogout)}
+          onClick={onLogout}
         >
           Sign out
         </Button>
@@ -554,127 +537,6 @@ function WorkspaceList({
                     {ws.role}
                   </span>
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </ContentPane>
-    </Screen>
-  );
-}
-
-function TokensScreen({
-  user,
-  onBack,
-  onLogout,
-}: {
-  user: User;
-  onBack: () => void;
-  onLogout: () => void;
-}): ReactElement {
-  const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
-  const [name, setName] = useState("");
-  const [created, setCreated] = useState<{ id: number; name: string; token: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = useCallback(() => {
-    api
-      .listTokens()
-      .then(setTokens)
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : "Failed to load"),
-      );
-  }, []);
-  useEffect(reload, [reload]);
-
-  const create = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    api
-      .createToken(name.trim())
-      .then((t) => {
-        setCreated(t);
-        setName("");
-        reload();
-      })
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : "Create failed"),
-      );
-  };
-
-  const revoke = (id: number) => {
-    api
-      .revokeToken(id)
-      .then(reload)
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.message : "Revoke failed"),
-      );
-  };
-
-  return (
-    <Screen>
-      <Topbar>
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          ← Workspaces
-        </Button>
-        <strong>Tokens</strong>
-        <span className="flex-1" />
-        <span className={muted}>{user.username}</span>
-        <Button variant="ghost" size="sm" onClick={() => api.logout().then(onLogout)}>
-          Sign out
-        </Button>
-      </Topbar>
-      <ContentPane>
-        <p className={cn("text-xs", muted)}>
-          Personal access tokens authenticate as you (humans or agents) via{" "}
-          <code>Authorization: Bearer &lt;token&gt;</code>. The token value is shown once at
-          creation; copy it now.
-        </p>
-        <form onSubmit={create} className="mt-3 flex gap-2">
-          <Input
-            placeholder="token name (e.g., 'my-agent')"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Button type="submit" disabled={!name.trim()}>
-            Create token
-          </Button>
-        </form>
-
-        {created && (
-          <div
-            className={cn(
-              "my-3 flex flex-col gap-2 rounded-md border border-[var(--cf-fg)] p-3",
-            )}
-          >
-            <div className={cn("text-xs", muted)}>
-              {created.name}: copy this now, it won't be shown again:
-            </div>
-            <code className="select-all break-all rounded border border-[var(--cf-border)] p-2 font-mono">
-              {created.token}
-            </code>
-            <Button variant="ghost" size="sm" onClick={() => setCreated(null)}>
-              Dismiss
-            </Button>
-          </div>
-        )}
-
-        {error && <div className="py-2 text-red-600">{error}</div>}
-        {tokens && tokens.length === 0 && <div className={muted}>No tokens yet.</div>}
-        {tokens && tokens.length > 0 && (
-          <ul className="mt-3 space-y-1.5">
-            {tokens.map((t) => (
-              <li key={t.id}>
-                <div className="flex w-full items-center gap-2.5 rounded-md px-4 py-3">
-                  <strong>{t.name}</strong>
-                  <span className={cn("text-xs", muted)}>
-                    created {new Date(t.created_at).toISOString().slice(0, 10)}
-                  </span>
-                  <span className="flex-1" />
-                  <Button variant="outline" size="sm" onClick={() => revoke(t.id)}>
-                    Revoke
-                  </Button>
-                </div>
               </li>
             ))}
           </ul>
@@ -1225,12 +1087,11 @@ function WorkspaceView({
     busy: boolean;
     draftReviewId: number | null;
   }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
-  // The active writable change id; set synchronously from each save response.
-  // We track only the id to avoid a stale-state race between setHasPending
-  // and a separate listChanges round-trip.
+  // The active writable branch, set synchronously from save responses to avoid
+  // racing a separate branch-list refresh.
   const [currentBranchName, setCurrentBranchName] = useState<string | null>(null);
   const [reviewBranchName, setReviewBranchName] = useState<string | null>(null);
-  const [changesReady, setChangesReady] = useState(false);
+  const [branchesReady, setBranchesReady] = useState(false);
   // Tree + file reads run against whichever branch is "active": the review's
   // head when in review mode, otherwise the user's working branch (or main).
   const activeBranchName = reviewBranchName ?? currentBranchName;
@@ -1270,7 +1131,7 @@ function WorkspaceView({
   // Auto-select when there's exactly one; keep an already-selected branch if
   // it still appears in the list (don't clobber a freshly-created one).
   const reloadBranches = useCallback((markReady = false) => {
-    if (markReady) setChangesReady(false);
+    if (markReady) setBranchesReady(false);
     api
       .myBranches(workspace.slug)
       .then((branches) => {
@@ -1286,7 +1147,7 @@ function WorkspaceView({
       })
       .catch(() => undefined)
       .finally(() => {
-        if (markReady) setChangesReady(true);
+        if (markReady) setBranchesReady(true);
       });
   }, [workspace.slug]);
 
@@ -1297,7 +1158,7 @@ function WorkspaceView({
   const openPathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const reviewingPullNumberRef = useRef<number | null>(null);
-  // Tracks the branchId the currently-open file was last fetched against, so
+  // Tracks the branch the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
   // branch even after currentBranchName is nulled by publish.
   const openFileBranchRef = useRef<string | null>(null);
@@ -1456,14 +1317,14 @@ function WorkspaceView({
   // the file and wipe `dirty=true` from any local edits in flight.
   const initialOpenRef = useRef(false);
   useEffect(() => {
-    if (!changesReady || initialOpenRef.current) return;
+    if (!branchesReady || initialOpenRef.current) return;
     const r = parseRoute();
     if (r.kind === "workspace" && r.slug === workspace.slug && r.filePath) {
       initialOpenRef.current = true;
       openPathFromSource(r.filePath, { push: false, force: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional, see comment above
-  }, [changesReady, workspace.slug]);
+  }, [branchesReady, workspace.slug]);
 
   useEffect(() => {
     const handler = (): void => {

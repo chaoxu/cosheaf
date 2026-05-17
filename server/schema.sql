@@ -17,13 +17,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS tokens (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  token_hash TEXT NOT NULL UNIQUE,
-  created_at INTEGER NOT NULL
-);
+-- Cosheaf-side API tokens were removed. API clients should use Forgejo PATs
+-- directly as `Authorization: Bearer <token>`.
+DROP TABLE IF EXISTS tokens;
 
 CREATE TABLE IF NOT EXISTS workspaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

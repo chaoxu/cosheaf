@@ -36,7 +36,7 @@ collaborators through Cosheaf's HTTP API.
   Forgejo PAT as `Authorization: Bearer <token>`.
 - **Passthrough-first agent API** — agents use
   `/api/v1/w/:slug/forgejo/*` for Forgejo-shaped branch, pull request, issue,
-  review, and contents operations.
+  label, milestone, notification, review, and read-only contents operations.
 
 ## API shape
 
@@ -53,6 +53,13 @@ File writes have a clear boundary. A Markdown write through Forgejo contents
 API passthrough is treated as an external repo edit and reaches the SQLite
 index through webhook/reindex reconciliation. A Markdown write that needs
 immediate Cosheaf document/index behavior should use the typed file route.
+
+Example passthrough calls, all with `Authorization: Bearer <Forgejo PAT>`:
+`GET /api/v1/w/flushing-coin/forgejo/issues?state=open`,
+`GET /api/v1/w/flushing-coin/forgejo/pulls?state=open`,
+`GET /api/v1/w/flushing-coin/forgejo/labels`,
+`GET /api/v1/w/flushing-coin/forgejo/milestones?state=open`, and
+`GET /api/v1/w/flushing-coin/forgejo/contents/hello.md`.
 
 ## Quick start
 
@@ -82,7 +89,7 @@ to the server.
 ## Project layout
 
 ```
-server/        Hono API, Forgejo client, SQLite sidecar index, change workflow
+server/        Hono API, Forgejo client, SQLite sidecar index, pull request workflow
 src/cosheaf/   React UI (login, workspace, file tree, editor, review surfaces)
 scripts/       dev:all spawner, lefthook checks, Forgejo issue + worker-branch tools
 FORMAT.md      Coflat document format reference

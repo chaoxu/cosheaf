@@ -122,6 +122,20 @@ of view. Webhooks and `pnpm cli workspace reindex <slug>` reconcile those
 writes into SQLite. A Markdown write that needs immediate Cosheaf
 frontmatter/index/SSE behavior should go through the typed file route.
 
+Examples for agents using a Forgejo PAT:
+
+- `GET /api/v1/w/flushing-coin/forgejo/issues?state=open`
+- `PATCH /api/v1/w/flushing-coin/forgejo/issues/42` with `{ "state": "closed" }`
+- `GET /api/v1/w/flushing-coin/forgejo/pulls?state=open`
+- `GET /api/v1/w/flushing-coin/forgejo/labels`
+- `GET /api/v1/w/flushing-coin/forgejo/milestones?state=open`
+- `GET /api/v1/w/flushing-coin/forgejo/contents/hello.md`
+- `GET /api/v1/w/flushing-coin/forgejo/notifications?status=unread`
+
+Use `Authorization: Bearer <Forgejo PAT>` on these Cosheaf requests; Cosheaf
+translates that to the Forgejo token auth header after validating workspace
+membership.
+
 Rules of thumb:
 
 - Don't add a typed wrapper that's a 1:1 Forgejo proxy with no logic — the
@@ -167,7 +181,7 @@ server/
     files.ts       # tree/file get/put/delete, search, backlinks, documents list
     pulls.ts       # pull request + review API (merge, reviews, comments, drafts, settings)
     branches.ts    # branch list/create/delete
-    issues.ts      # issues, labels, milestones, comments, timeline (proxies Forgejo)
+    issues.ts      # issue UI projections, comments, timeline, dependencies
     notifications.ts # notification feed
     forgejo-passthrough.ts # /forgejo/* agent escape hatch (audited)
     webhooks.ts    # Forgejo webhook reconciliation

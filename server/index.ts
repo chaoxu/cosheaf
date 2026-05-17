@@ -5,7 +5,6 @@ import { getDb, loadConfig } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import { auth } from "./routes/auth.js";
-import { tokens } from "./routes/tokens.js";
 import { workspaces } from "./routes/workspaces.js";
 import { files } from "./routes/files.js";
 import { branches } from "./routes/branches.js";
@@ -35,7 +34,6 @@ app.use("*", async (c, next) => {
 app.get("/api/v1/health", (c) => c.json({ ok: true }));
 
 app.route("/api/v1", auth);
-app.route("/api/v1/tokens", tokens);
 app.route("/api/v1/workspaces", workspaces);
 app.route("/api/v1/w", files);
 app.route("/api/v1/w", pulls);

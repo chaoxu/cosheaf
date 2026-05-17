@@ -66,6 +66,14 @@ function login(db: Database.Database, username: string, password: string) {
   });
 }
 
+async function waitForFetchCalls(count: number): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    if (fetchMock.mock.calls.length >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`expected ${count} fetch calls, saw ${fetchMock.mock.calls.length}`);
+}
+
 describe("POST /api/v1/auth/login", () => {
   it("201 from Forgejo → stores encrypted PAT and sets session cookie", async () => {
     const db = freshDb();
@@ -155,25 +163,24 @@ describe("POST /api/v1/auth/login", () => {
     expect(res.status).toBe(502);
   });
 
-  it("concurrent logins for same user share one PAT exchange (no race)", async () => {
-    // Two simultaneous logins must not both POST + DELETE — the loser would
-    // clobber the winner's freshly-issued token. The in-process serializer
-    // collapses them onto one fetch chain.
+  it("serializes concurrent logins for the same user without sharing credential results", async () => {
     const db = freshDb();
-    let resolveFirst: ((v: Response) => void) | undefined;
-    fetchMock.mockImplementationOnce(
-      () => new Promise<Response>((r) => { resolveFirst = r; }),
-    );
+    let resolveFirst: ((value: Response) => void) | undefined;
+    fetchMock
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => { resolveFirst = resolve; }),
+      )
+      .mockResolvedValueOnce(failure(401, { message: "bad" }));
+
     const a = login(db, "gwen", "secret");
-    const b = login(db, "gwen", "secret");
-    // Yield to the event loop so both handlers reach the in-flight check.
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    resolveFirst?.(ok({ sha1: "shared-pat" }));
+    await waitForFetchCalls(1);
+    const b = login(db, "gwen", "wrong");
+
+    resolveFirst?.(ok({ sha1: "pat-gwen" }));
     const [ra, rb] = await Promise.all([a, b]);
     expect(ra.status).toBe(200);
-    expect(rb.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rb.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("400 when username or password missing", async () => {

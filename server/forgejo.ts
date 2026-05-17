@@ -15,8 +15,6 @@ import type {
   ForgejoHook,
   ForgejoIssue,
   ForgejoIssueComment,
-  ForgejoLabel,
-  ForgejoMilestone,
   ForgejoNotificationThread,
   ForgejoPull,
   ForgejoPullFile,
@@ -83,6 +81,10 @@ export class Forgejo {
   }
 
   // ---------------- users ----------------
+
+  async getCurrentUser(): Promise<ForgejoUser> {
+    return this.req<ForgejoUser>("/api/v1/user");
+  }
 
   async getUserByName(username: string): Promise<ForgejoUser | null> {
     try {
@@ -590,60 +592,8 @@ export class Forgejo {
     return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/pinned`);
   }
 
-  async pinIssue(owner: string, repo: string, number: number): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/pin`, {
-      method: "POST",
-      expectEmpty: true,
-    });
-  }
-
-  async unpinIssue(owner: string, repo: string, number: number): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/pin`, {
-      method: "DELETE",
-      expectEmpty: true,
-    });
-  }
-
   async listIssueTimeline(owner: string, repo: string, number: number): Promise<ForgejoTimelineEvent[]> {
     return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
-  }
-
-  // ---------- milestones ----------
-
-  async listMilestones(
-    owner: string,
-    repo: string,
-    state: "open" | "closed" | "all" = "open",
-  ): Promise<ForgejoMilestone[]> {
-    return this.req<ForgejoMilestone[]>(`/api/v1/repos/${owner}/${repo}/milestones?state=${state}`);
-  }
-
-  async createMilestone(
-    owner: string, repo: string,
-    opts: { title: string; description?: string; due_on?: string },
-  ): Promise<ForgejoMilestone> {
-    return this.req<ForgejoMilestone>(`/api/v1/repos/${owner}/${repo}/milestones`, {
-      method: "POST",
-      body: {
-        title: opts.title,
-        description: opts.description ?? "",
-        ...(opts.due_on ? { due_on: opts.due_on } : {}),
-      },
-    });
-  }
-
-  async editMilestone(
-    owner: string, repo: string, id: number,
-    opts: { title?: string; description?: string; state?: "open" | "closed" },
-  ): Promise<ForgejoMilestone> {
-    const payload: Record<string, unknown> = {};
-    if (opts.title !== undefined) payload.title = opts.title;
-    if (opts.description !== undefined) payload.description = opts.description;
-    if (opts.state !== undefined) payload.state = opts.state;
-    return this.req<ForgejoMilestone>(`/api/v1/repos/${owner}/${repo}/milestones/${id}`, {
-      method: "PATCH",
-      body: payload,
-    });
   }
 
   async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
@@ -715,25 +665,6 @@ export class Forgejo {
     });
   }
 
-  async editIssue(
-    owner: string, repo: string, number: number,
-    opts: {
-      title?: string; body?: string; state?: "open" | "closed";
-      assignees?: string[]; milestone?: number | null;
-    },
-  ): Promise<ForgejoIssue> {
-    const payload: Record<string, unknown> = {};
-    if (opts.title !== undefined) payload.title = opts.title;
-    if (opts.body !== undefined) payload.body = opts.body;
-    if (opts.state !== undefined) payload.state = opts.state;
-    if (opts.assignees !== undefined) payload.assignees = opts.assignees;
-    if (opts.milestone !== undefined) payload.milestone = opts.milestone ?? 0;
-    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`, {
-      method: "PATCH",
-      body: payload,
-    });
-  }
-
   async listIssueComments(owner: string, repo: string, number: number): Promise<ForgejoIssueComment[]> {
     return this.req<ForgejoIssueComment[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/comments`);
   }
@@ -799,29 +730,6 @@ export class Forgejo {
     });
   }
 
-  // ---------- labels ----------
-
-  async listLabels(owner: string, repo: string): Promise<ForgejoLabel[]> {
-    return this.req<ForgejoLabel[]>(`/api/v1/repos/${owner}/${repo}/labels`);
-  }
-
-  async createLabel(
-    owner: string, repo: string, opts: { name: string; color: string; description?: string },
-  ): Promise<ForgejoLabel> {
-    return this.req<ForgejoLabel>(`/api/v1/repos/${owner}/${repo}/labels`, {
-      method: "POST",
-      body: { name: opts.name, color: opts.color, description: opts.description ?? "" },
-    });
-  }
-
-  async setIssueLabels(
-    owner: string, repo: string, number: number, labelIds: number[],
-  ): Promise<ForgejoLabel[]> {
-    return this.req<ForgejoLabel[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/labels`, {
-      method: "PUT",
-      body: { labels: labelIds },
-    });
-  }
 }
 
 function encodeFilePath(p: string): string {
@@ -834,10 +742,8 @@ function encodeFilePath(p: string): string {
 export type {
   ForgejoIssue,
   ForgejoIssueComment,
-  ForgejoMilestone,
   ForgejoActivity,
   ForgejoTimelineEvent,
-  ForgejoLabel,
   ForgejoUser,
   ForgejoRepo,
   ForgejoNotificationThread,

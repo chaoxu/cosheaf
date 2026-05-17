@@ -3,7 +3,6 @@
 // permission cache is pre-seeded per test so we exercise only the
 // request actually under test against the mock.
 
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,8 +14,8 @@ import { Forgejo } from "../forgejo.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
-import { _resetPermCacheForTests, _seedPermCacheForTests } from "../middleware.js";
-import { encryptPat } from "../pat-crypto.js";
+import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
+import { seedAuthUser } from "../test-helpers.js";
 import { pulls } from "./pulls.js";
 import { branches } from "./branches.js";
 
@@ -40,22 +39,8 @@ function freshDb(): Database.Database {
   return db;
 }
 
-function sha256Hex(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
-}
-
 function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
-  const token = `cs_${username}`;
-  const blob = encryptPat(`fake-pat-${username}`, config.sessionSecret);
-  db.prepare(
-    "INSERT INTO users (id, username, forgejo_token_ciphertext, created_at) VALUES (?, ?, ?, 0)",
-  ).run(id, username, blob);
-  db.prepare("INSERT INTO tokens (user_id, name, token_hash, created_at) VALUES (?, 'test', ?, 0)").run(
-    id,
-    sha256Hex(token),
-  );
-  _seedPermCacheForTests("owner", "repo", username, role);
-  return token;
+  return seedAuthUser(db, config, { id, username, role, owner: "owner", repo: "repo" });
 }
 
 function seedWorkspace(db: Database.Database): void {
@@ -83,6 +68,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   _resetPermCacheForTests();
+  _resetBearerAuthCacheForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();

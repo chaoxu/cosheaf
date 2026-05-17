@@ -34,6 +34,7 @@ export interface AppEnv {
     // Forgejo client bound to the authenticated user's PAT. Set by
     // requireAuth; used by every workspace route via repoCtx.fj.
     fjUser: Forgejo;
+    forgejoToken: string;
     workspace: WorkspaceContext;
     repoCtx: RepoCtx;
   };

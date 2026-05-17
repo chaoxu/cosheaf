@@ -10,10 +10,11 @@ import type { AppEnv } from "../types.js";
 import {
   createSession,
   destroySession,
+  SESSION_TTL_SECONDS,
   setStoredPat,
   upsertUserFromForgejo,
-  userFromSession,
 } from "../users.js";
+import { resolveAuth } from "../middleware.js";
 
 export const auth = new Hono<AppEnv>();
 
@@ -48,24 +49,28 @@ export type LoginOutcome =
 // token. Forgejo doesn't expose stored token shas (only at creation) so we
 // can't compare-and-swap; serialize locally instead. Caveat: only effective
 // within one cosheaf process. Multi-process deployments would still race.
-const inFlight = new Map<string, Promise<LoginOutcome>>();
+const loginQueues = new Map<string, Promise<void>>();
 
 async function exchangeForgejoCredsForPat(
   baseUrl: string,
   username: string,
   password: string,
 ): Promise<LoginOutcome> {
-  const existing = inFlight.get(username);
-  if (existing) return existing;
-  const p = (async (): Promise<LoginOutcome> => {
-    try {
-      return await exchangeForgejoCredsForPatRaw(baseUrl, username, password);
-    } finally {
-      inFlight.delete(username);
-    }
+  const previous = loginQueues.get(username) ?? Promise.resolve();
+  const run = (async (): Promise<LoginOutcome> => {
+    await previous.catch(() => undefined);
+    return exchangeForgejoCredsForPatRaw(baseUrl, username, password);
   })();
-  inFlight.set(username, p);
-  return p;
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  loginQueues.set(username, tail);
+  try {
+    return await run;
+  } finally {
+    if (loginQueues.get(username) === tail) loginQueues.delete(username);
+  }
 }
 
 async function exchangeForgejoCredsForPatRaw(
@@ -143,7 +148,7 @@ auth.post("/login", async (c) => {
     httpOnly: true,
     sameSite: "Lax",
     path: "/",
-    maxAge: 30 * 24 * 60 * 60,
+    maxAge: SESSION_TTL_SECONDS,
     secure: process.env.NODE_ENV === "production",
   });
   return c.json({ id: user.id, username: user.username });
@@ -162,10 +167,8 @@ auth.post("/logout", (c) => {
   return c.json({ ok: true });
 });
 
-auth.get("/me", (c) => {
-  const sid = getCookie(c, "session");
-  if (!sid) return c.json({ user: null });
-  const u = userFromSession(c.get("db"), sid);
-  if (!u) return c.json({ user: null });
-  return c.json({ user: { id: u.id, username: u.username } });
+auth.get("/me", async (c) => {
+  const auth = await resolveAuth(c);
+  if (!auth) return c.json({ user: null });
+  return c.json({ user: { id: auth.user.id, username: auth.user.username } });
 });

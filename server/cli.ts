@@ -6,7 +6,7 @@ import { stdin, stdout } from "node:process";
 import { Command, InvalidArgumentError } from "commander";
 import { WORKSPACE_SLUG_RE } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
-import { createToken, findUserByUsername, upsertUserFromForgejo } from "./users.js";
+import { findUserByUsername, upsertUserFromForgejo } from "./users.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
 import {
@@ -505,24 +505,6 @@ async function inspectWorkspace(slug: string): Promise<void> {
   if (userBranches.length > 20) console.log(`  … ${userBranches.length - 20} more`);
 }
 
-// --------------------------------- token ---------------------------------
-
-function mintToken(username: string, name: string): void {
-  const { db } = ctx();
-  const user = findUserByUsername(db, username);
-  if (!user) {
-    console.error(`user '${username}' not found in cosheaf DB`);
-    process.exit(1);
-  }
-  const { token } = createToken(db, user.id, name);
-  console.log(token);
-  console.error(
-    "\nWARNING: this cs_ token authenticates as the user and will use their\n" +
-      "encrypted Forgejo PAT on every workspace call. Treat it like a Forgejo\n" +
-      "password — full repo + issue + notification scope.\n",
-  );
-}
-
 // ---------------------------------- repl ----------------------------------
 
 function startRepl(): void {
@@ -640,12 +622,6 @@ function buildProgram(): Command {
     .command("doctor")
     .description("check that forgejo, admin token, schema, and per-workspace state are sane")
     .action(doctor);
-
-  program
-    .command("token <username>")
-    .description("mint a cs_ bearer token for a cosheaf user (scripted-client use)")
-    .option("--name <name>", "token name shown in the user's token list", "cli")
-    .action((username, opts) => mintToken(username, opts.name));
 
   program
     .command("repl")

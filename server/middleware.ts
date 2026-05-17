@@ -1,31 +1,72 @@
+import type { Context } from "hono";
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
-import { Forgejo } from "./forgejo.js";
-import { getStoredPat, userFromSession, userFromToken } from "./users.js";
+import { Forgejo, ForgejoError } from "./forgejo.js";
+import { getStoredPat, upsertUserFromForgejo, userFromSession, type User } from "./users.js";
+
+interface AuthResolution {
+  user: User;
+  forgejoToken: string;
+}
+
+interface BearerCacheEntry {
+  username: string;
+  expiresAt: number;
+}
+
+const BEARER_CACHE = new Map<string, BearerCacheEntry>();
+const BEARER_TTL_MS = 30_000;
+
+export function _seedBearerAuthCacheForTests(token: string, username: string): void {
+  BEARER_CACHE.set(token, { username, expiresAt: Date.now() + 60_000 });
+}
+
+export function _resetBearerAuthCacheForTests(): void {
+  BEARER_CACHE.clear();
+}
+
+function bearerToken(authHeader?: string): string | null {
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const token = authHeader.slice("Bearer ".length).trim();
+  return token || null;
+}
+
+export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | null> {
+  const db = c.get("db");
+  const config = c.get("config");
+  const bearer = bearerToken(c.req.header("authorization"));
+  if (bearer) {
+    const now = Date.now();
+    const cached = BEARER_CACHE.get(bearer);
+    let username = cached && cached.expiresAt > now ? cached.username : null;
+    if (!username) {
+      const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: bearer });
+      try {
+        username = (await fj.getCurrentUser()).login;
+      } catch (err) {
+        if (err instanceof ForgejoError && (err.status === 401 || err.status === 403)) return null;
+        throw err;
+      }
+      BEARER_CACHE.set(bearer, { username, expiresAt: now + BEARER_TTL_MS });
+    }
+    return { user: upsertUserFromForgejo(db, username), forgejoToken: bearer };
+  }
+
+  const sid = getCookie(c, "session");
+  const user = sid ? userFromSession(db, sid) : null;
+  if (!user) return null;
+  const pat = getStoredPat(db, user.id, config.sessionSecret);
+  return pat ? { user, forgejoToken: pat } : null;
+}
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const db = c.get("db");
-  const auth = c.req.header("authorization");
-  let user = null;
-  if (auth?.startsWith("Bearer ")) {
-    user = userFromToken(db, auth.slice("Bearer ".length).trim());
-  }
-  if (!user) {
-    const sid = getCookie(c, "session");
-    if (sid) user = userFromSession(db, sid);
-  }
-  if (!user) return c.json({ error: "not authenticated", code: "unauthorized" }, 401);
-  const config = c.get("config");
-  const pat = getStoredPat(db, user.id, config.sessionSecret);
-  if (!pat) {
-    // Session valid but no usable PAT — usually a key rotation or a freshly
-    // migrated account that never re-logged in. Force a clean re-login.
-    return c.json({ error: "forgejo credentials expired, log in again", code: "unauthorized" }, 401);
-  }
-  c.set("user", user);
-  c.set("fjUser", new Forgejo({ baseUrl: config.forgejoUrl, token: pat }));
+  const auth = await resolveAuth(c);
+  if (!auth) return c.json({ error: "not authenticated", code: "unauthorized" }, 401);
+  c.set("user", auth.user);
+  c.set("forgejoToken", auth.forgejoToken);
+  c.set("fjUser", new Forgejo({ baseUrl: c.get("config").forgejoUrl, token: auth.forgejoToken }));
   await next();
 };
 

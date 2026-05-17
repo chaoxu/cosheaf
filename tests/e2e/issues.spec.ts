@@ -47,7 +47,7 @@ test.describe.serial("Issues", () => {
     // chao defines a label via API then opens the prior issue + applies it.
     await loginAs(page, "chao");
     await page.evaluate(async () => {
-      await fetch("/api/v1/w/flushing-coin/labels", {
+      await fetch("/api/v1/w/flushing-coin/forgejo/labels", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: "needs-review", color: "facc15" }),
@@ -197,7 +197,7 @@ test.describe.serial("Issues", () => {
     await loginAs(page, "chao");
     // Create milestone server-side (no full UI for create yet)
     await page.evaluate(async () => {
-      await fetch("/api/v1/w/flushing-coin/milestones", {
+      await fetch("/api/v1/w/flushing-coin/forgejo/milestones", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "v1 polish" }),
