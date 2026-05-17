@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-export const DEFAULT_REPO = "chaoxu/coflat";
+export const DEFAULT_REPO = "chaoxu/cosheaf";
 export const DEFAULT_ISSUE_OWNER = "chaoxu";
 
 const COMMANDS = [

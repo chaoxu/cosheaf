@@ -211,7 +211,7 @@ describe("issue CLI wrapper", () => {
 
     expect(status).toBe(0);
     expect(calls).toEqual([]);
-    expect(output.value).toContain("tea issues close --repo chaoxu/coflat 408");
+    expect(output.value).toContain("tea issues close --repo chaoxu/cosheaf 408");
   });
 
   it("runs verification before viewing or closing issues", () => {
