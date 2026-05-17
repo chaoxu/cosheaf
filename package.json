@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:fast": "pnpm typecheck && pnpm test",
+    "dev:fresh": "rm -rf node_modules/.vite node_modules/.vite-temp && pnpm dev:all",
     "lint": "pnpm check:lint",
     "lint:errors": "node scripts/check-bare-catch.mjs",
     "lint:boundaries": "node scripts/check-plugin-render-boundary.mjs",

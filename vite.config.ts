@@ -49,15 +49,20 @@ export default defineConfig({
       // doesn't trigger a 5–15s optimize pause.
       "parse-diff",
       "react-diff-view",
-      // Coflat reader/parse subpaths used outside the editor surface.
-      "@chaoxu/coflat-editor/reader",
-      "@chaoxu/coflat-editor/parse",
       // hydrateMath dynamic-imports katex; pre-bundle so it's ready on first paint.
       "katex",
     ],
-    // The editor package is already a single bundled .mjs; Vite's optimizer
-    // chokes on its `import("pdfjs-dist/.../pdf.worker.min.mjs?url")` line.
-    exclude: ["@chaoxu/coflat-editor"],
+    // `@chaoxu/coflat-editor` is a `file:` link. pnpm's content-addressed
+    // folder name (`.pnpm/@chaoxu+coflat-editor@file+..+coflat-editor_<hash>/`)
+    // changes whenever the editor source is touched, but optimizeDeps caches
+    // pin the old hash → ENOENT → blank page. Excluding all entries means
+    // Vite resolves them on the fly against the live tree. The editor is
+    // already a single bundled .mjs so there's nothing to pre-bundle.
+    exclude: [
+      "@chaoxu/coflat-editor",
+      "@chaoxu/coflat-editor/reader",
+      "@chaoxu/coflat-editor/parse",
+    ],
   },
   server: {
     hmr: false,
