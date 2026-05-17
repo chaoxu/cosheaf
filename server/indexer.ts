@@ -4,13 +4,15 @@
 
 import path from "node:path";
 import type Database from "better-sqlite3";
-import { coflatMarkdownFormat, type DocumentLink } from "./document-format/coflat.js";
+import type { DocumentLink } from "./document-format/types.js";
+import { getDocumentFormat } from "./format-registry.js";
 import { generateDocId } from "./ids.js";
 
 export interface PageIngest {
   workspaceId: number;
   filePath: string;
   bodyText: string; // raw file content (frontmatter + body)
+  formatId?: string;
 }
 
 export interface IngestPlan {
@@ -39,7 +41,7 @@ function prep(db: Database.Database, sql: string): Database.Statement {
 }
 
 export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan {
-  const format = coflatMarkdownFormat;
+  const format = getDocumentFormat(p.formatId ?? formatIdForWorkspace(db, p.workspaceId));
   const parsed = format.parseDocument(p.bodyText);
   const fmId = typeof parsed.frontmatter.id === "string" && parsed.frontmatter.id.length > 0
     ? parsed.frontmatter.id
@@ -130,6 +132,12 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   }
 
   return { cosheafId, title, rewrittenContent: rewritten, commit };
+}
+
+function formatIdForWorkspace(db: Database.Database, workspaceId: number): string | null {
+  const row = prep(db, "SELECT default_md_format FROM workspaces WHERE id = ?")
+    .get(workspaceId) as { default_md_format?: string | null } | undefined;
+  return row?.default_md_format ?? null;
 }
 
 function lineFromOffset(source: string, offset: number): number {

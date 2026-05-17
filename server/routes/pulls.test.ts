@@ -18,6 +18,7 @@ import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middl
 import { seedAuthUser } from "../test-helpers.js";
 import { pulls } from "./pulls.js";
 import { branches } from "./branches.js";
+import { COFLAT_FORMAT_ID, DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-pulls-test",
@@ -152,6 +153,41 @@ describe("pulls + branches routes", () => {
         body: JSON.stringify({ min_approvals: 2 }),
       });
       expect(res.status).toBe(403);
+    });
+
+    it("PUT /settings rejects unknown markdown formats", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock.mockResolvedValueOnce(ok({ permission: "admin" }));
+      const res = await appFor(db).request("/api/v1/w/w/settings", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ default_md_format: "unknown" }),
+      });
+      expect(res.status).toBe(400);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it("PUT /settings leaves the format unchanged when reindex fails", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" }))
+        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 1 }))
+        .mockResolvedValueOnce(ok({ message: "tree failed" }, 500));
+
+      const res = await appFor(db).request("/api/v1/w/w/settings", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
+      });
+
+      expect(res.status).toBe(500);
+      expect(
+        db.prepare("SELECT default_md_format FROM workspaces WHERE id = 1").get(),
+      ).toEqual({ default_md_format: DEFAULT_DOCUMENT_FORMAT_ID });
     });
   });
 

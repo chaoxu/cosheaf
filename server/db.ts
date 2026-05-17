@@ -117,6 +117,13 @@ function migrateBacklinksLine(db: Database.Database): void {
   }
 }
 
+function migrateWorkspaceDefaultFormat(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info('workspaces')").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "default_md_format")) {
+    db.exec("ALTER TABLE workspaces ADD COLUMN default_md_format TEXT NOT NULL DEFAULT 'forgejo-passthrough';");
+  }
+}
+
 function migrateDropDocKindColumns(db: Database.Database): void {
   const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
   const has = (name: string): boolean => docMapCols.some((c) => c.name === name);
@@ -174,6 +181,7 @@ export function getDb(config: Config): Database.Database {
   migrateDropIssuesSidecar(db);
   migrateUsersToForgejoAuth(db);
   migrateBacklinksLine(db);
+  migrateWorkspaceDefaultFormat(db);
   dbInstance = db;
   return db;
 }

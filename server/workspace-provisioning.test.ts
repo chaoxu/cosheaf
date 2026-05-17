@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
+import { DEFAULT_DOCUMENT_FORMAT_ID } from "../shared/document-format.js";
 import {
   provisionWorkspace,
   reindexWorkspaceFromForgejo,
@@ -82,6 +83,7 @@ describe("workspace provisioning", () => {
 
     expect(result.createdRepo).toBe(true);
     expect(result.workspace.slug).toBe("notes");
+    expect(result.workspace.default_md_format).toBe(DEFAULT_DOCUMENT_FORMAT_ID);
     expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "chao", "admin");
     expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_id = ?").get(result.workspace.id))
       .toEqual({ path: "readme.md" });

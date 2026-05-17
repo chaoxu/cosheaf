@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
   slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   forgejo_repo TEXT NOT NULL,
+  default_md_format TEXT NOT NULL DEFAULT 'forgejo-passthrough',
   created_at INTEGER NOT NULL
 );
 

@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { deletePage, indexPage } from "./indexer.js";
 import { parseDocument } from "./frontmatter.js";
+import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
 
 function freshDb(): Database.Database {
   const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-idx-"));
@@ -13,7 +14,9 @@ function freshDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   db.exec(readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
   // Minimal seed: one workspace.
-  db.prepare("INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'w', 0)").run();
+  db.prepare(
+    "INSERT INTO workspaces (id, slug, name, forgejo_repo, default_md_format, created_at) VALUES (1, 'w', 'W', 'w', ?, 0)",
+  ).run(COFLAT_FORMAT_ID);
   return db;
 }
 

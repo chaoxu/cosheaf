@@ -18,6 +18,7 @@
       { "prefix": "commits", "methods": ["GET"] },
       { "prefix": "contents", "methods": ["GET"] },
       { "prefix": "reviews", "methods": ["GET", "POST"] },
+      { "prefix": "markdown", "methods": ["POST"] },
       { "prefix": "activities/feeds", "methods": ["GET"] },
       { "prefix": "notifications", "methods": ["GET", "PUT"] }
     ]

@@ -71,13 +71,15 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "commander": "^14.0.3",
+    "dompurify": "^3.4.3",
     "hono": "^4.12.18",
     "katex": "^0.16.46",
     "parse-diff": "^0.12.0",
     "react": "^19.2.4",
     "react-diff-view": "^3.3.3",
     "react-dom": "^19.2.4",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.9",

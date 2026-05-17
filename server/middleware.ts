@@ -157,8 +157,10 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
   if (!slug) return c.json({ error: "workspace required", code: "validation" }, 400);
   const db = c.get("db");
   const row = db
-    .prepare("SELECT id, name, forgejo_repo FROM workspaces WHERE slug = ?")
-    .get(slug) as { id: number; name: string; forgejo_repo: string } | undefined;
+    .prepare("SELECT id, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
+    .get(slug) as
+      | { id: number; name: string; forgejo_repo: string; default_md_format: string }
+      | undefined;
   if (!row) return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
   const fj = c.get("fjUser");
@@ -168,7 +170,14 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  c.set("workspace", { id: row.id, slug, name: row.name, forgejoRepo: row.forgejo_repo, role });
+  c.set("workspace", {
+    id: row.id,
+    slug,
+    name: row.name,
+    forgejoRepo: row.forgejo_repo,
+    defaultMdFormat: row.default_md_format,
+    role,
+  });
   c.set("repoCtx", { fj, owner, repo: row.forgejo_repo });
   await next();
 };

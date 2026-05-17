@@ -3,9 +3,7 @@
 // for the client.
 //
 // Endpoints under /:slug/* :
-//   GET    /pulls?state=open|closed|all     — list PRs
 //   POST   /pulls                           — open a PR
-//   GET    /pulls/:n                        — PR metadata
 //   POST   /pulls/:n/merge                  — merge a PR (admin only)
 //   POST   /pulls/:n/close                  — close a PR (no merge)
 //   GET    /pulls/:n/files                  — per-file diff structured
@@ -38,7 +36,10 @@ import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
+import { allDocumentFormats } from "../format-registry.js";
+import { reindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
 import type { LineComment } from "../../shared/comments.js";
+import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { PrMeta, PullFileStatus } from "../../shared/review.js";
 
 export const pulls = new Hono<AppEnv>();
@@ -494,22 +495,55 @@ pulls.post("/:slug/pulls/:n/pending-review/:rid/submit", async (c) => {
 pulls.get("/:slug/settings", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const bp = await fj.getBranchProtection(owner, repo, "main");
-  return c.json({ min_approvals: bp?.required_approvals ?? 1 });
+  return c.json({
+    min_approvals: bp?.required_approvals ?? 1,
+    default_md_format: normalizeDocumentFormatId(c.get("workspace").defaultMdFormat),
+    formats: allDocumentFormats().map((f) => ({ id: f.id, displayName: f.displayName })),
+  });
 });
 
 pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { min_approvals?: number } | null;
-  if (!body || !Number.isInteger(body.min_approvals) || (body.min_approvals as number) < 1)
+  const body = (await c.req.json().catch(() => null)) as {
+    min_approvals?: number;
+    default_md_format?: string;
+  } | null;
+  if (!body)
+    return c.json({ error: "settings payload required", code: "validation" }, 400);
+  if (body.min_approvals !== undefined && (!Number.isInteger(body.min_approvals) || body.min_approvals < 1)) {
     return c.json({ error: "min_approvals must be >= 1", code: "validation" }, 400);
+  }
+  if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format)) {
+    return c.json({ error: "unknown markdown format", code: "validation" }, 400);
+  }
   const { fj, owner, repo } = c.get("repoCtx");
   const existing = await fj.getBranchProtection(owner, repo, "main");
-  if (!existing) {
-    await fj.createBranchProtection(owner, repo, {
-      branch_name: "main",
-      required_approvals: body.min_approvals,
-    });
-  } else {
-    await fj.updateBranchProtection(owner, repo, "main", { required_approvals: body.min_approvals });
+  const minApprovals = body.min_approvals ?? existing?.required_approvals ?? 1;
+  if (body.min_approvals !== undefined) {
+    if (!existing) {
+      await fj.createBranchProtection(owner, repo, {
+        branch_name: "main",
+        required_approvals: body.min_approvals,
+      });
+    } else {
+      await fj.updateBranchProtection(owner, repo, "main", { required_approvals: body.min_approvals });
+    }
   }
-  return c.json({ min_approvals: body.min_approvals });
+  const defaultMdFormat = body.default_md_format !== undefined
+    ? normalizeDocumentFormatId(body.default_md_format)
+    : normalizeDocumentFormatId(c.get("workspace").defaultMdFormat);
+  if (body.default_md_format !== undefined) {
+    await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
+      id: c.get("workspace").id,
+      forgejo_repo: repo,
+      default_md_format: defaultMdFormat,
+    });
+    c.get("db")
+      .prepare("UPDATE workspaces SET default_md_format = ? WHERE id = ?")
+      .run(defaultMdFormat, c.get("workspace").id);
+  }
+  return c.json({
+    min_approvals: minApprovals,
+    default_md_format: defaultMdFormat,
+    formats: allDocumentFormats().map((f) => ({ id: f.id, displayName: f.displayName })),
+  });
 });

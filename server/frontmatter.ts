@@ -1,17 +1,23 @@
-import { coflatMarkdownFormat, type Frontmatter, type ParsedDocument } from "./document-format/coflat.js";
+import {
+  extractFirstH1,
+  parseFrontmatterYaml,
+  serializeFrontmatterYaml,
+  type Frontmatter,
+  type ParsedDocument,
+} from "../shared/frontmatter-yaml.js";
 import { generateDocId } from "./ids.js";
 
 export type { Frontmatter, ParsedDocument };
 export { generateDocId };
 
 export function parseDocument(content: string): ParsedDocument {
-  return coflatMarkdownFormat.parseDocument(content);
+  return parseFrontmatterYaml(content);
 }
 
 export function serializeDocument(frontmatter: Frontmatter, body: string): string {
-  return coflatMarkdownFormat.serializeDocument(frontmatter, body);
+  return serializeFrontmatterYaml(frontmatter, body);
 }
 
 export function extractTitle(body: string): string | null {
-  return coflatMarkdownFormat.extractTitle(body);
+  return extractFirstH1(body);
 }

@@ -14,6 +14,7 @@ import {
   provisionWorkspace,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
+import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
 
 interface SeedOptions {
   user: string;
@@ -164,6 +165,7 @@ async function seed(args: string[]): Promise<void> {
     user,
     forgejoUsername: options.user,
     allowExistingLocal: true,
+    defaultMdFormat: COFLAT_FORMAT_ID,
   });
   console.log(`${createdRepo ? "created" : "ensured"} workspace ${options.workspace}`);
 
@@ -243,8 +245,10 @@ async function workspaceRm(slug: string): Promise<void> {
 async function workspaceReindex(slug: string): Promise<void> {
   const { db, forgejo, config } = ctx();
   const ws = db
-    .prepare("SELECT id, slug, name, forgejo_repo FROM workspaces WHERE slug = ?")
-    .get(slug) as { id: number; slug: string; name: string; forgejo_repo: string } | undefined;
+    .prepare("SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
+    .get(slug) as
+      | { id: number; slug: string; name: string; forgejo_repo: string; default_md_format: string }
+      | undefined;
   if (!ws) {
     console.error(`workspace '${slug}' not found`);
     process.exit(1);
@@ -388,8 +392,8 @@ async function doctor(): Promise<void> {
 
   // Per-workspace checks
   const workspaces = db
-    .prepare("SELECT id, slug, forgejo_repo FROM workspaces ORDER BY slug")
-    .all() as Array<{ id: number; slug: string; forgejo_repo: string }>;
+    .prepare("SELECT id, slug, forgejo_repo, default_md_format FROM workspaces ORDER BY slug")
+    .all() as Array<{ id: number; slug: string; forgejo_repo: string; default_md_format: string }>;
   for (const ws of workspaces) {
     results.push(
       await check(`workspace ${ws.slug}: forgejo repo exists`, async () => {
@@ -438,14 +442,18 @@ async function doctor(): Promise<void> {
 async function inspectWorkspace(slug: string): Promise<void> {
   const { config, db, forgejo } = ctx();
   const ws = db
-    .prepare("SELECT id, slug, name, forgejo_repo FROM workspaces WHERE slug = ?")
-    .get(slug) as { id: number; slug: string; name: string; forgejo_repo: string } | undefined;
+    .prepare("SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
+    .get(slug) as
+      | { id: number; slug: string; name: string; forgejo_repo: string; default_md_format: string }
+      | undefined;
   if (!ws) {
     console.error(`workspace '${slug}' not found`);
     process.exit(1);
   }
 
-  console.log(`workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.forgejo_repo}\n`);
+  console.log(
+    `workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.forgejo_repo}, format ${ws.default_md_format}\n`,
+  );
 
   const sidecarPaths = new Set(
     (

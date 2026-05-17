@@ -1,17 +1,6 @@
-export interface Frontmatter {
-  id?: string;
-  title?: string;
-  type?: string;
-  target?: string;
-  tags?: string[];
-  [key: string]: unknown;
-}
+import type { Frontmatter, ParsedDocument } from "../../shared/frontmatter-yaml.js";
 
-export interface ParsedDocument {
-  frontmatter: Frontmatter;
-  body: string;
-  hadFrontmatter: boolean;
-}
+export type { Frontmatter, ParsedDocument };
 
 export interface DocumentLink {
   kind: "id" | "path";

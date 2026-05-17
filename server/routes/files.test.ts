@@ -12,6 +12,7 @@ import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { files } from "./files.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-files-test",
@@ -31,8 +32,8 @@ function freshDb(): Database.Database {
   db.pragma("foreign_keys = ON");
   db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
   db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
-  ).run();
+    "INSERT INTO workspaces (id, slug, name, forgejo_repo, default_md_format, created_at) VALUES (1, 'w', 'W', 'repo', ?, 0)",
+  ).run(COFLAT_FORMAT_ID);
   return db;
 }
 

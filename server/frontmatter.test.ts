@@ -17,6 +17,14 @@ describe("frontmatter", () => {
     expect(r.body).toBe("# Hello\n");
   });
 
+  it("parseDocument accepts CRLF frontmatter fences", () => {
+    const r = parseDocument("---\r\nid: abc12345\r\ntitle: Hello\r\n---\r\n# Hello\r\n");
+    expect(r.hadFrontmatter).toBe(true);
+    expect(r.frontmatter.id).toBe("abc12345");
+    expect(r.frontmatter.title).toBe("Hello");
+    expect(r.body).toBe("# Hello\r\n");
+  });
+
   it("parseDocument falls back to no-frontmatter on bad YAML", () => {
     const r = parseDocument("---\n: invalid:\n---\nbody");
     expect(r.hadFrontmatter).toBe(false);

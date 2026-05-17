@@ -4,6 +4,7 @@ import type { Role } from "../../shared/roles.js";
 import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { requireAuth } from "../middleware.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
+import { normalizeDocumentFormatId } from "../../shared/document-format.js";
 
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
@@ -12,9 +13,15 @@ workspaces.get("/", async (c) => {
   const rows = c
     .get("db")
     .prepare(
-      "SELECT id, slug, name, forgejo_repo FROM workspaces ORDER BY name",
+      "SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces ORDER BY name",
     )
-    .all() as Array<{ id: number; slug: string; name: string; forgejo_repo: string }>;
+    .all() as Array<{
+      id: number;
+      slug: string;
+      name: string;
+      forgejo_repo: string;
+      default_md_format: string;
+    }>;
 
   // Resolve the caller's role on each workspace via Forgejo using the user's
   // own PAT. Workspaces where the user has no permission are filtered out,
@@ -25,7 +32,15 @@ workspaces.get("/", async (c) => {
   const resolved = await Promise.all(
     rows.map(async (r) => {
       const p = await fj.getRepoPermission(owner, r.forgejo_repo, fjUser).catch(() => "none" as const);
-      return p === "none" ? null : { id: r.id, slug: r.slug, name: r.name, role: p as Role };
+      return p === "none"
+        ? null
+        : {
+            id: r.id,
+            slug: r.slug,
+            name: r.name,
+            role: p as Role,
+            default_md_format: normalizeDocumentFormatId(r.default_md_format),
+          };
     }),
   );
   return c.json({ workspaces: resolved.filter((r): r is NonNullable<typeof r> => r !== null) });
@@ -58,7 +73,13 @@ workspaces.post("/", async (c) => {
       rollbackCreatedRepoOnLocalFailure: true,
     });
     return c.json(
-      { id: workspace.id, slug: body.slug, name: body.name, role: "admin" },
+      {
+        id: workspace.id,
+        slug: body.slug,
+        name: body.name,
+        role: "admin",
+        default_md_format: normalizeDocumentFormatId(workspace.default_md_format),
+      },
       201,
     );
   } catch (err) {
