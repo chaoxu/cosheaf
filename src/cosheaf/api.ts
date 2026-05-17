@@ -98,8 +98,13 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new ApiError(res.status, err.error ?? `HTTP ${res.status}`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    // Forgejo rejected the stored PAT. Server has already wiped the session;
+    // bounce the page so the SPA re-mounts and lands on the login form.
+    if (res.status === 401 && body.code === "pat_invalid" && typeof window !== "undefined") {
+      window.location.reload();
+    }
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
   }
   if (res.status === 204 || res.status === 304) return undefined as T;
   const text = await res.text();
