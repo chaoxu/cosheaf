@@ -6,7 +6,6 @@ import { DELETED_USER_LOGIN, type ForgejoIssue } from "../forgejo-types.js";
 import type { ForgejoIssueComment } from "../forgejo.js";
 import type {
   ActivityRow,
-  DependencyRow,
   IssueComment,
   IssueDetail,
   IssueRow,
@@ -190,55 +189,8 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- dependencies ----------
-
-function depRow(i: { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }): DependencyRow {
-  return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
-}
-
-// Typed because the UI uses one normalized DependencyRow for issues and PRs.
-issues.get("/:slug/issues/:number/dependencies", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const list = await fj.listIssueDependencies(owner, repo, number);
-  return c.json({ issues: (list ?? []).map(depRow) });
-});
-
-// Typed because the UI uses one normalized DependencyRow for issues and PRs.
-issues.get("/:slug/issues/:number/blocks", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const list = await fj.listIssueBlocks(owner, repo, number);
-  return c.json({ issues: (list ?? []).map(depRow) });
-});
-
-// Typed dependency writes currently emit SSE and hide Forgejo's cross-repo body
-// fields from the SPA. Raw Forgejo callers can use passthrough if needed.
-issues.post("/:slug/issues/:number/dependencies", async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  const body = (await c.req.json().catch(() => null)) as { index?: number } | null;
-  if (!Number.isFinite(number) || !body?.index)
-    return c.json({ error: "bad number / index", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.addIssueDependency(owner, repo, number, body.index);
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_added" });
-  return c.json({ ok: true });
-});
-
-issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  const dep = Number(c.req.param("dep"));
-  if (!Number.isFinite(number) || !Number.isFinite(dep))
-    return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.removeIssueDependency(owner, repo, number, dep);
-  c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_removed" });
-  return c.json({ ok: true });
-});
+// Dependencies/blocks are Forgejo-native; the SPA calls them through the
+// passthrough at /forgejo/issues/:n/dependencies and derives is_pr client-side.
 
 // Typed because Forgejo activities encode references in JSON-ish strings; the
 // SPA gets parsed issue refs and normalized timestamps.

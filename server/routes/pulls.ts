@@ -162,14 +162,8 @@ function forgejoErrToResult(err: unknown): { ok: false; status: number; message:
 }
 
 
-pulls.get("/:slug/pulls", async (c) => {
-  const state = c.req.query("state") ?? "open";
-  if (state !== "open" && state !== "closed" && state !== "all")
-    return c.json({ error: "state must be open|closed|all", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const pulls = await fj.listPulls(owner, repo, state);
-  return c.json({ pulls: pulls.map(prMeta) });
-});
+// List and per-PR fetch are pure Forgejo shape; the SPA calls them through
+// the passthrough at /forgejo/pulls and applies prMeta() client-side.
 
 pulls.post("/:slug/pulls", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -203,14 +197,6 @@ pulls.post("/:slug/pulls", async (c) => {
   }
 });
 
-pulls.get("/:slug/pulls/:n", async (c) => {
-  const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const pull = await fj.getPull(owner, repo, n);
-  if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  return c.json(prMeta(pull));
-});
 
 pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePr(c.req.param("n"));

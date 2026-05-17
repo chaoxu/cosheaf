@@ -127,6 +127,57 @@ function milestoneFromForgejo(m: ForgejoMilestoneRef): Milestone {
   };
 }
 
+interface ForgejoDependencyIssue {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  pull_request?: unknown;
+}
+
+function dependencyRowFromForgejo(i: ForgejoDependencyIssue): DependencyRow {
+  return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
+}
+
+interface ForgejoPullRaw {
+  number: number;
+  title: string;
+  body?: string | null;
+  state: "open" | "closed" | string;
+  merged?: boolean | null;
+  user?: { login?: string } | null;
+  created_at: string;
+  merged_at?: string | null;
+  mergeable?: boolean | null;
+  head: { ref: string; sha: string };
+  base: { ref: string; sha: string };
+  additions?: number | null;
+  deletions?: number | null;
+  changed_files?: number | null;
+}
+
+const DELETED_USER_LOGIN = "Ghost";
+
+function prMetaFromForgejo(p: ForgejoPullRaw): PrMeta {
+  return {
+    number: p.number,
+    title: p.title,
+    body: p.body ?? "",
+    state: p.state === "closed" ? "closed" : "open",
+    merged: p.merged ?? false,
+    author_username: p.user?.login ?? DELETED_USER_LOGIN,
+    created_at: Date.parse(p.created_at) || 0,
+    merged_at: p.merged_at ? Date.parse(p.merged_at) : null,
+    mergeable: p.mergeable ?? null,
+    head_ref: p.head.ref,
+    head_sha: p.head.sha,
+    base_ref: p.base.ref,
+    base_sha: p.base.sha,
+    additions_total: p.additions ?? 0,
+    deletions_total: p.deletions ?? 0,
+    files_changed: p.changed_files ?? 0,
+  };
+}
+
 export const api = {
   me: () => jsonFetch<{ user: User | null }>("/api/v1/me"),
   login: (username: string, password: string) =>
@@ -211,7 +262,9 @@ export const api = {
   // ---------- Pulls (Forgejo-shape) ----------
 
   listPulls: (slug: string, state: "open" | "closed" | "all" = "open") =>
-    jsonFetch<{ pulls: PrMeta[] }>(`${w(slug)}/pulls?state=${state}`).then((r) => r.pulls),
+    jsonFetch<ForgejoPullRaw[]>(forgejo(slug, `pulls?state=${state}`)).then((rows) =>
+      rows.map(prMetaFromForgejo),
+    ),
   openPull: (
     slug: string,
     payload: { head: string; base?: string; title?: string; body?: string },
@@ -221,7 +274,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getPull: (slug: string, prNumber: number) =>
-    jsonFetch<PrMeta>(`${w(slug)}/pulls/${prNumber}`),
+    jsonFetch<ForgejoPullRaw>(forgejo(slug, `pulls/${prNumber}`)).then(prMetaFromForgejo),
   mergePull: (
     slug: string,
     prNumber: number,
@@ -383,17 +436,25 @@ export const api = {
   listActivities: (slug: string, limit = 50) =>
     jsonFetch<{ activities: ActivityRow[] }>(`${w(slug)}/activities?limit=${limit}`),
   listIssueDependencies: (slug: string, number: number) =>
-    jsonFetch<{ issues: DependencyRow[] }>(`${w(slug)}/issues/${number}/dependencies`),
+    jsonFetch<ForgejoDependencyIssue[]>(forgejo(slug, `issues/${number}/dependencies`)).then(
+      (issues) => ({ issues: issues.map(dependencyRowFromForgejo) }),
+    ),
   listIssueBlocks: (slug: string, number: number) =>
-    jsonFetch<{ issues: DependencyRow[] }>(`${w(slug)}/issues/${number}/blocks`),
+    jsonFetch<ForgejoDependencyIssue[]>(forgejo(slug, `issues/${number}/blocks`)).then(
+      (issues) => ({ issues: issues.map(dependencyRowFromForgejo) }),
+    ),
   addIssueDependency: (slug: string, number: number, index: number) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/dependencies`, {
+    jsonFetch<unknown>(forgejo(slug, `issues/${number}/dependencies`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ index }),
-    }),
+    }).then(() => ({ ok: true as const })),
   removeIssueDependency: (slug: string, number: number, index: number) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/dependencies/${index}`, { method: "DELETE" }),
+    jsonFetch<unknown>(forgejo(slug, `issues/${number}/dependencies`), {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ index }),
+    }).then(() => ({ ok: true as const })),
   listMilestones: (slug: string, state: "open" | "closed" | "all" = "open") =>
     jsonFetch<ForgejoMilestoneRef[]>(forgejo(slug, `milestones?state=${state}`)).then((milestones) => ({
       milestones: milestones.map(milestoneFromForgejo),

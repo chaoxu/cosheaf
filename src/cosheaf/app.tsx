@@ -1956,7 +1956,7 @@ function WorkspaceView({
               onClick={() => setSidebarView("pages")}
               testId="sidebar-tab-pages"
             >
-              Pages
+              Files
             </SidebarTab>
             <SidebarTab
               active={sidebarView === "inbox"}
