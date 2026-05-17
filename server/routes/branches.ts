@@ -16,7 +16,6 @@ import {
 } from "../middleware.js";
 import { ForgejoError, type Forgejo } from "../forgejo.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
-import { userBranchPrefix } from "../../shared/conventions.js";
 
 export const branches = new Hono<AppEnv>();
 branches.use("*", requireAuth);
@@ -40,13 +39,13 @@ branches.get("/:slug/branches/mine", async (c) => {
     fj.listPulls(owner, repo, "open"),
   ]);
   const openHeads = new Set(pulls.map((p) => p.head.ref));
-  // Identify "your branches" by the `user/<username>/` prefix we enforce on
-  // file PUT auto-create. This is deterministic — unlike scanning the
-  // latest commit's author/committer, which falls over after rebase,
-  // cherry-pick, or a web-UI edit attributed to a different user.
-  const prefix = userBranchPrefix(c.get("user").username);
+  // Identify "your branches" by the author of the branch's head commit.
+  // This is the natural Forgejo-native answer ("branches I authored, that
+  // don't already have an open PR"), replacing the older `user/<username>/`
+  // prefix convention.
+  const me = c.get("user").username;
   const mine = list
-    .filter((b) => b.name.startsWith(prefix) && !openHeads.has(b.name))
+    .filter((b) => b.commit?.author?.username === me && !openHeads.has(b.name))
     .map((b) => ({
       name: b.name,
       commit_sha: b.commit?.id ?? null,

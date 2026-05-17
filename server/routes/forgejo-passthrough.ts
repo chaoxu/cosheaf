@@ -38,7 +38,7 @@ import { requireAuth, requireMembership } from "../middleware.js";
 //
 // `branches` and `contents` are GET-only on purpose: cosheaf has
 // dedicated, validated endpoints for branch creation and file writes
-// that enforce the `user/<username>/` prefix and content conventions.
+// that apply content conventions and (for files) synchronous indexing.
 // Letting them through the passthrough would bypass those gates.
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [

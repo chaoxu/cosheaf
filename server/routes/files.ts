@@ -8,7 +8,6 @@ import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cach
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
-  userBranchPrefix,
 } from "../../shared/conventions.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 
@@ -37,10 +36,10 @@ function refFromQuery(c: import("hono").Context<AppEnv>): string {
   return b && b.length > 0 ? b : "main";
 }
 
-// Auto-create the target branch from `main` if it doesn't exist, but only if
-// the name is prefixed with `user/<username>/` — otherwise reject. Without this
-// gate, `PUT /file?branch=<arbitrary>` is an unbounded branch-creation
-// primitive for any write member (including misbehaving clients).
+// Auto-create the target branch from `main` if it doesn't exist. Any valid
+// branch name is allowed — cosheaf's job is to be a thin shell over Forgejo's
+// branch model, not to enforce a naming convention Forgejo itself doesn't
+// require. Write-member gating happens upstream via requireWriteOnMutation.
 async function ensureBranch(
   c: import("hono").Context<AppEnv>,
   branch: string,
@@ -49,7 +48,6 @@ async function ensureBranch(
   const { fj, owner, repo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, branch);
   if (exists) return "ok";
-  if (!branch.startsWith(userBranchPrefix(c.get("user").username))) return "forbidden";
   await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
   return "ok";
 }

@@ -284,18 +284,25 @@ describe("pulls + branches routes", () => {
   });
 
   describe("branches", () => {
-    it("GET /branches/mine filters by `user/<sudo>/` prefix and excludes branches with open PRs", async () => {
+    it("GET /branches/mine filters by head-commit author and excludes branches with open PRs", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
       fetchMock
-        // listBranches paged: first page returns 4, second page returns 0
+        // listBranches: mix of authors. Includes a branch without the legacy
+        // user/<name>/ prefix to confirm we now match on author, not name.
         .mockResolvedValueOnce(
           ok([
-            { name: "main", commit: { id: "m" } },
-            { name: "user/alice/wip-1", commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z" } },
-            { name: "user/alice/wip-2", commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z" } },
-            { name: "user/bob/wip-9", commit: { id: "b9" } },
+            { name: "main", commit: { id: "m", author: { username: "alice" } } },
+            {
+              name: "user/alice/wip-1",
+              commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z", author: { username: "alice" } },
+            },
+            {
+              name: "feature/passthrough",
+              commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z", author: { username: "alice" } },
+            },
+            { name: "user/bob/wip-9", commit: { id: "b9", author: { username: "bob" } } },
           ]),
         )
         // listPulls "open"
@@ -305,8 +312,12 @@ describe("pulls + branches routes", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { branches: Array<{ name: string }> };
-      // wip-1 excluded (open PR), wip-2 kept, bob excluded (wrong prefix).
-      expect(body.branches.map((b) => b.name)).toEqual(["user/alice/wip-2"]);
+      // wip-1 excluded (open PR by alice), feature/passthrough kept (alice
+      // authored, no PR), bob excluded (different author), main excluded
+      // (also has no open-PR check but does have an unrelated commit shape).
+      expect(body.branches.map((b) => b.name).sort()).toEqual(
+        ["feature/passthrough", "main"].sort(),
+      );
     });
 
     it("POST /branches rejects names without a valid shape", async () => {
