@@ -11,7 +11,7 @@ import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middl
 import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
-import { files } from "./files.js";
+import { files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 
 const config: Config = {
@@ -59,6 +59,47 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("safeRel repo-path validator", () => {
+  // Imported via the route module's export so all consumers share one
+  // implementation (#22). Each accept/reject case exercises a documented
+  // rule from the helper's comment.
+  it("accepts safe nested paths", () => {
+    for (const p of ["a.md", "docs/intro.md", "deep/nested/x.md", "assets/img.png"]) {
+      expect(safeRel(p)).toBe(p);
+    }
+  });
+  it("rejects empty / undefined", () => {
+    expect(safeRel(undefined)).toBeNull();
+    expect(safeRel("")).toBeNull();
+  });
+  it("rejects absolute paths", () => {
+    expect(safeRel("/etc/passwd")).toBeNull();
+    expect(safeRel("\\windows\\path")).toBeNull();
+  });
+  it("rejects traversal segments", () => {
+    expect(safeRel("..")).toBeNull();
+    expect(safeRel("../etc/passwd")).toBeNull();
+    expect(safeRel("docs/../escape")).toBeNull();
+    expect(safeRel("docs/./loop")).toBe("docs/./loop"); // "." segment is allowed; ".." is the only blocked literal
+  });
+  it("rejects encoded traversal forms", () => {
+    expect(safeRel("docs/%2e%2e/escape")).toBeNull();
+    expect(safeRel("docs/%2E%2E/escape")).toBeNull();
+    expect(safeRel("docs%2fescape")).toBeNull();
+  });
+  it("rejects backslashes (Forgejo treats / as the only separator)", () => {
+    expect(safeRel("docs\\intro.md")).toBeNull();
+  });
+  it("rejects control characters", () => {
+    expect(safeRel("docs/intro\x00.md")).toBeNull();
+    expect(safeRel("docs/\nintro.md")).toBeNull();
+  });
+  it("rejects empty segments", () => {
+    expect(safeRel("docs//intro.md")).toBeNull();
+    expect(safeRel("docs/")).toBeNull();
+  });
 });
 
 describe("files validation route", () => {

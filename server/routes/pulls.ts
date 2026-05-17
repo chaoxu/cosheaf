@@ -264,7 +264,9 @@ pulls.get("/:slug/pulls/:n/files", async (c) => {
 pulls.get("/:slug/pulls/:n/file", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
-  const path = c.req.query("path");
+  // Apply the same repo-path safety check the file route uses (rejects
+  // absolute, traversal, encoded-traversal, backslash, control chars).
+  const path = safeRel(c.req.query("path"));
   const side = c.req.query("side");
   if (!path) return c.json({ error: "path required", code: "validation" }, 400);
   if (side !== "base" && side !== "head")
