@@ -76,6 +76,39 @@ function ctx() {
   return { config, db, forgejo };
 }
 
+interface CliWorkspaceRow {
+  id: number;
+  slug: string;
+  name: string;
+  forgejo_repo: string;
+  default_md_format: string;
+}
+
+// Resolve a workspace by slug and hand the caller everything it needs.
+// Exits 1 with a uniform "workspace 'x' not found" message on miss so callers
+// don't repeat the same five lines.
+async function withWorkspace<T>(
+  slug: string,
+  fn: (args: {
+    config: ReturnType<typeof loadConfig>;
+    db: ReturnType<typeof getDb>;
+    forgejo: Forgejo;
+    workspace: CliWorkspaceRow;
+  }) => Promise<T> | T,
+): Promise<T> {
+  const { config, db, forgejo } = ctx();
+  const ws = db
+    .prepare(
+      "SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?",
+    )
+    .get(slug) as CliWorkspaceRow | undefined;
+  if (!ws) {
+    console.error(`workspace '${slug}' not found`);
+    process.exit(1);
+  }
+  return fn({ config, db, forgejo, workspace: ws });
+}
+
 function valueFlag(args: string[], flag: string): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -228,86 +261,64 @@ function userRm(username: string): void {
 }
 
 async function workspaceRm(slug: string): Promise<void> {
-  const { db, forgejo, config } = ctx();
-  const ws = db.prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?").get(slug) as { id: number; forgejo_repo: string } | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-  try {
-    await forgejo.deleteRepo(config.forgejoOwner, ws.forgejo_repo);
-  } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) {
-      console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
-      process.exit(1);
+  await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
+    try {
+      await forgejo.deleteRepo(config.forgejoOwner, ws.forgejo_repo);
+    } catch (err) {
+      if (!(err instanceof ForgejoError && err.status === 404)) {
+        console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
+        process.exit(1);
+      }
     }
-  }
-  deleteSidecarForWorkspace(db, ws.id);
-  console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
+    deleteSidecarForWorkspace(db, ws.id);
+    console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
+  });
 }
 
 async function workspaceReindex(slug: string): Promise<void> {
-  const { db, forgejo, config } = ctx();
-  const ws = db
-    .prepare("SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
-    .get(slug) as
-      | { id: number; slug: string; name: string; forgejo_repo: string; default_md_format: string }
-      | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-  const count = await reindexWorkspaceFromForgejo(db, forgejo, config, ws);
-  console.log(`reindexed ${count} markdown file${count === 1 ? "" : "s"} in workspace ${slug}`);
+  await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
+    const count = await reindexWorkspaceFromForgejo(db, forgejo, config, ws);
+    console.log(`reindexed ${count} markdown file${count === 1 ? "" : "s"} in workspace ${slug}`);
+  });
 }
 
 async function workspaceMember(slug: string, username: string, role: Role): Promise<void> {
-  const { db, forgejo, config } = ctx();
-  const ws = db.prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?").get(slug) as { id: number; forgejo_repo: string } | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-  const user = findUserByUsername(db, username);
-  if (!user) {
-    console.error(`user '${username}' not found in cosheaf; run \`cli user add\` first`);
-    process.exit(1);
-  }
-  await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, username, role);
-  // Keep the branch-protection push whitelist in sync. Admin can direct-push;
-  // write/read users can't. Adjust on every change so demotion takes effect.
-  const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
-  const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
-  const onList = current.includes(username);
-  if (role === "admin" && !onList) {
-    await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, username]);
-  } else if (role !== "admin" && onList) {
-    await forgejo.patchBranchProtectionPushWhitelist(
-      config.forgejoOwner,
-      ws.forgejo_repo,
-      "main",
-      current.filter((u) => u !== username),
-    );
-  }
-  console.log(`set ${username} as ${role} in workspace ${slug}`);
+  await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
+    const user = findUserByUsername(db, username);
+    if (!user) {
+      console.error(`user '${username}' not found in cosheaf; run \`cli user add\` first`);
+      process.exit(1);
+    }
+    await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, username, role);
+    // Keep the branch-protection push whitelist in sync. Admin can direct-push;
+    // write/read users can't. Adjust on every change so demotion takes effect.
+    const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
+    const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
+    const onList = current.includes(username);
+    if (role === "admin" && !onList) {
+      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, username]);
+    } else if (role !== "admin" && onList) {
+      await forgejo.patchBranchProtectionPushWhitelist(
+        config.forgejoOwner,
+        ws.forgejo_repo,
+        "main",
+        current.filter((u) => u !== username),
+      );
+    }
+    console.log(`set ${username} as ${role} in workspace ${slug}`);
+  });
 }
 
 function passthroughLog(slug: string): void {
-  const { db } = ctx();
-  const ws = db.prepare("SELECT id FROM workspaces WHERE slug = ?").get(slug) as
-    | { id: number }
-    | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-  const rows = db
-    .prepare(
-      "SELECT l.created_at, l.method, l.path, l.query, l.status, l.duration_ms, u.username " +
-        "FROM forgejo_passthrough_log l JOIN users u ON u.id = l.user_id " +
-        "WHERE l.workspace_id = ? ORDER BY l.created_at DESC LIMIT 50",
-    )
-    .all(ws.id) as Array<{
+  // Use withWorkspace just for the lookup+error path; the body is sync.
+  void withWorkspace(slug, ({ db, workspace: ws }) => {
+    const rows = db
+      .prepare(
+        "SELECT l.created_at, l.method, l.path, l.query, l.status, l.duration_ms, u.username " +
+          "FROM forgejo_passthrough_log l JOIN users u ON u.id = l.user_id " +
+          "WHERE l.workspace_id = ? ORDER BY l.created_at DESC LIMIT 50",
+      )
+      .all(ws.id) as Array<{
     created_at: number;
     method: string;
     path: string;
@@ -316,13 +327,14 @@ function passthroughLog(slug: string): void {
     duration_ms: number;
     username: string;
   }>;
-  for (const row of rows) {
-    const ts = new Date(row.created_at).toISOString();
-    const qs = row.query ? `?${row.query}` : "";
-    console.log(
-      `${ts}\t${row.username}\t${row.method}\t${row.path}${qs}\t${row.status}\t${row.duration_ms}ms`,
-    );
-  }
+    for (const row of rows) {
+      const ts = new Date(row.created_at).toISOString();
+      const qs = row.query ? `?${row.query}` : "";
+      console.log(
+        `${ts}\t${row.username}\t${row.method}\t${row.path}${qs}\t${row.status}\t${row.duration_ms}ms`,
+      );
+    }
+  });
 }
 
 // --------------------------------- doctor ---------------------------------
@@ -444,17 +456,7 @@ async function doctor(): Promise<void> {
 // ---------------------------- inspect workspace ----------------------------
 
 async function inspectWorkspace(slug: string): Promise<void> {
-  const { config, db, forgejo } = ctx();
-  const ws = db
-    .prepare("SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
-    .get(slug) as
-      | { id: number; slug: string; name: string; forgejo_repo: string; default_md_format: string }
-      | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-
+  await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
   console.log(
     `workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.forgejo_repo}, format ${ws.default_md_format}\n`,
   );
@@ -515,6 +517,7 @@ async function inspectWorkspace(slug: string): Promise<void> {
     console.log(`  ${b.name}  @${b.commit?.id?.slice(0, 8) ?? "?"}`);
   }
   if (userBranches.length > 20) console.log(`  … ${userBranches.length - 20} more`);
+  });
 }
 
 // ------------------------------- drift-check -------------------------------
@@ -523,15 +526,7 @@ async function inspectWorkspace(slug: string): Promise<void> {
 // given workspace. No auto-repair. Exit 1 if drift detected so the command
 // is scriptable (e.g. periodic check, CI sanity).
 async function workspaceDriftCheck(slug: string): Promise<void> {
-  const { config, db, forgejo } = ctx();
-  const ws = db
-    .prepare("SELECT id, forgejo_repo FROM workspaces WHERE slug = ?")
-    .get(slug) as { id: number; forgejo_repo: string } | undefined;
-  if (!ws) {
-    console.error(`workspace '${slug}' not found`);
-    process.exit(1);
-  }
-
+  await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
   const sidecarPaths = new Set(
     (
       db
@@ -564,6 +559,7 @@ async function workspaceDriftCheck(slug: string): Promise<void> {
   for (const p of onlyForgejo) console.log(`  forgejo-only: ${p}`);
   console.log(`\nrun \`pnpm cli workspace reindex ${slug}\` to rebuild from Forgejo`);
   process.exit(1);
+  });
 }
 
 // ---------------------------------- repl ----------------------------------
