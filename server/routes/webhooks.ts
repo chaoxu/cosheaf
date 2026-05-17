@@ -26,9 +26,21 @@ async function serializeWorkspace<T>(workspaceId: number, work: () => Promise<T>
   }
 }
 
-function workspaceForRepo(db: import("better-sqlite3").Database, repoFullName: string): WorkspaceRow | null {
+// Match the webhook's repo identity against owner + name, not name alone.
+// Cosheaf binds every workspace to a repo under `config.forgejoOwner`; a
+// webhook payload whose repo lives under a different owner is unrelated
+// (could be a misconfigured webhook target on another instance) and must
+// not match an arbitrary same-named workspace.
+function workspaceForRepo(
+  db: import("better-sqlite3").Database,
+  repoFullName: string,
+  expectedOwner: string,
+): WorkspaceRow | null {
   const slashIdx = repoFullName.indexOf("/");
-  const name = slashIdx >= 0 ? repoFullName.slice(slashIdx + 1) : repoFullName;
+  if (slashIdx < 0) return null;
+  const owner = repoFullName.slice(0, slashIdx);
+  const name = repoFullName.slice(slashIdx + 1);
+  if (owner !== expectedOwner) return null;
   return (
     (db
       .prepare(
@@ -41,7 +53,9 @@ function workspaceForRepo(db: import("better-sqlite3").Database, repoFullName: s
 webhooks.post("/forgejo", async (c) => {
   const config = c.get("config");
   const raw = await c.req.text();
-  const rawSignature = c.req.header("x-forgejo-signature") ?? c.req.header("x-gitea-signature") ?? "";
+  // Forgejo-only. Gitea is not a supported target, so we no longer accept
+  // x-gitea-* header aliases (they were a transitional compatibility).
+  const rawSignature = c.req.header("x-forgejo-signature") ?? "";
   // Strip optional "sha256=" prefix used by Forgejo webhook signatures.
   const signature = rawSignature.replace(/^sha256=/, "");
   if (!signature || !/^[0-9a-fA-F]+$/.test(signature)) {
@@ -53,8 +67,8 @@ webhooks.post("/forgejo", async (c) => {
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return c.json({ error: "bad signature", code: "unauthorized" }, 401);
   }
-  const event = c.req.header("x-forgejo-event") ?? c.req.header("x-gitea-event") ?? "unknown";
-  const deliveryHeader = c.req.header("x-forgejo-delivery") ?? c.req.header("x-gitea-delivery");
+  const event = c.req.header("x-forgejo-event") ?? "unknown";
+  const deliveryHeader = c.req.header("x-forgejo-delivery");
   const deliveryId = deliveryHeader ?? `body:${createHash("sha256").update(raw).digest("hex")}`;
 
   const db = c.get("db");
@@ -67,7 +81,7 @@ webhooks.post("/forgejo", async (c) => {
     return c.json({ error: "bad json", code: "validation" }, 400);
   }
   const repoFullName = (payload.repository as { full_name?: string } | undefined)?.full_name ?? "";
-  const ws = workspaceForRepo(db, repoFullName);
+  const ws = workspaceForRepo(db, repoFullName, config.forgejoOwner);
   if (!ws) {
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
       deliveryId, Date.now(), event,

@@ -156,4 +156,47 @@ describe("forgejo webhooks", () => {
     const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "rev-1"));
     expect(res.status).toBe(200);
   });
+
+  it("ignores deliveries whose repository owner doesn't match config.forgejoOwner", async () => {
+    const db = freshDb();
+    const app = appFor(db, {} as Forgejo);
+    // Same repo name "repo" but a different owner — must not match the
+    // workspace, even though forgejo_repo='repo' is in the db.
+    const body = JSON.stringify({
+      action: "opened",
+      repository: { full_name: "someone-else/repo" },
+      pull_request: { number: 99 },
+    });
+    const res = await app.request(
+      "/api/v1/webhooks/forgejo",
+      signedForgejo(body, "pull_request", "wrong-owner-1"),
+    );
+    // Webhook is still acked (200) so Forgejo doesn't retry; but no work
+    // happens because the owner check failed.
+    expect(res.status).toBe(200);
+    expect(db.prepare("SELECT count(*) AS c FROM webhook_log").get()).toEqual({ c: 1 });
+  });
+
+  it("rejects deliveries that arrive with only x-gitea-* headers", async () => {
+    const db = freshDb();
+    const app = appFor(db, {} as Forgejo);
+    const body = JSON.stringify({
+      action: "opened",
+      repository: { full_name: "owner/repo" },
+      pull_request: { number: 1 },
+    });
+    const signature = createHmac("sha256", config.webhookSecret).update(body).digest("hex");
+    const res = await app.request("/api/v1/webhooks/forgejo", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-gitea-signature": signature,
+        "x-gitea-event": "pull_request",
+        "x-gitea-delivery": "gitea-only",
+      },
+      body,
+    });
+    // No x-forgejo-signature → signature is empty → handler rejects.
+    expect(res.status).toBe(401);
+  });
 });
