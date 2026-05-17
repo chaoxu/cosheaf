@@ -177,6 +177,33 @@ describe("forgejo webhooks", () => {
     expect(db.prepare("SELECT count(*) AS c FROM webhook_log").get()).toEqual({ c: 1 });
   });
 
+  it("removes sidecar rows on repository=deleted webhook", async () => {
+    const db = freshDb();
+    const app = appFor(db, {} as Forgejo);
+    // Plant a row in each derived table so the cleanup is observable.
+    db.prepare(
+      "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run("abc", 1, "page.md", "Page", Date.now());
+    db.prepare(
+      "INSERT INTO backlinks (workspace_id, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(1, "abc", "page.md", null, "external", 1);
+    db.prepare("INSERT INTO page_tags (workspace_id, cosheaf_id, tag) VALUES (?, ?, ?)").run(1, "abc", "wip");
+
+    const body = JSON.stringify({
+      action: "deleted",
+      repository: { full_name: "owner/repo" },
+    });
+    const res = await app.request(
+      "/api/v1/webhooks/forgejo",
+      signedForgejo(body, "repository", "del-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(db.prepare("SELECT count(*) AS c FROM workspaces WHERE id = 1").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM backlinks WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM page_tags WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+  });
+
   it("rejects deliveries that arrive with only x-gitea-* headers", async () => {
     const db = freshDb();
     const app = appFor(db, {} as Forgejo);

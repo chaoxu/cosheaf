@@ -190,6 +190,19 @@ webhooks.post("/forgejo", async (c) => {
           action: String(payload.action ?? ""),
         });
       }
+    } else if (event === "repository") {
+      // The repo this workspace is bound to was deleted on Forgejo (admin
+      // UI / tea / API). Wipe the sidecar rows so cosheaf stops surfacing
+      // a ghost workspace. The Forgejo side is already gone; there's
+      // nothing to roll back.
+      if (String(payload.action ?? "") === "deleted") {
+        db.prepare("DELETE FROM doc_map WHERE workspace_id = ?").run(ws.id);
+        db.prepare("DELETE FROM backlinks WHERE workspace_id = ?").run(ws.id);
+        db.prepare("DELETE FROM page_tags WHERE workspace_id = ?").run(ws.id);
+        db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(ws.id);
+        db.prepare("DELETE FROM workspaces WHERE id = ?").run(ws.id);
+        sse.publish(ws.slug, { type: "workspace_deleted" });
+      }
     }
   });
   if (deduped) return c.json({ ok: true, dedup: true });
