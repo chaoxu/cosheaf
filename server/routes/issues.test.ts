@@ -55,6 +55,19 @@ function ok(body: unknown): Response {
   });
 }
 
+function forgejoIssue(
+  number: number,
+  title: string,
+  opts: { state?: "open" | "closed"; isPr?: boolean } = {},
+): { number: number; title: string; state: "open" | "closed"; pull_request?: object | null } {
+  return {
+    number,
+    title,
+    state: opts.state ?? "open",
+    pull_request: opts.isPr ? {} : null,
+  };
+}
+
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
@@ -112,12 +125,7 @@ describe("issues routes", () => {
   it("fills Forgejo owner/repo when adding an issue dependency", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(ok({
-      number: 7,
-      title: "Theorem",
-      state: "open",
-      pull_request: null,
-    }));
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
     const res = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
       method: "POST",
@@ -137,5 +145,93 @@ describe("issues routes", () => {
     expect(await res.json()).toEqual({
       issue: { number: 7, title: "Theorem", state: "open", is_pr: false },
     });
+  });
+
+  it("fills Forgejo owner/repo when removing an issue dependency", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 9 }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/repo/issues/7/dependencies",
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      index: 9,
+      owner: "owner",
+      repo: "repo",
+    });
+    expect(await res.json()).toEqual({
+      issue: { number: 7, title: "Theorem", state: "open", is_pr: false },
+    });
+  });
+
+  it("maps dependency and block lists to compact DTOs", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock
+      .mockResolvedValueOnce(ok([forgejoIssue(9, "Lemma"), forgejoIssue(11, "PR", { isPr: true })]))
+      .mockResolvedValueOnce(ok([forgejoIssue(12, "Blocked theorem", { state: "closed" })]));
+
+    const deps = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const blocks = await appFor(db).request("/api/v1/w/w/issues/7/blocks", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(deps.status).toBe(200);
+    expect(await deps.json()).toEqual({
+      issues: [
+        { number: 9, title: "Lemma", state: "open", is_pr: false },
+        { number: 11, title: "PR", state: "open", is_pr: true },
+      ],
+    });
+    expect(blocks.status).toBe(200);
+    expect(await blocks.json()).toEqual({
+      issues: [{ number: 12, title: "Blocked theorem", state: "closed", is_pr: false }],
+    });
+  });
+
+  it("rejects malformed and self dependency mutations before calling Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const app = appFor(db);
+
+    const badBody = await app.request("/api/v1/w/w/issues/7/dependencies", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 9.5 }),
+    });
+    const self = await app.request("/api/v1/w/w/issues/7/dependencies", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 7 }),
+    });
+    const badParam = await app.request("/api/v1/w/w/issues/7.5/dependencies", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 9 }),
+    });
+
+    expect(badBody.status).toBe(400);
+    expect(await badBody.json()).toEqual({
+      error: "dependency issue number required",
+      code: "validation",
+    });
+    expect(self.status).toBe(400);
+    expect(await self.json()).toEqual({
+      error: "issue cannot depend on itself",
+      code: "validation",
+    });
+    expect(badParam.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

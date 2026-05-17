@@ -33,6 +33,11 @@ function toDependencyRow(i: ForgejoIssue): DependencyRow {
   };
 }
 
+function parseIssueNumber(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
 issues.use("/:slug/*", requireMembership());
@@ -95,8 +100,8 @@ issues.get("/:slug/issues/pinned", async (c) => {
 // fallback and normalized timestamps.
 issues.get("/:slug/issues/:number", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json({ error: "bad number" }, 400);
   try {
     const issue = await fj.getIssue(owner, repo, number);
     if (issue.pull_request) return c.json({ error: "not an issue" }, 404);
@@ -151,40 +156,41 @@ issues.post("/:slug/issues", async (c) => {
 // Typed because Forgejo's dependency mutation body redundantly requires the
 // owner/repo, which the SPA should not know.
 issues.get("/:slug/issues/:number/dependencies", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listIssueDependencies(owner, repo, number);
   return c.json({ issues: list.map(toDependencyRow) });
 });
 
 issues.get("/:slug/issues/:number/blocks", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listIssueBlocks(owner, repo, number);
   return c.json({ issues: list.map(toDependencyRow) });
 });
 
 issues.post("/:slug/issues/:number/dependencies", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json({ error: "bad number" }, 400);
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
-  const index = Number(body?.index);
-  if (!Number.isFinite(index) || index <= 0) {
+  const index = parseIssueNumber(body?.index);
+  if (index === null) {
     return c.json({ error: "dependency issue number required", code: "validation" }, 400);
   }
+  if (index === number) return c.json({ error: "issue cannot depend on itself", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   const updated = await fj.addIssueDependency(owner, repo, number, index);
   return c.json({ issue: toDependencyRow(updated) }, 201);
 });
 
 issues.delete("/:slug/issues/:number/dependencies", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json({ error: "bad number" }, 400);
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
-  const index = Number(body?.index);
-  if (!Number.isFinite(index) || index <= 0) {
+  const index = parseIssueNumber(body?.index);
+  if (index === null) {
     return c.json({ error: "dependency issue number required", code: "validation" }, 400);
   }
   const { fj, owner, repo } = c.get("repoCtx");
@@ -239,8 +245,8 @@ issues.get("/:slug/activities", async (c) => {
 // Typed because the SPA timeline uses a narrowed event DTO with normalized
 // label/milestone/dependency references.
 issues.get("/:slug/issues/:number/timeline", async (c) => {
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   const events = await fj.listIssueTimeline(owner, repo, number);
   // Forgejo returns null instead of [] for some empty issue timelines.
