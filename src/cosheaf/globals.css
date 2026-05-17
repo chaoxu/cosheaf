@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "@chaoxu/coflat-editor/style.css";
 
 /* Rich diff tints. The reader emits `data-source-line` on every block;
    RichDiffRender toggles these classes onto matching nodes. */

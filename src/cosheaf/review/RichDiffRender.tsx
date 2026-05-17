@@ -12,15 +12,12 @@
 //      CommentThread components into per-line container divs appended after
 //      the matching block.
 
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
-import {
-  type DocumentContext,
-  hydrateMath,
-  renderToHtml,
-} from "@chaoxu/coflat-editor/reader";
+import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
+import DOMPurify from "dompurify";
 import type { LineComment } from "../api";
 import { CommentThread, type CommentActions } from "./CommentThread";
 import { groupCommentsByLine } from "./comment-anchors";
@@ -48,9 +45,18 @@ export function RichDiffRender({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const commentRootsRef = useRef<Map<string, Root>>(new Map());
 
-  const html = useMemo(() => {
-    const { html: rendered } = renderToHtml(source, ctx, { sourceLineAttribution: true });
-    return rendered;
+  const [html, setHtml] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    async function render(): Promise<void> {
+      const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
+      const { html: rendered } = renderToHtml(source, ctx, { sourceLineAttribution: true });
+      if (!cancelled) setHtml(DOMPurify.sanitize(rendered));
+    }
+    void render();
+    return () => {
+      cancelled = true;
+    };
   }, [source, ctx]);
 
   // Mount HTML imperatively so React never re-renders the inner tree.
@@ -66,7 +72,7 @@ export function RichDiffRender({
     commentRootsRef.current.clear();
     root.innerHTML = html;
     root.dataset.cosheafHtml = html;
-    void hydrateMath(root);
+    void import("@chaoxu/coflat-editor/reader").then(({ hydrateMath }) => hydrateMath(root));
   }, [html]);
 
   // Tint added/removed lines.

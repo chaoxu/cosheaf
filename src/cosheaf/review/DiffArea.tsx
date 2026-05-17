@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import type { LineComment, PullFile } from "../api";
+import type { DocumentFormatId } from "../../../shared/document-format";
+import { getClientDocumentFormat } from "../format-registry";
 import type { DiffRendererProps, ViewMode, ViewShape } from "./diff-renderer-types";
 import { SourceDiff } from "./diff-renderers/SourceDiff";
 import { SourceAfterOnly } from "./diff-renderers/SourceAfterOnly";
@@ -31,6 +33,7 @@ function isDisabled(mode: ViewMode, shape: ViewShape): boolean {
 export function DiffArea({
   file,
   workspaceSlug,
+  formatId,
   loadContent,
   comments,
   currentForgejoUsername,
@@ -40,6 +43,7 @@ export function DiffArea({
 }: {
   file: PullFile | null;
   workspaceSlug: string;
+  formatId: DocumentFormatId;
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
   currentForgejoUsername?: string;
@@ -56,11 +60,14 @@ export function DiffArea({
   const [mode, setMode] = useState<ViewMode>(() => readMode(modeKey));
   const [shape, setShape] = useState<ViewShape>(() => readShape(shapeKey));
 
+  const richAvailable = getClientDocumentFormat(formatId).supportsRichDiff;
+
   // If the active combination became invalid (e.g. user switched mode and
   // landed on Rich+Unified), nudge the shape to a valid one.
   useEffect(() => {
     if (isDisabled(mode, shape)) setShape("split");
-  }, [mode, shape]);
+    if (!richAvailable && mode === "rich") setMode("source");
+  }, [mode, shape, richAvailable]);
 
   useEffect(() => {
     localStorage.setItem(modeKey, mode);
@@ -90,7 +97,14 @@ export function DiffArea({
   return (
     <div className="flex flex-col min-h-0">
       <div className="flex items-center gap-3 px-3 py-1.5 border-b border-[var(--cf-border)]">
-        <Toggle label="View" items={MODES} value={mode} onChange={setMode} testIdPrefix="view-mode" />
+        <Toggle
+          label="View"
+          items={MODES}
+          value={mode}
+          onChange={setMode}
+          testIdPrefix="view-mode"
+          disabledItem={(id) => id === "rich" && !richAvailable}
+        />
         <Toggle
           label="Shape"
           items={SHAPES}

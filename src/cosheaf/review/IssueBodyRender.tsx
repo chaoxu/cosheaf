@@ -13,14 +13,20 @@
 // data attributes. Click handling is done via a container-level click
 // listener so React never sees stale handler refs.
 
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { hydrateMath, renderToHtml, type DocumentContext } from "@chaoxu/coflat-editor/reader";
+import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
+import DOMPurify from "dompurify";
 import "katex/dist/katex.min.css";
+import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../../shared/document-format";
+import { parseFrontmatterYaml } from "../../../shared/frontmatter-yaml";
+import { api } from "../api";
 import { escapeAttr, escapeHtml } from "../lib/html-escape";
 
 interface RenderProps {
   text: string;
+  workspaceSlug: string;
+  formatId: DocumentFormatId;
   onOpenPageById?: (cosheafId: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
   onOpenNumber?: (n: number) => void;
@@ -38,6 +44,8 @@ const BARE_REF_RE =
 
 export function IssueBodyRender({
   text,
+  workspaceSlug,
+  formatId,
   onOpenPageById,
   onOpenPath,
   onOpenNumber,
@@ -49,19 +57,47 @@ export function IssueBodyRender({
 
   // Fall back to a minimal local resolver so the surface still works without
   // a workspace-scoped ctx (unit tests, isolated previews).
-  const effectiveCtx: DocumentContext = ctx ?? {
-    refResolver: {
-      resolve(key, _mode) {
-        return {
-          content: `[@${escapeHtml(key)}]`,
-          className: `${REF_PAGE_CLASS} ${REF_BUTTON_CLASS}`,
-        };
+  const effectiveCtx: DocumentContext = useMemo(
+    () =>
+      ctx ?? {
+        refResolver: {
+          resolve(key: string, _mode: unknown) {
+            return {
+              content: `[@${escapeHtml(key)}]`,
+              className: `${REF_PAGE_CLASS} ${REF_BUTTON_CLASS}`,
+            };
+          },
+        },
       },
-    },
-  };
+    [ctx],
+  );
 
-  const { html: rendered } = renderToHtml(text, effectiveCtx);
-  const html = injectPageRefTestIds(rewriteBareRefsInHtml(rendered));
+  const [html, setHtml] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setHtml("");
+    async function render(): Promise<void> {
+      if (formatId === COFLAT_FORMAT_ID) {
+        const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
+        const { html: rendered } = renderToHtml(text, effectiveCtx);
+        const rewritten = injectPageRefTestIds(rewriteBareRefsInHtml(rendered));
+        if (!cancelled) setHtml(DOMPurify.sanitize(rewritten));
+        return;
+      }
+      const { body } = parseFrontmatterYaml(text);
+      const rendered = await api.renderForgejoMarkdown(workspaceSlug, body);
+      if (!cancelled) setHtml(DOMPurify.sanitize(rendered.html));
+    }
+    void render().catch(() => {
+      if (!cancelled) {
+        setHtml(DOMPurify.sanitize(`<pre>${escapeHtml(text)}</pre>`));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [text, workspaceSlug, formatId, effectiveCtx]);
 
   // Own the DOM directly so React never overwrites our hydrated math.
   useLayoutEffect(() => {
@@ -70,8 +106,10 @@ export function IssueBodyRender({
     if (root.dataset.cosheafHtml === html) return; // no change, skip
     root.innerHTML = html;
     root.dataset.cosheafHtml = html;
-    void hydrateMath(root);
-  }, [html]);
+    if (formatId === COFLAT_FORMAT_ID) {
+      void import("@chaoxu/coflat-editor/reader").then(({ hydrateMath }) => hydrateMath(root));
+    }
+  }, [html, formatId]);
 
   useLayoutEffect(() => {
     const root = containerRef.current;
@@ -219,4 +257,3 @@ function injectPageRefTestIds(html: string): string {
     return `<span${attrs} data-testid="ref-page-${escapeAttr(keyM[1])}">`;
   });
 }
-

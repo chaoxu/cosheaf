@@ -2,6 +2,7 @@ import type { Role } from "../../shared/roles";
 import type { PullFiles, PrMeta, PrState, PullFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 import type { WorkspaceValidation } from "../../shared/validation";
+import type { DocumentFormatId } from "../../shared/document-format";
 
 export type Decision = "approve" | "request_changes" | "comment";
 export type { Role, PullFiles, PullFile, PrMeta, PrState, LineComment, CommentSide };
@@ -16,6 +17,13 @@ export interface Workspace {
   slug: string;
   name: string;
   role: Role;
+  default_md_format: DocumentFormatId;
+}
+
+export interface WorkspaceSettings {
+  min_approvals: number;
+  default_md_format: DocumentFormatId;
+  formats: Array<{ id: DocumentFormatId; displayName: string }>;
 }
 
 export interface DocumentMeta {
@@ -125,17 +133,6 @@ function milestoneFromForgejo(m: ForgejoMilestoneRef): Milestone {
     closed_issues: m.closed_issues,
     due_on: m.due_on ? new Date(m.due_on).getTime() : null,
   };
-}
-
-interface ForgejoDependencyIssue {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  pull_request?: unknown;
-}
-
-function dependencyRowFromForgejo(i: ForgejoDependencyIssue): DependencyRow {
-  return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
 }
 
 interface ForgejoIssueCommentRaw {
@@ -377,9 +374,9 @@ export const api = {
 
   // ---------- Workspace settings ----------
 
-  getSettings: (slug: string) => jsonFetch<{ min_approvals: number }>(`${w(slug)}/settings`),
-  updateSettings: (slug: string, body: { min_approvals: number }) =>
-    jsonFetch<{ min_approvals: number }>(`${w(slug)}/settings`, {
+  getSettings: (slug: string) => jsonFetch<WorkspaceSettings>(`${w(slug)}/settings`),
+  updateSettings: (slug: string, body: { min_approvals?: number; default_md_format?: DocumentFormatId }) =>
+    jsonFetch<WorkspaceSettings>(`${w(slug)}/settings`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -435,6 +432,24 @@ export const api = {
     jsonFetch<unknown>(forgejo(slug, `issues/comments/${id}`), { method: "DELETE" }).then(
       () => ({ ok: true as const }),
     ),
+  renderForgejoMarkdown: async (slug: string, text: string): Promise<{ html: string }> => {
+    const res = await fetch(forgejo(slug, "markdown"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ Text: text, Mode: "comment", Wiki: false }),
+      credentials: "same-origin",
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(res.status, err.error ?? `HTTP ${res.status}`);
+    }
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("application/json")) {
+      const data = (await res.json()) as { html?: string };
+      return { html: data.html ?? "" };
+    }
+    return { html: await res.text() };
+  },
   listLabels: (slug: string) =>
     jsonFetch<Label[]>(forgejo(slug, "labels")).then((labels) => ({ labels })),
   createLabel: (slug: string, body: { name: string; color: string; description?: string }) =>
@@ -460,21 +475,17 @@ export const api = {
   listActivities: (slug: string, limit = 50) =>
     jsonFetch<{ activities: ActivityRow[] }>(`${w(slug)}/activities?limit=${limit}`),
   listIssueDependencies: (slug: string, number: number) =>
-    jsonFetch<ForgejoDependencyIssue[]>(forgejo(slug, `issues/${number}/dependencies`)).then(
-      (issues) => ({ issues: issues.map(dependencyRowFromForgejo) }),
-    ),
+    jsonFetch<{ issues: DependencyRow[] }>(`${w(slug)}/issues/${number}/dependencies`),
   listIssueBlocks: (slug: string, number: number) =>
-    jsonFetch<ForgejoDependencyIssue[]>(forgejo(slug, `issues/${number}/blocks`)).then(
-      (issues) => ({ issues: issues.map(dependencyRowFromForgejo) }),
-    ),
+    jsonFetch<{ issues: DependencyRow[] }>(`${w(slug)}/issues/${number}/blocks`),
   addIssueDependency: (slug: string, number: number, index: number) =>
-    jsonFetch<unknown>(forgejo(slug, `issues/${number}/dependencies`), {
+    jsonFetch<unknown>(`${w(slug)}/issues/${number}/dependencies`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ index }),
     }).then(() => ({ ok: true as const })),
   removeIssueDependency: (slug: string, number: number, index: number) =>
-    jsonFetch<unknown>(forgejo(slug, `issues/${number}/dependencies`), {
+    jsonFetch<unknown>(`${w(slug)}/issues/${number}/dependencies`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ index }),

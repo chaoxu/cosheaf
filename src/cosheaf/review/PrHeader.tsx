@@ -2,10 +2,23 @@ import type { ReactElement } from "react";
 import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/utils";
 import type { PrMeta } from "../api";
+import type { DocumentFormatId } from "../../../shared/document-format";
+import { IssueBodyRender } from "./IssueBodyRender";
+import type { DocumentContext } from "../document-format/coflat-context";
 
 const muted = "text-[var(--cf-muted)]";
 
-export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
+export function PrHeader({
+  pr,
+  workspaceSlug,
+  formatId,
+  documentContext,
+}: {
+  pr: PrMeta;
+  workspaceSlug: string;
+  formatId: DocumentFormatId;
+  documentContext?: DocumentContext;
+}): ReactElement {
   return (
     <header
       data-testid="pr-header"
@@ -27,6 +40,16 @@ export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
           {" "}across {pr.files_changed} {pr.files_changed === 1 ? "file" : "files"}
         </span>
       </div>
+      {pr.body.trim().length > 0 && (
+        <div className="text-sm">
+          <IssueBodyRender
+            text={pr.body}
+            workspaceSlug={workspaceSlug}
+            formatId={formatId}
+            ctx={documentContext}
+          />
+        </div>
+      )}
     </header>
   );
 }

@@ -20,7 +20,7 @@ export function buildWorkspaceDocumentContext(opts: WorkspaceContextOptions): Do
   }
   return {
     refResolver: {
-      resolve(key, _mode) {
+      resolve(key: string, _mode: unknown) {
         const file = byId.get(key);
         if (!file) {
           // Unresolved — keep the literal bracketed form so authors notice
@@ -40,4 +40,3 @@ export function buildWorkspaceDocumentContext(opts: WorkspaceContextOptions): Do
     },
   };
 }
-

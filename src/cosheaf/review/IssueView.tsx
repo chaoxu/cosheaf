@@ -8,12 +8,14 @@ import { Button } from "../components/ui/button";
 import { api } from "../api";
 import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
 import { IssueBodyRender, type DocumentContext } from "../document-format/coflat-issue-render";
+import type { DocumentFormatId } from "../../../shared/document-format";
 import { formatRelativeTime } from "../lib/format-relative-time";
 
 const muted = "text-[var(--cf-muted)]";
 
 export function IssueView({
   workspaceSlug,
+  formatId,
   number,
   currentForgejoUsername,
   canManageLabels,
@@ -27,6 +29,7 @@ export function IssueView({
   documentContext,
 }: {
   workspaceSlug: string;
+  formatId: DocumentFormatId;
   number: number;
   currentForgejoUsername?: string;
   canManageLabels?: boolean;
@@ -308,6 +311,8 @@ export function IssueView({
             {issue.body ? (
               <IssueBodyRender
                 text={issue.body}
+                workspaceSlug={workspaceSlug}
+                formatId={formatId}
                 ctx={documentContext}
                 onOpenPageById={onOpenPageById}
                 onOpenPath={onOpenPath}
@@ -436,6 +441,8 @@ export function IssueView({
                 <div className="text-sm">
                   <IssueBodyRender
                     text={c.body}
+                    workspaceSlug={workspaceSlug}
+                    formatId={formatId}
                     ctx={documentContext}
                     onOpenPageById={onOpenPageById}
                     onOpenPath={onOpenPath}
@@ -731,4 +738,3 @@ function FocusedTextarea({
     />
   );
 }
-

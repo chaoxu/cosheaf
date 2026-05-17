@@ -6,19 +6,101 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { api } from "../api";
-import type { Label, Milestone } from "../api";
+import type { Label, Milestone, WorkspaceSettings } from "../api";
+import type { DocumentFormatId } from "../../../shared/document-format";
 
 const muted = "text-[var(--cf-muted)]";
 
 const DEFAULT_LABEL_COLORS = ["e11d48", "f59e0b", "10b981", "3b82f6", "8b5cf6", "6b7280"];
 
-export function SettingsPanel({ workspaceSlug }: { workspaceSlug: string }): ReactElement {
+export function SettingsPanel({
+  workspaceSlug,
+  initialFormatId,
+  onFormatChanged,
+}: {
+  workspaceSlug: string;
+  initialFormatId: DocumentFormatId;
+  onFormatChanged?: (formatId: DocumentFormatId) => void;
+}): ReactElement {
   return (
     <div className="flex flex-col gap-6 p-4 max-w-3xl">
       <h1 className="text-lg font-semibold">Workspace settings</h1>
+      <FormatManager
+        workspaceSlug={workspaceSlug}
+        initialFormatId={initialFormatId}
+        onFormatChanged={onFormatChanged}
+      />
       <LabelsManager workspaceSlug={workspaceSlug} />
       <MilestonesManager workspaceSlug={workspaceSlug} />
     </div>
+  );
+}
+
+function FormatManager({
+  workspaceSlug,
+  initialFormatId,
+  onFormatChanged,
+}: {
+  workspaceSlug: string;
+  initialFormatId: DocumentFormatId;
+  onFormatChanged?: (formatId: DocumentFormatId) => void;
+}): ReactElement {
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [formatId, setFormatId] = useState<DocumentFormatId>(initialFormatId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getSettings(workspaceSlug)
+      .then((next) => {
+        setSettings(next);
+        setFormatId(next.default_md_format);
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "load failed"));
+  }, [workspaceSlug]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await api.updateSettings(workspaceSlug, { default_md_format: formatId });
+      setSettings(next);
+      setFormatId(next.default_md_format);
+      onFormatChanged?.(next.default_md_format);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section data-testid="settings-format" className="flex flex-col gap-2">
+      <h2 className="text-base font-semibold">Markdown format</h2>
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <select
+          value={formatId}
+          onChange={(event) => setFormatId(event.target.value as DocumentFormatId)}
+          data-testid="settings-format-select"
+          className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
+        >
+          {(settings?.formats ?? [{ id: initialFormatId, displayName: initialFormatId }]).map((format) => (
+            <option key={format.id} value={format.id}>
+              {format.displayName}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" type="submit" disabled={busy || formatId === settings?.default_md_format}>
+          Apply
+        </Button>
+      </form>
+      <div className={cn("text-xs", muted)}>
+        Switching format reindexes the workspace; backlinks may be removed when the selected format does not extract links.
+      </div>
+      {error && <div className="text-xs text-red-600">{error}</div>}
+    </section>
   );
 }
 

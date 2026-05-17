@@ -1,5 +1,7 @@
 import type { ReactElement } from "react";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format";
+import { getClientDocumentFormat } from "./format-registry";
 
 type OutlineEntry = {
   readonly level: 1 | 2 | 3 | 4 | 5 | 6;
@@ -41,8 +43,10 @@ import { PrHeader } from "./review/PrHeader";
 import { FileList } from "./review/FileList";
 import { DiffArea } from "./review/DiffArea";
 import { ReviewActions } from "./review/ReviewActions";
+import { IssueBodyRender } from "./review/IssueBodyRender";
 import { IssueView } from "./review/IssueView";
 import { buildWorkspaceDocumentContext } from "./document-format/coflat-context";
+import type { DocumentContext } from "./document-format/coflat-context";
 import type {
   EditorAssetUploader,
   EditorAutocompleteSource,
@@ -51,10 +55,6 @@ import type {
   MountedEditor,
 } from "./document-format/coflat-editor";
 import { SettingsPanel } from "./review/SettingsPanel";
-
-const MarkdownEditor = lazy(() =>
-  import("./document-format/coflat-editor").then((m) => ({ default: m.MarkdownEditor })),
-);
 
 type View =
   | { kind: "loading" }
@@ -978,9 +978,15 @@ function describeOpType(row: ActivityRow): {
 
 function ApprovalsPanel({
   approvals,
+  workspaceSlug,
+  formatId,
+  documentContext,
   lineCommentCount = 0,
 }: {
   approvals: ApprovalRecord[];
+  workspaceSlug: string;
+  formatId: Workspace["default_md_format"];
+  documentContext?: DocumentContext;
   lineCommentCount?: number;
 }): ReactElement {
   // Latest verdict per reviewer (excluding "comment", which is just activity).
@@ -1065,7 +1071,14 @@ function ApprovalsPanel({
                   <span className={muted}>{formatTime(a.created_at)}</span>
                 </div>
                 {a.comment && (
-                  <div className="text-xs pl-4 whitespace-pre-wrap break-words">{a.comment}</div>
+                  <div className="text-xs pl-4 break-words">
+                    <IssueBodyRender
+                      text={a.comment}
+                      workspaceSlug={workspaceSlug}
+                      formatId={formatId}
+                      ctx={documentContext}
+                    />
+                  </div>
                 )}
               </li>
             ))}
@@ -1123,6 +1136,14 @@ function WorkspaceView({
 }): ReactElement {
   const [files, setFiles] = useState<FileEntry[] | null>(null);
   const workspaceCtx = useMemo(() => buildWorkspaceDocumentContext({ files }), [files]);
+  const [activeFormatId, setActiveFormatId] = useState(workspace.default_md_format);
+  useEffect(() => {
+    setActiveFormatId(workspace.default_md_format);
+  }, [workspace.default_md_format]);
+  const ActiveMarkdownEditor = useMemo(
+    () => lazy(getClientDocumentFormat(activeFormatId).editor),
+    [activeFormatId],
+  );
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [openDoc, setOpenDoc] = useState<FileEntry["doc"] | undefined>(undefined);
   const [content, setContent] = useState("");
@@ -2236,6 +2257,7 @@ function WorkspaceView({
           {!reviewingPullNumber && !openPath && viewingIssue !== null && (
             <IssueView
               workspaceSlug={workspace.slug}
+              formatId={activeFormatId}
               number={viewingIssue}
               documentContext={workspaceCtx}
               currentForgejoUsername={user.username}
@@ -2326,7 +2348,11 @@ function WorkspaceView({
           )}
           {!reviewingPullNumber && !openPath && viewingIssue === null && !newIssueOpen && sidebarView === "settings" && (
             <div className="flex-1 overflow-auto">
-              <SettingsPanel workspaceSlug={workspace.slug} />
+              <SettingsPanel
+                workspaceSlug={workspace.slug}
+                initialFormatId={activeFormatId}
+                onFormatChanged={setActiveFormatId}
+              />
             </div>
           )}
           {!reviewingPullNumber && !openPath && viewingIssue === null && !newIssueOpen && sidebarView !== "settings" && (
@@ -2337,7 +2363,7 @@ function WorkspaceView({
           {!reviewingPullNumber && openPath && (
             <>
               <Suspense fallback={<div className="flex-1" />}>
-                <MarkdownEditor
+                <ActiveMarkdownEditor
                   key={openPath}
                   value={content}
                   mode={editorMode}
@@ -2375,16 +2401,29 @@ function WorkspaceView({
                 />
               )}
               {activeBranchName && (
-                <ApprovalsPanel approvals={approvals} />
+                <ApprovalsPanel
+                  approvals={approvals}
+                  workspaceSlug={workspace.slug}
+                  formatId={activeFormatId}
+                  documentContext={workspaceCtx}
+                />
               )}
             </>
           )}
           {reviewingPullNumber && (
             <>
-              {reviewState.pr && <PrHeader pr={reviewState.pr} />}
+              {reviewState.pr && (
+                <PrHeader
+                  pr={reviewState.pr}
+                  workspaceSlug={workspace.slug}
+                  formatId={activeFormatId}
+                  documentContext={workspaceCtx}
+                />
+              )}
               <div className="min-h-0 shrink-0">
                 <DiffArea
                   workspaceSlug={workspace.slug}
+                  formatId={activeFormatId}
                   file={
                     reviewState.diff?.files.find((f) => f.path === reviewState.selectedPath) ??
                     reviewState.diff?.files[0] ??
@@ -2409,6 +2448,9 @@ function WorkspaceView({
               </div>
               <ApprovalsPanel
                 approvals={approvals}
+                workspaceSlug={workspace.slug}
+                formatId={activeFormatId}
+                documentContext={workspaceCtx}
                 lineCommentCount={reviewState.comments.length}
               />
               {reviewState.pr && (
@@ -2454,14 +2496,16 @@ function WorkspaceView({
             <div className="flex shrink-0 items-center gap-0.5">
               {openPath && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
-                    title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
-                    className="px-1.5 rounded hover:bg-[var(--cf-hover)]"
-                  >
-                    {editorMode === "rich" ? "Source" : "Rich"}
-                  </button>
+                  {activeFormatId === COFLAT_FORMAT_ID && (
+                    <button
+                      type="button"
+                      onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
+                      title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
+                      className="px-1.5 rounded hover:bg-[var(--cf-hover)]"
+                    >
+                      {editorMode === "rich" ? "Source" : "Rich"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={save}
