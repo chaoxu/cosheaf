@@ -1711,10 +1711,14 @@ function WorkspaceView({
             // Admin direct-merge bypasses required-approvals branch protection.
             await api.mergePull(workspace.slug, pr.number, { Do: "squash", force: true });
             setStatus("merged to main");
+            // Direct-merge clears the branch (it was merged; there's no
+            // follow-up). For the normal "open for review" path we KEEP the
+            // branch context so a later save (e.g. after request-changes)
+            // appends commits to the same PR head ref (#26).
+            setCurrentBranchName(null);
           } else {
-            setStatus(`pull request #${pr.number} opened`);
+            setStatus(`pull request #${pr.number} opened — saves on this file continue pushing to ${currentBranchName}`);
           }
-          setCurrentBranchName(null);
           refreshPulls();
           void loadTree();
         } catch (err) {

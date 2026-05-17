@@ -112,31 +112,27 @@ try {
     { timeout: 10000 },
   );
 
-  // ── 3. meri amends the same branch and we resubmit by re-saving ───────────
+  // ── 3. meri amends the same branch — the save pushes another commit to
+  //       the existing PR's head ref instead of forking a second PR (#26).
   stage = "meri-edit-2";
   await meri.bringToFront();
   await typeIntoEditor(meri, " v2");
   await meri.locator('button:has-text("Save")').first().click();
-  // The save goes to a fresh user branch (currentBranchName was cleared on
-  // opening a pull request). Open a *second* PR — Forgejo treats each amend session as its
-  // own PR in this smoke; production would push to the same branch.
+  // After #26: openPull no longer clears currentBranchName for the "open
+  // for review" path, so the save continues on the same head ref.
   await meri.getByTestId("active-branch-name").waitFor({ state: "attached", timeout: 8000 });
   const meriBranch2 = (await meri.getByTestId("active-branch-name").innerText()).trim();
-  await meri.getByTestId("open-pull-request").click();
-  await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
-  const prNumber2 = await meri.evaluate(async (branch) => {
-    const r = await fetch("/api/v1/w/flushing-coin/forgejo/pulls?state=open");
-    const pulls = await r.json();
-    const found = pulls.find((p) => p.head?.ref === branch);
-    return found ? found.number : null;
-  }, meriBranch2);
-  if (!prNumber2) throw new Error("could not locate PR2");
+  if (meriBranch2 !== meriBranch) {
+    throw new Error(
+      `expected the second save to push to the same PR branch "${meriBranch}", got "${meriBranch2}"`,
+    );
+  }
 
-  // ── 4. vera approves the new PR ───────────────────────────────────────────
+  // ── 4. vera approves the same PR after the follow-up commit lands ─────────
   stage = "vera-approve";
   await vera.bringToFront();
   await vera.getByTestId("sidebar-tab-inbox").click();
-  const reviewPullItem2 = vera.locator(`[data-testid="review-pull-${prNumber2}"]`);
+  const reviewPullItem2 = vera.locator(`[data-testid="review-pull-${prNumber}"]`);
   await reviewPullItem2.waitFor({ state: "visible", timeout: 15000 });
   await reviewPullItem2.click();
   await vera.getByTestId("review-approve").waitFor({ state: "visible", timeout: 8000 });
@@ -154,9 +150,9 @@ try {
       body: JSON.stringify({ Do: "squash" }),
     });
     return { status: r.status, body: await r.text() };
-  }, prNumber2);
+  }, prNumber);
   if (mergeResult.status !== 200)
-    throw new Error(`merge ${prNumber2}: ${mergeResult.status} ${mergeResult.body}`);
+    throw new Error(`merge ${prNumber}: ${mergeResult.status} ${mergeResult.body}`);
 
   await meri.screenshot({ path: SCREENSHOT, fullPage: false });
 
@@ -165,7 +161,6 @@ try {
     ok,
     stage,
     prNumber,
-    prNumber2,
     path: FLOW_PATH,
     badResponses,
     pageErrors,
