@@ -79,6 +79,24 @@ export class Forgejo {
     return (txt ? JSON.parse(txt) : undefined) as T;
   }
 
+  // `req<T>()` that returns null on 404 instead of throwing. Used by every
+  // get-or-null call (getRepo, getBranchProtection, getBranch, getPull, …).
+  private async reqOpt<T>(p: string, opts: RequestOpts = {}): Promise<T | null> {
+    try {
+      return await this.req<T>(p, opts);
+    } catch (e) {
+      if (e instanceof ForgejoError && e.status === 404) return null;
+      throw e;
+    }
+  }
+
+  // Compose a repo-scoped Forgejo URL. All repo-bound methods share this so
+  // a rename of Forgejo's path shape (or a future owner-encoding tweak)
+  // changes one place.
+  private repoPath(owner: string, repo: string, suffix: string): string {
+    return `/api/v1/repos/${owner}/${repo}/${suffix}`;
+  }
+
   // ---------------- users ----------------
 
   async getCurrentUser(): Promise<ForgejoUser> {
@@ -86,12 +104,7 @@ export class Forgejo {
   }
 
   async getUserByName(username: string): Promise<ForgejoUser | null> {
-    try {
-      return await this.req<ForgejoUser>(`/api/v1/users/${encodeURIComponent(username)}`);
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return null;
-      throw e;
-    }
+    return this.reqOpt<ForgejoUser>(`/api/v1/users/${encodeURIComponent(username)}`);
   }
 
   async createUser(opts: {
@@ -148,16 +161,11 @@ export class Forgejo {
   }
 
   async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {
-    try {
-      return await this.req<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`);
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return null;
-      throw e;
-    }
+    return this.reqOpt<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`);
   }
 
   async addCollaborator(owner: string, repo: string, username: string, permission: "read" | "write" | "admin"): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}`, {
+    await this.req(this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}`), {
       method: "PUT",
       body: { permission },
       expectEmpty: true,
@@ -165,14 +173,14 @@ export class Forgejo {
   }
 
   async removeCollaborator(owner: string, repo: string, username: string): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}`, {
+    await this.req(this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}`), {
       method: "DELETE",
       expectEmpty: true,
     });
   }
 
   async listCollaborators(owner: string, repo: string): Promise<ForgejoUser[]> {
-    return this.req<ForgejoUser[]>(`/api/v1/repos/${owner}/${repo}/collaborators`);
+    return this.req<ForgejoUser[]>(this.repoPath(owner, repo, `collaborators`));
   }
 
   // Returns "admin"|"write"|"read"|"none". `owner` is collapsed to `admin` so
@@ -185,7 +193,7 @@ export class Forgejo {
   ): Promise<"admin" | "write" | "read" | "none"> {
     try {
       const r = await this.req<{ permission?: string }>(
-        `/api/v1/repos/${owner}/${repo}/collaborators/${encodeURIComponent(username)}/permission`,
+        this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}/permission`),
       );
       const p = r.permission;
       if (p === "owner" || p === "admin") return "admin";
@@ -201,12 +209,7 @@ export class Forgejo {
   // ---------------- branch protection ----------------
 
   async getBranchProtection(owner: string, repo: string, branch: string): Promise<ForgejoBranchProtection | null> {
-    try {
-      return await this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections/${encodeURIComponent(branch)}`);
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return null;
-      throw e;
-    }
+    return this.reqOpt<ForgejoBranchProtection>(this.repoPath(owner, repo, `branch_protections/${encodeURIComponent(branch)}`));
   }
 
   async createBranchProtection(owner: string, repo: string, opts: {
@@ -215,7 +218,7 @@ export class Forgejo {
     push_whitelist_usernames?: string[];
   }): Promise<ForgejoBranchProtection> {
     const whitelist = opts.push_whitelist_usernames ?? [];
-    return this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections`, {
+    return this.req<ForgejoBranchProtection>(this.repoPath(owner, repo, `branch_protections`), {
       method: "POST",
       body: {
         branch_name: opts.branch_name,
@@ -236,7 +239,7 @@ export class Forgejo {
   }
 
   async patchBranchProtectionPushWhitelist(owner: string, repo: string, branch: string, usernames: string[]): Promise<ForgejoBranchProtection> {
-    return this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections/${encodeURIComponent(branch)}`, {
+    return this.req<ForgejoBranchProtection>(this.repoPath(owner, repo, `branch_protections/${encodeURIComponent(branch)}`), {
       method: "PATCH",
       body: {
         enable_push: usernames.length > 0,
@@ -249,7 +252,7 @@ export class Forgejo {
   async updateBranchProtection(owner: string, repo: string, branch: string, patch: {
     required_approvals?: number;
   }): Promise<ForgejoBranchProtection> {
-    return this.req<ForgejoBranchProtection>(`/api/v1/repos/${owner}/${repo}/branch_protections/${encodeURIComponent(branch)}`, {
+    return this.req<ForgejoBranchProtection>(this.repoPath(owner, repo, `branch_protections/${encodeURIComponent(branch)}`), {
       method: "PATCH",
       body: patch,
     });
@@ -258,7 +261,7 @@ export class Forgejo {
   // ---------------- webhooks ----------------
 
   async createRepoHook(owner: string, repo: string, url: string, secret: string, events: string[]): Promise<ForgejoHook> {
-    return this.req<ForgejoHook>(`/api/v1/repos/${owner}/${repo}/hooks`, {
+    return this.req<ForgejoHook>(this.repoPath(owner, repo, `hooks`), {
       method: "POST",
       body: {
         type: "forgejo",
@@ -270,27 +273,22 @@ export class Forgejo {
   }
 
   async listRepoHooks(owner: string, repo: string): Promise<ForgejoHook[]> {
-    return this.req<ForgejoHook[]>(`/api/v1/repos/${owner}/${repo}/hooks`);
+    return this.req<ForgejoHook[]>(this.repoPath(owner, repo, `hooks`));
   }
 
   // ---------------- contents (files) ----------------
 
   async getRawFile(owner: string, repo: string, ref: string, filepath: string): Promise<string> {
-    return this.req<string>(`/api/v1/repos/${owner}/${repo}/raw/${encodeFilePath(filepath)}`, {
+    return this.req<string>(this.repoPath(owner, repo, `raw/${encodeFilePath(filepath)}`), {
       query: { ref },
       raw: true,
     });
   }
 
   async getFileMeta(owner: string, repo: string, ref: string, filepath: string): Promise<ForgejoContent | null> {
-    try {
-      return await this.req<ForgejoContent>(`/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(filepath)}`, {
+    return this.reqOpt<ForgejoContent>(this.repoPath(owner, repo, `contents/${encodeFilePath(filepath)}`), {
         query: { ref },
       });
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return null;
-      throw e;
-    }
   }
 
   async putFile(owner: string, repo: string, opts: {
@@ -320,7 +318,7 @@ export class Forgejo {
       message: opts.message,
       ...(isUpdate ? { sha: opts.sha } : {}),
     };
-    const path = `/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(opts.path)}`;
+    const path = this.repoPath(owner, repo, `contents/${encodeFilePath(opts.path)}`);
     return this.req<ForgejoFileResponse>(path, {
       method: isUpdate ? "PUT" : "POST",
       body,
@@ -333,7 +331,7 @@ export class Forgejo {
     sha: string;
     message: string;
   }): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(opts.path)}`, {
+    await this.req(this.repoPath(owner, repo, `contents/${encodeFilePath(opts.path)}`), {
       method: "DELETE",
       body: { branch: opts.branch, sha: opts.sha, message: opts.message },
       expectEmpty: true,
@@ -345,7 +343,7 @@ export class Forgejo {
     let page = 1;
     while (true) {
       const r = await this.req<{ tree: ForgejoTreeEntry[]; truncated: boolean }>(
-        `/api/v1/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}`,
+        this.repoPath(owner, repo, `git/trees/${encodeURIComponent(ref)}`),
         { query: { recursive: recursive ? "true" : "false", page, per_page: 50 } },
       );
       out.push(...(r.tree ?? []));
@@ -359,7 +357,7 @@ export class Forgejo {
   // ---------------- branches ----------------
 
   async createBranch(owner: string, repo: string, opts: { newBranchName: string; oldBranchName?: string }): Promise<ForgejoBranch> {
-    return this.req<ForgejoBranch>(`/api/v1/repos/${owner}/${repo}/branches`, {
+    return this.req<ForgejoBranch>(this.repoPath(owner, repo, `branches`), {
       method: "POST",
       body: {
         new_branch_name: opts.newBranchName,
@@ -373,7 +371,7 @@ export class Forgejo {
     let page = 1;
     while (true) {
       const batch = await this.req<ForgejoBranch[]>(
-        `/api/v1/repos/${owner}/${repo}/branches`,
+        this.repoPath(owner, repo, `branches`),
         { query: { page, per_page: 50 } },
       );
       if (batch.length === 0) break;
@@ -386,16 +384,11 @@ export class Forgejo {
   }
 
   async getBranch(owner: string, repo: string, branch: string): Promise<ForgejoBranch | null> {
-    try {
-      return await this.req<ForgejoBranch>(`/api/v1/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`);
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return null;
-      throw e;
-    }
+    return this.reqOpt<ForgejoBranch>(this.repoPath(owner, repo, `branches/${encodeURIComponent(branch)}`));
   }
 
   async deleteBranch(owner: string, repo: string, branch: string): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`, {
+    await this.req(this.repoPath(owner, repo, `branches/${encodeURIComponent(branch)}`), {
       method: "DELETE",
       expectEmpty: true,
     });
@@ -409,26 +402,21 @@ export class Forgejo {
     title: string;
     body: string;
   }): Promise<ForgejoPull> {
-    return this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls`, {
+    return this.req<ForgejoPull>(this.repoPath(owner, repo, `pulls`), {
       method: "POST",
       body: { head: opts.head, base: opts.base, title: opts.title, body: opts.body },
     });
   }
 
   async getPull(owner: string, repo: string, index: number): Promise<ForgejoPull | null> {
-    try {
-      return await this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls/${index}`);
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return null;
-      throw e;
-    }
+    return this.reqOpt<ForgejoPull>(this.repoPath(owner, repo, `pulls/${index}`));
   }
 
   async listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<ForgejoPull[]> {
     const out: ForgejoPull[] = [];
     let page = 1;
     while (true) {
-      const r = await this.req<ForgejoPull[]>(`/api/v1/repos/${owner}/${repo}/pulls`, {
+      const r = await this.req<ForgejoPull[]>(this.repoPath(owner, repo, `pulls`), {
         query: { state, page, limit: 50, sort: "newest" },
       });
       if (!r || r.length === 0) break;
@@ -441,14 +429,14 @@ export class Forgejo {
   }
 
   async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed" }): Promise<ForgejoPull> {
-    return this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls/${index}`, {
+    return this.req<ForgejoPull>(this.repoPath(owner, repo, `pulls/${index}`), {
       method: "PATCH",
       body: patch,
     });
   }
 
   async mergePull(owner: string, repo: string, index: number, opts: { Do: "merge" | "squash" | "rebase"; message?: string; force?: boolean }): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/pulls/${index}/merge`, {
+    await this.req(this.repoPath(owner, repo, `pulls/${index}/merge`), {
       method: "POST",
       body: { Do: opts.Do, MergeMessageField: opts.message ?? "", force_merge: opts.force ?? false },
       expectEmpty: true,
@@ -456,11 +444,11 @@ export class Forgejo {
   }
 
   async listPullFiles(owner: string, repo: string, index: number): Promise<ForgejoPullFile[]> {
-    return this.req<ForgejoPullFile[]>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/files`);
+    return this.req<ForgejoPullFile[]>(this.repoPath(owner, repo, `pulls/${index}/files`));
   }
 
   async getPullDiff(owner: string, repo: string, index: number): Promise<string> {
-    return this.req<string>(`/api/v1/repos/${owner}/${repo}/pulls/${index}.diff`, { raw: true });
+    return this.req<string>(this.repoPath(owner, repo, `pulls/${index}.diff`), { raw: true });
   }
 
   async listReviews(owner: string, repo: string, index: number): Promise<ForgejoReview[]> {
@@ -470,7 +458,7 @@ export class Forgejo {
     const all: ForgejoReview[] = [];
     for (let page = 1; page < 50; page++) {
       const batch = await this.req<ForgejoReview[]>(
-        `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews?page=${page}&limit=50`,
+        this.repoPath(owner, repo, `pulls/${index}/reviews?page=${page}&limit=50`),
       );
       all.push(...batch);
       if (batch.length < 50) break;
@@ -487,7 +475,7 @@ export class Forgejo {
     const payload: Record<string, unknown> = { event: opts.event, body: opts.body };
     if (opts.comments && opts.comments.length > 0) payload.comments = opts.comments;
     if (opts.commit_id) payload.commit_id = opts.commit_id;
-    return this.req<ForgejoReview>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`, {
+    return this.req<ForgejoReview>(this.repoPath(owner, repo, `pulls/${index}/reviews`), {
       method: "POST",
       body: payload,
     });
@@ -498,7 +486,7 @@ export class Forgejo {
     body: string;
   }): Promise<ForgejoReview> {
     return this.req<ForgejoReview>(
-      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}`,
+      this.repoPath(owner, repo, `pulls/${index}/reviews/${reviewId}`),
       { method: "POST", body: { event: opts.event, body: opts.body } },
     );
   }
@@ -513,7 +501,7 @@ export class Forgejo {
     if (opts.new_position !== undefined) payload.new_position = opts.new_position;
     if (opts.old_position !== undefined) payload.old_position = opts.old_position;
     return this.req<ForgejoPullReviewComment>(
-      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments`,
+      this.repoPath(owner, repo, `pulls/${index}/reviews/${reviewId}/comments`),
       { method: "POST", body: payload },
     );
   }
@@ -522,7 +510,7 @@ export class Forgejo {
     owner: string, repo: string, index: number, reviewId: number,
   ): Promise<ForgejoPullReviewComment[]> {
     return this.req<ForgejoPullReviewComment[]>(
-      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments`,
+      this.repoPath(owner, repo, `pulls/${index}/reviews/${reviewId}/comments`),
     );
   }
 
@@ -532,7 +520,7 @@ export class Forgejo {
   ): Promise<ForgejoPullReviewComment[]> {
     try {
       return await this.req<ForgejoPullReviewComment[]>(
-        `/api/v1/repos/${owner}/${repo}/pulls/${index}/comments`,
+        this.repoPath(owner, repo, `pulls/${index}/comments`),
       );
     } catch (err) {
       if (!(err instanceof ForgejoError && err.status === 404)) throw err;
@@ -575,33 +563,33 @@ export class Forgejo {
     if (opts.assigned_by) params.set("assigned_by", opts.assigned_by);
     if (opts.created_by) params.set("created_by", opts.created_by);
     if (opts.q) params.set("q", opts.q);
-    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues?${params.toString()}`);
+    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues?${params.toString()}`));
   }
 
   async getIssue(owner: string, repo: string, number: number): Promise<ForgejoIssue> {
-    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`);
+    return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}`));
   }
 
   async listPinnedIssues(owner: string, repo: string): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/pinned`);
+    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/pinned`));
   }
 
   async listIssueTimeline(owner: string, repo: string, number: number): Promise<ForgejoTimelineEvent[]> {
-    return this.req<ForgejoTimelineEvent[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/timeline`);
+    return this.req<ForgejoTimelineEvent[]>(this.repoPath(owner, repo, `issues/${number}/timeline`));
   }
 
   async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`);
+    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/${number}/dependencies`));
   }
 
   async listIssueBlocks(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`);
+    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/${number}/blocks`));
   }
 
   async addIssueDependency(
     owner: string, repo: string, number: number, dependencyIndex: number,
   ): Promise<ForgejoIssue> {
-    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
+    return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}/dependencies`), {
       method: "POST",
       body: { index: dependencyIndex, owner, repo },
     });
@@ -610,7 +598,7 @@ export class Forgejo {
   async removeIssueDependency(
     owner: string, repo: string, number: number, dependencyIndex: number,
   ): Promise<ForgejoIssue> {
-    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
+    return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}/dependencies`), {
       method: "DELETE",
       body: { index: dependencyIndex, owner, repo },
     });
@@ -619,7 +607,7 @@ export class Forgejo {
   async removeIssueBlock(
     owner: string, repo: string, number: number, blockIndex: number,
   ): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`, {
+    await this.req(this.repoPath(owner, repo, `issues/${number}/blocks`), {
       method: "DELETE",
       body: { index: blockIndex, owner, repo },
     });
@@ -633,7 +621,7 @@ export class Forgejo {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     return this.req<ForgejoActivity[]>(
-      `/api/v1/repos/${owner}/${repo}/activities/feeds?${params.toString()}`,
+      this.repoPath(owner, repo, `activities/feeds?${params.toString()}`),
     );
   }
 
@@ -644,7 +632,7 @@ export class Forgejo {
     const payload: Record<string, unknown> = { title: opts.title, body: opts.body };
     if (opts.assignees?.length) payload.assignees = opts.assignees;
     if (opts.labels?.length) payload.labels = opts.labels;
-    return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues`, {
+    return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues`), {
       method: "POST",
       body: payload,
     });
@@ -666,7 +654,7 @@ export class Forgejo {
     } = {},
   ): Promise<ForgejoNotificationThread[]> {
     return this.req<ForgejoNotificationThread[]>(
-      `/api/v1/repos/${owner}/${repo}/notifications`,
+      this.repoPath(owner, repo, `notifications`),
       {
         query: {
           all: opts.all ? "true" : undefined,
@@ -687,7 +675,7 @@ export class Forgejo {
   }
 
   async markRepoNotificationsRead(owner: string, repo: string): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}/notifications`, {
+    await this.req(this.repoPath(owner, repo, `notifications`), {
       method: "PUT",
       expectEmpty: true,
     });
