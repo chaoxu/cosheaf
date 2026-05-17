@@ -177,6 +177,105 @@ describe("forgejo webhooks", () => {
     expect(db.prepare("SELECT count(*) AS c FROM webhook_log").get()).toEqual({ c: 1 });
   });
 
+  describe("reconciliation of external Forgejo writes (#32)", () => {
+    function mockedForgejo(returnBodyFor: Record<string, string>) {
+      return {
+        getRawFile: vi.fn(async (_o, _r, _ref, path) => {
+          if (!(path in returnBodyFor)) throw new Error(`unexpected getRawFile for ${path}`);
+          return returnBodyFor[path];
+        }),
+      } as unknown as Forgejo;
+    }
+
+    it("ADD: a push that adds foo.md creates a doc_map row", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({ "foo.md": "---\nid: foo-1\n---\n# Foo\n" });
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/repo" },
+        commits: [{ added: ["foo.md"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body));
+      expect(res.status).toBe(200);
+      const row = db.prepare(
+        "SELECT cosheaf_id, forgejo_id, title FROM doc_map WHERE workspace_id = 1",
+      ).get();
+      expect(row).toMatchObject({ cosheaf_id: "foo-1", forgejo_id: "foo.md", title: "Foo" });
+    });
+
+    it("UPDATE: a push that modifies foo.md updates the existing row", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({ "foo.md": "---\nid: foo-1\n---\n# Foo v2\n" });
+      db.prepare(
+        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", 1, "foo.md", "Foo", Date.now());
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/repo" },
+        commits: [{ modified: ["foo.md"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "update-1"));
+      expect(res.status).toBe(200);
+      expect(db.prepare("SELECT title FROM doc_map WHERE workspace_id = 1").get()).toEqual({
+        title: "Foo v2",
+      });
+    });
+
+    it("DELETE: a push that removes foo.md drops the doc_map row and emits SSE remove", async () => {
+      const db = freshDb();
+      db.prepare(
+        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", 1, "foo.md", "Foo", Date.now());
+      const app = appFor(db, {} as Forgejo);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/repo" },
+        commits: [{ removed: ["foo.md"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "delete-1"));
+      expect(res.status).toBe(200);
+      expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+    });
+
+    it("RENAME (Forgejo's removed+added): old row goes, new row comes in", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({ "new.md": "---\nid: foo-1\n---\n# Foo\n" });
+      db.prepare(
+        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", 1, "old.md", "Foo", Date.now());
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/repo" },
+        commits: [{ added: ["new.md"], removed: ["old.md"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "rename-1"));
+      expect(res.status).toBe(200);
+      const rows = db.prepare(
+        "SELECT forgejo_id FROM doc_map WHERE workspace_id = 1",
+      ).all() as Array<{ forgejo_id: string }>;
+      expect(rows.map((r) => r.forgejo_id)).toEqual(["new.md"]);
+    });
+
+    it("ignores pushes to non-main refs", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({});
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/feature/wip",
+        repository: { full_name: "owner/repo" },
+        commits: [{ added: ["foo.md"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "non-main-1"));
+      expect(res.status).toBe(200);
+      // Did not reach Forgejo for the file body (main-only).
+      expect(vi.mocked(fj.getRawFile)).not.toHaveBeenCalled();
+      expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+    });
+  });
+
   it("removes sidecar rows on repository=deleted webhook", async () => {
     const db = freshDb();
     const app = appFor(db, {} as Forgejo);
