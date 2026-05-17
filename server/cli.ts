@@ -145,10 +145,6 @@ async function userAdd(username: string): Promise<void> {
   await ensureForgejoUser(username, password);
 }
 
-async function userCreate(username: string, password: string): Promise<void> {
-  await ensureForgejoUser(username, password);
-}
-
 async function seed(args: string[]): Promise<void> {
   const options = parseSeedOptions(args);
   await ensureForgejoUser(options.user, options.password);
@@ -340,7 +336,7 @@ function buildProgram(): Command {
   user
     .command("create <username> <password>")
     .description("non-interactive create (dev/CI use)")
-    .action(userCreate);
+    .action(ensureForgejoUser);
   user.command("list").description("list cosheaf users").action(userList);
   user.command("rm <username>").description("remove from cosheaf (forgejo account preserved)").action(userRm);
 

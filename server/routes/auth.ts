@@ -37,11 +37,42 @@ const TOKEN_SCOPES = [
 
 interface CreateTokenResponse { sha1: string }
 
+export type LoginOutcome =
+  | { kind: "ok"; pat: string }
+  | { kind: "bad_credentials" }
+  | { kind: "upstream_unavailable"; detail: string };
+
+// Per-username serialization for the PAT-exchange flow. Two simultaneous
+// logins for the same user would otherwise race on the 422-retry path: the
+// loser's DELETE of `cosheaf` would clobber the winner's freshly-issued
+// token. Forgejo doesn't expose stored token shas (only at creation) so we
+// can't compare-and-swap; serialize locally instead. Caveat: only effective
+// within one cosheaf process. Multi-process deployments would still race.
+const inFlight = new Map<string, Promise<LoginOutcome>>();
+
 async function exchangeForgejoCredsForPat(
   baseUrl: string,
   username: string,
   password: string,
-): Promise<string | null> {
+): Promise<LoginOutcome> {
+  const existing = inFlight.get(username);
+  if (existing) return existing;
+  const p = (async (): Promise<LoginOutcome> => {
+    try {
+      return await exchangeForgejoCredsForPatRaw(baseUrl, username, password);
+    } finally {
+      inFlight.delete(username);
+    }
+  })();
+  inFlight.set(username, p);
+  return p;
+}
+
+async function exchangeForgejoCredsForPatRaw(
+  baseUrl: string,
+  username: string,
+  password: string,
+): Promise<LoginOutcome> {
   const url = `${baseUrl}/api/v1/users/${encodeURIComponent(username)}/tokens`;
   const basic = Buffer.from(`${username}:${password}`).toString("base64");
   const headers = {
@@ -52,17 +83,30 @@ async function exchangeForgejoCredsForPat(
   const body = JSON.stringify({ name: TOKEN_NAME, scopes: TOKEN_SCOPES });
 
   const create = async () => fetch(url, { method: "POST", headers, body });
-  let res = await create();
-  if (res.status === 422) {
-    // Name already in use from a previous session — delete and retry.
-    const del = await fetch(`${url}/${TOKEN_NAME}`, { method: "DELETE", headers });
-    if (!del.ok && del.status !== 404) return null;
+  let res: Response;
+  try {
     res = await create();
+    if (res.status === 422) {
+      // Name already in use from a previous session — delete and retry.
+      const del = await fetch(`${url}/${TOKEN_NAME}`, { method: "DELETE", headers });
+      if (!del.ok && del.status !== 404) {
+        return { kind: "upstream_unavailable", detail: `delete token: ${del.status}` };
+      }
+      res = await create();
+    }
+  } catch (err) {
+    return { kind: "upstream_unavailable", detail: (err as Error).message };
   }
-  if (res.status === 401 || res.status === 403) return null;
-  if (!res.ok) return null;
+  if (res.status === 401 || res.status === 403) return { kind: "bad_credentials" };
+  if (res.status >= 500 || res.status === 429) {
+    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
+  }
+  if (!res.ok) {
+    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
+  }
   const parsed = (await res.json().catch(() => null)) as CreateTokenResponse | null;
-  return parsed?.sha1 ?? null;
+  if (!parsed?.sha1) return { kind: "upstream_unavailable", detail: "missing sha1 in response" };
+  return { kind: "ok", pat: parsed.sha1 };
 }
 
 auth.post("/login", async (c) => {
@@ -73,12 +117,20 @@ auth.post("/login", async (c) => {
     return c.json({ error: "missing credentials", code: "validation" }, 400);
 
   const config = c.get("config");
-  const pat = await exchangeForgejoCredsForPat(config.forgejoUrl, body.username, body.password);
-  if (!pat) return c.json({ error: "invalid credentials", code: "unauthorized" }, 401);
+  const outcome = await exchangeForgejoCredsForPat(config.forgejoUrl, body.username, body.password);
+  if (outcome.kind === "bad_credentials") {
+    return c.json({ error: "invalid credentials", code: "unauthorized" }, 401);
+  }
+  if (outcome.kind === "upstream_unavailable") {
+    return c.json(
+      { error: `forgejo unavailable: ${outcome.detail}`, code: "bad_gateway" },
+      502,
+    );
+  }
 
   const db = c.get("db");
   const user = upsertUserFromForgejo(db, body.username);
-  setStoredPat(db, user.id, pat, config.sessionSecret);
+  setStoredPat(db, user.id, outcome.pat, config.sessionSecret);
 
   const sessionId = createSession(db, user.id);
   setCookie(c, "session", sessionId, {
@@ -91,6 +143,10 @@ auth.post("/login", async (c) => {
   return c.json({ id: user.id, username: user.username });
 });
 
+// Logout drops the cosheaf session cookie but does NOT revoke the Forgejo
+// PAT — that's intentional. A revoke would race with concurrent sessions
+// (laptop + phone) and the user's next login would overwrite the token
+// anyway. The PAT lives until the next login replaces it.
 auth.post("/logout", (c) => {
   const sid = getCookie(c, "session");
   if (sid) {

@@ -40,8 +40,8 @@ issues.get("/:slug/issues", async (c) => {
   const filter = c.req.query("filter");
   const q = c.req.query("q") ?? undefined;
   // The sidecar used to compute these locally; Forgejo's repo-scoped /issues
-  // already supports the same filters, so proxy through with `Sudo` so it
-  // resolves against the caller's identity.
+  // already supports the same filters. The caller's PAT is what the Forgejo
+  // client is bound to, so created_by/assigned_by use their identity.
   if (filter === "mine") {
     // "mine" = authored OR assigned. Forgejo doesn't OR these server-side,
     // so two calls + dedupe. They're cheap and the response is small.

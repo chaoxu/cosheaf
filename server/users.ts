@@ -65,8 +65,11 @@ export function getStoredPat(
   if (!row?.blob) return null;
   try {
     return decryptPat(row.blob, sessionSecret);
-  } catch (_err) {
-    // Bad ciphertext (key rotated, tamper, truncated) → force re-login.
+  } catch (err) {
+    // Bad ciphertext: key rotated (SESSION_SECRET changed), tamper, or
+    // truncated row. Log so ops can tell an environment misconfiguration
+    // apart from "user just needs to log in again." Don't log the bytes.
+    console.warn(`getStoredPat decrypt failed for user ${userId}: ${(err as Error).message}`);
     return null;
   }
 }
@@ -99,8 +102,17 @@ export function userFromSession(db: Database.Database, sessionId: string): User 
 }
 
 // Personal API tokens (cosheaf-side bearer tokens for scripted clients).
-// These still authenticate the user to cosheaf; the user's stored Forgejo
-// PAT is what gets used onward to Forgejo. The two layers are independent.
+//
+// These authenticate the bearer as the owning cosheaf user; once
+// authenticated, every Forgejo call uses that user's stored, encrypted PAT
+// (the same one the browser session uses). So a `cs_…` token holder acts
+// with the user's full Forgejo permissions — repo + issue + notification —
+// not a reduced cosheaf-only scope. Treat cs_ tokens with the same care as
+// the user's Forgejo password.
+//
+// (If we ever want narrower scripted-client tokens, the right move is to
+// mint a separate, scope-reduced Forgejo PAT per cs_ token and use that
+// instead of the user's primary PAT. Not implemented yet.)
 
 export interface TokenRow { id: number; name: string; created_at: number }
 

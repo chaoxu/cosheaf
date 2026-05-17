@@ -8,7 +8,6 @@ export type { Role, PullFiles, PullFile, PrMeta, PrState, LineComment, CommentSi
 export interface User {
   id: number;
   username: string;
-  forgejo_username: string;
 }
 
 export interface Workspace {

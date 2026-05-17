@@ -40,7 +40,7 @@ branches.get("/:slug/branches/mine", async (c) => {
     fj.listPulls(owner, repo, "open"),
   ]);
   const openHeads = new Set(pulls.map((p) => p.head.ref));
-  // Identify "your branches" by the `user/<sudo>/` prefix we enforce on
+  // Identify "your branches" by the `user/<username>/` prefix we enforce on
   // file PUT auto-create. This is deterministic — unlike scanning the
   // latest commit's author/committer, which falls over after rebase,
   // cherry-pick, or a web-UI edit attributed to a different user.

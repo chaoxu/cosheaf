@@ -767,7 +767,7 @@ export class Forgejo {
 
   // ---------- notifications ----------
 
-  // List unread notification threads for the calling user (via Sudo), scoped
+  // List unread notification threads for the user this client is bound to, scoped
   // to a single repository. Forgejo returns subjects of type "Issue"/"Pull"/
   // "Commit"; we filter to Issue/Pull at the route layer.
   async listRepoNotifications(

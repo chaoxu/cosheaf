@@ -15,6 +15,9 @@ const IV_LEN = 12;   // GCM standard
 const TAG_LEN = 16;
 const SALT = Buffer.from("cosheaf-pat-key:v1");
 
+// scrypt is expensive (~tens of ms); cache the derived key keyed on the
+// secret it was derived from. Tests that switch SESSION_SECRET get a fresh
+// derivation automatically because the cached entry's secret won't match.
 let cachedKey: { secret: string; key: Buffer } | null = null;
 function deriveKey(secret: string): Buffer {
   if (cachedKey && cachedKey.secret === secret) return cachedKey.key;

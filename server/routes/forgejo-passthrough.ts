@@ -4,12 +4,13 @@
 //
 //   {METHOD} /api/v1/w/{slug}/forgejo/{tail}
 //   -> {METHOD} {forgejoUrl}/api/v1/repos/{owner}/{repo}/{tail}
-//   with `Authorization: token <admin>` + `Sudo: <user's forgejo proxy>`.
+//   with `Authorization: token <caller's encrypted PAT>`.
 //
-// Cosheaf handles auth (Bearer cs_… → workspace user → Sudo) and workspace
-// scoping (path is anchored at the workspace's repo so an agent cannot
-// stumble into another repo or /admin/*). Body and query are forwarded
-// verbatim; response status, content-type, and Link header are forwarded.
+// Cosheaf handles auth (cookie session or `Bearer cs_…` → workspace user →
+// decrypted Forgejo PAT) and workspace scoping (path is anchored at the
+// workspace's repo so an agent cannot stumble into another repo or /admin/*).
+// Body and query are forwarded verbatim; response status, content-type, and
+// Link header are forwarded.
 //
 // Policy (intentional, see AGENTS.md):
 //
@@ -38,7 +39,7 @@ import { getStoredPat } from "../users.js";
 //
 // `branches` and `contents` are GET-only on purpose: cosheaf has
 // dedicated, validated endpoints for branch creation and file writes
-// that enforce the `user/<sudo>/` prefix and content conventions.
+// that enforce the `user/<username>/` prefix and content conventions.
 // Letting them through the passthrough would bypass those gates.
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [

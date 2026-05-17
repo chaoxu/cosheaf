@@ -36,7 +36,7 @@ function refFromQuery(c: import("hono").Context<AppEnv>): string {
 }
 
 // Auto-create the target branch from `main` if it doesn't exist, but only if
-// the name is prefixed with `user/<sudo>/` — otherwise reject. Without this
+// the name is prefixed with `user/<username>/` — otherwise reject. Without this
 // gate, `PUT /file?branch=<arbitrary>` is an unbounded branch-creation
 // primitive for any write member (including misbehaving clients).
 async function ensureBranch(

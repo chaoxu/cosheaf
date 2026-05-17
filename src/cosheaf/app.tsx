@@ -1499,7 +1499,7 @@ function WorkspaceView({
   const branchForWrite = useCallback(
     (): string =>
       currentBranchNameRef.current ??
-      `${userBranchPrefix(user.forgejo_username ?? user.username)}wip-${shortId()}`,
+      `${userBranchPrefix(user.username)}wip-${shortId()}`,
     [user],
   );
 
@@ -1954,7 +1954,7 @@ function WorkspaceView({
     setBusy(true);
     const branch =
       currentBranchName ??
-      `${userBranchPrefix(user.forgejo_username ?? user.username)}wip-${shortId()}`;
+      `${userBranchPrefix(user.username)}wip-${shortId()}`;
     api
       .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`, branch)
       .then((r) => {
@@ -2267,7 +2267,7 @@ function WorkspaceView({
               workspaceSlug={workspace.slug}
               number={viewingIssue}
               documentContext={workspaceCtx}
-              currentForgejoUsername={user.forgejo_username}
+              currentForgejoUsername={user.username}
               canManageLabels={workspace.role === "admin"}
               canPin={workspace.role === "admin"}
               isPinned={pinnedIssues.some((p) => p.number === viewingIssue)}
@@ -2417,12 +2417,12 @@ function WorkspaceView({
                   }
                   loadContent={loadReviewFileContent}
                   comments={reviewState.comments}
-                  currentForgejoUsername={user.forgejo_username}
+                  currentForgejoUsername={user.username}
                   onAddComment={
                     // Hide the inline composer for the author of the PR — even
                     // admins/writers can't review their own changes, so the
                     // affordance would be misleading.
-                    reviewState.pr?.author_username === user.forgejo_username
+                    reviewState.pr?.author_username === user.username
                       ? undefined
                       : workspace.role === "admin" || workspace.role === "write"
                         ? addReviewComment
@@ -2441,7 +2441,7 @@ function WorkspaceView({
                   state={reviewState.pr.state}
                   merged={reviewState.pr.merged}
                   role={workspace.role}
-                  isAuthor={reviewState.pr.author_username === user.forgejo_username}
+                  isAuthor={reviewState.pr.author_username === user.username}
                   onSubmit={submitReview}
                   onClose={closeReviewedChange}
                   busy={reviewState.busy}
