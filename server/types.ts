@@ -13,25 +13,27 @@ export interface WorkspaceContext {
   role: Role;
 }
 
-// Materialized inside requireMembership so every workspace-scoped route
-// has a single shorthand for the Forgejo client + (owner, repo, sudo)
-// tuple. Eliminates ~28 sites of repeated c.get() unpacking and removes
-// the "did I remember sudo?" footgun.
+// Per-request bundle handed to workspace-scoped routes. `fj` is bound to the
+// authenticated user's Forgejo PAT — there is no admin token at runtime and
+// no Sudo header to forget.
 export interface RepoCtx {
   fj: Forgejo;
   owner: string;
   repo: string;
-  sudo: string;
 }
 
 export interface AppEnv {
   Variables: {
     db: Database.Database;
     config: Config;
-    forgejo: Forgejo;
+    // Admin-bound Forgejo client. Used only by the webhook handler and
+    // provisioning paths; never on a user-facing request handler.
+    fjAdmin: Forgejo;
     sse: SSEHub;
     user: User;
-    forgejoUsername: string;
+    // Forgejo client bound to the authenticated user's PAT. Set by
+    // requireAuth; used by every workspace route via repoCtx.fj.
+    fjUser: Forgejo;
     workspace: WorkspaceContext;
     repoCtx: RepoCtx;
   };

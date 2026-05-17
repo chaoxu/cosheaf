@@ -3,14 +3,8 @@ import { stdin, stdout } from "node:process";
 import { Command, InvalidArgumentError } from "commander";
 import { WORKSPACE_SLUG_RE } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
-import {
-  createUser,
-  ensureForgejoProxy,
-  findUserByUsername,
-  hashPassword,
-  setUserPassword,
-} from "./users.js";
-import { Forgejo } from "./forgejo.js";
+import { findUserByUsername, upsertUserFromForgejo } from "./users.js";
+import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
 import {
   ensureWorkspaceFile,
@@ -26,8 +20,6 @@ interface SeedOptions {
 }
 
 async function readPassword(prompt: string): Promise<string> {
-  // For non-TTY stdin (piped input like `echo pw | cli`), readline echoes
-  // are harmless and we want to keep that path working unchanged.
   if (!stdin.isTTY) {
     const rl = createInterface({ input: stdin, output: stdout });
     try {
@@ -36,7 +28,6 @@ async function readPassword(prompt: string): Promise<string> {
       rl.close();
     }
   }
-  // TTY: muted input. Set raw mode and read char-by-char until newline.
   stdout.write(prompt);
   return new Promise<string>((resolve) => {
     let buf = "";
@@ -45,7 +36,7 @@ async function readPassword(prompt: string): Promise<string> {
     stdin.setEncoding("utf8");
     const onData = (chunk: string): void => {
       for (const ch of chunk) {
-        if (ch === "\n" || ch === "\r" || ch === "") {
+        if (ch === "\n" || ch === "\r" || ch === "") {
           stdout.write("\n");
           stdin.setRawMode?.(false);
           stdin.pause();
@@ -53,13 +44,12 @@ async function readPassword(prompt: string): Promise<string> {
           resolve(buf);
           return;
         }
-        if (ch === "") {
-          // Ctrl-C
+        if (ch === "") {
           stdin.setRawMode?.(false);
           stdin.pause();
           process.exit(130);
         }
-        if (ch === "" || ch === "\b") {
+        if (ch === "" || ch === "\b") {
           buf = buf.slice(0, -1);
           continue;
         }
@@ -73,7 +63,10 @@ async function readPassword(prompt: string): Promise<string> {
 function ctx() {
   const config = loadConfig();
   const db = getDb(config);
-  const forgejo = new Forgejo({ baseUrl: config.forgejoUrl, adminToken: config.forgejoToken });
+  // CLI runs out-of-band of any HTTP request; use the admin token. This is
+  // the one entry-point that's allowed to (the runtime request path never
+  // touches the admin token — it uses per-user PATs).
+  const forgejo = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken });
   return { config, db, forgejo };
 }
 
@@ -116,69 +109,61 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   };
 }
 
-async function userAdd(username: string): Promise<void> {
+// Create the Forgejo account if absent, then mirror as a cosheaf user row.
+// The password is set on the Forgejo side — that's the only password the
+// user has, and they use it to log into cosheaf, which validates against
+// Forgejo and stores a per-user PAT.
+async function ensureForgejoUser(
+  username: string,
+  password: string,
+): Promise<void> {
   const { db, forgejo } = ctx();
-  if (findUserByUsername(db, username)) {
-    console.error(`user '${username}' already exists`);
-    process.exit(1);
+  const fjExisting = await forgejo.getUserByName(username);
+  if (!fjExisting) {
+    await forgejo.createUser({
+      username,
+      email: `${username}@cosheaf.local`,
+      password,
+      must_change_password: false,
+    });
+    console.log(`created forgejo user ${username}`);
+  } else {
+    console.log(`forgejo user ${username} already exists (password unchanged)`);
   }
-  const password = await readPassword(`password for ${username}: `);
+  if (!findUserByUsername(db, username)) {
+    upsertUserFromForgejo(db, username);
+    console.log(`mirrored cosheaf user ${username}`);
+  }
+}
+
+async function userAdd(username: string): Promise<void> {
+  const password = await readPassword(`forgejo password for ${username}: `);
   if (!password) {
     console.error("password required");
     process.exit(1);
   }
-  const hash = await hashPassword(password);
-  const user = createUser(db, username, hash);
-  const fj = await ensureForgejoProxy(db, forgejo, user);
-  console.log(`created user ${user.username} (id=${user.id}, forgejo=${fj})`);
+  await ensureForgejoUser(username, password);
 }
 
 async function userCreate(username: string, password: string): Promise<void> {
-  await ensureSeedUser(username, password);
-}
-
-async function userPasswd(username: string): Promise<void> {
-  const { db } = ctx();
-  if (!findUserByUsername(db, username)) {
-    console.error(`user '${username}' not found`);
-    process.exit(1);
-  }
-  const password = await readPassword(`new password for ${username}: `);
-  if (!password) {
-    console.error("password required");
-    process.exit(1);
-  }
-  const hash = await hashPassword(password);
-  setUserPassword(db, username, hash);
-  console.log(`updated password for ${username}`);
-}
-
-async function ensureSeedUser(username: string, password: string): Promise<{ id: number; username: string; forgejo_username: string | null }> {
-  const { db, forgejo } = ctx();
-  const passwordHash = await hashPassword(password);
-  const existing = findUserByUsername(db, username);
-  if (existing) {
-    setUserPassword(db, username, passwordHash);
-    const fj = await ensureForgejoProxy(db, forgejo, existing);
-    console.log(`updated user ${username} (forgejo=${fj})`);
-    return findUserByUsername(db, username) ?? existing;
-  }
-  const user = createUser(db, username, passwordHash);
-  const fj = await ensureForgejoProxy(db, forgejo, user);
-  console.log(`created user ${username} (id=${user.id}, forgejo=${fj})`);
-  return findUserByUsername(db, username) ?? user;
+  await ensureForgejoUser(username, password);
 }
 
 async function seed(args: string[]): Promise<void> {
   const options = parseSeedOptions(args);
-  const user = await ensureSeedUser(options.user, options.password);
+  await ensureForgejoUser(options.user, options.password);
+
   const { config, db, forgejo } = ctx();
-  const fjUser = await ensureForgejoProxy(db, forgejo, user);
+  const user = findUserByUsername(db, options.user);
+  if (!user) {
+    console.error(`user ${options.user} not in cosheaf DB after creation`);
+    process.exit(1);
+  }
   const { workspace, createdRepo } = await provisionWorkspace(db, forgejo, config, {
     slug: options.workspace,
     name: options.workspaceName,
     user,
-    forgejoUsername: fjUser,
+    forgejoUsername: options.user,
     allowExistingLocal: true,
   });
   console.log(`${createdRepo ? "created" : "ensured"} workspace ${options.workspace}`);
@@ -206,10 +191,8 @@ async function seed(args: string[]): Promise<void> {
   ];
 
   for (const file of files) {
-    const created = await ensureWorkspaceFile(forgejo, config, workspace.forgejo_repo, fjUser, file);
-    if (created) {
-      console.log(`created ${file.path}`);
-    }
+    const created = await ensureWorkspaceFile(forgejo, config, workspace.forgejo_repo, file);
+    if (created) console.log(`created ${file.path}`);
   }
   await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
 
@@ -219,10 +202,10 @@ async function seed(args: string[]): Promise<void> {
 function userList(): void {
   const { db } = ctx();
   const rows = db
-    .prepare("SELECT id, username, forgejo_username, created_at FROM users ORDER BY username")
-    .all() as Array<{ id: number; username: string; forgejo_username: string | null; created_at: number }>;
+    .prepare("SELECT id, username, created_at FROM users ORDER BY username")
+    .all() as Array<{ id: number; username: string; created_at: number }>;
   for (const row of rows) {
-    console.log(`${row.id}\t${row.username}\t${row.forgejo_username ?? "-"}\t${new Date(row.created_at).toISOString()}`);
+    console.log(`${row.id}\t${row.username}\t${new Date(row.created_at).toISOString()}`);
   }
 }
 
@@ -233,7 +216,7 @@ function userRm(username: string): void {
     console.error(`user '${username}' not found`);
     process.exit(1);
   }
-  console.log(`deleted user ${username}`);
+  console.log(`deleted cosheaf user ${username} (forgejo account left intact)`);
 }
 
 async function workspaceRm(slug: string): Promise<void> {
@@ -246,15 +229,12 @@ async function workspaceRm(slug: string): Promise<void> {
   try {
     await forgejo.deleteRepo(config.forgejoOwner, ws.forgejo_repo);
   } catch (err) {
-    // 404 is fine — repo already gone.
-    const status = (err as { status?: number }).status;
-    if (status !== 404) {
+    if (!(err instanceof ForgejoError && err.status === 404)) {
       console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
       process.exit(1);
     }
   }
   db.prepare("DELETE FROM workspaces WHERE id = ?").run(ws.id);
-  // FTS / backlinks / page_tags reference workspace_id without FK cascade; clean explicitly.
   db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(ws.id);
   db.prepare("DELETE FROM backlinks WHERE workspace_id = ?").run(ws.id);
   db.prepare("DELETE FROM page_tags WHERE workspace_id = ?").run(ws.id);
@@ -283,25 +263,23 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
   }
   const user = findUserByUsername(db, username);
   if (!user) {
-    console.error(`user '${username}' not found`);
+    console.error(`user '${username}' not found in cosheaf; run \`cli user add\` first`);
     process.exit(1);
   }
-  const fj = await ensureForgejoProxy(db, forgejo, user);
-  await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, fj, role);
-  // Keep the branch-protection push whitelist in sync: admins can direct-push
-  // to main from the cosheaf UI; write/read users must not. Adjust on every
-  // role change (not just promotion) so a demotion actually revokes access.
+  await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, username, role);
+  // Keep the branch-protection push whitelist in sync. Admin can direct-push;
+  // write/read users can't. Adjust on every change so demotion takes effect.
   const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
   const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
-  const onList = current.includes(fj);
+  const onList = current.includes(username);
   if (role === "admin" && !onList) {
-    await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, fj]);
+    await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, username]);
   } else if (role !== "admin" && onList) {
     await forgejo.patchBranchProtectionPushWhitelist(
       config.forgejoOwner,
       ws.forgejo_repo,
       "main",
-      current.filter((u) => u !== fj),
+      current.filter((u) => u !== username),
     );
   }
   console.log(`set ${username} as ${role} in workspace ${slug}`);
@@ -349,27 +327,22 @@ function parseRole(value: string): Role {
 function buildProgram(): Command {
   const program = new Command("cosheaf").description("cosheaf admin CLI").exitOverride();
 
-  // `seed`: keep the raw-args pipeline through parseSeedOptions so its
-  // behavior (and dedicated test) stays the single source of truth for
-  // option parsing + validation. allowUnknownOption is on so commander
-  // doesn't reject e.g. `--password=…`.
   program
     .command("seed")
-    .description("create-or-update a user and workspace for local development")
+    .description("create-or-update a forgejo user and workspace for local development")
     .allowUnknownOption(true)
     .allowExcessArguments(true)
     .helpOption(false)
     .action((_opts, cmd) => seed(cmd.args));
 
   const user = program.command("user").description("user management");
-  user.command("add <username>").description("create a user; prompts for password").action(userAdd);
+  user.command("add <username>").description("create a forgejo user; prompts for password").action(userAdd);
   user
     .command("create <username> <password>")
     .description("non-interactive create (dev/CI use)")
     .action(userCreate);
-  user.command("passwd <username>").description("reset a user's password").action(userPasswd);
-  user.command("list").description("list users").action(userList);
-  user.command("rm <username>").description("delete a user").action(userRm);
+  user.command("list").description("list cosheaf users").action(userList);
+  user.command("rm <username>").description("remove from cosheaf (forgejo account preserved)").action(userRm);
 
   const workspace = program.command("workspace").description("workspace management");
   workspace
@@ -399,8 +372,6 @@ async function main(): Promise<void> {
     await program.parseAsync(process.argv);
   } catch (err) {
     if (err instanceof Error && "code" in err) {
-      // Commander already printed the help/error; just exit non-zero unless
-      // it was the user explicitly asking for help.
       const code = (err as { code?: string }).code;
       if (code === "commander.help" || code === "commander.helpDisplayed") return;
       if (code === "commander.version") return;

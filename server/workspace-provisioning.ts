@@ -54,16 +54,13 @@ export async function provisionWorkspace(
   if (existingRepo) {
     repoExisted = true;
   } else {
-    await forgejo.createUserRepo(
-      {
-        name: repoName,
-        description: options.name,
-        private: true,
-        auto_init: true,
-        default_branch: "main",
-      },
-      owner,
-    );
+    await forgejo.createUserRepo({
+      name: repoName,
+      description: options.name,
+      private: true,
+      auto_init: true,
+      default_branch: "main",
+    });
     createdRepo = true;
   }
 
@@ -101,7 +98,7 @@ export async function provisionWorkspace(
     // can retry instead of finding out via stale data weeks later.
     await ensureWorkspaceWebhookOrThrow(forgejo, config, repoName);
     if (!repoExisted) {
-      await ensureWorkspaceFile(forgejo, config, repoName, options.forgejoUsername, {
+      await ensureWorkspaceFile(forgejo, config, repoName, {
         path: ".gitattributes",
         content: "*.md text eol=lf -text\n",
         message: "chore: lock byte-exactness for .md",
@@ -202,7 +199,6 @@ export async function ensureWorkspaceFile(
   forgejo: Forgejo,
   config: Config,
   repoName: string,
-  forgejoUsername: string,
   file: { path: string; content: string; message: string },
 ): Promise<boolean> {
   const meta = await forgejo.getFileMeta(config.forgejoOwner, repoName, "main", file.path);
@@ -212,7 +208,6 @@ export async function ensureWorkspaceFile(
     path: file.path,
     content: file.content,
     message: file.message,
-    sudo: forgejoUsername,
   });
   return true;
 }

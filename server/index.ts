@@ -17,14 +17,17 @@ import { forgejoPassthrough } from "./routes/forgejo-passthrough.js";
 
 const config = loadConfig();
 const db = getDb(config);
-const forgejo = new Forgejo({ baseUrl: config.forgejoUrl, adminToken: config.forgejoToken });
+// Admin-bound Forgejo client. Used by the webhook handler (no user context)
+// and out-of-band provisioning. Never reached on a user-facing request path —
+// per-request middleware builds a Forgejo from the user's stored PAT instead.
+const fjAdmin = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken });
 const sse = new SSEHub();
 
 const app = new Hono<AppEnv>();
 app.use("*", async (c, next) => {
   c.set("db", db);
   c.set("config", config);
-  c.set("forgejo", forgejo);
+  c.set("fjAdmin", fjAdmin);
   c.set("sse", sse);
   await next();
 });

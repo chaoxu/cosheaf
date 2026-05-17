@@ -75,6 +75,20 @@ function migrateDropIssuesSidecar(db: Database.Database): void {
   `);
 }
 
+// Move users to Forgejo-owned auth: drop cosheaf-side password_hash (login
+// goes through Forgejo now), drop forgejo_username (cosheaf username equals
+// Forgejo username), add forgejo_token_ciphertext for the encrypted per-user
+// PAT. Idempotent; safe on fresh schemas where the new column already exists.
+function migrateUsersToForgejoAuth(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info('users')").all() as Array<{ name: string }>;
+  const has = (name: string): boolean => cols.some((c) => c.name === name);
+  if (has("password_hash")) db.exec("ALTER TABLE users DROP COLUMN password_hash;");
+  if (has("forgejo_username")) db.exec("ALTER TABLE users DROP COLUMN forgejo_username;");
+  if (!has("forgejo_token_ciphertext")) {
+    db.exec("ALTER TABLE users ADD COLUMN forgejo_token_ciphertext BLOB;");
+  }
+}
+
 function migrateDropDocKindColumns(db: Database.Database): void {
   const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
   const hasLegacyDocMapCols = docMapCols.some((c) => c.name === "doc_type" || c.name === "forgejo_kind");
@@ -116,6 +130,7 @@ export function getDb(config: Config): Database.Database {
   db.exec(schema);
   migrateDropDocKindColumns(db);
   migrateDropIssuesSidecar(db);
+  migrateUsersToForgejoAuth(db);
   dbInstance = db;
   return db;
 }

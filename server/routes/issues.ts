@@ -33,7 +33,7 @@ issues.use("/:slug/*", requireWriteOnMutation);
 
 // GET /api/v1/w/:slug/issues?state=open|closed|all&filter=mine|assigned|all
 issues.get("/:slug/issues", async (c) => {
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const stateRaw = c.req.query("state");
   const state: "open" | "closed" | "all" =
     stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
@@ -46,8 +46,8 @@ issues.get("/:slug/issues", async (c) => {
     // "mine" = authored OR assigned. Forgejo doesn't OR these server-side,
     // so two calls + dedupe. They're cheap and the response is small.
     const [authored, assigned] = await Promise.all([
-      fj.listIssues(owner, repo, { state, created_by: sudo, q }),
-      fj.listIssues(owner, repo, { state, assigned_by: sudo, q }),
+      fj.listIssues(owner, repo, { state, q }),
+      fj.listIssues(owner, repo, { state, q }),
     ]);
     const byNum = new Map<number, IssueRow>();
     for (const i of [...authored, ...assigned]) {
@@ -59,7 +59,7 @@ issues.get("/:slug/issues", async (c) => {
   const list = await fj.listIssues(owner, repo, {
     state,
     q,
-    ...(filter === "assigned" ? { assigned_by: sudo } : {}),
+    ...(filter === "assigned" ? {  } : {}),
   });
   return c.json({ issues: list.filter((i) => !i.pull_request).map(toIssueRow) });
 });
@@ -86,12 +86,10 @@ issues.post("/:slug/issues/:number/pin", requireAdmin, async (c) => {
   const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  // Forgejo restricts pinning to repo owner/admin; cosheaf's workspace owner
-  // is the Forgejo repo owner (created the repo). Sudo as the workspace
-  // owner rather than the calling user, since the caller may be a workspace
-  // owner role but not the Forgejo repo owner identity.
+  // Forgejo restricts pinning to repo owner/admin; the calling user is gated
+  // by requireAdmin above, so their PAT has the required permission.
   const { fj, owner, repo } = c.get("repoCtx");
-  await fj.pinIssue(owner, repo, number, owner);
+  await fj.pinIssue(owner, repo, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "pinned" });
   return c.json({ ok: true });
 });
@@ -102,7 +100,7 @@ issues.delete("/:slug/issues/:number/pin", requireAdmin, async (c) => {
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
-  await fj.unpinIssue(owner, repo, number, owner);
+  await fj.unpinIssue(owner, repo, number);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "unpinned" });
   return c.json({ ok: true });
 });
@@ -145,12 +143,11 @@ issues.post("/:slug/issues", async (c) => {
   } | null;
   if (!body?.title || !body.title.trim())
     return c.json({ error: "title required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const created = await fj.createIssue(owner, repo, {
     title: body.title.trim(),
     body: body.body ?? "",
     labels: body.labels,
-    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "issue", number: created.number, action: "opened" });
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
@@ -172,12 +169,11 @@ issues.post("/:slug/labels", requireAdmin, async (c) => {
   } | null;
   if (!body?.name || !body.color)
     return c.json({ error: "name and color required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const created = await fj.createLabel(owner, repo, {
     name: body.name.trim(),
     color: body.color.replace(/^#/, ""),
     description: body.description,
-    sudo,
   });
   return c.json(created, 201);
 });
@@ -189,8 +185,8 @@ issues.put("/:slug/issues/:number/labels", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { labels?: number[] } | null;
   if (!body || !Array.isArray(body.labels))
     return c.json({ error: "labels (number[]) required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const labels = await fj.setIssueLabels(owner, repo, number, body.labels, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const labels = await fj.setIssueLabels(owner, repo, number, body.labels);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "labeled" });
   return c.json({ labels });
 });
@@ -206,10 +202,9 @@ async function transitionIssue(
   const ws = c.get("workspace");
   const number = Number(c.req.param("number"));
   if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const updated = await fj.editIssue(owner, repo, number, {
     state,
-    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "issue", number, action: state });
   return c.json({ ok: true, state: updated.state });
@@ -223,8 +218,8 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
   if (!body?.body || !body.body.trim())
     return c.json({ error: "body required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const cm = await fj.createIssueComment(owner, repo, number, body.body.trim(), sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const cm = await fj.createIssueComment(owner, repo, number, body.body.trim());
   c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
   const created: IssueComment = {
     id: cm.id,
@@ -243,8 +238,8 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
   if (!body?.body || !body.body.trim())
     return c.json({ error: "body required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  const cm = await fj.editIssueComment(owner, repo, commentId, body.body.trim(), sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  const cm = await fj.editIssueComment(owner, repo, commentId, body.body.trim());
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
     number: Number(c.req.param("number")),
@@ -257,8 +252,8 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
 issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   const ws = c.get("workspace");
   const commentId = Number(c.req.param("id"));
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  await fj.deleteIssueComment(owner, repo, commentId, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.deleteIssueComment(owner, repo, commentId);
   c.get("sse").publish(ws.slug, {
     type: "issue_comment",
     number: Number(c.req.param("number")),
@@ -295,11 +290,10 @@ issues.post("/:slug/milestones", requireAdmin, async (c) => {
   } | null;
   if (!body?.title || !body.title.trim())
     return c.json({ error: "title required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const m = await fj.createMilestone(owner, repo, {
     title: body.title.trim(),
     description: body.description,
-    sudo,
   });
   return c.json({ id: m.id, title: m.title, state: m.state }, 201);
 });
@@ -312,10 +306,9 @@ issues.put("/:slug/issues/:number/milestone", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { id?: number | null } | null;
   if (body === null) return c.json({ error: "body required", code: "validation" }, 400);
   const milestoneId = body.id ?? null;
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   await fj.editIssue(owner, repo, number, {
     milestone: milestoneId,
-    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "milestone" });
   return c.json({ ok: true });
@@ -349,8 +342,8 @@ issues.post("/:slug/issues/:number/dependencies", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { index?: number } | null;
   if (!Number.isFinite(number) || !body?.index)
     return c.json({ error: "bad number / index", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  await fj.addIssueDependency(owner, repo, number, body.index, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.addIssueDependency(owner, repo, number, body.index);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_added" });
   return c.json({ ok: true });
 });
@@ -361,8 +354,8 @@ issues.delete("/:slug/issues/:number/dependencies/:dep", async (c) => {
   const dep = Number(c.req.param("dep"));
   if (!Number.isFinite(number) || !Number.isFinite(dep))
     return c.json({ error: "bad number" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  await fj.removeIssueDependency(owner, repo, number, dep, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.removeIssueDependency(owner, repo, number, dep);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "dependency_removed" });
   return c.json({ ok: true });
 });

@@ -2,8 +2,8 @@ import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
-import type { Forgejo } from "./forgejo.js";
-import { userFromSession, userFromToken, ensureForgejoProxy } from "./users.js";
+import { Forgejo } from "./forgejo.js";
+import { getStoredPat, userFromSession, userFromToken } from "./users.js";
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const db = c.get("db");
@@ -17,10 +17,15 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     if (sid) user = userFromSession(db, sid);
   }
   if (!user) return c.json({ error: "not authenticated", code: "unauthorized" }, 401);
+  const config = c.get("config");
+  const pat = getStoredPat(db, user.id, config.sessionSecret);
+  if (!pat) {
+    // Session valid but no usable PAT — usually a key rotation or a freshly
+    // migrated account that never re-logged in. Force a clean re-login.
+    return c.json({ error: "forgejo credentials expired, log in again", code: "unauthorized" }, 401);
+  }
   c.set("user", user);
-  const fj = c.get("forgejo");
-  const fjName = await ensureForgejoProxy(db, fj, user);
-  c.set("forgejoUsername", fjName);
+  c.set("fjUser", new Forgejo({ baseUrl: config.forgejoUrl, token: pat }));
   await next();
 };
 
@@ -53,9 +58,9 @@ export function _seedPermCacheForTests(
 // cache TTL.
 export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   const ws = c.get("workspace");
-  const fj = c.get("forgejo");
+  const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
-  const fjName = c.get("forgejoUsername");
+  const fjName = c.get("user").username;
   const fresh = await fj.getRepoPermission(owner, ws.forgejoRepo, fjName);
   if (fresh !== "admin")
     return c.json({ error: "admin required", code: "forbidden" }, 403);
@@ -66,9 +71,6 @@ export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
-// Require the caller has at least `write` (i.e. `write` or `admin`) on the
-// workspace. Read-only members can still hit GET/HEAD routes, but any
-// mutation method is gated here. Uses the cached role from requireMembership.
 // Require the caller is workspace `admin` (i.e. Forgejo collaborator with the
 // "owner" / admin role). Uses the cached role from requireMembership — for a
 // fresh re-check on truly destructive ops (merge, delete repo), see
@@ -81,6 +83,9 @@ export const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+// Require the caller has at least `write` (i.e. `write` or `admin`) on the
+// workspace. Read-only members can still hit GET/HEAD routes, but any
+// mutation method is gated here. Uses the cached role from requireMembership.
 export const requireWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
   const m = c.req.method.toUpperCase();
   if (m === "GET" || m === "HEAD" || m === "OPTIONS") return next();
@@ -115,14 +120,14 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
     .get(slug) as { id: number; name: string; forgejo_repo: string } | undefined;
   if (!row) return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  const fj = c.get("forgejo");
+  const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
-  const fjName = c.get("forgejoUsername");
+  const fjName = c.get("user").username;
   const role = await fetchRole(fj, owner, row.forgejo_repo, fjName);
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
   c.set("workspace", { id: row.id, slug, name: row.name, forgejoRepo: row.forgejo_repo, role });
-  c.set("repoCtx", { fj, owner, repo: row.forgejo_repo, sudo: fjName });
+  c.set("repoCtx", { fj, owner, repo: row.forgejo_repo });
   await next();
 };

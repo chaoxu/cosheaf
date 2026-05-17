@@ -16,6 +16,7 @@ import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { _resetPermCacheForTests, _seedPermCacheForTests } from "../middleware.js";
+import { encryptPat } from "../pat-crypto.js";
 import { pulls } from "./pulls.js";
 import { branches } from "./branches.js";
 
@@ -45,14 +46,15 @@ function sha256Hex(input: string): string {
 
 function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
   const token = `cs_${username}`;
+  const blob = encryptPat(`fake-pat-${username}`, config.sessionSecret);
   db.prepare(
-    "INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (?, ?, 'hash', ?, 0)",
-  ).run(id, username, `cs-${username}`);
+    "INSERT INTO users (id, username, forgejo_token_ciphertext, created_at) VALUES (?, ?, ?, 0)",
+  ).run(id, username, blob);
   db.prepare("INSERT INTO tokens (user_id, name, token_hash, created_at) VALUES (?, 'test', ?, 0)").run(
     id,
     sha256Hex(token),
   );
-  _seedPermCacheForTests("owner", "repo", `cs-${username}`, role);
+  _seedPermCacheForTests("owner", "repo", username, role);
   return token;
 }
 
@@ -67,7 +69,7 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
-    c.set("forgejo", new Forgejo({ baseUrl: config.forgejoUrl, adminToken: config.forgejoToken }));
+    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken }));
     c.set("sse", new SSEHub());
     await next();
   });
@@ -114,8 +116,8 @@ function pull(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     changed_files: 0,
     created_at: "2026-05-16T00:00:00Z",
     merged_at: null,
-    user: { login: "cs-alice" },
-    head: { ref: "user/cs-alice/wip", sha: "h" },
+    user: { login: "alice" },
+    head: { ref: "user/alice/wip", sha: "h" },
     base: { ref: "main", sha: "b" },
     ...overrides,
   };
@@ -209,8 +211,8 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
-      // GET /pulls/7 → returns a PR authored by cs-alice (the caller).
-      fetchMock.mockResolvedValueOnce(ok(pull({ user: { login: "cs-alice" } })));
+      // GET /pulls/7 → returns a PR authored by alice (the caller).
+      fetchMock.mockResolvedValueOnce(ok(pull({ user: { login: "alice" } })));
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -231,7 +233,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
         .mockResolvedValueOnce(new Response("Please try again later", { status: 405 }))
         .mockResolvedValueOnce(empty(200)) // merge succeeds
-        .mockResolvedValueOnce(ok(pull({ head: { ref: "user/cs-alice/wip", sha: "h" } }))) // GET pull
+        .mockResolvedValueOnce(ok(pull({ head: { ref: "user/alice/wip", sha: "h" } }))) // GET pull
         .mockResolvedValueOnce(empty(204)); // delete branch
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/merge", {
         method: "POST",
@@ -269,20 +271,20 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(
           ok([
             { name: "main", commit: { id: "m" } },
-            { name: "user/cs-alice/wip-1", commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z" } },
-            { name: "user/cs-alice/wip-2", commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z" } },
-            { name: "user/cs-bob/wip-9", commit: { id: "b9" } },
+            { name: "user/alice/wip-1", commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z" } },
+            { name: "user/alice/wip-2", commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z" } },
+            { name: "user/bob/wip-9", commit: { id: "b9" } },
           ]),
         )
         // listPulls "open"
-        .mockResolvedValueOnce(ok([pull({ head: { ref: "user/cs-alice/wip-1", sha: "h" } })]));
+        .mockResolvedValueOnce(ok([pull({ head: { ref: "user/alice/wip-1", sha: "h" } })]));
       const res = await appFor(db).request("/api/v1/w/w/branches/mine", {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { branches: Array<{ name: string }> };
       // wip-1 excluded (open PR), wip-2 kept, bob excluded (wrong prefix).
-      expect(body.branches.map((b) => b.name)).toEqual(["user/cs-alice/wip-2"]);
+      expect(body.branches.map((b) => b.name)).toEqual(["user/alice/wip-2"]);
     });
 
     it("POST /branches rejects names without a valid shape", async () => {
@@ -309,20 +311,20 @@ describe("pulls + branches routes", () => {
       fetchMock
         .mockResolvedValueOnce(
           ok([
-            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "cs-vera" }, submitted_at: "2026-05-16T00:00:00Z" },
-            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "cs-vera" }, submitted_at: "2026-05-16T00:01:00Z" },
-            { id: 3, state: "APPROVED", body: "", user: { login: "cs-meri" }, submitted_at: "2026-05-16T00:02:00Z" },
-            { id: 4, state: "COMMENT", body: "q", user: { login: "cs-bob" }, submitted_at: "2026-05-16T00:03:00Z" },
+            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:01:00Z" },
+            { id: 3, state: "APPROVED", body: "", user: { login: "meri" }, submitted_at: "2026-05-16T00:02:00Z" },
+            { id: 4, state: "COMMENT", body: "q", user: { login: "bob" }, submitted_at: "2026-05-16T00:03:00Z" },
           ]),
         )
         // approvalCounts uses listReviews — same data. Reused under the hood;
         // implementation calls it twice (once for output, once for counts).
         .mockResolvedValueOnce(
           ok([
-            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "cs-vera" }, submitted_at: "2026-05-16T00:00:00Z" },
-            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "cs-vera" }, submitted_at: "2026-05-16T00:01:00Z" },
-            { id: 3, state: "APPROVED", body: "", user: { login: "cs-meri" }, submitted_at: "2026-05-16T00:02:00Z" },
-            { id: 4, state: "COMMENT", body: "q", user: { login: "cs-bob" }, submitted_at: "2026-05-16T00:03:00Z" },
+            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:01:00Z" },
+            { id: 3, state: "APPROVED", body: "", user: { login: "meri" }, submitted_at: "2026-05-16T00:02:00Z" },
+            { id: 4, state: "COMMENT", body: "q", user: { login: "bob" }, submitted_at: "2026-05-16T00:03:00Z" },
           ]),
         );
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
@@ -336,7 +338,7 @@ describe("pulls + branches routes", () => {
       };
       expect(body.approvals).toBe(2);
       expect(body.rejections).toBe(0);
-      expect(body.reviews.find((r) => r.username === "cs-bob")?.decision).toBe("comment");
+      expect(body.reviews.find((r) => r.username === "bob")?.decision).toBe("comment");
     });
   });
 });

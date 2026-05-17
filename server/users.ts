@@ -1,7 +1,6 @@
-import { hash, verify } from "@node-rs/argon2";
 import { createHash, randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
-import { ForgejoError, type Forgejo } from "./forgejo.js";
+import { decryptPat, encryptPat } from "./pat-crypto.js";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TOKEN_PREFIX = "cs_";
@@ -10,50 +9,66 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-export async function hashPassword(p: string): Promise<string> {
-  return hash(p);
-}
-export async function verifyPassword(p: string, h: string): Promise<boolean> {
-  return verify(h, p);
-}
-
+// Cosheaf user. Username is also the Forgejo username — login validates
+// directly against Forgejo and stores a per-user PAT (encrypted) for later
+// API calls. There is no cosheaf-side password.
 export interface User {
   id: number;
   username: string;
-  forgejo_username: string | null;
 }
 
 function readUser(db: Database.Database, where: string, ...args: unknown[]): User | null {
   const row = db
-    .prepare(`SELECT id, username, forgejo_username FROM users WHERE ${where}`)
+    .prepare(`SELECT id, username FROM users WHERE ${where}`)
     .get(...args) as User | undefined;
   return row ?? null;
 }
 
-export function findUserByUsername(db: Database.Database, username: string): (User & { password_hash: string }) | null {
-  const row = db
-    .prepare("SELECT id, username, forgejo_username, password_hash FROM users WHERE username = ?")
-    .get(username) as (User & { password_hash: string }) | undefined;
-  return row ?? null;
+export function findUserByUsername(db: Database.Database, username: string): User | null {
+  return readUser(db, "username = ?", username);
 }
 export function findUserById(db: Database.Database, id: number): User | null {
   return readUser(db, "id = ?", id);
 }
 
-export function createUser(db: Database.Database, username: string, passwordHash: string): User {
+// Create or get the user row for a freshly authenticated Forgejo identity.
+// Called from the login route after Forgejo accepted the credentials, so
+// `username` is already proven against Forgejo.
+export function upsertUserFromForgejo(db: Database.Database, username: string): User {
+  const existing = readUser(db, "username = ?", username);
+  if (existing) return existing;
   return db
     .prepare(
-      "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?) RETURNING id, username, forgejo_username",
+      "INSERT INTO users (username, created_at) VALUES (?, ?) RETURNING id, username",
     )
-    .get(username, passwordHash, Date.now()) as User;
+    .get(username, Date.now()) as User;
 }
 
-export function setUserPassword(db: Database.Database, username: string, passwordHash: string): boolean {
-  return db.prepare("UPDATE users SET password_hash = ? WHERE username = ?").run(passwordHash, username).changes > 0;
+export function setStoredPat(
+  db: Database.Database,
+  userId: number,
+  pat: string,
+  sessionSecret: string,
+): void {
+  const blob = encryptPat(pat, sessionSecret);
+  db.prepare("UPDATE users SET forgejo_token_ciphertext = ? WHERE id = ?").run(blob, userId);
 }
 
-export function setForgejoUsername(db: Database.Database, userId: number, forgejoUsername: string): void {
-  db.prepare("UPDATE users SET forgejo_username = ? WHERE id = ?").run(forgejoUsername, userId);
+export function getStoredPat(
+  db: Database.Database,
+  userId: number,
+  sessionSecret: string,
+): string | null {
+  const row = db
+    .prepare("SELECT forgejo_token_ciphertext AS blob FROM users WHERE id = ?")
+    .get(userId) as { blob: Buffer | null } | undefined;
+  if (!row?.blob) return null;
+  try {
+    return decryptPat(row.blob, sessionSecret);
+  } catch (_err) {
+    // Bad ciphertext (key rotated, tamper, truncated) → force re-login.
+    return null;
+  }
 }
 
 // Sessions
@@ -71,7 +86,7 @@ export function destroySession(db: Database.Database, id: string): void {
 export function userFromSession(db: Database.Database, sessionId: string): User | null {
   const row = db
     .prepare(
-      "SELECT users.id AS id, users.username AS username, users.forgejo_username AS forgejo_username, sessions.expires_at AS expires_at " +
+      "SELECT users.id AS id, users.username AS username, sessions.expires_at AS expires_at " +
         "FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.id = ?",
     )
     .get(sessionId) as (User & { expires_at: number }) | undefined;
@@ -80,10 +95,12 @@ export function userFromSession(db: Database.Database, sessionId: string): User 
     destroySession(db, sessionId);
     return null;
   }
-  return { id: row.id, username: row.username, forgejo_username: row.forgejo_username };
+  return { id: row.id, username: row.username };
 }
 
-// Tokens
+// Personal API tokens (cosheaf-side bearer tokens for scripted clients).
+// These still authenticate the user to cosheaf; the user's stored Forgejo
+// PAT is what gets used onward to Forgejo. The two layers are independent.
 
 export interface TokenRow { id: number; name: string; created_at: number }
 
@@ -107,43 +124,9 @@ export function userFromToken(db: Database.Database, token: string): User | null
   const tokenHash = sha256Hex(token);
   const row = db
     .prepare(
-      "SELECT users.id AS id, users.username AS username, users.forgejo_username AS forgejo_username " +
+      "SELECT users.id AS id, users.username AS username " +
         "FROM tokens JOIN users ON users.id = tokens.user_id WHERE tokens.token_hash = ?",
     )
     .get(tokenHash) as User | undefined;
   return row ?? null;
-}
-
-// Forgejo proxy
-
-function forgejoUsernameFor(cosheafUsername: string): string {
-  // Forgejo usernames allow letters, digits, dashes, underscores, dots; must start with alnum.
-  // Cosheaf usernames are already a strict subset, but be safe.
-  const cleaned = cosheafUsername.replace(/[^A-Za-z0-9._-]/g, "_");
-  return `cs-${cleaned}`;
-}
-
-export async function ensureForgejoProxy(
-  db: Database.Database,
-  forgejo: Forgejo,
-  user: User,
-): Promise<string> {
-  if (user.forgejo_username) return user.forgejo_username;
-  const fjName = forgejoUsernameFor(user.username);
-  const existing = await forgejo.getUserByName(fjName);
-  if (!existing) {
-    const password = randomBytes(24).toString("base64url");
-    try {
-      await forgejo.createUser({
-        username: fjName,
-        email: `${fjName}@cosheaf.local`,
-        password,
-      });
-    } catch (err) {
-      // Concurrent first-login can race two creates; treat 409/422 as "someone else won".
-      if (!(err instanceof ForgejoError && (err.status === 409 || err.status === 422))) throw err;
-    }
-  }
-  setForgejoUsername(db, user.id, fjName);
-  return fjName;
 }

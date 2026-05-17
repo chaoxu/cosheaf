@@ -68,21 +68,21 @@ describe("workspace provisioning", () => {
   it("provisions a workspace, owner membership, repo policy, hook, and initial index", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo({ "readme.md": "# Readme\n\nhello" });
-    const user = { id: 7, username: "chao", forgejo_username: "cs-chao" };
-    db.prepare("INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run(user.id, user.username, "hash", user.forgejo_username, 0);
+    const user = { id: 7, username: "chao" };
+    db.prepare("INSERT INTO users (id, username, created_at) VALUES (?, ?, 0)")
+      .run(user.id, user.username);
 
     const result = await provisionWorkspace(db, forgejo, config, {
       slug: "notes",
       name: "Notes",
       user,
-      forgejoUsername: "cs-chao",
+      forgejoUsername: "chao",
       rollbackCreatedRepoOnLocalFailure: true,
     });
 
     expect(result.createdRepo).toBe(true);
     expect(result.workspace.slug).toBe("notes");
-    expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "cs-chao", "admin");
+    expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "chao", "admin");
     expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_id = ?").get(result.workspace.id))
       .toEqual({ path: "readme.md" });
     expect(forgejo.createBranchProtection).toHaveBeenCalledOnce();
@@ -97,22 +97,22 @@ describe("workspace provisioning", () => {
   it("allows seed-style idempotent provisioning of an existing workspace", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo();
-    const user = { id: 1, username: "chao", forgejo_username: "cs-chao" };
-    db.prepare("INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run(user.id, user.username, "hash", user.forgejo_username, 0);
+    const user = { id: 1, username: "chao" };
+    db.prepare("INSERT INTO users (id, username, created_at) VALUES (?, ?, 0)")
+      .run(user.id, user.username);
 
     await provisionWorkspace(db, forgejo, config, {
       slug: "notes",
       name: "Notes",
       user,
-      forgejoUsername: "cs-chao",
+      forgejoUsername: "chao",
       allowExistingLocal: true,
     });
     await provisionWorkspace(db, forgejo, config, {
       slug: "notes",
       name: "Notes renamed",
       user,
-      forgejoUsername: "cs-chao",
+      forgejoUsername: "chao",
       allowExistingLocal: true,
     });
 

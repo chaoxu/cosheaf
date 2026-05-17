@@ -44,11 +44,11 @@ async function ensureBranch(
   branch: string,
 ): Promise<"ok" | "forbidden"> {
   if (branch === "main") return "ok";
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, branch);
   if (exists) return "ok";
-  if (!branch.startsWith(userBranchPrefix(sudo))) return "forbidden";
-  await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main", sudo });
+  if (!branch.startsWith(userBranchPrefix(c.get("user").username))) return "forbidden";
+  await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
   return "ok";
 }
 
@@ -179,7 +179,7 @@ files.put("/:slug/file", async (c) => {
   const ensured = await ensureBranch(c, branch);
   if (ensured === "forbidden")
     return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
 
@@ -195,7 +195,6 @@ files.put("/:slug/file", async (c) => {
       content: finalContent,
       sha: existing?.sha,
       message: existing ? `update ${rel}` : `create ${rel}`,
-      sudo,
     });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 409)
@@ -222,7 +221,7 @@ files.post("/:slug/assets", async (c) => {
     return c.json({ error: "file field required", code: "validation" }, 400);
   if (file.size > MAX_ASSET_BYTES)
     return c.json({ error: `asset exceeds ${MAX_ASSET_DISPLAY}`, code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const ensured = await ensureBranch(c, branch);
   if (ensured === "forbidden")
     return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
@@ -238,7 +237,6 @@ files.post("/:slug/assets", async (c) => {
     path: assetPath,
     content: bytes,
     message: `upload ${safeName}`,
-    sudo,
   });
   invalidateBranchTree(owner, repo, branch);
   return c.json({ path: assetPath });
@@ -281,7 +279,7 @@ files.delete("/:slug/file", async (c) => {
   const ensured = await ensureBranch(c, branch);
   if (ensured === "forbidden")
     return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const meta = await fj.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json({ error: "not found", code: "not_found" }, 404);
   await fj.deleteFile(owner, repo, {
@@ -289,7 +287,6 @@ files.delete("/:slug/file", async (c) => {
     path: rel,
     sha: meta.sha,
     message: `delete ${rel}`,
-    sudo,
   });
   invalidateBranchTree(owner, repo, branch);
   return c.json({ ok: true, branch });

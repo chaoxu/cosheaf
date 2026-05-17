@@ -16,12 +16,12 @@ workspaces.get("/", async (c) => {
     )
     .all() as Array<{ id: number; slug: string; name: string; forgejo_repo: string }>;
 
-  // Resolve the caller's role on each workspace via Forgejo. Workspaces where
-  // the user has no permission are filtered out, mirroring the old behavior
-  // where listing was gated by membership.
-  const fj = c.get("forgejo");
+  // Resolve the caller's role on each workspace via Forgejo using the user's
+  // own PAT. Workspaces where the user has no permission are filtered out,
+  // mirroring the old behavior where listing was gated by membership.
+  const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
-  const fjUser = c.get("forgejoUsername");
+  const fjUser = c.get("user").username;
   const resolved = await Promise.all(
     rows.map(async (r) => {
       const p = await fj.getRepoPermission(owner, r.forgejo_repo, fjUser).catch(() => "none" as const);
@@ -40,11 +40,12 @@ workspaces.post("/", async (c) => {
 
   const db = c.get("db");
   const config = c.get("config");
-  const fj = c.get("forgejo");
+  // Provisioning creates a repo and installs branch protection + webhooks —
+  // operations that need admin privileges. Use the admin-bound client; this
+  // is one of the few places that's allowed to.
+  const fj = c.get("fjAdmin");
   const user = c.get("user");
-  const fjUser = c.get("forgejoUsername");
 
-  // Reject early if the slug is taken locally — avoids reaching Forgejo.
   const taken = db.prepare("SELECT 1 FROM workspaces WHERE slug = ?").get(body.slug);
   if (taken) return c.json({ error: "slug already taken", code: "conflict" }, 409);
 
@@ -53,7 +54,7 @@ workspaces.post("/", async (c) => {
       slug: body.slug,
       name: body.name,
       user,
-      forgejoUsername: fjUser,
+      forgejoUsername: user.username,
       rollbackCreatedRepoOnLocalFailure: true,
     });
     return c.json(

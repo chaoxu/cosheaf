@@ -34,7 +34,7 @@ async function deleteBranchQuietly(fj: Forgejo, owner: string, repo: string, bra
 }
 
 branches.get("/:slug/branches/mine", async (c) => {
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const [list, pulls] = await Promise.all([
     fj.listBranches(owner, repo),
     fj.listPulls(owner, repo, "open"),
@@ -44,7 +44,7 @@ branches.get("/:slug/branches/mine", async (c) => {
   // file PUT auto-create. This is deterministic — unlike scanning the
   // latest commit's author/committer, which falls over after rebase,
   // cherry-pick, or a web-UI edit attributed to a different user.
-  const prefix = userBranchPrefix(sudo);
+  const prefix = userBranchPrefix(c.get("user").username);
   const mine = list
     .filter((b) => b.name.startsWith(prefix) && !openHeads.has(b.name))
     .map((b) => ({
@@ -67,9 +67,9 @@ branches.post("/:slug/branches", async (c) => {
     body.name.endsWith("/")
   )
     return c.json({ error: "valid branch name required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   try {
-    await fj.createBranch(owner, repo, { newBranchName: body.name, oldBranchName: "main", sudo });
+    await fj.createBranch(owner, repo, { newBranchName: body.name, oldBranchName: "main" });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 409)
       return c.json({ error: "branch already exists", code: "conflict" }, 409);

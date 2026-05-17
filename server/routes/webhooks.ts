@@ -75,7 +75,7 @@ webhooks.post("/forgejo", async (c) => {
     return c.json({ ok: true, ignored: "unknown_repo" });
   }
 
-  const fj = c.get("forgejo");
+  const fj = c.get("fjAdmin");
   const owner = config.forgejoOwner;
   const sse = c.get("sse");
 

@@ -14,6 +14,7 @@ import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import type { AppEnv } from "./types.js";
 import { _resetPermCacheForTests, requireAdminFresh, requireAuth, requireMembership } from "./middleware.js";
+import { encryptPat } from "./pat-crypto.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-middleware-test",
@@ -41,9 +42,10 @@ function sha256Hex(input: string): string {
 
 function seedUser(db: Database.Database, username: string): string {
   const token = `cs_${username}`;
+  const blob = encryptPat(`fake-pat-${username}`, config.sessionSecret);
   db.prepare(
-    "INSERT INTO users (username, password_hash, forgejo_username, created_at) VALUES (?, 'hash', ?, 0)",
-  ).run(username, `cs-${username}`);
+    "INSERT INTO users (username, forgejo_token_ciphertext, created_at) VALUES (?, ?, 0)",
+  ).run(username, blob);
   const userId = (db.prepare("SELECT id FROM users WHERE username = ?").get(username) as { id: number }).id;
   db.prepare("INSERT INTO tokens (user_id, name, token_hash, created_at) VALUES (?, 'test', ?, 0)").run(
     userId,
@@ -57,7 +59,7 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
-    c.set("forgejo", new Forgejo({ baseUrl: config.forgejoUrl, adminToken: config.forgejoToken }));
+    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken }));
     c.set("sse", new SSEHub());
     await next();
   });

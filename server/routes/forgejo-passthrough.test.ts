@@ -11,6 +11,7 @@ import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { _seedPermCacheForTests } from "../middleware.js";
+import { encryptPat } from "../pat-crypto.js";
 import { forgejoPassthrough } from "./forgejo-passthrough.js";
 
 const config: Config = {
@@ -39,9 +40,10 @@ function sha256Hex(input: string): string {
 
 function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
   const token = `cs_${username}`;
+  const blob = encryptPat(`fake-pat-${username}`, config.sessionSecret);
   db.prepare(
-    "INSERT INTO users (id, username, password_hash, forgejo_username, created_at) VALUES (?, ?, 'hash', ?, 0)",
-  ).run(id, username, `cs-${username}`);
+    "INSERT INTO users (id, username, forgejo_token_ciphertext, created_at) VALUES (?, ?, ?, 0)",
+  ).run(id, username, blob);
   db.prepare("INSERT INTO tokens (user_id, name, token_hash, created_at) VALUES (?, 'test', ?, 0)").run(
     id,
     sha256Hex(token),
@@ -49,7 +51,7 @@ function seedUser(db: Database.Database, id: number, username: string, role: Rol
   // Skip the requireMembership Forgejo call by pre-populating its cache so the
   // fetchMock can be asserted purely against the request under test.
   // seedWorkspace uses repo='repo', forgejoOwner='owner'.
-  _seedPermCacheForTests("owner", "repo", `cs-${username}`, role);
+  _seedPermCacheForTests("owner", "repo", username, role);
   return token;
 }
 
@@ -66,7 +68,7 @@ function appFor(db: Database.Database): Hono<AppEnv> {
     c.set("config", config);
     // Real Forgejo client; we mock global fetch instead so we exercise the
     // passthrough wiring end-to-end.
-    c.set("forgejo", new Forgejo({ baseUrl: config.forgejoUrl, adminToken: config.forgejoToken }));
+    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken }));
     c.set("sse", new SSEHub());
     await next();
   });
@@ -109,8 +111,9 @@ describe("Forgejo passthrough", () => {
     expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/repo/pulls?state=open");
     expect(init.method).toBe("GET");
     const headers = init.headers as Record<string, string>;
-    expect(headers.authorization).toBe("token admin-token");
-    expect(headers.sudo).toBe("cs-alice");
+    // Forwards the caller's own PAT — no admin token, no Sudo header.
+    expect(headers.authorization).toBe("token fake-pat-alice");
+    expect(headers.sudo).toBeUndefined();
   });
 
   it("POST /forgejo/issues forwards body verbatim and returns Forgejo's response", async () => {
@@ -257,6 +260,8 @@ describe("Forgejo passthrough", () => {
     expect(res.status).toBe(201);
     const [, init] = fetchMock.mock.calls[0];
     const headers = init.headers as Record<string, string>;
-    expect(headers.sudo).toBe("cs-bob");
+    // The member's own PAT is forwarded (no Sudo header any more).
+    expect(headers.authorization).toBe("token fake-pat-bob");
+    expect(headers.sudo).toBeUndefined();
   });
 });

@@ -37,7 +37,7 @@ function appFor(db: Database.Database, forgejo: Forgejo): Hono<AppEnv> {
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
-    c.set("forgejo", forgejo);
+    c.set("fjAdmin", forgejo);
     c.set("sse", new SSEHub());
     await next();
   });

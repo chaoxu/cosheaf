@@ -31,6 +31,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
+import { getStoredPat } from "../users.js";
 
 // Tail prefixes we forward. `methods` lists which HTTP verbs are allowed
 // for that prefix.
@@ -94,7 +95,7 @@ forgejoPassthrough.use("/:slug/*", requireMembership());
 forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   const slug = c.req.param("slug");
   const config = c.get("config");
-  const { owner, repo, sudo } = c.get("repoCtx");
+  const { owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const user = c.get("user");
   const db = c.get("db");
@@ -127,12 +128,13 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
     config.forgejoUrl,
   );
 
-  // Forward headers: only the ones that affect Forgejo's request handling.
-  // Strip the cosheaf Authorization (which is a cs_ token, not a Forgejo
-  // token) and replace with the admin token + Sudo.
+  // Forward with the caller's own Forgejo PAT — same trust model as the
+  // typed routes. Strip the cosheaf Authorization (which is a cs_ token, not
+  // a Forgejo token) and replace with the user's decrypted PAT.
+  const pat = getStoredPat(db, user.id, config.sessionSecret);
+  if (!pat) return c.json({ error: "forgejo credentials expired", code: "unauthorized" }, 401);
   const fwdHeaders: Record<string, string> = {
-    authorization: `token ${config.forgejoToken}`,
-    sudo,
+    authorization: `token ${pat}`,
     accept: c.req.header("accept") ?? "application/json",
   };
   const ct = c.req.header("content-type");

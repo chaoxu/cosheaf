@@ -47,7 +47,6 @@
   "license": "MIT",
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@node-rs/argon2",
       "better-sqlite3",
       "esbuild",
       "lefthook"
@@ -64,7 +63,6 @@
     "@hono/node-server": "^2.0.2",
     "@lezer/common": "^1.5.1",
     "@lezer/highlight": "^1.2.3",
-    "@node-rs/argon2": "^2.0.2",
     "@radix-ui/react-slot": "^1.2.4",
     "better-sqlite3": "^12.9.0",
     "class-variance-authority": "^0.7.1",

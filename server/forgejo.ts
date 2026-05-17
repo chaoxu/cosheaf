@@ -1,5 +1,10 @@
 // Thin wrapper around the Forgejo REST API.
-// All calls go through one admin token; per-user actions use the `Sudo` header.
+//
+// Each instance is bound to a single token. On the request path that's the
+// authenticated user's PAT (stored encrypted in users.forgejo_token_ciphertext);
+// for out-of-band provisioning (CLI user/workspace creation, webhook handler)
+// we instantiate a separate admin-bound instance. There is no `Sudo` header
+// — Forgejo attributes every action to whoever owns the token.
 
 import type {
   ForgejoActivity,
@@ -25,7 +30,7 @@ import type {
 
 export interface ForgejoConfig {
   baseUrl: string;
-  adminToken: string;
+  token: string;  // PAT for the identity this client acts as
 }
 
 export class ForgejoError extends Error {
@@ -43,7 +48,6 @@ interface RequestOpts {
   method?: string;
   query?: Record<string, string | number | undefined>;
   body?: unknown;
-  sudo?: string;
   raw?: boolean;
   expectEmpty?: boolean;
 }
@@ -59,11 +63,10 @@ export class Forgejo {
       }
     }
     const headers: Record<string, string> = {
-      authorization: `token ${this.cfg.adminToken}`,
+      authorization: `token ${this.cfg.token}`,
       accept: "application/json",
     };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
-    if (opts.sudo) headers.sudo = opts.sudo;
 
     const res = await fetch(url, {
       method: opts.method ?? "GET",
@@ -126,10 +129,9 @@ export class Forgejo {
     private?: boolean;
     auto_init?: boolean;
     default_branch?: string;
-  }, sudo: string): Promise<ForgejoRepo> {
+  }): Promise<ForgejoRepo> {
     return this.req<ForgejoRepo>("/api/v1/user/repos", {
       method: "POST",
-      sudo,
       body: {
         name: opts.name,
         description: opts.description ?? "",
@@ -296,7 +298,6 @@ export class Forgejo {
     content: string; // raw text; will be base64-encoded
     sha?: string; // current sha if updating
     message: string;
-    sudo: string;
   }): Promise<ForgejoFileResponse> {
     return this.putFileBytes(owner, repo, {
       ...opts,
@@ -310,7 +311,6 @@ export class Forgejo {
     content: Buffer; // raw bytes; will be base64-encoded
     sha?: string;
     message: string;
-    sudo: string;
   }): Promise<ForgejoFileResponse> {
     const isUpdate = !!opts.sha;
     const body = {
@@ -323,7 +323,6 @@ export class Forgejo {
     return this.req<ForgejoFileResponse>(path, {
       method: isUpdate ? "PUT" : "POST",
       body,
-      sudo: opts.sudo,
     });
   }
 
@@ -332,12 +331,10 @@ export class Forgejo {
     path: string;
     sha: string;
     message: string;
-    sudo: string;
   }): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/contents/${encodeFilePath(opts.path)}`, {
       method: "DELETE",
       body: { branch: opts.branch, sha: opts.sha, message: opts.message },
-      sudo: opts.sudo,
       expectEmpty: true,
     });
   }
@@ -360,10 +357,9 @@ export class Forgejo {
 
   // ---------------- branches ----------------
 
-  async createBranch(owner: string, repo: string, opts: { newBranchName: string; oldBranchName?: string; sudo: string }): Promise<ForgejoBranch> {
+  async createBranch(owner: string, repo: string, opts: { newBranchName: string; oldBranchName?: string }): Promise<ForgejoBranch> {
     return this.req<ForgejoBranch>(`/api/v1/repos/${owner}/${repo}/branches`, {
       method: "POST",
-      sudo: opts.sudo,
       body: {
         new_branch_name: opts.newBranchName,
         old_branch_name: opts.oldBranchName ?? "main",
@@ -411,11 +407,9 @@ export class Forgejo {
     base: string;
     title: string;
     body: string;
-    sudo: string;
   }): Promise<ForgejoPull> {
     return this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls`, {
       method: "POST",
-      sudo: opts.sudo,
       body: { head: opts.head, base: opts.base, title: opts.title, body: opts.body },
     });
   }
@@ -445,18 +439,16 @@ export class Forgejo {
     return out;
   }
 
-  async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed" }, sudo?: string): Promise<ForgejoPull> {
+  async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed" }): Promise<ForgejoPull> {
     return this.req<ForgejoPull>(`/api/v1/repos/${owner}/${repo}/pulls/${index}`, {
       method: "PATCH",
       body: patch,
-      sudo,
     });
   }
 
-  async mergePull(owner: string, repo: string, index: number, opts: { Do: "merge" | "squash" | "rebase"; sudo: string; message?: string; force?: boolean }): Promise<void> {
+  async mergePull(owner: string, repo: string, index: number, opts: { Do: "merge" | "squash" | "rebase"; message?: string; force?: boolean }): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/pulls/${index}/merge`, {
       method: "POST",
-      sudo: opts.sudo,
       body: { Do: opts.Do, MergeMessageField: opts.message ?? "", force_merge: opts.force ?? false },
       expectEmpty: true,
     });
@@ -488,7 +480,6 @@ export class Forgejo {
   async createReview(owner: string, repo: string, index: number, opts: {
     event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
     body: string;
-    sudo: string;
     comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
     commit_id?: string;
   }): Promise<ForgejoReview> {
@@ -497,7 +488,6 @@ export class Forgejo {
     if (opts.commit_id) payload.commit_id = opts.commit_id;
     return this.req<ForgejoReview>(`/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews`, {
       method: "POST",
-      sudo: opts.sudo,
       body: payload,
     });
   }
@@ -505,11 +495,10 @@ export class Forgejo {
   async submitPullReview(owner: string, repo: string, index: number, reviewId: number, opts: {
     event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT";
     body: string;
-    sudo: string;
   }): Promise<ForgejoReview> {
     return this.req<ForgejoReview>(
       `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}`,
-      { method: "POST", sudo: opts.sudo, body: { event: opts.event, body: opts.body } },
+      { method: "POST", body: { event: opts.event, body: opts.body } },
     );
   }
 
@@ -518,14 +507,13 @@ export class Forgejo {
     body: string;
     new_position?: number;
     old_position?: number;
-    sudo: string;
   }): Promise<ForgejoPullReviewComment> {
     const payload: Record<string, unknown> = { path: opts.path, body: opts.body };
     if (opts.new_position !== undefined) payload.new_position = opts.new_position;
     if (opts.old_position !== undefined) payload.old_position = opts.old_position;
     return this.req<ForgejoPullReviewComment>(
       `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments`,
-      { method: "POST", sudo: opts.sudo, body: payload },
+      { method: "POST", body: payload },
     );
   }
 
@@ -550,20 +538,20 @@ export class Forgejo {
   // (only GET/DELETE). Review-comment edits go through the generic
   // issue-comment endpoint, which Forgejo treats as the same record.
   async editReviewComment(
-    owner: string, repo: string, commentId: number, body: string, sudo: string,
+    owner: string, repo: string, commentId: number, body: string,
   ): Promise<ForgejoPullReviewComment> {
     return this.req<ForgejoPullReviewComment>(
       `/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`,
-      { method: "PATCH", sudo, body: { body } },
+      { method: "PATCH", body: { body } },
     );
   }
 
   async deleteReviewComment(
-    owner: string, repo: string, index: number, reviewId: number, commentId: number, sudo: string,
+    owner: string, repo: string, index: number, reviewId: number, commentId: number,
   ): Promise<void> {
     await this.req<unknown>(
       `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments/${commentId}`,
-      { method: "DELETE", sudo, expectEmpty: true },
+      { method: "DELETE", expectEmpty: true },
     );
   }
 
@@ -602,18 +590,16 @@ export class Forgejo {
     return this.req<ForgejoIssue[]>(`/api/v1/repos/${owner}/${repo}/issues/pinned`);
   }
 
-  async pinIssue(owner: string, repo: string, number: number, sudo: string): Promise<void> {
+  async pinIssue(owner: string, repo: string, number: number): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/pin`, {
       method: "POST",
-      sudo,
       expectEmpty: true,
     });
   }
 
-  async unpinIssue(owner: string, repo: string, number: number, sudo: string): Promise<void> {
+  async unpinIssue(owner: string, repo: string, number: number): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/pin`, {
       method: "DELETE",
-      sudo,
       expectEmpty: true,
     });
   }
@@ -634,11 +620,10 @@ export class Forgejo {
 
   async createMilestone(
     owner: string, repo: string,
-    opts: { title: string; description?: string; due_on?: string; sudo: string },
+    opts: { title: string; description?: string; due_on?: string },
   ): Promise<ForgejoMilestone> {
     return this.req<ForgejoMilestone>(`/api/v1/repos/${owner}/${repo}/milestones`, {
       method: "POST",
-      sudo: opts.sudo,
       body: {
         title: opts.title,
         description: opts.description ?? "",
@@ -649,7 +634,7 @@ export class Forgejo {
 
   async editMilestone(
     owner: string, repo: string, id: number,
-    opts: { title?: string; description?: string; state?: "open" | "closed"; sudo: string },
+    opts: { title?: string; description?: string; state?: "open" | "closed" },
   ): Promise<ForgejoMilestone> {
     const payload: Record<string, unknown> = {};
     if (opts.title !== undefined) payload.title = opts.title;
@@ -657,7 +642,6 @@ export class Forgejo {
     if (opts.state !== undefined) payload.state = opts.state;
     return this.req<ForgejoMilestone>(`/api/v1/repos/${owner}/${repo}/milestones/${id}`, {
       method: "PATCH",
-      sudo: opts.sudo,
       body: payload,
     });
   }
@@ -667,21 +651,19 @@ export class Forgejo {
   }
 
   async addIssueDependency(
-    owner: string, repo: string, number: number, depIndex: number, sudo: string,
+    owner: string, repo: string, number: number, depIndex: number,
   ): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
       method: "POST",
-      sudo,
       body: { index: depIndex, owner, repo },
     });
   }
 
   async removeIssueDependency(
-    owner: string, repo: string, number: number, depIndex: number, sudo: string,
+    owner: string, repo: string, number: number, depIndex: number,
   ): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/dependencies`, {
       method: "DELETE",
-      sudo,
       body: { index: depIndex, owner, repo },
     });
   }
@@ -691,21 +673,19 @@ export class Forgejo {
   }
 
   async addIssueBlock(
-    owner: string, repo: string, number: number, blockIndex: number, sudo: string,
+    owner: string, repo: string, number: number, blockIndex: number,
   ): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`, {
       method: "POST",
-      sudo,
       body: { index: blockIndex, owner, repo },
     });
   }
 
   async removeIssueBlock(
-    owner: string, repo: string, number: number, blockIndex: number, sudo: string,
+    owner: string, repo: string, number: number, blockIndex: number,
   ): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/issues/${number}/blocks`, {
       method: "DELETE",
-      sudo,
       body: { index: blockIndex, owner, repo },
     });
   }
@@ -724,14 +704,13 @@ export class Forgejo {
 
   async createIssue(
     owner: string, repo: string,
-    opts: { title: string; body: string; assignees?: string[]; labels?: number[]; sudo: string },
+    opts: { title: string; body: string; assignees?: string[]; labels?: number[] },
   ): Promise<ForgejoIssue> {
     const payload: Record<string, unknown> = { title: opts.title, body: opts.body };
     if (opts.assignees?.length) payload.assignees = opts.assignees;
     if (opts.labels?.length) payload.labels = opts.labels;
     return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues`, {
       method: "POST",
-      sudo: opts.sudo,
       body: payload,
     });
   }
@@ -740,7 +719,7 @@ export class Forgejo {
     owner: string, repo: string, number: number,
     opts: {
       title?: string; body?: string; state?: "open" | "closed";
-      assignees?: string[]; milestone?: number | null; sudo: string;
+      assignees?: string[]; milestone?: number | null;
     },
   ): Promise<ForgejoIssue> {
     const payload: Record<string, unknown> = {};
@@ -751,7 +730,6 @@ export class Forgejo {
     if (opts.milestone !== undefined) payload.milestone = opts.milestone ?? 0;
     return this.req<ForgejoIssue>(`/api/v1/repos/${owner}/${repo}/issues/${number}`, {
       method: "PATCH",
-      sudo: opts.sudo,
       body: payload,
     });
   }
@@ -761,31 +739,29 @@ export class Forgejo {
   }
 
   async createIssueComment(
-    owner: string, repo: string, number: number, body: string, sudo: string,
+    owner: string, repo: string, number: number, body: string,
   ): Promise<ForgejoIssueComment> {
     return this.req<ForgejoIssueComment>(`/api/v1/repos/${owner}/${repo}/issues/${number}/comments`, {
       method: "POST",
-      sudo,
       body: { body },
     });
   }
 
   async editIssueComment(
-    owner: string, repo: string, commentId: number, body: string, sudo: string,
+    owner: string, repo: string, commentId: number, body: string,
   ): Promise<ForgejoIssueComment> {
     return this.req<ForgejoIssueComment>(`/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`, {
       method: "PATCH",
-      sudo,
       body: { body },
     });
   }
 
   async deleteIssueComment(
-    owner: string, repo: string, commentId: number, sudo: string,
+    owner: string, repo: string, commentId: number,
   ): Promise<void> {
     await this.req<unknown>(
       `/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`,
-      { method: "DELETE", sudo, expectEmpty: true },
+      { method: "DELETE", expectEmpty: true },
     );
   }
 
@@ -795,12 +771,11 @@ export class Forgejo {
   // to a single repository. Forgejo returns subjects of type "Issue"/"Pull"/
   // "Commit"; we filter to Issue/Pull at the route layer.
   async listRepoNotifications(
-    owner: string, repo: string, sudo: string, opts: { all?: boolean; limit?: number } = {},
+    owner: string, repo: string, opts: { all?: boolean; limit?: number } = {},
   ): Promise<ForgejoNotificationThread[]> {
     return this.req<ForgejoNotificationThread[]>(
       `/api/v1/repos/${owner}/${repo}/notifications`,
       {
-        sudo,
         query: {
           all: opts.all ? "true" : undefined,
           limit: opts.limit ?? 50,
@@ -809,19 +784,17 @@ export class Forgejo {
     );
   }
 
-  async markNotificationRead(id: number, sudo: string): Promise<void> {
+  async markNotificationRead(id: number): Promise<void> {
     await this.req(`/api/v1/notifications/threads/${id}`, {
       method: "PATCH",
-      sudo,
       query: { "to-status": "read" },
       expectEmpty: true,
     });
   }
 
-  async markRepoNotificationsRead(owner: string, repo: string, sudo: string): Promise<void> {
+  async markRepoNotificationsRead(owner: string, repo: string): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}/notifications`, {
       method: "PUT",
-      sudo,
       expectEmpty: true,
     });
   }
@@ -833,21 +806,19 @@ export class Forgejo {
   }
 
   async createLabel(
-    owner: string, repo: string, opts: { name: string; color: string; description?: string; sudo: string },
+    owner: string, repo: string, opts: { name: string; color: string; description?: string },
   ): Promise<ForgejoLabel> {
     return this.req<ForgejoLabel>(`/api/v1/repos/${owner}/${repo}/labels`, {
       method: "POST",
-      sudo: opts.sudo,
       body: { name: opts.name, color: opts.color, description: opts.description ?? "" },
     });
   }
 
   async setIssueLabels(
-    owner: string, repo: string, number: number, labelIds: number[], sudo: string,
+    owner: string, repo: string, number: number, labelIds: number[],
   ): Promise<ForgejoLabel[]> {
     return this.req<ForgejoLabel[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/labels`, {
       method: "PUT",
-      sudo,
       body: { labels: labelIds },
     });
   }

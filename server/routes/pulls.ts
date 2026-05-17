@@ -123,14 +123,13 @@ async function mergeWithRetry(
   owner: string,
   repo: string,
   prNumber: number,
-  sudo: string,
   opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
   const Do = opts.Do ?? "squash";
   let lastErr: unknown;
   for (let attempt = 0; attempt < 8; attempt++) {
     try {
-      await fj.mergePull(owner, repo, prNumber, { Do, sudo, force: opts.force });
+      await fj.mergePull(owner, repo, prNumber, { Do, force: opts.force });
       return { ok: true };
     } catch (err) {
       lastErr = err;
@@ -180,14 +179,13 @@ pulls.post("/:slug/pulls", async (c) => {
     body?: string;
   };
   if (!body.head) return c.json({ error: "head required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   try {
     const pr = await fj.createPull(owner, repo, {
       head: body.head,
       base: body.base ?? "main",
       title: body.title ?? body.head,
       body: body.body ?? "",
-      sudo,
     });
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
     return c.json(prMeta(pr), 201);
@@ -221,10 +219,10 @@ pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
     Do?: "squash" | "merge" | "rebase";
     force?: boolean;
   };
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   // Admins can bypass the required-approvals branch protection rule by
   // passing `force: true`. Callers default to false (normal review flow).
-  const result = await mergeWithRetry(fj, owner, repo, n, sudo, { Do: body.Do, force: body.force });
+  const result = await mergeWithRetry(fj, owner, repo, n, { Do: body.Do, force: body.force });
   if (!result.ok) {
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
     return c.json({ error: `merge failed: ${result.message}`, code }, result.status as 409 | 502 | 500);
@@ -243,8 +241,8 @@ pulls.post("/:slug/pulls/:n/close", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  await fj.editPull(owner, repo, n, { state: "closed" }, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.editPull(owner, repo, n, { state: "closed" });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
   return c.json({ ok: true });
 });
@@ -331,10 +329,10 @@ pulls.post("/:slug/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  if (pull.user?.login === sudo)
+  if (pull.user?.login === c.get("user").username)
     return c.json({ error: "cannot review your own pull request", code: "forbidden" }, 403);
 
   const payload = (await c.req.json().catch(() => ({}))) as { event?: string; body?: string | null };
@@ -345,7 +343,6 @@ pulls.post("/:slug/pulls/:n/reviews", async (c) => {
   await fj.createReview(owner, repo, n, {
     event: EVENT_MAP[event],
     body: payload.body ?? "",
-    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reviewed" });
 
@@ -413,10 +410,10 @@ pulls.post("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
   const ws = c.get("workspace");
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  if (pull.user?.login === sudo)
+  if (pull.user?.login === c.get("user").username)
     return c.json({ error: "cannot comment on your own pull request", code: "forbidden" }, 403);
 
   const input = parseCommentInput(await c.req.json().catch(() => null));
@@ -427,7 +424,6 @@ pulls.post("/:slug/pulls/:n/comments", async (c) => {
   await fj.createReview(owner, repo, n, {
     event: "COMMENT",
     body: "",
-    sudo,
     comments: [{ path: input.path, body: input.body, ...pos }],
   });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "commented" });
@@ -440,8 +436,8 @@ pulls.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
   if (n === null || !cid) return c.json({ error: "bad ids", code: "validation" }, 400);
   const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
   if (!body?.body) return c.json({ error: "body required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  await fj.editReviewComment(owner, repo, cid, body.body, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.editReviewComment(owner, repo, cid, body.body);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
 });
@@ -452,8 +448,8 @@ pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
   const rid = Number(c.req.query("review_id"));
   if (n === null || !cid || !rid)
     return c.json({ error: "review_id query required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
-  await fj.deleteReviewComment(owner, repo, n, rid, cid, sudo);
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.deleteReviewComment(owner, repo, n, rid, cid);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
 });
@@ -473,7 +469,6 @@ async function findOrCreatePendingReview(
   const created = await fj.createReview(owner, repo, n, {
     event: "PENDING",
     body: "(draft)",
-    sudo: forgejoUsername,
   });
   return created.id;
 }
@@ -481,12 +476,12 @@ async function findOrCreatePendingReview(
 pulls.post("/:slug/pulls/:n/draft-review", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
-  if (pull.user?.login === sudo)
+  if (pull.user?.login === c.get("user").username)
     return c.json({ error: "cannot review your own pull request", code: "forbidden" }, 403);
-  const review_id = await findOrCreatePendingReview(fj, owner, repo, n, sudo);
+  const review_id = await findOrCreatePendingReview(fj, owner, repo, n, c.get("user").username);
   return c.json({ review_id });
 });
 
@@ -497,14 +492,13 @@ pulls.post("/:slug/pulls/:n/draft-review/:rid/comments", async (c) => {
   const ws = c.get("workspace");
   const input = parseCommentInput(await c.req.json().catch(() => null));
   if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
   if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
   await fj.addCommentToReview(owner, repo, n, rid, {
     path: input.path,
     body: input.body,
     ...pos,
-    sudo,
   });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
@@ -520,11 +514,10 @@ pulls.post("/:slug/pulls/:n/draft-review/:rid/submit", async (c) => {
   } | null;
   if (!body?.event) return c.json({ error: "event required", code: "validation" }, 400);
   const eventMap = { approve: "APPROVED", request_changes: "REQUEST_CHANGES", comment: "COMMENT" } as const;
-  const { fj, owner, repo, sudo } = c.get("repoCtx");
+  const { fj, owner, repo } = c.get("repoCtx");
   await fj.submitPullReview(owner, repo, n, rid, {
     event: eventMap[body.event],
     body: body.body ?? "",
-    sudo,
   });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "reviewed" });
   return c.json({ ok: true });

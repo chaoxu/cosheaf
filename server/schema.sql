@@ -1,10 +1,12 @@
 -- Cosheaf sidecar schema (Forgejo backend).
 
+-- Cosheaf usernames are identical to Forgejo usernames; there's no separate
+-- cosheaf password. Login validates against Forgejo by exchanging the user's
+-- Forgejo credentials for a per-user PAT, which is then encrypted at rest.
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  forgejo_username TEXT,
+  forgejo_token_ciphertext BLOB,  -- AES-256-GCM(SESSION_SECRET) over the PAT
   created_at INTEGER NOT NULL
 );
 
