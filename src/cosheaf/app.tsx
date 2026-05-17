@@ -46,7 +46,6 @@ import { ReviewActions } from "./review/ReviewActions";
 import { IssueBodyRender } from "./review/IssueBodyRender";
 import { IssueView } from "./review/IssueView";
 import { buildWorkspaceDocumentContext } from "./document-format/coflat-context";
-import type { DocumentContext } from "./document-format/coflat-context";
 import type {
   EditorAssetUploader,
   EditorAutocompleteSource,
@@ -55,6 +54,7 @@ import type {
   MountedEditor,
 } from "./document-format/coflat-editor";
 import { SettingsPanel } from "./review/SettingsPanel";
+import { WorkspaceProvider, useWorkspaceContext } from "./workspace-context";
 
 type View =
   | { kind: "loading" }
@@ -982,17 +982,12 @@ function describeOpType(row: ActivityRow): {
 
 function ApprovalsPanel({
   approvals,
-  workspaceSlug,
-  formatId,
-  documentContext,
   lineCommentCount = 0,
 }: {
   approvals: ApprovalRecord[];
-  workspaceSlug: string;
-  formatId: Workspace["default_md_format"];
-  documentContext?: DocumentContext;
   lineCommentCount?: number;
 }): ReactElement {
+  const { slug: workspaceSlug, formatId, documentContext } = useWorkspaceContext();
   // Latest verdict per reviewer (excluding "comment", which is just activity).
   const verdictByUser = new Map<string, ApprovalRecord>();
   for (const a of approvals) {
@@ -1954,7 +1949,13 @@ function WorkspaceView({
       .finally(() => setBusy(false));
   };
 
+  const workspaceContextValue = useMemo(
+    () => ({ slug: workspace.slug, formatId: activeFormatId, documentContext: workspaceCtx }),
+    [workspace.slug, activeFormatId, workspaceCtx],
+  );
+
   return (
+    <WorkspaceProvider value={workspaceContextValue}>
     <Screen>
       <div className="flex min-h-0 flex-1">
         <aside
@@ -2267,10 +2268,7 @@ function WorkspaceView({
           )}
           {!reviewingPullNumber && !openPath && viewingIssue !== null && (
             <IssueView
-              workspaceSlug={workspace.slug}
-              formatId={activeFormatId}
               number={viewingIssue}
-              documentContext={workspaceCtx}
               currentForgejoUsername={user.username}
               canManageLabels={workspace.role === "admin"}
               canPin={workspace.role === "admin"}
@@ -2412,29 +2410,15 @@ function WorkspaceView({
                 />
               )}
               {activeBranchName && (
-                <ApprovalsPanel
-                  approvals={approvals}
-                  workspaceSlug={workspace.slug}
-                  formatId={activeFormatId}
-                  documentContext={workspaceCtx}
-                />
+                <ApprovalsPanel approvals={approvals} />
               )}
             </>
           )}
           {reviewingPullNumber && (
             <>
-              {reviewState.pr && (
-                <PrHeader
-                  pr={reviewState.pr}
-                  workspaceSlug={workspace.slug}
-                  formatId={activeFormatId}
-                  documentContext={workspaceCtx}
-                />
-              )}
+              {reviewState.pr && <PrHeader pr={reviewState.pr} />}
               <div className="min-h-0 shrink-0">
                 <DiffArea
-                  workspaceSlug={workspace.slug}
-                  formatId={activeFormatId}
                   file={
                     reviewState.diff?.files.find((f) => f.path === reviewState.selectedPath) ??
                     reviewState.diff?.files[0] ??
@@ -2459,9 +2443,6 @@ function WorkspaceView({
               </div>
               <ApprovalsPanel
                 approvals={approvals}
-                workspaceSlug={workspace.slug}
-                formatId={activeFormatId}
-                documentContext={workspaceCtx}
                 lineCommentCount={reviewState.comments.length}
               />
               {reviewState.pr && (
@@ -2563,5 +2544,6 @@ function WorkspaceView({
         </main>
       </div>
     </Screen>
+    </WorkspaceProvider>
   );
 }

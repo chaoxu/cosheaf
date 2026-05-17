@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
 import type { LineComment, PrFile } from "../api";
-import type { DocumentFormatId } from "../../../shared/document-format";
 import { getClientDocumentFormat } from "../format-registry";
 import type { DiffRendererProps, ViewMode, ViewShape } from "./diff-renderer-types";
+import { useWorkspaceContext } from "../workspace-context";
 import { SourceDiff } from "./diff-renderers/SourceDiff";
 import { SourceAfterOnly } from "./diff-renderers/SourceAfterOnly";
 import { HeadWithTint } from "./diff-renderers/HeadWithTint";
@@ -32,8 +32,6 @@ function isDisabled(mode: ViewMode, shape: ViewShape): boolean {
 
 export function DiffArea({
   file,
-  workspaceSlug,
-  formatId,
   loadContent,
   comments,
   currentForgejoUsername,
@@ -42,8 +40,6 @@ export function DiffArea({
   onDeleteComment,
 }: {
   file: PrFile | null;
-  workspaceSlug: string;
-  formatId: DocumentFormatId;
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
   currentForgejoUsername?: string;
@@ -51,6 +47,7 @@ export function DiffArea({
   onEditComment?: DiffRendererProps["onEditComment"];
   onDeleteComment?: DiffRendererProps["onDeleteComment"];
 }): ReactElement {
+  const { slug: workspaceSlug, formatId } = useWorkspaceContext();
   const fileComments = useMemo(
     () => (file ? comments.filter((c) => c.path === file.path) : []),
     [comments, file],

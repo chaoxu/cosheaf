@@ -2,23 +2,13 @@ import type { ReactElement } from "react";
 import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/utils";
 import type { PrMeta } from "../api";
-import type { DocumentFormatId } from "../../../shared/document-format";
 import { IssueBodyRender } from "./IssueBodyRender";
-import type { DocumentContext } from "../document-format/coflat-context";
+import { useWorkspaceContext } from "../workspace-context";
 
 const muted = "text-[var(--cf-muted)]";
 
-export function PrHeader({
-  pr,
-  workspaceSlug,
-  formatId,
-  documentContext,
-}: {
-  pr: PrMeta;
-  workspaceSlug: string;
-  formatId: DocumentFormatId;
-  documentContext?: DocumentContext;
-}): ReactElement {
+export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
+  const { slug: workspaceSlug, formatId, documentContext } = useWorkspaceContext();
   return (
     <header
       data-testid="pr-header"

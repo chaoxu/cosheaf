@@ -7,15 +7,13 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
 import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
-import { IssueBodyRender, type DocumentContext } from "../document-format/coflat-issue-render";
-import type { DocumentFormatId } from "../../../shared/document-format";
+import { IssueBodyRender } from "../document-format/coflat-issue-render";
 import { formatRelativeTime } from "../lib/format-relative-time";
+import { useWorkspaceContext } from "../workspace-context";
 
 const muted = "text-[var(--cf-muted)]";
 
 export function IssueView({
-  workspaceSlug,
-  formatId,
   number,
   currentForgejoUsername,
   canManageLabels,
@@ -26,10 +24,7 @@ export function IssueView({
   onOpenPageById,
   onOpenPath,
   onOpenNumber,
-  documentContext,
 }: {
-  workspaceSlug: string;
-  formatId: DocumentFormatId;
   number: number;
   currentForgejoUsername?: string;
   canManageLabels?: boolean;
@@ -40,8 +35,8 @@ export function IssueView({
   onOpenPageById?: (id: string) => void;
   onOpenPath?: (path: string, range: { from: number; to: number } | null, fragment: string | null) => void;
   onOpenNumber?: (n: number) => void;
-  documentContext?: DocumentContext;
 }): ReactElement {
+  const { slug: workspaceSlug, formatId, documentContext } = useWorkspaceContext();
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [comments, setComments] = useState<IssueComment[]>([]);
   const [allLabels, setAllLabels] = useState<Label[]>([]);
