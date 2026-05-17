@@ -519,6 +519,21 @@ pulls.get("/:slug/settings", async (c) => {
   });
 });
 
+// PUT /settings is NOT atomic across Forgejo and SQLite — by design.
+// Forgejo is authoritative for branch protection and a network call away;
+// SQLite is local. We commit Forgejo first (the source of truth), then
+// SQLite. Order within the handler:
+//
+//   1. validate payload (cheap, no side effects)
+//   2. update Forgejo branch protection if min_approvals changed
+//   3. reindex from Forgejo if default_md_format changed (this WRITES to
+//      doc_map/backlinks/FTS with the new format's rules)
+//   4. UPDATE workspaces.default_md_format — the cosheaf-side commit point
+//
+// If any step throws, the response is a 5xx with the step that failed in
+// the body. The repair path is always: PUT /settings again with the same
+// payload (idempotent), then optionally `pnpm cli workspace reindex <slug>`
+// if the format flag advanced but the indexer crashed mid-walk.
 pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     min_approvals?: number;
@@ -533,27 +548,48 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
     return c.json({ error: "unknown markdown format", code: "validation" }, 400);
   }
   const { fj, owner, repo } = c.get("repoCtx");
-  const existing = await fj.getBranchProtection(owner, repo, "main");
-  const minApprovals = body.min_approvals ?? existing?.required_approvals ?? 1;
-  if (body.min_approvals !== undefined) {
-    if (!existing) {
-      await fj.createBranchProtection(owner, repo, {
-        branch_name: "main",
-        required_approvals: body.min_approvals,
-      });
-    } else {
-      await fj.updateBranchProtection(owner, repo, "main", { required_approvals: body.min_approvals });
+
+  let minApprovals: number;
+  try {
+    const existing = await fj.getBranchProtection(owner, repo, "main");
+    minApprovals = body.min_approvals ?? existing?.required_approvals ?? 1;
+    if (body.min_approvals !== undefined) {
+      if (!existing) {
+        await fj.createBranchProtection(owner, repo, {
+          branch_name: "main",
+          required_approvals: body.min_approvals,
+        });
+      } else {
+        await fj.updateBranchProtection(owner, repo, "main", { required_approvals: body.min_approvals });
+      }
     }
+  } catch (err) {
+    return c.json(
+      { error: `branch-protection update failed (Forgejo unchanged): ${(err as Error).message}`, code: "forgejo_failed", step: "branch_protection" },
+      502,
+    );
   }
+
   const defaultMdFormat = body.default_md_format !== undefined
     ? normalizeDocumentFormatId(body.default_md_format)
     : normalizeDocumentFormatId(c.get("workspace").defaultMdFormat);
   if (body.default_md_format !== undefined) {
-    await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
-      id: c.get("workspace").id,
-      forgejo_repo: repo,
-      default_md_format: defaultMdFormat,
-    });
+    try {
+      await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
+        id: c.get("workspace").id,
+        forgejo_repo: repo,
+        default_md_format: defaultMdFormat,
+      });
+    } catch (err) {
+      return c.json(
+        {
+          error: `reindex failed; Forgejo branch protection updated but sidecar may be partial. Re-run settings update or \`pnpm cli workspace reindex\`: ${(err as Error).message}`,
+          code: "reindex_failed",
+          step: "reindex",
+        },
+        502,
+      );
+    }
     c.get("db")
       .prepare("UPDATE workspaces SET default_md_format = ? WHERE id = ?")
       .run(defaultMdFormat, c.get("workspace").id);

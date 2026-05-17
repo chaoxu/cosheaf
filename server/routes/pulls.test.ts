@@ -184,7 +184,10 @@ describe("pulls + branches routes", () => {
         body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
       });
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(502);
+      const body = (await res.json()) as { code: string; step?: string };
+      expect(body.code).toBe("reindex_failed");
+      expect(body.step).toBe("reindex");
       expect(
         db.prepare("SELECT default_md_format FROM workspaces WHERE id = 1").get(),
       ).toEqual({ default_md_format: DEFAULT_DOCUMENT_FORMAT_ID });
