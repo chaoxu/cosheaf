@@ -232,7 +232,7 @@ issues.get("/:slug/activities", async (c) => {
       return {
         id: a.id,
         op_type: a.op_type,
-        actor: a.act_user?.login ?? null,
+        author_username: a.act_user?.login ?? null,
         ref_index: refIndex,
         ref_name: a.ref_name ?? null,
         comment_body: body,

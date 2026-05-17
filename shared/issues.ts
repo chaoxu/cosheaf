@@ -83,7 +83,7 @@ export interface TimelineEvent {
 export interface ActivityRow {
   id: number;
   op_type: string;
-  actor: string | null;
+  author_username: string | null;
   ref_index: number | null;
   ref_name: string | null;
   comment_body: string | null;

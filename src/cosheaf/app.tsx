@@ -918,7 +918,7 @@ function ActivityLine({
   const desc = describeOpType(row);
   return (
     <div className={cn("flex items-baseline gap-1", muted)}>
-      <strong className="text-[var(--cf-fg)]">@{row.actor ?? "?"}</strong>
+      <strong className="text-[var(--cf-fg)]">@{row.author_username ?? "?"}</strong>
       <span>{desc.verb}</span>
       {desc.targetKind && desc.targetNumber !== null && (() => {
         const n = desc.targetNumber;
