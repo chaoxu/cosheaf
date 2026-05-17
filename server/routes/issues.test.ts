@@ -1,7 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
@@ -11,6 +8,7 @@ import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { issues } from "./issues.js";
+import { freshTestDb, responseOk, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-issues-test",
@@ -24,14 +22,8 @@ const config: Config = {
 };
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-issues-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
-  ).run();
+  const db = freshTestDb("cosheaf-issues-");
+  seedTestWorkspace(db);
   return db;
 }
 
@@ -48,12 +40,7 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   return app;
 }
 
-function ok(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
+const ok = responseOk;
 
 function forgejoIssue(
   number: number,

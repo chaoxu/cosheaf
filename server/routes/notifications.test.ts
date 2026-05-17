@@ -1,7 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
@@ -11,6 +8,7 @@ import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { notifications } from "./notifications.js";
+import { freshTestDb, responseEmpty, responseOk, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-notifications-test",
@@ -24,14 +22,8 @@ const config: Config = {
 };
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-notifs-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
-  ).run();
+  const db = freshTestDb("cosheaf-notifs-");
+  seedTestWorkspace(db);
   return db;
 }
 
@@ -48,20 +40,8 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   return app;
 }
 
-function ok(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function empty(status: number): Response {
-  // Some HTTP statuses (204, 205, 304) forbid a body; Response throws on
-  // them with a non-empty body. We construct with an empty body but the
-  // current spec says even an empty string can be invalid for 204/205.
-  // Use 200 with no body for mocks that don't care about the exact code.
-  return new Response(null, { status: status === 204 || status === 205 ? 200 : status });
-}
+const ok = responseOk;
+const empty = responseEmpty;
 
 const fetchMock = vi.fn();
 beforeEach(() => {

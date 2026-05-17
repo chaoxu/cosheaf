@@ -1,15 +1,13 @@
 import { createHmac } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
 import type { Forgejo } from "../forgejo.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import { webhooks } from "./webhooks.js";
+import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-webhook-test",
@@ -22,22 +20,9 @@ const config: Config = {
   webhookUrl: "http://cosheaf.test/webhook",
 };
 
-const openDbs: Array<{ db: Database.Database; dir: string }> = [];
-afterEach(() => {
-  for (const { db, dir } of openDbs.splice(0)) {
-    try { db.close(); } catch (_err) { /* already closed */ }
-    try { rmSync(dir, { recursive: true, force: true }); } catch (_err) { /* gone */ }
-  }
-});
-
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-webhook-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  openDbs.push({ db, dir });
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  db.prepare("INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)").run();
+  const db = freshTestDb("cosheaf-webhook-");
+  seedTestWorkspace(db);
   return db;
 }
 
