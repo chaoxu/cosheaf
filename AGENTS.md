@@ -157,6 +157,83 @@ Rules of thumb:
   repo-scoped filters (`assigned_by`, `created_by`, `state`, `q`) are
   what the typed routes should compose.
 
+### Agent flows
+
+Three common flows. Each works with `curl` against a running cosheaf
+(`pnpm dev:all`) using a Forgejo PAT as the Bearer token. Replace `$SLUG`,
+`$PAT`, etc.
+
+**1. Add a page to main.** Use the typed file route so frontmatter is
+applied and the sidecar updates synchronously:
+
+```sh
+curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=main" \
+  -H "Authorization: Bearer $PAT" \
+  -H "content-type: application/json" \
+  -d '{"content": "# New page\n\nbody."}'
+```
+
+**2. Open a PR, get a review, merge.**
+
+```sh
+# Create branch (Forgejo native)
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/branches" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"new_branch_name": "agent/wip-1", "old_branch_name": "main"}'
+
+# Edit a file on the branch (typed route runs the indexer)
+curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=agent/wip-1" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"content": "# Updated\n\nbody."}'
+
+# Open PR (Forgejo native via passthrough)
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/pulls" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"head": "agent/wip-1", "base": "main", "title": "Update notes/new.md"}'
+
+# Submit a review (Forgejo native)
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/pulls/42/reviews" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"event": "APPROVED", "body": "looks good"}'
+
+# Merge (typed route — runs requireAdminFresh)
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/merge" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"Do": "squash"}'
+```
+
+**3. Triage issues.**
+
+```sh
+# List my open issues
+curl "http://localhost:3030/api/v1/w/$SLUG/forgejo/issues?state=open&assigned_by=$ME" \
+  -H "Authorization: Bearer $PAT"
+
+# Comment on one
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/issues/17/comments" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"body": "investigating"}'
+
+# Close it
+curl -X PATCH "http://localhost:3030/api/v1/w/$SLUG/forgejo/issues/17" \
+  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
+  -d '{"state": "closed"}'
+```
+
+Notes for agent retry logic:
+
+- Reading after a passthrough write through cosheaf's typed routes is
+  not immediately consistent — the webhook reconciles asynchronously. If
+  you need read-your-write, use the typed file route (which indexes
+  synchronously), or read back through passthrough (Forgejo is the source
+  of truth and always consistent with itself).
+- `PUT contents/...`, `PATCH issues/:n`, and `DELETE` are idempotent on
+  Forgejo's side — safe to retry.
+- `POST pulls` is **not** idempotent — retry produces a duplicate PR.
+  Check for an existing open PR with the same head/base before retrying.
+- `POST pulls/:n/merge` retries internally on Forgejo's transient 405
+  "try again later"; you don't need to retry it from outside.
+
 Do not rewrite the app, build a generic CMS, add arbitrary document-format
 plugins, or move agent/prover logic into this repo as part of this direction.
 
