@@ -9,6 +9,7 @@ import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
 import { isDocumentFormatId } from "../../shared/document-format.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { ForgejoIssue } from "../forgejo.js";
+import { bad, unauthorized } from "./responses.js";
 
 export const webhooks = new Hono<AppEnv>();
 
@@ -61,13 +62,13 @@ webhooks.post("/forgejo", async (c) => {
   // Strip optional "sha256=" prefix used by Forgejo webhook signatures.
   const signature = rawSignature.replace(/^sha256=/, "");
   if (!signature || !/^[0-9a-fA-F]+$/.test(signature)) {
-    return c.json({ error: "missing or malformed signature", code: "unauthorized" }, 401);
+    return c.json(...unauthorized("missing or malformed signature"));
   }
   const expected = createHmac("sha256", config.webhookSecret).update(raw).digest("hex");
   const a = Buffer.from(signature, "hex");
   const b = Buffer.from(expected, "hex");
   if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    return c.json({ error: "bad signature", code: "unauthorized" }, 401);
+    return c.json(...unauthorized("bad signature"));
   }
   const event = c.req.header("x-forgejo-event") ?? "unknown";
   const deliveryHeader = c.req.header("x-forgejo-delivery");
@@ -80,7 +81,7 @@ webhooks.post("/forgejo", async (c) => {
   try {
     payload = JSON.parse(raw) as Record<string, unknown>;
   } catch (_err) {
-    return c.json({ error: "bad json", code: "validation" }, 400);
+    return c.json(...bad("bad json"));
   }
   const repoFullName = (payload.repository as { full_name?: string } | undefined)?.full_name ?? "";
   const ws = workspaceForRepo(db, repoFullName, config.forgejoOwner);

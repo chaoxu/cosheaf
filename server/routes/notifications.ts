@@ -3,6 +3,7 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
 import type { NotificationRow } from "../../shared/issues.js";
+import { bad } from "./responses.js";
 
 export const notifications = new Hono<AppEnv>();
 notifications.use("*", requireAuth);
@@ -52,7 +53,7 @@ notifications.get("/:slug/notifications", async (c) => {
 // POST /api/v1/w/:slug/notifications/:id/read
 notifications.post("/:slug/notifications/:id/read", async (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "bad id", code: "validation" }, 400);
+  if (!Number.isFinite(id)) return c.json(...bad("bad id"));
   const { fj } = c.get("repoCtx");
   await fj.markNotificationRead(id);
   return c.json({ ok: true });

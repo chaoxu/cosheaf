@@ -32,6 +32,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
+import { forbidden, methodNotAllowed } from "./responses.js";
 
 // Tail prefixes we forward. `methods` lists which HTTP verbs are allowed
 // for that prefix.
@@ -107,21 +108,21 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   const reqUrl = new URL(c.req.url);
   const prefix = `/api/v1/w/${slug}/forgejo/`;
   if (!reqUrl.pathname.startsWith(prefix)) {
-    return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
+    return c.json(...forbidden("passthrough path not allowed"));
   }
   const tailPath = reqUrl.pathname.slice(prefix.length);
   const queryString = reqUrl.search; // includes leading "?" or ""
 
   if (!isSafeTail(tailPath)) {
-    return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
+    return c.json(...forbidden("passthrough path not allowed"));
   }
   const method = c.req.method.toUpperCase();
   const verdict = classifyTail(tailPath, method);
   if (verdict === "method") {
-    return c.json({ error: "method not allowed for this path", code: "method_not_allowed" }, 405);
+    return c.json(...methodNotAllowed("method not allowed for this path"));
   }
   if (verdict === "forbidden") {
-    return c.json({ error: "passthrough path not allowed", code: "forbidden" }, 403);
+    return c.json(...forbidden("passthrough path not allowed"));
   }
 
   // Build the Forgejo URL.

@@ -5,6 +5,7 @@ import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { requireAuth } from "../middleware.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { normalizeDocumentFormatId } from "../../shared/document-format.js";
+import { bad, conflict } from "./responses.js";
 
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
@@ -49,9 +50,9 @@ workspaces.get("/", async (c) => {
 workspaces.post("/", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { slug?: string; name?: string } | null;
   if (!body?.slug || !body.name)
-    return c.json({ error: "slug and name required", code: "validation" }, 400);
+    return c.json(...bad("slug and name required"));
   if (!WORKSPACE_SLUG_RE.test(body.slug))
-    return c.json({ error: "invalid slug", code: "validation" }, 400);
+    return c.json(...bad("invalid slug"));
 
   const db = c.get("db");
   const config = c.get("config");
@@ -62,7 +63,7 @@ workspaces.post("/", async (c) => {
   const user = c.get("user");
 
   const taken = db.prepare("SELECT 1 FROM workspaces WHERE slug = ?").get(body.slug);
-  if (taken) return c.json({ error: "slug already taken", code: "conflict" }, 409);
+  if (taken) return c.json(...conflict("slug already taken"));
 
   try {
     const { workspace } = await provisionWorkspace(db, fj, config, {
@@ -84,7 +85,7 @@ workspaces.post("/", async (c) => {
     );
   } catch (err) {
     if ((err as Error).message.includes("UNIQUE") || (err as Error).message === "workspace slug already exists") {
-      return c.json({ error: "slug already taken", code: "conflict" }, 409);
+      return c.json(...conflict("slug already taken"));
     }
     return c.json(
       { error: `workspace create failed: ${(err as Error).message}`, code: "internal" },

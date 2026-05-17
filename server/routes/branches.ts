@@ -23,6 +23,7 @@ branches.use("/:slug/*", requireMembership());
 branches.use("/:slug/*", requireWriteOnMutation);
 
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
+import { bad, conflict } from "./responses.js";
 
 branches.get("/:slug/branches/mine", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
@@ -57,13 +58,13 @@ branches.post("/:slug/branches", async (c) => {
     body.name.startsWith("/") ||
     body.name.endsWith("/")
   )
-    return c.json({ error: "valid branch name required", code: "validation" }, 400);
+    return c.json(...bad("valid branch name required"));
   const { fj, owner, repo } = c.get("repoCtx");
   try {
     await fj.createBranch(owner, repo, { newBranchName: body.name, oldBranchName: "main" });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 409)
-      return c.json({ error: "branch already exists", code: "conflict" }, 409);
+      return c.json(...conflict("branch already exists"));
     throw err;
   }
   invalidateRepoTrees(owner, repo);
@@ -84,7 +85,7 @@ branches.delete("/:slug/branches/:name{.+}", async (c) => {
     name.startsWith("/") ||
     name.endsWith("/")
   )
-    return c.json({ error: "valid branch name required (not main)", code: "validation" }, 400);
+    return c.json(...bad("valid branch name required (not main)"));
   const { fj, owner, repo } = c.get("repoCtx");
   await deleteBranchQuietly(fj, owner, repo, name);
   invalidateRepoTrees(owner, repo);

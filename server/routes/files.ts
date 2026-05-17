@@ -10,6 +10,7 @@ import {
   MAX_ASSET_DISPLAY,
 } from "../../shared/conventions.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
+import { bad, conflict, notFound } from "./responses.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -144,7 +145,7 @@ files.get("/:slug/tree", async (c) => {
 
 files.get("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
-  if (!rel) return c.json({ error: "path required", code: "validation" }, 400);
+  if (!rel) return c.json(...bad("path required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
   try {
@@ -159,12 +160,12 @@ files.get("/:slug/file", async (c) => {
         return c.json({ content });
       } catch (err2) {
         if (err2 instanceof ForgejoError && err2.status === 404)
-          return c.json({ error: "not found", code: "not_found" }, 404);
+          return c.json(...notFound());
         throw err2;
       }
     }
     if (err instanceof ForgejoError && err.status === 404)
-      return c.json({ error: "not found", code: "not_found" }, 404);
+      return c.json(...notFound());
     throw err;
   }
 });
@@ -172,13 +173,13 @@ files.get("/:slug/file", async (c) => {
 files.put("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))
-    return c.json({ error: "invalid path", code: "validation" }, 400);
+    return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (branch === "main")
-    return c.json({ error: "branch required (cannot write to main)", code: "validation" }, 400);
+    return c.json(...bad("branch required (cannot write to main)"));
   const body = (await c.req.json().catch(() => null)) as { content?: string } | null;
   if (body?.content === undefined)
-    return c.json({ error: "content required", code: "validation" }, 400);
+    return c.json(...bad("content required"));
 
   await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -208,7 +209,7 @@ files.put("/:slug/file", async (c) => {
     });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 409)
-      return c.json({ error: "conflict on push", code: "conflict" }, 409);
+      return c.json(...conflict("conflict on push"));
     throw err;
   }
   invalidateBranchTree(owner, repo, branch);
@@ -224,13 +225,13 @@ files.put("/:slug/file", async (c) => {
 files.post("/:slug/assets", async (c) => {
   const branch = c.req.query("branch")?.trim();
   if (!branch)
-    return c.json({ error: "branch required", code: "validation" }, 400);
+    return c.json(...bad("branch required"));
   const form = await c.req.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File))
-    return c.json({ error: "file field required", code: "validation" }, 400);
+    return c.json(...bad("file field required"));
   if (file.size > MAX_ASSET_BYTES)
-    return c.json({ error: `asset exceeds ${MAX_ASSET_DISPLAY}`, code: "validation" }, 400);
+    return c.json(...bad(`asset exceeds ${MAX_ASSET_DISPLAY}`));
   const { fj, owner, repo } = c.get("repoCtx");
   await ensureBranch(c, branch);
   // Random-prefixed under assets/ so two simultaneous uploads of the same
@@ -280,14 +281,14 @@ files.get("/:slug/suggest", (c) => {
 files.delete("/:slug/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))
-    return c.json({ error: "invalid path", code: "validation" }, 400);
+    return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (branch === "main")
-    return c.json({ error: "branch required (cannot delete on main)", code: "validation" }, 400);
+    return c.json(...bad("branch required (cannot delete on main)"));
   await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
   const meta = await fj.getFileMeta(owner, repo, branch, rel);
-  if (!meta) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!meta) return c.json(...notFound());
   await fj.deleteFile(owner, repo, {
     branch,
     path: rel,
@@ -319,7 +320,7 @@ files.get("/:slug/search", (c) => {
       )
       .all(ws.id, ftsQuery, limit) as typeof rows;
   } catch (err) {
-    return c.json({ error: `search failed: ${(err as Error).message}`, code: "validation" }, 400);
+    return c.json(...bad(`search failed: ${(err as Error).message}`));
   }
   if (rows.length === 0) {
     const patterns = terms.map((t) => `%${likeEscape(t)}%`);
@@ -353,7 +354,7 @@ files.get("/:slug/search", (c) => {
 
 files.get("/:slug/backlinks", (c) => {
   const id = c.req.query("id");
-  if (!id) return c.json({ error: "id required", code: "validation" }, 400);
+  if (!id) return c.json(...bad("id required"));
   const ws = c.get("workspace");
   const rows = c
     .get("db")

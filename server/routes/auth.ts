@@ -15,6 +15,7 @@ import {
   upsertUserFromForgejo,
 } from "../users.js";
 import { resolveAuth } from "../middleware.js";
+import { bad, unauthorized } from "./responses.js";
 
 export const auth = new Hono<AppEnv>();
 
@@ -125,12 +126,12 @@ auth.post("/login", async (c) => {
     | { username?: string; password?: string }
     | null;
   if (!body?.username || !body.password)
-    return c.json({ error: "missing credentials", code: "validation" }, 400);
+    return c.json(...bad("missing credentials"));
 
   const config = c.get("config");
   const outcome = await exchangeForgejoCredsForPat(config.forgejoUrl, body.username, body.password);
   if (outcome.kind === "bad_credentials") {
-    return c.json({ error: "invalid credentials", code: "unauthorized" }, 401);
+    return c.json(...unauthorized("invalid credentials"));
   }
   if (outcome.kind === "upstream_unavailable") {
     return c.json(

@@ -10,6 +10,7 @@ import type {
   IssueRow,
   TimelineEvent,
 } from "../../shared/issues.js";
+import { bad, notFound } from "./responses.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
   return {
@@ -101,10 +102,10 @@ issues.get("/:slug/issues/pinned", async (c) => {
 issues.get("/:slug/issues/:number", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const number = parseIssueNumber(c.req.param("number"));
-  if (number === null) return c.json({ error: "bad number" }, 400);
+  if (number === null) return c.json(...bad("bad number"));
   try {
     const issue = await fj.getIssue(owner, repo, number);
-    if (issue.pull_request) return c.json({ error: "not an issue" }, 404);
+    if (issue.pull_request) return c.json(...notFound("not an issue"));
     const detail: IssueDetail = {
       number: issue.number,
       title: issue.title,
@@ -122,7 +123,7 @@ issues.get("/:slug/issues/:number", async (c) => {
     return c.json(detail);
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404) {
-      return c.json({ error: "not found", code: "not_found" }, 404);
+      return c.json(...notFound());
     }
     throw err;
   }
@@ -138,7 +139,7 @@ issues.post("/:slug/issues", async (c) => {
     labels?: number[];
   } | null;
   if (!body?.title || !body.title.trim())
-    return c.json({ error: "title required", code: "validation" }, 400);
+    return c.json(...bad("title required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const created = await fj.createIssue(owner, repo, {
     title: body.title.trim(),
@@ -157,7 +158,7 @@ issues.post("/:slug/issues", async (c) => {
 // owner/repo, which the SPA should not know.
 issues.get("/:slug/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
-  if (number === null) return c.json({ error: "bad number" }, 400);
+  if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listIssueDependencies(owner, repo, number);
   return c.json({ issues: list.map(toDependencyRow) });
@@ -165,7 +166,7 @@ issues.get("/:slug/issues/:number/dependencies", async (c) => {
 
 issues.get("/:slug/issues/:number/blocks", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
-  if (number === null) return c.json({ error: "bad number" }, 400);
+  if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listIssueBlocks(owner, repo, number);
   return c.json({ issues: list.map(toDependencyRow) });
@@ -173,13 +174,13 @@ issues.get("/:slug/issues/:number/blocks", async (c) => {
 
 issues.post("/:slug/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
-  if (number === null) return c.json({ error: "bad number" }, 400);
+  if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
   const index = parseIssueNumber(body?.index);
   if (index === null) {
-    return c.json({ error: "dependency issue number required", code: "validation" }, 400);
+    return c.json(...bad("dependency issue number required"));
   }
-  if (index === number) return c.json({ error: "issue cannot depend on itself", code: "validation" }, 400);
+  if (index === number) return c.json(...bad("issue cannot depend on itself"));
   const { fj, owner, repo } = c.get("repoCtx");
   const updated = await fj.addIssueDependency(owner, repo, number, index);
   return c.json({ issue: toDependencyRow(updated) }, 201);
@@ -187,11 +188,11 @@ issues.post("/:slug/issues/:number/dependencies", async (c) => {
 
 issues.delete("/:slug/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
-  if (number === null) return c.json({ error: "bad number" }, 400);
+  if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
   const index = parseIssueNumber(body?.index);
   if (index === null) {
-    return c.json({ error: "dependency issue number required", code: "validation" }, 400);
+    return c.json(...bad("dependency issue number required"));
   }
   const { fj, owner, repo } = c.get("repoCtx");
   const updated = await fj.removeIssueDependency(owner, repo, number, index);
@@ -246,7 +247,7 @@ issues.get("/:slug/activities", async (c) => {
 // label/milestone/dependency references.
 issues.get("/:slug/issues/:number/timeline", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
-  if (number === null) return c.json({ error: "bad number" }, 400);
+  if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const events = await fj.listIssueTimeline(owner, repo, number);
   // Forgejo returns null instead of [] for some empty issue timelines.

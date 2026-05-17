@@ -49,6 +49,7 @@ pulls.use("/:slug/*", requireMembership());
 pulls.use("/:slug/*", requireWriteOnMutation);
 
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
+import { bad, conflict, forbidden, notFound } from "./responses.js";
 
 function parsePr(raw: string | undefined): number | null {
   const n = Number(raw);
@@ -166,7 +167,7 @@ pulls.post("/:slug/pulls", async (c) => {
     title?: string;
     body?: string;
   };
-  if (!body.head) return c.json({ error: "head required", code: "validation" }, 400);
+  if (!body.head) return c.json(...bad("head required"));
   const { fj, owner, repo } = c.get("repoCtx");
   try {
     const pr = await fj.createPull(owner, repo, {
@@ -185,7 +186,7 @@ pulls.post("/:slug/pulls", async (c) => {
     if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
       // Pass the Forgejo message through (empty diff, duplicate-PR, etc.)
       // rather than collapsing every 4xx to "no diff vs base".
-      return c.json({ error: err.message, code: "conflict" }, 409);
+      return c.json(...conflict(err.message));
     }
     throw err;
   }
@@ -194,7 +195,7 @@ pulls.post("/:slug/pulls", async (c) => {
 
 pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const body = (await c.req.json().catch(() => ({}))) as {
     Do?: "squash" | "merge" | "rebase";
     force?: boolean;
@@ -219,7 +220,7 @@ pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
 
 pulls.post("/:slug/pulls/:n/close", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.editPull(owner, repo, n, { state: "closed" });
@@ -231,7 +232,7 @@ pulls.post("/:slug/pulls/:n/close", async (c) => {
 
 pulls.get("/:slug/pulls/:n/files", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const [metas, unified] = await Promise.all([
     fj.listPullFiles(owner, repo, n),
@@ -255,24 +256,24 @@ pulls.get("/:slug/pulls/:n/files", async (c) => {
 
 pulls.get("/:slug/pulls/:n/file", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   // Apply the same repo-path safety check the file route uses (rejects
   // absolute, traversal, encoded-traversal, backslash, control chars).
   const path = safeRel(c.req.query("path"));
   const side = c.req.query("side");
-  if (!path) return c.json({ error: "path required", code: "validation" }, 400);
+  if (!path) return c.json(...bad("path required"));
   if (side !== "base" && side !== "head")
-    return c.json({ error: "side must be base or head", code: "validation" }, 400);
+    return c.json(...bad("side must be base or head"));
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
-  if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!pull) return c.json(...notFound());
   const sha = side === "base" ? pull.base.sha : pull.head.sha;
   try {
     const content = await fj.getRawFile(owner, repo, sha, path);
     return c.json({ content });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404)
-      return c.json({ error: "file not present at this side", code: "not_found" }, 404);
+      return c.json(...notFound("file not present at this side"));
     throw err;
   }
 });
@@ -287,7 +288,7 @@ const EVENT_MAP = {
 
 pulls.get("/:slug/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const reviews = await fj.listReviews(owner, repo, n);
   const out = reviews
@@ -309,18 +310,18 @@ pulls.get("/:slug/pulls/:n/reviews", async (c) => {
 
 pulls.post("/:slug/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
-  if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
-    return c.json({ error: "cannot review your own pull request", code: "forbidden" }, 403);
+    return c.json(...forbidden("cannot review your own pull request"));
 
   const payload = (await c.req.json().catch(() => ({}))) as { event?: string; body?: string | null };
   const event = payload.event as keyof typeof EVENT_MAP | undefined;
   if (!event || !(event in EVENT_MAP))
-    return c.json({ error: "event must be APPROVE|REQUEST_CHANGES|COMMENT", code: "validation" }, 400);
+    return c.json(...bad("event must be APPROVE|REQUEST_CHANGES|COMMENT"));
 
   await fj.createReview(owner, repo, n, {
     event: EVENT_MAP[event],
@@ -367,7 +368,7 @@ async function resolveLinePosition(
 
 pulls.get("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const [allComments, metas, unified] = await Promise.all([
     fj.listPullComments(owner, repo, n),
@@ -398,7 +399,7 @@ pulls.get("/:slug/pulls/:n/comments", async (c) => {
 
 pulls.post("/:slug/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   // Validate the body BEFORE touching Forgejo so malformed requests don't
   // burn a getPull call.
   const input = parseCommentInput(await c.req.json().catch(() => null));
@@ -413,11 +414,11 @@ pulls.post("/:slug/pulls/:n/comments", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
-  if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
-    return c.json({ error: "cannot comment on your own pull request", code: "forbidden" }, 403);
+    return c.json(...forbidden("cannot comment on your own pull request"));
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
-  if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
+  if ("error" in pos) return c.json(...bad(pos.error));
 
   await fj.createReview(owner, repo, n, {
     event: "COMMENT",
@@ -453,12 +454,12 @@ async function findOrCreatePendingReview(
 
 pulls.post("/:slug/pulls/:n/pending-review", async (c) => {
   const n = parsePr(c.req.param("n"));
-  if (n === null) return c.json({ error: "bad pull number", code: "validation" }, 400);
+  if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
-  if (!pull) return c.json({ error: "not found", code: "not_found" }, 404);
+  if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
-    return c.json({ error: "cannot review your own pull request", code: "forbidden" }, 403);
+    return c.json(...forbidden("cannot review your own pull request"));
   const review_id = await findOrCreatePendingReview(fj, owner, repo, n, c.get("user").username);
   return c.json({ review_id });
 });
@@ -466,13 +467,13 @@ pulls.post("/:slug/pulls/:n/pending-review", async (c) => {
 pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = Number(c.req.param("rid"));
-  if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);
+  if (n === null || !rid) return c.json(...bad("bad ids"));
   const ws = c.get("workspace");
   const input = parseCommentInput(await c.req.json().catch(() => null));
-  if (!input) return c.json({ error: "path, line, side, body required", code: "validation" }, 400);
+  if (!input) return c.json(...bad("path, line, side, body required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
-  if ("error" in pos) return c.json({ error: pos.error, code: "validation" }, 400);
+  if ("error" in pos) return c.json(...bad(pos.error));
   await fj.addCommentToReview(owner, repo, n, rid, {
     path: input.path,
     body: input.body,
@@ -485,12 +486,12 @@ pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
 pulls.post("/:slug/pulls/:n/pending-review/:rid/submit", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = Number(c.req.param("rid"));
-  if (n === null || !rid) return c.json({ error: "bad ids", code: "validation" }, 400);
+  if (n === null || !rid) return c.json(...bad("bad ids"));
   const body = (await c.req.json().catch(() => null)) as {
     event?: "approve" | "request_changes" | "comment";
     body?: string;
   } | null;
-  if (!body?.event) return c.json({ error: "event required", code: "validation" }, 400);
+  if (!body?.event) return c.json(...bad("event required"));
   const eventMap = { approve: "APPROVED", request_changes: "REQUEST_CHANGES", comment: "COMMENT" } as const;
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.submitPullReview(owner, repo, n, rid, {
@@ -534,12 +535,12 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
     default_md_format?: string;
   } | null;
   if (!body)
-    return c.json({ error: "settings payload required", code: "validation" }, 400);
+    return c.json(...bad("settings payload required"));
   if (body.min_approvals !== undefined && (!Number.isInteger(body.min_approvals) || body.min_approvals < 1)) {
-    return c.json({ error: "min_approvals must be >= 1", code: "validation" }, 400);
+    return c.json(...bad("min_approvals must be >= 1"));
   }
   if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format)) {
-    return c.json({ error: "unknown markdown format", code: "validation" }, 400);
+    return c.json(...bad("unknown markdown format"));
   }
   const { fj, owner, repo } = c.get("repoCtx");
 

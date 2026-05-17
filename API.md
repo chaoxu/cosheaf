@@ -48,6 +48,27 @@ interface Branch {
 }
 ```
 
+## Errors
+
+Every typed route returns errors as `{ error, code, details? }` with an HTTP
+status that matches the `code`. Agents should switch on `code` rather than
+parsing `error`. The `details` field carries structured context for
+multi-step failures (e.g. `step: "reindex"` on settings updates).
+
+```ts
+type ErrorCode =
+  | "validation"        // 400 — caller payload is malformed or missing fields
+  | "unauthorized"      // 401 — no session / bearer / Forgejo PAT
+  | "pat_invalid"       // 401 — Forgejo rejected the stored PAT; SPA reloads to log in
+  | "forbidden"         // 403 — authenticated but lacks the required role
+  | "not_found"         // 404
+  | "method_not_allowed" // 405 (passthrough only)
+  | "conflict"          // 409 — Forgejo precondition (merge conflict, dup PR)
+  | "forgejo_failed"    // 502 — Forgejo write rejected; carries details.step
+  | "reindex_failed"    // 502 — Forgejo updated but sidecar didn't; retry-safe
+  | "bad_gateway";      // 502 — Forgejo upstream unreachable / 5xx
+```
+
 ## Auth
 
 Cosheaf owns the login UX so users do not need to know Forgejo is the backend.
