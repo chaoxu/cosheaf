@@ -416,29 +416,9 @@ pulls.post("/:slug/pulls/:n/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-pulls.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
-  const n = parsePr(c.req.param("n"));
-  const cid = Number(c.req.param("cid"));
-  if (n === null || !cid) return c.json({ error: "bad ids", code: "validation" }, 400);
-  const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
-  if (!body?.body) return c.json({ error: "body required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.editReviewComment(owner, repo, cid, body.body);
-  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
-  return c.json({ ok: true });
-});
-
-pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
-  const n = parsePr(c.req.param("n"));
-  const cid = Number(c.req.param("cid"));
-  const rid = Number(c.req.query("review_id"));
-  if (n === null || !cid || !rid)
-    return c.json({ error: "review_id query required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.deleteReviewComment(owner, repo, n, rid, cid);
-  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
-  return c.json({ ok: true });
-});
+// Review-comment edit and delete go through passthrough:
+//   PATCH  /forgejo/issues/comments/:id     (Forgejo treats it as the same record)
+//   DELETE /forgejo/pulls/:n/reviews/:rid/comments/:cid
 
 // ---------- pending reviews ----------
 

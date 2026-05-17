@@ -138,6 +138,24 @@ function dependencyRowFromForgejo(i: ForgejoDependencyIssue): DependencyRow {
   return { number: i.number, title: i.title, state: i.state, is_pr: !!i.pull_request };
 }
 
+interface ForgejoIssueCommentRaw {
+  id: number;
+  body: string;
+  user?: { login?: string } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function issueCommentFromForgejo(cm: ForgejoIssueCommentRaw): IssueComment {
+  return {
+    id: cm.id,
+    body: cm.body,
+    author: cm.user?.login ?? DELETED_USER_LOGIN,
+    created_at: Date.parse(cm.created_at) || 0,
+    updated_at: Date.parse(cm.updated_at) || 0,
+  };
+}
+
 interface ForgejoPullRaw {
   number: number;
   title: string;
@@ -322,16 +340,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  editComment: (slug: string, prNumber: number, commentId: number, body: string) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/comments/${commentId}`, {
+  editComment: (slug: string, _prNumber: number, commentId: number, body: string) =>
+    jsonFetch<unknown>(forgejo(slug, `issues/comments/${commentId}`), {
       method: "PATCH",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ body }),
-    }),
+    }).then(() => ({ ok: true as const })),
   deleteComment: (slug: string, prNumber: number, commentId: number, reviewId: number) =>
-    jsonFetch<{ ok: true }>(
-      `${w(slug)}/pulls/${prNumber}/comments/${commentId}?review_id=${reviewId}`,
+    jsonFetch<unknown>(
+      forgejo(slug, `pulls/${prNumber}/reviews/${reviewId}/comments/${commentId}`),
       { method: "DELETE" },
-    ),
+    ).then(() => ({ ok: true as const })),
 
   startPendingReview: (slug: string, prNumber: number) =>
     jsonFetch<{ review_id: number }>(`${w(slug)}/pulls/${prNumber}/pending-review`, { method: "POST" }),
@@ -380,7 +399,9 @@ export const api = {
   getIssue: (slug: string, number: number) =>
     jsonFetch<IssueDetail>(`${w(slug)}/issues/${number}`),
   getIssueComments: (slug: string, number: number) =>
-    jsonFetch<{ comments: IssueComment[] }>(`${w(slug)}/issues/${number}/comments`),
+    jsonFetch<ForgejoIssueCommentRaw[]>(forgejo(slug, `issues/${number}/comments`)).then(
+      (rows) => ({ comments: rows.map(issueCommentFromForgejo) }),
+    ),
   createIssue: (slug: string, body: { title: string; body: string }) =>
     jsonFetch<{ number: number; title: string; state: "open" | "closed" }>(
       `${w(slug)}/issues`,
@@ -399,18 +420,21 @@ export const api = {
       body: JSON.stringify({ state: "open" }),
     }).then((issue) => ({ ok: true as const, state: issue.state as "open" })),
   createIssueComment: (slug: string, number: number, body: string) =>
-    jsonFetch<IssueComment>(`${w(slug)}/issues/${number}/comments`, {
+    jsonFetch<ForgejoIssueCommentRaw>(forgejo(slug, `issues/${number}/comments`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body }),
-    }),
-  editIssueComment: (slug: string, number: number, id: number, body: string) =>
-    jsonFetch<{ id: number; body: string; updated_at: number }>(
-      `${w(slug)}/issues/${number}/comments/${id}`,
-      { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ body }) },
+    }).then(issueCommentFromForgejo),
+  editIssueComment: (slug: string, _number: number, id: number, body: string) =>
+    jsonFetch<ForgejoIssueCommentRaw>(forgejo(slug, `issues/comments/${id}`), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body }),
+    }).then((cm) => ({ id: cm.id, body: cm.body, updated_at: Date.parse(cm.updated_at) || 0 })),
+  deleteIssueComment: (slug: string, _number: number, id: number) =>
+    jsonFetch<unknown>(forgejo(slug, `issues/comments/${id}`), { method: "DELETE" }).then(
+      () => ({ ok: true as const }),
     ),
-  deleteIssueComment: (slug: string, number: number, id: number) =>
-    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/comments/${id}`, { method: "DELETE" }),
   listLabels: (slug: string) =>
     jsonFetch<Label[]>(forgejo(slug, "labels")).then((labels) => ({ labels })),
   createLabel: (slug: string, body: { name: string; color: string; description?: string }) =>

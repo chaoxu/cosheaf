@@ -14,7 +14,6 @@ import type {
   ForgejoFileResponse,
   ForgejoHook,
   ForgejoIssue,
-  ForgejoIssueComment,
   ForgejoNotificationThread,
   ForgejoPull,
   ForgejoPullFile,
@@ -552,27 +551,6 @@ export class Forgejo {
     }
   }
 
-  // Forgejo doesn't expose PATCH on /pulls/.../reviews/{id}/comments/{cid}
-  // (only GET/DELETE). Review-comment edits go through the generic
-  // issue-comment endpoint, which Forgejo treats as the same record.
-  async editReviewComment(
-    owner: string, repo: string, commentId: number, body: string,
-  ): Promise<ForgejoPullReviewComment> {
-    return this.req<ForgejoPullReviewComment>(
-      `/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`,
-      { method: "PATCH", body: { body } },
-    );
-  }
-
-  async deleteReviewComment(
-    owner: string, repo: string, index: number, reviewId: number, commentId: number,
-  ): Promise<void> {
-    await this.req<unknown>(
-      `/api/v1/repos/${owner}/${repo}/pulls/${index}/reviews/${reviewId}/comments/${commentId}`,
-      { method: "DELETE", expectEmpty: true },
-    );
-  }
-
   // ---------- issues ----------
 
   async listIssues(
@@ -645,37 +623,6 @@ export class Forgejo {
       method: "POST",
       body: payload,
     });
-  }
-
-  async listIssueComments(owner: string, repo: string, number: number): Promise<ForgejoIssueComment[]> {
-    return this.req<ForgejoIssueComment[]>(`/api/v1/repos/${owner}/${repo}/issues/${number}/comments`);
-  }
-
-  async createIssueComment(
-    owner: string, repo: string, number: number, body: string,
-  ): Promise<ForgejoIssueComment> {
-    return this.req<ForgejoIssueComment>(`/api/v1/repos/${owner}/${repo}/issues/${number}/comments`, {
-      method: "POST",
-      body: { body },
-    });
-  }
-
-  async editIssueComment(
-    owner: string, repo: string, commentId: number, body: string,
-  ): Promise<ForgejoIssueComment> {
-    return this.req<ForgejoIssueComment>(`/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`, {
-      method: "PATCH",
-      body: { body },
-    });
-  }
-
-  async deleteIssueComment(
-    owner: string, repo: string, commentId: number,
-  ): Promise<void> {
-    await this.req<unknown>(
-      `/api/v1/repos/${owner}/${repo}/issues/comments/${commentId}`,
-      { method: "DELETE", expectEmpty: true },
-    );
   }
 
   // ---------- notifications ----------

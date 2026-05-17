@@ -3,10 +3,8 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { DELETED_USER_LOGIN, type ForgejoIssue } from "../forgejo-types.js";
-import type { ForgejoIssueComment } from "../forgejo.js";
 import type {
   ActivityRow,
-  IssueComment,
   IssueDetail,
   IssueRow,
   TimelineEvent,
@@ -136,58 +134,9 @@ issues.post("/:slug/issues", async (c) => {
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
 });
 
-// Typed comments keep body validation, SSE, deleted-user fallback, and
-// timestamp normalization for the SPA.
-issues.post("/:slug/issues/:number/comments", async (c) => {
-  const ws = c.get("workspace");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
-  if (!body?.body || !body.body.trim())
-    return c.json({ error: "body required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const cm = await fj.createIssueComment(owner, repo, number, body.body.trim());
-  c.get("sse").publish(ws.slug, { type: "issue_comment", number, action: "created" });
-  const created: IssueComment = {
-    id: cm.id,
-    body: cm.body,
-    author: cm.user?.login ?? DELETED_USER_LOGIN,
-    created_at: new Date(cm.created_at).getTime(),
-    updated_at: new Date(cm.updated_at).getTime(),
-  };
-  return c.json(created, 201);
-});
-
-// PATCH /api/v1/w/:slug/issues/:number/comments/:id — edit own
-issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
-  const ws = c.get("workspace");
-  const commentId = Number(c.req.param("id"));
-  const body = (await c.req.json().catch(() => null)) as { body?: string } | null;
-  if (!body?.body || !body.body.trim())
-    return c.json({ error: "body required", code: "validation" }, 400);
-  const { fj, owner, repo } = c.get("repoCtx");
-  const cm = await fj.editIssueComment(owner, repo, commentId, body.body.trim());
-  c.get("sse").publish(ws.slug, {
-    type: "issue_comment",
-    number: Number(c.req.param("number")),
-    action: "edited",
-  });
-  return c.json({ id: cm.id, body: cm.body, updated_at: new Date(cm.updated_at).getTime() });
-});
-
-// DELETE /api/v1/w/:slug/issues/:number/comments/:id
-issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
-  const ws = c.get("workspace");
-  const commentId = Number(c.req.param("id"));
-  const { fj, owner, repo } = c.get("repoCtx");
-  await fj.deleteIssueComment(owner, repo, commentId);
-  c.get("sse").publish(ws.slug, {
-    type: "issue_comment",
-    number: Number(c.req.param("number")),
-    action: "deleted",
-  });
-  return c.json({ ok: true });
-});
+// Issue comment list/create/edit/delete are pure Forgejo passthrough.
+// The SPA hits /forgejo/issues/:n/comments and /forgejo/issues/comments/:id
+// and normalizes the response shape client-side.
 
 // Dependencies/blocks are Forgejo-native; the SPA calls them through the
 // passthrough at /forgejo/issues/:n/dependencies and derives is_pr client-side.
@@ -269,20 +218,3 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
   });
 });
 
-// Typed comments keep the human UI response stable; agents can use Forgejo
-// issue comments through passthrough for raw API behavior.
-issues.get("/:slug/issues/:number/comments", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
-  const number = Number(c.req.param("number"));
-  if (!Number.isFinite(number)) return c.json({ error: "bad number" }, 400);
-  const list: ForgejoIssueComment[] = await fj.listIssueComments(owner, repo, number);
-  return c.json({
-    comments: list.map<IssueComment>((cm) => ({
-      id: cm.id,
-      body: cm.body,
-      author: cm.user?.login ?? DELETED_USER_LOGIN,
-      created_at: new Date(cm.created_at).getTime(),
-      updated_at: new Date(cm.updated_at).getTime(),
-    })),
-  });
-});

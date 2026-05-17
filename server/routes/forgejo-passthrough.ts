@@ -42,7 +42,7 @@ import { requireAuth, requireMembership } from "../middleware.js";
 // Letting them through the passthrough would bypass those gates.
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [
-  { prefix: "pulls",            methods: new Set<Method>(["GET", "POST", "PATCH"]) },
+  { prefix: "pulls",            methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
   { prefix: "issues",           methods: new Set<Method>(["GET", "POST", "PATCH", "PUT", "DELETE"]) },
   { prefix: "labels",           methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },
   { prefix: "milestones",       methods: new Set<Method>(["GET", "POST", "PATCH", "DELETE"]) },

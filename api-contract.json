@@ -10,7 +10,7 @@
     "target": "/api/v1/repos/:owner/:repo/*",
     "forbidden": ["pulls/:number/merge"],
     "allowed": [
-      { "prefix": "pulls", "methods": ["GET", "POST", "PATCH"] },
+      { "prefix": "pulls", "methods": ["GET", "POST", "PATCH", "DELETE"] },
       { "prefix": "issues", "methods": ["GET", "POST", "PATCH", "PUT", "DELETE"] },
       { "prefix": "labels", "methods": ["GET", "POST", "PATCH", "DELETE"] },
       { "prefix": "milestones", "methods": ["GET", "POST", "PATCH", "DELETE"] },
