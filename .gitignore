@@ -16,3 +16,4 @@ output/
 __pycache__/
 test-results/
 playwright-report/
+ai-math-kb-manifesto.zh.md
