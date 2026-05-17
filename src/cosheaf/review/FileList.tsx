@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
-import type { LineComment, PullFile } from "../api";
+import type { LineComment, PrFile } from "../api";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -10,7 +10,7 @@ export function FileList({
   onSelect,
   comments,
 }: {
-  files: readonly PullFile[];
+  files: readonly PrFile[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
   comments?: readonly LineComment[];
@@ -65,8 +65,8 @@ export function FileList({
   );
 }
 
-function StatusGlyph({ status }: { status: PullFile["status"] }): ReactElement {
-  const map: Record<PullFile["status"], { glyph: string; color: string; label: string }> = {
+function StatusGlyph({ status }: { status: PrFile["status"] }): ReactElement {
+  const map: Record<PrFile["status"], { glyph: string; color: string; label: string }> = {
     added: { glyph: "A", color: "text-green-600", label: "added" },
     modified: { glyph: "M", color: "text-yellow-600", label: "modified" },
     deleted: { glyph: "D", color: "text-red-600", label: "deleted" },

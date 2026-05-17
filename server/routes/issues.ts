@@ -16,7 +16,7 @@ function toIssueRow(i: ForgejoIssue): IssueRow {
     number: i.number,
     title: i.title,
     state: i.state,
-    author_login: i.user?.login ?? DELETED_USER_LOGIN,
+    author_username: i.user?.login ?? DELETED_USER_LOGIN,
     labels: i.labels.map((l) => l.name),
     comment_count: i.comments,
     created_at: new Date(i.created_at).getTime(),
@@ -91,7 +91,7 @@ issues.get("/:slug/issues/pinned", async (c) => {
       state: i.state,
       comment_count: i.comments,
       updated_at: new Date(i.updated_at).getTime(),
-      author_login: i.user?.login ?? DELETED_USER_LOGIN,
+      author_username: i.user?.login ?? DELETED_USER_LOGIN,
     })),
   });
 });
@@ -110,7 +110,7 @@ issues.get("/:slug/issues/:number", async (c) => {
       title: issue.title,
       body: issue.body,
       state: issue.state,
-      author: issue.user?.login ?? DELETED_USER_LOGIN,
+      author_username: issue.user?.login ?? DELETED_USER_LOGIN,
       assignees: (issue.assignees ?? []).map((a) => a.login),
       labels: issue.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
       milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,
@@ -255,7 +255,7 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
     events: safe.map<TimelineEvent>((e) => ({
       id: e.id,
       type: e.type,
-      author: e.user?.login ?? null,
+      author_username: e.user?.login ?? null,
       body: e.body ?? null,
       created_at: new Date(e.created_at).getTime(),
       updated_at: e.updated_at ? new Date(e.updated_at).getTime() : null,

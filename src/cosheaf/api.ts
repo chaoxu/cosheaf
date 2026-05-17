@@ -1,11 +1,11 @@
 import type { Role } from "../../shared/roles";
-import type { PullFiles, PrMeta, PrState, PullFile } from "../../shared/review";
+import type { PrFiles, PrMeta, PrState, PrFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 import type { WorkspaceValidation } from "../../shared/validation";
 import type { DocumentFormatId } from "../../shared/document-format";
 
 export type Decision = "approve" | "request_changes" | "comment";
-export type { Role, PullFiles, PullFile, PrMeta, PrState, LineComment, CommentSide };
+export type { Role, PrFiles, PrFile, PrMeta, PrState, LineComment, CommentSide };
 
 export interface User {
   id: number;
@@ -152,7 +152,7 @@ function issueCommentFromForgejo(cm: ForgejoIssueCommentRaw): IssueComment {
   return {
     id: cm.id,
     body: cm.body,
-    author: cm.user?.login ?? DELETED_USER_LOGIN,
+    author_username: cm.user?.login ?? DELETED_USER_LOGIN,
     created_at: Date.parse(cm.created_at) || 0,
     updated_at: Date.parse(cm.updated_at) || 0,
   };
@@ -307,8 +307,8 @@ export const api = {
   closePull: (slug: string, prNumber: number) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/pulls/${prNumber}/close`, { method: "POST" }),
 
-  listPullFiles: (slug: string, prNumber: number) =>
-    jsonFetch<PullFiles>(`${w(slug)}/pulls/${prNumber}/files`),
+  listPrFiles: (slug: string, prNumber: number) =>
+    jsonFetch<PrFiles>(`${w(slug)}/pulls/${prNumber}/files`),
   pullFile: (slug: string, prNumber: number, path: string, side: "base" | "head") =>
     jsonFetch<{ content: string }>(
       `${w(slug)}/pulls/${prNumber}/file?path=${encodeURIComponent(path)}&side=${side}`,

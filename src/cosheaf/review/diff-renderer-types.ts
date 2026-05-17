@@ -1,4 +1,4 @@
-import type { CommentSide, LineComment, PullFile } from "../api";
+import type { CommentSide, LineComment, PrFile } from "../api";
 
 export type ViewMode = "source" | "rich";
 export type ViewShape = "unified" | "split" | "after";
@@ -10,7 +10,7 @@ export interface AddCommentTarget {
 }
 
 export interface DiffRendererProps {
-  file: PullFile;
+  file: PrFile;
   loadContent: (side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
   // Identity of the viewer so each renderer can offer edit/delete on the

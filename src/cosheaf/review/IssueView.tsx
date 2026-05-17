@@ -143,7 +143,7 @@ export function IssueView({
             </span>
             <span className={muted}>ISSUE</span>
             <span className={muted}>·</span>
-            <span>by @{issue.author}</span>
+            <span>by @{issue.author_username}</span>
             <span className={cn("ml-auto", muted)}>#{issue.number}</span>
           </div>
           <h1 className="text-lg font-semibold truncate">{issue.title}</h1>
@@ -305,7 +305,7 @@ export function IssueView({
       <div className="flex-1 min-h-0 overflow-auto px-4 py-3 flex flex-col gap-4">
         <div className="rounded border border-[var(--cf-border)] p-3">
           <div className={cn("text-xs mb-2", muted)}>
-            <strong className="text-[var(--cf-fg)]">@{issue.author}</strong> opened this issue
+            <strong className="text-[var(--cf-fg)]">@{issue.author_username}</strong> opened this issue
           </div>
           <div className="text-sm">
             {issue.body ? (
@@ -371,7 +371,7 @@ export function IssueView({
             return <TimelineRow key={`event-${item.e.id}`} e={item.e} onOpenNumber={onOpenNumber} />;
           }
           const c = item.c;
-          const isOwn = !!currentForgejoUsername && c.author === currentForgejoUsername;
+          const isOwn = !!currentForgejoUsername && c.author_username === currentForgejoUsername;
           const editing = editingId === c.id;
           return (
             <div
@@ -380,7 +380,7 @@ export function IssueView({
               data-testid={`issue-comment-${c.id}`}
             >
               <div className={cn("flex items-center gap-2 text-xs mb-2", muted)}>
-                <strong className="text-[var(--cf-fg)]">@{c.author}</strong>
+                <strong className="text-[var(--cf-fg)]">@{c.author_username}</strong>
                 <span>{formatRelativeTime(c.created_at)}</span>
                 {c.updated_at > c.created_at + 1000 && <span>(edited)</span>}
                 {isOwn && !editing && (
@@ -605,7 +605,7 @@ function TimelineRow({
       className={cn("flex items-center gap-2 text-xs px-2 py-1 border-l-2 border-[var(--cf-border)]", muted)}
     >
       <span aria-hidden>{desc.icon}</span>
-      {e.author && <strong className="text-[var(--cf-fg)]">@{e.author}</strong>}
+      {e.author_username && <strong className="text-[var(--cf-fg)]">@{e.author_username}</strong>}
       <span>{desc.text(onOpenNumber)}</span>
       <span className="ml-auto">{formatRelativeTime(e.created_at)}</span>
     </div>

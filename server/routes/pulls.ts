@@ -41,7 +41,7 @@ import { allDocumentFormats } from "../format-registry.js";
 import { reindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
-import type { PrMeta, PullFileStatus } from "../../shared/review.js";
+import type { PrMeta, PrFileStatus } from "../../shared/review.js";
 
 export const pulls = new Hono<AppEnv>();
 pulls.use("*", requireAuth);
@@ -55,7 +55,7 @@ function parsePr(raw: string | undefined): number | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-function normalizeStatus(s: string): PullFileStatus {
+function normalizeStatus(s: string): PrFileStatus {
   if (s === "added" || s === "modified" || s === "deleted" || s === "renamed" || s === "copied") return s;
   return "modified";
 }

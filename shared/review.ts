@@ -1,18 +1,18 @@
 // Types shared by server and client for the PR review surface.
 
-export type PullFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
+export type PrFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
 
-export interface PullFile {
+export interface PrFile {
   path: string;
   previous_path?: string;
-  status: PullFileStatus;
+  status: PrFileStatus;
   additions: number;
   deletions: number;
   patch: string;
 }
 
-export interface PullFiles {
-  files: PullFile[];
+export interface PrFiles {
+  files: PrFile[];
 }
 
 // Forgejo PR state vocabulary. Cosheaf no longer stores its own workflow

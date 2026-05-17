@@ -14,7 +14,7 @@ export interface IssueRow {
   number: number;
   title: string;
   state: "open" | "closed";
-  author_login: string;
+  author_username: string;
   labels: string[];
   comment_count: number;
   created_at: number;
@@ -26,7 +26,7 @@ export interface IssueDetail {
   title: string;
   body: string;
   state: "open" | "closed";
-  author: string;
+  author_username: string;
   assignees: string[];
   labels: Label[];
   milestone: { id: number; title: string } | null;
@@ -39,7 +39,7 @@ export interface IssueDetail {
 export interface IssueComment {
   id: number;
   body: string;
-  author: string;
+  author_username: string;
   created_at: number;
   updated_at: number;
 }
@@ -64,7 +64,7 @@ export interface DependencyRow {
 export interface TimelineEvent {
   id: number;
   type: string;
-  author: string | null;
+  author_username: string | null;
   body: string | null;
   created_at: number;
   updated_at: number | null;

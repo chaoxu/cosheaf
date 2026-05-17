@@ -16,7 +16,7 @@ import {
   type ActivityRow,
   type ApprovalRecord,
   type Backlink,
-  type PullFiles,
+  type PrFiles,
   type Decision,
   type FileEntry,
   type IssueRow,
@@ -1182,7 +1182,7 @@ function WorkspaceView({
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
   const [reviewState, setReviewState] = useState<{
     pr: PrMeta | null;
-    diff: PullFiles | null;
+    diff: PrFiles | null;
     comments: LineComment[];
     selectedPath: string | null;
     busy: boolean;
@@ -1808,7 +1808,7 @@ function WorkspaceView({
     let cancelled = false;
     Promise.all([
       api.getPull(workspace.slug, reviewingPullNumber),
-      api.listPullFiles(workspace.slug, reviewingPullNumber),
+      api.listPrFiles(workspace.slug, reviewingPullNumber),
       api.listComments(workspace.slug, reviewingPullNumber).catch(() => []),
     ])
       .then(([pr, diff, comments]) => {

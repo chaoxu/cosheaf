@@ -365,6 +365,29 @@ branch deleted or PR closed unmerged ──▶ closed/discarded
 - Route code must use Forgejo path helpers and existing validation when touching
   workspace files; never concatenate unvalidated user paths into API URLs.
 
+### Naming conventions
+
+- **snake_case in SQLite rows + wire shapes shared with the SPA.**
+  `forgejo_repo`, `default_md_format`, `cosheaf_id`, `forgejo_id`,
+  `created_at`, `updated_at`, `author_username`. Shared interfaces in
+  `shared/` use snake_case for fields that round-trip through SQL rows
+  or the JSON wire format. The SPA consumes them as-received.
+- **camelCase in middleware-internal types and function parameters.**
+  `WorkspaceContext.forgejoRepo`, `WorkspaceContext.defaultMdFormat`,
+  function args like `cosheafId`, `forgejoId`. The conversion happens
+  once, at the row-load boundary in `server/middleware.ts`.
+- **PR-related types use the `Pr` prefix.** `PrMeta`, `PrState`, `PrFile`,
+  `PrFiles`, `PrFileStatus`. Functions named to match (`prMeta`,
+  `parsePr`, `listPrFiles`). Route filenames and URL segments stay
+  `pulls` to match Forgejo's REST path.
+- **`role` is `Role` in `WorkspaceContext` and `Role | "none"` in
+  permission-cache entries.** `"none"` is the documented sentinel for
+  "workspace exists; the user has no role on it" and is bounded at the
+  middleware layer — callers downstream see `Role`.
+- **Forgejo's `user.login` field is `author_username` in cosheaf shapes.**
+  Not `author`, not `author_login`. One canonical name for "the Forgejo
+  username of whoever did this thing."
+
 ## When changing the document model
 
 If you change document types, statuses, link extraction, or workflow

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import { cn } from "../lib/utils";
-import type { LineComment, PullFile } from "../api";
+import type { LineComment, PrFile } from "../api";
 import type { DocumentFormatId } from "../../../shared/document-format";
 import { getClientDocumentFormat } from "../format-registry";
 import type { DiffRendererProps, ViewMode, ViewShape } from "./diff-renderer-types";
@@ -41,7 +41,7 @@ export function DiffArea({
   onEditComment,
   onDeleteComment,
 }: {
-  file: PullFile | null;
+  file: PrFile | null;
   workspaceSlug: string;
   formatId: DocumentFormatId;
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
