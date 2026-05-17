@@ -48,15 +48,7 @@ pulls.use("*", requireAuth);
 pulls.use("/:slug/*", requireMembership());
 pulls.use("/:slug/*", requireWriteOnMutation);
 
-async function deleteBranchQuietly(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
-  try {
-    await fj.deleteBranch(owner, repo, branch);
-  } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) {
-      console.warn(`deleteBranch ${branch}: ${(err as Error).message}`);
-    }
-  }
-}
+import { deleteBranchQuietly } from "../workspace-cleanup.js";
 
 function parsePr(raw: string | undefined): number | null {
   const n = Number(raw);

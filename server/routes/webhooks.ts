@@ -5,6 +5,8 @@ import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
+import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
+import { isDocumentFormatId } from "../../shared/document-format.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { ForgejoIssue } from "../forgejo.js";
 
@@ -147,7 +149,7 @@ webhooks.post("/forgejo", async (c) => {
             workspaceId: ws.id,
             filePath: r.path,
             bodyText: r.body,
-            formatId: ws.default_md_format,
+            formatId: isDocumentFormatId(ws.default_md_format) ? ws.default_md_format : undefined,
           });
         }
         if (failures.length > 0) {
@@ -196,11 +198,7 @@ webhooks.post("/forgejo", async (c) => {
       // a ghost workspace. The Forgejo side is already gone; there's
       // nothing to roll back.
       if (String(payload.action ?? "") === "deleted") {
-        db.prepare("DELETE FROM doc_map WHERE workspace_id = ?").run(ws.id);
-        db.prepare("DELETE FROM backlinks WHERE workspace_id = ?").run(ws.id);
-        db.prepare("DELETE FROM page_tags WHERE workspace_id = ?").run(ws.id);
-        db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(ws.id);
-        db.prepare("DELETE FROM workspaces WHERE id = ?").run(ws.id);
+        deleteSidecarForWorkspace(db, ws.id);
         sse.publish(ws.slug, { type: "workspace_deleted" });
       }
     }

@@ -14,6 +14,7 @@ import {
   provisionWorkspace,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
+import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
 import { DEFAULT_DOCUMENT_FORMAT_ID, isDocumentFormatId, type DocumentFormatId } from "../shared/document-format.js";
 
 interface SeedOptions {
@@ -241,10 +242,7 @@ async function workspaceRm(slug: string): Promise<void> {
       process.exit(1);
     }
   }
-  db.prepare("DELETE FROM workspaces WHERE id = ?").run(ws.id);
-  db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(ws.id);
-  db.prepare("DELETE FROM backlinks WHERE workspace_id = ?").run(ws.id);
-  db.prepare("DELETE FROM page_tags WHERE workspace_id = ?").run(ws.id);
+  deleteSidecarForWorkspace(db, ws.id);
   console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
 }
 

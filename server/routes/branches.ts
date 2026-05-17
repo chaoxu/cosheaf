@@ -14,7 +14,7 @@ import {
   requireMembership,
   requireWriteOnMutation,
 } from "../middleware.js";
-import { ForgejoError, type Forgejo } from "../forgejo.js";
+import { ForgejoError } from "../forgejo.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 
 export const branches = new Hono<AppEnv>();
@@ -22,15 +22,7 @@ branches.use("*", requireAuth);
 branches.use("/:slug/*", requireMembership());
 branches.use("/:slug/*", requireWriteOnMutation);
 
-async function deleteBranchQuietly(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
-  try {
-    await fj.deleteBranch(owner, repo, branch);
-  } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) {
-      console.warn(`deleteBranch ${branch}: ${(err as Error).message}`);
-    }
-  }
-}
+import { deleteBranchQuietly } from "../workspace-cleanup.js";
 
 branches.get("/:slug/branches/mine", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");

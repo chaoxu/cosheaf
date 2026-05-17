@@ -1,15 +1,24 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { deletePage, indexPage } from "./indexer.js";
 import { parseDocument } from "./frontmatter.js";
 import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
 
+const openDbs: Array<{ db: Database.Database; dir: string }> = [];
+afterEach(() => {
+  for (const { db, dir } of openDbs.splice(0)) {
+    try { db.close(); } catch (_err) { /* already closed */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch (_err) { /* gone */ }
+  }
+});
+
 function freshDb(): Database.Database {
   const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-idx-"));
   const db = new Database(path.join(dir, "test.sqlite"));
+  openDbs.push({ db, dir });
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
