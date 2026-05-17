@@ -22,7 +22,7 @@ import {
   type NotificationRow,
   type OpenPull,
   type PrMeta,
-  type ReviewQueueEntry,
+  type PullReviewEntry,
   type SearchResult,
   type User,
   type Workspace,
@@ -608,7 +608,7 @@ function BacklinksPanel({
 
 function InboxOrActivity({
   kind,
-  queue,
+  reviewPulls,
   openPrs,
   issues,
   pinned,
@@ -619,7 +619,7 @@ function InboxOrActivity({
   query,
   setQuery,
   onRefresh,
-  onReviewChange,
+  onOpenPullReview,
   onOpenIssue,
   onOpenPr,
   onMarkNotifRead,
@@ -627,7 +627,7 @@ function InboxOrActivity({
   onNewIssue,
 }: {
   kind: "inbox" | "activity";
-  queue: readonly ReviewQueueEntry[];
+  reviewPulls: readonly PullReviewEntry[];
   openPrs: readonly OpenPull[];
   issues: readonly IssueRow[];
   pinned: readonly IssueRow[];
@@ -638,7 +638,7 @@ function InboxOrActivity({
   query: string;
   setQuery: (q: string) => void;
   onRefresh: () => void;
-  onReviewChange: (entry: ReviewQueueEntry) => void;
+  onOpenPullReview: (entry: PullReviewEntry) => void;
   onOpenIssue: (number: number) => void;
   onOpenPr: (number: number) => void;
   onMarkNotifRead: (id: number) => void;
@@ -646,16 +646,16 @@ function InboxOrActivity({
   onNewIssue: () => void;
 }): ReactElement {
   const isInbox = kind === "inbox";
-  // In Inbox+Mine: only PRs awaiting your review (queue).
+  // In Inbox+Mine: only PRs awaiting your review.
   // In Inbox+All or Activity: every open PR in the workspace.
   const useOpenList = !isInbox || scope === "all";
   const q = query.trim().toLowerCase();
-  const sourceQueue: ReviewQueueEntry[] = useOpenList
+  const sourcePulls: PullReviewEntry[] = useOpenList
     ? openPrs.map((p) => ({ ...p, approvals: 0, rejections: 0 }))
-    : [...queue];
-  const visibleQueue = q
-    ? sourceQueue.filter((qe) => qe.title.toLowerCase().includes(q))
-    : sourceQueue;
+    : [...reviewPulls];
+  const visiblePulls = q
+    ? sourcePulls.filter((qe) => qe.title.toLowerCase().includes(q))
+    : sourcePulls;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-2 py-1">
@@ -700,7 +700,7 @@ function InboxOrActivity({
           className="h-7 text-xs"
         />
       </div>
-      {visibleQueue.length === 0 && issues.length === 0 && notifications.length === 0 && (
+      {visiblePulls.length === 0 && issues.length === 0 && notifications.length === 0 && (
         <div className={cn("px-3 py-2 text-xs", muted)}>
           {isInbox ? "Nothing waiting on you." : "No open activity."}
         </div>
@@ -748,15 +748,15 @@ function InboxOrActivity({
           </ul>
         </>
       )}
-      {visibleQueue.length > 0 && (
+      {visiblePulls.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
           {useOpenList ? "Open pull requests" : "Pull requests awaiting your review"}
         </div>
       )}
       <ul className="m-0 p-0">
-        {visibleQueue.map((entry) => (
+        {visiblePulls.map((entry) => (
           <li key={`pr-${entry.number}`}>
-            <FileRow onClick={() => onReviewChange(entry)} testId={`review-queue-pull-${entry.number}`}>
+            <FileRow onClick={() => onOpenPullReview(entry)} testId={`review-pull-${entry.number}`}>
               <span className="text-[10px] uppercase tracking-wide bg-blue-500/15 text-blue-700 rounded px-1 mr-1">PR</span>
               <strong>{entry.title}</strong>
               <span className={cn("text-xs", muted)}>
@@ -1060,13 +1060,13 @@ function WorkspaceView({
   const [newPath, setNewPath] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-  const [queue, setQueue] = useState<ReviewQueueEntry[] | null>(null);
+  const [reviewPulls, setReviewPulls] = useState<PullReviewEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "settings">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
-  const [openBranches, setOpenBranches] = useState<OpenPull[] | null>(null);
+  const [openPrs, setOpenPrs] = useState<OpenPull[] | null>(null);
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
@@ -1085,8 +1085,8 @@ function WorkspaceView({
     comments: LineComment[];
     selectedPath: string | null;
     busy: boolean;
-    draftReviewId: number | null;
-  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
+    pendingReviewId: number | null;
+  }>({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, pendingReviewId: null });
   // The active writable branch, set synchronously from save responses to avoid
   // racing a separate branch-list refresh.
   const [currentBranchName, setCurrentBranchName] = useState<string | null>(null);
@@ -1139,7 +1139,7 @@ function WorkspaceView({
           // If the user has an explicit branch selected, keep it. Forgejo's
           // branch listing is eventually consistent — a branch we just
           // created via PUT /file may take a beat to appear in /branches/mine,
-          // and clearing the selection in the interim wipes the publish
+          // and clearing the selection in the interim wipes the open-pull-request
           // affordance and the post-save tree refresh.
           if (current) return current;
           return branches.length === 1 ? (branches[0]?.name ?? null) : null;
@@ -1160,7 +1160,7 @@ function WorkspaceView({
   const reviewingPullNumberRef = useRef<number | null>(null);
   // Tracks the branch the currently-open file was last fetched against, so
   // background refetches (e.g. SSE-driven refreshes) keep hitting the same
-  // branch even after currentBranchName is nulled by publish.
+  // branch even after currentBranchName is nulled by opening a pull request.
   const openFileBranchRef = useRef<string | null>(null);
   useEffect(() => {
     openPathRef.current = openPath;
@@ -1178,7 +1178,7 @@ function WorkspaceView({
   // shifted, which kicked off a reconnect storm during reviews and saves.
   const reloadTreeRef = useRef(reloadTree);
   const reloadBranchesRef = useRef(reloadBranches);
-  const openQueueRef = useRef<() => void>(() => {});
+  const refreshPullsRef = useRef<() => void>(() => {});
   useEffect(() => {
     reloadTreeRef.current = reloadTree;
     reloadBranchesRef.current = reloadBranches;
@@ -1211,7 +1211,7 @@ function WorkspaceView({
           }
         }
       } else if (event.type === "pull" || event.type === "pull_reviewed") {
-        openQueueRef.current();
+        refreshPullsRef.current();
         reloadBranchesRef.current();
         reloadTreeRef.current();
         if (reviewingPullNumberRef.current) {
@@ -1469,7 +1469,7 @@ function WorkspaceView({
     void editorRef.current?.triggerSave("manual");
   }, [openPath, reviewingPullNumber]);
 
-  const openQueue = useCallback(() => {
+  const refreshPulls = useCallback(() => {
     api
       .listPulls(workspace.slug, "open")
       .then((pulls) =>
@@ -1480,16 +1480,16 @@ function WorkspaceView({
               rejections: 0,
               reviews: [] as ApprovalRecord[],
             }));
-            return { ...p, approvals: r.approvals, rejections: r.rejections } as ReviewQueueEntry;
+            return { ...p, approvals: r.approvals, rejections: r.rejections } as PullReviewEntry;
           }),
         ),
       )
-      .then(setQueue)
-      .catch(() => setQueue([]));
+      .then(setReviewPulls)
+      .catch(() => setReviewPulls([]));
   }, [workspace.slug]);
   useEffect(() => {
-    openQueueRef.current = openQueue;
-  }, [openQueue]);
+    refreshPullsRef.current = refreshPulls;
+  }, [refreshPulls]);
 
   const refreshIssues = useCallback(
     (scope: "mine" | "all", panel: "inbox" | "activity", q: string) => {
@@ -1538,8 +1538,8 @@ function WorkspaceView({
   useEffect(() => {
     api
       .listPulls(workspace.slug, "open")
-      .then(setOpenBranches)
-      .catch(() => setOpenBranches([]));
+      .then(setOpenPrs)
+      .catch(() => setOpenPrs([]));
   }, [workspace.slug]);
 
   const refreshPinned = useCallback(async () => {
@@ -1572,8 +1572,8 @@ function WorkspaceView({
     };
   }, [sidebarView, workspace.slug]);
 
-  const reviewChange = useCallback(
-    (entry: ReviewQueueEntry) => {
+  const openPullReview = useCallback(
+    (entry: PullReviewEntry) => {
       setReviewingPullNumber(entry.number);
       setReviewBranchName(entry.head_ref);
       setCurrentBranchName(null);
@@ -1584,7 +1584,7 @@ function WorkspaceView({
     [loadApprovals],
   );
 
-  const publish = useCallback(
+  const openPullRequest = useCallback(
     (mode?: "direct" | "review") => {
       if (!currentBranchName) {
         setStatus("nothing on this branch to merge or review");
@@ -1606,7 +1606,7 @@ function WorkspaceView({
             setStatus(`pull request #${pr.number} opened`);
           }
           setCurrentBranchName(null);
-          openQueue();
+          refreshPulls();
           void loadTree();
         } catch (err) {
           setStatus(err instanceof ApiError ? err.message : "Open pull request failed");
@@ -1615,7 +1615,7 @@ function WorkspaceView({
         }
       })();
     },
-    [workspace.slug, currentBranchName, openQueue],
+    [workspace.slug, currentBranchName, refreshPulls],
   );
 
   // Submit a review decision (approve, request_changes, or comment-only) on
@@ -1625,11 +1625,11 @@ function WorkspaceView({
       const n = reviewingPullNumber;
       if (!n) return;
       const comment = body.trim() || undefined;
-      const draftId = reviewState.draftReviewId;
+      const pendingId = reviewState.pendingReviewId;
       setReviewState((s) => ({ ...s, busy: true }));
       try {
-        if (draftId) {
-          await api.submitDraftReview(workspace.slug, n, draftId, {
+        if (pendingId) {
+          await api.submitPendingReview(workspace.slug, n, pendingId, {
             event: decision,
             body: comment,
           });
@@ -1644,10 +1644,10 @@ function WorkspaceView({
           setStatus(decision === "approve" ? "approved" : decision === "request_changes" ? "changes requested" : "commented");
         }
         loadApprovals(n);
-        openQueue();
+        refreshPulls();
         const pr = await api.getPull(workspace.slug, n).catch(() => null);
         if (pr) {
-          setReviewState((s) => ({ ...s, pr, draftReviewId: null }));
+          setReviewState((s) => ({ ...s, pr, pendingReviewId: null }));
           if (pr.merged || pr.state === "closed") {
             setReviewingPullNumber(null);
             setReviewBranchName(null);
@@ -1660,10 +1660,10 @@ function WorkspaceView({
         setReviewState((s) => ({ ...s, busy: false }));
       }
     },
-    [reviewingPullNumber, workspace.slug, reviewState.draftReviewId, loadApprovals, openQueue],
+    [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId, loadApprovals, refreshPulls],
   );
 
-  const closeReviewedChange = useCallback(async () => {
+  const closeReviewedPull = useCallback(async () => {
     const n = reviewingPullNumber;
     if (!n) return;
     setReviewState((s) => ({ ...s, busy: true }));
@@ -1672,21 +1672,21 @@ function WorkspaceView({
       setStatus("Pull request closed");
       setReviewingPullNumber(null);
       setReviewBranchName(null);
-      openQueue();
+      refreshPulls();
       void loadTree();
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : "close failed");
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
-  }, [reviewingPullNumber, workspace.slug, openQueue]);
+  }, [reviewingPullNumber, workspace.slug, refreshPulls]);
 
   // When entering review, fetch PR meta + per-file diff. Clear on exit.
   // Each transition (enter, switch PR, exit) clears selectedPath + reviewBranchName
   // first so a stale file or branch from the previous PR can't leak through.
   useEffect(() => {
     setReviewBranchName(null);
-    setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, draftReviewId: null });
+    setReviewState({ pr: null, diff: null, comments: [], selectedPath: null, busy: false, pendingReviewId: null });
     if (!reviewingPullNumber) return;
     let cancelled = false;
     Promise.all([
@@ -1735,15 +1735,15 @@ function WorkspaceView({
     async (target: { path: string; line: number; side: "new" | "old" }, body: string) => {
       const n = reviewingPullNumber;
       if (!n) return;
-      const draftId = reviewState.draftReviewId;
-      if (draftId) {
-        await api.addDraftReviewComment(workspace.slug, n, draftId, { ...target, body });
+      const pendingId = reviewState.pendingReviewId;
+      if (pendingId) {
+        await api.addPendingReviewComment(workspace.slug, n, pendingId, { ...target, body });
       } else {
         await api.addComment(workspace.slug, n, { ...target, body });
       }
       refreshReviewComments();
     },
-    [reviewingPullNumber, workspace.slug, reviewState.draftReviewId, refreshReviewComments],
+    [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId, refreshReviewComments],
   );
 
   const editReviewComment = useCallback(
@@ -1766,25 +1766,25 @@ function WorkspaceView({
     [reviewingPullNumber, workspace.slug, refreshReviewComments],
   );
 
-  const toggleDraftReview = useCallback(async () => {
+  const togglePendingReview = useCallback(async () => {
     const n = reviewingPullNumber;
     if (!n) return;
-    if (reviewState.draftReviewId) {
+    if (reviewState.pendingReviewId) {
       // Cancel local batch — Forgejo keeps the PENDING review server-side
       // for reuse; we just stop sending into it.
-      setReviewState((s) => ({ ...s, draftReviewId: null }));
+      setReviewState((s) => ({ ...s, pendingReviewId: null }));
       return;
     }
     setReviewState((s) => ({ ...s, busy: true }));
     try {
-      const { review_id } = await api.startDraftReview(workspace.slug, n);
-      setReviewState((s) => ({ ...s, draftReviewId: review_id }));
+      const { review_id } = await api.startPendingReview(workspace.slug, n);
+      setReviewState((s) => ({ ...s, pendingReviewId: review_id }));
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : "could not start a pending review");
     } finally {
       setReviewState((s) => ({ ...s, busy: false }));
     }
-  }, [reviewingPullNumber, workspace.slug, reviewState.draftReviewId]);
+  }, [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId]);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -1800,12 +1800,12 @@ function WorkspaceView({
       }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
-        if (!busy) publish();
+        if (!busy) openPullRequest();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [openPath, dirty, save, busy, publish]);
+  }, [openPath, dirty, save, busy, openPullRequest]);
 
   const create = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1874,7 +1874,7 @@ function WorkspaceView({
               active={sidebarView === "inbox"}
               onClick={() => {
                 setSidebarView("inbox");
-                openQueue();
+                refreshPulls();
               }}
               testId="sidebar-tab-inbox"
             >
@@ -1916,7 +1916,7 @@ function WorkspaceView({
           ) : sidebarView === "inbox" || sidebarView === "activity" ? (
             <InboxOrActivity
               kind={sidebarView}
-              queue={queue ?? []}
+              reviewPulls={reviewPulls ?? []}
               issues={issues ?? []}
               pinned={pinnedIssues}
               activities={activities}
@@ -1925,7 +1925,7 @@ function WorkspaceView({
               query={inboxQuery}
               setQuery={setInboxQuery}
               onRefresh={() => {
-                openQueue();
+                refreshPulls();
                 refreshPinned();
                 if (sidebarView === "inbox") refreshNotifs();
                 if (sidebarView === "inbox" || sidebarView === "activity") {
@@ -1941,16 +1941,16 @@ function WorkspaceView({
                     .catch(() => undefined);
                 }
               }}
-              openPrs={openBranches ?? []}
+              openPrs={openPrs ?? []}
               notifications={notifs}
-              onReviewChange={reviewChange}
+              onOpenPullReview={openPullReview}
               onOpenIssue={(n) => {
                 setNewIssueOpen(false);
                 setViewingIssue(n);
               }}
               onOpenPr={(prNumber) => {
-                const row = (openBranches ?? []).find((r) => r.number === prNumber);
-                if (row) reviewChange({ ...row, approvals: 0, rejections: 0 });
+                const row = (openPrs ?? []).find((r) => r.number === prNumber);
+                if (row) openPullReview({ ...row, approvals: 0, rejections: 0 });
               }}
               onMarkNotifRead={(id) => {
                 setNotifs((prev) => prev.filter((x) => x.id !== id));
@@ -2149,10 +2149,10 @@ function WorkspaceView({
                 // PR and issue numbers share a single sequence in Forgejo.
                 // If we already know about a PR with this number, open it
                 // as a review; otherwise treat the number as an issue.
-                const pr = (openBranches ?? []).find((c) => c.number === n) ?? (queue ?? []).find((c) => c.number === n);
+                const pr = (openPrs ?? []).find((c) => c.number === n) ?? (reviewPulls ?? []).find((c) => c.number === n);
                 if (pr) {
                   setViewingIssue(null);
-                  reviewChange({ ...pr, approvals: 0, rejections: 0 });
+                  openPullReview({ ...pr, approvals: 0, rejections: 0 });
                 } else {
                   setViewingIssue(n);
                 }
@@ -2169,7 +2169,7 @@ function WorkspaceView({
                 data-testid="new-issue-title"
               />
               <textarea
-                placeholder="Describe the question, problem, or proposal…"
+                placeholder="Describe the question, problem, or idea…"
                 value={newIssueBody}
                 onChange={(e) => setNewIssueBody(e.target.value)}
                 rows={10}
@@ -2304,16 +2304,16 @@ function WorkspaceView({
                   role={workspace.role}
                   isAuthor={reviewState.pr.author_username === user.username}
                   onSubmit={submitReview}
-                  onClose={closeReviewedChange}
+                  onClose={closeReviewedPull}
                   busy={reviewState.busy}
-                  draftReviewActive={reviewState.draftReviewId !== null}
-                  onToggleDraftReview={toggleDraftReview}
+                  pendingReviewActive={reviewState.pendingReviewId !== null}
+                  onTogglePendingReview={togglePendingReview}
                 />
               )}
             </>
           )}
           {activeBranchName && (
-            <span data-testid="active-branch-id" hidden>{activeBranchName}</span>
+            <span data-testid="active-branch" hidden>{activeBranchName}</span>
           )}
           <div
             data-statusbar
@@ -2364,8 +2364,8 @@ function WorkspaceView({
                       {workspace.role === "admin" && (
                         <button
                           type="button"
-                          data-testid="publish-direct"
-                          onClick={() => publish("direct")}
+                          data-testid="merge-branch"
+                          onClick={() => openPullRequest("direct")}
                           disabled={busy}
                           title="Squash-merge this branch into main (⇧⌘P)"
                           className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
@@ -2375,8 +2375,8 @@ function WorkspaceView({
                       )}
                       <button
                         type="button"
-                        data-testid="publish-review"
-                        onClick={() => publish("review")}
+                        data-testid="open-pull-request"
+                        onClick={() => openPullRequest("review")}
                         disabled={busy}
                         title="Open a pull request for this branch"
                         className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"

@@ -242,18 +242,18 @@ POST /w/:slug/pulls/:n/comments
 → { "ok": true }
 ```
 
-Draft review helpers exist because Forgejo represents pending reviews
+Pending review helpers exist because Forgejo represents pending reviews
 separately:
 
 ```http
-POST /w/:slug/pulls/:n/draft-review
+POST /w/:slug/pulls/:n/pending-review
 → { "review_id": number }
 
-POST /w/:slug/pulls/:n/draft-review/:reviewId/comments
+POST /w/:slug/pulls/:n/pending-review/:reviewId/comments
 { "path": string, "line": number, "side": "base" | "head", "body": string }
 → { "ok": true }
 
-POST /w/:slug/pulls/:n/draft-review/:reviewId/submit
+POST /w/:slug/pulls/:n/pending-review/:reviewId/submit
 { "event": "approve" | "request_changes" | "comment", "body"?: string }
 → { "ok": true }
 ```

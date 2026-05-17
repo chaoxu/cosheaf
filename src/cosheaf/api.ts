@@ -40,7 +40,7 @@ export interface Branch {
 // Open-PR list = Forgejo PrMeta as-is. Queue entries add cached approval
 // counts so the sidebar can render the gate without a per-row fetch.
 export type OpenPull = PrMeta;
-export type ReviewQueueEntry = PrMeta & { approvals: number; rejections: number };
+export type PullReviewEntry = PrMeta & { approvals: number; rejections: number };
 
 export interface ApprovalRecord {
   username: string;
@@ -277,26 +277,26 @@ export const api = {
       { method: "DELETE" },
     ),
 
-  startDraftReview: (slug: string, prNumber: number) =>
-    jsonFetch<{ review_id: number }>(`${w(slug)}/pulls/${prNumber}/draft-review`, { method: "POST" }),
-  addDraftReviewComment: (
+  startPendingReview: (slug: string, prNumber: number) =>
+    jsonFetch<{ review_id: number }>(`${w(slug)}/pulls/${prNumber}/pending-review`, { method: "POST" }),
+  addPendingReviewComment: (
     slug: string,
     prNumber: number,
     reviewId: number,
     payload: { path: string; line: number; side: CommentSide; body: string },
   ) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/pulls/${prNumber}/draft-review/${reviewId}/comments`,
+      `${w(slug)}/pulls/${prNumber}/pending-review/${reviewId}/comments`,
       { method: "POST", body: JSON.stringify(payload) },
     ),
-  submitDraftReview: (
+  submitPendingReview: (
     slug: string,
     prNumber: number,
     reviewId: number,
     payload: { event: "approve" | "request_changes" | "comment"; body?: string },
   ) =>
     jsonFetch<{ ok: true }>(
-      `${w(slug)}/pulls/${prNumber}/draft-review/${reviewId}/submit`,
+      `${w(slug)}/pulls/${prNumber}/pending-review/${reviewId}/submit`,
       { method: "POST", body: JSON.stringify(payload) },
     ),
 

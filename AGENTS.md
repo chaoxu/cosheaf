@@ -187,7 +187,7 @@ server/
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   main.tsx        # React entry
-  app.tsx         # full single-file UI (sidebar, editor, queue, propose, backlinks)
+  app.tsx         # full single-file UI (sidebar, editor, pull requests, issues, backlinks)
   editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat-editor
   api.ts          # typed fetch client mirroring server routes
 data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar

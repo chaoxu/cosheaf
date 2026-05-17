@@ -16,8 +16,8 @@ export async function openReview(page: Page, expectMarker = "Pythagoras") {
   await page.getByTestId("sidebar-tab-inbox").click();
   // Open the seeded demo PR specifically (title "e2e demo PR") rather than
   // the first row, so this is stable when other tests have left fresher PRs
-  // at the top of the queue.
-  const demo = page.locator('[data-testid^="review-queue-pull-"]', { hasText: "e2e demo PR" }).first();
+  // at the top of the pull request list.
+  const demo = page.locator('[data-testid^="review-pull-"]', { hasText: "e2e demo PR" }).first();
   await demo.waitFor({ state: "visible" });
   await demo.click();
   await page.getByTestId("pr-header").waitFor({ state: "visible" });

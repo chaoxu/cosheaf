@@ -69,8 +69,8 @@ try {
   if (!meriBranch) throw new Error("could not read active-branch-name from meri's session");
 
   stage = "meri-open-pr-1";
-  await meri.getByTestId("publish-review").waitFor({ state: "visible", timeout: 8000 });
-  await meri.getByTestId("publish-review").click();
+  await meri.getByTestId("open-pull-request").waitFor({ state: "visible", timeout: 8000 });
+  await meri.getByTestId("open-pull-request").click();
   // After open, currentBranch is cleared.
   await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
 
@@ -89,11 +89,11 @@ try {
 
   stage = "vera-open-inbox";
   await vera.getByTestId("sidebar-tab-inbox").click();
-  const queueItem = vera.locator(`[data-testid="review-queue-pull-${prNumber}"]`);
-  await queueItem.waitFor({ state: "visible", timeout: 15000 });
+  const reviewPullItem = vera.locator(`[data-testid="review-pull-${prNumber}"]`);
+  await reviewPullItem.waitFor({ state: "visible", timeout: 15000 });
 
-  stage = "vera-click-queue";
-  await queueItem.click();
+  stage = "vera-click-pull";
+  await reviewPullItem.click();
   await vera.getByTestId("pr-header").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("pr-file-list").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("review-request-changes").waitFor({ state: "visible", timeout: 8000 });
@@ -118,11 +118,11 @@ try {
   await typeIntoEditor(meri, " v2");
   await meri.locator('button:has-text("Save")').first().click();
   // The save goes to a fresh user branch (currentBranchName was cleared on
-  // publish). Open a *second* PR — Forgejo treats each amend session as its
+  // opening a pull request). Open a *second* PR — Forgejo treats each amend session as its
   // own PR in this smoke; production would push to the same branch.
   await meri.getByTestId("active-branch-name").waitFor({ state: "attached", timeout: 8000 });
   const meriBranch2 = (await meri.getByTestId("active-branch-name").innerText()).trim();
-  await meri.getByTestId("publish-review").click();
+  await meri.getByTestId("open-pull-request").click();
   await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
   const prNumber2 = await meri.evaluate(async (branch) => {
     const r = await fetch("/api/v1/w/flushing-coin/pulls?state=open");
@@ -136,9 +136,9 @@ try {
   stage = "vera-approve";
   await vera.bringToFront();
   await vera.getByTestId("sidebar-tab-inbox").click();
-  const queueItem2 = vera.locator(`[data-testid="review-queue-pull-${prNumber2}"]`);
-  await queueItem2.waitFor({ state: "visible", timeout: 15000 });
-  await queueItem2.click();
+  const reviewPullItem2 = vera.locator(`[data-testid="review-pull-${prNumber2}"]`);
+  await reviewPullItem2.waitFor({ state: "visible", timeout: 15000 });
+  await reviewPullItem2.click();
   await vera.getByTestId("review-approve").waitFor({ state: "visible", timeout: 8000 });
   await vera.getByTestId("review-comment").fill("LGTM");
   await vera.getByTestId("review-approve").click();
