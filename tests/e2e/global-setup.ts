@@ -26,7 +26,7 @@ async function seedReviewablePr(): Promise<void> {
 
   for (const file of [
     { path: "demo.md", content: "# Pythagoras\n\nIn a right triangle, a^2 + b^2 = c^2.\n\nProof: similar triangles.\n" },
-    { path: "demo2.md", content: "# Companion\n\nA second file in the same change.\n" },
+    { path: "demo2.md", content: "# Companion\n\nA second file on the same branch.\n" },
   ]) {
     const put = await fetch(
       `http://localhost:3030/api/v1/w/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,

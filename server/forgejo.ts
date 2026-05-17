@@ -3,7 +3,7 @@
 // Each instance is bound to a single token. On the request path that's the
 // authenticated user's PAT (stored encrypted in users.forgejo_token_ciphertext);
 // for out-of-band provisioning (CLI user/workspace creation, webhook handler)
-// we instantiate a separate admin-bound instance. There is no `Sudo` header
+// we instantiate a separate admin-bound instance. There is no impersonation header
 // — Forgejo attributes every action to whoever owns the token.
 
 import type {

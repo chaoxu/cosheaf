@@ -2,7 +2,7 @@
 // users; the user types their Forgejo username + password into cosheaf's
 // form, cosheaf forwards those creds (HTTP Basic) to Forgejo's
 // /users/:user/tokens endpoint, and the returned PAT is encrypted and
-// stored. Later API calls use that PAT — no admin token, no `Sudo:` header.
+// stored. Later API calls use that PAT — no admin token, no impersonation header.
 
 import { Hono } from "hono";
 import { setCookie, deleteCookie, getCookie } from "hono/cookie";

@@ -98,7 +98,7 @@ describe("Forgejo passthrough", () => {
     expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/repo/pulls?state=open");
     expect(init.method).toBe("GET");
     const headers = init.headers as Record<string, string>;
-    // Forwards the caller's own PAT — no admin token, no Sudo header.
+    // Forwards the caller's own PAT — no admin token, no impersonation header.
     expect(headers.authorization).toBe("token fake-pat-alice");
     expect(headers.sudo).toBeUndefined();
   });
@@ -291,7 +291,7 @@ describe("Forgejo passthrough", () => {
     expect(res.status).toBe(201);
     const [, init] = fetchMock.mock.calls[0];
     const headers = init.headers as Record<string, string>;
-    // The member's own PAT is forwarded (no Sudo header any more).
+    // The member's own PAT is forwarded without an impersonation header.
     expect(headers.authorization).toBe("token fake-pat-bob");
     expect(headers.sudo).toBeUndefined();
   });

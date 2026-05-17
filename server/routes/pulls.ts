@@ -454,7 +454,7 @@ pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- draft (PENDING) reviews ----------
+// ---------- pending reviews ----------
 
 async function findOrCreatePendingReview(
   fj: Forgejo,

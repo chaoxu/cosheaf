@@ -47,9 +47,11 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, and browser sessions. Memberships, branches, and pull
-  requests live on Forgejo and are read on demand. The page index is
-  rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
+  links, FTS index, local auth state, workspace-to-repo mappings, webhook
+  dedupe, and passthrough audit logs. Memberships, branches, pull requests,
+  issues, labels, milestones, and notifications live on Forgejo and are read
+  on demand. The page index is rebuildable from Forgejo via
+  `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
@@ -179,7 +181,7 @@ server/
     auth.ts        # login/logout/me
     workspaces.ts  # list/create workspaces
     files.ts       # tree/file get/put/delete, search, backlinks, documents list
-    pulls.ts       # pull request + review API (merge, reviews, comments, drafts, settings)
+    pulls.ts       # pull request + review API (merge, reviews, comments, pending reviews, settings)
     branches.ts    # branch list/create/delete
     issues.ts      # issue UI projections, comments, timeline, dependencies
     notifications.ts # notification feed
