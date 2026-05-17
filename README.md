@@ -11,9 +11,9 @@ fenced divs, KaTeX math, `[@id]` cross-references, citations, and LaTeX export
 conventions. Cosheaf itself stays page-oriented; it does not maintain a
 math-native theorem graph or proof dependency model.
 
-Coflat is the current canonical document format. Supporting other markdown
-profiles or document formats may make sense later, but it is not part of the
-current product surface.
+Workspaces choose a markdown format. New workspaces default to Forgejo Markdown
+passthrough for plain `.md` files, while Coflat workspaces opt into math-friendly
+rendering, backlinks, and rich review diffs.
 
 The substrate is fully usable by humans alone. Automated agents
 (an `autoprover` layer, planned separately) participate as ordinary Forgejo

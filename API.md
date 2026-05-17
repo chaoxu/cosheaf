@@ -27,6 +27,7 @@ interface Workspace {
   slug: string;
   name: string;
   role: Role;
+  default_md_format: "forgejo-passthrough" | "coflat";
 }
 
 interface DocumentMeta {
@@ -102,7 +103,7 @@ audits the call in `forgejo_passthrough_log`.
 
 Allowed repo-scoped passthrough prefixes:
 
-- `pulls` with `GET`, `POST`, `PATCH`
+- `pulls` with `GET`, `POST`, `PATCH`, `DELETE`
 - `issues` with `GET`, `POST`, `PATCH`, `PUT`, `DELETE`
 - `labels` with `GET`, `POST`, `PATCH`, `DELETE`
 - `milestones` with `GET`, `POST`, `PATCH`, `DELETE`
@@ -110,6 +111,7 @@ Allowed repo-scoped passthrough prefixes:
 - `commits` with `GET`
 - `contents` with `GET`
 - `reviews` with `GET`, `POST`
+- `markdown` with `POST`
 - `activities/feeds` with `GET`
 - `notifications` with `GET`, `PUT`
 
@@ -196,14 +198,8 @@ mirror them.
 ## Pull Requests
 
 ```http
-GET /w/:slug/pulls?state=open|closed|all
-→ { "pulls": PrMeta[] }
-
 POST /w/:slug/pulls
 { "head": string, "base"?: string, "title"?: string, "body"?: string }
-→ PrMeta
-
-GET /w/:slug/pulls/:n
 → PrMeta
 
 POST /w/:slug/pulls/:n/merge
@@ -214,9 +210,17 @@ POST /w/:slug/pulls/:n/close
 → { "ok": true }
 ```
 
-`PrMeta` is the Forgejo pull request identity normalized for the SPA:
-`number`, `title`, `body`, `state`, `merged`, author, head/base refs and SHAs,
-timestamps, mergeability, and changed-file counts.
+Pull request listing and metadata are 1:1 Forgejo reads and should use
+passthrough:
+
+```http
+GET /w/:slug/forgejo/pulls?state=open|closed|all
+GET /w/:slug/forgejo/pulls/:n
+```
+
+The SPA normalizes Forgejo pull request JSON to `PrMeta`: `number`, `title`,
+`body`, `state`, `merged`, author, head/base refs and SHAs, timestamps,
+mergeability, and changed-file counts.
 
 ## Pull Request Reviews And Comments
 
@@ -290,6 +294,14 @@ GET /w/:slug/issues/:n/timeline
 GET /w/:slug/issues/:n/dependencies
 → { "issues": DependencyRow[] }
 
+POST /w/:slug/issues/:n/dependencies
+{ "index": number }
+→ { "issue": DependencyRow }
+
+DELETE /w/:slug/issues/:n/dependencies
+{ "index": number }
+→ { "issue": DependencyRow }
+
 GET /w/:slug/issues/:n/blocks
 → { "issues": DependencyRow[] }
 ```
@@ -318,15 +330,16 @@ Forgejo endpoint is not repo-anchored.
 
 ```http
 GET /w/:slug/settings
-→ { "min_approvals": number }
+→ { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
 
 PUT /w/:slug/settings
-{ "min_approvals": number }
-→ { "min_approvals": number }
+{ "min_approvals"?: number, "default_md_format"?: "forgejo-passthrough" | "coflat" }
+→ { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
 ```
 
-Settings map to Forgejo branch protection on `main`. Updating settings requires
-admin permission.
+Approval settings map to Forgejo branch protection on `main`. The workspace
+markdown format controls typed file indexing and SPA rendering. Updating
+settings requires admin permission.
 
 ## Events
 

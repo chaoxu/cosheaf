@@ -16,12 +16,12 @@ Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
 math-native: do not add theorem graphs, proof dependency models, or other
 semantic math layers unless explicitly requested.
 
-Coflat markdown is one of the document formats cosheaf supports, and currently
-the only one. The codebase carries a `DocumentFormat` seam
+Coflat markdown is one of the document formats cosheaf supports, alongside
+Forgejo Markdown passthrough. The codebase carries a `DocumentFormat` seam
 (`server/document-format/`, `src/cosheaf/document-format/`) so additional
-formats can be added cleanly later; touch that seam through the
-`coflatMarkdownFormat` singleton rather than reaching into its internals.
-Don't add a second format until one is asked for.
+formats can be added cleanly later; register formats through the format
+registry rather than reaching into one implementation's internals.
+Don't add another format until one is asked for.
 
 Agents (autoprover and friends) are out of scope here. They will live in a
 separate layer and participate as ordinary Forgejo write-access collaborators
@@ -309,6 +309,31 @@ links recognized by the indexer:
 - `[text](relative/path.md[#fragment])` — markdown link to another page
 
 Bare URLs, raw HTML, and indented code blocks are intentionally out of scope.
+
+### Workspace markdown formats
+
+Workspaces declare one markdown format in `workspaces.default_md_format`.
+New workspaces default to `forgejo-passthrough` (Forgejo Markdown); development
+fixtures that need Coflat behavior explicitly use `coflat`.
+
+- `forgejo-passthrough`: plain `.md` files rendered through Forgejo's
+  repo-scoped `/markdown` API. It preserves YAML frontmatter but extracts no
+  backlinks; rich rendered diffs are unavailable and the review UI falls back
+  to source diffs.
+- `coflat`: Coflat-flavored markdown using `@chaoxu/coflat-editor` parser and
+  reader. Coflat-only features include `[@id]` backlinks, bare-ref rewriting
+  for issue/page references, and source-line-attributed rich diffs.
+
+Generic YAML frontmatter parsing lives in `shared/frontmatter-yaml.ts`; do not
+hide generic frontmatter behavior behind one format implementation. Server
+format implementations are registered in `server/format-registry.ts`.
+
+Every SPA markdown render surface should be checked when changing formats:
+issue bodies, issue comments, PR descriptions, PR review comments, label and
+milestone descriptions, notification previews, page editor/viewer content, and
+PR file diffs. Rendered HTML inserted into the DOM must pass through DOMPurify.
+Do not add rendered-HTML caching unless measured Forgejo `/markdown` latency
+becomes a real bottleneck.
 
 ## Things this repo is NOT
 

@@ -108,8 +108,8 @@ deployment.
 - Do not require Pandoc, LaTeX, or desktop-native dependencies for ordinary
   page editing and review.
 - Do not add a math-native theorem graph or proof dependency model.
-- Do not introduce pluggable document formats yet; Coflat remains the only
-  supported format for now.
+- Do not introduce additional document formats as part of this epic; Coflat
+  operations should stay scoped to Coflat workspaces.
 
 ## Milestones
 

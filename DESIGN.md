@@ -13,9 +13,9 @@ conventions. Cosheaf does not model mathematical objects as a separate graph:
 the durable unit is still the markdown page, and the sidecar index stores only
 page metadata, links, tags, and search text.
 
-Coflat is the only supported document format today. The architecture should not
-pretend that formats are pluggable yet, though future work may allow a workspace
-to choose another markdown profile or document format.
+Workspaces choose one markdown format. New workspaces default to Forgejo
+Markdown passthrough for plain `.md` files; Coflat workspaces opt into
+math-friendly parsing, `[@id]` backlinks, and rich rendered diffs.
 
 Cosheaf is meant to be useful with only human users. Autonomous agents can
 participate later through the same HTTP API as ordinary Forgejo collaborators.
@@ -40,7 +40,7 @@ participate later through the same HTTP API as ordinary Forgejo collaborators.
 
 ## Document Model
 
-Pages use YAML frontmatter plus Coflat-flavored markdown:
+Pages use YAML frontmatter plus the workspace's markdown format:
 
 ```yaml
 ---
@@ -56,7 +56,7 @@ Cosheaf indexes:
 
 - title and body in FTS5 using the trigram tokenizer
 - tags from frontmatter
-- backlinks from `[@id]` and `[text](relative.md[#fragment])`
+- backlinks from the active format's link extractor
 - path-to-id mappings in `doc_map`
 
 ## Branch And Pull Request Model
