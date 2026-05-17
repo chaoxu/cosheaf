@@ -55,6 +55,7 @@ import type {
 } from "./document-format/coflat-editor";
 import { SettingsPanel } from "./review/SettingsPanel";
 import { WorkspaceProvider, useWorkspaceContext } from "./workspace-context";
+import { useReviewComments } from "./use-review-comments";
 
 type View =
   | { kind: "loading" }
@@ -1834,49 +1835,20 @@ function WorkspaceView({
     [reviewingPullNumber, workspace.slug],
   );
 
-  const refreshReviewComments = useCallback(() => {
-    const n = reviewingPullNumber;
-    if (!n) return;
-    api
-      .listComments(workspace.slug, n)
-      .then((comments) => setReviewState((s) => ({ ...s, comments })))
-      .catch(() => undefined);
-  }, [reviewingPullNumber, workspace.slug]);
-
-  const addReviewComment = useCallback(
-    async (target: { path: string; line: number; side: "head" | "base" }, body: string) => {
-      const n = reviewingPullNumber;
-      if (!n) return;
-      const pendingId = reviewState.pendingReviewId;
-      if (pendingId) {
-        await api.addPendingReviewComment(workspace.slug, n, pendingId, { ...target, body });
-      } else {
-        await api.addComment(workspace.slug, n, { ...target, body });
-      }
-      refreshReviewComments();
-    },
-    [reviewingPullNumber, workspace.slug, reviewState.pendingReviewId, refreshReviewComments],
+  const setReviewComments = useCallback(
+    (comments: LineComment[]) => setReviewState((s) => ({ ...s, comments })),
+    [],
   );
-
-  const editReviewComment = useCallback(
-    async (commentId: number, body: string) => {
-      const n = reviewingPullNumber;
-      if (!n) return;
-      await api.editComment(workspace.slug, n, commentId, body);
-      refreshReviewComments();
-    },
-    [reviewingPullNumber, workspace.slug, refreshReviewComments],
-  );
-
-  const deleteReviewComment = useCallback(
-    async (commentId: number, reviewId: number) => {
-      const n = reviewingPullNumber;
-      if (!n) return;
-      await api.deleteComment(workspace.slug, n, commentId, reviewId);
-      refreshReviewComments();
-    },
-    [reviewingPullNumber, workspace.slug, refreshReviewComments],
-  );
+  const {
+    add: addReviewComment,
+    edit: editReviewComment,
+    remove: deleteReviewComment,
+  } = useReviewComments({
+    slug: workspace.slug,
+    pullNumber: reviewingPullNumber,
+    pendingReviewId: reviewState.pendingReviewId,
+    setComments: setReviewComments,
+  });
 
   const togglePendingReview = useCallback(async () => {
     const n = reviewingPullNumber;
