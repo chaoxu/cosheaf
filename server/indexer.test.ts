@@ -118,11 +118,11 @@ describe("indexPage", () => {
     expect(ftsRow.body).toContain("Source");
 
     const links = db
-      .prepare("SELECT target_label FROM backlinks WHERE workspace_id = 1 ORDER BY target_label")
-      .all() as Array<{ target_label: string }>;
-    expect(links.map((l) => l.target_label)).toEqual([
-      "[@targetid]",
-      "[link](other.md#sec:part)",
+      .prepare("SELECT target_label, line FROM backlinks WHERE workspace_id = 1 ORDER BY target_label")
+      .all() as Array<{ target_label: string; line: number }>;
+    expect(links).toEqual([
+      { target_label: "[@targetid]", line: 8 },
+      { target_label: "[link](other.md#sec:part)", line: 8 },
     ]);
 
     const tags = db

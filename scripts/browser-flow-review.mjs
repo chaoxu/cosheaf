@@ -52,7 +52,7 @@ let stage = "start";
 try {
   // ── 1. meri creates a file and opens a PR ──────────────────────────────────
   stage = "meri-login";
-  await loginAs(meri, "meri", "123123");
+  await loginAs(meri, "meri", "Cosheaf123!");
 
   stage = "meri-create";
   await meri.getByTestId("new-file-toggle").click();
@@ -85,7 +85,7 @@ try {
 
   // ── 2. vera reviews and requests changes ───────────────────────────────────
   stage = "vera-login";
-  await loginAs(vera, "vera", "123123");
+  await loginAs(vera, "vera", "Cosheaf123!");
 
   stage = "vera-open-inbox";
   await vera.getByTestId("sidebar-tab-inbox").click();
@@ -146,7 +146,7 @@ try {
   // Approval lands; chao (admin) merges through the API.
   stage = "admin-merge";
   const adminPage = await makeContext("chao");
-  await loginAs(adminPage, "chao", "123123");
+  await loginAs(adminPage, "chao", "Cosheaf123!");
   const mergeResult = await adminPage.evaluate(async (n) => {
     const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/merge`, {
       method: "POST",

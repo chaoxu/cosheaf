@@ -94,11 +94,19 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
       .run(p.workspaceId, cosheafId);
     const insertBacklink = prep(
       db,
-      "INSERT OR IGNORE INTO backlinks (workspace_id, src_id, src_path, target_id, target_label) VALUES (?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO backlinks (workspace_id, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
     );
+    const bodyStart = p.bodyText.length - parsed.body.length;
     for (const link of format.extractLinks(parsed.body)) {
       const targetId = resolveLinkTarget(db, p.workspaceId, p.filePath, link);
-      insertBacklink.run(p.workspaceId, cosheafId, p.filePath, targetId, link.raw);
+      insertBacklink.run(
+        p.workspaceId,
+        cosheafId,
+        p.filePath,
+        targetId,
+        link.raw,
+        lineFromOffset(p.bodyText, bodyStart + link.from),
+      );
     }
     prep(db, "DELETE FROM page_tags WHERE workspace_id = ? AND cosheaf_id = ?")
       .run(p.workspaceId, cosheafId);
@@ -122,6 +130,15 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   }
 
   return { cosheafId, title, rewrittenContent: rewritten, commit };
+}
+
+function lineFromOffset(source: string, offset: number): number {
+  let line = 1;
+  const end = Math.max(0, Math.min(offset, source.length));
+  for (let i = 0; i < end; i++) {
+    if (source.charCodeAt(i) === 10) line++;
+  }
+  return line;
 }
 
 // Convenience for webhook-driven reindex where there's no Forgejo write to fail.

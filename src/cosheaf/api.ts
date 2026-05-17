@@ -1,6 +1,7 @@
 import type { Role } from "../../shared/roles";
 import type { PullFiles, PrMeta, PrState, PullFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
+import type { WorkspaceValidation } from "../../shared/validation";
 
 export type Decision = "approve" | "request_changes" | "comment";
 export type { Role, PullFiles, PullFile, PrMeta, PrState, LineComment, CommentSide };
@@ -190,6 +191,8 @@ export const api = {
 
   backlinks: (slug: string, id: string) =>
     jsonFetch<{ backlinks: Backlink[] }>(`${w(slug)}/backlinks${qs({ id })}`).then((r) => r.backlinks),
+  validateWorkspace: (slug: string) =>
+    jsonFetch<WorkspaceValidation>(`${w(slug)}/validation`),
   search: (slug: string, q: string) =>
     jsonFetch<{ results: SearchResult[] }>(`${w(slug)}/search${qs({ q })}`).then((r) => r.results),
 
@@ -443,3 +446,4 @@ export type {
   NotificationRow,
   TimelineEvent,
 };
+export type { WorkspaceValidation };

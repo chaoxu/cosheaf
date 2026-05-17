@@ -42,10 +42,10 @@ function extractLinks(body: string): DocumentLink[] {
   const out: DocumentLink[] = [];
   for (const ref of extractReferences(body)) {
     if (ref.kind === "ref" && ref.mode === "bracketed" && ref.key) {
-      out.push({ kind: "id", ref: ref.key, raw: `[@${ref.key}]` });
+      out.push({ kind: "id", ref: ref.key, raw: `[@${ref.key}]`, from: ref.from, to: ref.to });
     } else if (ref.kind === "link" && ref.href) {
       if (!/\.md(?:#[^)\s]+)?$/.test(ref.href)) continue;
-      out.push({ kind: "path", ref: ref.href, raw: ref.raw });
+      out.push({ kind: "path", ref: ref.href, raw: ref.raw, from: ref.from, to: ref.to });
     }
   }
   return out;

@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
 import type { AppEnv } from "../types.js";
+import { createSession, upsertUserFromForgejo } from "../users.js";
 import { auth } from "./auth.js";
 
 const config: Config = {
@@ -40,7 +41,7 @@ function appFor(db: Database.Database) {
     c.set("config", config);
     await next();
   });
-  app.route("/api/v1/auth", auth);
+  app.route("/api/v1", auth);
   return app;
 }
 
@@ -59,7 +60,7 @@ const failure = (status: number, body: unknown = {}): Response =>
   new Response(JSON.stringify(body), { status });
 
 function login(db: Database.Database, username: string, password: string) {
-  return appFor(db).request("/api/v1/auth/login", {
+  return appFor(db).request("/api/v1/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -74,7 +75,7 @@ async function waitForFetchCalls(count: number): Promise<void> {
   throw new Error(`expected ${count} fetch calls, saw ${fetchMock.mock.calls.length}`);
 }
 
-describe("POST /api/v1/auth/login", () => {
+describe("POST /api/v1/login", () => {
   it("201 from Forgejo → stores encrypted PAT and sets session cookie", async () => {
     const db = freshDb();
     fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-aaa" }));
@@ -185,12 +186,27 @@ describe("POST /api/v1/auth/login", () => {
 
   it("400 when username or password missing", async () => {
     const db = freshDb();
-    const res = await appFor(db).request("/api/v1/auth/login", {
+    const res = await appFor(db).request("/api/v1/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ username: "h" }),
     });
     expect(res.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/v1/me", () => {
+  it("returns null for a valid cookie session whose Forgejo PAT is missing", async () => {
+    const db = freshDb();
+    const user = upsertUserFromForgejo(db, "iris");
+    const session = createSession(db, user.id);
+
+    const res = await appFor(db).request("/api/v1/me", {
+      headers: { cookie: `session=${session}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ user: null });
   });
 });

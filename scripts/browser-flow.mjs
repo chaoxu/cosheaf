@@ -9,7 +9,7 @@ const chromium = await loadChromium();
 const URL = process.env.URL ?? "http://localhost:5173/";
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-flow.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "123123";
+const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const FLOW_PATH = process.env.COSHEAF_FLOW_PATH ?? `smoke-flow-${Date.now()}.md`;
 

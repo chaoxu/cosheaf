@@ -26,6 +26,7 @@ import {
   type SearchResult,
   type User,
   type Workspace,
+  type WorkspaceValidation,
 } from "./api";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -605,6 +606,79 @@ function BacklinksPanel({
   );
 }
 
+function LinterPanel({
+  result,
+  onRefresh,
+  onOpenPath,
+}: {
+  result: WorkspaceValidation | null;
+  onRefresh: () => void;
+  onOpenPath: (path: string, line: number | null) => void;
+}): ReactElement {
+  const broken = result?.broken_refs ?? [];
+  const orphans = result?.orphan_labels ?? [];
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-3 px-2 py-1">
+        <strong>Linter</strong>
+        <Button variant="ghost" size="icon" onClick={onRefresh} aria-label="Refresh linter">↻</Button>
+      </div>
+      {!result ? (
+        <div className={cn("px-3 py-2 text-xs", muted)}>Checking references…</div>
+      ) : broken.length === 0 && orphans.length === 0 ? (
+        <div className={cn("px-3 py-2 text-xs", muted)}>No reference issues.</div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {broken.length > 0 && (
+            <>
+              <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+                Broken references
+              </div>
+              <ul className="m-0 p-0">
+                {broken.map((r) => (
+                  <li key={`${r.source_id}-${r.target_label}`}>
+                    <FileRow
+                      onClick={() => onOpenPath(r.source_path, r.line)}
+                      testId={`lint-broken-${r.source_id}-${r.target_label}`}
+                    >
+                      <strong>{r.target_label}</strong>
+                      <span className={cn("text-xs", muted)}>
+                        {` in ${r.source_title ?? r.source_path}${r.line ? `:${r.line}` : ""}`}
+                      </span>
+                    </FileRow>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {orphans.length > 0 && (
+            <>
+              <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
+                Orphan ids
+              </div>
+              <ul className="m-0 p-0">
+                {orphans.map((o) => (
+                  <li key={o.id}>
+                    <FileRow
+                      onClick={() => onOpenPath(o.path, null)}
+                      testId={`lint-orphan-${o.id}`}
+                    >
+                      <strong>{o.id}</strong>
+                      <span className={cn("text-xs", muted)}>
+                        {` ${o.title ?? o.path}`}
+                      </span>
+                    </FileRow>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function InboxOrActivity({
   kind,
@@ -1062,7 +1136,7 @@ function WorkspaceView({
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [reviewPulls, setReviewPulls] = useState<PullReviewEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
-  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "settings">("pages");
+  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "linter" | "settings">("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
@@ -1070,6 +1144,8 @@ function WorkspaceView({
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [notifs, setNotifs] = useState<NotificationRow[]>([]);
+  const [validation, setValidation] = useState<WorkspaceValidation | null>(null);
+  const [pendingScroll, setPendingScroll] = useState<{ path: string; line: number } | null>(null);
   const [viewingIssue, setViewingIssue] = useState<number | null>(null);
   const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newIssueTitle, setNewIssueTitle] = useState("");
@@ -1238,6 +1314,13 @@ function WorkspaceView({
     },
     [workspace.slug],
   );
+
+  const refreshValidation = useCallback(() => {
+    api
+      .validateWorkspace(workspace.slug)
+      .then(setValidation)
+      .catch(() => setValidation({ broken_refs: [], orphan_labels: [] }));
+  }, [workspace.slug]);
 
   // Approvals only exist for an open/closed PR. We pass the PR number when we
   // know we're inside a review; otherwise clear.
@@ -1572,6 +1655,11 @@ function WorkspaceView({
     };
   }, [sidebarView, workspace.slug]);
 
+  useEffect(() => {
+    if (sidebarView !== "linter") return;
+    refreshValidation();
+  }, [sidebarView, refreshValidation]);
+
   const openPullReview = useCallback(
     (entry: PullReviewEntry) => {
       setReviewingPullNumber(entry.number);
@@ -1862,7 +1950,7 @@ function WorkspaceView({
               ☰
             </Button>
           </div>
-          <div className={cn("flex items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
+          <div className={cn("flex flex-wrap items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
             <SidebarTab
               active={sidebarView === "pages"}
               onClick={() => setSidebarView("pages")}
@@ -1894,6 +1982,13 @@ function WorkspaceView({
             >
               Outline
             </SidebarTab>
+            <SidebarTab
+              active={sidebarView === "linter"}
+              onClick={() => setSidebarView("linter")}
+              testId="sidebar-tab-linter"
+            >
+              Linter
+            </SidebarTab>
             {workspace.role === "admin" && (
               <SidebarTab
                 active={sidebarView === "settings"}
@@ -1912,6 +2007,21 @@ function WorkspaceView({
             <OutlinePanel
               entries={outline}
               onPick={(line) => editorRef.current?.scrollToLine(line, { center: true })}
+            />
+          ) : sidebarView === "linter" ? (
+            <LinterPanel
+              result={validation}
+              onRefresh={refreshValidation}
+              onOpenPath={(path, line) => {
+                setViewingIssue(null);
+                setNewIssueOpen(false);
+                if (line && path === openPath) {
+                  editorRef.current?.scrollToLine(line, { center: true });
+                } else if (line) {
+                  setPendingScroll({ path, line });
+                }
+                openPathFromSource(path);
+              }}
             />
           ) : sidebarView === "inbox" || sidebarView === "activity" ? (
             <InboxOrActivity
@@ -2237,6 +2347,10 @@ function WorkspaceView({
                     editorRef.current = editor;
                     setOutline(editor.outline.get());
                     editor.outline.subscribe(setOutline);
+                    if (pendingScroll && pendingScroll.path === openPath) {
+                      editor.scrollToLine(pendingScroll.line, { center: true });
+                      setPendingScroll(null);
+                    }
                   }}
                   onChange={(next) => {
                     // Just mirror content for save payload. Dirty tracking

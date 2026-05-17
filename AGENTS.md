@@ -180,7 +180,7 @@ server/
   routes/
     auth.ts        # login/logout/me
     workspaces.ts  # list/create workspaces
-    files.ts       # tree/file get/put/delete, search, backlinks, documents list
+    files.ts       # tree/file get/put/delete, search, backlinks, validation
     pulls.ts       # pull request + review API (merge, reviews, comments, pending reviews, settings)
     branches.ts    # branch list/create/delete
     issues.ts      # issue UI projections, comments, timeline, dependencies

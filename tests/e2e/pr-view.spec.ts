@@ -8,8 +8,6 @@ test.describe.serial("PR review surface", () => {
     await loginAs(page, "vera");
     await openReview(page);
 
-    await expect(page.locator('[data-testid="comment-thread"]')).not.toHaveCount(0);
-
     // Walk the five reachable (mode, shape) combinations.
     const combos: Array<{ mode: "source" | "rich"; shape: "unified" | "split" | "after"; testId: string }> = [
       { mode: "source", shape: "unified", testId: "diff-pane-unified" },

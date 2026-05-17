@@ -27,6 +27,7 @@
     "/w/:slug/tree": "frontmatter-parsed page tree",
     "/w/:slug/search": "SQLite FTS sidecar",
     "/w/:slug/backlinks": "SQLite backlink sidecar",
+    "/w/:slug/validation": "SQLite backlink/doc_map consistency checks for broken references and orphan ids",
     "/w/:slug/suggest": "Cosheaf document id autocomplete",
     "/w/:slug/events": "workspace SSE",
     "/w/:slug/branches": "user branch prefix and branch cleanup gates",

@@ -110,6 +110,13 @@ function migrateUsersToForgejoAuth(db: Database.Database): void {
   }
 }
 
+function migrateBacklinksLine(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info('backlinks')").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "line")) {
+    db.exec("ALTER TABLE backlinks ADD COLUMN line INTEGER;");
+  }
+}
+
 function migrateDropDocKindColumns(db: Database.Database): void {
   const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
   const has = (name: string): boolean => docMapCols.some((c) => c.name === name);
@@ -166,6 +173,7 @@ export function getDb(config: Config): Database.Database {
   migrateDropDocKindColumns(db);
   migrateDropIssuesSidecar(db);
   migrateUsersToForgejoAuth(db);
+  migrateBacklinksLine(db);
   dbInstance = db;
   return db;
 }

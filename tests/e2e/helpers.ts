@@ -6,7 +6,7 @@ export async function loginAs(page: Page, username: string) {
   await page.goto("/");
   const inputs = page.locator("form input");
   await inputs.nth(0).fill(username);
-  await inputs.nth(1).fill("123123");
+  await inputs.nth(1).fill("Cosheaf123!");
   await page.locator('button:has-text("Sign in")').click();
   await page.getByTestId("workspace-flushing-coin").waitFor({ state: "visible" });
   await page.getByTestId("workspace-flushing-coin").click();
@@ -39,11 +39,11 @@ export async function createPrAsMeri(page: Page): Promise<{ branch: string; prNu
     await fetch("/api/v1/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ username: "meri", password: "123123" }),
+      body: JSON.stringify({ username: "meri", password: "Cosheaf123!" }),
     });
   });
   const fileName = `e2e-${Date.now()}.md`;
-  const branch = `user/cs-meri/e2e-${Date.now()}`;
+  const branch = `user/meri/e2e-${Date.now()}`;
   const result = await page.evaluate(
     async ({ name, br }) => {
       const r = await fetch(

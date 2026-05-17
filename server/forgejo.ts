@@ -531,9 +531,20 @@ export class Forgejo {
   async listPullComments(
     owner: string, repo: string, index: number,
   ): Promise<ForgejoPullReviewComment[]> {
-    return this.req<ForgejoPullReviewComment[]>(
-      `/api/v1/repos/${owner}/${repo}/pulls/${index}/comments`,
-    );
+    try {
+      return await this.req<ForgejoPullReviewComment[]>(
+        `/api/v1/repos/${owner}/${repo}/pulls/${index}/comments`,
+      );
+    } catch (err) {
+      if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+      const reviews = await this.listReviews(owner, repo, index);
+      const nested = await Promise.all(
+        reviews
+          .filter((r) => r.id > 0)
+          .map((r) => this.listReviewComments(owner, repo, index, r.id).catch(() => [])),
+      );
+      return nested.flat();
+    }
   }
 
   // Forgejo doesn't expose PATCH on /pulls/.../reviews/{id}/comments/{cid}
@@ -698,17 +709,26 @@ export class Forgejo {
 
   // ---------- notifications ----------
 
-  // List unread notification threads for the user this client is bound to, scoped
-  // to a single repository. Forgejo returns subjects of type "Issue"/"Pull"/
-  // "Commit"; we filter to Issue/Pull at the route layer.
+  // List notification threads for the user this client is bound to, scoped to
+  // a single repository. Filters map directly to Forgejo's repo notification
+  // query params.
   async listRepoNotifications(
-    owner: string, repo: string, opts: { all?: boolean; limit?: number } = {},
+    owner: string,
+    repo: string,
+    opts: {
+      all?: boolean;
+      limit?: number;
+      statusTypes?: Array<"unread" | "read" | "pinned">;
+      subjectTypes?: Array<"Issue" | "Pull" | "Commit" | "Repository">;
+    } = {},
   ): Promise<ForgejoNotificationThread[]> {
     return this.req<ForgejoNotificationThread[]>(
       `/api/v1/repos/${owner}/${repo}/notifications`,
       {
         query: {
           all: opts.all ? "true" : undefined,
+          "status-types": opts.statusTypes?.join(","),
+          "subject-type": opts.subjectTypes?.join(","),
           limit: opts.limit ?? 50,
         },
       },

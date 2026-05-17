@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS backlinks (
   src_path TEXT NOT NULL,
   target_id TEXT,
   target_label TEXT NOT NULL,
+  line INTEGER,
   PRIMARY KEY (workspace_id, src_id, target_label)
 );
 CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks (workspace_id, target_id);

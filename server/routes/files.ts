@@ -10,6 +10,7 @@ import {
   MAX_ASSET_DISPLAY,
   userBranchPrefix,
 } from "../../shared/conventions.js";
+import type { WorkspaceValidation } from "../../shared/validation.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -363,6 +364,47 @@ files.get("/:slug/backlinks", (c) => {
     )
     .all(ws.id, id);
   return c.json({ backlinks: rows });
+});
+
+files.get("/:slug/validation", (c) => {
+  const ws = c.get("workspace");
+  const db = c.get("db");
+  const brokenRefs = db
+    .prepare(
+      `SELECT b.src_id AS source_id,
+              b.src_path AS source_path,
+              src.title AS source_title,
+              b.target_id AS target_id,
+              b.target_label AS target_label,
+              b.line AS line
+         FROM backlinks b
+         LEFT JOIN doc_map src
+           ON src.workspace_id = b.workspace_id
+          AND src.cosheaf_id = b.src_id
+         LEFT JOIN doc_map target
+           ON target.workspace_id = b.workspace_id
+          AND target.cosheaf_id = b.target_id
+        WHERE b.workspace_id = ?
+          AND (b.target_id IS NULL OR target.cosheaf_id IS NULL)
+        ORDER BY b.src_path, b.line, b.target_label`,
+    )
+    .all(ws.id) as WorkspaceValidation["broken_refs"];
+  const orphanLabels = db
+    .prepare(
+      `SELECT d.cosheaf_id AS id,
+              d.forgejo_id AS path,
+              d.title AS title
+         FROM doc_map d
+         LEFT JOIN backlinks b
+           ON b.workspace_id = d.workspace_id
+          AND b.target_id = d.cosheaf_id
+          AND b.src_id != d.cosheaf_id
+        WHERE d.workspace_id = ?
+          AND b.src_id IS NULL
+        ORDER BY d.forgejo_id`,
+    )
+    .all(ws.id) as WorkspaceValidation["orphan_labels"];
+  return c.json({ broken_refs: brokenRefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
 });
 
 files.get("/:slug/events", (c) => {
