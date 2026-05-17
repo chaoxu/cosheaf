@@ -42,6 +42,7 @@ interface WorkspaceSeed {
   slug?: string;
   name?: string;
   forgejo_repo?: string;
+  default_md_format?: string;
 }
 
 // Insert a workspaces row with sensible defaults. Idempotent on (id) so
@@ -53,6 +54,12 @@ export function seedTestWorkspace(db: Database.Database, init: WorkspaceSeed = {
     name: init.name ?? "W",
     forgejo_repo: init.forgejo_repo ?? "repo",
   };
+  if (init.default_md_format !== undefined) {
+    db.prepare(
+      "INSERT OR IGNORE INTO workspaces (id, slug, name, forgejo_repo, default_md_format, created_at) VALUES (?, ?, ?, ?, ?, 0)",
+    ).run(row.id, row.slug, row.name, row.forgejo_repo, init.default_md_format);
+    return;
+  }
   db.prepare(
     "INSERT OR IGNORE INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (?, ?, ?, ?, 0)",
   ).run(row.id, row.slug, row.name, row.forgejo_repo);

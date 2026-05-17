@@ -3,16 +3,14 @@
 // DB and the per-username serialization map is implicit (process-global,
 // cleared between tests because each test uses a fresh username).
 
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
 import type { AppEnv } from "../types.js";
 import { createSession, upsertUserFromForgejo } from "../users.js";
 import { auth } from "./auth.js";
+import { freshTestDb } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-auth-test",
@@ -26,12 +24,7 @@ const config: Config = {
 };
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-auth-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  return db;
+  return freshTestDb("cosheaf-auth-");
 }
 
 function appFor(db: Database.Database) {

@@ -3,10 +3,7 @@
 // permission cache is pre-seeded per test so we exercise only the
 // request actually under test against the mock.
 
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
@@ -19,6 +16,7 @@ import { seedAuthUser } from "../test-helpers.js";
 import { pulls } from "./pulls.js";
 import { branches } from "./branches.js";
 import { COFLAT_FORMAT_ID, DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
+import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-pulls-test",
@@ -32,12 +30,7 @@ const config: Config = {
 };
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-pulls-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  return db;
+  return freshTestDb("cosheaf-pulls-");
 }
 
 function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
@@ -45,9 +38,7 @@ function seedUser(db: Database.Database, id: number, username: string, role: Rol
 }
 
 function seedWorkspace(db: Database.Database): void {
-  db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
-  ).run();
+  seedTestWorkspace(db);
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {

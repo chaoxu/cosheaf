@@ -1,7 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
@@ -12,6 +9,7 @@ import type { Role } from "../../shared/roles.js";
 import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { forgejoPassthrough } from "./forgejo-passthrough.js";
+import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-passthrough-test",
@@ -25,12 +23,7 @@ const config: Config = {
 };
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-passthrough-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  return db;
+  return freshTestDb("cosheaf-passthrough-");
 }
 
 function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
@@ -41,9 +34,7 @@ function seedUser(db: Database.Database, id: number, username: string, role: Rol
 }
 
 function seedWorkspace(db: Database.Database): void {
-  db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
-  ).run();
+  seedTestWorkspace(db);
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {

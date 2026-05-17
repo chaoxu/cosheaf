@@ -1,6 +1,3 @@
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +10,7 @@ import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-files-test",
@@ -26,14 +24,8 @@ const config: Config = {
 };
 
 function freshDb(): Database.Database {
-  const dir = mkdtempSync(path.join(tmpdir(), "cosheaf-files-"));
-  const db = new Database(path.join(dir, "test.sqlite"));
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(path.join(__dirname, "..", "schema.sql"), "utf8"));
-  db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, default_md_format, created_at) VALUES (1, 'w', 'W', 'repo', ?, 0)",
-  ).run(COFLAT_FORMAT_ID);
+  const db = freshTestDb("cosheaf-files-");
+  seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
   return db;
 }
 
