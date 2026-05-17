@@ -79,10 +79,21 @@ branches.post("/:slug/branches", async (c) => {
   return c.json({ name: body.name }, 201);
 });
 
-branches.delete("/:slug/branches/:name", async (c) => {
+// `:name{.+}` captures multi-segment names so `user/chao/foo` works whether
+// or not the caller URL-encodes the slashes. Same validation shape as the
+// POST handler — never allow `main`, traversal, or punctuation outside the
+// allowlist.
+branches.delete("/:slug/branches/:name{.+}", async (c) => {
   const name = c.req.param("name");
-  if (!name || name === "main")
-    return c.json({ error: "branch name required (not main)", code: "validation" }, 400);
+  if (
+    !name ||
+    !/^[A-Za-z0-9._/-]+$/.test(name) ||
+    name === "main" ||
+    name.includes("..") ||
+    name.startsWith("/") ||
+    name.endsWith("/")
+  )
+    return c.json({ error: "valid branch name required (not main)", code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
   await deleteBranchQuietly(fj, owner, repo, name);
   invalidateRepoTrees(owner, repo);

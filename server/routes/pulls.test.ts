@@ -320,6 +320,40 @@ describe("pulls + branches routes", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("DELETE /branches/:name handles slash-containing names", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock.mockResolvedValueOnce(empty(204));
+      const res = await appFor(db).request("/api/v1/w/w/branches/user/alice/wip-2", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      // Upstream Forgejo URL contains the full multi-segment name (URL-encoded
+      // per Forgejo's API path-param convention).
+      expect(String(fetchMock.mock.calls[0][0])).toContain(
+        "/branches/user%2Falice%2Fwip-2",
+      );
+    });
+
+    it("DELETE /branches refuses main and invalid name shapes", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      // Single-segment "main" and a space-containing name are both rejected
+      // by the route's validation (400). Path-traversal forms with `..` are
+      // resolved by the URL parser before the route handler sees them, so
+      // we don't separately assert on them.
+      for (const bad of ["main", "a%20b", "user/foo..bar"]) {
+        const res = await appFor(db).request(
+          `/api/v1/w/w/branches/${bad}`,
+          { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
+        );
+        expect(res.status, `expected 400 for ${bad}`).toBe(400);
+      }
+    });
   });
 
   describe("approvals math", () => {
