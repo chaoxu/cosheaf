@@ -699,6 +699,7 @@ function InboxOrActivity({
   onMarkNotifRead,
   onMarkAllNotifsRead,
   onNewIssue,
+  canWrite,
 }: {
   kind: "inbox" | "activity";
   reviewPulls: readonly PullReviewEntry[];
@@ -718,6 +719,7 @@ function InboxOrActivity({
   onMarkNotifRead: (id: number) => void;
   onMarkAllNotifsRead: () => void;
   onNewIssue: () => void;
+  canWrite: boolean;
 }): ReactElement {
   const isInbox = kind === "inbox";
   // In Inbox+Mine: only PRs awaiting your review.
@@ -754,15 +756,17 @@ function InboxOrActivity({
             </div>
           )}
           <Button variant="ghost" size="icon" onClick={onRefresh} aria-label="Refresh">↻</Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onNewIssue}
-            data-testid="new-issue"
-            aria-label="New issue"
-          >
-            + Issue
-          </Button>
+          {canWrite && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onNewIssue}
+              data-testid="new-issue"
+              aria-label="New issue"
+            >
+              + Issue
+            </Button>
+          )}
         </div>
       </div>
       <div className="px-2 pb-1">
@@ -2099,6 +2103,7 @@ function WorkspaceView({
                 setViewingIssue(null);
                 setNewIssueOpen(true);
               }}
+              canWrite={workspace.role !== "read"}
             />
           ) : reviewingPullNumber && reviewState.diff ? (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -2196,17 +2201,19 @@ function WorkspaceView({
                 <>
                   <div className="flex items-center justify-between gap-3 px-2 py-1">
                     <strong>Files</strong>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      data-testid="new-file-toggle"
-                      onClick={() => setCreating((v) => !v)}
-                      aria-label={creating ? "Cancel" : "New file"}
-                    >
-                      {creating ? "−" : "+"}
-                    </Button>
+                    {workspace.role !== "read" && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        data-testid="new-file-toggle"
+                        onClick={() => setCreating((v) => !v)}
+                        aria-label={creating ? "Cancel" : "New file"}
+                      >
+                        {creating ? "−" : "+"}
+                      </Button>
+                    )}
                   </div>
-                  {creating && (
+                  {workspace.role !== "read" && creating && (
                     <form onSubmit={create} className="flex gap-2 px-2 pb-2">
                       <NewFilePathInput value={newPath} onChange={setNewPath} />
                       <Button type="submit" size="sm">
@@ -2510,15 +2517,17 @@ function WorkspaceView({
                       {editorMode === "rich" ? "Source" : "Rich"}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={save}
-                    disabled={!dirty || busy || !!reviewingPullNumber}
-                    className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
-                  >
-                    Save
-                  </button>
-                  {currentBranchName && (
+                  {workspace.role !== "read" && (
+                    <button
+                      type="button"
+                      onClick={save}
+                      disabled={!dirty || busy || !!reviewingPullNumber}
+                      className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  )}
+                  {currentBranchName && workspace.role !== "read" && (
                     <>
                       <span data-testid="active-branch-name" className="hidden">
                         {currentBranchName}
