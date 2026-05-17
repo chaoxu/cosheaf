@@ -48,13 +48,12 @@ function refFromQuery(c: import("hono").Context<AppEnv>): string {
 async function ensureBranch(
   c: import("hono").Context<AppEnv>,
   branch: string,
-): Promise<"ok" | "forbidden"> {
-  if (branch === "main") return "ok";
+): Promise<void> {
+  if (branch === "main") return;
   const { fj, owner, repo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, branch);
-  if (exists) return "ok";
+  if (exists) return;
   await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
-  return "ok";
 }
 
 function likeEscape(s: string): string {
@@ -181,9 +180,7 @@ files.put("/:slug/file", async (c) => {
   if (body?.content === undefined)
     return c.json({ error: "content required", code: "validation" }, 400);
 
-  const ensured = await ensureBranch(c, branch);
-  if (ensured === "forbidden")
-    return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
+  await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
@@ -235,9 +232,7 @@ files.post("/:slug/assets", async (c) => {
   if (file.size > MAX_ASSET_BYTES)
     return c.json({ error: `asset exceeds ${MAX_ASSET_DISPLAY}`, code: "validation" }, 400);
   const { fj, owner, repo } = c.get("repoCtx");
-  const ensured = await ensureBranch(c, branch);
-  if (ensured === "forbidden")
-    return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
+  await ensureBranch(c, branch);
   // Random-prefixed under assets/ so two simultaneous uploads of the same
   // filename don't collide. We don't try to dedupe by content hash here;
   // git already deduplicates blobs server-side.
@@ -289,9 +284,7 @@ files.delete("/:slug/file", async (c) => {
   const branch = refFromQuery(c);
   if (branch === "main")
     return c.json({ error: "branch required (cannot delete on main)", code: "validation" }, 400);
-  const ensured = await ensureBranch(c, branch);
-  if (ensured === "forbidden")
-    return c.json({ error: "branch name must be `user/<you>/...`", code: "forbidden" }, 403);
+  await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
   const meta = await fj.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json({ error: "not found", code: "not_found" }, 404);

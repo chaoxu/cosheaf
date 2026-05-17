@@ -65,7 +65,7 @@ async function seedReviewablePr(): Promise<void> {
         body: JSON.stringify({
           path: comment.path,
           line: comment.line,
-          side: "new",
+          side: "head",
           body: comment.body,
         }),
       },
