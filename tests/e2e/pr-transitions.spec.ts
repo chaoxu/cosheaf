@@ -3,7 +3,7 @@ import { createPrAsMeri, loginAs } from "./helpers";
 
 // PR review state lives on Forgejo now. Each transition consumes a PR, so we
 // open a fresh one per test and assert the post-transition state via the
-// Forgejo-shape /pulls/:n endpoint instead of poking SQLite.
+// Forgejo passthrough instead of poking SQLite.
 test.describe.serial("PR review state transitions", () => {
   test("Approve transitions a fresh PR to merged", async ({ page }) => {
     const { prNumber } = await createPrAsMeri(page);
@@ -40,7 +40,7 @@ test.describe.serial("PR review state transitions", () => {
     }, prNumber);
     expect(merged).toBe(200);
     const state = await page.evaluate(async (n) => {
-      const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}`);
+      const r = await fetch(`/api/v1/w/flushing-coin/forgejo/pulls/${n}`);
       return (await r.json()) as { state: string; merged: boolean };
     }, prNumber);
     expect(state.merged).toBe(true);

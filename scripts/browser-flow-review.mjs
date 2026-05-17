@@ -76,9 +76,9 @@ try {
 
   // Locate the just-opened PR number via Forgejo-shape API on the same origin.
   const prNumber = await meri.evaluate(async (branch) => {
-    const r = await fetch("/api/v1/w/flushing-coin/pulls?state=open");
-    const { pulls } = await r.json();
-    const found = pulls.find((p) => p.head_ref === branch);
+    const r = await fetch("/api/v1/w/flushing-coin/forgejo/pulls?state=open");
+    const pulls = await r.json();
+    const found = pulls.find((p) => p.head?.ref === branch);
     return found ? found.number : null;
   }, meriBranch);
   if (!prNumber) throw new Error("could not locate PR by head_ref after open");
@@ -125,9 +125,9 @@ try {
   await meri.getByTestId("open-pull-request").click();
   await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
   const prNumber2 = await meri.evaluate(async (branch) => {
-    const r = await fetch("/api/v1/w/flushing-coin/pulls?state=open");
-    const { pulls } = await r.json();
-    const found = pulls.find((p) => p.head_ref === branch);
+    const r = await fetch("/api/v1/w/flushing-coin/forgejo/pulls?state=open");
+    const pulls = await r.json();
+    const found = pulls.find((p) => p.head?.ref === branch);
     return found ? found.number : null;
   }, meriBranch2);
   if (!prNumber2) throw new Error("could not locate PR2");

@@ -10,7 +10,7 @@ import type { ForgejoIssue } from "../forgejo.js";
 
 export const webhooks = new Hono<AppEnv>();
 
-interface WorkspaceRow { id: number; slug: string; forgejo_repo: string }
+interface WorkspaceRow { id: number; slug: string; forgejo_repo: string; default_md_format: string }
 
 const workspaceQueues = new Map<number, Promise<void>>();
 
@@ -32,7 +32,7 @@ function workspaceForRepo(db: import("better-sqlite3").Database, repoFullName: s
   return (
     (db
       .prepare(
-        "SELECT id, slug, forgejo_repo FROM workspaces WHERE forgejo_repo = ?",
+        "SELECT id, slug, forgejo_repo, default_md_format FROM workspaces WHERE forgejo_repo = ?",
       )
       .get(name) as WorkspaceRow | undefined) ?? null
   );
@@ -129,7 +129,12 @@ webhooks.post("/forgejo", async (c) => {
             failures.push(`${r.path}: ${r.error}`);
             continue;
           }
-          indexPage(db, { workspaceId: ws.id, filePath: r.path, bodyText: r.body });
+          indexPage(db, {
+            workspaceId: ws.id,
+            filePath: r.path,
+            bodyText: r.body,
+            formatId: ws.default_md_format,
+          });
         }
         if (failures.length > 0) {
           // Don't throw — that would unwind the dedupe row and provoke a Forgejo

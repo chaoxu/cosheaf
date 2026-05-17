@@ -50,6 +50,7 @@ const ALLOWED: Array<{ prefix: string; methods: ReadonlySet<Method> }> = [
   { prefix: "commits",          methods: new Set<Method>(["GET"]) },
   { prefix: "contents",         methods: new Set<Method>(["GET"]) },
   { prefix: "reviews",          methods: new Set<Method>(["GET", "POST"]) },
+  { prefix: "markdown",         methods: new Set<Method>(["POST"]) },
   { prefix: "activities/feeds", methods: new Set<Method>(["GET"]) },
   { prefix: "notifications",    methods: new Set<Method>(["GET", "PUT"]) },
 ];
