@@ -5,7 +5,7 @@ hold the canonical markdown files, branches, pull requests, reviews, issues,
 and collaborator memberships; SQLite is a derived, rebuildable sidecar index
 for fast reads, sessions, and local auth state.
 
-The long-term direction is a thin knowledge-base UI over a Forgejo/Gitea-style
+The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
 Coflat rendering and indexing, not a separate CMS with its own workflow model.
 When adding features, prefer a direct mapping to Forgejo concepts and APIs
@@ -47,7 +47,7 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, and sessions/tokens. Memberships, branches, and pull
+  links, FTS index, and browser sessions. Memberships, branches, and pull
   requests live on Forgejo and are read on demand. The page index is
   rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
@@ -65,7 +65,8 @@ architectural pivot and is substantially executed. Future work should
 move in small, reversible steps:
 
 - Make editing branch-native: use real branch names as the primary identity for
-  work in progress; keep local branch ids only as transitional/cache details.
+  work in progress; keep local branch ids, where still present, as cache
+  details.
 - Make review pull-request-native: prefer PR numbers, head/base branches,
   review states, review comments, and Forgejo merge behavior over change-centric
   Cosheaf vocabulary.
@@ -73,32 +74,58 @@ move in small, reversible steps:
   state, dependencies/blocks, comments, and timeline should be mediated only
   where Cosheaf adds knowledge-base rendering or links.
 - Keep API shapes Forgejo-like where possible (`/branches`, `/pulls`,
-  `/issues`, file contents) and mark older compatibility wrappers as
-  transitional when replacing them.
+  `/issues`, file contents) and retire older wrappers when the Forgejo-like
+  route is in place.
 - Treat webhooks and repair/reindex commands as the reconciliation path from
   Forgejo into SQLite.
+- Review/simplify checklist for Forgejo-shell issues: prefer direct Forgejo
+  concepts and APIs; use passthrough for 1:1 Forgejo operations; keep typed
+  routes only where Cosheaf adds document/index behavior, validation, SSE, or
+  UI response shaping; delete old token and wrapper language as the
+  Forgejo-native path lands.
 
 Forgejo-only: Gitea is not a supported target. Don't add Gitea-compatibility
 hedging or version-sensitivity caveats; assume Forgejo behavior.
 
-### Typed routes vs Forgejo passthrough
+### Agent API and typed routes
 
-Cosheaf exposes two HTTP surfaces; pick by consumer, not by endpoint:
+Cosheaf exposes two HTTP surfaces. Agents should start with the Forgejo
+passthrough API for ordinary Forgejo operations, and use typed routes only when
+they need Cosheaf behavior on top of Forgejo.
 
-- **Typed routes** (`routes/pulls.ts`, `routes/issues.ts`, `routes/files.ts`,
-  `routes/branches.ts`, `routes/notifications.ts`) are the **human-UI
-  surface**. Add to them when a route needs validation, response shaping for
-  the SPA, sidecar integration, SSE events, or cosheaf-specific gates
-  (e.g. `requireAdminFresh` on merge).
 - **Forgejo passthrough** (`/api/v1/w/:slug/forgejo/*`) is the **agent
-  surface**. Forgejo-trained bots reach Forgejo through it with cosheaf
-  handling auth (`Bearer cs_…` → `Sudo:`) and workspace scoping. Every call
-  is audited in `forgejo_passthrough_log`.
+  default**. Forgejo-trained bots reach Forgejo through it with direct
+  `Authorization: Bearer <Forgejo PAT>` auth; Cosheaf validates the PAT,
+  enforces workspace scoping, and audits every call in
+  `forgejo_passthrough_log`. Use it first for branch, pull request, issue,
+  comment, label, milestone, review, notification, and file-content operations
+  that are naturally Forgejo-shaped.
+- **Typed routes** (`routes/pulls.ts`, `routes/issues.ts`, `routes/files.ts`,
+  `routes/branches.ts`, `routes/notifications.ts`) are for the SPA and for
+  Cosheaf-specific behavior. Keep or add them when a route needs validation,
+  response shaping, sidecar integration, SSE events, or Cosheaf-specific gates
+  (e.g. `requireAdminFresh` on merge).
+
+Typed routes remain recommended for Cosheaf document/index behavior:
+
+- Use `routes/files.ts` for page reads/writes that should synchronously apply
+  Coflat frontmatter/id handling, path validation, index updates, backlinks,
+  FTS, and browser events.
+- Use typed search, backlinks, document-list, and event routes when callers
+  need the SQLite sidecar index rather than raw Forgejo repository contents.
+- Use typed merge/admin routes where Cosheaf adds freshness checks or other
+  UI safety gates before calling Forgejo.
+
+File-write boundary: a Markdown write through the Forgejo contents API,
+including via passthrough, is an external repository write from Cosheaf's point
+of view. Webhooks and `pnpm cli workspace reindex <slug>` reconcile those
+writes into SQLite. A Markdown write that needs immediate Cosheaf
+frontmatter/index/SSE behavior should go through the typed file route.
 
 Rules of thumb:
 
 - Don't add a typed wrapper that's a 1:1 Forgejo proxy with no logic — the
-  SPA can fetch through passthrough instead.
+  SPA or agent can fetch through passthrough instead.
 - Don't expose a path through passthrough when a typed route guards it
   (e.g. `pulls/:n/merge` is forbidden in passthrough because the typed
   route runs `requireAdminFresh`).
@@ -127,7 +154,7 @@ server/
   index.ts        # Hono entrypoint, routes mounted under /api
   db.ts           # config + better-sqlite3 instance
   schema.sql      # full DB schema (executed on every startup; CREATE IF NOT EXISTS)
-  users.ts        # users, sessions, tokens, argon2 hashing, Forgejo proxy users
+  users.ts        # users, sessions, argon2 hashing, Forgejo PAT-backed auth
   middleware.ts   # requireAuth, requireMembership(slug)
   frontmatter.ts  # parse/serialize YAML frontmatter
   indexer.ts      # indexPage(): parse → upsert doc_map → reindex backlinks/tags/FTS
@@ -136,7 +163,6 @@ server/
   cli.ts          # `pnpm cli` user/workspace/seed/reindex commands
   routes/
     auth.ts        # login/logout/me
-    tokens.ts      # personal API tokens
     workspaces.ts  # list/create workspaces
     files.ts       # tree/file get/put/delete, search, backlinks, documents list
     pulls.ts       # pull request + review API (merge, reviews, comments, drafts, settings)
@@ -192,9 +218,8 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 
 ## Data model
 
-- `users(id, username, password_hash, forgejo_username, created_at)`
+- `users(id, username, forgejo_token_ciphertext, created_at)`
 - `sessions(id, user_id, expires_at)` — cookie sessions
-- `tokens(id, user_id, name, token_hash)` — personal API tokens (`Bearer cs_…`)
 - `workspaces(id, slug, name, forgejo_repo)` — one Forgejo repo per workspace
 - `doc_map(workspace_id, cosheaf_id, forgejo_id, title, created_at)` — pages only; the prior polymorphic `doc_type`/`forgejo_kind` columns were dropped.
 - `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
