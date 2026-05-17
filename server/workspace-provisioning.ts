@@ -162,15 +162,20 @@ export async function ensureWorkspacePermissions(
   }
 
   try {
+    // The whitelist needs both the workspace owner (direct-push from the UI)
+    // and `config.forgejoOwner` (the admin identity used by provisioning and
+    // the webhook handler — without it, ensureWorkspaceFile below can't seed
+    // the initial .gitattributes / hello.md to main).
+    const whitelist = Array.from(new Set([forgejoUsername, config.forgejoOwner]));
     const existing = await forgejo.getBranchProtection(config.forgejoOwner, repoName, "main");
     if (!existing) {
       await forgejo.createBranchProtection(config.forgejoOwner, repoName, {
         branch_name: "main",
         required_approvals: 1,
-        push_whitelist_usernames: [forgejoUsername],
+        push_whitelist_usernames: whitelist,
       });
     } else {
-      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, repoName, "main", [forgejoUsername]);
+      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, repoName, "main", whitelist);
     }
   } catch (err) {
     console.warn(`branch protection setup failed: ${(err as Error).message}`);
