@@ -104,6 +104,7 @@ DESIGN.md      Product philosophy and trust model
 pnpm dev:all          # API + Vite together (recommended)
 pnpm setup:dev        # Seed chao / Flushing Coin / Hello for local testing
 pnpm smoke            # Headless browser smoke test against the dev fixture
+                      # For a full manual walkthrough see SMOKE_CHECKLIST.md
 pnpm server           # API only (port 3030)
 pnpm dev              # Vite only
 pnpm build            # Vite production build
