@@ -8,7 +8,7 @@ import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { notifications } from "./notifications.js";
-import { freshTestDb, responseEmpty, responseOk, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-notifications-test",
@@ -40,8 +40,6 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   return app;
 }
 
-const ok = responseOk;
-const empty = responseEmpty;
 
 const fetchMock = vi.fn();
 beforeEach(() => {

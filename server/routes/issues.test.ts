@@ -8,7 +8,7 @@ import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { issues } from "./issues.js";
-import { freshTestDb, responseOk, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseOk as ok, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-issues-test",
@@ -40,7 +40,6 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   return app;
 }
 
-const ok = responseOk;
 
 function forgejoIssue(
   number: number,

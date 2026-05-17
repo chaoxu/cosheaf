@@ -22,18 +22,18 @@ afterEach(() => {
   }
 });
 
-const SCHEMA_PATH = path.join(import.meta.dirname, "..", "schema.sql");
+const SCHEMA = readFileSync(path.join(import.meta.dirname, "..", "schema.sql"), "utf8");
 
-// Build a fresh, isolated SQLite under a tmpdir. WAL + FK on. Schema
-// loaded from server/schema.sql. The caller seeds rows it needs;
-// seedTestWorkspace() is the common one and lives alongside.
+// Build a fresh, isolated SQLite under a tmpdir. WAL + FK on. The caller
+// seeds rows it needs; seedTestWorkspace() is the common one and lives
+// alongside.
 export function freshTestDb(prefix = "cosheaf-test-"): Database.Database {
   const dir = mkdtempSync(path.join(tmpdir(), prefix));
   const db = new Database(path.join(dir, "test.sqlite"));
   openDbs.push({ db, dir });
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  db.exec(readFileSync(SCHEMA_PATH, "utf8"));
+  db.exec(SCHEMA);
   return db;
 }
 
