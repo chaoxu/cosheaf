@@ -4,39 +4,24 @@
 // per-repo on push so cached entries can't outlast their source.
 
 import type { ForgejoTreeEntry } from "./forgejo-types.js";
-
-interface Entry {
-  tree: ForgejoTreeEntry[];
-  insertedAt: number;
-}
+import { TTLCache } from "./ttl-cache.js";
 
 // Soft cap: pulls.test.ts and the SPA both keep cache pressure low; the cap
 // is here to prevent runaway growth from a script hammering different refs.
 const MAX_ENTRIES = 256;
 const TTL_MS = 5 * 60_000;
-const cache = new Map<string, Entry>();
+const cache = new TTLCache<string, ForgejoTreeEntry[]>(TTL_MS, { maxEntries: MAX_ENTRIES });
 
 function key(owner: string, repo: string, ref: string): string {
   return `${owner}|${repo}|${ref}`;
 }
 
 export function getCachedTree(owner: string, repo: string, ref: string): ForgejoTreeEntry[] | undefined {
-  const entry = cache.get(key(owner, repo, ref));
-  if (!entry) return undefined;
-  if (Date.now() - entry.insertedAt > TTL_MS) {
-    cache.delete(key(owner, repo, ref));
-    return undefined;
-  }
-  return entry.tree;
+  return cache.get(key(owner, repo, ref)) ?? undefined;
 }
 
 export function setCachedTree(owner: string, repo: string, ref: string, tree: ForgejoTreeEntry[]): void {
-  if (cache.size >= MAX_ENTRIES) {
-    // Drop oldest insertion. Map preserves insertion order.
-    const first = cache.keys().next().value;
-    if (first !== undefined) cache.delete(first);
-  }
-  cache.set(key(owner, repo, ref), { tree, insertedAt: Date.now() });
+  cache.set(key(owner, repo, ref), tree);
 }
 
 export function invalidateBranchTree(owner: string, repo: string, ref: string): void {

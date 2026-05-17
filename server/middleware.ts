@@ -5,22 +5,18 @@ import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { getStoredPat, upsertUserFromForgejo, userFromSession, type User } from "./users.js";
+import { TTLCache } from "./ttl-cache.js";
 
 interface AuthResolution {
   user: User;
   forgejoToken: string;
 }
 
-interface BearerCacheEntry {
-  username: string;
-  expiresAt: number;
-}
-
-const BEARER_CACHE = new Map<string, BearerCacheEntry>();
 const BEARER_TTL_MS = 30_000;
+const BEARER_CACHE = new TTLCache<string, string>(BEARER_TTL_MS);
 
 export function _seedBearerAuthCacheForTests(token: string, username: string): void {
-  BEARER_CACHE.set(token, { username, expiresAt: Date.now() + 60_000 });
+  BEARER_CACHE.set(token, username, 60_000);
 }
 
 export function _resetBearerAuthCacheForTests(): void {
@@ -38,9 +34,7 @@ export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | 
   const config = c.get("config");
   const bearer = bearerToken(c.req.header("authorization"));
   if (bearer) {
-    const now = Date.now();
-    const cached = BEARER_CACHE.get(bearer);
-    let username = cached && cached.expiresAt > now ? cached.username : null;
+    let username = BEARER_CACHE.get(bearer);
     if (!username) {
       const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: bearer });
       try {
@@ -49,7 +43,7 @@ export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | 
         if (err instanceof ForgejoError && (err.status === 401 || err.status === 403)) return null;
         throw err;
       }
-      BEARER_CACHE.set(bearer, { username, expiresAt: now + BEARER_TTL_MS });
+      BEARER_CACHE.set(bearer, username);
     }
     return { user: upsertUserFromForgejo(db, username), forgejoToken: bearer };
   }
@@ -73,9 +67,8 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 // In-process cache of Forgejo collaborator-permission lookups. Forgejo is SoT;
 // this avoids a Forgejo round-trip on every workspace request. TTL is short so
 // permission revocations propagate quickly enough for our use.
-interface PermCacheEntry { role: Role | "none"; expiresAt: number }
-const PERM_CACHE = new Map<string, PermCacheEntry>();
 const PERM_TTL_MS = 30_000;
+const PERM_CACHE = new TTLCache<string, Role | "none">(PERM_TTL_MS);
 
 export function _resetPermCacheForTests(): void {
   PERM_CACHE.clear();
@@ -87,10 +80,7 @@ export function _seedPermCacheForTests(
   forgejoUsername: string,
   role: Role,
 ): void {
-  PERM_CACHE.set(`${owner}/${repo}/${forgejoUsername}`, {
-    role,
-    expiresAt: Date.now() + 60_000,
-  });
+  PERM_CACHE.set(`${owner}/${repo}/${forgejoUsername}`, role, 60_000);
 }
 
 // Bypass the in-process role cache and re-fetch from Forgejo. Use on routes
@@ -105,10 +95,7 @@ export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   const fresh = await fj.getRepoPermission(owner, ws.forgejoRepo, fjName);
   if (fresh !== "admin")
     return c.json({ error: "admin required", code: "forbidden" }, 403);
-  PERM_CACHE.set(`${owner}/${ws.forgejoRepo}/${fjName}`, {
-    role: fresh,
-    expiresAt: Date.now() + PERM_TTL_MS,
-  });
+  PERM_CACHE.set(`${owner}/${ws.forgejoRepo}/${fjName}`, fresh);
   await next();
 };
 
@@ -144,11 +131,10 @@ async function fetchRole(
   forgejoUsername: string,
 ): Promise<Role | "none"> {
   const key = `${owner}/${repo}/${forgejoUsername}`;
-  const now = Date.now();
   const cached = PERM_CACHE.get(key);
-  if (cached && cached.expiresAt > now) return cached.role;
+  if (cached !== null) return cached;
   const p = await fj.getRepoPermission(owner, repo, forgejoUsername);
-  PERM_CACHE.set(key, { role: p, expiresAt: now + PERM_TTL_MS });
+  PERM_CACHE.set(key, p);
   return p;
 }
 
