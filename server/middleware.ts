@@ -174,15 +174,18 @@ export function _resetFormatCacheForTests(): void {
   FORMAT_CACHE.clear();
 }
 
+// Test helper: tests don't know the owner at fixture-seed time (it lives
+// on Config). The seed accepts only the slug; the bare key is also checked
+// by fetchWorkspaceFormat below as a fallback after the canonical
+// `owner/slug` lookup misses.
 export function _seedFormatCacheForTests(slug: string, formatId: string): void {
-  FORMAT_CACHE.set(`${slug}`, formatId, 60_000);
+  FORMAT_CACHE.set(slug, formatId, 60_000);
 }
 
 async function fetchWorkspaceFormat(fj: Forgejo, owner: string, slug: string): Promise<string> {
-  const key = `${owner}/${slug}`;
-  const cached = FORMAT_CACHE.get(key) ?? FORMAT_CACHE.get(slug);
+  const cached = FORMAT_CACHE.get(`${owner}/${slug}`) ?? FORMAT_CACHE.get(slug);
   if (cached !== null) return cached;
   const format = await readWorkspaceFormatFromTopics(fj, owner, slug);
-  FORMAT_CACHE.set(key, format);
+  FORMAT_CACHE.set(`${owner}/${slug}`, format);
   return format;
 }

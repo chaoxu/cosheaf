@@ -2,11 +2,9 @@ import type Database from "better-sqlite3";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
 
-// Delete every sidecar row for a workspace. `workspaces` is parent-FK to
-// doc_map (ON DELETE CASCADE handles that one); backlinks, page_tags, and
-// notes_fts don't carry the FK so they need explicit deletes. Shared by the
-// workspace-rm CLI (admin teardown) and the repository-deleted webhook
-// handler (reconciliation when Forgejo loses the repo).
+// Delete every sidecar row for a workspace. Shared by the workspace-rm
+// CLI (admin teardown) and the repository-deleted webhook handler
+// (reconciliation when Forgejo loses the repo).
 export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: string): void {
   db.prepare("DELETE FROM doc_map WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM notes_fts WHERE workspace_slug = ?").run(workspaceSlug);
