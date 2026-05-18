@@ -92,10 +92,10 @@ export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
   const fjName = c.get("user").username;
-  const fresh = await fj.getRepoPermission(owner, ws.forgejoRepo, fjName);
+  const fresh = await fj.getRepoPermission(owner, ws.slug, fjName);
   if (fresh !== "admin")
     return c.json({ error: "admin required", code: "forbidden" }, 403);
-  PERM_CACHE.set(`${owner}/${ws.forgejoRepo}/${fjName}`, fresh);
+  PERM_CACHE.set(`${owner}/${ws.slug}/${fjName}`, fresh);
   await next();
 };
 
@@ -143,16 +143,16 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
   if (!slug) return c.json({ error: "workspace required", code: "validation" }, 400);
   const db = c.get("db");
   const row = db
-    .prepare("SELECT id, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
+    .prepare("SELECT id, name, default_md_format FROM workspaces WHERE slug = ?")
     .get(slug) as
-      | { id: number; name: string; forgejo_repo: string; default_md_format: string }
+      | { id: number; name: string; default_md_format: string }
       | undefined;
   if (!row) return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
   const fjName = c.get("user").username;
-  const role = await fetchRole(fj, owner, row.forgejo_repo, fjName);
+  const role = await fetchRole(fj, owner, slug, fjName);
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
@@ -160,10 +160,9 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
     id: row.id,
     slug,
     name: row.name,
-    forgejoRepo: row.forgejo_repo,
     defaultMdFormat: row.default_md_format,
     role,
   });
-  c.set("repoCtx", { fj, owner, repo: row.forgejo_repo });
+  c.set("repoCtx", { fj, owner, repo: slug });
   await next();
 };

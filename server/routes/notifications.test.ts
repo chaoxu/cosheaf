@@ -64,7 +64,7 @@ describe("notifications route", () => {
 
     expect(res.status).toBe(200);
     const url = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(url.pathname).toBe("/api/v1/repos/owner/repo/notifications");
+    expect(url.pathname).toBe("/api/v1/repos/owner/w/notifications");
     expect(url.searchParams.get("status-types")).toBe("unread");
     expect(url.searchParams.get("subject-type")).toBe("Issue,Pull");
   });
@@ -79,7 +79,7 @@ describe("notifications route", () => {
           subject: {
             type: "Issue",
             title: "Bug A",
-            url: "http://forgejo.test/api/v1/repos/owner/repo/issues/42",
+            url: "http://forgejo.test/api/v1/repos/owner/w/issues/42",
             html_url: "http://forgejo.test/owner/repo/issues/42",
           },
           repository: { full_name: "owner/repo" },
@@ -90,7 +90,7 @@ describe("notifications route", () => {
           subject: {
             type: "Pull",
             title: "PR B",
-            url: "http://forgejo.test/api/v1/repos/owner/repo/pulls/9",
+            url: "http://forgejo.test/api/v1/repos/owner/w/pulls/9",
             html_url: "http://forgejo.test/owner/repo/pulls/9",
           },
           repository: { full_name: "owner/repo" },
@@ -140,7 +140,7 @@ describe("notifications route", () => {
     });
     expect(res.status).toBe(200);
     const url = new URL(String(fetchMock.mock.calls[0][0]));
-    expect(url.pathname).toBe("/api/v1/repos/owner/repo/notifications");
+    expect(url.pathname).toBe("/api/v1/repos/owner/w/notifications");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
   });
 

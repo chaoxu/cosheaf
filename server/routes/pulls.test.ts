@@ -34,7 +34,7 @@ function freshDb(): Database.Database {
 }
 
 function seedUser(db: Database.Database, id: number, username: string, role: Role): string {
-  return seedAuthUser(db, config, { id, username, role, owner: "owner", repo: "repo" });
+  return seedAuthUser(db, config, { id, username, role, owner: "owner", repo: "w" });
 }
 
 function seedWorkspace(db: Database.Database): void {

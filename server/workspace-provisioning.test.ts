@@ -124,7 +124,7 @@ describe("workspace provisioning", () => {
 
   it("reindex removes pages no longer present in Forgejo main", async () => {
     const db = freshDb();
-    db.prepare("INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'w', 0)").run();
+    db.prepare("INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)").run();
     const forgejo = fakeForgejo({ "keep.md": "# Keep\n" });
     db.prepare(
       "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES ('gone', 1, 'gone.md', 'Gone', 0)",
@@ -133,7 +133,7 @@ describe("workspace provisioning", () => {
       "INSERT INTO notes_fts (workspace_id, cosheaf_id, path, title, body) VALUES (1, 'gone', 'gone.md', 'Gone', 'Gone')",
     ).run();
 
-    const count = await reindexWorkspaceFromForgejo(db, forgejo, config, { id: 1, forgejo_repo: "w" });
+    const count = await reindexWorkspaceFromForgejo(db, forgejo, config, { id: 1, slug: "w" });
 
     expect(count).toBe(1);
     expect(db.prepare("SELECT forgejo_id FROM doc_map WHERE workspace_id = 1 ORDER BY forgejo_id").all())

@@ -11,7 +11,7 @@ function freshDb(): Database.Database {
   // [@id] citation syntax; the default 'forgejo-passthrough' format
   // wouldn't extract those into backlinks.
   db.prepare(
-    "INSERT INTO workspaces (id, slug, name, forgejo_repo, default_md_format, created_at) VALUES (1, 'w', 'W', 'w', ?, 0)",
+    "INSERT INTO workspaces (id, slug, name, default_md_format, created_at) VALUES (1, 'w', 'W', ?, 0)",
   ).run(COFLAT_FORMAT_ID);
   return db;
 }

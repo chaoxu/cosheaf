@@ -13,7 +13,7 @@ import { bad, unauthorized } from "./responses.js";
 
 export const webhooks = new Hono<AppEnv>();
 
-interface WorkspaceRow { id: number; slug: string; forgejo_repo: string; default_md_format: string }
+interface WorkspaceRow { id: number; slug: string; default_md_format: string }
 
 const workspaceQueues = new Map<number, Promise<void>>();
 
@@ -47,7 +47,7 @@ function workspaceForRepo(
   return (
     (db
       .prepare(
-        "SELECT id, slug, forgejo_repo, default_md_format FROM workspaces WHERE forgejo_repo = ?",
+        "SELECT id, slug, default_md_format FROM workspaces WHERE slug = ?",
       )
       .get(name) as WorkspaceRow | undefined) ?? null
   );
@@ -120,7 +120,7 @@ webhooks.post("/forgejo", async (c) => {
       const ref = payload.ref as string | undefined;
       // Any push moves at least one ref — drop the repo's cached trees so the
       // next /tree fetch re-pulls from Forgejo. Cheaper than diffing refs.
-      invalidateRepoTrees(owner, ws.forgejo_repo);
+      invalidateRepoTrees(owner, ws.slug);
       if (ref === "refs/heads/main") {
         const commits = (payload.commits ?? []) as Array<{ added?: string[]; modified?: string[]; removed?: string[] }>;
         const touched = new Set<string>();
@@ -139,7 +139,7 @@ webhooks.post("/forgejo", async (c) => {
         // push touched many notes.
         const results = await Promise.all(
           mdPaths.map((path) =>
-            fj.getRawFile(owner, ws.forgejo_repo, "main", path).then(
+            fj.getRawFile(owner, ws.slug, "main", path).then(
               (body) => ({ path, body, error: null as string | null }),
               (err: unknown) => ({ path, body: "", error: (err as Error).message }),
             ),

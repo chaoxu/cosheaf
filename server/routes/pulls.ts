@@ -575,7 +575,7 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
     try {
       await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
         id: c.get("workspace").id,
-        forgejo_repo: repo,
+        slug: repo,
         default_md_format: defaultMdFormat,
       });
     } catch (err) {

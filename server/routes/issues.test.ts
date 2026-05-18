@@ -121,12 +121,12 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(201);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "http://forgejo.test/api/v1/repos/owner/repo/issues/7/dependencies",
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7/dependencies",
     );
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
       index: 9,
       owner: "owner",
-      repo: "repo",
+      repo: "w",
     });
     expect(await res.json()).toEqual({
       issue: { number: 7, title: "Theorem", state: "open", is_pr: false },
@@ -146,13 +146,13 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "http://forgejo.test/api/v1/repos/owner/repo/issues/7/dependencies",
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7/dependencies",
     );
     expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
       index: 9,
       owner: "owner",
-      repo: "repo",
+      repo: "w",
     });
     expect(await res.json()).toEqual({
       issue: { number: 7, title: "Theorem", state: "open", is_pr: false },

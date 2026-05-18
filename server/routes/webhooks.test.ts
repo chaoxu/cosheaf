@@ -73,7 +73,7 @@ describe("forgejo webhooks", () => {
     const app = appFor(db, forgejo);
     const body = JSON.stringify({
       ref: "refs/heads/main",
-      repository: { full_name: "owner/repo" },
+      repository: { full_name: "owner/w" },
       commits: [{ added: ["recovered.md"] }],
     });
 
@@ -110,7 +110,7 @@ describe("forgejo webhooks", () => {
     const app = appFor(db, forgejo);
     const body = JSON.stringify({
       ref: "refs/heads/main",
-      repository: { full_name: "owner/repo" },
+      repository: { full_name: "owner/w" },
       commits: [{ added: ["once.md"] }],
     });
 
@@ -132,7 +132,7 @@ describe("forgejo webhooks", () => {
     const app = appFor(db, {} as Forgejo);
     const body = JSON.stringify({
       action: "opened",
-      repository: { full_name: "owner/repo" },
+      repository: { full_name: "owner/w" },
       pull_request: { number: 12 },
     });
     const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request", "pr-1"));
@@ -143,7 +143,7 @@ describe("forgejo webhooks", () => {
     const db = freshDb();
     const app = appFor(db, {} as Forgejo);
     const body = JSON.stringify({
-      repository: { full_name: "owner/repo" },
+      repository: { full_name: "owner/w" },
       pull_request: { number: 13 },
       review: { state: "APPROVED" },
     });
@@ -155,10 +155,10 @@ describe("forgejo webhooks", () => {
     const db = freshDb();
     const app = appFor(db, {} as Forgejo);
     // Same repo name "repo" but a different owner — must not match the
-    // workspace, even though forgejo_repo='repo' is in the db.
+    // workspace, even though slug='w' is in the db.
     const body = JSON.stringify({
       action: "opened",
-      repository: { full_name: "someone-else/repo" },
+      repository: { full_name: "someone-else/w" },
       pull_request: { number: 99 },
     });
     const res = await app.request(
@@ -187,7 +187,7 @@ describe("forgejo webhooks", () => {
       const app = appFor(db, fj);
       const body = JSON.stringify({
         ref: "refs/heads/main",
-        repository: { full_name: "owner/repo" },
+        repository: { full_name: "owner/w" },
         commits: [{ added: ["foo.md"] }],
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body));
@@ -207,7 +207,7 @@ describe("forgejo webhooks", () => {
       const app = appFor(db, fj);
       const body = JSON.stringify({
         ref: "refs/heads/main",
-        repository: { full_name: "owner/repo" },
+        repository: { full_name: "owner/w" },
         commits: [{ modified: ["foo.md"] }],
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "update-1"));
@@ -225,7 +225,7 @@ describe("forgejo webhooks", () => {
       const app = appFor(db, {} as Forgejo);
       const body = JSON.stringify({
         ref: "refs/heads/main",
-        repository: { full_name: "owner/repo" },
+        repository: { full_name: "owner/w" },
         commits: [{ removed: ["foo.md"] }],
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "delete-1"));
@@ -242,7 +242,7 @@ describe("forgejo webhooks", () => {
       const app = appFor(db, fj);
       const body = JSON.stringify({
         ref: "refs/heads/main",
-        repository: { full_name: "owner/repo" },
+        repository: { full_name: "owner/w" },
         commits: [{ added: ["new.md"], removed: ["old.md"] }],
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "rename-1"));
@@ -259,7 +259,7 @@ describe("forgejo webhooks", () => {
       const app = appFor(db, fj);
       const body = JSON.stringify({
         ref: "refs/heads/feature/wip",
-        repository: { full_name: "owner/repo" },
+        repository: { full_name: "owner/w" },
         commits: [{ added: ["foo.md"] }],
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "non-main-1"));
@@ -284,7 +284,7 @@ describe("forgejo webhooks", () => {
 
     const body = JSON.stringify({
       action: "deleted",
-      repository: { full_name: "owner/repo" },
+      repository: { full_name: "owner/w" },
     });
     const res = await app.request(
       "/api/v1/webhooks/forgejo",
@@ -302,7 +302,7 @@ describe("forgejo webhooks", () => {
     const app = appFor(db, {} as Forgejo);
     const body = JSON.stringify({
       action: "opened",
-      repository: { full_name: "owner/repo" },
+      repository: { full_name: "owner/w" },
       pull_request: { number: 1 },
     });
     const signature = createHmac("sha256", config.webhookSecret).update(body).digest("hex");

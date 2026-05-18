@@ -30,7 +30,9 @@ export function seedAuthUser(
   if (opts.role) {
     _seedPermCacheForTests(
       opts.owner ?? config.forgejoOwner,
-      opts.repo ?? "repo",
+      // seedTestWorkspace's default slug is "w"; since slug ≡ repo name now
+      // (#60), the perm-cache key must use the same value.
+      opts.repo ?? "w",
       opts.username,
       opts.role,
     );

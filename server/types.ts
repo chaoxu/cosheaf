@@ -9,7 +9,6 @@ export interface WorkspaceContext {
   id: number;
   slug: string;
   name: string;
-  forgejoRepo: string;
   defaultMdFormat: string;
   role: Role;
 }

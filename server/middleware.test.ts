@@ -83,7 +83,7 @@ describe("requireMembership", () => {
   it("accepts a Forgejo PAT bearer by resolving /api/v1/user", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     fetchMock
       .mockResolvedValueOnce(ok({ login: "alice" }))
@@ -103,7 +103,7 @@ describe("requireMembership", () => {
   it("resolves Forgejo collaborator permission and sets ws.role", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
@@ -118,7 +118,7 @@ describe("requireMembership", () => {
   it("returns 404 (not 403) when Forgejo says the user has no collaborator access", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     const token = seedUser(db, "alice");
     // Forgejo returns 404 from the permission endpoint for an unknown
@@ -134,7 +134,7 @@ describe("requireMembership", () => {
   it("treats Forgejo's owner permission as admin", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "owner" }));
@@ -149,7 +149,7 @@ describe("requireMembership", () => {
   it("caches by (owner, repo, user) — back-to-back requests hit Forgejo once", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValue(ok({ permission: "write" }));
@@ -163,10 +163,10 @@ describe("requireMembership", () => {
   it("does not collide across workspaces with the same user", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w1', 'W1', 'repo1', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w1', 'W1', 0)",
     ).run();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (2, 'w2', 'W2', 'repo2', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (2, 'w2', 'W2', 0)",
     ).run();
     const token = seedUser(db, "alice");
     fetchMock
@@ -185,7 +185,7 @@ describe("requireAdminFresh", () => {
   it("re-fetches Forgejo permission, ignoring the cached role", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     const token = seedUser(db, "alice");
     fetchMock
@@ -202,7 +202,7 @@ describe("requireAdminFresh", () => {
   it("allows the request when Forgejo still reports admin", async () => {
     const db = freshDb();
     db.prepare(
-      "INSERT INTO workspaces (id, slug, name, forgejo_repo, created_at) VALUES (1, 'w', 'W', 'repo', 0)",
+      "INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)",
     ).run();
     const token = seedUser(db, "alice");
     fetchMock

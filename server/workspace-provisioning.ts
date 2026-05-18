@@ -22,7 +22,7 @@ export interface WorkspaceRow {
   id: number;
   slug: string;
   name: string;
-  forgejo_repo: string;
+  
   default_md_format: string;
 }
 
@@ -89,7 +89,7 @@ export async function provisionWorkspace(
   };
 
   try {
-    workspace = upsertWorkspace(db, options, repoName);
+    workspace = upsertWorkspace(db, options);
   } catch (err) {
     return rollback(err);
   }
@@ -123,10 +123,9 @@ export async function provisionWorkspace(
 function upsertWorkspace(
   db: Database.Database,
   options: ProvisionWorkspaceOptions,
-  repoName: string,
 ): WorkspaceRow {
   const existing = db
-    .prepare("SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?")
+    .prepare("SELECT id, slug, name, default_md_format FROM workspaces WHERE slug = ?")
     .get(options.slug) as WorkspaceRow | undefined;
   if (existing && !options.allowExistingLocal) {
     throw new Error("workspace slug already exists");
@@ -134,20 +133,19 @@ function upsertWorkspace(
 
   if (existing) {
     const formatId = options.defaultMdFormat ?? existing.default_md_format;
-    db.prepare("UPDATE workspaces SET name = ?, forgejo_repo = ?, default_md_format = ? WHERE id = ?")
-      .run(options.name, repoName, formatId, existing.id);
-    return { ...existing, name: options.name, forgejo_repo: repoName, default_md_format: formatId };
+    db.prepare("UPDATE workspaces SET name = ?, default_md_format = ? WHERE id = ?")
+      .run(options.name, formatId, existing.id);
+    return { ...existing, name: options.name, default_md_format: formatId };
   }
 
   return db
     .prepare(
-      "INSERT INTO workspaces (slug, name, forgejo_repo, default_md_format, created_at) VALUES (?, ?, ?, ?, ?) " +
-        "RETURNING id, slug, name, forgejo_repo, default_md_format",
+      "INSERT INTO workspaces (slug, name, default_md_format, created_at) VALUES (?, ?, ?, ?) " +
+        "RETURNING id, slug, name, default_md_format",
     )
     .get(
       options.slug,
       options.name,
-      repoName,
       options.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
       Date.now(),
     ) as WorkspaceRow;
@@ -231,10 +229,10 @@ export async function reindexWorkspaceFromForgejo(
   db: Database.Database,
   forgejo: Forgejo,
   config: Config,
-  workspace: Pick<WorkspaceRow, "id" | "forgejo_repo"> & { default_md_format?: string },
+  workspace: Pick<WorkspaceRow, "id" | "slug"> & { default_md_format?: string },
 ): Promise<number> {
   const seen = new Set<string>();
-  const tree = await forgejo.getTree(config.forgejoOwner, workspace.forgejo_repo, "main", true);
+  const tree = await forgejo.getTree(config.forgejoOwner, workspace.slug, "main", true);
   const mdPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
     .map((e) => e.path);
@@ -244,7 +242,7 @@ export async function reindexWorkspaceFromForgejo(
   const bodies = await Promise.all(
     mdPaths.map((path) =>
       forgejo
-        .getRawFile(config.forgejoOwner, workspace.forgejo_repo, "main", path)
+        .getRawFile(config.forgejoOwner, workspace.slug, "main", path)
         .then((body) => ({ path, body })),
     ),
   );

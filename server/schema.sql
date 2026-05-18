@@ -21,11 +21,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- directly as `Authorization: Bearer <token>`.
 DROP TABLE IF EXISTS tokens;
 
+-- The workspace slug IS the Forgejo repository name; cosheaf only ever
+-- creates repos with repoName = slug, so the two values are guaranteed
+-- equal (#60).
 CREATE TABLE IF NOT EXISTS workspaces (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   slug TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  forgejo_repo TEXT NOT NULL,
   default_md_format TEXT NOT NULL DEFAULT 'forgejo-passthrough',
   created_at INTEGER NOT NULL
 );

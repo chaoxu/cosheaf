@@ -14,13 +14,13 @@ workspaces.get("/", async (c) => {
   const rows = c
     .get("db")
     .prepare(
-      "SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces ORDER BY name",
+      "SELECT id, slug, name, default_md_format FROM workspaces ORDER BY name",
     )
     .all() as Array<{
       id: number;
       slug: string;
       name: string;
-      forgejo_repo: string;
+      
       default_md_format: string;
     }>;
 
@@ -32,7 +32,7 @@ workspaces.get("/", async (c) => {
   const fjUser = c.get("user").username;
   const resolved = await Promise.all(
     rows.map(async (r) => {
-      const p = await fj.getRepoPermission(owner, r.forgejo_repo, fjUser).catch(() => "none" as const);
+      const p = await fj.getRepoPermission(owner, r.slug, fjUser).catch(() => "none" as const);
       return p === "none"
         ? null
         : {

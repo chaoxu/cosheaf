@@ -30,7 +30,7 @@ function seedUser(db: Database.Database, id: number, username: string, role: Rol
   // Skip the requireMembership Forgejo call by pre-populating its cache so the
   // fetchMock can be asserted purely against the request under test.
   // seedWorkspace uses repo='repo', forgejoOwner='owner'.
-  return seedAuthUser(db, config, { id, username, role, owner: "owner", repo: "repo" });
+  return seedAuthUser(db, config, { id, username, role, owner: "owner", repo: "w" });
 }
 
 function seedWorkspace(db: Database.Database): void {
@@ -86,7 +86,7 @@ describe("Forgejo passthrough", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/repo/pulls?state=open");
+    expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls?state=open");
     expect(init.method).toBe("GET");
     const headers = init.headers as Record<string, string>;
     // Forwards the caller's own PAT — no admin token, no impersonation header.
@@ -114,7 +114,7 @@ describe("Forgejo passthrough", () => {
     expect(await res.json()).toEqual({ number: 42, title: "hi" });
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/repo/issues");
+    expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/w/issues");
     expect(init.method).toBe("POST");
     const body = init.body as ArrayBuffer;
     expect(new TextDecoder().decode(body)).toBe(JSON.stringify({ title: "hi", body: "world" }));
@@ -135,7 +135,7 @@ describe("Forgejo passthrough", () => {
     expect(await res.json()).toEqual([{ id: 9, name: "ready" }]);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/repo/issues/42/labels");
+    expect(String(url)).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/42/labels");
     expect(init.method).toBe("PUT");
     expect(new TextDecoder().decode(init.body as ArrayBuffer)).toBe(JSON.stringify({ labels: [9] }));
   });
@@ -159,7 +159,7 @@ describe("Forgejo passthrough", () => {
     expect(list.status).toBe(200);
     expect(markAll.status).toBe(204);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "http://forgejo.test/api/v1/repos/owner/repo/notifications?status=unread",
+      "http://forgejo.test/api/v1/repos/owner/w/notifications?status=unread",
     );
     expect(fetchMock.mock.calls[1][1].method).toBe("PUT");
   });

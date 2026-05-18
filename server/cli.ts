@@ -80,7 +80,6 @@ interface CliWorkspaceRow {
   id: number;
   slug: string;
   name: string;
-  forgejo_repo: string;
   default_md_format: string;
 }
 
@@ -99,7 +98,7 @@ async function withWorkspace<T>(
   const { config, db, forgejo } = ctx();
   const ws = db
     .prepare(
-      "SELECT id, slug, name, forgejo_repo, default_md_format FROM workspaces WHERE slug = ?",
+      "SELECT id, slug, name, default_md_format FROM workspaces WHERE slug = ?",
     )
     .get(slug) as CliWorkspaceRow | undefined;
   if (!ws) {
@@ -232,7 +231,7 @@ async function seed(args: string[]): Promise<void> {
   ];
 
   for (const file of files) {
-    const created = await ensureWorkspaceFile(forgejo, config, workspace.forgejo_repo, file);
+    const created = await ensureWorkspaceFile(forgejo, config, workspace.slug, file);
     if (created) console.log(`created ${file.path}`);
   }
   await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
@@ -263,7 +262,7 @@ function userRm(username: string): void {
 async function workspaceRm(slug: string): Promise<void> {
   await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
     try {
-      await forgejo.deleteRepo(config.forgejoOwner, ws.forgejo_repo);
+      await forgejo.deleteRepo(config.forgejoOwner, ws.slug);
     } catch (err) {
       if (!(err instanceof ForgejoError && err.status === 404)) {
         console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
@@ -289,18 +288,18 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
       console.error(`user '${username}' not found in cosheaf; run \`cli user add\` first`);
       process.exit(1);
     }
-    await forgejo.addCollaborator(config.forgejoOwner, ws.forgejo_repo, username, role);
+    await forgejo.addCollaborator(config.forgejoOwner, ws.slug, username, role);
     // Keep the branch-protection push whitelist in sync. Admin can direct-push;
     // write/read users can't. Adjust on every change so demotion takes effect.
-    const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.forgejo_repo, "main");
+    const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.slug, "main");
     const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
     const onList = current.includes(username);
     if (role === "admin" && !onList) {
-      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.forgejo_repo, "main", [...current, username]);
+      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.slug, "main", [...current, username]);
     } else if (role !== "admin" && onList) {
       await forgejo.patchBranchProtectionPushWhitelist(
         config.forgejoOwner,
-        ws.forgejo_repo,
+        ws.slug,
         "main",
         current.filter((u) => u !== username),
       );
@@ -380,19 +379,19 @@ async function doctor(): Promise<void> {
 
   // Per-workspace checks
   const workspaces = db
-    .prepare("SELECT id, slug, forgejo_repo, default_md_format FROM workspaces ORDER BY slug")
-    .all() as Array<{ id: number; slug: string; forgejo_repo: string; default_md_format: string }>;
+    .prepare("SELECT id, slug, default_md_format FROM workspaces ORDER BY slug")
+    .all() as Array<{ id: number; slug: string; default_md_format: string }>;
   for (const ws of workspaces) {
     results.push(
       await check(`workspace ${ws.slug}: forgejo repo exists`, async () => {
-        const r = await forgejo.getRepo(config.forgejoOwner, ws.forgejo_repo);
-        if (!r) throw new Error(`repo ${config.forgejoOwner}/${ws.forgejo_repo} missing`);
+        const r = await forgejo.getRepo(config.forgejoOwner, ws.slug);
+        if (!r) throw new Error(`repo ${config.forgejoOwner}/${ws.slug} missing`);
         return r.full_name;
       }),
     );
     results.push(
       await check(`workspace ${ws.slug}: webhook installed`, async () => {
-        const hooks = await forgejo.listRepoHooks(config.forgejoOwner, ws.forgejo_repo);
+        const hooks = await forgejo.listRepoHooks(config.forgejoOwner, ws.slug);
         const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
         if (!ours) throw new Error("no push webhook on repo");
         return `hook id=${ours.id}`;
@@ -430,7 +429,7 @@ async function doctor(): Promise<void> {
 async function inspectWorkspace(slug: string): Promise<void> {
   await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
   console.log(
-    `workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.forgejo_repo}, format ${ws.default_md_format}\n`,
+    `workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.default_md_format}\n`,
   );
 
   const sidecarPaths = new Set(
@@ -442,7 +441,7 @@ async function inspectWorkspace(slug: string): Promise<void> {
   );
   let forgejoPaths: Set<string>;
   try {
-    const tree = await forgejo.getTree(config.forgejoOwner, ws.forgejo_repo, "main", true);
+    const tree = await forgejo.getTree(config.forgejoOwner, ws.slug, "main", true);
     forgejoPaths = new Set(
       tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).map((e) => e.path),
     );
@@ -475,14 +474,14 @@ async function inspectWorkspace(slug: string): Promise<void> {
   }
 
   console.log();
-  const pulls = await forgejo.listPulls(config.forgejoOwner, ws.forgejo_repo, "open");
+  const pulls = await forgejo.listPulls(config.forgejoOwner, ws.slug, "open");
   console.log(`open PRs (${pulls.length}):`);
   for (const p of pulls) {
     console.log(`  #${p.number} ${p.title.slice(0, 60)}  by ${p.user?.login ?? "(deleted)"}  head=${p.head.ref}`);
   }
 
   console.log();
-  const branches = await forgejo.listBranches(config.forgejoOwner, ws.forgejo_repo);
+  const branches = await forgejo.listBranches(config.forgejoOwner, ws.slug);
   const userBranches = branches.filter((b) => b.name.startsWith("user/"));
   console.log(`user/* branches (${userBranches.length}):`);
   for (const b of userBranches.slice(0, 20)) {
@@ -508,7 +507,7 @@ async function workspaceDriftCheck(slug: string): Promise<void> {
   );
   let forgejoPaths: Set<string>;
   try {
-    const tree = await forgejo.getTree(config.forgejoOwner, ws.forgejo_repo, "main", true);
+    const tree = await forgejo.getTree(config.forgejoOwner, ws.slug, "main", true);
     forgejoPaths = new Set(
       tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).map((e) => e.path),
     );
@@ -554,9 +553,9 @@ function startRepl(): void {
 async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<void> {
   const { config, db, forgejo } = ctx();
   const workspaces = db
-    .prepare("SELECT slug, forgejo_repo FROM workspaces")
-    .all() as Array<{ slug: string; forgejo_repo: string }>;
-  const repos = workspaces.map((w) => `${config.forgejoOwner}/${w.forgejo_repo}`);
+    .prepare("SELECT slug FROM workspaces")
+    .all() as Array<{ slug: string }>;
+  const repos = workspaces.map((w) => `${config.forgejoOwner}/${w.slug}`);
 
   console.error("This will:");
   console.error(`  - delete ${path.join(config.dataDir, "db.sqlite")} (+ -shm/-wal)`);
@@ -579,11 +578,11 @@ async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<v
   if (!opts.keepForgejo) {
     for (const w of workspaces) {
       try {
-        await forgejo.deleteRepo(config.forgejoOwner, w.forgejo_repo);
-        console.error(`deleted forgejo repo ${w.forgejo_repo}`);
+        await forgejo.deleteRepo(config.forgejoOwner, w.slug);
+        console.error(`deleted forgejo repo ${w.slug}`);
       } catch (err) {
         if (!(err instanceof ForgejoError && err.status === 404)) {
-          console.error(`warning: deleteRepo ${w.forgejo_repo} failed: ${(err as Error).message}`);
+          console.error(`warning: deleteRepo ${w.slug} failed: ${(err as Error).message}`);
         }
       }
     }
