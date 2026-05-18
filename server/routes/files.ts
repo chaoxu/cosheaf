@@ -185,6 +185,7 @@ files.put("/:slug/file", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
+  const hub = c.get("sse");
 
   // Pass the workspace's declared markdown format explicitly so passthrough
   // workspaces don't inherit coflat indexing behavior (e.g. backlink
@@ -212,7 +213,12 @@ files.put("/:slug/file", async (c) => {
       return c.json(...conflict("conflict on push"));
     throw err;
   }
+  // #53: Commit the sidecar reindex now that the canonical write succeeded.
+  // Without this, doc_map / FTS / backlinks lag until the webhook fires and
+  // typed read-after-write (search, suggest, /backlinks) breaks.
+  plan.commit();
   invalidateBranchTree(owner, repo, branch);
+  hub.publish(ws.slug, { type: "change", path: rel });
   return c.json({
     ok: true,
     branch,
