@@ -32,8 +32,10 @@ collaborators through Cosheaf's HTTP API.
   body is full-text searchable.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
   stream updates over SSE to open browsers.
-- **Forgejo-native API auth** — humans use cookie sessions; agents can send a
-  Forgejo PAT as `Authorization: Bearer <token>`.
+- **Forgejo-native API auth** — every request sends a Forgejo PAT as
+  `Authorization: Bearer <token>`. Humans get one via cosheaf's login form
+  (which exchanges Forgejo credentials for a PAT and hands it to the SPA);
+  agents send their own.
 - **Passthrough-first agent API** — agents use
   `/api/v1/w/:slug/forgejo/*` for Forgejo-shaped branch, pull request, issue,
   label, milestone, notification, review, and read-only contents operations.

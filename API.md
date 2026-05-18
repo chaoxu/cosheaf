@@ -6,11 +6,12 @@ client types in `src/cosheaf/api.ts`.
 
 Base path: `/api/v1`
 
-All JSON routes return `{ error, code }` on expected failures. Browser sessions
-use the `sid` cookie. Bot/client access uses a direct Forgejo personal access
-token as `Authorization: Bearer <Forgejo PAT>`. Cosheaf validates the PAT,
-resolves workspace membership through Forgejo, and forwards the caller's own
-Forgejo identity on Forgejo-backed operations.
+All JSON routes return `{ error, code }` on expected failures. Every request
+authenticates via `Authorization: Bearer <Forgejo PAT>` — the SPA stashes
+the PAT in localStorage after the login endpoint exchanges Forgejo
+credentials for one, and agents send their own PAT directly. Cosheaf
+validates the PAT, resolves workspace membership through Forgejo, and
+forwards the caller's own Forgejo identity on Forgejo-backed operations.
 
 ## Core Types
 
@@ -18,12 +19,10 @@ Forgejo identity on Forgejo-backed operations.
 type Role = "admin" | "write" | "read";
 
 interface User {
-  id: number;
   username: string;
 }
 
 interface Workspace {
-  id: number;
   slug: string;
   name: string;
   role: Role;
@@ -72,21 +71,26 @@ type ErrorCode =
 ## Auth
 
 Cosheaf owns the login UX so users do not need to know Forgejo is the backend.
-Login exchanges Forgejo username/password credentials for a Cosheaf-managed
-Forgejo PAT and stores it encrypted for the browser session. API clients can
-skip login and send their own Forgejo PAT as bearer auth.
+Login exchanges Forgejo username/password credentials for a fresh Forgejo PAT
+and returns it to the SPA, which stashes it in localStorage and sends it as
+`Authorization: Bearer <pat>` on every subsequent request. API clients can
+skip login and send their own Forgejo PAT directly.
 
 ```http
 POST /login
 { "username": string, "password": string }
-→ User
+→ { "username": string, "pat": string }
 
 POST /logout
 → { "ok": true }
 
 GET /me
-→ { "user": User | null }
+→ { "user": { "username": string } | null }
 ```
+
+Logout is a server-side no-op; the SPA clears localStorage. Cosheaf does
+not revoke the PAT on logout — revoke it in Forgejo to invalidate it
+across devices.
 
 There is no Cosheaf personal-token API. Create and revoke PATs in Forgejo.
 

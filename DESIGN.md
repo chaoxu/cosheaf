@@ -23,8 +23,9 @@ participate later through the same HTTP API as ordinary Forgejo collaborators.
 ## Core Philosophy
 
 - **Forgejo is the source of truth.** Workspace content lives in a Forgejo repo.
-  SQLite is a sidecar for fast reads, browser sessions, workspace mapping,
-  search, backlinks, tags, webhook logs, and passthrough audit logs.
+  SQLite is a sidecar for fast reads, search, backlinks, tags, and webhook
+  dedupe. Identity, sessions, workspace registry, and audit logs all live on
+  Forgejo — there is no `users`, `sessions`, or `workspaces` table.
 - **Use Forgejo terms directly.** Cosheaf should mirror Forgejo's branch, pull
   request, review, issue, merge, and close model instead of inventing parallel
   workflow concepts. A user should be able to perform the same durable
@@ -121,8 +122,9 @@ that should become an HTTP API feature usable by humans too.
 
 ## Stack
 
-- **Server**: Node, TypeScript, Hono, `better-sqlite3`, Forgejo REST API,
-  argon2 for password hashing.
+- **Server**: Node, TypeScript, Hono, `better-sqlite3`, Forgejo REST API.
+  No password hashing — the Forgejo PAT is the credential, exchanged at
+  login and sent as `Authorization: Bearer <pat>` on every request.
 - **Client**: React 19, Vite, Tailwind v4, shadcn-style primitives, and
   `@chaoxu/coflat-editor`.
 - **Format**: Coflat-flavored Pandoc markdown per `FORMAT.md`.
