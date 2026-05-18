@@ -1301,9 +1301,21 @@ function WorkspaceView({
             setDirty(false);
             setStatus("file deleted on server");
           } else if (!dirtyRef.current) {
+            // Race guard (#54): user may switch files (or start editing)
+            // before this in-flight refresh resolves. Bump openRequestRef so
+            // both this and openPathFromSource compete on the same token, and
+            // bail if the user has moved on or started editing.
+            const reqId = openRequestRef.current + 1;
+            openRequestRef.current = reqId;
+            const path = event.path;
             api
-              .getFile(workspace.slug, event.path, openFileBranchRef.current ?? undefined)
-              .then((r) => setContent(r.content))
+              .getFile(workspace.slug, path, openFileBranchRef.current ?? undefined)
+              .then((r) => {
+                if (openRequestRef.current !== reqId) return;
+                if (openPathRef.current !== path) return;
+                if (dirtyRef.current) return;
+                setContent(r.content);
+              })
               .catch(() => undefined);
           }
         }
