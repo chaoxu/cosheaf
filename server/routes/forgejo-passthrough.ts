@@ -142,8 +142,8 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   }
 
   // Forward with the caller's own Forgejo PAT — same trust model as the
-  // typed routes. Browser sessions use the encrypted PAT recovered by
-  // requireAuth; bearer clients already supplied a Forgejo PAT directly.
+  // typed routes. The PAT comes from the request's Authorization header
+  // and is set on the context by requireAuth.
   const fwdHeaders: Record<string, string> = {
     authorization: `token ${c.get("forgejoToken")}`,
     accept: c.req.header("accept") ?? "application/json",
