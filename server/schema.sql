@@ -73,10 +73,7 @@ CREATE TABLE IF NOT EXISTS webhook_log (
 -- relies on push/PR/review webhooks only for cache invalidation (page
 -- reindex on push; issue mirror on issue events). No SQLite workflow state.
 
--- Issues were previously mirrored in `issues` / `issue_assignees`; removed
--- because Forgejo's repo-scoped /issues already supports the same filters
--- and the mirror kept drifting on partial webhook deliveries.
-
--- forgejo_passthrough_log audit table was dropped in #59. Forgejo's own
--- access logging covers passthrough calls; the cosheaf-side mirror was
--- duplicate state with no SPA consumer.
+-- There is no issues mirror: Forgejo's repo-scoped /issues already supports
+-- the same filters and a mirror would drift on partial webhook deliveries.
+-- There is no passthrough audit log: Forgejo's own access logging covers
+-- it, and a cosheaf-side mirror has no SPA consumer.

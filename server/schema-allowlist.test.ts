@@ -9,17 +9,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ALLOWED_TABLES = new Set([
-  // Local auth
-  "users",
-  "sessions",
-  // Workspace → Forgejo repo mapping
-  "workspaces",
   // Derived document index from Forgejo content (rebuildable via reindex)
   "doc_map",
   "backlinks",
   "page_tags",
   "notes_fts",
-  // FTS5 virtual table emits a configuration row in sqlite_master:
+  // FTS5 virtual table emits configuration rows in sqlite_master:
   "notes_fts_data",
   "notes_fts_idx",
   "notes_fts_content",
@@ -27,8 +22,6 @@ const ALLOWED_TABLES = new Set([
   "notes_fts_config",
   // Webhook idempotency
   "webhook_log",
-  // SQLite internal
-  "sqlite_sequence",
 ]);
 
 describe("sqlite schema allowlist (#36 — no Forgejo state mirror)", () => {
