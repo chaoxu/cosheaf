@@ -111,6 +111,11 @@ webhooks.post("/forgejo", async (c) => {
       deduped = true;
       return;
     }
+    // #55: catch unexpected errors so they don't surface as 500 (which would
+    // make Forgejo retry; the retry would then hit the dedupe row and silently
+    // succeed, permanently losing the event). Treat as handled — operator can
+    // rerun `pnpm cli workspace reindex` if reconciliation drifted.
+    try {
     if (event === "push") {
       const ref = payload.ref as string | undefined;
       // Any push moves at least one ref — drop the repo's cached trees so the
@@ -202,6 +207,11 @@ webhooks.post("/forgejo", async (c) => {
         deleteSidecarForWorkspace(db, ws.id);
         sse.publish(ws.slug, { type: "workspace_deleted" });
       }
+    }
+    } catch (err) {
+      console.warn(
+        `webhook handler error (delivery=${deliveryId}, event=${event}): ${(err as Error).message}`,
+      );
     }
   });
   if (deduped) return c.json({ ok: true, dedup: true });
