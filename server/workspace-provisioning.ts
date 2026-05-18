@@ -21,8 +21,6 @@ const WEBHOOK_EVENTS = [
 export interface WorkspaceRow {
   id: number;
   slug: string;
-  name: string;
-  
   default_md_format: string;
 }
 
@@ -125,7 +123,7 @@ function upsertWorkspace(
   options: ProvisionWorkspaceOptions,
 ): WorkspaceRow {
   const existing = db
-    .prepare("SELECT id, slug, name, default_md_format FROM workspaces WHERE slug = ?")
+    .prepare("SELECT id, slug, default_md_format FROM workspaces WHERE slug = ?")
     .get(options.slug) as WorkspaceRow | undefined;
   if (existing && !options.allowExistingLocal) {
     throw new Error("workspace slug already exists");
@@ -133,19 +131,18 @@ function upsertWorkspace(
 
   if (existing) {
     const formatId = options.defaultMdFormat ?? existing.default_md_format;
-    db.prepare("UPDATE workspaces SET name = ?, default_md_format = ? WHERE id = ?")
-      .run(options.name, formatId, existing.id);
-    return { ...existing, name: options.name, default_md_format: formatId };
+    db.prepare("UPDATE workspaces SET default_md_format = ? WHERE id = ?")
+      .run(formatId, existing.id);
+    return { ...existing, default_md_format: formatId };
   }
 
   return db
     .prepare(
-      "INSERT INTO workspaces (slug, name, default_md_format, created_at) VALUES (?, ?, ?, ?) " +
-        "RETURNING id, slug, name, default_md_format",
+      "INSERT INTO workspaces (slug, default_md_format, created_at) VALUES (?, ?, ?) " +
+        "RETURNING id, slug, default_md_format",
     )
     .get(
       options.slug,
-      options.name,
       options.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
       Date.now(),
     ) as WorkspaceRow;

@@ -8,7 +8,6 @@ import type { Role } from "../shared/roles.js";
 export interface WorkspaceContext {
   id: number;
   slug: string;
-  name: string;
   defaultMdFormat: string;
   role: Role;
 }

@@ -119,12 +119,11 @@ describe("workspace provisioning", () => {
     });
 
     expect(db.prepare("SELECT count(*) AS count FROM workspaces").get()).toEqual({ count: 1 });
-    expect(db.prepare("SELECT name FROM workspaces WHERE slug = 'notes'").get()).toEqual({ name: "Notes renamed" });
   });
 
   it("reindex removes pages no longer present in Forgejo main", async () => {
     const db = freshDb();
-    db.prepare("INSERT INTO workspaces (id, slug, name, created_at) VALUES (1, 'w', 'W', 0)").run();
+    db.prepare("INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)").run();
     const forgejo = fakeForgejo({ "keep.md": "# Keep\n" });
     db.prepare(
       "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES ('gone', 1, 'gone.md', 'Gone', 0)",

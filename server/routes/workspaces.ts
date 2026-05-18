@@ -14,31 +14,33 @@ workspaces.get("/", async (c) => {
   const rows = c
     .get("db")
     .prepare(
-      "SELECT id, slug, name, default_md_format FROM workspaces ORDER BY name",
+      "SELECT id, slug, default_md_format FROM workspaces ORDER BY slug",
     )
     .all() as Array<{
       id: number;
       slug: string;
-      name: string;
-      
       default_md_format: string;
     }>;
 
-  // Resolve the caller's role on each workspace via Forgejo using the user's
-  // own PAT. Workspaces where the user has no permission are filtered out,
-  // mirroring the old behavior where listing was gated by membership.
+  // Resolve the caller's role and the display name via Forgejo using the
+  // user's own PAT. The display name is the Forgejo repo description
+  // (#61) — cosheaf no longer mirrors it. Workspaces where the user has
+  // no permission are filtered out, mirroring the old membership gate.
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
   const fjUser = c.get("user").username;
   const resolved = await Promise.all(
     rows.map(async (r) => {
-      const p = await fj.getRepoPermission(owner, r.slug, fjUser).catch(() => "none" as const);
+      const [p, repo] = await Promise.all([
+        fj.getRepoPermission(owner, r.slug, fjUser).catch(() => "none" as const),
+        fj.getRepo(owner, r.slug).catch(() => null),
+      ]);
       return p === "none"
         ? null
         : {
             id: r.id,
             slug: r.slug,
-            name: r.name,
+            name: repo?.description?.trim() || r.slug,
             role: p as Role,
             default_md_format: normalizeDocumentFormatId(r.default_md_format),
           };

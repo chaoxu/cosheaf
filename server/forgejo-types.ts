@@ -102,6 +102,7 @@ export interface ForgejoRepo {
   name: string;
   full_name: string;
   default_branch: string;
+  description?: string;
   owner: ForgejoUser;
 }
 export interface ForgejoNotificationThread {

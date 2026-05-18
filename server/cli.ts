@@ -79,7 +79,6 @@ function ctx() {
 interface CliWorkspaceRow {
   id: number;
   slug: string;
-  name: string;
   default_md_format: string;
 }
 
@@ -98,7 +97,7 @@ async function withWorkspace<T>(
   const { config, db, forgejo } = ctx();
   const ws = db
     .prepare(
-      "SELECT id, slug, name, default_md_format FROM workspaces WHERE slug = ?",
+      "SELECT id, slug, default_md_format FROM workspaces WHERE slug = ?",
     )
     .get(slug) as CliWorkspaceRow | undefined;
   if (!ws) {
@@ -428,8 +427,10 @@ async function doctor(): Promise<void> {
 
 async function inspectWorkspace(slug: string): Promise<void> {
   await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
+  const repo = await forgejo.getRepo(config.forgejoOwner, ws.slug).catch(() => null);
+  const display = repo?.description?.trim() || ws.slug;
   console.log(
-    `workspace ${ws.slug} (${ws.name}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.default_md_format}\n`,
+    `workspace ${ws.slug} (${display}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.default_md_format}\n`,
   );
 
   const sidecarPaths = new Set(

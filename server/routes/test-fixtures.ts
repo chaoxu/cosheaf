@@ -40,7 +40,6 @@ export function freshTestDb(prefix = "cosheaf-test-"): Database.Database {
 interface WorkspaceSeed {
   id?: number;
   slug?: string;
-  name?: string;
   default_md_format?: string;
 }
 
@@ -49,16 +48,15 @@ interface WorkspaceSeed {
 export function seedTestWorkspace(db: Database.Database, init: WorkspaceSeed = {}): void {
   const id = init.id ?? 1;
   const slug = init.slug ?? "w";
-  const name = init.name ?? "W";
   if (init.default_md_format !== undefined) {
     db.prepare(
-      "INSERT OR IGNORE INTO workspaces (id, slug, name, default_md_format, created_at) VALUES (?, ?, ?, ?, 0)",
-    ).run(id, slug, name, init.default_md_format);
+      "INSERT OR IGNORE INTO workspaces (id, slug, default_md_format, created_at) VALUES (?, ?, ?, 0)",
+    ).run(id, slug, init.default_md_format);
     return;
   }
   db.prepare(
-    "INSERT OR IGNORE INTO workspaces (id, slug, name, created_at) VALUES (?, ?, ?, 0)",
-  ).run(id, slug, name);
+    "INSERT OR IGNORE INTO workspaces (id, slug, created_at) VALUES (?, ?, 0)",
+  ).run(id, slug);
 }
 
 // JSON Response builder for fetchMock. Default status is 200; the
