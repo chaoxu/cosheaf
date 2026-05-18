@@ -1732,7 +1732,9 @@ function WorkspaceView({
             setStatus(`pull request #${pr.number} opened — saves on this file continue pushing to ${currentBranchName}`);
           }
           refreshPulls();
-          void loadTree();
+          // #57: in review mode the branch stays current; load its tree, not
+          // main's, so the sidebar keeps showing branch contents.
+          void loadTree(mode === "direct" ? undefined : currentBranchName ?? undefined);
         } catch (err) {
           setStatus(err instanceof ApiError ? err.message : "Open pull request failed");
         } finally {
