@@ -164,6 +164,12 @@ export class Forgejo {
     return this.reqOpt<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`);
   }
 
+  async listUserRepos(owner: string, opts: { limit?: number; page?: number } = {}): Promise<ForgejoRepo[]> {
+    return this.req<ForgejoRepo[]>(`/api/v1/users/${encodeURIComponent(owner)}/repos`, {
+      query: { limit: opts.limit ?? 50, page: opts.page ?? 1 },
+    });
+  }
+
   async addCollaborator(owner: string, repo: string, username: string, permission: "read" | "write" | "admin"): Promise<void> {
     await this.req(this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}`), {
       method: "PUT",
@@ -274,6 +280,21 @@ export class Forgejo {
 
   async listRepoHooks(owner: string, repo: string): Promise<ForgejoHook[]> {
     return this.req<ForgejoHook[]>(this.repoPath(owner, repo, `hooks`));
+  }
+
+  // ---------------- topics ----------------
+
+  async listRepoTopics(owner: string, repo: string): Promise<string[]> {
+    const r = await this.req<{ topics?: string[] }>(this.repoPath(owner, repo, `topics`));
+    return r.topics ?? [];
+  }
+
+  async replaceRepoTopics(owner: string, repo: string, topics: string[]): Promise<void> {
+    await this.req<void>(this.repoPath(owner, repo, `topics`), {
+      method: "PUT",
+      body: { topics },
+      expectEmpty: true,
+    });
   }
 
   // ---------------- contents (files) ----------------

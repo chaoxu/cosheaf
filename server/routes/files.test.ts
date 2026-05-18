@@ -99,19 +99,22 @@ describe("files validation route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     indexPage(db, {
-      workspaceId: 1,
+      workspaceSlug: "w",
       filePath: "source.md",
       bodyText: "---\nid: source\n---\n# Source\n\nSee [@target], [@missing], and [Gone](gone.md).\n",
+      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
-      workspaceId: 1,
+      workspaceSlug: "w",
       filePath: "target.md",
       bodyText: "---\nid: target\n---\n# Target\n",
+      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
-      workspaceId: 1,
+      workspaceSlug: "w",
       filePath: "orphan.md",
       bodyText: "---\nid: orphan\n---\n# Orphan\n",
+      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/w/w/validation", {

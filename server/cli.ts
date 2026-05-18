@@ -15,7 +15,13 @@ import {
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
 import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
-import { DEFAULT_DOCUMENT_FORMAT_ID, isDocumentFormatId, type DocumentFormatId } from "../shared/document-format.js";
+import {
+  DEFAULT_DOCUMENT_FORMAT_ID,
+  documentFormatFromTopics,
+  isDocumentFormatId,
+  isFormatTopic,
+  type DocumentFormatId,
+} from "../shared/document-format.js";
 
 interface SeedOptions {
   user: string;
@@ -77,9 +83,8 @@ function ctx() {
 }
 
 interface CliWorkspaceRow {
-  id: number;
   slug: string;
-  default_md_format: string;
+  defaultMdFormat: string;
 }
 
 // Resolve a workspace by slug and hand the caller everything it needs.
@@ -95,15 +100,19 @@ async function withWorkspace<T>(
   }) => Promise<T> | T,
 ): Promise<T> {
   const { config, db, forgejo } = ctx();
-  const ws = db
-    .prepare(
-      "SELECT id, slug, default_md_format FROM workspaces WHERE slug = ?",
-    )
-    .get(slug) as CliWorkspaceRow | undefined;
-  if (!ws) {
+  // Workspaces are now identified solely by their Forgejo repo. The CLI
+  // verifies existence against Forgejo and reads the markdown format from
+  // the repo's topics (#62).
+  const repo = await forgejo.getRepo(config.forgejoOwner, slug);
+  if (!repo) {
     console.error(`workspace '${slug}' not found`);
     process.exit(1);
   }
+  const topics = await forgejo.listRepoTopics(config.forgejoOwner, slug);
+  const ws: CliWorkspaceRow = {
+    slug,
+    defaultMdFormat: documentFormatFromTopics(topics),
+  };
   return fn({ config, db, forgejo, workspace: ws });
 }
 
@@ -268,7 +277,7 @@ async function workspaceRm(slug: string): Promise<void> {
         process.exit(1);
       }
     }
-    deleteSidecarForWorkspace(db, ws.id);
+    deleteSidecarForWorkspace(db, ws.slug);
     console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
   });
 }
@@ -369,17 +378,19 @@ async function doctor(): Promise<void> {
   );
 
   results.push(
-    await check("schema applied (users + workspaces tables exist)", async () => {
+    await check("schema applied (users table exists)", async () => {
       db.prepare("SELECT 1 FROM users LIMIT 1").get();
-      db.prepare("SELECT 1 FROM workspaces LIMIT 1").get();
       return "ok";
     }),
   );
 
-  // Per-workspace checks
-  const workspaces = db
-    .prepare("SELECT id, slug, default_md_format FROM workspaces ORDER BY slug")
-    .all() as Array<{ id: number; slug: string; default_md_format: string }>;
+  // Per-workspace checks. Workspaces are enumerated from Forgejo (repos
+  // under config.forgejoOwner with a `cosheaf-format-*` topic), not from
+  // SQLite — there's no workspaces table anymore.
+  const repos = await forgejo.listUserRepos(config.forgejoOwner, { limit: 50 });
+  const workspaces = repos
+    .filter((r) => (r.topics ?? []).some(isFormatTopic))
+    .map((r) => ({ slug: r.name, defaultMdFormat: documentFormatFromTopics(r.topics ?? []) }));
   for (const ws of workspaces) {
     results.push(
       await check(`workspace ${ws.slug}: forgejo repo exists`, async () => {
@@ -430,14 +441,14 @@ async function inspectWorkspace(slug: string): Promise<void> {
   const repo = await forgejo.getRepo(config.forgejoOwner, ws.slug).catch(() => null);
   const display = repo?.description?.trim() || ws.slug;
   console.log(
-    `workspace ${ws.slug} (${display}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.default_md_format}\n`,
+    `workspace ${ws.slug} (${display}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.defaultMdFormat}\n`,
   );
 
   const sidecarPaths = new Set(
     (
       db
-        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_id = ?")
-        .all(ws.id) as Array<{ path: string }>
+        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_slug = ?")
+        .all(ws.slug) as Array<{ path: string }>
     ).map((r) => r.path),
   );
   let forgejoPaths: Set<string>;
@@ -502,8 +513,8 @@ async function workspaceDriftCheck(slug: string): Promise<void> {
   const sidecarPaths = new Set(
     (
       db
-        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_id = ?")
-        .all(ws.id) as Array<{ path: string }>
+        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_slug = ?")
+        .all(ws.slug) as Array<{ path: string }>
     ).map((r) => r.path),
   );
   let forgejoPaths: Set<string>;
@@ -540,7 +551,7 @@ function startRepl(): void {
   const { config, db, forgejo } = ctx();
   console.log(
     "cosheaf repl — bindings: db (better-sqlite3), forgejo (admin Forgejo client), config\n" +
-      "  e.g.  db.prepare('SELECT * FROM workspaces').all()\n" +
+      "  e.g.  db.prepare('SELECT * FROM doc_map').all()\n" +
       "        await forgejo.getRepo(config.forgejoOwner, 'notes')\n",
   );
   const r = repl.start({ prompt: "cosheaf> ", useGlobal: true, breakEvalOnSigint: true });
@@ -553,10 +564,11 @@ function startRepl(): void {
 
 async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<void> {
   const { config, db, forgejo } = ctx();
-  const workspaces = db
-    .prepare("SELECT slug FROM workspaces")
-    .all() as Array<{ slug: string }>;
-  const repos = workspaces.map((w) => `${config.forgejoOwner}/${w.slug}`);
+  // Workspaces are enumerated from Forgejo, not SQLite (#62).
+  const allRepos = await forgejo.listUserRepos(config.forgejoOwner, { limit: 50 });
+  const repos = allRepos
+    .filter((r) => (r.topics ?? []).some(isFormatTopic))
+    .map((r) => `${config.forgejoOwner}/${r.name}`);
 
   console.error("This will:");
   console.error(`  - delete ${path.join(config.dataDir, "db.sqlite")} (+ -shm/-wal)`);
@@ -577,13 +589,13 @@ async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<v
   }
 
   if (!opts.keepForgejo) {
-    for (const w of workspaces) {
+    for (const r of allRepos.filter((rr) => (rr.topics ?? []).some(isFormatTopic))) {
       try {
-        await forgejo.deleteRepo(config.forgejoOwner, w.slug);
-        console.error(`deleted forgejo repo ${w.slug}`);
+        await forgejo.deleteRepo(config.forgejoOwner, r.name);
+        console.error(`deleted forgejo repo ${r.name}`);
       } catch (err) {
         if (!(err instanceof ForgejoError && err.status === 404)) {
-          console.error(`warning: deleteRepo ${w.slug} failed: ${(err as Error).message}`);
+          console.error(`warning: deleteRepo ${r.name} failed: ${(err as Error).message}`);
         }
       }
     }

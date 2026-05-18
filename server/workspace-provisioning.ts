@@ -4,7 +4,14 @@ import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
 import { deletePage, indexPage } from "./indexer.js";
 import type { User } from "./users.js";
-import { DEFAULT_DOCUMENT_FORMAT_ID } from "../shared/document-format.js";
+import {
+  DEFAULT_DOCUMENT_FORMAT_ID,
+  type DocumentFormatId,
+  documentFormatFromTopics,
+  isFormatTopic,
+  normalizeDocumentFormatId,
+  topicForDocumentFormat,
+} from "../shared/document-format.js";
 
 // Forgejo events we subscribe to. The cosheaf webhook handler in
 // `server/routes/webhooks.ts` switches on these exact strings — if you
@@ -18,10 +25,13 @@ const WEBHOOK_EVENTS = [
   "issue_comment",
 ];
 
-export interface WorkspaceRow {
-  id: number;
+// A workspace is now identified only by its slug. The slug equals the
+// Forgejo repo name; the display name lives in the Forgejo repo description;
+// the markdown format lives in a Forgejo repo topic. There is no SQLite
+// `workspaces` row — sidecar tables key off the slug directly.
+export interface Workspace {
   slug: string;
-  default_md_format: string;
+  defaultMdFormat: DocumentFormatId;
 }
 
 export interface ProvisionWorkspaceOptions {
@@ -35,7 +45,7 @@ export interface ProvisionWorkspaceOptions {
 }
 
 export interface ProvisionWorkspaceResult {
-  workspace: WorkspaceRow;
+  workspace: Workspace;
   repoExisted: boolean;
   createdRepo: boolean;
 }
@@ -65,17 +75,7 @@ export async function provisionWorkspace(
     createdRepo = true;
   }
 
-  // Provisioning is a sequence with side effects in different stores (Forgejo
-  // + local DB). If any required step fails after we create the Forgejo repo
-  // / local row, roll both back so a retry sees a clean slate. The optional
-  // reindex is best-effort.
-  let workspace: WorkspaceRow;
   const rollback = async (err: unknown): Promise<never> => {
-    try {
-      db.prepare("DELETE FROM workspaces WHERE slug = ?").run(options.slug);
-    } catch (cleanupErr) {
-      console.warn(`rollback local delete failed: ${(cleanupErr as Error).message}`);
-    }
     if (createdRepo && options.rollbackCreatedRepoOnLocalFailure) {
       try {
         await forgejo.deleteRepo(owner, repoName);
@@ -86,18 +86,27 @@ export async function provisionWorkspace(
     throw err;
   };
 
+  let workspace: Workspace;
   try {
-    workspace = upsertWorkspace(db, options);
+    const formatId = normalizeDocumentFormatId(
+      options.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
+    );
+    await setWorkspaceFormatTopic(forgejo, owner, repoName, formatId);
+    workspace = { slug: repoName, defaultMdFormat: formatId };
   } catch (err) {
     return rollback(err);
   }
 
   try {
     await ensureWorkspacePermissions(forgejo, config, repoName, options.forgejoUsername);
-    // Webhook setup is required — without it, the sidecar will diverge from
-    // Forgejo silently. Let failures roll the workspace back so the operator
-    // can retry instead of finding out via stale data weeks later.
-    await ensureWorkspaceWebhookOrThrow(forgejo, config, repoName);
+    // #64: Webhook registration is needed only for workspaces whose sidecar
+    // we reconcile from Forgejo events. Passthrough workspaces don't index
+    // into the sidecar (no doc_map / FTS / backlinks usage), so there's
+    // nothing to reconcile and no SSE event worth firing. Skip the hook for
+    // them; coflat workspaces still get one and roll back on failure.
+    if (workspace.defaultMdFormat !== "forgejo-passthrough") {
+      await ensureWorkspaceWebhookOrThrow(forgejo, config, repoName);
+    }
     if (!repoExisted) {
       await ensureWorkspaceFile(forgejo, config, repoName, {
         path: ".gitattributes",
@@ -118,34 +127,27 @@ export async function provisionWorkspace(
   return { workspace, repoExisted, createdRepo };
 }
 
-function upsertWorkspace(
-  db: Database.Database,
-  options: ProvisionWorkspaceOptions,
-): WorkspaceRow {
-  const existing = db
-    .prepare("SELECT id, slug, default_md_format FROM workspaces WHERE slug = ?")
-    .get(options.slug) as WorkspaceRow | undefined;
-  if (existing && !options.allowExistingLocal) {
-    throw new Error("workspace slug already exists");
-  }
+// Replace any existing cosheaf-format-* topics on the repo with exactly the
+// one that selects `formatId`. Other repo topics (user-set) are preserved.
+export async function setWorkspaceFormatTopic(
+  forgejo: Forgejo,
+  owner: string,
+  repoName: string,
+  formatId: DocumentFormatId,
+): Promise<void> {
+  const existing = await forgejo.listRepoTopics(owner, repoName);
+  const preserved = existing.filter((t) => !isFormatTopic(t));
+  const target = [...preserved, topicForDocumentFormat(formatId)];
+  await forgejo.replaceRepoTopics(owner, repoName, target);
+}
 
-  if (existing) {
-    const formatId = options.defaultMdFormat ?? existing.default_md_format;
-    db.prepare("UPDATE workspaces SET default_md_format = ? WHERE id = ?")
-      .run(formatId, existing.id);
-    return { ...existing, default_md_format: formatId };
-  }
-
-  return db
-    .prepare(
-      "INSERT INTO workspaces (slug, default_md_format, created_at) VALUES (?, ?, ?) " +
-        "RETURNING id, slug, default_md_format",
-    )
-    .get(
-      options.slug,
-      options.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
-      Date.now(),
-    ) as WorkspaceRow;
+export async function readWorkspaceFormatFromTopics(
+  forgejo: Forgejo,
+  owner: string,
+  repoName: string,
+): Promise<DocumentFormatId> {
+  const topics = await forgejo.listRepoTopics(owner, repoName);
+  return documentFormatFromTopics(topics);
 }
 
 export async function ensureWorkspacePermissions(
@@ -226,7 +228,7 @@ export async function reindexWorkspaceFromForgejo(
   db: Database.Database,
   forgejo: Forgejo,
   config: Config,
-  workspace: Pick<WorkspaceRow, "id" | "slug"> & { default_md_format?: string },
+  workspace: { slug: string; defaultMdFormat?: string },
 ): Promise<number> {
   const seen = new Set<string>();
   const tree = await forgejo.getTree(config.forgejoOwner, workspace.slug, "main", true);
@@ -234,8 +236,7 @@ export async function reindexWorkspaceFromForgejo(
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
     .map((e) => e.path);
   // Fetch all markdown bodies in parallel — each getRawFile is independent
-  // and the indexPage write that follows is local. Note Forgejo rate limits
-  // aren't a concern at this volume (one workspace's tree).
+  // and the indexPage write that follows is local.
   const bodies = await Promise.all(
     mdPaths.map((path) =>
       forgejo
@@ -245,19 +246,19 @@ export async function reindexWorkspaceFromForgejo(
   );
   for (const { path, body } of bodies) {
     indexPage(db, {
-      workspaceId: workspace.id,
+      workspaceSlug: workspace.slug,
       filePath: path,
       bodyText: body,
-      formatId: workspace.default_md_format,
+      formatId: workspace.defaultMdFormat,
     });
     seen.add(path);
   }
 
   const indexed = db
-    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_id = ?")
-    .all(workspace.id) as Array<{ forgejo_id: string }>;
+    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = ?")
+    .all(workspace.slug) as Array<{ forgejo_id: string }>;
   for (const row of indexed) {
-    if (!seen.has(row.forgejo_id)) deletePage(db, workspace.id, row.forgejo_id);
+    if (!seen.has(row.forgejo_id)) deletePage(db, workspace.slug, row.forgejo_id);
   }
   return seen.size;
 }

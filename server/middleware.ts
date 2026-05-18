@@ -6,6 +6,7 @@ import type { Role } from "../shared/roles.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { getStoredPat, upsertUserFromForgejo, userFromSession, type User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
+import { documentFormatFromTopics } from "../shared/document-format.js";
 
 interface AuthResolution {
   user: User;
@@ -141,14 +142,6 @@ async function fetchRole(
 export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => async (c, next) => {
   const slug = c.req.param(param);
   if (!slug) return c.json({ error: "workspace required", code: "validation" }, 400);
-  const db = c.get("db");
-  const row = db
-    .prepare("SELECT id, default_md_format FROM workspaces WHERE slug = ?")
-    .get(slug) as
-      | { id: number; default_md_format: string }
-      | undefined;
-  if (!row) return c.json({ error: "workspace not found", code: "not_found" }, 404);
-
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
   const fjName = c.get("user").username;
@@ -156,12 +149,31 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  c.set("workspace", {
-    id: row.id,
-    slug,
-    defaultMdFormat: row.default_md_format,
-    role,
-  });
+  const defaultMdFormat = await fetchWorkspaceFormat(fj, owner, slug);
+  c.set("workspace", { slug, defaultMdFormat, role });
   c.set("repoCtx", { fj, owner, repo: slug });
   await next();
 };
+
+// In-process cache of the workspace's markdown format (read from the Forgejo
+// repo topic). Same TTL discipline as the role cache — format changes
+// propagate quickly enough, and a topic flip is a rare admin action.
+const FORMAT_TTL_MS = 30_000;
+const FORMAT_CACHE = new TTLCache<string, string>(FORMAT_TTL_MS);
+
+export function _resetFormatCacheForTests(): void {
+  FORMAT_CACHE.clear();
+}
+
+export function _seedFormatCacheForTests(slug: string, formatId: string): void {
+  FORMAT_CACHE.set(slug, formatId, 60_000);
+}
+
+async function fetchWorkspaceFormat(fj: Forgejo, owner: string, slug: string): Promise<string> {
+  const cached = FORMAT_CACHE.get(slug);
+  if (cached !== null) return cached;
+  const topics = await fj.listRepoTopics(owner, slug);
+  const format = documentFormatFromTopics(topics);
+  FORMAT_CACHE.set(slug, format);
+  return format;
+}

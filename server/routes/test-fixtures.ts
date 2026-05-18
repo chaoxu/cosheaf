@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach } from "vitest";
+import { DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
+import { _seedFormatCacheForTests } from "../middleware.js";
 
 // Tracks every Database returned by freshTestDb() so a single afterEach
 // closes them and cleans up the tmpdir behind them. Without this each
@@ -38,25 +40,25 @@ export function freshTestDb(prefix = "cosheaf-test-"): Database.Database {
 }
 
 interface WorkspaceSeed {
-  id?: number;
   slug?: string;
   default_md_format?: string;
 }
 
-// Insert a workspaces row with sensible defaults. Idempotent on (id) so
-// repeat callers in the same test don't blow up.
-export function seedTestWorkspace(db: Database.Database, init: WorkspaceSeed = {}): void {
-  const id = init.id ?? 1;
+// Register a test workspace with the middleware. The `workspaces` table is
+// gone (#62); the only thing that needs setup now is the in-process format
+// cache so requireMembership can resolve `defaultMdFormat` without an actual
+// Forgejo round-trip.
+export function seedTestWorkspace(
+  db: Database.Database,
+  init: WorkspaceSeed = {},
+): { slug: string } {
   const slug = init.slug ?? "w";
-  if (init.default_md_format !== undefined) {
-    db.prepare(
-      "INSERT OR IGNORE INTO workspaces (id, slug, default_md_format, created_at) VALUES (?, ?, ?, 0)",
-    ).run(id, slug, init.default_md_format);
-    return;
-  }
-  db.prepare(
-    "INSERT OR IGNORE INTO workspaces (id, slug, created_at) VALUES (?, ?, 0)",
-  ).run(id, slug);
+  const formatId = init.default_md_format ?? DEFAULT_DOCUMENT_FORMAT_ID;
+  _seedFormatCacheForTests(slug, formatId);
+  // `db` is intentionally unused: there is no SQLite row to seed anymore.
+  // Kept in the signature so test callers don't need to change.
+  void db;
+  return { slug };
 }
 
 // JSON Response builder for fetchMock. Default status is 200; the

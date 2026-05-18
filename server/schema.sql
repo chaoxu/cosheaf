@@ -21,16 +21,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- directly as `Authorization: Bearer <token>`.
 DROP TABLE IF EXISTS tokens;
 
--- The workspace slug IS the Forgejo repository name; cosheaf only ever
--- creates repos with repoName = slug, so the two values are guaranteed
--- equal (#60). The display name lives in the Forgejo repo description
--- and is read on demand (#61).
-CREATE TABLE IF NOT EXISTS workspaces (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  slug TEXT NOT NULL UNIQUE,
-  default_md_format TEXT NOT NULL DEFAULT 'forgejo-passthrough',
-  created_at INTEGER NOT NULL
-);
+-- Workspaces table removed (#62). The workspace slug IS the Forgejo
+-- repository name (#60), display name comes from the Forgejo repo
+-- description (#61), and the workspace's default markdown format lives in
+-- a Forgejo repo topic (`cosheaf-format-coflat` present → coflat,
+-- otherwise → forgejo-passthrough). Sidecar tables key off the slug
+-- directly (`workspace_slug TEXT`); legacy `workspace_id INTEGER` columns
+-- are migrated in db.ts before this schema runs.
 
 -- Memberships: removed. Role and access are sourced from Forgejo's
 -- collaborator-permission API; middleware queries Forgejo and caches.
@@ -39,12 +36,12 @@ CREATE TABLE IF NOT EXISTS workspaces (
 -- additional kinds (if ever) get their own tables, not a polymorphic column.
 CREATE TABLE IF NOT EXISTS doc_map (
   cosheaf_id TEXT NOT NULL,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  workspace_slug TEXT NOT NULL,
   forgejo_id TEXT NOT NULL,  -- repo-relative path of the markdown file
   title TEXT,
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (workspace_id, cosheaf_id),
-  UNIQUE (workspace_id, forgejo_id)
+  PRIMARY KEY (workspace_slug, cosheaf_id),
+  UNIQUE (workspace_slug, forgejo_id)
 );
 
 -- Pre-existing DBs may have legacy target_id / author_user_id columns and
@@ -53,7 +50,7 @@ DROP INDEX IF EXISTS idx_doc_map_target;
 DROP INDEX IF EXISTS idx_doc_map_type;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-  workspace_id UNINDEXED,
+  workspace_slug UNINDEXED,
   cosheaf_id UNINDEXED,
   path,
   title,
@@ -62,21 +59,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
 );
 
 CREATE TABLE IF NOT EXISTS backlinks (
-  workspace_id INTEGER NOT NULL,
+  workspace_slug TEXT NOT NULL,
   src_id TEXT NOT NULL,
   src_path TEXT NOT NULL,
   target_id TEXT,
   target_label TEXT NOT NULL,
   line INTEGER,
-  PRIMARY KEY (workspace_id, src_id, target_label)
+  PRIMARY KEY (workspace_slug, src_id, target_label)
 );
-CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks (workspace_id, target_id);
+CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks (workspace_slug, target_id);
 
 CREATE TABLE IF NOT EXISTS page_tags (
-  workspace_id INTEGER NOT NULL,
+  workspace_slug TEXT NOT NULL,
   cosheaf_id TEXT NOT NULL,
   tag TEXT NOT NULL,
-  PRIMARY KEY (workspace_id, cosheaf_id, tag)
+  PRIMARY KEY (workspace_slug, cosheaf_id, tag)
 );
 
 CREATE TABLE IF NOT EXISTS webhook_log (

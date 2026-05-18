@@ -7,11 +7,11 @@ import { ForgejoError } from "./forgejo.js";
 // notes_fts don't carry the FK so they need explicit deletes. Shared by the
 // workspace-rm CLI (admin teardown) and the repository-deleted webhook
 // handler (reconciliation when Forgejo loses the repo).
-export function deleteSidecarForWorkspace(db: Database.Database, workspaceId: number): void {
-  db.prepare("DELETE FROM workspaces WHERE id = ?").run(workspaceId);
-  db.prepare("DELETE FROM notes_fts WHERE workspace_id = ?").run(workspaceId);
-  db.prepare("DELETE FROM backlinks WHERE workspace_id = ?").run(workspaceId);
-  db.prepare("DELETE FROM page_tags WHERE workspace_id = ?").run(workspaceId);
+export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: string): void {
+  db.prepare("DELETE FROM doc_map WHERE workspace_slug = ?").run(workspaceSlug);
+  db.prepare("DELETE FROM notes_fts WHERE workspace_slug = ?").run(workspaceSlug);
+  db.prepare("DELETE FROM backlinks WHERE workspace_slug = ?").run(workspaceSlug);
+  db.prepare("DELETE FROM page_tags WHERE workspace_slug = ?").run(workspaceSlug);
 }
 
 // Forgejo.deleteBranch with 404-tolerance — used in PR-merge cleanup and the

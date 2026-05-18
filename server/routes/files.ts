@@ -130,9 +130,9 @@ files.get("/:slug/tree", async (c) => {
   const docs = c
     .get("db")
     .prepare(
-      "SELECT cosheaf_id AS id, forgejo_id AS path, title FROM doc_map WHERE workspace_id = ?",
+      "SELECT cosheaf_id AS id, forgejo_id AS path, title FROM doc_map WHERE workspace_slug = ?",
     )
-    .all(ws.id) as Array<{ id: string; path: string; title: string | null }>;
+    .all(ws.slug) as Array<{ id: string; path: string; title: string | null }>;
   const byPath = new Map(docs.map((d) => [d.path, d]));
   const merged = out.map((f) => {
     const meta = byPath.get(f.path);
@@ -191,7 +191,7 @@ files.put("/:slug/file", async (c) => {
   // workspaces don't inherit coflat indexing behavior (e.g. backlink
   // extraction for `[@id]` references). #25.
   const plan = planIndexPage(db, {
-    workspaceId: ws.id,
+    workspaceSlug: ws.slug,
     filePath: rel,
     bodyText: body.content,
     formatId: ws.defaultMdFormat,
@@ -270,11 +270,11 @@ files.get("/:slug/suggest", (c) => {
     .get("db")
     .prepare(
       "SELECT cosheaf_id AS id, title FROM doc_map " +
-        "WHERE workspace_id = ? AND " +
+        "WHERE workspace_slug = ? AND " +
         "(cosheaf_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') " +
         "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
     )
-    .all(ws.id, term, term, limit) as Array<{ id: string; title: string | null }>;
+    .all(ws.slug, term, term, limit) as Array<{ id: string; title: string | null }>;
   return c.json({
     suggestions: rows.map((r) => ({
       id: r.id,
@@ -321,10 +321,10 @@ files.get("/:slug/search", (c) => {
       .prepare(
         `SELECT cosheaf_id AS doc_id, path, title, body, bm25(notes_fts) AS rank
            FROM notes_fts
-          WHERE workspace_id = ? AND notes_fts MATCH ?
+          WHERE workspace_slug = ? AND notes_fts MATCH ?
           ORDER BY rank LIMIT ?`,
       )
-      .all(ws.id, ftsQuery, limit) as typeof rows;
+      .all(ws.slug, ftsQuery, limit) as typeof rows;
   } catch (err) {
     return c.json(...bad(`search failed: ${(err as Error).message}`));
   }
@@ -340,10 +340,10 @@ files.get("/:slug/search", (c) => {
         .prepare(
           `SELECT cosheaf_id AS doc_id, path, title, body
              FROM notes_fts
-            WHERE workspace_id = ? AND (${where})
+            WHERE workspace_slug = ? AND (${where})
             ORDER BY path LIMIT ?`,
         )
-        .all(ws.id, ...args, limit) as Array<{ doc_id: string; path: string; title: string | null; body: string }>;
+        .all(ws.slug, ...args, limit) as Array<{ doc_id: string; path: string; title: string | null; body: string }>;
       rows = fallbackRows.map((r) => ({ ...r, rank: 0 }));
     }
   }
@@ -369,12 +369,12 @@ files.get("/:slug/backlinks", (c) => {
               doc_map.title AS src_title, backlinks.target_label AS target_label
          FROM backlinks
          LEFT JOIN doc_map
-           ON doc_map.workspace_id = backlinks.workspace_id
+           ON doc_map.workspace_slug = backlinks.workspace_slug
           AND doc_map.cosheaf_id = backlinks.src_id
-        WHERE backlinks.workspace_id = ? AND backlinks.target_id = ?
+        WHERE backlinks.workspace_slug = ? AND backlinks.target_id = ?
         ORDER BY backlinks.src_path`,
     )
-    .all(ws.id, id);
+    .all(ws.slug, id);
   return c.json({ backlinks: rows });
 });
 
@@ -391,16 +391,16 @@ files.get("/:slug/validation", (c) => {
               b.line AS line
          FROM backlinks b
          LEFT JOIN doc_map src
-           ON src.workspace_id = b.workspace_id
+           ON src.workspace_slug = b.workspace_slug
           AND src.cosheaf_id = b.src_id
          LEFT JOIN doc_map target
-           ON target.workspace_id = b.workspace_id
+           ON target.workspace_slug = b.workspace_slug
           AND target.cosheaf_id = b.target_id
-        WHERE b.workspace_id = ?
+        WHERE b.workspace_slug = ?
           AND (b.target_id IS NULL OR target.cosheaf_id IS NULL)
         ORDER BY b.src_path, b.line, b.target_label`,
     )
-    .all(ws.id) as WorkspaceValidation["broken_refs"];
+    .all(ws.slug) as WorkspaceValidation["broken_refs"];
   const orphanLabels = db
     .prepare(
       `SELECT d.cosheaf_id AS id,
@@ -408,14 +408,14 @@ files.get("/:slug/validation", (c) => {
               d.title AS title
          FROM doc_map d
          LEFT JOIN backlinks b
-           ON b.workspace_id = d.workspace_id
+           ON b.workspace_slug = d.workspace_slug
           AND b.target_id = d.cosheaf_id
           AND b.src_id != d.cosheaf_id
-        WHERE d.workspace_id = ?
+        WHERE d.workspace_slug = ?
           AND b.src_id IS NULL
         ORDER BY d.forgejo_id`,
     )
-    .all(ws.id) as WorkspaceValidation["orphan_labels"];
+    .all(ws.slug) as WorkspaceValidation["orphan_labels"];
   return c.json({ broken_refs: brokenRefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
 });
 

@@ -50,6 +50,8 @@ function fakeForgejo(files: Record<string, string> = {}): Forgejo {
     patchBranchProtectionPushWhitelist: vi.fn(async () => ({ branch_name: "main", required_approvals: 1 })),
     listRepoHooks: vi.fn(async () => []),
     createRepoHook: vi.fn(async () => ({ id: 1, type: "forgejo", events: ["push"] })),
+    listRepoTopics: vi.fn(async () => [] as string[]),
+    replaceRepoTopics: vi.fn(async () => undefined),
     getFileMeta: vi.fn(async (_owner: string, _repo: string, _ref: string, filePath: string) =>
       files[filePath] === undefined ? null : { path: filePath, sha: `sha-${filePath}`, type: "file" },
     ),
@@ -79,13 +81,14 @@ describe("workspace provisioning", () => {
       user,
       forgejoUsername: "chao",
       rollbackCreatedRepoOnLocalFailure: true,
+      defaultMdFormat: "coflat",
     });
 
     expect(result.createdRepo).toBe(true);
     expect(result.workspace.slug).toBe("notes");
-    expect(result.workspace.default_md_format).toBe(DEFAULT_DOCUMENT_FORMAT_ID);
+    expect(result.workspace.defaultMdFormat).toBe("coflat");
     expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "chao", "admin");
-    expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_id = ?").get(result.workspace.id))
+    expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_slug = ?").get(result.workspace.slug))
       .toEqual({ path: "readme.md" });
     expect(forgejo.createBranchProtection).toHaveBeenCalledOnce();
     expect(forgejo.createRepoHook).toHaveBeenCalledOnce();
@@ -94,6 +97,24 @@ describe("workspace provisioning", () => {
       "notes",
       expect.objectContaining({ path: ".gitattributes" }),
     );
+  });
+
+  it("skips webhook registration for passthrough workspaces (#64)", async () => {
+    const db = freshDb();
+    const forgejo = fakeForgejo();
+    const user = { id: 7, username: "chao" };
+    db.prepare("INSERT INTO users (id, username, created_at) VALUES (?, ?, 0)")
+      .run(user.id, user.username);
+
+    await provisionWorkspace(db, forgejo, config, {
+      slug: "notes",
+      name: "Notes",
+      user,
+      forgejoUsername: "chao",
+      defaultMdFormat: DEFAULT_DOCUMENT_FORMAT_ID, // forgejo-passthrough
+    });
+
+    expect(forgejo.createRepoHook).not.toHaveBeenCalled();
   });
 
   it("allows seed-style idempotent provisioning of an existing workspace", async () => {
@@ -118,24 +139,25 @@ describe("workspace provisioning", () => {
       allowExistingLocal: true,
     });
 
-    expect(db.prepare("SELECT count(*) AS count FROM workspaces").get()).toEqual({ count: 1 });
+    // Idempotent re-provisioning: a second call should not fail. The
+    // workspaces table is gone (#62), so there's no row-count to assert;
+    // the assertion is implicit in `provisionWorkspace` not throwing.
   });
 
   it("reindex removes pages no longer present in Forgejo main", async () => {
     const db = freshDb();
-    db.prepare("INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)").run();
     const forgejo = fakeForgejo({ "keep.md": "# Keep\n" });
     db.prepare(
-      "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES ('gone', 1, 'gone.md', 'Gone', 0)",
+      "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES ('gone', 'w', 'gone.md', 'Gone', 0)",
     ).run();
     db.prepare(
-      "INSERT INTO notes_fts (workspace_id, cosheaf_id, path, title, body) VALUES (1, 'gone', 'gone.md', 'Gone', 'Gone')",
+      "INSERT INTO notes_fts (workspace_slug, cosheaf_id, path, title, body) VALUES ('w', 'gone', 'gone.md', 'Gone', 'Gone')",
     ).run();
 
-    const count = await reindexWorkspaceFromForgejo(db, forgejo, config, { id: 1, slug: "w" });
+    const count = await reindexWorkspaceFromForgejo(db, forgejo, config, { slug: "w", defaultMdFormat: "coflat" });
 
     expect(count).toBe(1);
-    expect(db.prepare("SELECT forgejo_id FROM doc_map WHERE workspace_id = 1 ORDER BY forgejo_id").all())
+    expect(db.prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = 'w' ORDER BY forgejo_id").all())
       .toEqual([{ forgejo_id: "keep.md" }]);
   });
 });

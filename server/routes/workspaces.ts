@@ -4,46 +4,38 @@ import type { Role } from "../../shared/roles.js";
 import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { requireAuth } from "../middleware.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
-import { normalizeDocumentFormatId } from "../../shared/document-format.js";
+import {
+  documentFormatFromTopics,
+  isFormatTopic,
+  normalizeDocumentFormatId,
+} from "../../shared/document-format.js";
 import { bad, conflict } from "./responses.js";
 
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
 
 workspaces.get("/", async (c) => {
-  const rows = c
-    .get("db")
-    .prepare(
-      "SELECT id, slug, default_md_format FROM workspaces ORDER BY slug",
-    )
-    .all() as Array<{
-      id: number;
-      slug: string;
-      default_md_format: string;
-    }>;
-
-  // Resolve the caller's role and the display name via Forgejo using the
-  // user's own PAT. The display name is the Forgejo repo description
-  // (#61) — cosheaf no longer mirrors it. Workspaces where the user has
-  // no permission are filtered out, mirroring the old membership gate.
+  // Cosheaf workspaces are now identified by the presence of a
+  // `cosheaf-format-*` topic on a repo under config.forgejoOwner. We list
+  // those repos via Forgejo (the source of truth) and filter by the topic
+  // marker. Permission resolution and display name come from the same
+  // repo objects.
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
   const fjUser = c.get("user").username;
+
+  const repos = await fj.listUserRepos(owner, { limit: 50 });
+  const candidates = repos.filter((r) => (r.topics ?? []).some(isFormatTopic));
   const resolved = await Promise.all(
-    rows.map(async (r) => {
-      const [p, repo] = await Promise.all([
-        fj.getRepoPermission(owner, r.slug, fjUser).catch(() => "none" as const),
-        fj.getRepo(owner, r.slug).catch(() => null),
-      ]);
-      return p === "none"
-        ? null
-        : {
-            id: r.id,
-            slug: r.slug,
-            name: repo?.description?.trim() || r.slug,
-            role: p as Role,
-            default_md_format: normalizeDocumentFormatId(r.default_md_format),
-          };
+    candidates.map(async (r) => {
+      const role = await fj.getRepoPermission(owner, r.name, fjUser).catch(() => "none" as const);
+      if (role === "none") return null;
+      return {
+        slug: r.name,
+        name: r.description?.trim() || r.name,
+        role: role as Role,
+        default_md_format: documentFormatFromTopics(r.topics ?? []),
+      };
     }),
   );
   return c.json({ workspaces: resolved.filter((r): r is NonNullable<typeof r> => r !== null) });
@@ -64,8 +56,8 @@ workspaces.post("/", async (c) => {
   const fj = c.get("fjAdmin");
   const user = c.get("user");
 
-  const taken = db.prepare("SELECT 1 FROM workspaces WHERE slug = ?").get(body.slug);
-  if (taken) return c.json(...conflict("slug already taken"));
+  const existing = await fj.getRepo(config.forgejoOwner, body.slug);
+  if (existing) return c.json(...conflict("slug already taken"));
 
   try {
     const { workspace } = await provisionWorkspace(db, fj, config, {
@@ -77,11 +69,10 @@ workspaces.post("/", async (c) => {
     });
     return c.json(
       {
-        id: workspace.id,
-        slug: body.slug,
+        slug: workspace.slug,
         name: body.name,
         role: "admin",
-        default_md_format: normalizeDocumentFormatId(workspace.default_md_format),
+        default_md_format: normalizeDocumentFormatId(workspace.defaultMdFormat),
       },
       201,
     );

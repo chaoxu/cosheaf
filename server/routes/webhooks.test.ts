@@ -26,12 +26,26 @@ function freshDb(): Database.Database {
   return db;
 }
 
+// Add the two repo-existence checks the webhook handler now makes (#62):
+// fj.getRepo to confirm the repo exists, fj.listRepoTopics to read the
+// format. Tests that only mock getRawFile etc. get these for free.
+function withRepoDefaults(forgejo: Forgejo): Forgejo {
+  const f = forgejo as unknown as Record<string, unknown>;
+  if (typeof f.getRepo !== "function") {
+    f.getRepo = vi.fn(async () => ({ id: 1, full_name: "owner/w" }));
+  }
+  if (typeof f.listRepoTopics !== "function") {
+    f.listRepoTopics = vi.fn(async () => [] as string[]);
+  }
+  return forgejo;
+}
+
 function appFor(db: Database.Database, forgejo: Forgejo): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
-    c.set("fjAdmin", forgejo);
+    c.set("fjAdmin", withRepoDefaults(forgejo));
     c.set("sse", new SSEHub());
     await next();
   });
@@ -193,7 +207,7 @@ describe("forgejo webhooks", () => {
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body));
       expect(res.status).toBe(200);
       const row = db.prepare(
-        "SELECT cosheaf_id, forgejo_id, title FROM doc_map WHERE workspace_id = 1",
+        "SELECT cosheaf_id, forgejo_id, title FROM doc_map WHERE workspace_slug = 'w'",
       ).get();
       expect(row).toMatchObject({ cosheaf_id: "foo-1", forgejo_id: "foo.md", title: "Foo" });
     });
@@ -202,8 +216,8 @@ describe("forgejo webhooks", () => {
       const db = freshDb();
       const fj = mockedForgejo({ "foo.md": "---\nid: foo-1\n---\n# Foo v2\n" });
       db.prepare(
-        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
-      ).run("foo-1", 1, "foo.md", "Foo", Date.now());
+        "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", "w", "foo.md", "Foo", Date.now());
       const app = appFor(db, fj);
       const body = JSON.stringify({
         ref: "refs/heads/main",
@@ -212,7 +226,7 @@ describe("forgejo webhooks", () => {
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "update-1"));
       expect(res.status).toBe(200);
-      expect(db.prepare("SELECT title FROM doc_map WHERE workspace_id = 1").get()).toEqual({
+      expect(db.prepare("SELECT title FROM doc_map WHERE workspace_slug = 'w'").get()).toEqual({
         title: "Foo v2",
       });
     });
@@ -220,8 +234,8 @@ describe("forgejo webhooks", () => {
     it("DELETE: a push that removes foo.md drops the doc_map row and emits SSE remove", async () => {
       const db = freshDb();
       db.prepare(
-        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
-      ).run("foo-1", 1, "foo.md", "Foo", Date.now());
+        "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", "w", "foo.md", "Foo", Date.now());
       const app = appFor(db, {} as Forgejo);
       const body = JSON.stringify({
         ref: "refs/heads/main",
@@ -230,15 +244,15 @@ describe("forgejo webhooks", () => {
       });
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "delete-1"));
       expect(res.status).toBe(200);
-      expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+      expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'w'").get()).toEqual({ c: 0 });
     });
 
     it("RENAME (Forgejo's removed+added): old row goes, new row comes in", async () => {
       const db = freshDb();
       const fj = mockedForgejo({ "new.md": "---\nid: foo-1\n---\n# Foo\n" });
       db.prepare(
-        "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
-      ).run("foo-1", 1, "old.md", "Foo", Date.now());
+        "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", "w", "old.md", "Foo", Date.now());
       const app = appFor(db, fj);
       const body = JSON.stringify({
         ref: "refs/heads/main",
@@ -248,7 +262,7 @@ describe("forgejo webhooks", () => {
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "rename-1"));
       expect(res.status).toBe(200);
       const rows = db.prepare(
-        "SELECT forgejo_id FROM doc_map WHERE workspace_id = 1",
+        "SELECT forgejo_id FROM doc_map WHERE workspace_slug = 'w'",
       ).all() as Array<{ forgejo_id: string }>;
       expect(rows.map((r) => r.forgejo_id)).toEqual(["new.md"]);
     });
@@ -266,7 +280,7 @@ describe("forgejo webhooks", () => {
       expect(res.status).toBe(200);
       // Did not reach Forgejo for the file body (main-only).
       expect(vi.mocked(fj.getRawFile)).not.toHaveBeenCalled();
-      expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+      expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'w'").get()).toEqual({ c: 0 });
     });
   });
 
@@ -275,12 +289,12 @@ describe("forgejo webhooks", () => {
     const app = appFor(db, {} as Forgejo);
     // Plant a row in each derived table so the cleanup is observable.
     db.prepare(
-      "INSERT INTO doc_map (cosheaf_id, workspace_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
-    ).run("abc", 1, "page.md", "Page", Date.now());
+      "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run("abc", "w", "page.md", "Page", Date.now());
     db.prepare(
-      "INSERT INTO backlinks (workspace_id, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
-    ).run(1, "abc", "page.md", null, "external", 1);
-    db.prepare("INSERT INTO page_tags (workspace_id, cosheaf_id, tag) VALUES (?, ?, ?)").run(1, "abc", "wip");
+      "INSERT INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("w", "abc", "page.md", null, "external", 1);
+    db.prepare("INSERT INTO page_tags (workspace_slug, cosheaf_id, tag) VALUES (?, ?, ?)").run("w", "abc", "wip");
 
     const body = JSON.stringify({
       action: "deleted",
@@ -291,10 +305,11 @@ describe("forgejo webhooks", () => {
       signedForgejo(body, "repository", "del-1"),
     );
     expect(res.status).toBe(200);
-    expect(db.prepare("SELECT count(*) AS c FROM workspaces WHERE id = 1").get()).toEqual({ c: 0 });
-    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_id = 1").get()).toEqual({ c: 0 });
-    expect(db.prepare("SELECT count(*) AS c FROM backlinks WHERE workspace_id = 1").get()).toEqual({ c: 0 });
-    expect(db.prepare("SELECT count(*) AS c FROM page_tags WHERE workspace_id = 1").get()).toEqual({ c: 0 });
+    // No workspaces table anymore (#62) — the sidecar tables are the
+    // only thing the repository=deleted handler touches.
+    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'w'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM backlinks WHERE workspace_slug = 'w'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM page_tags WHERE workspace_slug = 'w'").get()).toEqual({ c: 0 });
   });
 
   it("rejects deliveries that arrive with only x-gitea-* headers", async () => {

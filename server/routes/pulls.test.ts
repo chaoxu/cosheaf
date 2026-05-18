@@ -11,11 +11,11 @@ import { Forgejo } from "../forgejo.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
-import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
+import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { pulls } from "./pulls.js";
 import { branches } from "./branches.js";
-import { COFLAT_FORMAT_ID, DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
@@ -61,6 +61,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   _resetPermCacheForTests();
   _resetBearerAuthCacheForTests();
+  _resetFormatCacheForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -160,13 +161,18 @@ describe("pulls + branches routes", () => {
       expect(fetchMock).toHaveBeenCalledOnce();
     });
 
-    it("PUT /settings leaves the format unchanged when reindex fails", async () => {
+    it("PUT /settings writes the format topic to Forgejo before reindex", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "admin");
+      // Sequence: requireAdminFresh → getBranchProtection → listRepoTopics →
+      // replaceRepoTopics → getTree (fails). The format topic write is the
+      // commit point; the reindex is best-effort.
       fetchMock
         .mockResolvedValueOnce(ok({ permission: "admin" }))
         .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 1 }))
+        .mockResolvedValueOnce(ok({ topics: [] }))
+        .mockResolvedValueOnce(empty(204))
         .mockResolvedValueOnce(ok({ message: "tree failed" }, 500));
 
       const res = await appFor(db).request("/api/v1/w/w/settings", {
@@ -179,9 +185,17 @@ describe("pulls + branches routes", () => {
       const body = (await res.json()) as { code: string; step?: string };
       expect(body.code).toBe("reindex_failed");
       expect(body.step).toBe("reindex");
-      expect(
-        db.prepare("SELECT default_md_format FROM workspaces WHERE id = 1").get(),
-      ).toEqual({ default_md_format: DEFAULT_DOCUMENT_FORMAT_ID });
+      // Assert the Forgejo topics PUT was called with the new format topic.
+      // (No SQLite UPDATE to verify — workspaces table is gone in #62.)
+      const topicsPutCall = fetchMock.mock.calls.find((call) => {
+        const url = String(call[0] ?? "");
+        const init = (call[1] ?? {}) as RequestInit;
+        return url.includes("/repos/owner/w/topics") && (init.method ?? "GET").toUpperCase() === "PUT";
+      });
+      expect(topicsPutCall, "Forgejo /topics PUT was not called").toBeDefined();
+      const reqInit = (topicsPutCall?.[1] ?? {}) as RequestInit;
+      const sentBody = JSON.parse(String(reqInit.body ?? "{}")) as { topics?: string[] };
+      expect(sentBody.topics).toEqual(expect.arrayContaining([`cosheaf-format-${COFLAT_FORMAT_ID}`]));
     });
   });
 

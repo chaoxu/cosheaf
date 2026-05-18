@@ -6,26 +6,24 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
-import { isDocumentFormatId } from "../../shared/document-format.js";
+import { documentFormatFromTopics } from "../../shared/document-format.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { ForgejoIssue } from "../forgejo.js";
 import { bad, unauthorized } from "./responses.js";
 
 export const webhooks = new Hono<AppEnv>();
 
-interface WorkspaceRow { id: number; slug: string; default_md_format: string }
+const workspaceQueues = new Map<string, Promise<void>>();
 
-const workspaceQueues = new Map<number, Promise<void>>();
-
-async function serializeWorkspace<T>(workspaceId: number, work: () => Promise<T>): Promise<T> {
-  const previous = workspaceQueues.get(workspaceId) ?? Promise.resolve();
+async function serializeWorkspace<T>(slug: string, work: () => Promise<T>): Promise<T> {
+  const previous = workspaceQueues.get(slug) ?? Promise.resolve();
   const run = previous.catch(() => undefined).then(work);
   const current = run.then(() => undefined, () => undefined);
-  workspaceQueues.set(workspaceId, current);
+  workspaceQueues.set(slug, current);
   try {
     return await run;
   } finally {
-    if (workspaceQueues.get(workspaceId) === current) workspaceQueues.delete(workspaceId);
+    if (workspaceQueues.get(slug) === current) workspaceQueues.delete(slug);
   }
 }
 
@@ -33,24 +31,14 @@ async function serializeWorkspace<T>(workspaceId: number, work: () => Promise<T>
 // Cosheaf binds every workspace to a repo under `config.forgejoOwner`; a
 // webhook payload whose repo lives under a different owner is unrelated
 // (could be a misconfigured webhook target on another instance) and must
-// not match an arbitrary same-named workspace.
-function workspaceForRepo(
-  db: import("better-sqlite3").Database,
-  repoFullName: string,
-  expectedOwner: string,
-): WorkspaceRow | null {
+// not match.
+function slugForRepoFullName(repoFullName: string, expectedOwner: string): string | null {
   const slashIdx = repoFullName.indexOf("/");
   if (slashIdx < 0) return null;
   const owner = repoFullName.slice(0, slashIdx);
   const name = repoFullName.slice(slashIdx + 1);
   if (owner !== expectedOwner) return null;
-  return (
-    (db
-      .prepare(
-        "SELECT id, slug, default_md_format FROM workspaces WHERE slug = ?",
-      )
-      .get(name) as WorkspaceRow | undefined) ?? null
-  );
+  return name;
 }
 
 webhooks.post("/forgejo", async (c) => {
@@ -84,8 +72,8 @@ webhooks.post("/forgejo", async (c) => {
     return c.json(...bad("bad json"));
   }
   const repoFullName = (payload.repository as { full_name?: string } | undefined)?.full_name ?? "";
-  const ws = workspaceForRepo(db, repoFullName, config.forgejoOwner);
-  if (!ws) {
+  const slug = slugForRepoFullName(repoFullName, config.forgejoOwner);
+  if (!slug) {
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
       deliveryId, Date.now(), event,
     );
@@ -96,8 +84,21 @@ webhooks.post("/forgejo", async (c) => {
   const owner = config.forgejoOwner;
   const sse = c.get("sse");
 
+  // The repo must exist under our owner; otherwise it's a webhook from a
+  // foreign target. Use Forgejo as source of truth here — there's no SQLite
+  // workspaces row to consult anymore.
+  const repo = await fj.getRepo(owner, slug);
+  if (!repo) {
+    db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
+      deliveryId, Date.now(), event,
+    );
+    return c.json({ ok: true, ignored: "unknown_repo" });
+  }
+  const formatId = await fj.listRepoTopics(owner, slug).then(documentFormatFromTopics);
+  const ws = { slug, defaultMdFormat: formatId };
+
   let deduped = false;
-  await serializeWorkspace(ws.id, async () => {
+  await serializeWorkspace(ws.slug, async () => {
     // Claim the delivery id first. Any later failure leaves the dedupe row in
     // place so Forgejo's webhook retry doesn't stampede us — at-most-once
     // beats a retry storm that re-runs the side effects. Per-path failures
@@ -131,7 +132,7 @@ webhooks.post("/forgejo", async (c) => {
           for (const f of cm.removed ?? []) removed.add(f);
         }
         for (const path of removed) {
-          if (path.endsWith(".md")) deletePage(db, ws.id, path);
+          if (path.endsWith(".md")) deletePage(db, ws.slug, path);
         }
         const mdPaths = [...touched].filter((p) => p.endsWith(".md"));
         // Parallel fetch — each Forgejo getRawFile is independent and the
@@ -152,10 +153,10 @@ webhooks.post("/forgejo", async (c) => {
             continue;
           }
           indexPage(db, {
-            workspaceId: ws.id,
+            workspaceSlug: ws.slug,
             filePath: r.path,
             bodyText: r.body,
-            formatId: isDocumentFormatId(ws.default_md_format) ? ws.default_md_format : undefined,
+            formatId: ws.defaultMdFormat,
           });
         }
         if (failures.length > 0) {
@@ -204,7 +205,7 @@ webhooks.post("/forgejo", async (c) => {
       // a ghost workspace. The Forgejo side is already gone; there's
       // nothing to roll back.
       if (String(payload.action ?? "") === "deleted") {
-        deleteSidecarForWorkspace(db, ws.id);
+        deleteSidecarForWorkspace(db, ws.slug);
         sse.publish(ws.slug, { type: "workspace_deleted" });
       }
     }

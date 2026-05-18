@@ -38,7 +38,7 @@ import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
 import { safeRel } from "./files.js";
 import { allDocumentFormats } from "../format-registry.js";
-import { reindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
+import { reindexWorkspaceFromForgejo, setWorkspaceFormatTopic } from "../workspace-provisioning.js";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { PrMeta, PrFileStatus } from "../../shared/review.js";
@@ -573,10 +573,12 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
     : normalizeDocumentFormatId(c.get("workspace").defaultMdFormat);
   if (body.default_md_format !== undefined) {
     try {
+      // Format storage is now a Forgejo repo topic (#62). Update the topic
+      // before re-indexing so the reindex picks up the new format.
+      await setWorkspaceFormatTopic(fj, owner, repo, defaultMdFormat);
       await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
-        id: c.get("workspace").id,
         slug: repo,
-        default_md_format: defaultMdFormat,
+        defaultMdFormat,
       });
     } catch (err) {
       return c.json(
@@ -588,9 +590,6 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
         502,
       );
     }
-    c.get("db")
-      .prepare("UPDATE workspaces SET default_md_format = ? WHERE id = ?")
-      .run(defaultMdFormat, c.get("workspace").id);
   }
   return c.json({
     min_approvals: minApprovals,

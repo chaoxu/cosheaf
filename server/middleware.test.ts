@@ -12,7 +12,7 @@ import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import type { AppEnv } from "./types.js";
-import { _resetBearerAuthCacheForTests, _resetPermCacheForTests, requireAdminFresh, requireAuth, requireMembership } from "./middleware.js";
+import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests, _seedFormatCacheForTests, requireAdminFresh, requireAuth, requireMembership } from "./middleware.js";
 import { seedAuthUser } from "./test-helpers.js";
 
 const config: Config = {
@@ -61,6 +61,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   _resetPermCacheForTests();
   _resetBearerAuthCacheForTests();
+  _resetFormatCacheForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -82,9 +83,7 @@ function notFound(): Response {
 describe("requireMembership", () => {
   it("accepts a Forgejo PAT bearer by resolving /api/v1/user", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     fetchMock
       .mockResolvedValueOnce(ok({ login: "alice" }))
       .mockResolvedValueOnce(ok({ permission: "write" }));
@@ -102,9 +101,7 @@ describe("requireMembership", () => {
 
   it("resolves Forgejo collaborator permission and sets ws.role", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
 
@@ -117,9 +114,7 @@ describe("requireMembership", () => {
 
   it("returns 404 (not 403) when Forgejo says the user has no collaborator access", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     // Forgejo returns 404 from the permission endpoint for an unknown
     // collaborator → translated to role 'none' → middleware hides the workspace.
@@ -133,9 +128,7 @@ describe("requireMembership", () => {
 
   it("treats Forgejo's owner permission as admin", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "owner" }));
 
@@ -148,9 +141,7 @@ describe("requireMembership", () => {
 
   it("caches by (owner, repo, user) — back-to-back requests hit Forgejo once", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValue(ok({ permission: "write" }));
 
@@ -162,12 +153,8 @@ describe("requireMembership", () => {
 
   it("does not collide across workspaces with the same user", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w1', 0)",
-    ).run();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (2, 'w2', 0)",
-    ).run();
+    _seedFormatCacheForTests("w1", "forgejo-passthrough");
+    _seedFormatCacheForTests("w2", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "write" })) // w1
@@ -184,9 +171,7 @@ describe("requireMembership", () => {
 describe("requireAdminFresh", () => {
   it("re-fetches Forgejo permission, ignoring the cached role", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" })) // requireMembership caches admin
@@ -201,9 +186,7 @@ describe("requireAdminFresh", () => {
 
   it("allows the request when Forgejo still reports admin", async () => {
     const db = freshDb();
-    db.prepare(
-      "INSERT INTO workspaces (id, slug, created_at) VALUES (1, 'w', 0)",
-    ).run();
+    _seedFormatCacheForTests("w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" }))
