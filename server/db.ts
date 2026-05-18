@@ -61,78 +61,16 @@ export function loadConfig(): Config {
 
 let dbInstance: Database.Database | null = null;
 
-// Drop legacy doc_type/forgejo_kind columns and the doc_type FTS column on
-// existing DBs. The sidecar is rebuildable; we don't preserve FTS content —
-// `pnpm cli workspace reindex <slug>` regenerates it from Forgejo. The
-// migration is idempotent: it only runs if the columns are still present.
-// Drop the legacy `issues` / `issue_assignees` tables on existing DBs.
-// The mirror is gone; routes now proxy to Forgejo directly.
-function migrateDropIssuesSidecar(db: Database.Database): void {
-  db.exec(`
-    DROP INDEX IF EXISTS idx_issues_state;
-    DROP INDEX IF EXISTS idx_issues_author;
-    DROP INDEX IF EXISTS idx_issue_assignees_user;
-    DROP TABLE IF EXISTS issue_assignees;
-    DROP TABLE IF EXISTS issues;
-  `);
-}
-
-function migrateBacklinksLine(db: Database.Database): void {
-  const cols = db.prepare("PRAGMA table_info('backlinks')").all() as Array<{ name: string }>;
-  if (!cols.some((c) => c.name === "line")) {
-    db.exec("ALTER TABLE backlinks ADD COLUMN line INTEGER;");
-  }
-}
-
-function migrateDropDocKindColumns(db: Database.Database): void {
-  const docMapCols = db.prepare("PRAGMA table_info('doc_map')").all() as Array<{ name: string }>;
-  const has = (name: string): boolean => docMapCols.some((c) => c.name === name);
-  if (has("doc_type") || has("forgejo_kind")) {
-    // Can't ALTER DROP COLUMN: the legacy `UNIQUE (workspace_id, forgejo_kind,
-    // forgejo_id)` constraint references the column we're dropping. Recreate
-    // the table with the current shape and copy what's there.
-    db.exec(`
-      CREATE TABLE doc_map_new (
-        cosheaf_id TEXT NOT NULL,
-        workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-        forgejo_id TEXT NOT NULL,
-        title TEXT,
-        created_at INTEGER NOT NULL,
-        PRIMARY KEY (workspace_id, cosheaf_id),
-        UNIQUE (workspace_id, forgejo_id)
-      );
-      INSERT INTO doc_map_new (cosheaf_id, workspace_id, forgejo_id, title, created_at)
-        SELECT cosheaf_id, workspace_id, forgejo_id, title, created_at FROM doc_map;
-      DROP TABLE doc_map;
-      ALTER TABLE doc_map_new RENAME TO doc_map;
-    `);
-  }
-  const ftsRow = db
-    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts'")
-    .get() as { sql: string } | undefined;
-  const ftsNeedsRebuild =
-    !ftsRow ||
-    !/tokenize\s*=\s*'?trigram'?/i.test(ftsRow.sql) ||
-    /\bdoc_type\b/i.test(ftsRow.sql);
-  if (ftsRow && ftsNeedsRebuild) {
-    db.exec(`
-      DROP TABLE notes_fts;
-      CREATE VIRTUAL TABLE notes_fts USING fts5(
-        workspace_id UNINDEXED,
-        cosheaf_id UNINDEXED,
-        path,
-        title,
-        body,
-        tokenize='trigram'
-      );
-    `);
-  }
-}
-
 // Legacy sidecar tables keyed off `workspace_id INTEGER` (FK into the old
 // `workspaces` table) get rewritten to key off `workspace_slug TEXT`. We
 // detect the legacy shape and migrate in place, preserving rows by joining
 // through the workspaces table while it still exists, then drop it.
+//
+// Older migrations (doc_type/forgejo_kind column drop, issues sidecar drop,
+// backlinks.line add) were retired — every live cosheaf DB has long since
+// run them. If you're hitting a fresh-import error from a pre-May-17 DB,
+// the recovery is `rm $COSHEAF_DATA_DIR/db.sqlite && pnpm setup:dev`; the
+// sidecar is rebuildable from Forgejo.
 function migrateDropWorkspacesTable(db: Database.Database): void {
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -230,14 +168,12 @@ export function getDb(config: Config): Database.Database {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  // Pre-schema migrations: rewrite legacy table shapes before schema.sql's
-  // CREATE IF NOT EXISTS would silently leave them in place.
-  migrateDropDocKindColumns(db);
+  // Pre-schema migration: rewrite legacy `workspace_id INTEGER` tables to
+  // `workspace_slug TEXT` before schema.sql's CREATE IF NOT EXISTS would
+  // silently leave them in place.
   migrateDropWorkspacesTable(db);
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
-  migrateDropIssuesSidecar(db);
-  migrateBacklinksLine(db);
   dbInstance = db;
   return db;
 }
