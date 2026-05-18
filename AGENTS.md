@@ -3,7 +3,9 @@
 Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
 hold the canonical markdown files, branches, pull requests, reviews, issues,
 and collaborator memberships; SQLite is a derived, rebuildable sidecar index
-for fast reads, sessions, and local auth state.
+for fast reads. There is no cosheaf-side auth state — the SPA holds the
+user's Forgejo PAT in localStorage and sends it as `Authorization: Bearer
+<pat>` on every request.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
@@ -47,10 +49,12 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, local auth state, workspace-to-repo mappings, and webhook
-  dedupe. Memberships, branches, pull requests, issues, labels, milestones,
-  and notifications live on Forgejo and are read on demand. Passthrough calls
-  are no longer audited locally — Forgejo's access log is the trail. The page
+  links, FTS index, and webhook dedupe — keyed by Forgejo repo slug. There
+  is no users, sessions, or workspaces table; identity, workspace registry,
+  memberships, branches, pull requests, issues, labels, milestones, and
+  notifications all live on Forgejo and are read on demand (the workspace
+  format lives in a `cosheaf-format-*` repo topic). Passthrough calls
+  are not audited locally — Forgejo's access log is the trail. The page
   index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
@@ -239,8 +243,8 @@ plugins, or move agent/prover logic into this repo as part of this direction.
 
 ## Stack
 
-- **Server**: Hono on `@hono/node-server`, TypeScript, `better-sqlite3`,
-  `@node-rs/argon2` for password hashing.
+- **Server**: Hono on `@hono/node-server`, TypeScript, `better-sqlite3`.
+  No cosheaf-side password hashing — the Forgejo PAT is the credential.
 - **Client**: React 19 + Vite, single-page app in `src/cosheaf/app.tsx`.
 - **Editor**: `@chaoxu/coflat-editor` (published package; do not vendor it
   back into this repo).
@@ -255,8 +259,8 @@ server/
   index.ts        # Hono entrypoint, routes mounted under /api
   db.ts           # config + better-sqlite3 instance
   schema.sql      # full DB schema (executed on every startup; CREATE IF NOT EXISTS)
-  users.ts        # users, sessions, argon2 hashing, Forgejo PAT-backed auth
-  middleware.ts   # requireAuth, requireMembership(slug)
+  users.ts        # minimal `User` type ({username}); identity comes from Forgejo
+  middleware.ts   # requireAuth (Bearer PAT), requireMembership(slug)
   frontmatter.ts  # parse/serialize YAML frontmatter
   indexer.ts      # indexPage(): parse → upsert doc_map → reindex backlinks/tags/FTS
   forgejo.ts      # minimal Forgejo REST client
@@ -319,20 +323,22 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 
 ## Data model
 
-- `users(id, username, forgejo_token_ciphertext, created_at)`
-- `sessions(id, user_id, expires_at)` — cookie sessions
-- `workspaces(id, slug, name, forgejo_repo)` — one Forgejo repo per workspace
-- `doc_map(workspace_id, cosheaf_id, forgejo_id, title, created_at)` — pages only; the prior polymorphic `doc_type`/`forgejo_kind` columns were dropped.
-- `backlinks(workspace_id, src_id, src_path, target_id, target_label)`
-- `notes_fts` — FTS5 virtual table over title + body
-- `page_tags(workspace_id, cosheaf_id, tag)`
-- `webhook_log(delivery_id, delivered_at, event_type)`
+- `doc_map(workspace_slug, cosheaf_id, forgejo_id, title, created_at)` — pages only.
+- `backlinks(workspace_slug, src_id, src_path, target_id, target_label, line)`
+- `notes_fts` — FTS5 virtual table over title + body, keyed by `workspace_slug`.
+- `page_tags(workspace_slug, cosheaf_id, tag)`
+- `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
 
-Workspace role (`admin | write | read`) is resolved from Forgejo's
-collaborator-permission API on each request, cached in-process for 30s.
-There is no SQLite `memberships` table. There is no sidecar `branches`
-table either — branches and pull requests live entirely on Forgejo and
-are queried on demand via `/branches/mine` and `/pulls`.
+There is no `users`, `sessions`, or `workspaces` table (#63, #62). Identity
+comes from a Forgejo PAT sent as `Authorization: Bearer <pat>`; workspace
+identity is the Forgejo repo name; the workspace's markdown format lives
+in a Forgejo repo topic (`cosheaf-format-coflat` or
+`cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write |
+read`) is resolved from Forgejo's collaborator-permission API on each
+request, cached in-process for 30s; the bearer→username and slug→format
+mappings are cached on the same TTL. There is no `memberships` table and
+no sidecar `branches` table — branches and pull requests live entirely
+on Forgejo and are queried on demand.
 
 ## Branch and pull request lifecycle
 
@@ -368,14 +374,13 @@ branch deleted or PR closed unmerged ──▶ closed/discarded
 ### Naming conventions
 
 - **snake_case in SQLite rows + wire shapes shared with the SPA.**
-  `forgejo_repo`, `default_md_format`, `cosheaf_id`, `forgejo_id`,
+  `workspace_slug`, `cosheaf_id`, `forgejo_id`, `default_md_format`,
   `created_at`, `updated_at`, `author_username`. Shared interfaces in
   `shared/` use snake_case for fields that round-trip through SQL rows
   or the JSON wire format. The SPA consumes them as-received.
 - **camelCase in middleware-internal types and function parameters.**
-  `WorkspaceContext.forgejoRepo`, `WorkspaceContext.defaultMdFormat`,
-  function args like `cosheafId`, `forgejoId`. The conversion happens
-  once, at the row-load boundary in `server/middleware.ts`.
+  `WorkspaceContext.defaultMdFormat`, function args like `cosheafId`,
+  `forgejoId`, `workspaceSlug`.
 - **PR-related types use the `Pr` prefix.** `PrMeta`, `PrState`, `PrFile`,
   `PrFiles`, `PrFileStatus`. Functions named to match (`prMeta`,
   `parsePr`, `listPrFiles`). Route filenames and URL segments stay
@@ -420,9 +425,12 @@ Bare URLs, raw HTML, and indented code blocks are intentionally out of scope.
 
 ### Workspace markdown formats
 
-Workspaces declare one markdown format in `workspaces.default_md_format`.
-New workspaces default to `forgejo-passthrough` (Forgejo Markdown); development
-fixtures that need Coflat behavior explicitly use `coflat`.
+Workspaces declare one markdown format via a Forgejo repo topic:
+`cosheaf-format-coflat` or `cosheaf-format-forgejo-passthrough`. The
+presence of `cosheaf-format-<id>` selects the format; absence falls back
+to `forgejo-passthrough` (Forgejo Markdown). Development fixtures that
+need Coflat behavior explicitly set the topic via `--default-md-format
+coflat` at seed time.
 
 - `forgejo-passthrough`: plain `.md` files rendered through Forgejo's
   repo-scoped `/markdown` API. It preserves YAML frontmatter but extracts no

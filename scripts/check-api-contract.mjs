@@ -48,7 +48,6 @@ const requiredDocSnippets = [
   "/api/v1/w/:slug/forgejo/*",
   "pulls/:n/merge",
   "frontmatter/id",
-  "forgejo_passthrough_log",
 ];
 for (const snippet of requiredDocSnippets) {
   if (!docs.includes(snippet)) fail(`missing API boundary doc snippet: ${snippet}`);
