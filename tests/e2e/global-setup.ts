@@ -14,13 +14,19 @@ export default async function globalSetup(): Promise<void> {
   await seedReviewablePr();
 }
 
-async function seedReviewablePr(): Promise<void> {
-  const login = await fetch("http://localhost:3030/api/v1/login", {
+async function loginForPat(username: string, password: string): Promise<string> {
+  const res = await fetch("http://localhost:3030/api/v1/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "meri", password: "Cosheaf123!" }),
+    body: JSON.stringify({ username, password }),
   });
-  const cookie = login.headers.get("set-cookie") ?? "";
+  if (!res.ok) throw new Error(`login ${username}: ${res.status}`);
+  const body = (await res.json()) as { pat: string };
+  return body.pat;
+}
+
+async function seedReviewablePr(): Promise<void> {
+  const meriPat = await loginForPat("meri", "Cosheaf123!");
 
   const branch = "user/meri/e2e-demo";
 
@@ -32,7 +38,7 @@ async function seedReviewablePr(): Promise<void> {
       `http://localhost:3030/api/v1/w/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
       {
         method: "PUT",
-        headers: { "content-type": "application/json", cookie },
+        headers: { "content-type": "application/json", authorization: `Bearer ${meriPat}` },
         body: JSON.stringify({ content: file.content }),
       },
     );
@@ -41,18 +47,13 @@ async function seedReviewablePr(): Promise<void> {
 
   const opened = await fetch("http://localhost:3030/api/v1/w/flushing-coin/pulls", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie },
+    headers: { "content-type": "application/json", authorization: `Bearer ${meriPat}` },
     body: JSON.stringify({ head: branch, title: "e2e demo PR" }),
   });
   if (!opened.ok) throw new Error(`seedReviewablePr openPull: ${opened.status}`);
   const { number: prNumber } = (await opened.json()) as { number: number };
 
-  const vlogin = await fetch("http://localhost:3030/api/v1/login", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ username: "vera", password: "Cosheaf123!" }),
-  });
-  const vcookie = vlogin.headers.get("set-cookie") ?? "";
+  const veraPat = await loginForPat("vera", "Cosheaf123!");
   for (const comment of [
     { path: "demo.md", line: 5, body: "Should we cite Euclid's Elements I.47?" },
     { path: "demo2.md", line: 3, body: "This companion note needs a source." },
@@ -61,7 +62,7 @@ async function seedReviewablePr(): Promise<void> {
       `http://localhost:3030/api/v1/w/flushing-coin/pulls/${prNumber}/comments`,
       {
         method: "POST",
-        headers: { "content-type": "application/json", cookie: vcookie },
+        headers: { "content-type": "application/json", authorization: `Bearer ${veraPat}` },
         body: JSON.stringify({
           path: comment.path,
           line: comment.line,

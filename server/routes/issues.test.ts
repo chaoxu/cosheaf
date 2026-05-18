@@ -13,7 +13,6 @@ import { freshTestDb, responseOk as ok, seedTestWorkspace } from "./test-fixture
 const config: Config = {
   dataDir: "/tmp/cosheaf-issues-test",
   port: 3030,
-  sessionSecret: "test",
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "admin-token",
   forgejoOwner: "owner",

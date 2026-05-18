@@ -13,6 +13,7 @@ type OutlineEntry = {
 import {
   ApiError,
   api,
+  getStoredPat,
   type ActivityRow,
   type ApprovalRecord,
   type Backlink,
@@ -1282,8 +1283,13 @@ function WorkspaceView({
   }, [reloadTree, reloadBranches]);
 
   useEffect(() => {
-    const url = `/api/v1/w/${encodeURIComponent(workspace.slug)}/events`;
-    const es = new EventSource(url, { withCredentials: true });
+    // EventSource can't set Authorization headers, so the PAT goes in a
+    // `?pat=` query param. The server treats it identically to the header.
+    const pat = getStoredPat();
+    const url =
+      `/api/v1/w/${encodeURIComponent(workspace.slug)}/events` +
+      (pat ? `?pat=${encodeURIComponent(pat)}` : "");
+    const es = new EventSource(url);
     es.onmessage = (msg) => {
       let event: { type: string; path?: string };
       try {

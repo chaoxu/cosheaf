@@ -1,21 +1,20 @@
 // Auth route tests. Stubs global fetch so we exercise the PAT-exchange
-// flow without a live Forgejo. Each test starts from a fresh in-memory
-// DB and the per-username serialization map is implicit (process-global,
-// cleared between tests because each test uses a fresh username).
+// flow without a live Forgejo. After #63, login no longer touches the
+// database or sets a cookie — it just returns { username, pat } and the
+// SPA stashes the PAT in localStorage.
 
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "../db.js";
 import type { AppEnv } from "../types.js";
-import { createSession, upsertUserFromForgejo } from "../users.js";
+import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests } from "../middleware.js";
 import { auth } from "./auth.js";
 import { freshTestDb } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-auth-test",
   port: 3030,
-  sessionSecret: "test-secret-test-secret-test-secret",
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "admin-token",
   forgejoOwner: "owner",
@@ -42,6 +41,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  _resetBearerAuthCacheForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,13 +69,13 @@ async function waitForFetchCalls(count: number): Promise<void> {
 }
 
 describe("POST /api/v1/login", () => {
-  it("201 from Forgejo → stores encrypted PAT and sets session cookie", async () => {
+  it("201 from Forgejo → returns { username, pat } with no Set-Cookie", async () => {
     const db = freshDb();
     fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-aaa" }));
     const res = await login(db, "alice", "secret");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: expect.any(Number), username: "alice" });
-    expect(res.headers.get("set-cookie")).toMatch(/session=/);
+    expect(await res.json()).toEqual({ username: "alice", pat: "pat-aaa" });
+    expect(res.headers.get("set-cookie")).toBeNull();
 
     // Forgejo got Basic auth + the right token name/scopes
     const [url, init] = fetchMock.mock.calls[0];
@@ -86,22 +86,15 @@ describe("POST /api/v1/login", () => {
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.name).toBe("cosheaf");
     expect(body.scopes).toContain("write:repository");
-
-    // PAT row landed
-    const row = db
-      .prepare("SELECT forgejo_token_ciphertext FROM users WHERE username = 'alice'")
-      .get() as { forgejo_token_ciphertext: Buffer };
-    expect(row.forgejo_token_ciphertext.byteLength).toBeGreaterThan(0);
   });
 
-  it("401 from Forgejo → bad credentials, no row, no cookie", async () => {
+  it("401 from Forgejo → bad credentials, no cookie", async () => {
     const db = freshDb();
     fetchMock.mockResolvedValueOnce(failure(401, { message: "bad" }));
     const res = await login(db, "bob", "wrong");
     expect(res.status).toBe(401);
     expect(((await res.json()) as { code: string }).code).toBe("unauthorized");
     expect(res.headers.get("set-cookie")).toBeNull();
-    expect(db.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 0 });
   });
 
   it.each([
@@ -123,20 +116,18 @@ describe("POST /api/v1/login", () => {
   });
 
   it("400 without name-in-use marker is a real error → 502", async () => {
-    // Generic Forgejo 400 (e.g. invalid scope, password complexity rejected
-    // at PAT-creation time) must not loop into the delete-retry path.
     const db = freshDb();
     fetchMock.mockResolvedValueOnce(failure(400, { message: "PasswordComplexityTooLow" }));
     const res = await login(db, "carol", "secret");
     expect(res.status).toBe(502);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("name-in-use + delete fails → 502 forgejo unavailable", async () => {
     const db = freshDb();
     fetchMock
       .mockResolvedValueOnce(failure(400, { message: "name has been used" }))
-      .mockResolvedValueOnce(failure(500));                      // DELETE blew up
+      .mockResolvedValueOnce(failure(500));
     const res = await login(db, "dan", "secret");
     expect(res.status).toBe(502);
     expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
@@ -189,17 +180,30 @@ describe("POST /api/v1/login", () => {
   });
 });
 
-describe("GET /api/v1/me", () => {
-  it("returns null for a valid cookie session whose Forgejo PAT is missing", async () => {
+describe("POST /api/v1/logout", () => {
+  it("always returns ok", async () => {
     const db = freshDb();
-    const user = upsertUserFromForgejo(db, "iris");
-    const session = createSession(db, user.id);
+    const res = await appFor(db).request("/api/v1/logout", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+});
 
-    const res = await appFor(db).request("/api/v1/me", {
-      headers: { cookie: `session=${session}` },
-    });
-
+describe("GET /api/v1/me", () => {
+  it("returns { user: null } without Bearer", async () => {
+    const db = freshDb();
+    const res = await appFor(db).request("/api/v1/me");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ user: null });
+  });
+
+  it("returns the user when Bearer is valid (cached)", async () => {
+    const db = freshDb();
+    _seedBearerAuthCacheForTests("pat-iris", "iris");
+    const res = await appFor(db).request("/api/v1/me", {
+      headers: { authorization: "Bearer pat-iris" },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ user: { username: "iris" } });
   });
 });

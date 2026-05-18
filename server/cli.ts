@@ -6,7 +6,6 @@ import { stdin, stdout } from "node:process";
 import { Command, InvalidArgumentError } from "commander";
 import { WORKSPACE_SLUG_RE } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
-import { findUserByUsername, upsertUserFromForgejo } from "./users.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
 import {
@@ -160,15 +159,15 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   };
 }
 
-// Create the Forgejo account if absent, then mirror as a cosheaf user row.
-// The password is set on the Forgejo side — that's the only password the
-// user has, and they use it to log into cosheaf, which validates against
-// Forgejo and stores a per-user PAT.
+// Create the Forgejo account if absent. After #63 cosheaf no longer keeps
+// a local users table; users live entirely on Forgejo. The password set
+// here is the only password the user has — they type it at cosheaf's
+// login form, cosheaf exchanges it for a PAT, and the SPA stores the PAT.
 async function ensureForgejoUser(
   username: string,
   password: string,
 ): Promise<void> {
-  const { db, forgejo } = ctx();
+  const { forgejo } = ctx();
   const fjExisting = await forgejo.getUserByName(username);
   if (!fjExisting) {
     await forgejo.createUser({
@@ -180,10 +179,6 @@ async function ensureForgejoUser(
     console.log(`created forgejo user ${username}`);
   } else {
     console.log(`forgejo user ${username} already exists (password unchanged)`);
-  }
-  if (!findUserByUsername(db, username)) {
-    upsertUserFromForgejo(db, username);
-    console.log(`mirrored cosheaf user ${username}`);
   }
 }
 
@@ -201,11 +196,7 @@ async function seed(args: string[]): Promise<void> {
   await ensureForgejoUser(options.user, options.password);
 
   const { config, db, forgejo } = ctx();
-  const user = findUserByUsername(db, options.user);
-  if (!user) {
-    console.error(`user ${options.user} not in cosheaf DB after creation`);
-    process.exit(1);
-  }
+  const user = { username: options.user };
   const { workspace, createdRepo } = await provisionWorkspace(db, forgejo, config, {
     slug: options.workspace,
     name: options.workspaceName,
@@ -247,25 +238,9 @@ async function seed(args: string[]): Promise<void> {
   console.log(`seeded dev workspace: user=${options.user} workspace=${options.workspace}`);
 }
 
-function userList(): void {
-  const { db } = ctx();
-  const rows = db
-    .prepare("SELECT id, username, created_at FROM users ORDER BY username")
-    .all() as Array<{ id: number; username: string; created_at: number }>;
-  for (const row of rows) {
-    console.log(`${row.id}\t${row.username}\t${new Date(row.created_at).toISOString()}`);
-  }
-}
-
-function userRm(username: string): void {
-  const { db } = ctx();
-  const r = db.prepare("DELETE FROM users WHERE username = ?").run(username);
-  if (r.changes === 0) {
-    console.error(`user '${username}' not found`);
-    process.exit(1);
-  }
-  console.log(`deleted cosheaf user ${username} (forgejo account left intact)`);
-}
+// `user list` and `user rm` were removed in #63: cosheaf no longer keeps a
+// local users table, so listing/removing them is a Forgejo admin operation
+// done through Forgejo's UI or API directly.
 
 async function workspaceRm(slug: string): Promise<void> {
   await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
@@ -290,12 +265,9 @@ async function workspaceReindex(slug: string): Promise<void> {
 }
 
 async function workspaceMember(slug: string, username: string, role: Role): Promise<void> {
-  await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
-    const user = findUserByUsername(db, username);
-    if (!user) {
-      console.error(`user '${username}' not found in cosheaf; run \`cli user add\` first`);
-      process.exit(1);
-    }
+  await withWorkspace(slug, async ({ forgejo, config, workspace: ws }) => {
+    // Forgejo's addCollaborator API returns 404 if the user doesn't exist
+    // on Forgejo, which is the only "user" notion cosheaf has after #63.
     await forgejo.addCollaborator(config.forgejoOwner, ws.slug, username, role);
     // Keep the branch-protection push whitelist in sync. Admin can direct-push;
     // write/read users can't. Adjust on every change so demotion takes effect.
@@ -378,8 +350,8 @@ async function doctor(): Promise<void> {
   );
 
   results.push(
-    await check("schema applied (users table exists)", async () => {
-      db.prepare("SELECT 1 FROM users LIMIT 1").get();
+    await check("schema applied (doc_map table exists)", async () => {
+      db.prepare("SELECT 1 FROM doc_map LIMIT 1").get();
       return "ok";
     }),
   );
@@ -633,8 +605,6 @@ function buildProgram(): Command {
     .command("create <username> <password>")
     .description("non-interactive create (dev/CI use)")
     .action(ensureForgejoUser);
-  user.command("list").description("list cosheaf users").action(userList);
-  user.command("rm <username>").description("remove from cosheaf (forgejo account preserved)").action(userRm);
 
   const workspace = program.command("workspace").description("workspace management");
   workspace

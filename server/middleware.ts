@@ -1,10 +1,9 @@
 import type { Context } from "hono";
 import type { MiddlewareHandler } from "hono";
-import { getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
-import { getStoredPat, upsertUserFromForgejo, userFromSession, type User } from "./users.js";
+import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
 import { documentFormatFromTopics } from "../shared/document-format.js";
 
@@ -30,30 +29,34 @@ function bearerToken(authHeader?: string): string | null {
   return token || null;
 }
 
-export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | null> {
-  const db = c.get("db");
-  const config = c.get("config");
-  const bearer = bearerToken(c.req.header("authorization"));
-  if (bearer) {
-    let username = BEARER_CACHE.get(bearer);
-    if (!username) {
-      const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: bearer });
-      try {
-        username = (await fj.getCurrentUser()).login;
-      } catch (err) {
-        if (err instanceof ForgejoError && (err.status === 401 || err.status === 403)) return null;
-        throw err;
-      }
-      BEARER_CACHE.set(bearer, username);
-    }
-    return { user: upsertUserFromForgejo(db, username), forgejoToken: bearer };
-  }
+// EventSource can't set headers; the SSE route accepts the PAT via a
+// `?pat=` query param as a narrowly-scoped fallback. The PAT is the
+// credential either way — Forgejo validates it the same way.
+function bearerFromQuery(c: Context<AppEnv>): string | null {
+  const v = c.req.query("pat")?.trim();
+  return v && v.length > 0 ? v : null;
+}
 
-  const sid = getCookie(c, "session");
-  const user = sid ? userFromSession(db, sid) : null;
-  if (!user) return null;
-  const pat = getStoredPat(db, user.id, config.sessionSecret);
-  return pat ? { user, forgejoToken: pat } : null;
+// Bearer-only authentication. The SPA stores its PAT in localStorage and
+// sends it as `Authorization: Bearer <pat>` on every request; agents do the
+// same with their own Forgejo PAT. There is no cookie session and no
+// cosheaf-side user table — the PAT is the credential.
+export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | null> {
+  const config = c.get("config");
+  const bearer = bearerToken(c.req.header("authorization")) ?? bearerFromQuery(c);
+  if (!bearer) return null;
+  let username = BEARER_CACHE.get(bearer);
+  if (!username) {
+    const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: bearer });
+    try {
+      username = (await fj.getCurrentUser()).login;
+    } catch (err) {
+      if (err instanceof ForgejoError && (err.status === 401 || err.status === 403)) return null;
+      throw err;
+    }
+    BEARER_CACHE.set(bearer, username);
+  }
+  return { user: { username }, forgejoToken: bearer };
 }
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {

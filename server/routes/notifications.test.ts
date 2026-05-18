@@ -13,7 +13,6 @@ import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspac
 const config: Config = {
   dataDir: "/tmp/cosheaf-notifications-test",
   port: 3030,
-  sessionSecret: "test",
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "admin-token",
   forgejoOwner: "owner",

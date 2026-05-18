@@ -12,7 +12,6 @@ import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
 const config: Config = {
   dataDir: "/tmp/cosheaf-webhook-test",
   port: 3030,
-  sessionSecret: "test",
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "token",
   forgejoOwner: "owner",

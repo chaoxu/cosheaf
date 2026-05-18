@@ -2,10 +2,15 @@ import type Database from "better-sqlite3";
 import type { Role } from "../shared/roles.js";
 import type { Config } from "./db.js";
 import { _seedBearerAuthCacheForTests, _seedPermCacheForTests } from "./middleware.js";
-import { encryptPat } from "./pat-crypto.js";
 
+// After #63, cosheaf has no users table and no session cookie. The bearer
+// cache and the workspace permission cache are seeded directly so route
+// tests don't need a live Forgejo. The returned token is the bearer the
+// test should send in `Authorization: Bearer <token>`. The `id` and any
+// `Database` argument are kept only for call-site compatibility with the
+// previous helper signature and are otherwise unused.
 export function seedAuthUser(
-  db: Database.Database,
+  _db: Database.Database,
   config: Config,
   opts: {
     id?: number;
@@ -16,22 +21,12 @@ export function seedAuthUser(
   },
 ): string {
   const token = `fake-pat-${opts.username}`;
-  const blob = encryptPat(`fake-pat-${opts.username}`, config.sessionSecret);
-  if (opts.id === undefined) {
-    db.prepare(
-      "INSERT INTO users (username, forgejo_token_ciphertext, created_at) VALUES (?, ?, 0)",
-    ).run(opts.username, blob);
-  } else {
-    db.prepare(
-      "INSERT INTO users (id, username, forgejo_token_ciphertext, created_at) VALUES (?, ?, ?, 0)",
-    ).run(opts.id, opts.username, blob);
-  }
   _seedBearerAuthCacheForTests(token, opts.username);
   if (opts.role) {
     _seedPermCacheForTests(
       opts.owner ?? config.forgejoOwner,
-      // seedTestWorkspace's default slug is "w"; since slug ≡ repo name now
-      // (#60), the perm-cache key must use the same value.
+      // seedTestWorkspace's default slug is "w"; slug ≡ repo name (#60),
+      // so the perm-cache key uses the same value.
       opts.repo ?? "w",
       opts.username,
       opts.role,

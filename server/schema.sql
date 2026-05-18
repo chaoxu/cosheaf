@@ -1,24 +1,11 @@
 -- Cosheaf sidecar schema (Forgejo backend).
 
--- Cosheaf usernames are identical to Forgejo usernames; there's no separate
--- cosheaf password. Login validates against Forgejo by exchanging the user's
--- Forgejo credentials for a per-user PAT, which is then encrypted at rest.
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT NOT NULL UNIQUE,
-  forgejo_token_ciphertext BLOB,  -- AES-256-GCM(SESSION_SECRET) over the PAT
-  created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL
-);
-
--- Cosheaf-side API tokens were removed. API clients should use Forgejo PATs
--- directly as `Authorization: Bearer <token>`.
+-- #63: cosheaf no longer stores any auth state. The SPA holds the user's
+-- Forgejo PAT in localStorage and sends it as `Authorization: Bearer <pat>`
+-- on every request; agents do the same. There is no users table, no
+-- sessions table, no cosheaf-issued token table — the PAT is the credential.
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tokens;
 
 -- Workspaces table removed (#62). The workspace slug IS the Forgejo

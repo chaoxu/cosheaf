@@ -1,19 +1,13 @@
-// Login = Forgejo PAT exchange. Cosheaf doesn't hold passwords or proxy
-// users; the user types their Forgejo username + password into cosheaf's
-// form, cosheaf forwards those creds (HTTP Basic) to Forgejo's
-// /users/:user/tokens endpoint, and the returned PAT is encrypted and
-// stored. Later API calls use that PAT — no admin token, no impersonation header.
+// Login = Forgejo PAT exchange. Cosheaf doesn't hold passwords or sessions;
+// the user types their Forgejo username + password into cosheaf's form,
+// cosheaf forwards those creds (HTTP Basic) to Forgejo's /users/:user/tokens
+// endpoint, and the returned PAT is sent back to the SPA. The SPA stores
+// the PAT in localStorage and uses it as `Authorization: Bearer <pat>` on
+// every subsequent request. There is no cookie, no sessions table, no
+// stored-PAT table — the PAT is the credential.
 
 import { Hono } from "hono";
-import { setCookie, deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "../types.js";
-import {
-  createSession,
-  destroySession,
-  SESSION_TTL_SECONDS,
-  setStoredPat,
-  upsertUserFromForgejo,
-} from "../users.js";
 import { resolveAuth } from "../middleware.js";
 import { bad, unauthorized } from "./responses.js";
 
@@ -139,37 +133,17 @@ auth.post("/login", async (c) => {
       502,
     );
   }
-
-  const db = c.get("db");
-  const user = upsertUserFromForgejo(db, body.username);
-  setStoredPat(db, user.id, outcome.pat, config.sessionSecret);
-
-  const sessionId = createSession(db, user.id);
-  setCookie(c, "session", sessionId, {
-    httpOnly: true,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-    secure: process.env.NODE_ENV === "production",
-  });
-  return c.json({ id: user.id, username: user.username });
+  return c.json({ username: body.username, pat: outcome.pat });
 });
 
-// Logout drops the cosheaf session cookie but does NOT revoke the Forgejo
-// PAT — that's intentional. A revoke would race with concurrent sessions
-// (laptop + phone) and the user's next login would overwrite the token
-// anyway. The PAT lives until the next login replaces it.
-auth.post("/logout", (c) => {
-  const sid = getCookie(c, "session");
-  if (sid) {
-    destroySession(c.get("db"), sid);
-    deleteCookie(c, "session", { path: "/" });
-  }
-  return c.json({ ok: true });
-});
+// Logout is a no-op on the server: there is no session to destroy and we
+// deliberately do NOT revoke the Forgejo PAT (the user might be logged in
+// from another device with the same token). The SPA drops its local copy
+// of the PAT; the next login mints a fresh one.
+auth.post("/logout", (c) => c.json({ ok: true }));
 
 auth.get("/me", async (c) => {
-  const auth = await resolveAuth(c);
-  if (!auth) return c.json({ user: null });
-  return c.json({ user: { id: auth.user.id, username: auth.user.username } });
+  const a = await resolveAuth(c);
+  if (!a) return c.json({ user: null });
+  return c.json({ user: { username: a.user.username } });
 });

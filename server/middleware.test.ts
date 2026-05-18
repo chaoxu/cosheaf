@@ -18,7 +18,6 @@ import { seedAuthUser } from "./test-helpers.js";
 const config: Config = {
   dataDir: "/tmp/cosheaf-middleware-test",
   port: 3030,
-  sessionSecret: "test",
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "admin-token",
   forgejoOwner: "owner",

@@ -23,7 +23,6 @@ function freshDb(): Database.Database {
 const config: Config = {
   dataDir: "/tmp/cosheaf-test",
   port: 3030,
-  sessionSecret: "test",
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "token",
   forgejoOwner: "owner",
@@ -71,9 +70,7 @@ describe("workspace provisioning", () => {
   it("provisions a workspace, owner membership, repo policy, hook, and initial index", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo({ "readme.md": "# Readme\n\nhello" });
-    const user = { id: 7, username: "chao" };
-    db.prepare("INSERT INTO users (id, username, created_at) VALUES (?, ?, 0)")
-      .run(user.id, user.username);
+    const user = { username: "chao" };
 
     const result = await provisionWorkspace(db, forgejo, config, {
       slug: "notes",
@@ -102,9 +99,7 @@ describe("workspace provisioning", () => {
   it("skips webhook registration for passthrough workspaces (#64)", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo();
-    const user = { id: 7, username: "chao" };
-    db.prepare("INSERT INTO users (id, username, created_at) VALUES (?, ?, 0)")
-      .run(user.id, user.username);
+    const user = { username: "chao" };
 
     await provisionWorkspace(db, forgejo, config, {
       slug: "notes",
@@ -120,9 +115,7 @@ describe("workspace provisioning", () => {
   it("allows seed-style idempotent provisioning of an existing workspace", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo();
-    const user = { id: 1, username: "chao" };
-    db.prepare("INSERT INTO users (id, username, created_at) VALUES (?, ?, 0)")
-      .run(user.id, user.username);
+    const user = { username: "chao" };
 
     await provisionWorkspace(db, forgejo, config, {
       slug: "notes",

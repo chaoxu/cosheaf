@@ -13,8 +13,30 @@ export type Decision = "approve" | "request_changes" | "comment";
 export type { Role, PrFiles, PrFile, PrMeta, PrState, LineComment, CommentSide };
 
 export interface User {
-  id: number;
   username: string;
+}
+
+// PAT storage: after #63 cosheaf does not set a cookie or hold any
+// server-side session. The SPA keeps the Forgejo PAT in localStorage
+// and attaches it as `Authorization: Bearer <pat>` on every request.
+const PAT_KEY = "cosheaf.pat";
+
+export function setStoredPat(pat: string | null): void {
+  if (typeof window === "undefined") return;
+  if (pat === null) window.localStorage.removeItem(PAT_KEY);
+  else window.localStorage.setItem(PAT_KEY, pat);
+}
+
+export function getStoredPat(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(PAT_KEY);
+}
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const pat = getStoredPat();
+  const base: Record<string, string> = { "content-type": "application/json" };
+  if (pat) base.authorization = `Bearer ${pat}`;
+  return { ...base, ...(extra ?? {}) };
 }
 
 export interface Workspace {
@@ -98,15 +120,19 @@ export class ApiError extends Error {
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    credentials: "same-origin",
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
     ...init,
+    headers: authHeaders(init?.headers),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-    // Forgejo rejected the stored PAT. Server has already wiped the session;
-    // bounce the page so the SPA re-mounts and lands on the login form.
-    if (res.status === 401 && body.code === "pat_invalid" && typeof window !== "undefined") {
+    // Forgejo rejected the stored PAT, or no PAT was sent. Drop the local
+    // copy and bounce the page so the SPA re-mounts at the login screen.
+    if (
+      res.status === 401 &&
+      (body.code === "pat_invalid" || body.code === "unauthorized") &&
+      typeof window !== "undefined"
+    ) {
+      setStoredPat(null);
       window.location.reload();
     }
     throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
@@ -171,11 +197,20 @@ function prMetaFromForgejo(p: ForgejoPullRaw): PrMeta {
 export const api = {
   me: () => jsonFetch<{ user: User | null }>("/api/v1/me"),
   login: (username: string, password: string) =>
-    jsonFetch<User>("/api/v1/login", {
+    jsonFetch<{ username: string; pat: string }>("/api/v1/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
+    }).then((r) => {
+      setStoredPat(r.pat);
+      return { username: r.username } as User;
     }),
-  logout: () => jsonFetch<{ ok: true }>("/api/v1/logout", { method: "POST" }),
+  logout: () => {
+    // Best-effort; the server response is fire-and-forget. Clearing the
+    // local PAT is what actually logs the user out.
+    const p = jsonFetch<{ ok: true }>("/api/v1/logout", { method: "POST" }).catch(() => undefined);
+    setStoredPat(null);
+    return p.then(() => ({ ok: true as const }));
+  },
 
   listWorkspaces: () =>
     jsonFetch<{ workspaces: Workspace[] }>("/api/v1/workspaces").then((r) => r.workspaces),
@@ -203,10 +238,11 @@ export const api = {
   uploadAsset: async (slug: string, branch: string, file: File): Promise<{ path: string }> => {
     const form = new FormData();
     form.set("file", file);
+    const pat = getStoredPat();
     const res = await fetch(`${w(slug)}/assets${qs({ branch })}`, {
       method: "POST",
       body: form,
-      credentials: "same-origin",
+      headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
     });
     if (!res.ok) {
       let msg = `asset upload ${res.status}`;
@@ -410,9 +446,8 @@ export const api = {
   renderForgejoMarkdown: async (slug: string, text: string): Promise<{ html: string }> => {
     const res = await fetch(forgejo(slug, "markdown"), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ Text: text, Mode: "comment", Wiki: false }),
-      credentials: "same-origin",
     });
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as { error?: string };

@@ -21,15 +21,12 @@ for (const candidate of [
 export interface Config {
   dataDir: string;
   port: number;
-  sessionSecret: string;
   forgejoUrl: string;
   forgejoToken: string;
   forgejoOwner: string;
   webhookSecret: string;
   webhookUrl: string;
 }
-
-const DEFAULT_SESSION_SECRET = "dev-secret-change-me";
 
 function required(name: string): string {
   const v = process.env[name];
@@ -51,25 +48,9 @@ function withDefault(name: string, fallback: string): string {
 export function loadConfig(): Config {
   const dataDir = process.env.COSHEAF_DATA_DIR ?? path.resolve(process.cwd(), "data");
   mkdirSync(dataDir, { recursive: true });
-  const sessionSecret = process.env.COSHEAF_SESSION_SECRET ?? DEFAULT_SESSION_SECRET;
-  // The session secret derives the AES key that encrypts stored Forgejo PATs.
-  // If it changes between restarts (e.g. default → real value), every stored
-  // PAT becomes undecryptable and users get force-logged-out. In production
-  // that's a foot-gun; warn loudly. In tests the default is fine.
-  if (sessionSecret === DEFAULT_SESSION_SECRET && process.env.NODE_ENV === "production") {
-    console.error("COSHEAF_SESSION_SECRET is unset in production; refusing to start.");
-    process.exit(1);
-  }
-  if (sessionSecret === DEFAULT_SESSION_SECRET && process.env.NODE_ENV !== "test") {
-    console.warn(
-      "WARN: COSHEAF_SESSION_SECRET is unset; using the dev default. " +
-        "All stored Forgejo PATs are tied to this secret — changing it later forces every user to re-log-in.",
-    );
-  }
   return {
     dataDir,
     port: Number(process.env.COSHEAF_PORT ?? 3030),
-    sessionSecret,
     forgejoUrl: withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002"),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoOwner: withDefault("COSHEAF_FORGEJO_OWNER", "cosheaf-admin"),
@@ -94,20 +75,6 @@ function migrateDropIssuesSidecar(db: Database.Database): void {
     DROP TABLE IF EXISTS issue_assignees;
     DROP TABLE IF EXISTS issues;
   `);
-}
-
-// Move users to Forgejo-owned auth: drop cosheaf-side password_hash (login
-// goes through Forgejo now), drop forgejo_username (cosheaf username equals
-// Forgejo username), add forgejo_token_ciphertext for the encrypted per-user
-// PAT. Idempotent; safe on fresh schemas where the new column already exists.
-function migrateUsersToForgejoAuth(db: Database.Database): void {
-  const cols = db.prepare("PRAGMA table_info('users')").all() as Array<{ name: string }>;
-  const has = (name: string): boolean => cols.some((c) => c.name === name);
-  if (has("password_hash")) db.exec("ALTER TABLE users DROP COLUMN password_hash;");
-  if (has("forgejo_username")) db.exec("ALTER TABLE users DROP COLUMN forgejo_username;");
-  if (!has("forgejo_token_ciphertext")) {
-    db.exec("ALTER TABLE users ADD COLUMN forgejo_token_ciphertext BLOB;");
-  }
 }
 
 function migrateBacklinksLine(db: Database.Database): void {
@@ -271,7 +238,6 @@ export function getDb(config: Config): Database.Database {
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
   migrateDropIssuesSidecar(db);
-  migrateUsersToForgejoAuth(db);
   migrateBacklinksLine(db);
   dbInstance = db;
   return db;

@@ -1,10 +1,8 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { deleteCookie, getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
 import { getDb, loadConfig } from "./db.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
-import { destroySession } from "./users.js";
 import { SSEHub } from "./sse.js";
 import { auth } from "./routes/auth.js";
 import { workspaces } from "./routes/workspaces.js";
@@ -36,22 +34,11 @@ app.use("*", async (c, next) => {
 app.get("/api/v1/health", (c) => c.json({ ok: true }));
 
 // If a route handler bubbles a ForgejoError with status 401 it means the
-// caller's PAT was rejected by Forgejo (revoked, rotated, or invalidated by a
-// Forgejo SESSION_SECRET rotation). Wipe the cookie session row so the next
-// request goes through the login flow instead of failing the same way.
-// Bearer-authed callers (agents) get the same 401 + `pat_invalid` signal but
-// have no session to wipe — they re-acquire a PAT and retry.
+// caller's PAT was rejected by Forgejo (revoked, rotated). Surface a typed
+// `pat_invalid` so the SPA can drop the stored PAT and bounce to login;
+// agents see the same signal and re-acquire a PAT.
 app.onError((err, c) => {
   if (err instanceof ForgejoError && err.status === 401) {
-    const sid = getCookie(c, "session");
-    if (sid) {
-      try {
-        destroySession(c.get("db"), sid);
-      } catch (_err) {
-        // ignore — best-effort cleanup
-      }
-      deleteCookie(c, "session", { path: "/" });
-    }
     return c.json(
       { error: "Forgejo rejected the credentials; please log in again.", code: "pat_invalid" },
       401,
