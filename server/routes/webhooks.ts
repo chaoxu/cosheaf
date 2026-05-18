@@ -85,16 +85,20 @@ webhooks.post("/forgejo", async (c) => {
   const sse = c.get("sse");
 
   // The repo must exist under our owner; otherwise it's a webhook from a
-  // foreign target. Use Forgejo as source of truth here — there's no SQLite
-  // workspaces row to consult anymore.
-  const repo = await fj.getRepo(owner, slug);
+  // foreign target. Topics are only needed for push (to drive indexer
+  // format selection); fetch them in parallel with the existence check
+  // when we'll use them, otherwise skip the round-trip.
+  const needsFormat = event === "push";
+  const [repo, formatId] = await Promise.all([
+    fj.getRepo(owner, slug),
+    needsFormat ? fj.listRepoTopics(owner, slug).then(documentFormatFromTopics) : Promise.resolve(undefined),
+  ]);
   if (!repo) {
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
       deliveryId, Date.now(), event,
     );
     return c.json({ ok: true, ignored: "unknown_repo" });
   }
-  const formatId = await fj.listRepoTopics(owner, slug).then(documentFormatFromTopics);
   const ws = { slug, defaultMdFormat: formatId };
 
   let deduped = false;

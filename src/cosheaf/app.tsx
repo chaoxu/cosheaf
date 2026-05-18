@@ -522,7 +522,7 @@ function WorkspaceList({
         {workspaces && workspaces.length > 0 && (
           <ul className="mt-3 space-y-1.5">
             {workspaces.map((ws) => (
-              <li key={ws.id}>
+              <li key={ws.slug}>
                 <button
                   type="button"
                   data-testid={`workspace-${ws.slug}`}

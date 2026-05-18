@@ -108,6 +108,9 @@ export interface ForgejoRepo {
   // /topics endpoint (Forgejo client `listRepoTopics`) is the authoritative
   // read otherwise.
   topics?: string[];
+  // Included by Forgejo when listing/getting repos with an authenticated
+  // user — saves an extra `getRepoPermission` round-trip per repo.
+  permissions?: { admin?: boolean; push?: boolean; pull?: boolean };
 }
 export interface ForgejoNotificationThread {
   id: number;

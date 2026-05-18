@@ -5,6 +5,7 @@ import { getDb, loadConfig } from "./db.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import { auth } from "./routes/auth.js";
+import { invalidateBearerCache } from "./middleware.js";
 import { workspaces } from "./routes/workspaces.js";
 import { files } from "./routes/files.js";
 import { branches } from "./routes/branches.js";
@@ -39,6 +40,9 @@ app.get("/api/v1/health", (c) => c.json({ ok: true }));
 // agents see the same signal and re-acquire a PAT.
 app.onError((err, c) => {
   if (err instanceof ForgejoError && err.status === 401) {
+    const auth = c.req.header("authorization") ?? "";
+    const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+    if (bearer) invalidateBearerCache(bearer);
     return c.json(
       { error: "Forgejo rejected the credentials; please log in again.", code: "pat_invalid" },
       401,

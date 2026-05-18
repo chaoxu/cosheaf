@@ -5,7 +5,7 @@ import type { Role } from "../shared/roles.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
-import { documentFormatFromTopics } from "../shared/document-format.js";
+import { readWorkspaceFormatFromTopics } from "./workspace-provisioning.js";
 
 interface AuthResolution {
   user: User;
@@ -21,6 +21,13 @@ export function _seedBearerAuthCacheForTests(token: string, username: string): v
 
 export function _resetBearerAuthCacheForTests(): void {
   BEARER_CACHE.clear();
+}
+
+// Drop the cached username for a bearer that Forgejo just rejected. Called
+// from the global 401 handler so a revoked PAT can't keep resolving from
+// the cache for up to BEARER_TTL_MS after revocation.
+export function invalidateBearerCache(token: string): void {
+  BEARER_CACHE.delete(token);
 }
 
 function bearerToken(authHeader?: string): string | null {
@@ -158,9 +165,8 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
   await next();
 };
 
-// In-process cache of the workspace's markdown format (read from the Forgejo
-// repo topic). Same TTL discipline as the role cache — format changes
-// propagate quickly enough, and a topic flip is a rare admin action.
+// Same TTL discipline as the role cache — format changes propagate quickly
+// enough, and a topic flip is a rare admin action.
 const FORMAT_TTL_MS = 30_000;
 const FORMAT_CACHE = new TTLCache<string, string>(FORMAT_TTL_MS);
 
@@ -169,14 +175,14 @@ export function _resetFormatCacheForTests(): void {
 }
 
 export function _seedFormatCacheForTests(slug: string, formatId: string): void {
-  FORMAT_CACHE.set(slug, formatId, 60_000);
+  FORMAT_CACHE.set(`${slug}`, formatId, 60_000);
 }
 
 async function fetchWorkspaceFormat(fj: Forgejo, owner: string, slug: string): Promise<string> {
-  const cached = FORMAT_CACHE.get(slug);
+  const key = `${owner}/${slug}`;
+  const cached = FORMAT_CACHE.get(key) ?? FORMAT_CACHE.get(slug);
   if (cached !== null) return cached;
-  const topics = await fj.listRepoTopics(owner, slug);
-  const format = documentFormatFromTopics(topics);
-  FORMAT_CACHE.set(slug, format);
+  const format = await readWorkspaceFormatFromTopics(fj, owner, slug);
+  FORMAT_CACHE.set(key, format);
   return format;
 }

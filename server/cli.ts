@@ -11,6 +11,7 @@ import { ROLES, type Role } from "../shared/roles.js";
 import {
   ensureWorkspaceFile,
   provisionWorkspace,
+  readWorkspaceFormatFromTopics,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
 import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
@@ -83,7 +84,7 @@ function ctx() {
 
 interface CliWorkspaceRow {
   slug: string;
-  defaultMdFormat: string;
+  defaultMdFormat: DocumentFormatId;
 }
 
 // Resolve a workspace by slug and hand the caller everything it needs.
@@ -107,10 +108,9 @@ async function withWorkspace<T>(
     console.error(`workspace '${slug}' not found`);
     process.exit(1);
   }
-  const topics = await forgejo.listRepoTopics(config.forgejoOwner, slug);
   const ws: CliWorkspaceRow = {
     slug,
-    defaultMdFormat: documentFormatFromTopics(topics),
+    defaultMdFormat: await readWorkspaceFormatFromTopics(forgejo, config.forgejoOwner, slug),
   };
   return fn({ config, db, forgejo, workspace: ws });
 }

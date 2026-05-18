@@ -14,6 +14,14 @@ import { bad, conflict } from "./responses.js";
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
 
+function roleFromPermissions(p: { admin?: boolean; push?: boolean; pull?: boolean } | undefined): Role | "none" {
+  if (!p) return "none";
+  if (p.admin) return "admin";
+  if (p.push) return "write";
+  if (p.pull) return "read";
+  return "none";
+}
+
 workspaces.get("/", async (c) => {
   // Cosheaf workspaces are now identified by the presence of a
   // `cosheaf-format-*` topic on a repo under config.forgejoOwner. We list
@@ -22,23 +30,22 @@ workspaces.get("/", async (c) => {
   // repo objects.
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
-  const fjUser = c.get("user").username;
 
   const repos = await fj.listUserRepos(owner, { limit: 50 });
-  const candidates = repos.filter((r) => (r.topics ?? []).some(isFormatTopic));
-  const resolved = await Promise.all(
-    candidates.map(async (r) => {
-      const role = await fj.getRepoPermission(owner, r.name, fjUser).catch(() => "none" as const);
-      if (role === "none") return null;
-      return {
-        slug: r.name,
-        name: r.description?.trim() || r.name,
-        role: role as Role,
-        default_md_format: documentFormatFromTopics(r.topics ?? []),
-      };
-    }),
-  );
-  return c.json({ workspaces: resolved.filter((r): r is NonNullable<typeof r> => r !== null) });
+  // Forgejo's user-repos response includes a `permissions` object on each
+  // repo when called with a PAT — derive the role from that instead of a
+  // per-repo getRepoPermission round-trip.
+  const workspaces = repos
+    .filter((r) => (r.topics ?? []).some(isFormatTopic))
+    .map((r) => ({ repo: r, role: roleFromPermissions(r.permissions) }))
+    .filter((x) => x.role !== "none")
+    .map(({ repo: r, role }) => ({
+      slug: r.name,
+      name: r.description?.trim() || r.name,
+      role: role as Role,
+      default_md_format: documentFormatFromTopics(r.topics ?? []),
+    }));
+  return c.json({ workspaces });
 });
 
 workspaces.post("/", async (c) => {

@@ -40,7 +40,6 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 export interface Workspace {
-  id: number;
   slug: string;
   name: string;
   role: Role;

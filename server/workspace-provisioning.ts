@@ -228,7 +228,7 @@ export async function reindexWorkspaceFromForgejo(
   db: Database.Database,
   forgejo: Forgejo,
   config: Config,
-  workspace: { slug: string; defaultMdFormat?: string },
+  workspace: { slug: string; defaultMdFormat?: DocumentFormatId },
 ): Promise<number> {
   const seen = new Set<string>();
   const tree = await forgejo.getTree(config.forgejoOwner, workspace.slug, "main", true);
