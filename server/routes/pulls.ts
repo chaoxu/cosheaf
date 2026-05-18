@@ -98,7 +98,10 @@ async function approvalCounts(
   });
   for (const r of ordered) {
     if (!r.user) continue; // deleted account; review still counted by Forgejo
-    if (r.state === "APPROVED" || r.state === "REQUEST_CHANGES") {
+    // #56: DISMISSED must invalidate an earlier APPROVED/REQUEST_CHANGES from
+    // the same user, otherwise stale approvals/rejections persist after
+    // Forgejo has already dismissed them.
+    if (r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "DISMISSED") {
       latestByUser.set(r.user.login, r);
     }
   }

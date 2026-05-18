@@ -425,6 +425,26 @@ describe("pulls + branches routes", () => {
       expect(body.rejections).toBe(0);
       expect(body.reviews.find((r) => r.username === "bob")?.decision).toBe("comment");
     });
+
+    it("DISMISSED invalidates an earlier APPROVED from the same user (#56)", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      const reviews = [
+        { id: 1, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+        { id: 2, state: "DISMISSED", body: "", user: { login: "vera" }, submitted_at: "2026-05-16T00:01:00Z" },
+      ];
+      fetchMock
+        .mockResolvedValueOnce(ok(reviews))
+        .mockResolvedValueOnce(ok(reviews));
+      const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { approvals: number; rejections: number };
+      expect(body.approvals).toBe(0);
+      expect(body.rejections).toBe(0);
+    });
   });
 
   describe("line comments", () => {
