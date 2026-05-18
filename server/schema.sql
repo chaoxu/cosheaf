@@ -92,19 +92,6 @@ CREATE TABLE IF NOT EXISTS webhook_log (
 -- because Forgejo's repo-scoped /issues already supports the same filters
 -- and the mirror kept drifting on partial webhook deliveries.
 
--- Audit log for the Forgejo passthrough escape hatch. One row per
--- /api/v1/w/{slug}/forgejo/... call. We log the request shape and outcome
--- only; bodies are intentionally omitted (size + cross-agent privacy).
-CREATE TABLE IF NOT EXISTS forgejo_passthrough_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  method TEXT NOT NULL,
-  path TEXT NOT NULL,
-  query TEXT,
-  status INTEGER NOT NULL,
-  duration_ms INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_passthrough_log_workspace ON forgejo_passthrough_log (workspace_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_passthrough_log_user ON forgejo_passthrough_log (user_id, created_at DESC);
+-- forgejo_passthrough_log audit table was dropped in #59. Forgejo's own
+-- access logging covers passthrough calls; the cosheaf-side mirror was
+-- duplicate state with no SPA consumer.

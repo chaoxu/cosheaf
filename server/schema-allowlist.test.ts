@@ -25,9 +25,8 @@ const ALLOWED_TABLES = new Set([
   "notes_fts_content",
   "notes_fts_docsize",
   "notes_fts_config",
-  // Webhook idempotency + passthrough audit
+  // Webhook idempotency
   "webhook_log",
-  "forgejo_passthrough_log",
   // SQLite internal
   "sqlite_sequence",
 ]);

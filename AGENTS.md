@@ -47,11 +47,11 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, local auth state, workspace-to-repo mappings, webhook
-  dedupe, and passthrough audit logs. Memberships, branches, pull requests,
-  issues, labels, milestones, and notifications live on Forgejo and are read
-  on demand. The page index is rebuildable from Forgejo via
-  `pnpm cli workspace reindex <slug>`.
+  links, FTS index, local auth state, workspace-to-repo mappings, and webhook
+  dedupe. Memberships, branches, pull requests, issues, labels, milestones,
+  and notifications live on Forgejo and are read on demand. Passthrough calls
+  are no longer audited locally — Forgejo's access log is the trail. The page
+  index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
@@ -100,9 +100,9 @@ they need Cosheaf behavior on top of Forgejo.
 
 - **Forgejo passthrough** (`/api/v1/w/:slug/forgejo/*`) is the **agent
   default**. Forgejo-trained bots reach Forgejo through it with direct
-  `Authorization: Bearer <Forgejo PAT>` auth; Cosheaf validates the PAT,
-  enforces workspace scoping, and audits every call in
-  `forgejo_passthrough_log`. Use it first for branch, pull request, issue,
+  `Authorization: Bearer <Forgejo PAT>` auth; Cosheaf validates the PAT and
+  enforces workspace scoping. Forgejo's own access log is the audit trail —
+  cosheaf no longer mirrors it. Use it first for branch, pull request, issue,
   comment, label, milestone, review, notification, and file-content operations
   that are naturally Forgejo-shaped.
 - **Typed routes** (`routes/pulls.ts`, `routes/issues.ts`, `routes/files.ts`,

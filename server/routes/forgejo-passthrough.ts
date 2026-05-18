@@ -26,8 +26,8 @@
 //   /pulls/:n/merge goes through `requireAdminFresh`. Same logic applies if
 //   we later add cosheaf-side checks to a typed route.
 //
-// Every call is recorded in `forgejo_passthrough_log` so it's visible which
-// agent ran what. Rate limiting is a follow-up.
+// Rate limiting is a follow-up. Forgejo's own access log records every
+// forwarded request; cosheaf no longer mirrors it.
 
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
@@ -104,9 +104,6 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   const slug = c.req.param("slug");
   const config = c.get("config");
   const { owner, repo } = c.get("repoCtx");
-  const ws = c.get("workspace");
-  const user = c.get("user");
-  const db = c.get("db");
 
   // Extract tail from the URL. Use c.req.url so we get the original
   // (decoded-by-fetch) pathname + query exactly as the client sent them.
@@ -159,7 +156,6 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
   const hasBody = method !== "GET" && method !== "HEAD";
   const body = hasBody ? await c.req.raw.arrayBuffer() : undefined;
 
-  const start = Date.now();
   let status = 0;
   let respBody: ArrayBuffer = new ArrayBuffer(0);
   let respContentType: string | null = null;
@@ -181,23 +177,6 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
       JSON.stringify({ error: "forgejo unreachable", code: "bad_gateway", detail: (err as Error).message }),
     ).buffer as ArrayBuffer;
   }
-  const durationMs = Date.now() - start;
-
-  // Audit log.
-  db.prepare(
-    "INSERT INTO forgejo_passthrough_log (workspace_id, user_id, method, path, query, status, duration_ms, created_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(
-    ws.id,
-    user.id,
-    method,
-    tailPath,
-    queryString ? queryString.slice(1) : null,
-    status,
-    durationMs,
-    Date.now(),
-  );
-
   const outHeaders: Record<string, string> = {};
   if (respContentType) outHeaders["content-type"] = respContentType;
   if (respLink) outHeaders.link = respLink;

@@ -119,8 +119,8 @@ Cosheaf anchors `:tail` under the workspace repository:
 ```
 
 The caller supplies `Authorization: Bearer <Forgejo PAT>` to Cosheaf. Cosheaf
-validates membership, forwards the request to Forgejo with the caller's PAT, and
-audits the call in `forgejo_passthrough_log`.
+validates membership and forwards the request to Forgejo with the caller's
+PAT. Audit happens at the Forgejo access log.
 
 Allowed repo-scoped passthrough prefixes:
 

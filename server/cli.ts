@@ -309,34 +309,6 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
   });
 }
 
-function passthroughLog(slug: string): void {
-  // Use withWorkspace just for the lookup+error path; the body is sync.
-  void withWorkspace(slug, ({ db, workspace: ws }) => {
-    const rows = db
-      .prepare(
-        "SELECT l.created_at, l.method, l.path, l.query, l.status, l.duration_ms, u.username " +
-          "FROM forgejo_passthrough_log l JOIN users u ON u.id = l.user_id " +
-          "WHERE l.workspace_id = ? ORDER BY l.created_at DESC LIMIT 50",
-      )
-      .all(ws.id) as Array<{
-    created_at: number;
-    method: string;
-    path: string;
-    query: string | null;
-    status: number;
-    duration_ms: number;
-    username: string;
-  }>;
-    for (const row of rows) {
-      const ts = new Date(row.created_at).toISOString();
-      const qs = row.query ? `?${row.query}` : "";
-      console.log(
-        `${ts}\t${row.username}\t${row.method}\t${row.path}${qs}\t${row.status}\t${row.duration_ms}ms`,
-      );
-    }
-  });
-}
-
 // --------------------------------- doctor ---------------------------------
 
 interface CheckResult { name: string; ok: boolean; detail: string }
@@ -673,11 +645,6 @@ function buildProgram(): Command {
     .command("drift-check <slug>")
     .description("diagnostic: report differences between doc_map and Forgejo's main tree (exit 1 on drift)")
     .action(workspaceDriftCheck);
-
-  program
-    .command("passthrough-log <slug>")
-    .description("last 50 /forgejo/* passthrough calls")
-    .action(passthroughLog);
 
   program
     .command("doctor")

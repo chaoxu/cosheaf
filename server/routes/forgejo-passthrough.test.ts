@@ -214,37 +214,6 @@ describe("Forgejo passthrough", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("writes an audit log entry per call", async () => {
-    const db = freshDb();
-    seedWorkspace(db);
-    const token = seedUser(db, 1, "alice", "write");
-    fetchMock.mockResolvedValueOnce(ok([]));
-    fetchMock.mockResolvedValueOnce(ok({ number: 3 }, { "content-type": "application/json" }));
-
-    const app = appFor(db);
-    await app.request("/api/v1/w/w/forgejo/pulls?state=open", {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    await app.request("/api/v1/w/w/forgejo/issues/3", {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    // 403 should also log? Spec says "log every passthrough call". The
-    // forbidden response never went to Forgejo; we only log forwarded ones.
-    await app.request("/api/v1/w/w/forgejo/admin/users", {
-      headers: { authorization: `Bearer ${token}` },
-    });
-
-    const rows = db
-      .prepare(
-        "SELECT method, path, query, status FROM forgejo_passthrough_log ORDER BY id ASC",
-      )
-      .all() as Array<{ method: string; path: string; query: string | null; status: number }>;
-    expect(rows).toEqual([
-      { method: "GET", path: "pulls", query: "state=open", status: 200 },
-      { method: "GET", path: "issues/3", query: null, status: 200 },
-    ]);
-  });
-
   it("blocks write methods on GET-only prefixes (branches/contents)", async () => {
     const db = freshDb();
     seedWorkspace(db);
