@@ -16,6 +16,7 @@ import {
 } from "./workspace-provisioning.js";
 import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
 import {
+  COFLAT_FORMAT_ID,
   DEFAULT_DOCUMENT_FORMAT_ID,
   documentFormatFromTopics,
   isDocumentFormatId,
@@ -290,14 +291,24 @@ async function workspaceMember(slug: string, username: string, role: Role): Prom
 
 // --------------------------------- doctor ---------------------------------
 
-interface CheckResult { name: string; ok: boolean; detail: string }
+type CheckStatus = "ok" | "fail" | "warn";
+interface CheckResult { name: string; status: CheckStatus; detail: string }
 
 async function check(name: string, fn: () => Promise<string>): Promise<CheckResult> {
   try {
     const detail = await fn();
-    return { name, ok: true, detail };
+    return { name, status: "ok", detail };
   } catch (err) {
-    return { name, ok: false, detail: (err as Error).message };
+    return { name, status: "fail", detail: (err as Error).message };
+  }
+}
+
+async function checkWarn(name: string, fn: () => Promise<{ status: "ok" | "warn"; detail: string }>): Promise<CheckResult> {
+  try {
+    const r = await fn();
+    return { name, status: r.status, detail: r.detail };
+  } catch (err) {
+    return { name, status: "fail", detail: (err as Error).message };
   }
 }
 
@@ -356,13 +367,34 @@ async function doctor(): Promise<void> {
     }),
   );
 
+  results.push(
+    await checkWarn("webhook_log dedupe table healthy", async () => {
+      const total = (db.prepare("SELECT COUNT(*) AS n FROM webhook_log").get() as { n: number }).n;
+      if (total === 0) return { status: "ok", detail: "empty (no deliveries yet)" };
+      const bad = (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM webhook_log WHERE delivery_id IS NULL OR delivery_id = '' OR delivered_at IS NULL OR delivered_at <= 0",
+          )
+          .get() as { n: number }
+      ).n;
+      if (bad > 0) throw new Error(`${bad}/${total} rows malformed`);
+      return { status: "ok", detail: `${total} rows, all well-formed` };
+    }),
+  );
+
   // Per-workspace checks. Workspaces are enumerated from Forgejo (repos
   // under config.forgejoOwner with a `cosheaf-format-*` topic), not from
   // SQLite — there's no workspaces table anymore.
   const repos = await forgejo.listUserRepos(config.forgejoOwner, { limit: 50 });
-  const workspaces = repos
-    .filter((r) => (r.topics ?? []).some(isFormatTopic))
-    .map((r) => ({ slug: r.name, defaultMdFormat: documentFormatFromTopics(r.topics ?? []) }));
+  const workspaceRepos = repos.filter((r) => (r.topics ?? []).some(isFormatTopic));
+  const workspaces = workspaceRepos.map((r) => ({
+    slug: r.name,
+    topics: r.topics ?? [],
+    defaultMdFormat: documentFormatFromTopics(r.topics ?? []),
+  }));
+  const knownSlugs = new Set(workspaces.map((w) => w.slug));
+
   for (const ws of workspaces) {
     results.push(
       await check(`workspace ${ws.slug}: forgejo repo exists`, async () => {
@@ -371,39 +403,112 @@ async function doctor(): Promise<void> {
         return r.full_name;
       }),
     );
+
     results.push(
-      await check(`workspace ${ws.slug}: webhook installed`, async () => {
-        const hooks = await forgejo.listRepoHooks(config.forgejoOwner, ws.slug);
-        const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
-        if (!ours) throw new Error("no push webhook on repo");
-        return `hook id=${ours.id}`;
+      await check(`workspace ${ws.slug}: format topic well-formed`, async () => {
+        const formatTopics = ws.topics.filter(isFormatTopic);
+        if (formatTopics.length === 0) throw new Error("no cosheaf-format-* topic");
+        if (formatTopics.length > 1) {
+          throw new Error(`multiple format topics: ${formatTopics.join(", ")}`);
+        }
+        const suffix = formatTopics[0].slice("cosheaf-format-".length);
+        if (!isDocumentFormatId(suffix)) {
+          throw new Error(`unknown format suffix in topic ${formatTopics[0]}`);
+        }
+        if (suffix !== ws.defaultMdFormat) {
+          throw new Error(`topic ${formatTopics[0]} does not match resolved format ${ws.defaultMdFormat}`);
+        }
+        return `${formatTopics[0]} → ${ws.defaultMdFormat}`;
       }),
     );
-    const lastDelivery = db
-      .prepare(
-        "SELECT delivered_at, event_type FROM webhook_log ORDER BY delivered_at DESC LIMIT 1",
-      )
-      .get() as { delivered_at: number; event_type: string } | undefined;
-    results.push({
-      name: `workspace ${ws.slug}: recent webhook activity`,
-      ok: lastDelivery !== undefined,
-      detail: lastDelivery
-        ? `last ${lastDelivery.event_type} at ${new Date(lastDelivery.delivered_at).toISOString()}`
-        : "no webhook deliveries logged yet",
-    });
+
+    if (ws.defaultMdFormat === COFLAT_FORMAT_ID) {
+      results.push(
+        await check(`workspace ${ws.slug}: webhook installed`, async () => {
+          const hooks = await forgejo.listRepoHooks(config.forgejoOwner, ws.slug);
+          const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
+          if (!ours) throw new Error("no push webhook on repo");
+          return `hook id=${ours.id}`;
+        }),
+      );
+      const lastDelivery = db
+        .prepare(
+          "SELECT delivered_at, event_type FROM webhook_log ORDER BY delivered_at DESC LIMIT 1",
+        )
+        .get() as { delivered_at: number; event_type: string } | undefined;
+      results.push({
+        name: `workspace ${ws.slug}: recent webhook activity`,
+        status: lastDelivery !== undefined ? "ok" : "fail",
+        detail: lastDelivery
+          ? `last ${lastDelivery.event_type} at ${new Date(lastDelivery.delivered_at).toISOString()}`
+          : "no webhook deliveries logged yet",
+      });
+
+      results.push(
+        await checkWarn(`workspace ${ws.slug}: sidecar in sync with Forgejo tree`, async () => {
+          const tree = await forgejo.getTree(config.forgejoOwner, ws.slug, "main", true);
+          const forgejoCount = tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).length;
+          const sidecarCount = (
+            db
+              .prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?")
+              .get(ws.slug) as { n: number }
+          ).n;
+          if (forgejoCount === sidecarCount) {
+            return { status: "ok", detail: `${sidecarCount} pages` };
+          }
+          const delta = forgejoCount - sidecarCount;
+          return {
+            status: "warn",
+            detail: `forgejo=${forgejoCount} sidecar=${sidecarCount} (Δ=${delta >= 0 ? "+" : ""}${delta}); run \`pnpm cli workspace reindex ${ws.slug}\``,
+          };
+        }),
+      );
+    } else {
+      results.push({
+        name: `workspace ${ws.slug}: no webhook expected (passthrough)`,
+        status: "ok",
+        detail: `format=${ws.defaultMdFormat}`,
+      });
+    }
+  }
+
+  // Sidecar-orphan check: any workspace_slug in doc_map that no longer
+  // corresponds to a Forgejo repo carrying a cosheaf-format-* topic.
+  const sidecarSlugs = (
+    db.prepare("SELECT DISTINCT workspace_slug FROM doc_map").all() as Array<{ workspace_slug: string }>
+  ).map((r) => r.workspace_slug);
+  for (const slug of sidecarSlugs) {
+    if (knownSlugs.has(slug)) continue;
+    results.push(
+      await check(`sidecar orphan: workspace ${slug}`, async () => {
+        const repo = await forgejo.getRepo(config.forgejoOwner, slug);
+        if (!repo) {
+          throw new Error(`doc_map references ${slug} but Forgejo repo is gone; run \`pnpm cli workspace rm ${slug}\``);
+        }
+        const hasFormat = (repo.topics ?? []).some(isFormatTopic);
+        if (!hasFormat) {
+          throw new Error(`repo ${config.forgejoOwner}/${slug} exists but has no cosheaf-format-* topic; add a topic or run \`pnpm cli workspace rm ${slug}\``);
+        }
+        // Defensive: should be unreachable because knownSlugs is built from the same predicate.
+        return "ok";
+      }),
+    );
   }
 
   let failed = 0;
+  let warned = 0;
   for (const r of results) {
-    const mark = r.ok ? "OK" : "FAIL";
+    const mark = r.status === "ok" ? "OK" : r.status === "warn" ? "WARN" : "FAIL";
     console.log(`[${mark}] ${r.name} — ${r.detail}`);
-    if (!r.ok) failed++;
+    if (r.status === "fail") failed++;
+    else if (r.status === "warn") warned++;
   }
   if (failed > 0) {
-    console.error(`\n${failed} check${failed === 1 ? "" : "s"} failed`);
+    console.error(`\n${failed} check${failed === 1 ? "" : "s"} failed${warned > 0 ? `, ${warned} warning${warned === 1 ? "" : "s"}` : ""}`);
     process.exit(1);
   }
-  console.log(`\nall ${results.length} checks passed`);
+  const tail = warned > 0 ? ` (${warned} warning${warned === 1 ? "" : "s"})` : "";
+  console.log(`\nall ${results.length} checks passed${tail}`);
 }
 
 // ---------------------------- inspect workspace ----------------------------
