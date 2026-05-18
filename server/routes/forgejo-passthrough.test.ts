@@ -188,6 +188,21 @@ describe("Forgejo passthrough", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects encoded-separator traversal that would escape repo scope (#52)", async () => {
+    // `..%2fadmin` survives WHATWG URL normalization as literal text but
+    // Forgejo's path parser may treat %2f as a slash. We reject it before
+    // forwarding.
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    const res = await appFor(db).request(
+      "/api/v1/w/w/forgejo/pulls/..%2fadmin",
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects unknown prefixes with 403", async () => {
     const db = freshDb();
     seedWorkspace(db);

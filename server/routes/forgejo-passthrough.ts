@@ -81,9 +81,14 @@ function classifyTail(tail: string, method: string): "ok" | "method" | "forbidde
 function isSafeTail(tail: string): boolean {
   if (tail.length === 0) return false;
   if (tail.startsWith("/")) return false;
-  // Disallow `..` as a path segment anywhere (handles "..", "a/..", "../x").
-  const segs = tail.split("?")[0].split("/");
-  if (segs.some((s) => s === "..")) return false;
+  const pathPart = tail.split("?")[0];
+  // Reject any percent-encoded dot, slash, or backslash. These survive
+  // WHATWG URL normalization as literal text but may be decoded by Forgejo's
+  // own path parser, opening a workspace-scope escape. See #52.
+  if (/%2e|%2f|%5c/i.test(pathPart)) return false;
+  // Reject `..` anywhere in the path, not just as a whole segment — covers
+  // edge cases like `pulls/..%2fadmin` once we've stripped the encoded `/`.
+  if (pathPart.includes("..")) return false;
   // No re-anchoring into another repo or admin path. These are caught by
   // the whitelist too, but be explicit for defense in depth.
   if (tail.startsWith("repos/")) return false;
@@ -130,6 +135,14 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
     `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${tailPath}${queryString}`,
     config.forgejoUrl,
   );
+  // Belt-and-suspenders: after `new URL(...)` normalizes any traversal that
+  // slipped past isSafeTail (#52), the pathname must still live under this
+  // workspace's repo. Reject otherwise instead of forwarding the caller's PAT
+  // to an arbitrary Forgejo endpoint.
+  const expectedPrefix = `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/`;
+  if (!target.pathname.startsWith(expectedPrefix)) {
+    return c.json(...forbidden("passthrough escaped workspace scope"));
+  }
 
   // Forward with the caller's own Forgejo PAT — same trust model as the
   // typed routes. Browser sessions use the encrypted PAT recovered by
