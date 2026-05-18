@@ -16,9 +16,9 @@ export interface User {
   username: string;
 }
 
-// PAT storage: after #63 cosheaf does not set a cookie or hold any
-// server-side session. The SPA keeps the Forgejo PAT in localStorage
-// and attaches it as `Authorization: Bearer <pat>` on every request.
+// PAT storage: cosheaf does not set a cookie or hold any server-side
+// session. The SPA keeps the Forgejo PAT in localStorage and attaches
+// it as `Authorization: Bearer <pat>` on every request.
 const PAT_KEY = "cosheaf.pat";
 
 export function setStoredPat(pat: string | null): void {

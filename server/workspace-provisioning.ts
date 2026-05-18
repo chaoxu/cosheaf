@@ -99,11 +99,11 @@ export async function provisionWorkspace(
 
   try {
     await ensureWorkspacePermissions(forgejo, config, repoName, options.forgejoUsername);
-    // #64: Webhook registration is needed only for workspaces whose sidecar
-    // we reconcile from Forgejo events. Passthrough workspaces don't index
+    // Webhook registration is needed only for workspaces whose sidecar we
+    // reconcile from Forgejo events. Passthrough workspaces don't index
     // into the sidecar (no doc_map / FTS / backlinks usage), so there's
-    // nothing to reconcile and no SSE event worth firing. Skip the hook for
-    // them; coflat workspaces still get one and roll back on failure.
+    // nothing to reconcile and no SSE event worth firing. Skip the hook
+    // for them; coflat workspaces still get one and roll back on failure.
     if (workspace.defaultMdFormat !== "forgejo-passthrough") {
       await ensureWorkspaceWebhookOrThrow(forgejo, config, repoName);
     }

@@ -573,8 +573,8 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
     : normalizeDocumentFormatId(c.get("workspace").defaultMdFormat);
   if (body.default_md_format !== undefined) {
     try {
-      // Format storage is now a Forgejo repo topic (#62). Update the topic
-      // before re-indexing so the reindex picks up the new format.
+      // Format storage is a Forgejo repo topic. Update the topic before
+      // re-indexing so the reindex picks up the new format.
       await setWorkspaceFormatTopic(fj, owner, repo, defaultMdFormat);
       await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
         slug: repo,

@@ -101,9 +101,9 @@ async function withWorkspace<T>(
   }) => Promise<T> | T,
 ): Promise<T> {
   const { config, db, forgejo } = ctx();
-  // Workspaces are now identified solely by their Forgejo repo. The CLI
+  // Workspaces are identified solely by their Forgejo repo. The CLI
   // verifies existence against Forgejo and reads the markdown format from
-  // the repo's topics (#62).
+  // the repo's topics.
   const repo = await forgejo.getRepo(config.forgejoOwner, slug);
   if (!repo) {
     console.error(`workspace '${slug}' not found`);
@@ -160,10 +160,10 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   };
 }
 
-// Create the Forgejo account if absent. After #63 cosheaf no longer keeps
-// a local users table; users live entirely on Forgejo. The password set
-// here is the only password the user has — they type it at cosheaf's
-// login form, cosheaf exchanges it for a PAT, and the SPA stores the PAT.
+// Create the Forgejo account if absent. Users live entirely on Forgejo;
+// the password set here is the only password the user has — they type it
+// at cosheaf's login form, cosheaf exchanges it for a PAT, and the SPA
+// stores the PAT.
 async function ensureForgejoUser(
   username: string,
   password: string,
@@ -239,10 +239,6 @@ async function seed(args: string[]): Promise<void> {
   console.log(`seeded dev workspace: user=${options.user} workspace=${options.workspace}`);
 }
 
-// `user list` and `user rm` were removed in #63: cosheaf no longer keeps a
-// local users table, so listing/removing them is a Forgejo admin operation
-// done through Forgejo's UI or API directly.
-
 async function workspaceRm(slug: string): Promise<void> {
   await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
     try {
@@ -268,7 +264,7 @@ async function workspaceReindex(slug: string): Promise<void> {
 async function workspaceMember(slug: string, username: string, role: Role): Promise<void> {
   await withWorkspace(slug, async ({ forgejo, config, workspace: ws }) => {
     // Forgejo's addCollaborator API returns 404 if the user doesn't exist
-    // on Forgejo, which is the only "user" notion cosheaf has after #63.
+    // on Forgejo, which is the only "user" notion cosheaf has.
     await forgejo.addCollaborator(config.forgejoOwner, ws.slug, username, role);
     // Keep the branch-protection push whitelist in sync. Admin can direct-push;
     // write/read users can't. Adjust on every change so demotion takes effect.
@@ -641,7 +637,7 @@ function startRepl(): void {
 
 async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<void> {
   const { config, db, forgejo } = ctx();
-  // Workspaces are enumerated from Forgejo, not SQLite (#62).
+  // Workspaces are enumerated from Forgejo, not SQLite.
   const allRepos = await forgejo.listUserRepos(config.forgejoOwner, { limit: 50 });
   const repos = allRepos
     .filter((r) => (r.topics ?? []).some(isFormatTopic))

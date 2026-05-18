@@ -13,7 +13,7 @@ export function normalizeDocumentFormatId(value: unknown): DocumentFormatId {
   return isDocumentFormatId(value) ? value : DEFAULT_DOCUMENT_FORMAT_ID;
 }
 
-// Format-storage convention (#62): a workspace's markdown format lives in a
+// Format-storage convention: a workspace's markdown format lives in a
 // Forgejo repo topic. The presence of `cosheaf-format-<id>` selects that
 // format; without it, the default applies.
 const FORMAT_TOPIC_PREFIX = "cosheaf-format-";

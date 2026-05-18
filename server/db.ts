@@ -129,11 +129,10 @@ function migrateDropDocKindColumns(db: Database.Database): void {
   }
 }
 
-// #62: legacy sidecar tables keyed off `workspace_id INTEGER` (FK into the
-// `workspaces` table). The new schema keys off `workspace_slug TEXT`. We
-// detect the legacy shape and rewrite the affected tables in place,
-// preserving rows by joining through the workspaces table while it still
-// exists. Then drop `workspaces` itself.
+// Legacy sidecar tables keyed off `workspace_id INTEGER` (FK into the old
+// `workspaces` table) get rewritten to key off `workspace_slug TEXT`. We
+// detect the legacy shape and migrate in place, preserving rows by joining
+// through the workspaces table while it still exists, then drop it.
 function migrateDropWorkspacesTable(db: Database.Database): void {
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")

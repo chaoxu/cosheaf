@@ -1,20 +1,19 @@
 -- Cosheaf sidecar schema (Forgejo backend).
 
--- #63: cosheaf no longer stores any auth state. The SPA holds the user's
--- Forgejo PAT in localStorage and sends it as `Authorization: Bearer <pat>`
--- on every request; agents do the same. There is no users table, no
--- sessions table, no cosheaf-issued token table — the PAT is the credential.
+-- Cosheaf stores no auth state. The SPA holds the user's Forgejo PAT in
+-- localStorage and sends it as `Authorization: Bearer <pat>` on every
+-- request; agents do the same. The PAT is the credential.
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tokens;
 
--- Workspaces table removed (#62). The workspace slug IS the Forgejo
--- repository name (#60), display name comes from the Forgejo repo
--- description (#61), and the workspace's default markdown format lives in
--- a Forgejo repo topic (`cosheaf-format-coflat` present → coflat,
--- otherwise → forgejo-passthrough). Sidecar tables key off the slug
--- directly (`workspace_slug TEXT`); legacy `workspace_id INTEGER` columns
--- are migrated in db.ts before this schema runs.
+-- No workspaces table. The workspace slug IS the Forgejo repository name,
+-- the display name comes from the Forgejo repo description, and the
+-- workspace's default markdown format lives in a Forgejo repo topic
+-- (`cosheaf-format-coflat` present → coflat, otherwise → forgejo-passthrough).
+-- Sidecar tables key off the slug directly (`workspace_slug TEXT`); legacy
+-- `workspace_id INTEGER` columns are migrated in db.ts before this schema
+-- runs.
 
 -- Memberships: removed. Role and access are sourced from Forgejo's
 -- collaborator-permission API; middleware queries Forgejo and caches.
