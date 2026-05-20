@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@chaoxu/coflat-editor':
-        specifier: file:/Users/chaoxu/playground/coflat-editor
+        specifier: file:../coflat-editor
         version: file:../coflat-editor(2e966292a8ae36e8d7937e7595a18b88)
       '@codemirror/autocomplete':
         specifier: ^6.20.1

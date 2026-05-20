@@ -1,0 +1,63 @@
+x-cosheaf-app: &cosheaf-app
+  build:
+    context: ..
+    dockerfile: cosheaf/Dockerfile
+  image: cosheaf:local
+  restart: unless-stopped
+  environment:
+    COSHEAF_PORT: "3030"
+    COSHEAF_DATA_DIR: /var/lib/cosheaf
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "node",
+        "-e",
+        "fetch('http://127.0.0.1:3030/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+      ]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 20s
+
+services:
+  cosheaf-prod:
+    <<: *cosheaf-app
+    profiles: ["prod"]
+    container_name: cosheaf-prod
+    env_file:
+      - path: .env.prod
+        required: false
+    ports:
+      - "${COSHEAF_PROD_PORT:-3030}:3030"
+    volumes:
+      - cosheaf-prod-data:/var/lib/cosheaf
+
+  cosheaf-staging:
+    <<: *cosheaf-app
+    profiles: ["staging"]
+    container_name: cosheaf-staging
+    env_file:
+      - path: .env.staging
+        required: false
+    ports:
+      - "${COSHEAF_STAGING_PORT:-3031}:3030"
+    volumes:
+      - cosheaf-staging-data:/var/lib/cosheaf
+
+  cosheaf-testing:
+    <<: *cosheaf-app
+    profiles: ["testing"]
+    container_name: cosheaf-testing
+    env_file:
+      - path: .env.testing
+        required: false
+    ports:
+      - "${COSHEAF_TESTING_PORT:-3032}:3030"
+    volumes:
+      - cosheaf-testing-data:/var/lib/cosheaf
+
+volumes:
+  cosheaf-prod-data:
+  cosheaf-staging-data:
+  cosheaf-testing-data:

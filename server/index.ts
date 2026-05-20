@@ -1,5 +1,8 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { existsSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { AppEnv } from "./types.js";
 import { getDb, loadConfig } from "./db.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
@@ -60,6 +63,70 @@ app.route("/api/v1/w", issues);
 app.route("/api/v1/w", notifications);
 app.route("/api/v1/w", forgejoPassthrough);
 app.route("/api/v1/webhooks", webhooks);
+
+const distDir = path.resolve(process.cwd(), "dist");
+if (existsSync(path.join(distDir, "index.html"))) {
+  app.get("*", async (c, next) => {
+    if (c.req.path.startsWith("/api/")) {
+      return c.json({ error: "not found" }, 404);
+    }
+    const response = await serveDistFile(c.req.path);
+    if (response) return response;
+    await next();
+  });
+}
+
+async function serveDistFile(requestPath: string): Promise<Response | null> {
+  const resolvedPath = resolveDistPath(requestPath);
+  if (!resolvedPath) return null;
+  const body = await readFile(resolvedPath);
+  return new Response(body, { headers: { "content-type": contentType(resolvedPath) } });
+}
+
+function resolveDistPath(requestPath: string): string | null {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(requestPath);
+  } catch (_error) {
+    return null;
+  }
+  const relativePath = decodedPath === "/" ? "index.html" : decodedPath.replace(/^\/+/, "");
+  if (!relativePath || relativePath.split(/[\\/]/).includes("..")) return null;
+
+  let filePath = path.resolve(distDir, relativePath);
+  if (filePath !== distDir && !filePath.startsWith(`${distDir}${path.sep}`)) return null;
+
+  let stat;
+  try {
+    stat = statSync(filePath);
+  } catch (_error) {
+    filePath = path.join(distDir, "index.html");
+    stat = statSync(filePath);
+  }
+  if (stat.isDirectory()) filePath = path.join(filePath, "index.html");
+  return filePath;
+}
+
+function contentType(filePath: string): string {
+  switch (path.extname(filePath)) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+}
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`cosheaf server listening on http://localhost:${info.port}`);

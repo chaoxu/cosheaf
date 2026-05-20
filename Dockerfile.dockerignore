@@ -1,0 +1,11 @@
+**/.git
+**/.DS_Store
+**/node_modules
+**/dist
+**/dist-server
+**/test-results
+**/.playwright-*
+**/.vite
+**/data
+cosheaf/.env*
+coflat-editor/.env*

@@ -5,6 +5,9 @@ dist-server/
 data/
 .DS_Store
 .env.dev
+.env.prod
+.env.staging
+.env.testing
 *.tsbuildinfo
 .worktrees/
 .claude/state/
