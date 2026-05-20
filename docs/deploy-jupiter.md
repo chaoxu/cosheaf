@@ -14,9 +14,31 @@ cp .env.deploy.example .env.staging
 cp .env.deploy.example .env.testing
 ```
 
-Set `COSHEAF_FORGEJO_URL` to the Forgejo URL reachable from inside the
-container. Use the public Cosheaf URL for `COSHEAF_SERVER_URL` and
+Cosheaf uses its own Forgejo instance, separate from the general-purpose Gitea
+service on `jupiter:3001`. On `jupiter`, the Cosheaf Forgejo container listens
+on `100.93.22.80:3002`, so production should use:
+
+```sh
+COSHEAF_FORGEJO_URL=http://100.93.22.80:3002
+```
+
+Use the public Cosheaf URL for `COSHEAF_SERVER_URL` and
 `COSHEAF_WEBHOOK_URL`.
+
+## Forgejo backend
+
+The Cosheaf Forgejo data lives under `/srv/forgejo/data` on `jupiter`, with its
+Compose file at `/srv/forgejo/compose/docker-compose.yml`. A copy of the
+service shape is tracked in `deploy/jupiter/forgejo-compose.yaml`.
+
+Start or restart the Forgejo backend on `jupiter` with:
+
+```sh
+cd /srv/forgejo/compose
+docker compose up -d
+```
+
+Do not point Cosheaf at the general-purpose Gitea service on port `3001`.
 
 ## Build and run
 
