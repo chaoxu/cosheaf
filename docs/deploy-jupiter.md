@@ -73,3 +73,18 @@ inside that container:
 docker compose --profile staging exec cosheaf-staging \
   node dist-server/server/cli.js workspace reindex <slug>
 ```
+
+## Branch Previews
+
+Non-`main` branch pushes run `.gitea/workflows/preview.yml` on `jupiter`. The
+workflow builds the branch image, starts an isolated container named
+`cosheaf-preview-<branch-slug>`, gives it its own SQLite volume, and exposes it
+through Caddy as:
+
+```text
+http://cosheaf-<branch-slug>.lab
+```
+
+The preview uses `/srv/cosheaf/.env.staging` for Forgejo credentials and talks
+to the Cosheaf Forgejo backend on port `3002`. It should be used for branch
+testing only; production remains the `prod` Compose profile.

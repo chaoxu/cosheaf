@@ -1481,7 +1481,9 @@ function WorkspaceView({
 
   const branchForWrite = useCallback(
     (): string =>
-      currentBranchNameRef.current ??
+      (currentBranchNameRef.current && currentBranchNameRef.current !== "main"
+        ? currentBranchNameRef.current
+        : null) ??
       `${userBranchPrefix(user.username)}wip-${shortId()}`,
     [user],
   );
@@ -1918,7 +1920,7 @@ function WorkspaceView({
     if (!path.endsWith(".md")) path += ".md";
     setBusy(true);
     const branch =
-      currentBranchName ??
+      (currentBranchName && currentBranchName !== "main" ? currentBranchName : null) ??
       `${userBranchPrefix(user.username)}wip-${shortId()}`;
     api
       .putFile(workspace.slug, path, `# ${path.replace(/\.md$/, "")}\n`, branch)

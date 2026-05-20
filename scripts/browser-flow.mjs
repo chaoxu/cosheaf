@@ -44,9 +44,27 @@ try {
   if (!branchStatus.includes(FLOW_PATH)) {
     throw new Error(`expected created file in statusbar, got: ${branchStatus}`);
   }
+  const branchName = (await page.getByTestId("active-branch-name").innerText()).trim();
+  if (!branchName) throw new Error("expected an active branch before direct merge");
 
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[data-testid="merge-branch"]');
+    return button instanceof HTMLButtonElement && !button.disabled;
+  }, { timeout: 12000 });
   await page.getByTestId("merge-branch").click();
-  await page.getByTestId("merge-branch").waitFor({ state: "detached", timeout: 30000 });
+  await page.waitForFunction(
+    async ({ workspaceSlug, branch }) => {
+      const pat = localStorage.getItem("cosheaf.pat");
+      const r = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=all`, {
+        headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
+      });
+      if (!r.ok) return false;
+      const pulls = await r.json();
+      return pulls.some((p) => (p.title === branch || p.head?.ref === branch) && p.merged === true);
+    },
+    { workspaceSlug: WORKSPACE_SLUG, branch: branchName },
+    { timeout: 30000 },
+  );
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("editor").waitFor({ state: "visible", timeout: 12000 });
 

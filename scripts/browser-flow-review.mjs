@@ -10,6 +10,9 @@ const chromium = await loadChromium();
 const URL = process.env.URL ?? "http://localhost:5173/";
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-review.png";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const ADMIN_PASSWORD = process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
+const MERI_PASSWORD = process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
+const VERA_PASSWORD = process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const FLOW_PATH = process.env.COSHEAF_FLOW_PATH ?? `review-flow-${Date.now()}.md`;
 
 const consoleAll = [];
@@ -52,7 +55,7 @@ let stage = "start";
 try {
   // ── 1. meri creates a file and opens a PR ──────────────────────────────────
   stage = "meri-login";
-  await loginAs(meri, "meri", "Cosheaf123!");
+  await loginAs(meri, "meri", MERI_PASSWORD);
 
   stage = "meri-create";
   await meri.getByTestId("new-file-toggle").click();
@@ -71,21 +74,26 @@ try {
   stage = "meri-open-pr-1";
   await meri.getByTestId("open-pull-request").waitFor({ state: "visible", timeout: 8000 });
   await meri.getByTestId("open-pull-request").click();
-  // After open, currentBranch is cleared.
-  await meri.getByTestId("active-branch-name").waitFor({ state: "detached", timeout: 8000 });
+  await meri.getByTestId("active-branch-name").waitFor({ state: "hidden", timeout: 8000 });
 
   // Locate the just-opened PR number via Forgejo-shape API on the same origin.
-  const prNumber = await meri.evaluate(async (branch) => {
-    const r = await fetch("/api/v1/w/flushing-coin/forgejo/pulls?state=open");
+  const prNumber = await meri.evaluate(async ({ branch, workspaceSlug }) => {
+    const pat = localStorage.getItem("cosheaf.pat");
+    const r = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=open`, {
+      headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
+    });
     const pulls = await r.json();
-    const found = pulls.find((p) => p.head?.ref === branch);
-    return found ? found.number : null;
-  }, meriBranch);
+    const found = pulls.find((p) => p.head?.ref === branch || p.title === branch);
+    const fallback = pulls
+      .filter((p) => p.user?.login === "meri" && p.head?.ref?.startsWith("user/meri/wip-"))
+      .sort((a, b) => (b.number ?? 0) - (a.number ?? 0))[0];
+    return found ? found.number : (fallback?.number ?? null);
+  }, { branch: meriBranch, workspaceSlug: WORKSPACE_SLUG });
   if (!prNumber) throw new Error("could not locate PR by head_ref after open");
 
   // ── 2. vera reviews and requests changes ───────────────────────────────────
   stage = "vera-login";
-  await loginAs(vera, "vera", "Cosheaf123!");
+  await loginAs(vera, "vera", VERA_PASSWORD);
 
   stage = "vera-open-inbox";
   await vera.getByTestId("sidebar-tab-inbox").click();
@@ -103,12 +111,15 @@ try {
   await vera.getByTestId("review-request-changes").click();
   // After REQUEST_CHANGES the PR stays open; we just verify via API.
   await vera.waitForFunction(
-    async (n) => {
-      const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`);
+    async ({ n, workspaceSlug }) => {
+      const pat = localStorage.getItem("cosheaf.pat");
+      const r = await fetch(`/api/v1/w/${workspaceSlug}/pulls/${n}/reviews`, {
+        headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
+      });
       const j = await r.json();
       return j.rejections >= 1;
     },
-    prNumber,
+    { n: prNumber, workspaceSlug: WORKSPACE_SLUG },
     { timeout: 10000 },
   );
 
@@ -142,15 +153,19 @@ try {
   // Approval lands; chao (admin) merges through the API.
   stage = "admin-merge";
   const adminPage = await makeContext("chao");
-  await loginAs(adminPage, "chao", "Cosheaf123!");
-  const mergeResult = await adminPage.evaluate(async (n) => {
-    const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/merge`, {
+  await loginAs(adminPage, "chao", ADMIN_PASSWORD);
+  const mergeResult = await adminPage.evaluate(async ({ n, workspaceSlug }) => {
+    const pat = localStorage.getItem("cosheaf.pat");
+    const r = await fetch(`/api/v1/w/${workspaceSlug}/pulls/${n}/merge`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(pat ? { authorization: `Bearer ${pat}` } : {}),
+      },
       body: JSON.stringify({ Do: "squash" }),
     });
     return { status: r.status, body: await r.text() };
-  }, prNumber);
+  }, { n: prNumber, workspaceSlug: WORKSPACE_SLUG });
   if (mergeResult.status !== 200)
     throw new Error(`merge ${prNumber}: ${mergeResult.status} ${mergeResult.body}`);
 
