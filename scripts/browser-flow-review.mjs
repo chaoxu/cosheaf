@@ -48,6 +48,46 @@ async function typeIntoEditor(page, text) {
   await page.keyboard.type(text, { delay: 10 });
 }
 
+async function waitForReviewRejection(page, prNumber, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rejected = await page.evaluate(async ({ n, workspaceSlug }) => {
+      const pat = localStorage.getItem("cosheaf.pat");
+      const r = await fetch(`/api/v1/w/${workspaceSlug}/pulls/${n}/reviews`, {
+        headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
+      });
+      if (!r.ok) return false;
+      const j = await r.json();
+      return j.rejections >= 1;
+    }, { n: prNumber, workspaceSlug: WORKSPACE_SLUG });
+    if (rejected) return;
+    await page.waitForTimeout(500);
+  }
+  throw new Error(`timed out waiting for request-changes review on PR ${prNumber}`);
+}
+
+async function waitForOpenedPr(page, branch, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const prNumber = await page.evaluate(async ({ branch, workspaceSlug }) => {
+      const pat = localStorage.getItem("cosheaf.pat");
+      const r = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=open`, {
+        headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
+      });
+      if (!r.ok) return null;
+      const pulls = await r.json();
+      const found = pulls.find((p) => p.head?.ref === branch || p.title === branch);
+      const fallback = pulls
+        .filter((p) => p.user?.login === "meri" && p.head?.ref?.startsWith("user/meri/wip-"))
+        .sort((a, b) => (b.number ?? 0) - (a.number ?? 0))[0];
+      return found ? found.number : (fallback?.number ?? null);
+    }, { branch, workspaceSlug: WORKSPACE_SLUG });
+    if (prNumber) return prNumber;
+    await page.waitForTimeout(500);
+  }
+  throw new Error("could not locate PR by head_ref after open");
+}
+
 const meri = await makeContext("meri");
 const vera = await makeContext("vera");
 
@@ -77,19 +117,7 @@ try {
   await meri.getByTestId("active-branch-name").waitFor({ state: "hidden", timeout: 8000 });
 
   // Locate the just-opened PR number via Forgejo-shape API on the same origin.
-  const prNumber = await meri.evaluate(async ({ branch, workspaceSlug }) => {
-    const pat = localStorage.getItem("cosheaf.pat");
-    const r = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=open`, {
-      headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
-    });
-    const pulls = await r.json();
-    const found = pulls.find((p) => p.head?.ref === branch || p.title === branch);
-    const fallback = pulls
-      .filter((p) => p.user?.login === "meri" && p.head?.ref?.startsWith("user/meri/wip-"))
-      .sort((a, b) => (b.number ?? 0) - (a.number ?? 0))[0];
-    return found ? found.number : (fallback?.number ?? null);
-  }, { branch: meriBranch, workspaceSlug: WORKSPACE_SLUG });
-  if (!prNumber) throw new Error("could not locate PR by head_ref after open");
+  const prNumber = await waitForOpenedPr(meri, meriBranch);
 
   // ── 2. vera reviews and requests changes ───────────────────────────────────
   stage = "vera-login";
@@ -110,18 +138,7 @@ try {
   await vera.getByTestId("review-comment").fill("please add v2");
   await vera.getByTestId("review-request-changes").click();
   // After REQUEST_CHANGES the PR stays open; we just verify via API.
-  await vera.waitForFunction(
-    async ({ n, workspaceSlug }) => {
-      const pat = localStorage.getItem("cosheaf.pat");
-      const r = await fetch(`/api/v1/w/${workspaceSlug}/pulls/${n}/reviews`, {
-        headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
-      });
-      const j = await r.json();
-      return j.rejections >= 1;
-    },
-    { n: prNumber, workspaceSlug: WORKSPACE_SLUG },
-    { timeout: 10000 },
-  );
+  await waitForReviewRejection(vera, prNumber);
 
   // ── 3. meri amends the same branch — the save pushes another commit to
   //       the existing PR's head ref instead of forking a second PR (#26).

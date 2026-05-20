@@ -25,6 +25,30 @@ async function textOfTestId(id) {
   return page.getByTestId(id).innerText().catch(() => "");
 }
 
+async function waitForMergedFile(branch, path, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ready = await page.evaluate(async ({ workspaceSlug, branch, path }) => {
+      const pat = localStorage.getItem("cosheaf.pat");
+      const authHeaders = pat ? { authorization: `Bearer ${pat}` } : undefined;
+      const pullsResponse = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=all`, {
+        headers: authHeaders,
+      });
+      if (!pullsResponse.ok) return false;
+      const pulls = await pullsResponse.json();
+      const merged = pulls.some((p) => (p.title === branch || p.head?.ref === branch) && p.merged === true);
+      if (!merged) return false;
+      const fileResponse = await fetch(`/api/v1/w/${workspaceSlug}/file?path=${encodeURIComponent(path)}&branch=main`, {
+        headers: authHeaders,
+      });
+      return fileResponse.ok;
+    }, { workspaceSlug: WORKSPACE_SLUG, branch, path });
+    if (ready) return;
+    await page.waitForTimeout(500);
+  }
+  throw new Error(`timed out waiting for ${path} to be merged from ${branch}`);
+}
+
 try {
   await page.goto(URL, { waitUntil: "networkidle" });
   await signInIfNeeded(page, USERNAME, PASSWORD);
@@ -52,19 +76,7 @@ try {
     return button instanceof HTMLButtonElement && !button.disabled;
   }, { timeout: 12000 });
   await page.getByTestId("merge-branch").click();
-  await page.waitForFunction(
-    async ({ workspaceSlug, branch }) => {
-      const pat = localStorage.getItem("cosheaf.pat");
-      const r = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=all`, {
-        headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
-      });
-      if (!r.ok) return false;
-      const pulls = await r.json();
-      return pulls.some((p) => (p.title === branch || p.head?.ref === branch) && p.merged === true);
-    },
-    { workspaceSlug: WORKSPACE_SLUG, branch: branchName },
-    { timeout: 30000 },
-  );
+  await waitForMergedFile(branchName, FLOW_PATH);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("editor").waitFor({ state: "visible", timeout: 12000 });
 
