@@ -21,6 +21,7 @@ import DOMPurify from "dompurify";
 import { parseFrontmatterYaml } from "../../../shared/frontmatter-yaml";
 import type { LineComment } from "../api";
 import { CommentThread, type CommentActions } from "./CommentThread";
+import { normalizeCoflatReaderDom } from "./coflat-reader-dom";
 import { groupCommentsByLine } from "./comment-anchors";
 
 interface Props {
@@ -74,6 +75,7 @@ export function RichDiffRender({
     }
     commentRootsRef.current.clear();
     root.innerHTML = html;
+    normalizeCoflatReaderDom(root);
     root.dataset.cosheafHtml = html;
     void import("@chaoxu/coflat-editor/reader").then(({ hydrateMath }) => hydrateMath(root));
   }, [html]);

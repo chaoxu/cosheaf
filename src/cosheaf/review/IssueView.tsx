@@ -309,6 +309,7 @@ export function IssueView({
                 workspaceSlug={workspaceSlug}
                 formatId={formatId}
                 ctx={documentContext}
+                surface="document"
                 onOpenPageById={onOpenPageById}
                 onOpenPath={onOpenPath}
                 onOpenNumber={(n) => {
