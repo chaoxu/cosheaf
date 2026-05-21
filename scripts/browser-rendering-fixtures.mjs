@@ -55,7 +55,7 @@ try {
   await prHeader.getByText("Review focus").waitFor({ state: "visible", timeout: 10000 });
   await prHeader.getByText("rich diff rendering").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-mode-rich").click();
-  await page.getByText("Rendering Fixture").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("This page is seeded on a pull-request branch").waitFor({ state: "visible", timeout: 10000 });
   const frontmatterRenderedAsHeading = await page
     .getByRole("heading", { name: "id: rendering-fixture title: Rendering Fixture" })
     .isVisible()
