@@ -1440,6 +1440,8 @@ function WorkspaceView({
         .then((r) => {
           if (openRequestRef.current !== requestId) return;
           const doc = options.doc ?? filesRef.current?.find((f) => f.path === path)?.doc;
+          setViewingIssue(null);
+          setNewIssueOpen(false);
           setOpenPath(path);
           setOpenDoc(doc);
           setContent(r.content);
@@ -1777,6 +1779,10 @@ function WorkspaceView({
   const selectSidebarView = useCallback(
     (view: WorkspaceSidebarView) => {
       setSidebarView(view);
+      if (view !== "issues") {
+        setViewingIssue(null);
+        setNewIssueOpen(false);
+      }
       if (view === "issues") {
         refreshIssues(issuesScope, "issues", inboxQuery);
         void refreshPinned();

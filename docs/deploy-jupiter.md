@@ -81,6 +81,32 @@ health plus `pnpm cli doctor` inside the container. Doctor is stricter: on a
 fresh sidecar volume it may report missing recent webhook deliveries until a
 real Forgejo event has arrived.
 
+For host-level checks on `jupiter`, run:
+
+```sh
+pnpm jupiter:host-doctor -- prod
+```
+
+This uses Docker, Caddy, curl, and Forgejo's container to verify the public URL,
+direct webhook URL, deployed commit, Caddy config, and local health endpoint.
+The `/api/v1/health` response includes the deployed commit:
+
+```json
+{ "ok": true, "commit": "..." }
+```
+
+For browser checks from a machine with Playwright installed, run:
+
+```sh
+pnpm jupiter:e2e -- prod
+pnpm jupiter:e2e -- staging
+pnpm jupiter:e2e -- https://cosheaf-my-branch.lab
+```
+
+By default this runs non-destructive login/page and issue-navigation checks.
+Add `--destructive` to also run branch-merge and review-merge flows, which
+create and merge test files/PRs.
+
 The direct container ports are:
 
 - production: `3030`
@@ -123,6 +149,14 @@ direct `100.93.22.80:<port>` webhook URL.
 When a branch is deleted, `.gitea/workflows/preview-cleanup.yml` removes the
 preview container, image, Caddy snippet, and SQLite volume. It can also be run
 manually for a named branch.
+
+Preview helper commands on `jupiter`:
+
+```sh
+pnpm jupiter:preview -- url my-branch
+pnpm jupiter:preview -- list
+pnpm jupiter:preview -- clean my-branch
+```
 
 ## Promotion flow
 

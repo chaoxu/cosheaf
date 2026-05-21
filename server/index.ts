@@ -35,7 +35,12 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.get("/api/v1/health", (c) => c.json({ ok: true }));
+app.get("/api/v1/health", (c) =>
+  c.json({
+    ok: true,
+    commit: process.env.COSHEAF_GIT_SHA ?? "unknown",
+  }),
+);
 
 // If a route handler bubbles a ForgejoError with status 401 it means the
 // caller's PAT was rejected by Forgejo (revoked, rotated). Surface a typed

@@ -30,9 +30,11 @@ RUN pnpm --dir cosheaf prune --prod --ignore-scripts
 
 FROM node:25-bookworm-slim AS runtime
 
+ARG COSHEAF_GIT_SHA=unknown
 ENV NODE_ENV=production
 ENV COSHEAF_PORT=3030
 ENV COSHEAF_DATA_DIR=/var/lib/cosheaf
+ENV COSHEAF_GIT_SHA=${COSHEAF_GIT_SHA}
 
 WORKDIR /app
 

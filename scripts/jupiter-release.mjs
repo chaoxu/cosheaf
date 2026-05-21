@@ -26,11 +26,11 @@ const environments = {
 };
 
 function usage() {
-  console.error("usage: node scripts/jupiter-release.mjs <deploy|verify|release|doctor|health> <prod|staging|testing>");
+  console.error("usage: node scripts/jupiter-release.mjs <deploy|verify|release|doctor|health|host-doctor> <prod|staging|testing>");
   process.exit(2);
 }
 
-const [action, envName] = process.argv.slice(2);
+const [action, envName] = process.argv.slice(2).filter((arg) => arg !== "--");
 const env = environments[envName];
 if (!action || !env) usage();
 
@@ -58,7 +58,20 @@ function output(command, args) {
   return result.stdout.trim();
 }
 
+function tryOutput(command, args) {
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    shell: false,
+  });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function containerEnv(name) {
+  return output("docker", ["exec", env.service, "sh", "-c", `printenv ${name} || true`]) || "unknown";
+}
+
 function deploy() {
+  const commit = process.env.COSHEAF_GIT_SHA || tryOutput("git", ["rev-parse", "HEAD"]) || "unknown";
   run("docker", [
     "compose",
     "--profile",
@@ -68,7 +81,7 @@ function deploy() {
     "--build",
     "--force-recreate",
     env.service,
-  ]);
+  ], { env: { ...process.env, COSHEAF_GIT_SHA: commit } });
 }
 
 function health() {
@@ -115,8 +128,29 @@ function release() {
 }
 
 function show() {
-  const urls = output("docker", ["exec", env.service, "printenv", "COSHEAF_SERVER_URL", "COSHEAF_WEBHOOK_URL"]);
-  console.log(urls);
+  console.log(containerEnv("COSHEAF_SERVER_URL"));
+  console.log(containerEnv("COSHEAF_WEBHOOK_URL"));
+  console.log(containerEnv("COSHEAF_GIT_SHA"));
+}
+
+function hostDoctor() {
+  health();
+  const serverUrl = containerEnv("COSHEAF_SERVER_URL");
+  const webhookUrl = containerEnv("COSHEAF_WEBHOOK_URL");
+  const commit = containerEnv("COSHEAF_GIT_SHA");
+  console.log(`server=${serverUrl}`);
+  console.log(`webhook=${webhookUrl}`);
+  console.log(`commit=${commit}`);
+
+  if (serverUrl.startsWith("https://")) {
+    run("curl", ["-k", "-sS", "-o", "/dev/null", "-w", "public https: http=%{http_code}\\n", `${serverUrl}/api/v1/health`]);
+  }
+  if (webhookUrl.includes(".lab")) {
+    console.error("webhook URL should be direct/reachable from Forgejo, not .lab");
+    process.exit(1);
+  }
+  run("docker", ["exec", "forgejo-cosheaf", "wget", "-qO-", webhookUrl.replace("/api/v1/webhooks/forgejo", "/api/v1/health")]);
+  run("sudo", ["-n", "/usr/bin/caddy", "validate", "--config", "/etc/caddy/Caddyfile"]);
 }
 
 switch (action) {
@@ -126,6 +160,9 @@ switch (action) {
     break;
   case "health":
     health();
+    break;
+  case "host-doctor":
+    hostDoctor();
     break;
   case "doctor":
     doctor();
