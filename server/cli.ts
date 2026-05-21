@@ -23,6 +23,15 @@ import {
   isFormatTopic,
   type DocumentFormatId,
 } from "../shared/document-format.js";
+import {
+  COFLAT_SHOWCASE_BIB,
+  COFLAT_SHOWCASE_BIB_PATH,
+  COFLAT_SHOWCASE_IMAGE,
+  COFLAT_SHOWCASE_IMAGE_PATH,
+  COFLAT_SHOWCASE_ISSUE_TITLE,
+  COFLAT_SHOWCASE_PAGE_PATH,
+  coflatFeatureShowcase,
+} from "./seed-fixtures.js";
 
 interface SeedOptions {
   user: string;
@@ -390,6 +399,21 @@ async function seed(args: string[]): Promise<void> {
       ].join("\n"),
       message: "docs: add development hello page",
     },
+    {
+      path: COFLAT_SHOWCASE_PAGE_PATH,
+      content: coflatFeatureShowcase(options.workspaceName),
+      message: "docs: add coflat feature showcase",
+    },
+    {
+      path: COFLAT_SHOWCASE_BIB_PATH,
+      content: COFLAT_SHOWCASE_BIB,
+      message: "docs: add coflat showcase bibliography",
+    },
+    {
+      path: COFLAT_SHOWCASE_IMAGE_PATH,
+      content: COFLAT_SHOWCASE_IMAGE,
+      message: "docs: add coflat showcase image",
+    },
   ];
 
   for (const file of files) {
@@ -421,6 +445,21 @@ async function ensureRenderingFixtures(
       body: renderingFixtureIssueBody(workspaceName),
     });
     console.log("created rendering fixture issue");
+  }
+
+  const showcaseIssues = await forgejo.listIssues(config.forgejoOwner, repo, {
+    state: "all",
+    limit: 50,
+    q: COFLAT_SHOWCASE_ISSUE_TITLE,
+  });
+  if (showcaseIssues.some((issue) => issue.title === COFLAT_SHOWCASE_ISSUE_TITLE)) {
+    console.log("coflat showcase issue already exists");
+  } else {
+    await forgejo.createIssue(config.forgejoOwner, repo, {
+      title: COFLAT_SHOWCASE_ISSUE_TITLE,
+      body: coflatFeatureShowcase(workspaceName),
+    });
+    console.log("created coflat showcase issue");
   }
 
   const branch = await forgejo.getBranch(config.forgejoOwner, repo, RENDERING_FIXTURE_BRANCH);
