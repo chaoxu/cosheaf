@@ -21,9 +21,9 @@ import { forgejoPassthrough } from "./routes/forgejo-passthrough.js";
 const config = loadConfig();
 const db = getDb(config);
 // Admin-bound Forgejo client. Used by the webhook handler (no user context)
-// and out-of-band provisioning. Never reached on a user-facing request path —
-// per-request middleware builds a Forgejo from the user's stored PAT instead.
-const fjAdmin = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken });
+// and explicit provisioning paths. Normal user-facing workspace routes use the
+// caller's PAT; COSHEAF_FORGEJO_TOKEN is kept non-admin.
+const fjAdmin = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken });
 const sse = new SSEHub();
 
 const app = new Hono<AppEnv>();

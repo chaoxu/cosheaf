@@ -22,7 +22,12 @@ export interface Config {
   dataDir: string;
   port: number;
   forgejoUrl: string;
+  // Non-site-admin runtime token. This is the token name exposed in normal
+  // app env and should not carry Forgejo site-admin privileges.
   forgejoToken: string;
+  // Site-admin/provisioning token. Keep its usage limited to explicit
+  // provisioning, webhook reconciliation, and operator CLI paths.
+  forgejoAdminToken: string;
   forgejoOwner: string;
   webhookSecret: string;
   webhookUrl: string;
@@ -53,6 +58,7 @@ export function loadConfig(): Config {
     port: Number(process.env.COSHEAF_PORT ?? 3030),
     forgejoUrl: withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002"),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
+    forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
     forgejoOwner: withDefault("COSHEAF_FORGEJO_OWNER", "cosheaf-admin"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),
     webhookUrl: withDefault("COSHEAF_WEBHOOK_URL", "http://127.0.0.1:3030/api/v1/webhooks/forgejo"),

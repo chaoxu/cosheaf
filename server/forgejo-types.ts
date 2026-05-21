@@ -93,6 +93,7 @@ export interface ForgejoUser {
   full_name?: string;
   email?: string;
   active?: boolean;
+  is_admin?: boolean;
 }
 
 /** Stand-in login when a Forgejo response has `user: null`. */
