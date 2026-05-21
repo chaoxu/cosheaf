@@ -50,6 +50,7 @@ jobs:
 
       - name: Build preview image
         run: |
+          node cosheaf/scripts/prepare-coflat-editor-package.mjs
           docker build \
             -f cosheaf/Dockerfile \
             -t "${{ steps.preview.outputs.image }}" \
@@ -57,9 +58,12 @@ jobs:
 
       - name: Start preview container
         run: |
-          env_file=/srv/cosheaf/.env.staging
+          env_file=/srv/cosheaf/.env.preview
           if [ ! -f "$env_file" ]; then
-            echo "missing $env_file"
+            env_file=/srv/cosheaf/.env.prod
+          fi
+          if [ ! -f "$env_file" ]; then
+            echo "missing /srv/cosheaf/.env.preview or /srv/cosheaf/.env.prod"
             exit 1
           fi
 

@@ -1,23 +1,19 @@
 # Deploy on jupiter
 
-`jupiter` is the container host for production and branch testing. Build
-Cosheaf from `/Users/chaoxu/playground` or `~/playground`, because the Docker
-image needs both `cosheaf` and the sibling `coflat-editor` package.
+`jupiter` is the container host for the production service and disposable
+branch previews. Build Cosheaf from `/Users/chaoxu/playground/cosheaf` or
+`~/playground/cosheaf`.
 
 ## Environment model
 
-Cosheaf uses three environment shapes:
+Cosheaf has one long-lived environment:
 
-- **testing**: disposable branch previews. A non-`main` branch gets its own
-  container, SQLite volume, and HTTPS `.lab` route.
-- **staging**: optional long-lived rehearsal. Use this when a change needs a
-  realistic dry run before prod. For the current Cosheaf setup, staging may use
-  the same Forgejo backend and can be skipped for small changes.
 - **prod**: the user-facing app at `https://cosheaf.lab`.
 
-Testing should be cheap and disposable. Staging should be close to prod when it
-is used. Prod should only receive code that already passed the relevant browser
-and container checks.
+Testing happens through disposable branch previews. A non-`main` branch can get
+its own container, SQLite volume, and HTTPS `.lab` route. There is no separate
+long-lived staging service for this project right now; keeping staging around
+would mostly duplicate prod without buying much safety.
 
 ## Environment files
 
@@ -25,8 +21,6 @@ Compose reads env files from `/srv/cosheaf` by default:
 
 ```sh
 /srv/cosheaf/.env.prod
-/srv/cosheaf/.env.staging
-/srv/cosheaf/.env.testing
 ```
 
 Create them from `.env.deploy.example`. Do not keep authoritative secrets in
@@ -81,6 +75,12 @@ health plus `pnpm cli doctor` inside the container. Doctor is stricter: on a
 fresh sidecar volume it may report missing recent webhook deliveries until a
 real Forgejo event has arrived.
 
+Before Docker builds, `scripts/jupiter-release.mjs` runs
+`scripts/prepare-coflat-editor-package.mjs`. That packs the sibling
+`../coflat-editor` repo into `vendor/coflat-editor-package/package`, and the
+Dockerfile installs that packed package instead of copying, installing, and
+building the editor source inside the image.
+
 For host-level checks on `jupiter`, run:
 
 ```sh
@@ -99,7 +99,6 @@ For browser checks from a machine with Playwright installed, run:
 
 ```sh
 pnpm jupiter:e2e -- prod
-pnpm jupiter:e2e -- staging
 pnpm jupiter:e2e -- https://cosheaf-my-branch.lab
 ```
 
@@ -111,17 +110,12 @@ create and merge test files/PRs.
 The direct container ports are:
 
 - production: `3030`
-- staging: `3031`
-- testing: `3032`
 
-Override them with `COSHEAF_PROD_PORT`, `COSHEAF_STAGING_PORT`, or
-`COSHEAF_TESTING_PORT`.
+Override it with `COSHEAF_PROD_PORT`.
 
-Each long-lived environment has its own SQLite sidecar volume:
+The long-lived environment has one SQLite sidecar volume:
 
 - `cosheaf-prod-data`
-- `cosheaf-staging-data`
-- `cosheaf-testing-data`
 
 Forgejo remains the source of truth. If webhooks were down or repository
 content was changed outside Cosheaf, rebuild an environment's sidecar index
@@ -143,8 +137,8 @@ through Caddy as:
 https://cosheaf-<branch-slug>.lab
 ```
 
-Preview containers use `/srv/cosheaf/.env.staging` as their base Forgejo
-credentials, override their public server URL to the preview hostname, and use a
+Preview containers should use their own preview env file or generated env at
+runtime, override their public server URL to the preview hostname, and use a
 direct `100.93.22.80:<port>` webhook URL.
 
 When a branch is deleted, `.gitea/workflows/preview-cleanup.yml` removes the
@@ -163,11 +157,8 @@ pnpm jupiter:preview -- clean my-branch
 
 Use this default flow for larger changes:
 
-1. Push a branch and inspect its testing preview.
-2. Run browser smoke tests against the preview or staging.
+1. Push a branch and inspect its disposable preview.
+2. Run browser smoke tests against the preview.
 3. Merge to `main`.
 4. Deploy prod from the same commit.
 5. Run prod health and a small browser smoke.
-
-Use long-lived staging only when the change needs a realistic rehearsal before
-prod. For small UI fixes, a branch preview plus prod smoke is enough.

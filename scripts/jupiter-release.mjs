@@ -9,24 +9,10 @@ const environments = {
     defaultPort: "3030",
     publicUrl: "https://cosheaf.lab",
   },
-  staging: {
-    profile: "staging",
-    service: "cosheaf-staging",
-    portEnv: "COSHEAF_STAGING_PORT",
-    defaultPort: "3031",
-    publicUrl: null,
-  },
-  testing: {
-    profile: "testing",
-    service: "cosheaf-testing",
-    portEnv: "COSHEAF_TESTING_PORT",
-    defaultPort: "3032",
-    publicUrl: null,
-  },
 };
 
 function usage() {
-  console.error("usage: node scripts/jupiter-release.mjs <deploy|verify|release|doctor|health|host-doctor> <prod|staging|testing>");
+  console.error("usage: node scripts/jupiter-release.mjs <deploy|verify|release|doctor|health|host-doctor> <prod>");
   process.exit(2);
 }
 
@@ -72,6 +58,7 @@ function containerEnv(name) {
 
 function deploy() {
   const commit = process.env.COSHEAF_GIT_SHA || tryOutput("git", ["rev-parse", "HEAD"]) || "unknown";
+  run("node", ["scripts/prepare-coflat-editor-package.mjs"]);
   run("docker", [
     "compose",
     "--profile",

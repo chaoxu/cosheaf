@@ -43,31 +43,5 @@ services:
     volumes:
       - cosheaf-prod-data:/var/lib/cosheaf
 
-  cosheaf-staging:
-    <<: *cosheaf-app
-    profiles: ["staging"]
-    container_name: cosheaf-staging
-    env_file:
-      - path: ${COSHEAF_ENV_DIR:-/srv/cosheaf}/.env.staging
-        required: false
-    ports:
-      - "${COSHEAF_STAGING_PORT:-3031}:3030"
-    volumes:
-      - cosheaf-staging-data:/var/lib/cosheaf
-
-  cosheaf-testing:
-    <<: *cosheaf-app
-    profiles: ["testing"]
-    container_name: cosheaf-testing
-    env_file:
-      - path: ${COSHEAF_ENV_DIR:-/srv/cosheaf}/.env.testing
-        required: false
-    ports:
-      - "${COSHEAF_TESTING_PORT:-3032}:3030"
-    volumes:
-      - cosheaf-testing-data:/var/lib/cosheaf
-
 volumes:
   cosheaf-prod-data:
-  cosheaf-staging-data:
-  cosheaf-testing-data:

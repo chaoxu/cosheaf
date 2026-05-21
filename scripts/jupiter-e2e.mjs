@@ -8,22 +8,10 @@ const targets = {
     slug: "flushing-coin",
     pagePath: "hello.md",
   },
-  staging: {
-    url: "http://127.0.0.1:3031/",
-    workspace: "Staging Coin",
-    slug: "staging-coin",
-    pagePath: "hello.md",
-  },
-  testing: {
-    url: "http://127.0.0.1:3032/",
-    workspace: "Staging Coin",
-    slug: "staging-coin",
-    pagePath: "hello.md",
-  },
 };
 
 function usage() {
-  console.error("usage: node scripts/jupiter-e2e.mjs <prod|staging|testing|URL> [--destructive]");
+  console.error("usage: node scripts/jupiter-e2e.mjs <prod|URL> [--destructive]");
   process.exit(2);
 }
 

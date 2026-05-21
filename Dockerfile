@@ -24,12 +24,8 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
   && apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ pkg-config rsync
 
-COPY coflat-editor ./coflat-editor
+COPY cosheaf/vendor/coflat-editor-package/package ./coflat-editor
 COPY cosheaf ./cosheaf
-
-RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
-  pnpm --dir coflat-editor install --frozen-lockfile
-RUN pnpm --dir coflat-editor build
 
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir cosheaf install --frozen-lockfile --ignore-scripts
@@ -37,7 +33,8 @@ RUN pnpm --dir cosheaf rebuild better-sqlite3 esbuild
 RUN pnpm --dir cosheaf build
 RUN pnpm --dir cosheaf build:server
 RUN cp cosheaf/server/schema.sql cosheaf/dist-server/server/schema.sql
-RUN pnpm --dir cosheaf prune --prod --ignore-scripts
+RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
+  pnpm --dir cosheaf prune --prod --ignore-scripts
 
 FROM node:25-bookworm-slim AS runtime
 

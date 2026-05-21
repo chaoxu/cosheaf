@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@chaoxu/coflat-editor':
         specifier: file:../coflat-editor
-        version: file:../coflat-editor(2e966292a8ae36e8d7937e7595a18b88)
+        version: file:../coflat-editor(728294b3245655958fffa93c12a9669a)
       '@codemirror/autocomplete':
         specifier: ^6.20.1
         version: 6.20.2
@@ -60,8 +60,8 @@ importers:
         specifier: ^4.12.18
         version: 4.12.18
       katex:
-        specifier: ^0.16.46
-        version: 0.16.46
+        specifier: ^0.16.38
+        version: 0.16.38
       parse-diff:
         specifier: ^0.12.0
         version: 0.12.0
@@ -1711,8 +1711,8 @@ packages:
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
-  katex@0.16.46:
-    resolution: {integrity: sha512-WHy4Coo+bGZyH7NwJKHkS04YFsFcarWbAEOAC3EMndzdN6VSZqklLLIgfxzyaW9jDoeGYJX9SWbJPKpecox0Uw==}
+  katex@0.16.38:
+    resolution: {integrity: sha512-cjHooZUmIAUmDsHBN+1n8LaZdpmbj03LtYeYPyuYB7OuloiaeaV6N4LcfjcnHVzGWjVQmKrxxTrpDcmSzEZQwQ==}
     hasBin: true
 
   knip@6.12.2:
@@ -2326,7 +2326,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.14':
     optional: true
 
-  '@chaoxu/coflat-editor@file:../coflat-editor(2e966292a8ae36e8d7937e7595a18b88)':
+  '@chaoxu/coflat-editor@file:../coflat-editor(728294b3245655958fffa93c12a9669a)':
     dependencies:
       '@citation-js/core': 0.7.21
       '@citation-js/plugin-bibtex': 0.7.21(@citation-js/core@0.7.21)
@@ -2355,7 +2355,7 @@ snapshots:
       clsx: 2.1.1
       cmdk: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       dompurify: 3.4.3
-      katex: 0.16.46
+      katex: 0.16.38
       lucide-react: 0.577.0(react@19.2.6)
       pathe: 2.0.3
       pdfjs-dist: 5.7.284
@@ -3622,7 +3622,7 @@ snapshots:
 
   js-tokens@4.0.0: {}
 
-  katex@0.16.46:
+  katex@0.16.38:
     dependencies:
       commander: 8.3.0
 
