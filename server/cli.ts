@@ -32,6 +32,116 @@ interface SeedOptions {
   defaultMdFormat: DocumentFormatId;
 }
 
+const RENDERING_FIXTURE_ISSUE_TITLE = "Rendering fixture: long Markdown issue";
+const RENDERING_FIXTURE_PR_TITLE = "Rendering fixture: long Markdown PR";
+const RENDERING_FIXTURE_BRANCH = "fixtures/rendering-markdown";
+const RENDERING_FIXTURE_PATH = "notes/rendering-fixture.md";
+
+function renderingFixtureIssueBody(workspaceName: string): string {
+  return [
+    "## Purpose",
+    "",
+    `This seed issue exists so ${workspaceName} always has a long Markdown body for checking issue rendering, comments, references, and layout wrapping.`,
+    "",
+    "It intentionally includes multiple block types in one place:",
+    "",
+    "- a page reference to [@hello]",
+    "- an issue-style reference like #1",
+    "- a file-line reference like hello.md#L1-4",
+    "- inline math $a^2 + b^2 = c^2$ and display math",
+    "",
+    "$$",
+    "\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}",
+    "$$",
+    "",
+    "### Checklist",
+    "",
+    "- [ ] Headings keep a readable vertical rhythm.",
+    "- [ ] Lists, checkboxes, and long paragraphs wrap without overlapping the sidebar.",
+    "- [ ] Bare references become clickable where Cosheaf supports them.",
+    "",
+    "| Surface | What to inspect |",
+    "| --- | --- |",
+    "| Issue body | Long-form Markdown and math |",
+    "| Issue sidebar | Truncated titles and selection state |",
+    "| Browser back | Returning from issue detail to a file |",
+    "",
+    "> This quote is deliberately a little longer than usual, so the renderer has to handle multi-line blockquote wrapping rather than only a one-line sample.",
+    "",
+    "```ts",
+    "export function seededRenderingFixture(): string {",
+    '  return "issue markdown stays readable";',
+    "}",
+    "```",
+  ].join("\n");
+}
+
+function renderingFixturePrBody(): string {
+  return [
+    "## Review focus",
+    "",
+    "This seeded PR gives the review UI a stable long-form description and a Markdown file diff.",
+    "",
+    "Please inspect:",
+    "",
+    "1. the PR header rendering",
+    "2. rich diff rendering for the added Markdown file",
+    "3. references such as [@hello], hello.md#L1-4, and #1",
+    "",
+    "### Notes",
+    "",
+    "- The branch is intentionally left open for manual review testing.",
+    "- The body includes math: $e^{i\\pi} + 1 = 0$.",
+    "- The changed file includes headings, tables, code fences, and long paragraphs.",
+  ].join("\n");
+}
+
+function renderingFixturePage(workspaceName: string): string {
+  return [
+    "---",
+    "id: rendering-fixture",
+    "title: Rendering Fixture",
+    "---",
+    "# Rendering Fixture",
+    "",
+    `This page is seeded on a pull-request branch for ${workspaceName}. It is long enough to exercise the rich diff renderer and the editor's reader mode.`,
+    "",
+    "See [@hello] for the main seed page. This paragraph also mentions hello.md#L1-4 and #1 so bare-reference rewriting can be checked in review surfaces.",
+    "",
+    "## Mathematical block",
+    "",
+    "Inline math should render inside a sentence, for example $x^2 + y^2 = z^2$.",
+    "",
+    "$$",
+    "\\int_0^1 x^2\\,dx = \\frac{1}{3}",
+    "$$",
+    "",
+    "## Table",
+    "",
+    "| Feature | Expected behavior |",
+    "| --- | --- |",
+    "| Headings | Maintain hierarchy |",
+    "| Tables | Keep columns readable |",
+    "| Code fences | Preserve monospace formatting |",
+    "| References | Stay clickable where supported |",
+    "",
+    "## Code fence",
+    "",
+    "```ts",
+    "type SeededSurface = \"issue\" | \"pull-request\" | \"diff\";",
+    "",
+    "export const seededSurface: SeededSurface = \"diff\";",
+    "```",
+    "",
+    "## Long paragraph",
+    "",
+    "The renderer should handle a deliberately long paragraph without clipping or overlapping neighboring UI. This text is verbose on purpose: it gives the sidebar, review header, status bar, and scroll containers enough content to expose wrapping and overflow problems that a tiny fixture would miss.",
+    "",
+    "> A blockquote in the changed file helps verify quote styling in rich diff mode.",
+    "",
+  ].join("\n");
+}
+
 async function readPassword(prompt: string): Promise<string> {
   if (!stdin.isTTY) {
     const rl = createInterface({ input: stdin, output: stdout });
@@ -235,8 +345,70 @@ async function seed(args: string[]): Promise<void> {
     if (created) console.log(`created ${file.path}`);
   }
   await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
+  await ensureRenderingFixtures(forgejo, config, workspace.slug, options.workspaceName);
 
   console.log(`seeded dev workspace: user=${options.user} workspace=${options.workspace}`);
+}
+
+async function ensureRenderingFixtures(
+  forgejo: Forgejo,
+  config: ReturnType<typeof loadConfig>,
+  repo: string,
+  workspaceName: string,
+): Promise<void> {
+  const issues = await forgejo.listIssues(config.forgejoOwner, repo, {
+    state: "all",
+    limit: 50,
+    q: RENDERING_FIXTURE_ISSUE_TITLE,
+  });
+  if (issues.some((issue) => issue.title === RENDERING_FIXTURE_ISSUE_TITLE)) {
+    console.log("rendering fixture issue already exists");
+  } else {
+    await forgejo.createIssue(config.forgejoOwner, repo, {
+      title: RENDERING_FIXTURE_ISSUE_TITLE,
+      body: renderingFixtureIssueBody(workspaceName),
+    });
+    console.log("created rendering fixture issue");
+  }
+
+  const branch = await forgejo.getBranch(config.forgejoOwner, repo, RENDERING_FIXTURE_BRANCH);
+  if (!branch) {
+    await forgejo.createBranch(config.forgejoOwner, repo, {
+      newBranchName: RENDERING_FIXTURE_BRANCH,
+      oldBranchName: "main",
+    });
+    console.log(`created branch ${RENDERING_FIXTURE_BRANCH}`);
+  }
+
+  const page = renderingFixturePage(workspaceName);
+  const existingFile = await forgejo.getFileMeta(
+    config.forgejoOwner,
+    repo,
+    RENDERING_FIXTURE_BRANCH,
+    RENDERING_FIXTURE_PATH,
+  );
+  if (!existingFile) {
+    await forgejo.putFile(config.forgejoOwner, repo, {
+      branch: RENDERING_FIXTURE_BRANCH,
+      path: RENDERING_FIXTURE_PATH,
+      content: page,
+      message: "docs: add rendering fixture",
+    });
+    console.log(`created ${RENDERING_FIXTURE_PATH} on ${RENDERING_FIXTURE_BRANCH}`);
+  }
+
+  const pulls = await forgejo.listPulls(config.forgejoOwner, repo, "all");
+  if (pulls.some((pull) => pull.title === RENDERING_FIXTURE_PR_TITLE || pull.head.ref === RENDERING_FIXTURE_BRANCH)) {
+    console.log("rendering fixture PR already exists");
+    return;
+  }
+  await forgejo.createPull(config.forgejoOwner, repo, {
+    head: RENDERING_FIXTURE_BRANCH,
+    base: "main",
+    title: RENDERING_FIXTURE_PR_TITLE,
+    body: renderingFixturePrBody(),
+  });
+  console.log("created rendering fixture PR");
 }
 
 async function workspaceRm(slug: string): Promise<void> {

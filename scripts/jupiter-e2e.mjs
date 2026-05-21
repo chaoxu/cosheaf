@@ -55,6 +55,7 @@ const baseEnv = {
 const checks = [
   ["smoke", "scripts/browser-smoke.mjs"],
   ["issues-nav", "scripts/browser-issues-nav.mjs"],
+  ["rendering-fixtures", "scripts/browser-rendering-fixtures.mjs"],
 ];
 if (destructive) {
   checks.push(["direct-merge", "scripts/browser-flow.mjs"]);

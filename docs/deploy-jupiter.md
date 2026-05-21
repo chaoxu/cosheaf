@@ -103,7 +103,8 @@ pnpm jupiter:e2e -- staging
 pnpm jupiter:e2e -- https://cosheaf-my-branch.lab
 ```
 
-By default this runs non-destructive login/page and issue-navigation checks.
+By default this runs non-destructive login/page, issue-navigation, and seeded
+Markdown rendering checks for long-form issue and PR bodies.
 Add `--destructive` to also run branch-merge and review-merge flows, which
 create and merge test files/PRs.
 

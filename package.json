@@ -50,6 +50,7 @@
     "smoke:flow": "node scripts/browser-flow.mjs",
     "smoke:review": "node scripts/browser-flow-review.mjs",
     "smoke:issues": "node scripts/browser-issues-nav.mjs",
+    "smoke:rendering": "node scripts/browser-rendering-fixtures.mjs",
     "test:e2e": "playwright test",
     "check:e2e": "playwright test",
     "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review && pnpm check:e2e",
