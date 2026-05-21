@@ -22,8 +22,9 @@ on `100.93.22.80:3002`, so production should use:
 COSHEAF_FORGEJO_URL=http://100.93.22.80:3002
 ```
 
-Use the public Cosheaf URL for `COSHEAF_SERVER_URL` and
-`COSHEAF_WEBHOOK_URL`.
+Use the public HTTPS Cosheaf URL for `COSHEAF_SERVER_URL`. Use a direct
+Jupiter/Tailscale HTTP URL for `COSHEAF_WEBHOOK_URL`, because the Forgejo
+container does not resolve the browser-facing `.lab` hostname.
 
 ## Forgejo backend
 
@@ -82,7 +83,7 @@ workflow builds the branch image, starts an isolated container named
 through Caddy as:
 
 ```text
-http://cosheaf-<branch-slug>.lab
+https://cosheaf-<branch-slug>.lab
 ```
 
 The preview uses `/srv/cosheaf/.env.staging` for Forgejo credentials and talks
