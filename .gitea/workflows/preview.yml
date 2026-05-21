@@ -31,6 +31,8 @@ jobs:
           if [ -z "$slug" ]; then
             slug="branch"
           fi
+          # Keep preview ports collision-free across branch names. The state
+          # file is host-owned and intentionally outside git.
           state_dir=/srv/cosheaf/previews
           state_file="$state_dir/ports.json"
           lock_file="$state_dir/ports.lock"

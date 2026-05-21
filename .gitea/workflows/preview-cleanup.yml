@@ -43,6 +43,8 @@ jobs:
             echo "container=cosheaf-preview-$slug"
             echo "volume=cosheaf-preview-$slug-data"
             echo "image=cosheaf-preview:$slug"
+            echo "state=/srv/cosheaf/previews/ports.json"
+            echo "lock=/srv/cosheaf/previews/ports.lock"
           } >> "$GITHUB_OUTPUT"
 
       - name: Remove preview resources
@@ -55,6 +57,14 @@ jobs:
           delete_volume="${{ github.event.inputs.delete_volume }}"
           if [ -z "$delete_volume" ] || [ "$delete_volume" = "true" ]; then
             docker volume rm "${{ steps.preview.outputs.volume }}" >/dev/null 2>&1 || true
+          fi
+
+          if [ -f "${{ steps.preview.outputs.state }}" ]; then
+            exec 9>"${{ steps.preview.outputs.lock }}"
+            flock 9
+            tmp="$(mktemp)"
+            jq --arg slug "${{ steps.preview.outputs.slug }}" 'del(.[$slug])' "${{ steps.preview.outputs.state }}" > "$tmp"
+            mv "$tmp" "${{ steps.preview.outputs.state }}"
           fi
 
           echo "removed preview for ${{ steps.preview.outputs.branch }}"
