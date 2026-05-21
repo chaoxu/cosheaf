@@ -231,22 +231,57 @@ const borderColor = "border-[var(--cf-border)]";
 // workspace switching and the workspaces list participate in browser history.
 type RoutePath =
   | { kind: "workspaces" }
-  | { kind: "workspace"; slug: string; filePath: string | null };
+  | {
+      kind: "workspace";
+      slug: string;
+      filePath: string | null;
+      sidebarView?: WorkspaceSidebarView | null;
+      issueNumber?: number | null;
+      newIssue?: boolean;
+    };
+
+type WorkspaceSidebarView = "pages" | "inbox" | "issues" | "activity" | "outline" | "linter" | "settings";
 
 function parseRoute(): RoutePath {
   const path = window.location.pathname;
   const m = /^\/w\/([^/]+)(?:\/(.*))?$/.exec(path);
   if (m) {
     const filePath = m[2] ? decodeURIComponent(m[2]) : null;
-    return { kind: "workspace", slug: m[1], filePath };
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get("view");
+    const issue = Number(params.get("issue"));
+    const sidebarView =
+      view === "inbox" ||
+      view === "issues" ||
+      view === "activity" ||
+      view === "outline" ||
+      view === "linter" ||
+      view === "settings"
+        ? view
+        : null;
+    return {
+      kind: "workspace",
+      slug: m[1],
+      filePath,
+      sidebarView,
+      issueNumber: Number.isInteger(issue) && issue > 0 ? issue : null,
+      newIssue: params.get("newIssue") === "1",
+    };
   }
   return { kind: "workspaces" };
 }
 
 function routeUrl(r: RoutePath): string {
   if (r.kind === "workspaces") return "/";
-  if (r.filePath) return `/w/${r.slug}/${r.filePath.split("/").map(encodeURIComponent).join("/")}`;
-  return `/w/${r.slug}`;
+  const base = r.filePath
+    ? `/w/${r.slug}/${r.filePath.split("/").map(encodeURIComponent).join("/")}`
+    : `/w/${r.slug}`;
+  const params = new URLSearchParams();
+  if (r.sidebarView && r.sidebarView !== "pages") params.set("view", r.sidebarView);
+  if (r.issueNumber) params.set("issue", String(r.issueNumber));
+  if (r.newIssue) params.set("newIssue", "1");
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 function navigate(r: RoutePath, mode: "push" | "replace" = "push"): void {
@@ -703,7 +738,7 @@ function InboxOrActivity({
   onNewIssue,
   canWrite,
 }: {
-  kind: "inbox" | "activity";
+  kind: "inbox" | "issues" | "activity";
   reviewPulls: readonly PullReviewEntry[];
   openPrs: readonly OpenPull[];
   issues: readonly IssueRow[];
@@ -724,9 +759,11 @@ function InboxOrActivity({
   canWrite: boolean;
 }): ReactElement {
   const isInbox = kind === "inbox";
+  const isIssues = kind === "issues";
   // In Inbox+Mine: only PRs awaiting your review.
   // In Inbox+All or Activity: every open PR in the workspace.
-  const useOpenList = !isInbox || scope === "all";
+  // Issues is issue-only.
+  const useOpenList = !isIssues && (!isInbox || scope === "all");
   const q = query.trim().toLowerCase();
   const sourcePulls: PullReviewEntry[] = useOpenList
     ? openPrs.map((p) => ({ ...p, approvals: 0, rejections: 0 }))
@@ -737,9 +774,9 @@ function InboxOrActivity({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-2 py-1">
-        <strong>{isInbox ? "Inbox" : "Activity"}</strong>
+        <strong>{isInbox ? "Inbox" : isIssues ? "Issues" : "Activity"}</strong>
         <div className="flex items-center gap-1">
-          {isInbox && (
+          {(isInbox || isIssues) && (
             <div className="flex text-[10px] uppercase tracking-wide">
               <button
                 type="button"
@@ -782,7 +819,7 @@ function InboxOrActivity({
       </div>
       {visiblePulls.length === 0 && issues.length === 0 && notifications.length === 0 && (
         <div className={cn("px-3 py-2 text-xs", muted)}>
-          {isInbox ? "Nothing waiting on you." : "No open activity."}
+          {isInbox ? "Nothing waiting on you." : isIssues ? "No open issues." : "No open activity."}
         </div>
       )}
       {isInbox && notifications.length > 0 && (
@@ -848,7 +885,7 @@ function InboxOrActivity({
           </li>
         ))}
       </ul>
-      {!isInbox && activities.length > 0 && (
+      {!isInbox && !isIssues && activities.length > 0 && (
         <>
           <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
             Recent activity
@@ -884,7 +921,7 @@ function InboxOrActivity({
       </ul>
       {issues.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
-          {isInbox ? (scope === "mine" ? "Your issues" : "Issues") : "Open issues"}
+          {isInbox || isIssues ? (scope === "mine" ? "Your issues" : "Issues") : "Open issues"}
         </div>
       )}
       <ul className="m-0 flex-1 overflow-y-auto p-0">
@@ -1158,7 +1195,7 @@ function WorkspaceView({
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [reviewPulls, setReviewPulls] = useState<PullReviewEntry[] | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
-  const [sidebarView, setSidebarView] = useState<"pages" | "inbox" | "activity" | "outline" | "linter" | "settings">("pages");
+  const [sidebarView, setSidebarView] = useState<WorkspaceSidebarView>("pages");
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
@@ -1433,6 +1470,58 @@ function WorkspaceView({
     [openPathFromSource],
   );
 
+  const clearOpenFile = useCallback(() => {
+    setOpenPath(null);
+    setOpenDoc(undefined);
+    setContent("");
+    setDirty(false);
+    openFileBranchRef.current = null;
+  }, []);
+
+  const showIssue = useCallback(
+    (number: number, push = true) => {
+      if (dirtyRef.current && !confirm("Discard unsaved changes?")) return;
+      clearOpenFile();
+      setReviewingPullNumber(null);
+      setReviewBranchName(null);
+      setNewIssueOpen(false);
+      setViewingIssue(number);
+      setSidebarView("issues");
+      if (push) {
+        navigate({
+          kind: "workspace",
+          slug: workspace.slug,
+          filePath: null,
+          sidebarView: "issues",
+          issueNumber: number,
+        });
+      }
+    },
+    [clearOpenFile, workspace.slug],
+  );
+
+  const showNewIssue = useCallback(
+    (push = true) => {
+      if (dirtyRef.current && !confirm("Discard unsaved changes?")) return;
+      clearOpenFile();
+      setReviewingPullNumber(null);
+      setReviewBranchName(null);
+      setViewingIssue(null);
+      setNewIssueOpen(true);
+      setSidebarView("issues");
+      if (push) {
+        navigate({
+          kind: "workspace",
+          slug: workspace.slug,
+          filePath: null,
+          sidebarView: "issues",
+          newIssue: true,
+        });
+      }
+    },
+    [clearOpenFile, workspace.slug],
+  );
+
   // Open whatever file is in the URL on workspace entry. Intentionally
   // omits openPathFromSource from the deps: its identity changes whenever
   // activeBranchName updates, and re-running it after a save would refetch
@@ -1444,6 +1533,11 @@ function WorkspaceView({
     if (r.kind === "workspace" && r.slug === workspace.slug && r.filePath) {
       initialOpenRef.current = true;
       openPathFromSource(r.filePath, { push: false, force: true });
+    } else if (r.kind === "workspace" && r.slug === workspace.slug) {
+      initialOpenRef.current = true;
+      setSidebarView(r.sidebarView ?? "pages");
+      if (r.issueNumber) showIssue(r.issueNumber, false);
+      else if (r.newIssue) showNewIssue(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional, see comment above
   }, [branchesReady, workspace.slug]);
@@ -1457,18 +1551,23 @@ function WorkspaceView({
           navigate({ kind: "workspace", slug: workspace.slug, filePath: openPathRef.current }, "replace");
           return;
         }
-        setOpenPath(null);
-        setOpenDoc(undefined);
-        setContent("");
-        setDirty(false);
+        clearOpenFile();
+        setSidebarView(r.sidebarView ?? "pages");
+        setReviewingPullNumber(null);
+        setReviewBranchName(null);
+        setViewingIssue(r.issueNumber ?? null);
+        setNewIssueOpen(r.newIssue ?? false);
         return;
       }
+      setViewingIssue(null);
+      setNewIssueOpen(false);
+      setSidebarView(r.sidebarView ?? "pages");
       const opened = openPathFromSource(r.filePath, { push: false });
       if (!opened) navigate({ kind: "workspace", slug: workspace.slug, filePath: openPathRef.current }, "replace");
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
-  }, [workspace.slug, openPathFromSource]);
+  }, [workspace.slug, openPathFromSource, clearOpenFile]);
 
   // Host APIs for the embedded MarkdownEditor. The editor owns dirty
   // tracking (live doc vs last-saved baseline); cosheaf subscribes via
@@ -1616,8 +1715,8 @@ function WorkspaceView({
   }, [refreshPulls]);
 
   const refreshIssues = useCallback(
-    (scope: "mine" | "all", panel: "inbox" | "activity", q: string) => {
-      const filter = panel === "inbox" && scope === "mine" ? "mine" : undefined;
+    (scope: "mine" | "all", panel: "inbox" | "issues" | "activity", q: string) => {
+      const filter = (panel === "inbox" || panel === "issues") && scope === "mine" ? "mine" : undefined;
       api
         .listIssues(workspace.slug, {
           state: "open",
@@ -1630,10 +1729,10 @@ function WorkspaceView({
     [workspace.slug],
   );
 
-  // Fetch issues whenever the user opens Inbox/Activity, switches scope, or
+  // Fetch issues whenever the user opens Inbox/Issues/Activity, switches scope, or
   // changes the search query. Server-side LIKE filter on title.
   useEffect(() => {
-    if (sidebarView === "inbox" || sidebarView === "activity") {
+    if (sidebarView === "inbox" || sidebarView === "issues" || sidebarView === "activity") {
       const handle = setTimeout(() => {
         refreshIssues(issuesScope, sidebarView, inboxQuery);
       }, 150);
@@ -1674,6 +1773,23 @@ function WorkspaceView({
       setPinnedIssues([]);
     }
   }, [workspace.slug]);
+
+  const selectSidebarView = useCallback(
+    (view: WorkspaceSidebarView) => {
+      setSidebarView(view);
+      if (view === "issues") {
+        refreshIssues(issuesScope, "issues", inboxQuery);
+        void refreshPinned();
+      }
+      navigate({
+        kind: "workspace",
+        slug: workspace.slug,
+        filePath: openPathRef.current,
+        sidebarView: view,
+      });
+    },
+    [workspace.slug, issuesScope, inboxQuery, refreshIssues, refreshPinned],
+  );
 
   useEffect(() => {
     void refreshPinned();
@@ -1977,7 +2093,7 @@ function WorkspaceView({
           <div className={cn("flex flex-wrap items-center gap-0.5 border-b px-1 py-0.5 text-xs", borderColor)}>
             <SidebarTab
               active={sidebarView === "pages"}
-              onClick={() => setSidebarView("pages")}
+              onClick={() => selectSidebarView("pages")}
               testId="sidebar-tab-pages"
             >
               Files
@@ -1985,7 +2101,7 @@ function WorkspaceView({
             <SidebarTab
               active={sidebarView === "inbox"}
               onClick={() => {
-                setSidebarView("inbox");
+                selectSidebarView("inbox");
                 refreshPulls();
               }}
               testId="sidebar-tab-inbox"
@@ -1993,22 +2109,29 @@ function WorkspaceView({
               Inbox
             </SidebarTab>
             <SidebarTab
+              active={sidebarView === "issues"}
+              onClick={() => selectSidebarView("issues")}
+              testId="sidebar-tab-issues"
+            >
+              Issues
+            </SidebarTab>
+            <SidebarTab
               active={sidebarView === "activity"}
-              onClick={() => setSidebarView("activity")}
+              onClick={() => selectSidebarView("activity")}
               testId="sidebar-tab-activity"
             >
               Activity
             </SidebarTab>
             <SidebarTab
               active={sidebarView === "outline"}
-              onClick={() => setSidebarView("outline")}
+              onClick={() => selectSidebarView("outline")}
               disabled={!openPath}
             >
               Outline
             </SidebarTab>
             <SidebarTab
               active={sidebarView === "linter"}
-              onClick={() => setSidebarView("linter")}
+              onClick={() => selectSidebarView("linter")}
               testId="sidebar-tab-linter"
             >
               Linter
@@ -2016,7 +2139,7 @@ function WorkspaceView({
             {workspace.role === "admin" && (
               <SidebarTab
                 active={sidebarView === "settings"}
-                onClick={() => setSidebarView("settings")}
+                onClick={() => selectSidebarView("settings")}
                 testId="sidebar-tab-settings"
               >
                 ⚙
@@ -2047,7 +2170,7 @@ function WorkspaceView({
                 openPathFromSource(path);
               }}
             />
-          ) : sidebarView === "inbox" || sidebarView === "activity" ? (
+          ) : sidebarView === "inbox" || sidebarView === "issues" || sidebarView === "activity" ? (
             <InboxOrActivity
               kind={sidebarView}
               reviewPulls={reviewPulls ?? []}
@@ -2062,12 +2185,12 @@ function WorkspaceView({
                 refreshPulls();
                 refreshPinned();
                 if (sidebarView === "inbox") refreshNotifs();
-                if (sidebarView === "inbox" || sidebarView === "activity") {
+                if (sidebarView === "inbox" || sidebarView === "issues" || sidebarView === "activity") {
                   // refresh issues too
                   api
                     .listIssues(workspace.slug, {
                       state: "open",
-                      ...(sidebarView === "inbox" && issuesScope === "mine"
+                      ...((sidebarView === "inbox" || sidebarView === "issues") && issuesScope === "mine"
                         ? { filter: "mine" as const }
                         : {}),
                     })
@@ -2079,8 +2202,7 @@ function WorkspaceView({
               notifications={notifs}
               onOpenPullReview={openPullReview}
               onOpenIssue={(n) => {
-                setNewIssueOpen(false);
-                setViewingIssue(n);
+                showIssue(n);
               }}
               onOpenPr={(prNumber) => {
                 const row = (openPrs ?? []).find((r) => r.number === prNumber);
@@ -2095,8 +2217,7 @@ function WorkspaceView({
                 api.markAllNotificationsRead(workspace.slug).catch(() => refreshNotifs());
               }}
               onNewIssue={() => {
-                setViewingIssue(null);
-                setNewIssueOpen(true);
+                showNewIssue();
               }}
               canWrite={workspace.role !== "read"}
             />
@@ -2268,7 +2389,15 @@ function WorkspaceView({
               canPin={workspace.role === "admin"}
               isPinned={pinnedIssues.some((p) => p.number === viewingIssue)}
               onPinChanged={refreshPinned}
-              onClose={() => setViewingIssue(null)}
+              onClose={() => {
+                setViewingIssue(null);
+                navigate({
+                  kind: "workspace",
+                  slug: workspace.slug,
+                  filePath: null,
+                  sidebarView,
+                });
+              }}
               onOpenPageById={(id) => {
                 const match = filesRef.current?.find((f) => f.doc?.id === id);
                 if (match) {
@@ -2289,7 +2418,7 @@ function WorkspaceView({
                   setViewingIssue(null);
                   openPullReview({ ...pr, approvals: 0, rejections: 0 });
                 } else {
-                  setViewingIssue(n);
+                  showIssue(n);
                 }
               }}
             />
@@ -2335,7 +2464,7 @@ function WorkspaceView({
                       setNewIssueOpen(false);
                       setNewIssueTitle("");
                       setNewIssueBody("");
-                      setViewingIssue(created.number);
+                      showIssue(created.number);
                       // Refresh the sidebar list so the new issue is in
                       // the inbox immediately, not only after a manual refresh.
                       refreshIssues(issuesScope, "inbox", inboxQuery);
