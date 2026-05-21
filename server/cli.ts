@@ -533,10 +533,15 @@ async function mergePullWithRetry(
       await forgejo.mergePull(config.forgejoOwner, repo, index, {
         Do: "squash",
         message: "docs: merge rendering fixture",
+        force: true,
       });
       return;
     } catch (err) {
-      if (!(err instanceof ForgejoError && err.status === 405) || attempt === attempts) {
+      const isMergeabilityLag =
+        err instanceof ForgejoError &&
+        err.status === 405 &&
+        err.bodyText.toLowerCase().includes("try again later");
+      if (!isMergeabilityLag || attempt === attempts) {
         throw err;
       }
       await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
