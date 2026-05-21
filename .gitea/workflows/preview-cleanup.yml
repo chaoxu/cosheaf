@@ -1,0 +1,60 @@
+name: Branch preview cleanup
+
+on:
+  delete: {}
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch name to clean up
+        required: true
+      delete_volume:
+        description: Delete preview SQLite volume
+        required: false
+        default: "true"
+
+jobs:
+  cleanup:
+    name: Remove branch preview
+    runs-on: host
+    timeout-minutes: 10
+
+    steps:
+      - name: Compute preview name
+        id: preview
+        run: |
+          branch="${{ github.event.inputs.branch }}"
+          if [ -z "$branch" ]; then
+            branch="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$branch" ]; then
+            echo "missing branch name"
+            exit 1
+          fi
+          slug="$(printf '%s' "$branch" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
+            | cut -c1-40)"
+          if [ -z "$slug" ]; then
+            slug="branch"
+          fi
+          {
+            echo "branch=$branch"
+            echo "slug=$slug"
+            echo "container=cosheaf-preview-$slug"
+            echo "volume=cosheaf-preview-$slug-data"
+            echo "image=cosheaf-preview:$slug"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Remove preview resources
+        run: |
+          docker rm -f "${{ steps.preview.outputs.container }}" >/dev/null 2>&1 || true
+          docker image rm "${{ steps.preview.outputs.image }}" >/dev/null 2>&1 || true
+          sudo rm -f "/etc/caddy/sites.d/cosheaf-preview-${{ steps.preview.outputs.slug }}.caddy"
+          sudo -n /usr/bin/systemctl reload caddy
+
+          delete_volume="${{ github.event.inputs.delete_volume }}"
+          if [ -z "$delete_volume" ] || [ "$delete_volume" = "true" ]; then
+            docker volume rm "${{ steps.preview.outputs.volume }}" >/dev/null 2>&1 || true
+          fi
+
+          echo "removed preview for ${{ steps.preview.outputs.branch }}"

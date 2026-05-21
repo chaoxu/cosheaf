@@ -27,28 +27,9 @@ jobs:
       - name: Show workspace layout
         run: ls -la
 
-      - name: Pull in persistent env file if present
-        run: |
-          if [ -f /srv/cosheaf/.env.prod ]; then
-            cp /srv/cosheaf/.env.prod cosheaf/.env.prod
-          fi
-
-      - name: Build and start prod
+      - name: Build, start, and verify prod
         working-directory: cosheaf
-        run: docker compose --profile prod up -d --build
-
-      - name: Wait for container health
-        run: |
-          for i in $(seq 1 60); do
-            if curl -sf http://127.0.0.1:3030/api/v1/health > /dev/null; then
-              echo "healthy after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "health check failed after 60s"
-          docker logs cosheaf-prod --tail 80 || true
-          exit 1
+        run: node scripts/jupiter-release.mjs release prod
 
       - name: Write Caddy snippet
         run: |
