@@ -7,16 +7,17 @@
 // stored-PAT table — the PAT is the credential.
 
 import { Hono } from "hono";
+import { randomUUID } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { resolveAuth } from "../middleware.js";
 import { bad, unauthorized } from "./responses.js";
 
 export const auth = new Hono<AppEnv>();
 
-// Token name we reserve in Forgejo for cosheaf-issued PATs. There is at most
-// one of these per user at a time: each successful login deletes any existing
-// `cosheaf` token and creates a fresh one.
-const TOKEN_NAME = "cosheaf";
+// Token name prefix for cosheaf-issued PATs. Names are intentionally unique per
+// login so an automated smoke login as the same Forgejo user does not revoke an
+// existing browser tab's localStorage PAT.
+const TOKEN_NAME_PREFIX = "cosheaf";
 
 // Scopes cosheaf needs. Forgejo's PAT scopes are documented at
 // https://forgejo.org/docs/latest/admin/oauth2-provider/ — we ask for what
@@ -80,26 +81,17 @@ async function exchangeForgejoCredsForPatRaw(
     "content-type": "application/json",
     accept: "application/json",
   };
-  const body = JSON.stringify({ name: TOKEN_NAME, scopes: TOKEN_SCOPES });
+  const tokenName = `${TOKEN_NAME_PREFIX}-${randomUUID()}`;
+  const body = JSON.stringify({ name: tokenName, scopes: TOKEN_SCOPES });
 
   // Forgejo returns 400 (current) or 422 (older) when the token name is
-  // already taken; either way we want to delete the existing `cosheaf` token
-  // and retry. Sniff the body so we don't also retry on unrelated 400s.
+  // already taken. The name includes a UUID, so this should be effectively
+  // impossible; treat it as an upstream failure instead of deleting another
+  // login's still-valid token.
   const create = async () => fetch(url, { method: "POST", headers, body });
   let res: Response;
   try {
     res = await create();
-    if (res.status === 400 || res.status === 422) {
-      const bodyText = await res.clone().text();
-      const nameInUse = /name.*(?:has been used|already|in use)/i.test(bodyText);
-      if (nameInUse) {
-        const del = await fetch(`${url}/${TOKEN_NAME}`, { method: "DELETE", headers });
-        if (!del.ok && del.status !== 404) {
-          return { kind: "upstream_unavailable", detail: `delete token: ${del.status}` };
-        }
-        res = await create();
-      }
-    }
   } catch (err) {
     return { kind: "upstream_unavailable", detail: (err as Error).message };
   }

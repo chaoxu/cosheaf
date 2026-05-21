@@ -77,14 +77,14 @@ describe("POST /api/v1/login", () => {
     expect(await res.json()).toEqual({ username: "alice", pat: "pat-aaa" });
     expect(res.headers.get("set-cookie")).toBeNull();
 
-    // Forgejo got Basic auth + the right token name/scopes
+    // Forgejo got Basic auth + a non-shared token name/scopes.
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe("http://forgejo.test/api/v1/users/alice/tokens");
     expect((init as RequestInit).method).toBe("POST");
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers.authorization).toBe(`Basic ${Buffer.from("alice:secret").toString("base64")}`);
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.name).toBe("cosheaf");
+    expect(body.name).toMatch(/^cosheaf-[0-9a-f-]{36}$/);
     expect(body.scopes).toContain("write:repository");
   });
 
@@ -100,37 +100,12 @@ describe("POST /api/v1/login", () => {
   it.each([
     [422, "token name in use"],
     [400, "access token name has been used already"],
-  ])("%i name-already-used → delete then retry → success", async (status, message) => {
+  ])("%i name-already-used → 502 without deleting another token", async (status, message) => {
     const db = freshDb();
-    fetchMock
-      .mockResolvedValueOnce(failure(status, { message }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 })) // DELETE
-      .mockResolvedValueOnce(ok({ sha1: "pat-fresh" }));         // POST retry
-    const res = await login(db, "carol", "secret");
-    expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchMock.mock.calls[1][0])).toBe(
-      "http://forgejo.test/api/v1/users/carol/tokens/cosheaf",
-    );
-    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe("DELETE");
-  });
-
-  it("400 without name-in-use marker is a real error → 502", async () => {
-    const db = freshDb();
-    fetchMock.mockResolvedValueOnce(failure(400, { message: "PasswordComplexityTooLow" }));
+    fetchMock.mockResolvedValueOnce(failure(status, { message }));
     const res = await login(db, "carol", "secret");
     expect(res.status).toBe(502);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("name-in-use + delete fails → 502 forgejo unavailable", async () => {
-    const db = freshDb();
-    fetchMock
-      .mockResolvedValueOnce(failure(400, { message: "name has been used" }))
-      .mockResolvedValueOnce(failure(500));
-    const res = await login(db, "dan", "secret");
-    expect(res.status).toBe(502);
-    expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
   });
 
   it("5xx from Forgejo → 502 (operator-visible) not 401", async () => {
