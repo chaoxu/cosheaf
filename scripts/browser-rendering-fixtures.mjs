@@ -10,6 +10,7 @@ const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const ISSUE_TITLE = "Rendering fixture: long Markdown issue";
+const COFLAT_SHOWCASE_ISSUE_TITLE = "Rendering fixture: Coflat feature showcase";
 const PR_TITLE = "Rendering fixture: long Markdown PR";
 const SIDE_BY_SIDE_PR_TITLE = "Rendering fixture: side-by-side Markdown PR";
 
@@ -46,6 +47,21 @@ try {
   await issueView.getByText("Purpose").waitFor({ state: "visible", timeout: 10000 });
   await issueView.getByText("Checklist").waitFor({ state: "visible", timeout: 10000 });
   await issueView.getByText("seededRenderingFixture").waitFor({ state: "visible", timeout: 10000 });
+
+  await page.getByTestId("sidebar-tab-issues").click();
+  await page.getByRole("button", { name: "All" }).click();
+  await page.getByText(COFLAT_SHOWCASE_ISSUE_TITLE).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText(COFLAT_SHOWCASE_ISSUE_TITLE).click();
+  await page.getByTestId("issue-view").waitFor({ state: "visible", timeout: 10000 });
+  const showcaseView = page.getByTestId("issue-view");
+  await showcaseView.getByText("Coflat Feature Showcase").waitFor({ state: "visible", timeout: 10000 });
+  await showcaseView.getByText("Frontmatter and Structure Editing").waitFor({ state: "visible", timeout: 10000 });
+  await showcaseView.getByText("Labeled Display Math and Equation References").waitFor({ state: "visible", timeout: 10000 });
+  await showcaseView.getByText("Rich table for edit/display parity").waitFor({ state: "visible", timeout: 10000 });
+  const readerSurface = await showcaseView.locator('[data-reader-surface="document"]').count();
+  if (readerSurface === 0) {
+    throw new Error("coflat showcase issue did not use the full document reader surface");
+  }
 
   await page.getByTestId("sidebar-tab-inbox").click();
   await page.getByRole("button", { name: "All" }).click();

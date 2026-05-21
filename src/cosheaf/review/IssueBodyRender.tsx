@@ -32,6 +32,7 @@ interface RenderProps {
   onOpenNumber?: (n: number) => void;
   /** Workspace-scoped DocumentContext (shared with the editor surface). */
   ctx?: DocumentContext;
+  surface?: "document" | "inline";
 }
 
 const REF_PAGE_CLASS = "cosheaf-ref-page";
@@ -50,6 +51,7 @@ export function IssueBodyRender({
   onOpenPath,
   onOpenNumber,
   ctx,
+  surface = "inline",
 }: RenderProps): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handlersRef = useRef({ onOpenPageById, onOpenPath, onOpenNumber });
@@ -147,7 +149,11 @@ export function IssueBodyRender({
     return () => root.removeEventListener("click", onClick);
   }, []);
 
-  return <div ref={containerRef} className="cf-reader cf-reader-inline cf-doc-flow cf-issue-body" />;
+  const className =
+    surface === "document"
+      ? "cf-reader cf-doc-surface cf-doc-flow cf-issue-body"
+      : "cf-reader cf-reader-inline cf-doc-flow cf-issue-body";
+  return <div ref={containerRef} className={className} data-reader-surface={surface} />;
 }
 
 // Operate on the HTML string emitted by coflat's reader. We must not touch

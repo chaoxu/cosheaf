@@ -37,6 +37,7 @@ export function PrHeader({ pr }: { pr: PrMeta }): ReactElement {
             workspaceSlug={workspaceSlug}
             formatId={formatId}
             ctx={documentContext}
+            surface="document"
           />
         </div>
       )}

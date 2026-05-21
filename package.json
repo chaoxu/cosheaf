@@ -51,6 +51,7 @@
     "smoke:review": "node scripts/browser-flow-review.mjs",
     "smoke:issues": "node scripts/browser-issues-nav.mjs",
     "smoke:rendering": "node scripts/browser-rendering-fixtures.mjs",
+    "smoke:reader-parity": "node scripts/browser-reader-editor-parity.mjs",
     "test:e2e": "playwright test",
     "check:e2e": "playwright test",
     "check:stability": "pnpm test && pnpm smoke && pnpm smoke:flow && pnpm smoke:review && pnpm check:e2e",
@@ -67,7 +68,7 @@
     ]
   },
   "dependencies": {
-    "@chaoxu/coflat-editor": "0.2.1",
+    "@chaoxu/coflat-editor": "0.2.2",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/language": "^6.12.2",

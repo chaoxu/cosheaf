@@ -7,7 +7,6 @@ import {
   type StandaloneEditorMode,
   mountEditor,
 } from "@chaoxu/coflat-editor";
-import "@chaoxu/coflat-editor/style.css";
 
 // The host-API types aren't surfaced as named exports on the main entry, so
 // mirror the minimal shape we use. coflat-editor v0.2.0 host-api contract.

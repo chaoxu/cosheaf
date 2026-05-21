@@ -44,6 +44,7 @@ const checks = [
   ["smoke", "scripts/browser-smoke.mjs"],
   ["issues-nav", "scripts/browser-issues-nav.mjs"],
   ["rendering-fixtures", "scripts/browser-rendering-fixtures.mjs"],
+  ["reader-editor-parity", "scripts/browser-reader-editor-parity.mjs"],
 ];
 if (destructive) {
   checks.push(["direct-merge", "scripts/browser-flow.mjs"]);

@@ -226,6 +226,18 @@ function NewFilePathInput({
 
 const muted = "text-[var(--cf-muted)]";
 const borderColor = "border-[var(--cf-border)]";
+type DocumentThemeId = "default" | "blueprint-book";
+const DOCUMENT_THEME_KEY = "cosheaf:document-theme";
+const DOCUMENT_THEMES: Array<{ id: DocumentThemeId; label: string }> = [
+  { id: "default", label: "Default" },
+  { id: "blueprint-book", label: "Blueprint" },
+];
+
+function readDocumentTheme(): DocumentThemeId {
+  if (typeof localStorage === "undefined") return "default";
+  const value = localStorage.getItem(DOCUMENT_THEME_KEY);
+  return value === "blueprint-book" ? value : "default";
+}
 
 // URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
 // workspace switching and the workspaces list participate in browser history.
@@ -406,8 +418,14 @@ function Topbar({ children }: { children: React.ReactNode }): ReactElement {
   );
 }
 
-function Screen({ children }: { children: React.ReactNode }): ReactElement {
-  return <div className="flex h-full flex-col">{children}</div>;
+function Screen({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}): ReactElement {
+  return <div className={cn("flex h-full flex-col", className)}>{children}</div>;
 }
 
 function ContentPane({ children }: { children: React.ReactNode }): ReactElement {
@@ -1212,6 +1230,7 @@ function WorkspaceView({
   const [newIssueBusy, setNewIssueBusy] = useState(false);
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
+  const [documentTheme, setDocumentTheme] = useState<DocumentThemeId>(() => readDocumentTheme());
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
   const [reviewState, setReviewState] = useState<{
@@ -1232,6 +1251,10 @@ function WorkspaceView({
   const activeBranchName = reviewBranchName ?? currentBranchName;
   const filesRef = useRef<FileEntry[] | null>(null);
   const openRequestRef = useRef(0);
+
+  useEffect(() => {
+    localStorage.setItem(DOCUMENT_THEME_KEY, documentTheme);
+  }, [documentTheme]);
 
   // Sequence id for tree fetches: any in-flight tree response that isn't
   // the *latest* request is dropped. Without this, the initial-mount fetch
@@ -2072,7 +2095,12 @@ function WorkspaceView({
 
   return (
     <WorkspaceProvider value={workspaceContextValue}>
-    <Screen>
+    <Screen
+      className={cn(
+        "cf-theme-scope",
+        documentTheme === "blueprint-book" && "cf-theme-blueprint-book",
+      )}
+    >
       <div className="flex min-h-0 flex-1">
         <aside
           className={cn(
@@ -2615,6 +2643,21 @@ function WorkspaceView({
               <span className="truncate">{status ?? ""}</span>
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
+              {activeFormatId === COFLAT_FORMAT_ID && (
+                <select
+                  value={documentTheme}
+                  onChange={(e) => setDocumentTheme(e.target.value as DocumentThemeId)}
+                  title="Document theme"
+                  data-testid="document-theme-select"
+                  className="h-5 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs text-[var(--cf-fg)]"
+                >
+                  {DOCUMENT_THEMES.map((theme) => (
+                    <option key={theme.id} value={theme.id}>
+                      {theme.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               {openPath && (
                 <>
                   {activeFormatId === COFLAT_FORMAT_ID && (
