@@ -76,9 +76,11 @@ fresh sidecar volume it may report missing recent webhook deliveries until a
 real Forgejo event has arrived.
 
 Docker builds install `@chaoxu/coflat-editor` from the Jupiter Gitea npm
-registry. Production deploys should use an explicit published package version
-from `package.json` / `pnpm-lock.yaml`; do not rely on a sibling
-`../coflat-editor` checkout for normal prod releases.
+registry at `http://packages.lab/api/packages/chaoxu/npm/`. Production deploys
+should use an explicit published package version from `package.json` /
+`pnpm-lock.yaml`; do not rely on a sibling `../coflat-editor` checkout for
+normal prod releases. Do not commit `jupiter:3001` or raw Jupiter IP package
+registry URLs into `.npmrc` or the lockfile.
 
 When testing unpublished editor changes, use a local Cosheaf worktree and a
 temporary package-manager override. Publish a new editor patch version before

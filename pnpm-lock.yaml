@@ -187,7 +187,7 @@ packages:
     os: [win32]
 
   '@chaoxu/coflat-editor@0.2.1':
-    resolution: {integrity: sha512-EnLXFwI5QldWAjxbtpoWc4S3xg16wM+Fz+b/WBD/MeKXIlD/x7J+FZiV2IsuqVdtjBeNbsAwSOdd5LOI9+nUfA==, tarball: http://100.93.22.80:3001/api/packages/chaoxu/npm/%40chaoxu%2Fcoflat-editor/-/0.2.1/coflat-editor-0.2.1.tgz}
+    resolution: {integrity: sha512-EnLXFwI5QldWAjxbtpoWc4S3xg16wM+Fz+b/WBD/MeKXIlD/x7J+FZiV2IsuqVdtjBeNbsAwSOdd5LOI9+nUfA==, tarball: http://packages.lab/api/packages/chaoxu/npm/%40chaoxu%2Fcoflat-editor/-/0.2.1/coflat-editor-0.2.1.tgz}
     peerDependencies:
       '@citation-js/core': ^0.7.21
       '@citation-js/plugin-bibtex': ^0.7.21
