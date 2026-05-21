@@ -52,12 +52,35 @@ function tryOutput(command, args) {
   return result.status === 0 ? result.stdout.trim() : "";
 }
 
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function requireProdReleaseSource(commit) {
+  if (envName !== "prod") return;
+  if (process.env.COSHEAF_ALLOW_UNTRACKED_RELEASE === "1") return;
+  if (!commit || commit === "unknown") {
+    fail(
+      "refusing prod release with unknown commit; run from a git checkout or set COSHEAF_GIT_SHA",
+    );
+  }
+
+  const refName = process.env.GITHUB_REF_NAME || tryOutput("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (refName && refName !== "main" && refName !== "HEAD") {
+    fail(
+      `refusing prod release from ${refName}; push the branch preview, merge to main, then release`,
+    );
+  }
+}
+
 function containerEnv(name) {
   return output("docker", ["exec", env.service, "sh", "-c", `printenv ${name} || true`]) || "unknown";
 }
 
 function deploy() {
   const commit = process.env.COSHEAF_GIT_SHA || tryOutput("git", ["rev-parse", "HEAD"]) || "unknown";
+  requireProdReleaseSource(commit);
   run("node", ["scripts/prepare-coflat-editor-package.mjs"]);
   run("docker", [
     "compose",

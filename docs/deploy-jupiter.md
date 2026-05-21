@@ -162,3 +162,10 @@ Use this default flow for larger changes:
 3. Merge to `main`.
 4. Deploy prod from the same commit.
 5. Run prod health and a small browser smoke.
+
+`scripts/jupiter-release.mjs` enforces the production side of this path: prod
+release refuses to run with an unknown commit, and refuses to deploy from a
+non-`main` branch unless `COSHEAF_ALLOW_UNTRACKED_RELEASE=1` is set for an
+explicit emergency override. The normal way to test a bug fix before prod is
+to push the branch and use its generated `https://cosheaf-<branch>.lab`
+preview.
