@@ -25,6 +25,7 @@ const config: Config = {
   port: 3030,
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "token",
+  forgejoAdminToken: "admin-token",
   forgejoOwner: "owner",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",

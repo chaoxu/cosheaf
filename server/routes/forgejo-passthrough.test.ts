@@ -16,6 +16,7 @@ const config: Config = {
   port: 3030,
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "admin-token",
+  forgejoAdminToken: "admin-token",
   forgejoOwner: "owner",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
@@ -43,7 +44,7 @@ function appFor(db: Database.Database): Hono<AppEnv> {
     c.set("config", config);
     // Real Forgejo client; we mock global fetch instead so we exercise the
     // passthrough wiring end-to-end.
-    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken }));
+    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
     c.set("sse", new SSEHub());
     await next();
   });

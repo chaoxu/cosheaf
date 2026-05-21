@@ -27,7 +27,7 @@ export interface AppEnv {
     db: Database.Database;
     config: Config;
     // Admin-bound Forgejo client. Used only by the webhook handler and
-    // provisioning paths; never on a user-facing request handler.
+    // explicit provisioning paths; normal workspace routes use user PATs.
     fjAdmin: Forgejo;
     sse: SSEHub;
     user: User;

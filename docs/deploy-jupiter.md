@@ -27,6 +27,10 @@ Create them from `.env.deploy.example`. Do not keep authoritative secrets in
 the repo checkout. To use a different env directory, set `COSHEAF_ENV_DIR` when
 running Compose or `scripts/jupiter-release.mjs`.
 
+`COSHEAF_FORGEJO_TOKEN` is the non-site-admin runtime token. Admin/provisioning
+operations use `COSHEAF_FORGEJO_ADMIN_TOKEN` instead, so the long-standing
+runtime token name should not carry Forgejo site-admin privileges.
+
 Cosheaf uses its own Forgejo instance, separate from the general-purpose Gitea
 service on `jupiter:3001`. On `jupiter`, the Cosheaf Forgejo container listens
 on `100.93.22.80:3002`, so deployments should use:

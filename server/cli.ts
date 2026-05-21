@@ -241,7 +241,7 @@ function ctx() {
   // CLI runs out-of-band of any HTTP request; use the admin token. This is
   // the one entry-point that's allowed to (the runtime request path never
   // touches the admin token — it uses per-user PATs).
-  const forgejo = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken });
+  const forgejo = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken });
   return { config, db, forgejo };
 }
 
@@ -679,7 +679,7 @@ async function doctor(): Promise<void> {
   results.push(
     await check("forgejo reachable", async () => {
       // Some Forgejo deployments require auth even on /version, so send the
-      // admin token. We'll check admin-scope separately below.
+      // runtime token. We'll check admin-scope separately below.
       const r = await fetch(`${config.forgejoUrl}/api/v1/version`, {
         headers: { authorization: `token ${config.forgejoToken}` },
       });
@@ -690,11 +690,21 @@ async function doctor(): Promise<void> {
   );
 
   results.push(
+    await check("runtime token is non-admin", async () => {
+      const u = await new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoToken }).getCurrentUser();
+      if (u.is_admin === true) {
+        throw new Error("COSHEAF_FORGEJO_TOKEN is site-admin; use COSHEAF_FORGEJO_ADMIN_TOKEN for admin scope");
+      }
+      return u.login;
+    }),
+  );
+
+  results.push(
     await check("admin token has admin scope", async () => {
       // /admin/users requires admin permission; a 200 means the token works
       // for provisioning. 401/403 → wrong token. 404 → ancient Forgejo.
       const r = await fetch(`${config.forgejoUrl}/api/v1/admin/users?limit=1`, {
-        headers: { authorization: `token ${config.forgejoToken}` },
+        headers: { authorization: `token ${config.forgejoAdminToken}` },
       });
       if (r.status === 401 || r.status === 403) throw new Error("token rejected (not admin?)");
       if (!r.ok) throw new Error(`unexpected ${r.status}`);
