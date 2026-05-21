@@ -143,7 +143,13 @@ export function RichDiffRender({
     [],
   );
 
-  return <div ref={containerRef} data-testid={testId} className="cf-rich-diff prose max-w-none px-4 py-3" />;
+  return (
+    <div
+      ref={containerRef}
+      data-testid={testId}
+      className="cf-reader cf-reader-inline cf-doc-flow cf-rich-diff"
+    />
+  );
 }
 
 // Minimal CSS.escape that's safe for our key shape (`head:42`).

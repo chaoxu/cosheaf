@@ -11,6 +11,7 @@ const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const ISSUE_TITLE = "Rendering fixture: long Markdown issue";
 const PR_TITLE = "Rendering fixture: long Markdown PR";
+const SIDE_BY_SIDE_PR_TITLE = "Rendering fixture: side-by-side Markdown PR";
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -67,6 +68,17 @@ try {
   if (unresolvedPageRef) {
     throw new Error("page reference stayed unresolved in rich diff mode");
   }
+
+  await page.getByTestId("sidebar-tab-inbox").click();
+  await page.getByRole("button", { name: "All" }).click();
+  await page.getByText(SIDE_BY_SIDE_PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
+  await page.getByTestId("pr-header").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByTestId("view-mode-rich").click();
+  await page.getByTestId("view-shape-split").click();
+  await page.getByText("This is the default development page").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("This branch version of the Flushing Coin hello page").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("sideBySideFixture").waitFor({ state: "visible", timeout: 10000 });
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;

@@ -147,7 +147,7 @@ export function IssueBodyRender({
     return () => root.removeEventListener("click", onClick);
   }, []);
 
-  return <div ref={containerRef} className="cf-issue-body" />;
+  return <div ref={containerRef} className="cf-reader cf-reader-inline cf-doc-flow cf-issue-body" />;
 }
 
 // Operate on the HTML string emitted by coflat's reader. We must not touch

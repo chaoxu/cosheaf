@@ -36,6 +36,12 @@ const RENDERING_FIXTURE_ISSUE_TITLE = "Rendering fixture: long Markdown issue";
 const RENDERING_FIXTURE_PR_TITLE = "Rendering fixture: long Markdown PR";
 const RENDERING_FIXTURE_BRANCH = "fixtures/rendering-markdown";
 const RENDERING_FIXTURE_PATH = "notes/rendering-fixture.md";
+const SIDE_BY_SIDE_FIXTURE_PR_TITLE = "Rendering fixture: side-by-side Markdown PR";
+const SIDE_BY_SIDE_FIXTURE_BRANCH = "fixtures/side-by-side-rendering";
+const SIDE_BY_SIDE_FIXTURE_PATH = "hello.md";
+const MERGED_FIXTURE_PR_TITLE = "Rendering fixture: merged Markdown PR";
+const MERGED_FIXTURE_BRANCH = "fixtures/merged-rendering-markdown";
+const MERGED_FIXTURE_PATH = "notes/merged-rendering-fixture.md";
 
 function renderingFixtureIssueBody(workspaceName: string): string {
   return [
@@ -138,6 +144,52 @@ function renderingFixturePage(workspaceName: string): string {
     "The renderer should handle a deliberately long paragraph without clipping or overlapping neighboring UI. This text is verbose on purpose: it gives the sidebar, review header, status bar, and scroll containers enough content to expose wrapping and overflow problems that a tiny fixture would miss.",
     "",
     "> A blockquote in the changed file helps verify quote styling in rich diff mode.",
+    "",
+  ].join("\n");
+}
+
+function sideBySideFixturePrBody(): string {
+  return [
+    "## Review focus",
+    "",
+    "This seeded PR modifies an existing Markdown page so the side-by-side rich diff has meaningful base and head panes.",
+    "",
+    "- Base side should show the original `hello.md` body.",
+    "- Head side should show the updated long-form body.",
+    "- References like [@hello], hello.md#L1-4, and #1 should render in the same reader style as issue and PR bodies.",
+  ].join("\n");
+}
+
+function sideBySideFixturePage(workspaceName: string): string {
+  return [
+    "---",
+    "id: hello",
+    "title: Hello",
+    "---",
+    "# Hello",
+    "",
+    `This branch version of the ${workspaceName} hello page gives reviewers a real before/after comparison.`,
+    "",
+    "The paragraph is intentionally longer than the original seed. It should wrap with the same typography and spacing as the editor rich mode, including links such as [@hello], issue references such as #1, and path references such as hello.md#L1-4.",
+    "",
+    "## Side-by-side checks",
+    "",
+    "- The base pane should not be empty.",
+    "- The head pane should show this checklist.",
+    "- Tables and code blocks should keep the same visual language as the editor.",
+    "",
+    "| Pane | Expected content |",
+    "| --- | --- |",
+    "| base | original hello page |",
+    "| head | updated rendering fixture page |",
+    "",
+    "```ts",
+    "export const sideBySideFixture = true;",
+    "```",
+    "",
+    "$$",
+    "a^2 + b^2 = c^2",
+    "$$",
     "",
   ].join("\n");
 }
@@ -400,15 +452,150 @@ async function ensureRenderingFixtures(
   const pulls = await forgejo.listPulls(config.forgejoOwner, repo, "all");
   if (pulls.some((pull) => pull.title === RENDERING_FIXTURE_PR_TITLE || pull.head.ref === RENDERING_FIXTURE_BRANCH)) {
     console.log("rendering fixture PR already exists");
+  } else {
+    await forgejo.createPull(config.forgejoOwner, repo, {
+      head: RENDERING_FIXTURE_BRANCH,
+      base: "main",
+      title: RENDERING_FIXTURE_PR_TITLE,
+      body: renderingFixturePrBody(),
+    });
+    console.log("created rendering fixture PR");
+  }
+
+  await ensureSideBySideRenderingFixture(forgejo, config, repo, workspaceName, pulls);
+  await ensureMergedRenderingFixture(forgejo, config, repo, workspaceName, pulls);
+}
+
+async function ensureSideBySideRenderingFixture(
+  forgejo: Forgejo,
+  config: ReturnType<typeof loadConfig>,
+  repo: string,
+  workspaceName: string,
+  pulls: Awaited<ReturnType<Forgejo["listPulls"]>>,
+): Promise<void> {
+  const branch = await forgejo.getBranch(config.forgejoOwner, repo, SIDE_BY_SIDE_FIXTURE_BRANCH);
+  if (!branch) {
+    await forgejo.createBranch(config.forgejoOwner, repo, {
+      newBranchName: SIDE_BY_SIDE_FIXTURE_BRANCH,
+      oldBranchName: "main",
+    });
+    console.log(`created branch ${SIDE_BY_SIDE_FIXTURE_BRANCH}`);
+  }
+  const content = sideBySideFixturePage(workspaceName);
+  const meta = await forgejo.getFileMeta(
+    config.forgejoOwner,
+    repo,
+    SIDE_BY_SIDE_FIXTURE_BRANCH,
+    SIDE_BY_SIDE_FIXTURE_PATH,
+  );
+  const current = meta
+    ? await forgejo.getRawFile(
+        config.forgejoOwner,
+        repo,
+        SIDE_BY_SIDE_FIXTURE_BRANCH,
+        SIDE_BY_SIDE_FIXTURE_PATH,
+      )
+    : null;
+  if (current !== content) {
+    await forgejo.putFile(config.forgejoOwner, repo, {
+      branch: SIDE_BY_SIDE_FIXTURE_BRANCH,
+      path: SIDE_BY_SIDE_FIXTURE_PATH,
+      content,
+      sha: meta?.sha,
+      message: meta
+        ? "docs: update side-by-side rendering fixture"
+        : "docs: add side-by-side rendering fixture",
+    });
+    console.log(`${meta ? "updated" : "created"} ${SIDE_BY_SIDE_FIXTURE_PATH} on ${SIDE_BY_SIDE_FIXTURE_BRANCH}`);
+  }
+  if (pulls.some((pull) => pull.title === SIDE_BY_SIDE_FIXTURE_PR_TITLE || pull.head.ref === SIDE_BY_SIDE_FIXTURE_BRANCH)) {
+    console.log("side-by-side rendering fixture PR already exists");
     return;
   }
   await forgejo.createPull(config.forgejoOwner, repo, {
-    head: RENDERING_FIXTURE_BRANCH,
+    head: SIDE_BY_SIDE_FIXTURE_BRANCH,
     base: "main",
-    title: RENDERING_FIXTURE_PR_TITLE,
-    body: renderingFixturePrBody(),
+    title: SIDE_BY_SIDE_FIXTURE_PR_TITLE,
+    body: sideBySideFixturePrBody(),
   });
-  console.log("created rendering fixture PR");
+  console.log("created side-by-side rendering fixture PR");
+}
+
+async function mergePullWithRetry(
+  forgejo: Forgejo,
+  config: ReturnType<typeof loadConfig>,
+  repo: string,
+  index: number,
+): Promise<void> {
+  const attempts = 5;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await forgejo.mergePull(config.forgejoOwner, repo, index, {
+        Do: "squash",
+        message: "docs: merge rendering fixture",
+      });
+      return;
+    } catch (err) {
+      if (!(err instanceof ForgejoError && err.status === 405) || attempt === attempts) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+}
+
+async function ensureMergedRenderingFixture(
+  forgejo: Forgejo,
+  config: ReturnType<typeof loadConfig>,
+  repo: string,
+  workspaceName: string,
+  pulls: Awaited<ReturnType<Forgejo["listPulls"]>>,
+): Promise<void> {
+  const existing = pulls.find((pull) => pull.title === MERGED_FIXTURE_PR_TITLE || pull.head.ref === MERGED_FIXTURE_BRANCH);
+  if (existing?.merged) {
+    console.log("merged rendering fixture PR already exists");
+    return;
+  }
+  const branch = await forgejo.getBranch(config.forgejoOwner, repo, MERGED_FIXTURE_BRANCH);
+  if (!branch) {
+    await forgejo.createBranch(config.forgejoOwner, repo, {
+      newBranchName: MERGED_FIXTURE_BRANCH,
+      oldBranchName: "main",
+    });
+    console.log(`created branch ${MERGED_FIXTURE_BRANCH}`);
+  }
+  const mergedContent = renderingFixturePage(workspaceName)
+    .replace("id: rendering-fixture", "id: merged-rendering-fixture")
+    .replace("title: Rendering Fixture", "title: Merged Rendering Fixture");
+  const existingFile = await forgejo.getFileMeta(
+    config.forgejoOwner,
+    repo,
+    MERGED_FIXTURE_BRANCH,
+    MERGED_FIXTURE_PATH,
+  );
+  if (!existingFile) {
+    await forgejo.putFile(config.forgejoOwner, repo, {
+      branch: MERGED_FIXTURE_BRANCH,
+      path: MERGED_FIXTURE_PATH,
+      content: mergedContent,
+      message: "docs: add merged rendering fixture",
+    });
+    console.log(`created ${MERGED_FIXTURE_PATH} on ${MERGED_FIXTURE_BRANCH}`);
+  }
+  let pr = existing;
+  if (!pr) {
+    pr = await forgejo.createPull(config.forgejoOwner, repo, {
+      head: MERGED_FIXTURE_BRANCH,
+      base: "main",
+      title: MERGED_FIXTURE_PR_TITLE,
+      body: "## Merged rendering fixture\n\nThis PR is merged by the seed so the workspace has at least one completed review-flow artifact.",
+    });
+    console.log("created merged rendering fixture PR");
+  }
+  if (!pr.merged) {
+    await mergePullWithRetry(forgejo, config, repo, pr.number);
+    console.log("merged rendering fixture PR");
+  }
 }
 
 async function workspaceRm(slug: string): Promise<void> {
