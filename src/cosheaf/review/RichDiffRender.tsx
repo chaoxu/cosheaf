@@ -18,6 +18,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
 import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
 import DOMPurify from "dompurify";
+import { parseFrontmatterYaml } from "../../../shared/frontmatter-yaml";
 import type { LineComment } from "../api";
 import { CommentThread, type CommentActions } from "./CommentThread";
 import { groupCommentsByLine } from "./comment-anchors";
@@ -50,7 +51,9 @@ export function RichDiffRender({
     let cancelled = false;
     async function render(): Promise<void> {
       const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
-      const { html: rendered } = renderToHtml(source, ctx, { sourceLineAttribution: true });
+      const { html: rendered } = renderToHtml(markdownForReaderWithOriginalLines(source), ctx, {
+        sourceLineAttribution: true,
+      });
       if (!cancelled) setHtml(DOMPurify.sanitize(rendered));
     }
     void render();
@@ -146,4 +149,12 @@ export function RichDiffRender({
 // Minimal CSS.escape that's safe for our key shape (`head:42`).
 function cssEscape(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, (m) => `\\${m}`);
+}
+
+export function markdownForReaderWithOriginalLines(source: string): string {
+  const parsed = parseFrontmatterYaml(source);
+  if (!parsed.hadFrontmatter) return source;
+  const prefix = source.slice(0, source.length - parsed.body.length);
+  const skippedLineCount = prefix.split("\n").length - 1;
+  return `${"\n".repeat(skippedLineCount)}${parsed.body}`;
 }

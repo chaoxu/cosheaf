@@ -80,7 +80,8 @@ export function IssueBodyRender({
     async function render(): Promise<void> {
       if (formatId === COFLAT_FORMAT_ID) {
         const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
-        const { html: rendered } = renderToHtml(text, effectiveCtx);
+        const { body } = parseFrontmatterYaml(text);
+        const { html: rendered } = renderToHtml(body, effectiveCtx);
         const rewritten = injectPageRefTestIds(rewriteBareRefsInHtml(rendered));
         if (!cancelled) setHtml(DOMPurify.sanitize(rewritten));
         return;
