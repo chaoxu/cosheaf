@@ -75,11 +75,14 @@ health plus `pnpm cli doctor` inside the container. Doctor is stricter: on a
 fresh sidecar volume it may report missing recent webhook deliveries until a
 real Forgejo event has arrived.
 
-Before Docker builds, `scripts/jupiter-release.mjs` runs
-`scripts/prepare-coflat-editor-package.mjs`. That packs the sibling
-`../coflat-editor` repo into `vendor/coflat-editor-package/package`, and the
-Dockerfile installs that packed package instead of copying, installing, and
-building the editor source inside the image.
+Docker builds install `@chaoxu/coflat-editor` from the Jupiter Gitea npm
+registry. Production deploys should use an explicit published package version
+from `package.json` / `pnpm-lock.yaml`; do not rely on a sibling
+`../coflat-editor` checkout for normal prod releases.
+
+When testing unpublished editor changes, use a local Cosheaf worktree and a
+temporary package-manager override. Publish a new editor patch version before
+promoting those changes to Jupiter prod.
 
 For host-level checks on `jupiter`, run:
 

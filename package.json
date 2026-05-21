@@ -67,7 +67,7 @@
     ]
   },
   "dependencies": {
-    "@chaoxu/coflat-editor": "file:../coflat-editor",
+    "@chaoxu/coflat-editor": "0.2.1",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/language": "^6.12.2",

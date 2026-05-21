@@ -17,13 +17,6 @@ jobs:
         with:
           path: cosheaf
 
-      - name: Checkout coflat-editor (sibling needed by Dockerfile)
-        uses: actions/checkout@v4
-        with:
-          repository: chaoxu/coflat-editor
-          path: coflat-editor
-          token: ${{ secrets.GIT_PAT }}
-
       - name: Show workspace layout
         run: ls -la
 

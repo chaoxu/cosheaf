@@ -24,7 +24,6 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
   && apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ pkg-config rsync
 
-COPY cosheaf/vendor/coflat-editor-package/package ./coflat-editor
 COPY cosheaf ./cosheaf
 
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \

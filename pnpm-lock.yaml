@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@chaoxu/coflat-editor':
-        specifier: file:../coflat-editor
-        version: file:../coflat-editor(728294b3245655958fffa93c12a9669a)
+        specifier: 0.2.1
+        version: 0.2.1(728294b3245655958fffa93c12a9669a)
       '@codemirror/autocomplete':
         specifier: ^6.20.1
         version: 6.20.2
@@ -186,8 +186,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@chaoxu/coflat-editor@file:../coflat-editor':
-    resolution: {directory: ../coflat-editor, type: directory}
+  '@chaoxu/coflat-editor@0.2.1':
+    resolution: {integrity: sha512-EnLXFwI5QldWAjxbtpoWc4S3xg16wM+Fz+b/WBD/MeKXIlD/x7J+FZiV2IsuqVdtjBeNbsAwSOdd5LOI9+nUfA==, tarball: http://jupiter:3001/api/packages/chaoxu/npm/%40chaoxu%2Fcoflat-editor/-/0.2.1/coflat-editor-0.2.1.tgz}
     peerDependencies:
       '@citation-js/core': ^0.7.21
       '@citation-js/plugin-bibtex': ^0.7.21
@@ -2326,7 +2326,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.14':
     optional: true
 
-  '@chaoxu/coflat-editor@file:../coflat-editor(728294b3245655958fffa93c12a9669a)':
+  '@chaoxu/coflat-editor@0.2.1(728294b3245655958fffa93c12a9669a)':
     dependencies:
       '@citation-js/core': 0.7.21
       '@citation-js/plugin-bibtex': 0.7.21(@citation-js/core@0.7.21)

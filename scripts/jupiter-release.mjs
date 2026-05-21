@@ -81,7 +81,6 @@ function containerEnv(name) {
 function deploy() {
   const commit = process.env.COSHEAF_GIT_SHA || tryOutput("git", ["rev-parse", "HEAD"]) || "unknown";
   requireProdReleaseSource(commit);
-  run("node", ["scripts/prepare-coflat-editor-package.mjs"]);
   run("docker", [
     "compose",
     "--profile",

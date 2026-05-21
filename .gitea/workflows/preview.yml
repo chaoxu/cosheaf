@@ -17,18 +17,13 @@ jobs:
         with:
           path: cosheaf
 
-      - name: Checkout coflat-editor
-        uses: actions/checkout@v4
-        with:
-          repository: chaoxu/coflat-editor
-          path: coflat-editor
-          token: ${{ secrets.GIT_PAT }}
-
       - name: Compute preview name
         id: preview
         working-directory: cosheaf
         run: |
           branch="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+          sha="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+          remote="$(git config --get remote.origin.url)"
           slug="$(printf '%s' "$branch" \
             | tr '[:upper:]' '[:lower:]' \
             | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
@@ -36,23 +31,66 @@ jobs:
           if [ -z "$slug" ]; then
             slug="branch"
           fi
-          hash="$(printf '%s' "$branch" | cksum | awk '{print $1}')"
-          port=$((3100 + (hash % 200)))
+          state_dir=/srv/cosheaf/previews
+          state_file="$state_dir/ports.json"
+          lock_file="$state_dir/ports.lock"
+          mkdir -p "$state_dir"
+          if [ ! -s "$state_file" ]; then
+            printf '{}\n' > "$state_file"
+          fi
+          exec 9>"$lock_file"
+          flock 9
+
+          for stale_slug in $(jq -r 'keys[]' "$state_file"); do
+            if ! docker ps -a --format '{{.Names}}' | grep -qx "cosheaf-preview-$stale_slug"; then
+              tmp="$(mktemp)"
+              jq --arg slug "$stale_slug" 'del(.[$slug])' "$state_file" > "$tmp"
+              mv "$tmp" "$state_file"
+            fi
+          done
+
+          port="$(jq -r --arg slug "$slug" '.[$slug] // empty' "$state_file")"
+          if [ -z "$port" ]; then
+            for candidate in $(seq 3100 3299); do
+              if jq -e --argjson port "$candidate" 'to_entries[]? | select(.value == $port)' "$state_file" >/dev/null; then
+                continue
+              fi
+              port="$candidate"
+              tmp="$(mktemp)"
+              jq --arg slug "$slug" --argjson port "$port" '.[$slug] = $port' "$state_file" > "$tmp"
+              mv "$tmp" "$state_file"
+              break
+            done
+          fi
+          if [ -z "$port" ]; then
+            echo "no free preview ports in 3100-3299"
+            exit 1
+          fi
+          expires_at="$(date -u -d '+24 hours' '+%Y-%m-%dT%H:%M:%SZ')"
           {
             echo "branch=$branch"
+            echo "sha=$sha"
+            echo "remote=$remote"
             echo "slug=$slug"
             echo "port=$port"
+            echo "expires_at=$expires_at"
             echo "container=cosheaf-preview-$slug"
             echo "volume=cosheaf-preview-$slug-data"
             echo "image=cosheaf-preview:$slug"
+            echo "caddy=/etc/caddy/sites.d/cosheaf-preview-$slug.caddy"
           } >> "$GITHUB_OUTPUT"
-          echo "preview slug=$slug port=$port"
+          echo "preview slug=$slug port=$port expires_at=$expires_at"
 
       - name: Build preview image
         run: |
-          node cosheaf/scripts/prepare-coflat-editor-package.mjs
           docker build \
             -f cosheaf/Dockerfile \
+            --label fleet.preview=true \
+            --label fleet.app=cosheaf \
+            --label fleet.kind=preview \
+            --label fleet.source.ref="${{ steps.preview.outputs.branch }}" \
+            --label fleet.source.sha="${{ steps.preview.outputs.sha }}" \
+            --label fleet.expires_at="${{ steps.preview.outputs.expires_at }}" \
             -t "${{ steps.preview.outputs.image }}" \
             .
 
@@ -68,9 +106,26 @@ jobs:
           fi
 
           docker rm -f "${{ steps.preview.outputs.container }}" >/dev/null 2>&1 || true
+          docker volume inspect "${{ steps.preview.outputs.volume }}" >/dev/null 2>&1 || \
+            docker volume create \
+              --label fleet.preview=true \
+              --label fleet.app=cosheaf \
+              --label fleet.kind=preview \
+              --label fleet.source.ref="${{ steps.preview.outputs.branch }}" \
+              --label fleet.source.sha="${{ steps.preview.outputs.sha }}" \
+              --label fleet.expires_at="${{ steps.preview.outputs.expires_at }}" \
+              "${{ steps.preview.outputs.volume }}" >/dev/null
           docker run -d \
             --name "${{ steps.preview.outputs.container }}" \
             --restart unless-stopped \
+            --label fleet.preview=true \
+            --label fleet.app=cosheaf \
+            --label fleet.kind=preview \
+            --label fleet.source.remote="${{ steps.preview.outputs.remote }}" \
+            --label fleet.source.ref="${{ steps.preview.outputs.branch }}" \
+            --label fleet.source.sha="${{ steps.preview.outputs.sha }}" \
+            --label fleet.expires_at="${{ steps.preview.outputs.expires_at }}" \
+            --label fleet.caddy="${{ steps.preview.outputs.caddy }}" \
             --env-file "$env_file" \
             -e COSHEAF_SERVER_URL="https://cosheaf-${{ steps.preview.outputs.slug }}.lab" \
             -e COSHEAF_WEBHOOK_URL="http://100.93.22.80:${{ steps.preview.outputs.port }}/api/v1/webhooks/forgejo" \
@@ -81,8 +136,9 @@ jobs:
 
       - name: Write Caddy preview route
         run: |
-          sudo tee "/etc/caddy/sites.d/cosheaf-preview-${{ steps.preview.outputs.slug }}.caddy" > /dev/null <<EOF
+          sudo tee "${{ steps.preview.outputs.caddy }}" > /dev/null <<EOF
           # Generated by cosheaf/.gitea/workflows/preview.yml for ${{ steps.preview.outputs.branch }}.
+          # Expires at ${{ steps.preview.outputs.expires_at }}.
           https://cosheaf-${{ steps.preview.outputs.slug }}.lab {
               tls internal
               reverse_proxy 127.0.0.1:${{ steps.preview.outputs.port }}
