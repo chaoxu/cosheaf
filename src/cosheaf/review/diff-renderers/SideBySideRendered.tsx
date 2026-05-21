@@ -9,6 +9,8 @@ import { diffLineNumbers } from "../diff-lines";
 import { useFileSide } from "../use-file-side";
 import type { LineComment } from "../../api";
 import type { DiffRendererProps } from "../diff-renderer-types";
+import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
+import { useWorkspaceContext } from "../../workspace-context";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -20,13 +22,14 @@ export function SideBySideRendered({
   onEditComment,
   onDeleteComment,
 }: DiffRendererProps): ReactElement {
+  const { documentContext } = useWorkspaceContext();
   const base = useFileSide(loadContent, "base", file.status !== "added", file.path);
   const head = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   const error = base.error ?? head.error;
 
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;
 
-  const shared = { file, comments, currentForgejoUsername, onEditComment, onDeleteComment };
+  const shared = { file, comments, currentForgejoUsername, onEditComment, onDeleteComment, documentContext };
   return (
     <div
       data-testid="diff-pane-split"
@@ -63,6 +66,7 @@ function Pane({
   currentForgejoUsername,
   onEditComment,
   onDeleteComment,
+  documentContext,
 }: {
   label: "base" | "head";
   content: string | null;
@@ -73,6 +77,7 @@ function Pane({
   currentForgejoUsername?: string;
   onEditComment?: DiffRendererProps["onEditComment"];
   onDeleteComment?: DiffRendererProps["onDeleteComment"];
+  documentContext?: DocumentContext;
   file: DiffRendererProps["file"];
 }): ReactElement {
   return (
@@ -88,6 +93,7 @@ function Pane({
         ) : (
           <RichDiffRender
             source={content}
+            ctx={documentContext}
             addedLines={addedLines}
             comments={comments}
             side={side}

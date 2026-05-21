@@ -9,6 +9,7 @@ import { RichDiffRender } from "../RichDiffRender";
 import { diffLineNumbers } from "../diff-lines";
 import { useFileSide } from "../use-file-side";
 import type { DiffRendererProps } from "../diff-renderer-types";
+import { useWorkspaceContext } from "../../workspace-context";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -20,6 +21,7 @@ export function HeadWithTint({
   onEditComment,
   onDeleteComment,
 }: DiffRendererProps): ReactElement {
+  const { documentContext } = useWorkspaceContext();
   const { content, error } = useFileSide(loadContent, "head", file.status !== "deleted", file.path);
   if (error) return <div className={cn("p-3 text-sm", muted)}>Failed to load: {error}</div>;
   if (file.status === "deleted") return <div className={cn("p-3 text-sm", muted)}>(file deleted)</div>;
@@ -29,6 +31,7 @@ export function HeadWithTint({
     <div data-testid="diff-pane-after" className="min-h-0 flex flex-col">
       <RichDiffRender
         source={content}
+        ctx={documentContext}
         addedLines={diffLineNumbers(file.patch, "added")}
         comments={comments}
         side="head"

@@ -63,6 +63,10 @@ try {
   if (frontmatterRenderedAsHeading) {
     throw new Error("frontmatter rendered as a Markdown heading in rich diff mode");
   }
+  const unresolvedPageRef = await page.getByText("See [@hello] for the main seed page").isVisible().catch(() => false);
+  if (unresolvedPageRef) {
+    throw new Error("page reference stayed unresolved in rich diff mode");
+  }
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;
