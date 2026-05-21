@@ -66,3 +66,90 @@ body {
   list-style: decimal;
   padding-left: 1.5rem;
 }
+
+.cf-reader-inline .cf-doc-heading {
+  font-family: var(--cf-content-font, KaTeX_Main, "Times New Roman", serif);
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0.9rem 0 0.45rem;
+}
+
+.cf-reader-inline .cf-doc-heading--h1 {
+  font-size: 1.5rem;
+}
+
+.cf-reader-inline .cf-doc-heading--h2 {
+  font-size: 1.25rem;
+}
+
+.cf-reader-inline .cf-doc-heading--h3 {
+  font-size: 1.1rem;
+}
+
+.cf-reader-inline .cf-doc-heading--h4,
+.cf-reader-inline .cf-doc-heading--h5,
+.cf-reader-inline .cf-doc-heading--h6 {
+  font-size: 1rem;
+}
+
+.cf-reader-inline .cf-doc-paragraph {
+  margin: 0.45rem 0;
+}
+
+.cf-reader-inline .cf-doc-list {
+  margin: 0.45rem 0;
+}
+
+.cf-reader-inline .cf-doc-list-item {
+  margin: 0.2rem 0;
+}
+
+.cf-reader-inline .cf-doc-code-token {
+  font-family: var(--cf-code-font, Monaco, "DejaVu Sans Mono", Consolas, monospace);
+  font-size: 0.85em;
+  background: var(--cf-color-code-bg, var(--cf-hover));
+  border-radius: var(--cf-border-radius);
+  padding: 0.1em 0.25em;
+}
+
+.cf-reader-inline .cf-doc-code-block {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  background: var(--cf-color-code-bg, var(--cf-subtle));
+  border: var(--cf-border-width, 1px) solid var(--cf-border);
+  border-radius: var(--cf-border-radius-lg);
+  padding: 0.75em 1em;
+}
+
+.cf-reader-inline .cf-doc-code-block code {
+  font-family: var(--cf-code-font, Monaco, "DejaVu Sans Mono", Consolas, monospace);
+}
+
+.cf-reader-inline .cf-doc-blockquote {
+  margin: 0.75rem 0;
+  border-left: 3px solid var(--cf-blockquote-border);
+  padding-left: 1em;
+  color: var(--cf-blockquote-color);
+}
+
+.cf-reader-inline .cf-doc-table-block {
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  font-size: var(--cf-table-font-size, 0.9em);
+}
+
+.cf-reader-inline .cf-doc-table-cell {
+  border: var(--cf-border-width, 1px) solid var(--cf-table-border);
+  padding: var(--cf-table-cell-padding);
+  line-height: var(--cf-table-line-height, 1.5);
+}
+
+.cf-reader-inline .cf-doc-table-header {
+  border-bottom: var(--cf-border-width-accent, 2px) solid var(--cf-table-header-border);
+  background: var(--cf-subtle);
+  font-weight: 600;
+}
+
+.cf-reader-inline .cf-doc-display-math {
+  margin: 0.75rem 0;
+}
