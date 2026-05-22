@@ -41,7 +41,7 @@ const REF_BUTTON_CLASS = "cosheaf-ref-button";
 // Bare patterns coflat's reader doesn't tokenize (and which we apply only to
 // inter-tag text spans, never to attribute values or tag names).
 const BARE_REF_RE =
-  /(^|[\s(])([\w./-]+\.md(?:#L\d+(?:-\d+)?|#[\w-]+)?|#\d+)\b/g;
+  /(^|[\s(])(\[@([\w.:-]+)\]|[\w./-]+\.md(?:#L\d+(?:-\d+)?|#[\w-]+)?|#\d+)(?=\b|[\s).,;:!?]|$)/g;
 
 export function IssueBodyRender({
   text,
@@ -89,11 +89,11 @@ export function IssueBodyRender({
       }
       const { body } = parseFrontmatterYaml(text);
       const rendered = await api.renderMarkdown(workspaceSlug, body);
-      if (!cancelled) setHtml(DOMPurify.sanitize(rendered.html));
+      if (!cancelled) setHtml(sanitizeAndPrepareMarkdownHtml(rendered.html));
     }
     void render().catch(() => {
       if (!cancelled) {
-        setHtml(DOMPurify.sanitize(`<pre>${escapeHtml(text)}</pre>`));
+        setHtml(sanitizeAndPreparePlainText(text));
       }
     });
     return () => {
@@ -156,9 +156,22 @@ export function IssueBodyRender({
 }
 
 function sanitizeAndPrepareCoflatHtml(rendered: string): string {
+  return sanitizeAndPrepareMarkdownHtml(rendered);
+}
+
+function sanitizeAndPrepareMarkdownHtml(rendered: string): string {
   const fragment = DOMPurify.sanitize(rendered, { RETURN_DOM_FRAGMENT: true }) as DocumentFragment;
   rewriteBareRefsInFragment(fragment);
   injectPageRefTestIds(fragment);
+  const host = document.createElement("div");
+  host.append(fragment);
+  return host.innerHTML;
+}
+
+function sanitizeAndPreparePlainText(text: string): string {
+  const fragment = document.createDocumentFragment();
+  fragment.append(document.createTextNode(parseFrontmatterYaml(text).body));
+  rewriteBareRefsInFragment(fragment);
   const host = document.createElement("div");
   host.append(fragment);
   return host.innerHTML;
@@ -177,7 +190,7 @@ function rewriteBareRefsInFragment(root: DocumentFragment): void {
 
 function shouldSkipTextNode(node: Text): boolean {
   const parent = node.parentElement;
-  return parent?.closest("code, pre, a, .cf-math, .cosheaf-ref-page") !== null;
+  return parent?.closest("code, pre, a, .cf-math, .cosheaf-ref-page") != null;
 }
 
 function rewriteBareRefTextNode(node: Text): DocumentFragment | null {
@@ -190,9 +203,19 @@ function rewriteBareRefTextNode(node: Text): DocumentFragment | null {
   while ((m = BARE_REF_RE.exec(textRun)) !== null) {
     const lead = m[1];
     const ref = m[2];
+    const pageKey = m[3];
     const matchStart = m.index + lead.length;
     if (matchStart > cursor) fragment.append(document.createTextNode(textRun.slice(cursor, matchStart)));
-    if (ref.startsWith("#")) {
+    if (pageKey) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `${REF_PAGE_CLASS} ${REF_BUTTON_CLASS}`;
+      button.dataset.refKind = "page";
+      button.dataset.refKey = pageKey;
+      button.dataset.testid = `ref-page-${pageKey}`;
+      button.textContent = ref;
+      fragment.append(button);
+    } else if (ref.startsWith("#")) {
       const num = ref.slice(1);
       const button = document.createElement("button");
       button.type = "button";
