@@ -4,6 +4,8 @@
 //
 // Endpoints under /:slug/* :
 //   POST   /pulls                           — open a PR
+//   GET    /pulls?state=                    — list PR metadata
+//   GET    /pulls/:n                        — PR metadata
 //   POST   /pulls/:n/merge                  — merge a PR (admin only)
 //   POST   /pulls/:n/close                  — close a PR (no merge)
 //   GET    /pulls/:n/files                  — per-file diff structured
@@ -140,25 +142,41 @@ async function mergeWithRetry(
 
 function forgejoErrToResult(err: unknown): { ok: false; status: number; message: string } {
   if (err instanceof ForgejoError) {
+    const message = err.bodyText || "backend rejected request";
     // Pass distinguishable 4xx through so the client can show the right
     // affordance — auth/permission, missing target, validation, rate limit —
     // instead of collapsing every Forgejo precondition failure into 409.
-    if (err.status === 401 || err.status === 403) return { ok: false, status: err.status, message: err.message };
-    if (err.status === 404) return { ok: false, status: 404, message: err.message };
-    if (err.status === 422) return { ok: false, status: 422, message: err.message };
-    if (err.status === 429) return { ok: false, status: 429, message: err.message };
+    if (err.status === 401 || err.status === 403) return { ok: false, status: err.status, message };
+    if (err.status === 404) return { ok: false, status: 404, message };
+    if (err.status === 422) return { ok: false, status: 422, message };
+    if (err.status === 429) return { ok: false, status: 429, message };
     // 405 (conflict: e.g. "Please try again later", "PR has conflicts"), 409,
     // and any other 4xx we don't separate map to 409 — the caller violated a
-    // merge precondition. 5xx → Forgejo upstream is sick: 502.
-    if (err.status >= 500) return { ok: false, status: 502, message: err.message };
-    return { ok: false, status: 409, message: err.message };
+    // merge precondition. 5xx → backend upstream is sick: 502.
+    if (err.status >= 500) return { ok: false, status: 502, message };
+    return { ok: false, status: 409, message };
   }
   return { ok: false, status: 500, message: (err as Error)?.message ?? "merge failed" };
 }
 
 
-// List and per-PR fetch are pure Forgejo shape; the SPA calls them through
-// the passthrough at /forgejo/pulls and applies prMeta() client-side.
+pulls.get("/:slug/pulls", async (c) => {
+  const stateRaw = c.req.query("state");
+  const state: "open" | "closed" | "all" =
+    stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
+  const { fj, owner, repo } = c.get("repoCtx");
+  const rows = await fj.listPulls(owner, repo, state);
+  return c.json({ pulls: rows.map(prMeta) });
+});
+
+pulls.get("/:slug/pulls/:n", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  const pull = await fj.getPull(owner, repo, n);
+  if (!pull) return c.json(...notFound());
+  return c.json({ pull: prMeta(pull) });
+});
 
 pulls.post("/:slug/pulls", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -430,9 +448,32 @@ pulls.post("/:slug/pulls/:n/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-// Review-comment edit and delete go through passthrough:
-//   PATCH  /forgejo/issues/comments/:id     (Forgejo treats it as the same record)
-//   DELETE /forgejo/pulls/:n/reviews/:rid/comments/:cid
+pulls.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  const cid = parseReviewId(c.req.param("cid"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  if (cid === null) return c.json(...bad("bad comment id"));
+  const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
+  const text = typeof body?.body === "string" ? body.body : "";
+  if (!text.trim()) return c.json(...bad("comment body required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.editIssueComment(owner, repo, cid, text);
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
+  return c.json({ ok: true });
+});
+
+pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  const cid = parseReviewId(c.req.param("cid"));
+  const rid = parseReviewId(c.req.query("review_id"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  if (cid === null) return c.json(...bad("bad comment id"));
+  if (rid === null) return c.json(...bad("bad review id"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.deleteReviewComment(owner, repo, n, rid, cid);
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
+  return c.json({ ok: true });
+});
 
 // ---------- pending reviews ----------
 
@@ -561,7 +602,7 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
     }
   } catch (err) {
     return c.json(
-      { error: `branch-protection update failed (Forgejo unchanged): ${(err as Error).message}`, code: "forgejo_failed", step: "branch_protection" },
+      { error: `branch-protection update failed (backend unchanged): ${(err as Error).message}`, code: "backend_failed", step: "branch_protection" },
       502,
     );
   }

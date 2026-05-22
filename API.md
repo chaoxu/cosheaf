@@ -7,11 +7,10 @@ client types in `src/cosheaf/api.ts`.
 Base path: `/api/v1`
 
 All JSON routes return `{ error, code }` on expected failures. Every request
-authenticates via `Authorization: Bearer <Forgejo PAT>` — the SPA stashes
-the PAT in localStorage after the login endpoint exchanges Forgejo
-credentials for one, and agents send their own PAT directly. Cosheaf
-validates the PAT, resolves workspace membership through Forgejo, and
-forwards the caller's own Forgejo identity on Forgejo-backed operations.
+authenticates via `Authorization: Bearer <token>` — the SPA stashes the token
+in localStorage after login, and agents send their own token directly. Cosheaf
+validates the token, resolves workspace membership, and forwards the caller's
+identity on backend-backed operations.
 
 ## Core Types
 
@@ -57,24 +56,24 @@ multi-step failures (e.g. `step: "reindex"` on settings updates).
 ```ts
 type ErrorCode =
   | "validation"        // 400 — caller payload is malformed or missing fields
-  | "unauthorized"      // 401 — no session / bearer / Forgejo PAT
-  | "pat_invalid"       // 401 — Forgejo rejected the stored PAT; SPA reloads to log in
+  | "unauthorized"      // 401 — no session / bearer token
+  | "pat_invalid"       // 401 — backend rejected the stored token; SPA reloads to log in
   | "forbidden"         // 403 — authenticated but lacks the required role
   | "not_found"         // 404
-  | "method_not_allowed" // 405 (passthrough only)
-  | "conflict"          // 409 — Forgejo precondition (merge conflict, dup PR)
-  | "forgejo_failed"    // 502 — Forgejo write rejected; carries details.step
-  | "reindex_failed"    // 502 — Forgejo updated but sidecar didn't; retry-safe
-  | "bad_gateway";      // 502 — Forgejo upstream unreachable / 5xx
+  | "method_not_allowed" // 405
+  | "conflict"          // 409 — backend precondition (merge conflict, dup PR)
+  | "backend_failed"    // 502 — backend write rejected; carries details.step
+  | "reindex_failed"    // 502 — backend updated but sidecar didn't; retry-safe
+  | "bad_gateway";      // 502 — backend upstream unreachable / 5xx
 ```
 
 ## Auth
 
-Cosheaf owns the login UX so users do not need to know Forgejo is the backend.
-Login exchanges Forgejo username/password credentials for a fresh Forgejo PAT
+Cosheaf owns the login UX so users do not need to know which forge is the
+backend. Login exchanges username/password credentials for a fresh API token
 and returns it to the SPA, which stashes it in localStorage and sends it as
 `Authorization: Bearer <pat>` on every subsequent request. API clients can
-skip login and send their own Forgejo PAT directly.
+skip login and send their own Cosheaf API token directly.
 
 ```http
 POST /login
@@ -88,11 +87,12 @@ GET /me
 → { "user": { "username": string } | null }
 ```
 
-Logout is a server-side no-op; the SPA clears localStorage. Cosheaf does
-not revoke the PAT on logout — revoke it in Forgejo to invalidate it
+Logout is a server-side no-op; the SPA clears localStorage. Cosheaf does not
+revoke the token on logout — revoke it in the backing forge to invalidate it
 across devices.
 
-There is no Cosheaf personal-token API. Create and revoke PATs in Forgejo.
+There is no Cosheaf personal-token API yet. Create and revoke tokens in the
+backing forge.
 
 ## Workspaces
 
@@ -108,9 +108,11 @@ POST /workspaces
 Creating a workspace provisions a Forgejo repository, branch protection,
 webhook, `.gitattributes`, and the initial sidecar index.
 
-## Forgejo Passthrough
+## Backend Escape Hatch
 
-The agent/default Forgejo surface is:
+Normal clients should use the typed Cosheaf routes below. The legacy
+`/api/v1/w/:slug/forgejo/*` route is only an internal/compatibility escape
+hatch while older callers are migrated:
 
 ```http
 {METHOD} /w/:slug/forgejo/:tail
@@ -122,9 +124,9 @@ Cosheaf anchors `:tail` under the workspace repository:
 /api/v1/repos/{owner}/{repo}/:tail
 ```
 
-The caller supplies `Authorization: Bearer <Forgejo PAT>` to Cosheaf. Cosheaf
-validates membership and forwards the request to Forgejo with the caller's
-PAT. Audit happens at the Forgejo access log.
+The caller supplies `Authorization: Bearer <token>` to Cosheaf. Cosheaf
+validates membership and forwards the request to the backing forge with the
+caller's identity. Audit happens at the backing forge access log.
 
 Allowed repo-scoped passthrough prefixes:
 
@@ -144,19 +146,6 @@ Allowed repo-scoped passthrough prefixes:
 route so Cosheaf can run its fresh-admin gate. `contents` and `branches` are
 read-only in passthrough because typed file/branch routes enforce Cosheaf's
 path, branch, frontmatter, and indexing rules.
-
-Examples:
-
-```http
-GET /w/flushing-coin/forgejo/issues?state=open
-PATCH /w/flushing-coin/forgejo/issues/42
-PUT /w/flushing-coin/forgejo/issues/42/labels
-GET /w/flushing-coin/forgejo/pulls?state=open
-GET /w/flushing-coin/forgejo/labels
-GET /w/flushing-coin/forgejo/milestones?state=open
-GET /w/flushing-coin/forgejo/contents/hello.md
-GET /w/flushing-coin/forgejo/notifications?status=unread
-```
 
 ## Files
 
@@ -180,7 +169,7 @@ DELETE /w/:slug/file?path=<path>&branch=<branch>
 → { "ok": true, "branch": string }
 ```
 
-A Markdown write through Forgejo `contents` passthrough is treated as an
+A Markdown write through a raw backend contents escape hatch is treated as an
 external repository edit. It reaches SQLite through webhook or
 `pnpm cli workspace reindex <slug>` reconciliation, not through immediate typed
 file-route indexing.
@@ -201,7 +190,7 @@ GET /w/:slug/validation
 → WorkspaceValidation     # broken-reference report consumed by the linter tab
 
 GET /w/:slug/activities?limit=<n>
-→ { "activities": ActivityRow[] }   # normalized over Forgejo's activity-feed
+→ { "activities": ActivityRow[] }   # normalized over the backend activity feed
                                     # JSON (which encodes refs in opaque strings)
 ```
 
@@ -224,8 +213,8 @@ DELETE /w/:slug/branches/:name
 ```
 
 `branches/mine` lists the caller's in-progress branches that do not have an
-open pull request. Branches and pull requests live in Forgejo; SQLite does not
-mirror them.
+open pull request. Branches and pull requests live in the backing forge;
+SQLite does not mirror them.
 
 ## Pull Requests
 
@@ -233,6 +222,12 @@ mirror them.
 POST /w/:slug/pulls
 { "head": string, "base"?: string, "title"?: string, "body"?: string }
 → PrMeta
+
+GET /w/:slug/pulls?state=open|closed|all
+→ { "pulls": PrMeta[] }
+
+GET /w/:slug/pulls/:n
+→ { "pull": PrMeta }
 
 POST /w/:slug/pulls/:n/merge
 { "Do"?: "squash" | "merge" | "rebase", "force"?: boolean }
@@ -242,17 +237,9 @@ POST /w/:slug/pulls/:n/close
 → { "ok": true }
 ```
 
-Pull request listing and metadata are 1:1 Forgejo reads and should use
-passthrough:
-
-```http
-GET /w/:slug/forgejo/pulls?state=open|closed|all
-GET /w/:slug/forgejo/pulls/:n
-```
-
-The SPA normalizes Forgejo pull request JSON to `PrMeta`: `number`, `title`,
-`body`, `state`, `merged`, author, head/base refs and SHAs, timestamps,
-mergeability, and changed-file counts.
+Cosheaf returns `PrMeta`: `number`, `title`, `body`, `state`, `merged`,
+author, head/base refs and SHAs, timestamps, mergeability, and changed-file
+counts.
 
 ## Pull Request Reviews And Comments
 
@@ -276,9 +263,16 @@ GET /w/:slug/pulls/:n/comments
 POST /w/:slug/pulls/:n/comments
 { "path": string, "line": number, "side": "base" | "head", "body": string }
 → { "ok": true }
+
+PATCH /w/:slug/pulls/:n/comments/:commentId
+{ "body": string }
+→ { "ok": true }
+
+DELETE /w/:slug/pulls/:n/comments/:commentId?review_id=<reviewId>
+→ { "ok": true }
 ```
 
-Pending review helpers exist because Forgejo represents pending reviews
+Pending review helpers exist because the backend represents pending reviews
 separately:
 
 ```http
@@ -296,8 +290,8 @@ POST /w/:slug/pulls/:n/pending-review/:reviewId/submit
 
 ## Issues
 
-Typed issue routes remain where the SPA needs normalized DTOs, SSE behavior, or
-multi-call composition. Plain Forgejo issue operations should use passthrough.
+Issue routes return normalized Cosheaf DTOs and are the public surface for
+issue automation.
 
 ```http
 GET /w/:slug/issues?state=open|closed|all&filter=mine|assigned|all&q=<query>
@@ -313,13 +307,23 @@ POST /w/:slug/issues
 { "title": string, "body": string }
 → { "number": number, "title": string, "state": "open" | "closed" }
 
-# Issue comment list/create/edit/delete go through passthrough
-# (these were typed routes; they're now pure Forgejo shape with the
-# SPA normalizing timestamps client-side):
-#   GET    /w/:slug/forgejo/issues/:n/comments
-#   POST   /w/:slug/forgejo/issues/:n/comments
-#   PATCH  /w/:slug/forgejo/issues/comments/:id
-#   DELETE /w/:slug/forgejo/issues/comments/:id
+PATCH /w/:slug/issues/:n/state
+{ "state": "open" | "closed" }
+→ { "ok": true, "state": "open" | "closed" }
+
+GET /w/:slug/issues/:n/comments
+→ { "comments": IssueComment[] }
+
+POST /w/:slug/issues/:n/comments
+{ "body": string }
+→ IssueComment
+
+PATCH /w/:slug/issues/:n/comments/:commentId
+{ "body": string }
+→ IssueComment
+
+DELETE /w/:slug/issues/:n/comments/:commentId
+→ { "ok": true }
 
 GET /w/:slug/issues/:n/timeline
 → { "events": TimelineEvent[] }
@@ -339,8 +343,39 @@ GET /w/:slug/issues/:n/blocks
 → { "issues": DependencyRow[] }
 ```
 
-Labels, milestones, pin/unpin, issue state changes, and raw issue edits use
-`/w/:slug/forgejo/*`.
+```http
+GET /w/:slug/labels
+→ { "labels": Label[] }
+
+POST /w/:slug/labels
+{ "name": string, "color": string, "description"?: string }
+→ Label
+
+PUT /w/:slug/issues/:n/labels
+{ "labels": number[] }
+→ { "labels": Label[] }
+
+POST /w/:slug/issues/:n/pin
+→ { "ok": true }
+
+DELETE /w/:slug/issues/:n/pin
+→ { "ok": true }
+
+GET /w/:slug/milestones?state=open|closed|all
+→ { "milestones": Milestone[] }
+
+POST /w/:slug/milestones
+{ "title": string, "description"?: string }
+→ Milestone
+
+PATCH /w/:slug/issues/:n/milestone
+{ "id": number | null }
+→ { "ok": true }
+
+POST /w/:slug/markdown/render
+{ "text": string }
+→ { "html": string }
+```
 
 ## Notifications
 
@@ -355,10 +390,6 @@ POST /w/:slug/notifications/read-all
 → { "ok": true }
 ```
 
-Repo-scoped notification list and mark-all operations are also available
-through passthrough. The single-thread mark-read route stays typed because the
-Forgejo endpoint is not repo-anchored.
-
 ## Settings
 
 ```http
@@ -370,7 +401,7 @@ PUT /w/:slug/settings
 → { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
 ```
 
-Approval settings map to Forgejo branch protection on `main`. The workspace
+Approval settings map to backend branch protection on `main`. The workspace
 markdown format controls typed file indexing and SPA rendering. Updating
 settings requires admin permission.
 
@@ -382,5 +413,5 @@ GET /w/:slug/events
 
 Server-sent events stream JSON messages for file changes/removals, pull
 request updates, reviews, issue updates, and issue comments. Events are
-workspace-scoped hints; Forgejo and the typed read routes remain the source of
-truth after reconnect.
+workspace-scoped hints; the backing forge and the typed read routes remain the
+source of truth after reconnect.

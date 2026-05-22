@@ -42,17 +42,17 @@ app.get("/api/v1/health", (c) =>
   }),
 );
 
-// If a route handler bubbles a ForgejoError with status 401 it means the
-// caller's PAT was rejected by Forgejo (revoked, rotated). Surface a typed
-// `pat_invalid` so the SPA can drop the stored PAT and bounce to login;
-// agents see the same signal and re-acquire a PAT.
+// If a route handler bubbles a 401 from the backing forge, the caller's token
+// was rejected (revoked, rotated). Surface a typed `pat_invalid` so the SPA can
+// drop the stored token and bounce to login; agents see the same signal and
+// re-acquire a token.
 app.onError((err, c) => {
   if (err instanceof ForgejoError && err.status === 401) {
     const auth = c.req.header("authorization") ?? "";
     const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
     if (bearer) invalidateBearerCache(bearer);
     return c.json(
-      { error: "Forgejo rejected the credentials; please log in again.", code: "pat_invalid" },
+      { error: "Backend rejected the credentials; please log in again.", code: "pat_invalid" },
       401,
     );
   }

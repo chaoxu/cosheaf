@@ -71,14 +71,14 @@ async function waitForOpenedPr(page, branch, timeoutMs = 15000) {
   while (Date.now() < deadline) {
     const prNumber = await page.evaluate(async ({ branch, workspaceSlug }) => {
       const pat = localStorage.getItem("cosheaf.pat");
-      const r = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=open`, {
+      const r = await fetch(`/api/v1/w/${workspaceSlug}/pulls?state=open`, {
         headers: pat ? { authorization: `Bearer ${pat}` } : undefined,
       });
       if (!r.ok) return null;
-      const pulls = await r.json();
-      const found = pulls.find((p) => p.head?.ref === branch || p.title === branch);
+      const { pulls } = await r.json();
+      const found = pulls.find((p) => p.head_ref === branch || p.title === branch);
       const fallback = pulls
-        .filter((p) => p.user?.login === "meri" && p.head?.ref?.startsWith("user/meri/wip-"))
+        .filter((p) => p.author_username === "meri" && p.head_ref?.startsWith("user/meri/wip-"))
         .sort((a, b) => (b.number ?? 0) - (a.number ?? 0))[0];
       return found ? found.number : (fallback?.number ?? null);
     }, { branch, workspaceSlug: WORKSPACE_SLUG });
@@ -116,7 +116,7 @@ try {
   await meri.getByTestId("open-pull-request").click();
   await meri.getByTestId("active-branch-name").waitFor({ state: "hidden", timeout: 8000 });
 
-  // Locate the just-opened PR number via Forgejo-shape API on the same origin.
+  // Locate the just-opened PR number via the Cosheaf API on the same origin.
   const prNumber = await waitForOpenedPr(meri, meriBranch);
 
   // ── 2. vera reviews and requests changes ───────────────────────────────────

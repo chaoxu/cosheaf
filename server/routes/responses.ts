@@ -22,7 +22,7 @@ export type ErrorCode =
   | "method_not_allowed"
   | "bad_gateway"
   | "pat_invalid"
-  | "forgejo_failed"
+  | "backend_failed"
   | "reindex_failed";
 
 export interface ErrorBody {

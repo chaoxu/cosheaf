@@ -1,10 +1,7 @@
-// Login = Forgejo PAT exchange. Cosheaf doesn't hold passwords or sessions;
-// the user types their Forgejo username + password into cosheaf's form,
-// cosheaf forwards those creds (HTTP Basic) to Forgejo's /users/:user/tokens
-// endpoint, and the returned PAT is sent back to the SPA. The SPA stores
-// the PAT in localStorage and uses it as `Authorization: Bearer <pat>` on
-// every subsequent request. There is no cookie, no sessions table, no
-// stored-PAT table — the PAT is the credential.
+// Login exchanges user credentials for a backend token. Cosheaf doesn't hold
+// passwords or sessions; the returned token is sent back to the SPA, stored in
+// localStorage, and used as `Authorization: Bearer <token>` on every
+// subsequent request.
 
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
@@ -14,7 +11,7 @@ import { bad, unauthorized } from "./responses.js";
 
 export const auth = new Hono<AppEnv>();
 
-// Token name prefix for cosheaf-issued PATs. Names are intentionally unique per
+// Token name prefix for cosheaf-issued tokens. Names are intentionally unique per
 // login so an automated smoke login as the same Forgejo user does not revoke an
 // existing browser tab's localStorage PAT.
 const TOKEN_NAME_PREFIX = "cosheaf";
@@ -97,10 +94,10 @@ async function exchangeForgejoCredsForPatRaw(
   }
   if (res.status === 401 || res.status === 403) return { kind: "bad_credentials" };
   if (res.status >= 500 || res.status === 429) {
-    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
+    return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
   }
   if (!res.ok) {
-    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
+    return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
   }
   const parsed = (await res.json().catch(() => null)) as CreateTokenResponse | null;
   if (!parsed?.sha1) return { kind: "upstream_unavailable", detail: "missing sha1 in response" };
@@ -121,7 +118,7 @@ auth.post("/login", async (c) => {
   }
   if (outcome.kind === "upstream_unavailable") {
     return c.json(
-      { error: `forgejo unavailable: ${outcome.detail}`, code: "bad_gateway" },
+      { error: `backend unavailable: ${outcome.detail}`, code: "bad_gateway" },
       502,
     );
   }
@@ -129,9 +126,9 @@ auth.post("/login", async (c) => {
 });
 
 // Logout is a no-op on the server: there is no session to destroy and we
-// deliberately do NOT revoke the Forgejo PAT (the user might be logged in
+// deliberately do NOT revoke the backend token (the user might be logged in
 // from another device with the same token). The SPA drops its local copy
-// of the PAT; the next login mints a fresh one.
+// of the token; the next login mints a fresh one.
 auth.post("/logout", (c) => c.json({ ok: true }));
 
 auth.get("/me", async (c) => {

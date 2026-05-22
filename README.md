@@ -32,36 +32,39 @@ collaborators through Cosheaf's HTTP API.
   body is full-text searchable.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
   stream updates over SSE to open browsers.
-- **Forgejo-native API auth** — every request sends a Forgejo PAT as
+- **Cosheaf API token auth** — every request sends an API token as
   `Authorization: Bearer <token>`. Humans get one via cosheaf's login form
-  (which exchanges Forgejo credentials for a PAT and hands it to the SPA);
-  agents send their own.
-- **Passthrough-first agent API** — agents use
-  `/api/v1/w/:slug/forgejo/*` for Forgejo-shaped branch, pull request, issue,
-  label, milestone, notification, review, and read-only contents operations.
+  (which exchanges the forge credentials for a token and hands it to the SPA);
+  agents send their own token.
+- **Cosheaf-first agent API** — agents use typed Cosheaf workspace routes for
+  branches, files, pull requests, reviews, issues, labels, milestones,
+  notifications, and markdown rendering. The backing forge is an
+  implementation detail, not part of the public client contract.
 
 ## API shape
 
-Agents should use the Forgejo passthrough first. Cosheaf validates direct
-Forgejo PAT bearer auth, scopes the request to the workspace repository, and
-audits passthrough calls.
+Agents should use the typed Cosheaf workspace API. Cosheaf validates bearer
+auth, scopes the request to the workspace, and returns stable Cosheaf response
+shapes so callers do not need to know which forge backs the workspace.
 
-Use typed routes when the caller needs Cosheaf behavior rather than raw Forgejo
-behavior: Coflat page reads/writes with frontmatter/id handling, path
-validation, synchronous sidecar indexing, backlinks, FTS search, document
-lists, SSE updates, or merge/admin gates.
+Use typed routes for normal workflows: Coflat page reads/writes with
+frontmatter/id handling, path validation, synchronous sidecar indexing,
+backlinks, FTS search, document lists, branch creation, pull request
+list/detail/open/review/merge, issue comments, labels, milestones,
+notifications, markdown rendering, SSE updates, and merge/admin gates.
 
-File writes have a clear boundary. A Markdown write through Forgejo contents
-API passthrough is treated as an external repo edit and reaches the SQLite
-index through webhook/reindex reconciliation. A Markdown write that needs
-immediate Cosheaf document/index behavior should use the typed file route.
+File writes have a clear boundary. A Markdown write through a future raw
+contents escape hatch is treated as an external repo edit and reaches the
+SQLite index through webhook/reindex reconciliation. A Markdown write that
+needs immediate Cosheaf document/index behavior should use the typed file
+route.
 
-Example passthrough calls, all with `Authorization: Bearer <Forgejo PAT>`:
-`GET /api/v1/w/flushing-coin/forgejo/issues?state=open`,
-`GET /api/v1/w/flushing-coin/forgejo/pulls?state=open`,
-`GET /api/v1/w/flushing-coin/forgejo/labels`,
-`GET /api/v1/w/flushing-coin/forgejo/milestones?state=open`, and
-`GET /api/v1/w/flushing-coin/forgejo/contents/hello.md`.
+Example Cosheaf calls, all with `Authorization: Bearer <token>`:
+`GET /api/v1/w/flushing-coin/issues?state=open`,
+`GET /api/v1/w/flushing-coin/pulls?state=open`,
+`GET /api/v1/w/flushing-coin/labels`,
+`GET /api/v1/w/flushing-coin/milestones?state=open`, and
+`GET /api/v1/w/flushing-coin/file?path=hello.md&branch=main`.
 
 ## Quick start
 

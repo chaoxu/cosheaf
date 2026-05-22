@@ -66,6 +66,85 @@ afterEach(() => {
 });
 
 describe("issues routes", () => {
+  it("serves issue comments through Cosheaf DTOs", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok([
+      {
+        id: 101,
+        body: "looks **good**",
+        user: { login: "alice" },
+        created_at: "2026-05-20T00:00:00Z",
+        updated_at: "2026-05-20T00:01:00Z",
+      },
+    ]));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/comments", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7/comments",
+    );
+    await expect(res.json()).resolves.toMatchObject({
+      comments: [
+        {
+          id: 101,
+          body: "looks **good**",
+          author_username: "alice",
+        },
+      ],
+    });
+  });
+
+  it("updates issue state through a typed route", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem", { state: "closed" }), labels: [], comments: 0 }));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/state", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ state: "closed" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ state: "closed" });
+    await expect(res.json()).resolves.toEqual({ ok: true, state: "closed" });
+  });
+
+  it("serves labels, milestones, and markdown rendering without backend-shaped paths", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock
+      .mockResolvedValueOnce(ok([{ id: 1, name: "bug", color: "ff0000", description: "broken" }]))
+      .mockResolvedValueOnce(ok([{ id: 2, title: "v1", description: "ship", state: "open", open_issues: 1, closed_issues: 0, due_on: null }]))
+      .mockResolvedValueOnce(new Response("<p>Hello</p>", { status: 200, headers: { "content-type": "text/html" } }));
+
+    const app = appFor(db);
+    const labels = await app.request("/api/v1/w/w/labels", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const milestones = await app.request("/api/v1/w/w/milestones?state=all", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const markdown = await app.request("/api/v1/w/w/markdown/render", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ text: "Hello" }),
+    });
+
+    expect(labels.status).toBe(200);
+    expect(milestones.status).toBe(200);
+    expect(markdown.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/labels");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/milestones?state=all");
+    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/markdown");
+    await expect(markdown.json()).resolves.toEqual({ html: "<p>Hello</p>" });
+  });
+
   it("filters mine as authored OR assigned by the current Forgejo user", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

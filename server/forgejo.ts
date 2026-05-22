@@ -15,6 +15,9 @@ import type {
   ForgejoFileResponse,
   ForgejoHook,
   ForgejoIssue,
+  ForgejoIssueComment,
+  ForgejoLabel,
+  ForgejoMilestone,
   ForgejoNotificationThread,
   ForgejoPull,
   ForgejoPullFile,
@@ -558,6 +561,13 @@ export class Forgejo {
     );
   }
 
+  async deleteReviewComment(owner: string, repo: string, index: number, reviewId: number, commentId: number): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `pulls/${index}/reviews/${reviewId}/comments/${commentId}`), {
+      method: "DELETE",
+      expectEmpty: true,
+    });
+  }
+
   async listReviewComments(
     owner: string, repo: string, index: number, reviewId: number,
   ): Promise<ForgejoPullReviewComment[]> {
@@ -622,8 +632,115 @@ export class Forgejo {
     return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}`));
   }
 
+  async editIssue(
+    owner: string,
+    repo: string,
+    number: number,
+    patch: { state?: "open" | "closed"; milestone?: number },
+  ): Promise<ForgejoIssue> {
+    return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}`), {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
   async listPinnedIssues(owner: string, repo: string): Promise<ForgejoIssue[]> {
     return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/pinned`));
+  }
+
+  async pinIssue(owner: string, repo: string, number: number): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `issues/${number}/pin`), {
+      method: "POST",
+      expectEmpty: true,
+    });
+  }
+
+  async unpinIssue(owner: string, repo: string, number: number): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `issues/${number}/pin`), {
+      method: "DELETE",
+      expectEmpty: true,
+    });
+  }
+
+  async listIssueComments(owner: string, repo: string, number: number): Promise<ForgejoIssueComment[]> {
+    return this.req<ForgejoIssueComment[]>(this.repoPath(owner, repo, `issues/${number}/comments`));
+  }
+
+  async createIssueComment(
+    owner: string,
+    repo: string,
+    number: number,
+    body: string,
+  ): Promise<ForgejoIssueComment> {
+    return this.req<ForgejoIssueComment>(this.repoPath(owner, repo, `issues/${number}/comments`), {
+      method: "POST",
+      body: { body },
+    });
+  }
+
+  async editIssueComment(owner: string, repo: string, id: number, body: string): Promise<ForgejoIssueComment> {
+    return this.req<ForgejoIssueComment>(this.repoPath(owner, repo, `issues/comments/${id}`), {
+      method: "PATCH",
+      body: { body },
+    });
+  }
+
+  async deleteIssueComment(owner: string, repo: string, id: number): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `issues/comments/${id}`), {
+      method: "DELETE",
+      expectEmpty: true,
+    });
+  }
+
+  async listLabels(owner: string, repo: string): Promise<ForgejoLabel[]> {
+    return this.req<ForgejoLabel[]>(this.repoPath(owner, repo, `labels`));
+  }
+
+  async createLabel(
+    owner: string,
+    repo: string,
+    opts: { name: string; color: string; description?: string },
+  ): Promise<ForgejoLabel> {
+    return this.req<ForgejoLabel>(this.repoPath(owner, repo, `labels`), {
+      method: "POST",
+      body: opts,
+    });
+  }
+
+  async setIssueLabels(owner: string, repo: string, number: number, labels: number[]): Promise<ForgejoLabel[]> {
+    return this.req<ForgejoLabel[]>(this.repoPath(owner, repo, `issues/${number}/labels`), {
+      method: "PUT",
+      body: { labels },
+    });
+  }
+
+  async listMilestones(
+    owner: string,
+    repo: string,
+    state: "open" | "closed" | "all",
+  ): Promise<ForgejoMilestone[]> {
+    return this.req<ForgejoMilestone[]>(this.repoPath(owner, repo, `milestones`), {
+      query: { state },
+    });
+  }
+
+  async createMilestone(
+    owner: string,
+    repo: string,
+    opts: { title: string; description?: string },
+  ): Promise<ForgejoMilestone> {
+    return this.req<ForgejoMilestone>(this.repoPath(owner, repo, `milestones`), {
+      method: "POST",
+      body: opts,
+    });
+  }
+
+  async renderMarkdown(owner: string, repo: string, text: string): Promise<string> {
+    return this.req<string>(this.repoPath(owner, repo, `markdown`), {
+      method: "POST",
+      body: { Text: text, Mode: "comment", Wiki: false },
+      raw: true,
+    });
   }
 
   async listIssueTimeline(owner: string, repo: string, number: number): Promise<ForgejoTimelineEvent[]> {
@@ -749,6 +866,8 @@ function encodeFilePath(p: string): string {
 export type {
   ForgejoIssue,
   ForgejoIssueComment,
+  ForgejoLabel,
+  ForgejoMilestone,
   ForgejoActivity,
   ForgejoTimelineEvent,
   ForgejoUser,

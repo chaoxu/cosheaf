@@ -44,13 +44,16 @@ for (const [prefix, methods] of contractAllowed) {
 }
 
 const requiredDocSnippets = [
-  "Authorization: Bearer <Forgejo PAT>",
-  "/api/v1/w/:slug/forgejo/*",
+  "Authorization: Bearer <token>",
+  "typed Cosheaf workspace API",
   "pulls/:n/merge",
   "frontmatter/id",
 ];
 for (const snippet of requiredDocSnippets) {
   if (!docs.includes(snippet)) fail(`missing API boundary doc snippet: ${snippet}`);
+}
+if (!/legacy\s+`\/api\/v1\/w\/:slug\/forgejo\/\*`\s+route is\s+only an internal\/compatibility escape\s+hatch/.test(docs)) {
+  fail("missing API boundary doc snippet: legacy /forgejo route is internal compatibility only");
 }
 
 const staleDocPatterns = [
@@ -61,6 +64,10 @@ const staleDocPatterns = [
   /\/w\/:slug\/changes/,
   /\/w\/:slug\/change\b/,
   /\/w\/:slug\/publish/,
+  /api\/v1\/w\/flushing-coin\/forgejo/,
+  /api\/v1\/w\/\$SLUG\/forgejo/,
+  /Forgejo passthrough should/,
+  /Forgejo passthrough first/,
   /branchId/,
   /\bBranchState\b/,
 ];

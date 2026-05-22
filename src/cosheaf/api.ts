@@ -3,11 +3,6 @@ import type { PrFiles, PrMeta, PrState, PrFile } from "../../shared/review";
 import type { LineComment, CommentSide } from "../../shared/comments";
 import type { WorkspaceValidation } from "../../shared/validation";
 import type { DocumentFormatId } from "../../shared/document-format";
-import type {
-  ForgejoIssueCommentRaw,
-  ForgejoMilestoneRef,
-  ForgejoPullRaw,
-} from "../../shared/forgejo-shapes";
 
 export type Decision = "approve" | "request_changes" | "comment";
 export type { Role, PrFiles, PrFile, PrMeta, PrState, LineComment, CommentSide };
@@ -17,7 +12,7 @@ export interface User {
 }
 
 // PAT storage: cosheaf does not set a cookie or hold any server-side
-// session. The SPA keeps the Forgejo PAT in localStorage and attaches
+// session. The SPA keeps the API token in localStorage and attaches
 // it as `Authorization: Bearer <pat>` on every request.
 const PAT_KEY = "cosheaf.pat";
 
@@ -125,8 +120,8 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-    // Forgejo rejected the stored PAT, or no PAT was sent. Drop the local
-    // copy and bounce the page so the SPA re-mounts at the login screen.
+    // The backend rejected the stored token, or no token was sent. Drop the
+    // local copy and bounce the page so the SPA re-mounts at the login screen.
     if (
       res.status === 401 &&
       (body.code === "pat_invalid" || body.code === "unauthorized") &&
@@ -143,56 +138,10 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const w = (slug: string): string => `/api/v1/w/${encodeURIComponent(slug)}`;
-const forgejo = (slug: string, path: string): string => `${w(slug)}/forgejo/${path}`;
 const qs = (params: Record<string, string | undefined>): string => {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined);
   return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&")}` : "";
 };
-
-function milestoneFromForgejo(m: ForgejoMilestoneRef): Milestone {
-  return {
-    id: m.id,
-    title: m.title,
-    description: m.description ?? "",
-    state: m.state,
-    open_issues: m.open_issues,
-    closed_issues: m.closed_issues,
-    due_on: m.due_on ? new Date(m.due_on).getTime() : null,
-  };
-}
-
-function issueCommentFromForgejo(cm: ForgejoIssueCommentRaw): IssueComment {
-  return {
-    id: cm.id,
-    body: cm.body,
-    author_username: cm.user?.login ?? DELETED_USER_LOGIN,
-    created_at: Date.parse(cm.created_at) || 0,
-    updated_at: Date.parse(cm.updated_at) || 0,
-  };
-}
-
-const DELETED_USER_LOGIN = "Ghost";
-
-function prMetaFromForgejo(p: ForgejoPullRaw): PrMeta {
-  return {
-    number: p.number,
-    title: p.title,
-    body: p.body ?? "",
-    state: p.state === "closed" ? "closed" : "open",
-    merged: p.merged ?? false,
-    author_username: p.user?.login ?? DELETED_USER_LOGIN,
-    created_at: Date.parse(p.created_at) || 0,
-    merged_at: p.merged_at ? Date.parse(p.merged_at) : null,
-    mergeable: p.mergeable ?? null,
-    head_ref: p.head.ref,
-    head_sha: p.head.sha,
-    base_ref: p.base.ref,
-    base_sha: p.base.sha,
-    additions_total: p.additions ?? 0,
-    deletions_total: p.deletions ?? 0,
-    files_changed: p.changed_files ?? 0,
-  };
-}
 
 export const api = {
   me: () => jsonFetch<{ user: User | null }>("/api/v1/me"),
@@ -285,12 +234,10 @@ export const api = {
   deleteBranch: (slug: string, name: string) =>
     jsonFetch<{ ok: true }>(`${w(slug)}/branches/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
-  // ---------- Pulls (Forgejo-shape) ----------
+  // ---------- Pulls ----------
 
   listPulls: (slug: string, state: "open" | "closed" | "all" = "open") =>
-    jsonFetch<ForgejoPullRaw[]>(forgejo(slug, `pulls?state=${state}`)).then((rows) =>
-      rows.map(prMetaFromForgejo),
-    ),
+    jsonFetch<{ pulls: PrMeta[] }>(`${w(slug)}/pulls?state=${state}`).then((r) => r.pulls),
   openPull: (
     slug: string,
     payload: { head: string; base?: string; title?: string; body?: string },
@@ -300,7 +247,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getPull: (slug: string, prNumber: number) =>
-    jsonFetch<ForgejoPullRaw>(forgejo(slug, `pulls/${prNumber}`)).then(prMetaFromForgejo),
+    jsonFetch<{ pull: PrMeta }>(`${w(slug)}/pulls/${prNumber}`).then((r) => r.pull),
   mergePull: (
     slug: string,
     prNumber: number,
@@ -349,14 +296,14 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   editComment: (slug: string, _prNumber: number, commentId: number, body: string) =>
-    jsonFetch<unknown>(forgejo(slug, `issues/comments/${commentId}`), {
+    jsonFetch<unknown>(`${w(slug)}/pulls/${_prNumber}/comments/${commentId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body }),
     }).then(() => ({ ok: true as const })),
   deleteComment: (slug: string, prNumber: number, commentId: number, reviewId: number) =>
     jsonFetch<unknown>(
-      forgejo(slug, `pulls/${prNumber}/reviews/${reviewId}/comments/${commentId}`),
+      `${w(slug)}/pulls/${prNumber}/comments/${commentId}?review_id=${encodeURIComponent(String(reviewId))}`,
       { method: "DELETE" },
     ).then(() => ({ ok: true as const })),
 
@@ -407,79 +354,65 @@ export const api = {
   getIssue: (slug: string, number: number) =>
     jsonFetch<IssueDetail>(`${w(slug)}/issues/${number}`),
   getIssueComments: (slug: string, number: number) =>
-    jsonFetch<ForgejoIssueCommentRaw[]>(forgejo(slug, `issues/${number}/comments`)).then(
-      (rows) => ({ comments: rows.map(issueCommentFromForgejo) }),
-    ),
+    jsonFetch<{ comments: IssueComment[] }>(`${w(slug)}/issues/${number}/comments`),
   createIssue: (slug: string, body: { title: string; body: string }) =>
     jsonFetch<{ number: number; title: string; state: "open" | "closed" }>(
       `${w(slug)}/issues`,
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
     ),
   closeIssue: (slug: string, number: number) =>
-    jsonFetch<{ state: "open" | "closed" }>(forgejo(slug, `issues/${number}`), {
+    jsonFetch<{ ok: true; state: "open" | "closed" }>(`${w(slug)}/issues/${number}/state`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state: "closed" }),
     }).then((issue) => ({ ok: true as const, state: issue.state as "closed" })),
   reopenIssue: (slug: string, number: number) =>
-    jsonFetch<{ state: "open" | "closed" }>(forgejo(slug, `issues/${number}`), {
+    jsonFetch<{ ok: true; state: "open" | "closed" }>(`${w(slug)}/issues/${number}/state`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state: "open" }),
     }).then((issue) => ({ ok: true as const, state: issue.state as "open" })),
   createIssueComment: (slug: string, number: number, body: string) =>
-    jsonFetch<ForgejoIssueCommentRaw>(forgejo(slug, `issues/${number}/comments`), {
+    jsonFetch<IssueComment>(`${w(slug)}/issues/${number}/comments`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body }),
-    }).then(issueCommentFromForgejo),
+    }),
   editIssueComment: (slug: string, _number: number, id: number, body: string) =>
-    jsonFetch<ForgejoIssueCommentRaw>(forgejo(slug, `issues/comments/${id}`), {
+    jsonFetch<IssueComment>(`${w(slug)}/issues/${_number}/comments/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body }),
-    }).then((cm) => ({ id: cm.id, body: cm.body, updated_at: Date.parse(cm.updated_at) || 0 })),
+    }).then((cm) => ({ id: cm.id, body: cm.body, updated_at: cm.updated_at })),
   deleteIssueComment: (slug: string, _number: number, id: number) =>
-    jsonFetch<unknown>(forgejo(slug, `issues/comments/${id}`), { method: "DELETE" }).then(
+    jsonFetch<unknown>(`${w(slug)}/issues/${_number}/comments/${id}`, { method: "DELETE" }).then(
       () => ({ ok: true as const }),
     ),
-  renderForgejoMarkdown: async (slug: string, text: string): Promise<{ html: string }> => {
-    const res = await fetch(forgejo(slug, "markdown"), {
+  renderMarkdown: (slug: string, text: string): Promise<{ html: string }> =>
+    jsonFetch<{ html: string }>(`${w(slug)}/markdown/render`, {
       method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ Text: text, Mode: "comment", Wiki: false }),
-    });
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new ApiError(res.status, err.error ?? `HTTP ${res.status}`);
-    }
-    const ct = res.headers.get("content-type") ?? "";
-    if (ct.includes("application/json")) {
-      const data = (await res.json()) as { html?: string };
-      return { html: data.html ?? "" };
-    }
-    return { html: await res.text() };
-  },
+      body: JSON.stringify({ text }),
+    }),
   listLabels: (slug: string) =>
-    jsonFetch<Label[]>(forgejo(slug, "labels")).then((labels) => ({ labels })),
+    jsonFetch<{ labels: Label[] }>(`${w(slug)}/labels`),
   createLabel: (slug: string, body: { name: string; color: string; description?: string }) =>
-    jsonFetch<Label>(forgejo(slug, "labels"), {
+    jsonFetch<Label>(`${w(slug)}/labels`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, color: body.color.replace(/^#/, "") }),
     }),
   setIssueLabels: (slug: string, number: number, labels: number[]) =>
-    jsonFetch<Label[]>(forgejo(slug, `issues/${number}/labels`), {
+    jsonFetch<{ labels: Label[] }>(`${w(slug)}/issues/${number}/labels`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ labels }),
-    }).then((labels) => ({ labels })),
+    }),
   listPinnedIssues: (slug: string) =>
     jsonFetch<{ issues: IssueRow[] }>(`${w(slug)}/issues/pinned`),
   pinIssue: (slug: string, number: number) =>
-    jsonFetch<void>(forgejo(slug, `issues/${number}/pin`), { method: "POST" }).then(() => ({ ok: true as const })),
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "POST" }),
   unpinIssue: (slug: string, number: number) =>
-    jsonFetch<void>(forgejo(slug, `issues/${number}/pin`), { method: "DELETE" }).then(() => ({ ok: true as const })),
+    jsonFetch<{ ok: true }>(`${w(slug)}/issues/${number}/pin`, { method: "DELETE" }),
   getIssueTimeline: (slug: string, number: number) =>
     jsonFetch<{ events: TimelineEvent[] }>(`${w(slug)}/issues/${number}/timeline`),
   listActivities: (slug: string, limit = 50) =>
@@ -501,20 +434,18 @@ export const api = {
       body: JSON.stringify({ index }),
     }).then(() => ({ ok: true as const })),
   listMilestones: (slug: string, state: "open" | "closed" | "all" = "open") =>
-    jsonFetch<ForgejoMilestoneRef[]>(forgejo(slug, `milestones?state=${state}`)).then((milestones) => ({
-      milestones: milestones.map(milestoneFromForgejo),
-    })),
+    jsonFetch<{ milestones: Milestone[] }>(`${w(slug)}/milestones?state=${state}`),
   createMilestone: (slug: string, body: { title: string; description?: string }) =>
-    jsonFetch<{ id: number; title: string; state: "open" | "closed" }>(forgejo(slug, "milestones"), {
+    jsonFetch<{ id: number; title: string; state: "open" | "closed" }>(`${w(slug)}/milestones`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
   setIssueMilestone: (slug: string, number: number, id: number | null) =>
-    jsonFetch<unknown>(forgejo(slug, `issues/${number}`), {
+    jsonFetch<unknown>(`${w(slug)}/issues/${number}/milestone`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ milestone: id ?? 0 }),
+      body: JSON.stringify({ id }),
     }).then(() => ({ ok: true as const })),
 
   // ---- notifications ----

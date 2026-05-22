@@ -1,5 +1,5 @@
-// Route-level tests for the new Forgejo-shape /pulls/* and /branches/*
-// endpoints. The Forgejo client is real; `fetch` is mocked. The
+// Route-level tests for the typed /pulls/* and /branches/* endpoints. The
+// Forgejo client is real; `fetch` is mocked. The
 // permission cache is pre-seeded per test so we exercise only the
 // request actually under test against the mock.
 
@@ -103,6 +103,57 @@ function pull(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 describe("pulls + branches routes", () => {
+  it("GET /pulls returns stable Cosheaf PR metadata", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok([
+      pull({ number: 8, title: "Update docs", head: { ref: "agent/wip", sha: "h8" } }),
+    ]));
+
+    const res = await appFor(db).request("/api/v1/w/w/pulls?state=all", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/w/pulls?state=all&page=1&limit=50&sort=newest",
+    );
+    await expect(res.json()).resolves.toMatchObject({
+      pulls: [
+        {
+          number: 8,
+          title: "Update docs",
+          author_username: "alice",
+          head_ref: "agent/wip",
+          base_ref: "main",
+        },
+      ],
+    });
+  });
+
+  it("GET /pulls/:n returns stable Cosheaf PR metadata", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok(pull({ number: 7, title: "Review me" })));
+
+    const res = await appFor(db).request("/api/v1/w/w/pulls/7", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls/7");
+    await expect(res.json()).resolves.toMatchObject({
+      pull: {
+        number: 7,
+        title: "Review me",
+        head_ref: "user/alice/wip",
+        base_ref: "main",
+      },
+    });
+  });
+
   describe("admin-only gates (cache-bypassed)", () => {
     it("POST /pulls/:n/merge rejects a write user with 403", async () => {
       const db = freshDb();

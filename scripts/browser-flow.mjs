@@ -31,12 +31,12 @@ async function waitForMergedFile(branch, path, timeoutMs = 30000) {
     const ready = await page.evaluate(async ({ workspaceSlug, branch, path }) => {
       const pat = localStorage.getItem("cosheaf.pat");
       const authHeaders = pat ? { authorization: `Bearer ${pat}` } : undefined;
-      const pullsResponse = await fetch(`/api/v1/w/${workspaceSlug}/forgejo/pulls?state=all`, {
+      const pullsResponse = await fetch(`/api/v1/w/${workspaceSlug}/pulls?state=all`, {
         headers: authHeaders,
       });
       if (!pullsResponse.ok) return false;
-      const pulls = await pullsResponse.json();
-      const merged = pulls.some((p) => (p.title === branch || p.head?.ref === branch) && p.merged === true);
+      const { pulls } = await pullsResponse.json();
+      const merged = pulls.some((p) => (p.title === branch || p.head_ref === branch) && p.merged === true);
       if (!merged) return false;
       const fileResponse = await fetch(`/api/v1/w/${workspaceSlug}/file?path=${encodeURIComponent(path)}&branch=main`, {
         headers: authHeaders,

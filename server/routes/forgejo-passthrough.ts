@@ -1,12 +1,13 @@
 // Forgejo REST passthrough.
 //
-// Agents trained on Forgejo's API can hit Forgejo directly through cosheaf:
+// Legacy backend escape hatch. Public SPA and agent code should use typed
+// Cosheaf routes instead:
 //
 //   {METHOD} /api/v1/w/{slug}/forgejo/{tail}
 //   -> {METHOD} {forgejoUrl}/api/v1/repos/{owner}/{repo}/{tail}
-//   with `Authorization: token <caller Forgejo PAT>`.
+//   with `Authorization: token <caller backend token>`.
 //
-// Cosheaf handles auth (cookie session or `Bearer <Forgejo PAT>`) and
+// Cosheaf handles auth (`Bearer <token>`) and
 // workspace scoping (path is anchored at the
 // workspace's repo so an agent cannot stumble into another repo or /admin/*).
 // Body and query are forwarded verbatim; response status, content-type, and
@@ -14,13 +15,10 @@
 //
 // Policy (intentional, see AGENTS.md):
 //
-// - **Passthrough is the agent surface.** Forgejo-trained bots talk through
-//   here. The typed routes (routes/pulls.ts, routes/issues.ts,
-//   routes/files.ts, routes/branches.ts, routes/notifications.ts) are the
-//   *human-UI surface* — they shape responses for the SPA, run validation,
-//   integrate with the SQLite sidecar, and emit SSE.
-// - **Don't add a typed route just to wrap a Forgejo endpoint 1:1.** If the
-//   SPA only needs raw Forgejo JSON, use passthrough from the client.
+// - **Passthrough is compatibility only.** Don't add new public usage; use it
+//   only while old callers migrate to typed Cosheaf routes.
+// - **Public clients should not consume raw backend JSON.** Add typed routes
+//   for normal workspace workflows and shape responses there.
 // - **Don't add to passthrough what already has a typed route.** Merging is
 //   the canonical example: `pulls/:n/merge` is forbidden below because
 //   /pulls/:n/merge goes through `requireAdminFresh`. Same logic applies if
@@ -141,8 +139,8 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
     return c.json(...forbidden("passthrough escaped workspace scope"));
   }
 
-  // Forward with the caller's own Forgejo PAT — same trust model as the
-  // typed routes. The PAT comes from the request's Authorization header
+  // Forward with the caller's own backend token — same trust model as the
+  // typed routes. The token comes from the request's Authorization header
   // and is set on the context by requireAuth.
   const fwdHeaders: Record<string, string> = {
     authorization: `token ${c.get("forgejoToken")}`,
@@ -174,7 +172,7 @@ forgejoPassthrough.all("/:slug/forgejo/*", async (c) => {
     status = 502;
     respContentType = "application/json";
     respBody = new TextEncoder().encode(
-      JSON.stringify({ error: "forgejo unreachable", code: "bad_gateway", detail: (err as Error).message }),
+      JSON.stringify({ error: "backend unreachable", code: "bad_gateway", detail: (err as Error).message }),
     ).buffer as ArrayBuffer;
   }
   const outHeaders: Record<string, string> = {};

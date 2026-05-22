@@ -4,14 +4,14 @@ Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
 hold the canonical markdown files, branches, pull requests, reviews, issues,
 and collaborator memberships; SQLite is a derived, rebuildable sidecar index
 for fast reads. There is no cosheaf-side auth state — the SPA holds the
-user's Forgejo PAT in localStorage and sends it as `Authorization: Bearer
-<pat>` on every request.
+Cosheaf API token in localStorage and sends it as `Authorization: Bearer
+<token>` on every request.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
 Coflat rendering and indexing, not a separate CMS with its own workflow model.
-When adding features, prefer a direct mapping to Forgejo concepts and APIs
-before inventing a Cosheaf-specific abstraction.
+When adding features, prefer Cosheaf routes whose concepts map cleanly to the
+backing forge before inventing a separate workflow abstraction.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
@@ -87,84 +87,80 @@ move in small, reversible steps:
   route is in place.
 - Treat webhooks and repair/reindex commands as the reconciliation path from
   Forgejo into SQLite.
-- Review/simplify checklist for Forgejo-shell issues: prefer direct Forgejo
-  concepts and APIs; use passthrough for 1:1 Forgejo operations; keep typed
-  routes only where Cosheaf adds document/index behavior, validation, SSE, or
-  UI response shaping; delete old token and wrapper language as the
-  Forgejo-native path lands.
+- Review/simplify checklist for Forgejo-shell issues: prefer Cosheaf's typed
+  branch, PR, issue, review, label, milestone, notification, and file routes
+  for public clients; keep Forgejo details behind route implementations; delete
+  old token and wrapper language as the Forgejo-native path lands.
 
 Forgejo-only: Gitea is not a supported target. Don't add Gitea-compatibility
 hedging or version-sensitivity caveats; assume Forgejo behavior.
 
 ### Agent API and typed routes
 
-Cosheaf exposes two HTTP surfaces. Agents should start with the Forgejo
-passthrough API for ordinary Forgejo operations, and use typed routes only when
-they need Cosheaf behavior on top of Forgejo.
+Agents and external tools must use the typed Cosheaf workspace API. Forgejo is
+currently the durable backend, but it is an implementation detail: public
+client code should not construct `/forgejo/...` paths, send Forgejo-shaped
+request bodies, or rely on Forgejo response fields such as `head.ref` or
+`user.login`.
 
-- **Forgejo passthrough** (`/api/v1/w/:slug/forgejo/*`) is the **agent
-  default**. Forgejo-trained bots reach Forgejo through it with direct
-  `Authorization: Bearer <Forgejo PAT>` auth; Cosheaf validates the PAT and
-  enforces workspace scoping. Forgejo's own access log is the audit trail —
-  cosheaf no longer mirrors it. Use it first for branch, pull request, issue,
-  comment, label, milestone, review, notification, and file-content operations
-  that are naturally Forgejo-shaped.
-- **Typed routes** (`routes/pulls.ts`, `routes/issues.ts`, `routes/files.ts`,
-  `routes/branches.ts`, `routes/notifications.ts`) are for the SPA and for
-  Cosheaf-specific behavior. Keep or add them when a route needs validation,
-  response shaping, sidecar integration, SSE events, or Cosheaf-specific gates
-  (e.g. `requireAdminFresh` on merge).
+The typed routes live in `routes/pulls.ts`, `routes/issues.ts`,
+`routes/files.ts`, `routes/branches.ts`, and `routes/notifications.ts`. Keep or
+add them when a workflow needs a stable public contract, validation, response
+shaping, sidecar integration, SSE events, or Cosheaf-specific gates (e.g.
+`requireAdminFresh` on merge). The legacy `/api/v1/w/:slug/forgejo/*` route is
+only an internal/compatibility escape hatch while old callers are migrated; do
+not document it as an agent workflow and do not add new SPA or agent usage of
+it.
 
-Typed routes remain recommended for Cosheaf document/index behavior:
+Typed routes are the public contract for Cosheaf document/index behavior:
 
 - Use `routes/files.ts` for page reads/writes that should synchronously apply
   Coflat frontmatter/id handling, path validation, index updates, backlinks,
   FTS, and browser events.
 - Use typed search, backlinks, document-list, and event routes when callers
-  need the SQLite sidecar index rather than raw Forgejo repository contents.
+  need the SQLite sidecar index rather than raw backend repository contents.
+- Use typed branch, pull, issue, label, milestone, notification, and markdown
+  routes for normal workspace automation.
 - Use typed merge/admin routes where Cosheaf adds freshness checks or other
-  UI safety gates before calling Forgejo.
+  UI safety gates before calling the backend forge.
 
-File-write boundary: a Markdown write through the Forgejo contents API,
-including via passthrough, is an external repository write from Cosheaf's point
-of view. Webhooks and `pnpm cli workspace reindex <slug>` reconcile those
-writes into SQLite. A Markdown write that needs immediate Cosheaf
-frontmatter/index/SSE behavior should go through the typed file route.
+File-write boundary: a Markdown write through a raw backend contents escape
+hatch is an external repository write from Cosheaf's point of view. Webhooks
+and `pnpm cli workspace reindex <slug>` reconcile those writes into SQLite. A
+Markdown write that needs immediate Cosheaf frontmatter/index/SSE behavior
+should go through the typed file route.
 
-Cosheaf does not synchronously run the indexer or emit SSE on passthrough
+Cosheaf does not synchronously run the indexer or emit SSE on raw backend
 writes. Reconciliation is webhook-only. Callers (including agents) that need
 read-after-write consistency through cosheaf's typed routes must wait for the
 webhook to land or use the typed file route in the first place.
 
-Examples for agents using a Forgejo PAT:
+Examples for agents using a Cosheaf API token:
 
-- `GET /api/v1/w/flushing-coin/forgejo/issues?state=open`
-- `PATCH /api/v1/w/flushing-coin/forgejo/issues/42` with `{ "state": "closed" }`
-- `GET /api/v1/w/flushing-coin/forgejo/pulls?state=open`
-- `GET /api/v1/w/flushing-coin/forgejo/labels`
-- `GET /api/v1/w/flushing-coin/forgejo/milestones?state=open`
-- `GET /api/v1/w/flushing-coin/forgejo/contents/hello.md`
-- `GET /api/v1/w/flushing-coin/forgejo/notifications?status=unread`
+- `GET /api/v1/w/flushing-coin/issues?state=open`
+- `PATCH /api/v1/w/flushing-coin/issues/42/state` with `{ "state": "closed" }`
+- `GET /api/v1/w/flushing-coin/pulls?state=open`
+- `GET /api/v1/w/flushing-coin/labels`
+- `GET /api/v1/w/flushing-coin/milestones?state=open`
+- `GET /api/v1/w/flushing-coin/file?path=hello.md&branch=main`
+- `GET /api/v1/w/flushing-coin/notifications`
 
-Use `Authorization: Bearer <Forgejo PAT>` on these Cosheaf requests; Cosheaf
-translates that to the Forgejo token auth header after validating workspace
-membership.
+Use `Authorization: Bearer <token>` on these Cosheaf requests; Cosheaf
+validates workspace membership and translates to the backend credential
+internally.
 
 Rules of thumb:
 
-- Don't add a typed wrapper that's a 1:1 Forgejo proxy with no logic — the
-  SPA or agent can fetch through passthrough instead.
-- Don't expose a path through passthrough when a typed route guards it
-  (e.g. `pulls/:n/merge` is forbidden in passthrough because the typed
-  route runs `requireAdminFresh`).
-- Don't mirror Forgejo state into SQLite just to filter on it; Forgejo's
-  repo-scoped filters (`assigned_by`, `created_by`, `state`, `q`) are
-  what the typed routes should compose.
+- Don't add new public client usage of `/forgejo/...`.
+- Don't expose a backend escape hatch when a typed route guards it (e.g.
+  `pulls/:n/merge` must keep running `requireAdminFresh`).
+- Don't mirror backend forge state into SQLite just to filter on it; compose
+  backend filters inside typed routes and return stable Cosheaf DTOs.
 
 ### Agent flows
 
 Three common flows. Each works with `curl` against a running cosheaf
-(`pnpm dev:all`) using a Forgejo PAT as the Bearer token. Replace `$SLUG`,
+(`pnpm dev:all`) using a Cosheaf API token as the Bearer token. Replace `$SLUG`,
 `$PAT`, etc.
 
 **1. Add a page to main.** Use the typed file route so frontmatter is
@@ -180,25 +176,25 @@ curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=
 **2. Open a PR, get a review, merge.**
 
 ```sh
-# Create branch (Forgejo native)
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/branches" \
+# Create branch
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/branches" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"new_branch_name": "agent/wip-1", "old_branch_name": "main"}'
+  -d '{"name": "agent/wip-1"}'
 
 # Edit a file on the branch (typed route runs the indexer)
 curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=agent/wip-1" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"content": "# Updated\n\nbody."}'
 
-# Open PR (Forgejo native via passthrough)
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/pulls" \
+# Open PR
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"head": "agent/wip-1", "base": "main", "title": "Update notes/new.md"}'
 
-# Submit a review (Forgejo native)
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/pulls/42/reviews" \
+# Submit a review
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/reviews" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"event": "APPROVED", "body": "looks good"}'
+  -d '{"event": "APPROVE", "body": "looks good"}'
 
 # Merge (typed route — runs requireAdminFresh)
 curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/merge" \
@@ -210,29 +206,28 @@ curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/merge" \
 
 ```sh
 # List my open issues
-curl "http://localhost:3030/api/v1/w/$SLUG/forgejo/issues?state=open&assigned_by=$ME" \
+curl "http://localhost:3030/api/v1/w/$SLUG/issues?state=open&filter=assigned" \
   -H "Authorization: Bearer $PAT"
 
 # Comment on one
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/forgejo/issues/17/comments" \
+curl -X POST "http://localhost:3030/api/v1/w/$SLUG/issues/17/comments" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"body": "investigating"}'
 
 # Close it
-curl -X PATCH "http://localhost:3030/api/v1/w/$SLUG/forgejo/issues/17" \
+curl -X PATCH "http://localhost:3030/api/v1/w/$SLUG/issues/17/state" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"state": "closed"}'
 ```
 
 Notes for agent retry logic:
 
-- Reading after a passthrough write through cosheaf's typed routes is
-  not immediately consistent — the webhook reconciles asynchronously. If
-  you need read-your-write, use the typed file route (which indexes
-  synchronously), or read back through passthrough (Forgejo is the source
-  of truth and always consistent with itself).
-- `PUT contents/...`, `PATCH issues/:n`, and `DELETE` are idempotent on
-  Forgejo's side — safe to retry.
+- Reading after a raw backend write through cosheaf's typed routes is not
+  immediately consistent — the webhook reconciles asynchronously. If you need
+  read-your-write, use the typed file route, which indexes synchronously.
+- Typed `PUT /file`, `PATCH /issues/:n/state`, `DELETE /issues/:n/comments/:id`,
+  and `DELETE /pulls/:n/comments/:id` are idempotent enough for normal
+  client retry.
 - `POST pulls` is **not** idempotent — retry produces a duplicate PR.
   Check for an existing open PR with the same head/base before retrying.
 - `POST pulls/:n/merge` retries internally on Forgejo's transient 405
@@ -244,7 +239,7 @@ plugins, or move agent/prover logic into this repo as part of this direction.
 ## Stack
 
 - **Server**: Hono on `@hono/node-server`, TypeScript, `better-sqlite3`.
-  No cosheaf-side password hashing — the Forgejo PAT is the credential.
+  No cosheaf-side password hashing — the bearer token is the credential.
 - **Client**: React 19 + Vite, single-page app in `src/cosheaf/app.tsx`.
 - **Editor**: `@chaoxu/coflat-editor` (published package; do not vendor it
   back into this repo).
@@ -357,7 +352,7 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
 
 There is no `users`, `sessions`, or `workspaces` table (#63, #62). Identity
-comes from a Forgejo PAT sent as `Authorization: Bearer <pat>`; workspace
+comes from a bearer token sent as `Authorization: Bearer <token>`; workspace
 identity is the Forgejo repo name; the workspace's markdown format lives
 in a Forgejo repo topic (`cosheaf-format-coflat` or
 `cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write |

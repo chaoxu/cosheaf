@@ -73,7 +73,7 @@ async function main() {
     "This file was created by the Cosheaf API smoke.",
     "",
     "- typed file write should add frontmatter and update the sidecar index",
-    "- Forgejo passthrough should open and review a PR",
+    "- typed pull routes should open and review a PR",
     "- typed merge should enforce Cosheaf's merge boundary",
     "",
   ].join("\n");
@@ -89,7 +89,7 @@ async function main() {
   const indexed = search?.results?.some((row) => row.path === path);
   if (!indexed) throw new Error(`typed write did not show up in search index for ${path}`);
 
-  const pull = await request(`/w/${workspace}/forgejo/pulls`, {
+  const pull = await request(`/w/${workspace}/pulls`, {
     token: adminPat,
     method: "POST",
     body: {
@@ -97,7 +97,7 @@ async function main() {
       base: "main",
       title,
       body: [
-        "API smoke opened this PR through Forgejo passthrough.",
+        "API smoke opened this PR through the Cosheaf API.",
         "",
         "The merge step uses Cosheaf's typed merge route.",
       ].join("\n"),
@@ -106,10 +106,10 @@ async function main() {
   const prNumber = pull?.number;
   if (!Number.isInteger(prNumber)) throw new Error("open PR response did not include a pull number");
 
-  await request(`/w/${workspace}/forgejo/pulls/${prNumber}/reviews`, {
+  await request(`/w/${workspace}/pulls/${prNumber}/reviews`, {
     token: reviewerPat,
     method: "POST",
-    body: { event: "APPROVED", body: "API smoke approval" },
+    body: { event: "APPROVE", body: "API smoke approval" },
   });
 
   if (!opts.keepOpen) {

@@ -88,7 +88,7 @@ export function IssueBodyRender({
         return;
       }
       const { body } = parseFrontmatterYaml(text);
-      const rendered = await api.renderForgejoMarkdown(workspaceSlug, body);
+      const rendered = await api.renderMarkdown(workspaceSlug, body);
       if (!cancelled) setHtml(DOMPurify.sanitize(rendered.html));
     }
     void render().catch(() => {
