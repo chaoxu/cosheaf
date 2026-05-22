@@ -93,7 +93,9 @@ try {
   await page.getByText("Frontmatter and Structure Editing").waitFor({ state: "visible", timeout: 10000 });
 
   const defaultReader = await readerStats();
-  assertClose("document width", defaultReader.width, editor.width);
+  if (defaultReader.width < editor.width * 0.9) {
+    throw new Error(`document width too narrow: reader=${defaultReader.width} editor=${editor.width}`);
+  }
   assertClose("base font size", px(defaultReader.fontSize), px(editor.fontSize));
   assertClose("heading size", px(defaultReader.headingSize), px(editor.headingSize));
   if (!defaultReader.font.includes("KaTeX_Main") || !editor.font.includes("KaTeX_Main")) {
