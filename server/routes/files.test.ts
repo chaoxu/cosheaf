@@ -7,10 +7,11 @@ import { indexPage } from "../indexer.js";
 import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
 import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
+import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseOk, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-files-test",
@@ -48,6 +49,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   _resetPermCacheForTests();
   _resetBearerAuthCacheForTests();
+  _clearTreeCacheForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -80,6 +82,7 @@ describe("safeRel repo-path validator", () => {
     expect(safeRel("docs/%2e%2e/escape")).toBeNull();
     expect(safeRel("docs/%2E%2E/escape")).toBeNull();
     expect(safeRel("docs%2fescape")).toBeNull();
+    expect(safeRel("docs%5cintro.md")).toBeNull();
   });
   it("rejects backslashes (Forgejo treats / as the only separator)", () => {
     expect(safeRel("docs\\intro.md")).toBeNull();
@@ -163,5 +166,60 @@ describe("files mutation gates", () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: "write access required", code: "forbidden" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects asset uploads to main before forwarding to Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+
+    const res = await appFor(db).request("/api/v1/w/w/assets?branch=main", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "branch required (cannot upload assets to main)",
+      code: "validation",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("files tree cache", () => {
+  it("does not cache a missing-branch fallback tree under the missing branch", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    let branchExists = false;
+    fetchMock.mockImplementation(async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.includes("/git/trees/user%2Fstale")) {
+        if (!branchExists) return new Response("sha not found", { status: 400 });
+        return responseOk({
+          tree: [{ type: "blob", path: "branch.md", size: 2 }],
+          truncated: false,
+        });
+      }
+      if (url.includes("/git/trees/main")) {
+        return responseOk({
+          tree: [{ type: "blob", path: "main.md", size: 1 }],
+          truncated: false,
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const first = await appFor(db).request("/api/v1/w/w/tree?branch=user/stale", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ files: [{ path: "main.md", size: 1 }] });
+
+    branchExists = true;
+    const second = await appFor(db).request("/api/v1/w/w/tree?branch=user/stale", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ files: [{ path: "branch.md", size: 2 }] });
   });
 });

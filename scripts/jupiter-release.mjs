@@ -37,7 +37,7 @@ function maybeDelegateToJupiter() {
     action === "deploy" || action === "release"
       ? "git fetch origin main && git switch main && git pull --ff-only origin main && "
       : "";
-  const remote = `cd ${shellQuote(JUPITER_CHECKOUT)} && ${gitSync}COSHEAF_JUPITER_LOCAL=1 pnpm jupiter:release -- ${shellQuote(action)} ${shellQuote(envName)}`;
+  const remote = `cd ${shellQuote(JUPITER_CHECKOUT)} && ${gitSync}COSHEAF_JUPITER_LOCAL=1 node scripts/jupiter-release.mjs ${shellQuote(action)} ${shellQuote(envName)}`;
   run("ssh", [JUPITER_HOST, remote]);
   process.exit(0);
 }
@@ -216,7 +216,7 @@ function dispatch() {
 new Command("jupiter-release")
   .description("deploy and verify Cosheaf on jupiter")
   .argument("<action>", `one of ${actions.join("|")}`, parseAction)
-  .argument("<environment>", `one of ${Object.keys(environments).join("|")}`, parseEnvironment)
+  .argument("[environment]", `one of ${Object.keys(environments).join("|")}`, parseEnvironment, "prod")
   .action((actionArg, envArg) => {
     action = actionArg;
     envName = envArg;

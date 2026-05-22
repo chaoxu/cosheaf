@@ -30,7 +30,7 @@ export function safeRel(p: string | undefined): string | null {
     if (code < 0x20 || p[i] === "\\") return null;
   }
   if (p.split(/[/\\]/).some((seg) => seg === ".." || seg === "")) return null;
-  if (/%2e%2e/i.test(p) || /%2f/i.test(p)) return null;
+  if (/%2e%2e/i.test(p) || /%2f/i.test(p) || /%5c/i.test(p)) return null;
   return p;
 }
 
@@ -105,6 +105,7 @@ files.get("/:slug/tree", async (c) => {
   if (!tree) {
     try {
       tree = await fj.getTree(owner, repo, ref, true);
+      setCachedTree(owner, repo, ref, tree);
     } catch (err) {
       // Forgejo returns 404 for a missing ref *or* 400 with "sha not found"
       // for a branch that was deleted while a client still held its name
@@ -120,7 +121,6 @@ files.get("/:slug/tree", async (c) => {
         throw err;
       }
     }
-    setCachedTree(owner, repo, ref, tree);
   }
   const out = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
@@ -232,6 +232,8 @@ files.post("/:slug/assets", async (c) => {
   const branch = c.req.query("branch")?.trim();
   if (!branch)
     return c.json(...bad("branch required"));
+  if (branch === "main")
+    return c.json(...bad("branch required (cannot upload assets to main)"));
   const form = await c.req.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File))
