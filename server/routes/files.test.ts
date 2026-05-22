@@ -152,6 +152,30 @@ describe("files validation route", () => {
   });
 });
 
+describe("files suggest route", () => {
+  it("defaults malformed limits before querying SQLite", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    for (let i = 0; i < 12; i += 1) {
+      indexPage(db, {
+        workspaceSlug: "w",
+        filePath: `note-${i}.md`,
+        bodyText: `---\nid: alpha-${i}\n---\n# Alpha ${i}\n`,
+        formatId: COFLAT_FORMAT_ID,
+      });
+    }
+
+    const res = await appFor(db).request("/api/v1/w/w/suggest?prefix=alpha&limit=abc", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: Array<{ id: string }> };
+    expect(body.suggestions).toHaveLength(10);
+    expect(body.suggestions[0].id).toBe("alpha-0");
+  });
+});
+
 describe("files mutation gates", () => {
   it("rejects read-only users before forwarding file writes to Forgejo", async () => {
     const db = freshDb();

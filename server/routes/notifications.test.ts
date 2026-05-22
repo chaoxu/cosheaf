@@ -174,6 +174,20 @@ describe("notifications route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects non-integer notification ids before calling Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+
+    const res = await appFor(db).request("/api/v1/w/w/notifications/1.5/read", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "bad id", code: "validation" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("mark-all marks every thread in the workspace's repo", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

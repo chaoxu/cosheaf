@@ -52,8 +52,11 @@ export function IssueView({
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const requestSeqRef = useRef(0);
 
   const refresh = async () => {
+    const seq = ++requestSeqRef.current;
+    setError(null);
     try {
       const [det, cms, tl, deps, blks] = await Promise.all([
         api.getIssue(workspaceSlug, number),
@@ -62,17 +65,26 @@ export function IssueView({
         api.listIssueDependencies(workspaceSlug, number),
         api.listIssueBlocks(workspaceSlug, number),
       ]);
+      if (seq !== requestSeqRef.current) return;
       setIssue(det);
       setComments(cms.comments);
       setTimeline(tl.events);
       setDependencies(deps.issues);
       setBlocks(blks.issues);
     } catch (e) {
+      if (seq !== requestSeqRef.current) return;
       setError(e instanceof Error ? e.message : "failed to load issue");
     }
   };
 
   useEffect(() => {
+    setIssue(null);
+    setComments([]);
+    setTimeline([]);
+    setDependencies([]);
+    setBlocks([]);
+    setEditingId(null);
+    setEditDraft("");
     void refresh();
     api.listLabels(workspaceSlug).then((r) => setAllLabels(r.labels)).catch(() => undefined);
     api.listMilestones(workspaceSlug, "open").then((r) => setAllMilestones(r.milestones)).catch(() => undefined);

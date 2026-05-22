@@ -278,6 +278,30 @@ describe("pulls + branches routes", () => {
     });
   });
 
+  describe("pending review ids", () => {
+    it("rejects fractional pending review ids before calling Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+      const submit = await appFor(db).request("/api/v1/w/w/pulls/7/pending-review/1.5/submit", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ event: "approve" }),
+      });
+      const comment = await appFor(db).request("/api/v1/w/w/pulls/7/pending-review/1.5/comments", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ path: "x.md", line: 1, side: "head", body: "hi" }),
+      });
+
+      expect(submit.status).toBe(400);
+      expect(comment.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe("merge with retry", () => {
     it("POST /pulls/:n/merge retries on Forgejo 405 'try again later' and eventually succeeds", async () => {
       const db = freshDb();

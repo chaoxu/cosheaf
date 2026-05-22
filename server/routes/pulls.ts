@@ -57,6 +57,11 @@ function parsePr(raw: string | undefined): number | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+function parseReviewId(raw: string | undefined): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 function normalizeStatus(s: string): PrFileStatus {
   if (s === "added" || s === "modified" || s === "deleted" || s === "renamed" || s === "copied") return s;
   return "modified";
@@ -461,8 +466,8 @@ pulls.post("/:slug/pulls/:n/pending-review", async (c) => {
 
 pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
-  const rid = Number(c.req.param("rid"));
-  if (n === null || !rid) return c.json(...bad("bad ids"));
+  const rid = parseReviewId(c.req.param("rid"));
+  if (n === null || rid === null) return c.json(...bad("bad ids"));
   const ws = c.get("workspace");
   const input = parseCommentInput(await c.req.json().catch(() => null));
   if (!input) return c.json(...bad("path, line, side, body required"));
@@ -480,8 +485,8 @@ pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
 
 pulls.post("/:slug/pulls/:n/pending-review/:rid/submit", async (c) => {
   const n = parsePr(c.req.param("n"));
-  const rid = Number(c.req.param("rid"));
-  if (n === null || !rid) return c.json(...bad("bad ids"));
+  const rid = parseReviewId(c.req.param("rid"));
+  if (n === null || rid === null) return c.json(...bad("bad ids"));
   const body = (await c.req.json().catch(() => null)) as {
     event?: "approve" | "request_changes" | "comment";
     body?: string;

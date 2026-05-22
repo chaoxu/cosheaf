@@ -53,7 +53,7 @@ notifications.get("/:slug/notifications", async (c) => {
 // POST /api/v1/w/:slug/notifications/:id/read
 notifications.post("/:slug/notifications/:id/read", async (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json(...bad("bad id"));
+  if (!Number.isInteger(id) || id <= 0) return c.json(...bad("bad id"));
   const { fj, owner, repo } = c.get("repoCtx");
   const thread = await fj.getNotificationThread(id);
   if (thread.repository.full_name !== `${owner}/${repo}`) return c.json(...notFound());

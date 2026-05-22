@@ -262,7 +262,8 @@ files.post("/:slug/assets", async (c) => {
 files.get("/:slug/suggest", (c) => {
   const prefix = c.req.query("prefix")?.trim() ?? "";
   const trigger = c.req.query("trigger") ?? "[@";
-  const limit = Math.max(1, Math.min(20, Number(c.req.query("limit") ?? 10)));
+  const rawLimit = Number(c.req.query("limit") ?? 10);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : 10;
   const ws = c.get("workspace");
   // For `[@` trigger we suggest from doc_map (cross-ref ids + titles).
   // Other triggers return empty until we add e.g. tag completion.
