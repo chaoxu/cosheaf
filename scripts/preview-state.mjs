@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync, writeFileSync } from "node:fs";
-
-function usage() {
-  console.error("usage: node scripts/preview-state.mjs <slug|read-port|allocate|delete-port> ...");
-  process.exit(2);
-}
+import { Command } from "commander";
 
 function slugForBranch(name) {
   const slug = String(name)
@@ -29,48 +25,58 @@ function writeJson(file, data) {
 }
 
 function main() {
-  const [action, ...args] = process.argv.slice(2);
-  if (!action) usage();
+  const program = new Command("preview-state")
+    .description("manage Cosheaf Jupiter preview slug and port state");
 
-  if (action === "slug") {
-    const [branch] = args;
-    if (!branch) usage();
-    process.stdout.write(slugForBranch(branch));
-  } else if (action === "read-port") {
-    const [file, slug] = args;
-    if (!file || !slug) usage();
-    const data = readJson(file);
-    process.stdout.write(data[slug] ? String(data[slug]) : "");
-  } else if (action === "allocate") {
-    const [file, slug, startRaw, endRaw, ...usedRaw] = args;
-    if (!file || !slug || !startRaw || !endRaw) usage();
-    const data = readJson(file);
-    if (data[slug]) {
-      process.stdout.write(String(data[slug]));
-      process.exit(0);
-    }
-    const used = new Set(Object.values(data).map(String));
-    for (const port of usedRaw) used.add(String(port));
-    const start = Number(startRaw);
-    const end = Number(endRaw);
-    for (let port = start; port <= end; port += 1) {
-      if (used.has(String(port))) continue;
-      data[slug] = port;
+  program
+    .command("slug <branch>")
+    .description("print the canonical preview slug for a branch")
+    .action((branch) => {
+      process.stdout.write(slugForBranch(branch));
+    });
+
+  program
+    .command("read-port <file> <slug>")
+    .description("print the persisted port for a preview slug, if present")
+    .action((file, slug) => {
+      const data = readJson(file);
+      process.stdout.write(data[slug] ? String(data[slug]) : "");
+    });
+
+  program
+    .command("allocate <file> <slug> <start> <end> [usedPorts...]")
+    .description("allocate or reuse a preview port")
+    .action((file, slug, startRaw, endRaw, usedRaw = []) => {
+      const data = readJson(file);
+      if (data[slug]) {
+        process.stdout.write(String(data[slug]));
+        return;
+      }
+      const used = new Set(Object.values(data).map(String));
+      for (const port of usedRaw) used.add(String(port));
+      const start = Number(startRaw);
+      const end = Number(endRaw);
+      for (let port = start; port <= end; port += 1) {
+        if (used.has(String(port))) continue;
+        data[slug] = port;
+        writeJson(file, data);
+        process.stdout.write(String(port));
+        return;
+      }
+      console.error(`no free preview port in ${start}-${end}`);
+      process.exit(1);
+    });
+
+  program
+    .command("delete-port <file> <slug>")
+    .description("remove a preview slug from the port state file")
+    .action((file, slug) => {
+      const data = readJson(file);
+      delete data[slug];
       writeJson(file, data);
-      process.stdout.write(String(port));
-      process.exit(0);
-    }
-    console.error(`no free preview port in ${start}-${end}`);
-    process.exit(1);
-  } else if (action === "delete-port") {
-    const [file, slug] = args;
-    if (!file || !slug) usage();
-    const data = readJson(file);
-    delete data[slug];
-    writeJson(file, data);
-  } else {
-    usage();
-  }
+    });
+
+  program.parse(process.argv);
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
