@@ -1,5 +1,10 @@
 import type { Page } from "@playwright/test";
 
+export interface ApiFetchResult {
+  status: number;
+  body: string;
+}
+
 // loginAs drives the SPA login form. The React handler stores the returned
 // PAT in localStorage under "cosheaf.pat" (see src/cosheaf/api.ts
 // setStoredPat / login), which is what authorizes every subsequent
@@ -8,15 +13,24 @@ import type { Page } from "@playwright/test";
 // without a SPA session should use createPrAsMeri-style explicit Bearer
 // tokens instead.
 export async function loginAs(page: Page, username: string) {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await gotoRoot(page);
   await page.evaluate(() => localStorage.removeItem("cosheaf.pat"));
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await gotoRoot(page);
   const inputs = page.locator("form input");
   await inputs.nth(0).fill(username);
   await inputs.nth(1).fill("Cosheaf123!");
   await page.locator('button:has-text("Sign in")').click();
   await page.getByTestId("workspace-flushing-coin").waitFor({ state: "visible" });
   await page.getByTestId("workspace-flushing-coin").click();
+}
+
+async function gotoRoot(page: Page): Promise<void> {
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+  } catch (e) {
+    if (!(e instanceof Error) || !e.message.includes("net::ERR_ABORTED")) throw e;
+    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  }
 }
 
 export async function openReview(page: Page, expectMarker = "Pythagoras") {
@@ -36,6 +50,36 @@ export async function openReview(page: Page, expectMarker = "Pythagoras") {
     .locator(`[data-testid="diff-pane-unified"] >> text=${expectMarker}`)
     .first()
     .waitFor({ timeout: 8000 });
+}
+
+export async function authedApiFetch(
+  page: Page,
+  path: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<ApiFetchResult> {
+  return page.evaluate(
+    async ({ path: apiPath, init: requestInit }) => {
+      const token = localStorage.getItem("cosheaf.pat");
+      const headers = { ...(requestInit.headers ?? {}) };
+      if (requestInit.body && !("content-type" in headers)) headers["content-type"] = "application/json";
+      if (token) headers.authorization = `Bearer ${token}`;
+      const response = await fetch(apiPath, { ...requestInit, headers });
+      return { status: response.status, body: await response.text() };
+    },
+    { path, init },
+  );
+}
+
+export async function authedApiJson<T>(
+  page: Page,
+  path: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<T> {
+  const result = await authedApiFetch(page, path, init);
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(`apiFetch ${path}: ${result.status} ${result.body.slice(0, 200)}`);
+  }
+  return JSON.parse(result.body) as T;
 }
 
 export async function createPrAsMeri(page: Page): Promise<{ branch: string; prNumber: number }> {

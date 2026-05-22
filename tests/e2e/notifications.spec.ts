@@ -1,14 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { loginAs } from "./helpers";
+import { authedApiFetch, loginAs } from "./helpers";
 
 test.describe.serial("Notifications inbox", () => {
   test("@mention surfaces in chao's inbox, click opens the issue, mark-all clears", async ({ page }) => {
     // Reset chao's notification state for this workspace so the test is
     // independent of prior runs.
     await loginAs(page, "chao");
-    await page.evaluate(() =>
-      fetch("/api/v1/w/flushing-coin/notifications/read-all", { method: "POST" }),
-    );
+    await authedApiFetch(page, "/api/v1/w/flushing-coin/notifications/read-all", { method: "POST" });
 
     const probeTitle = `Notification probe ${Date.now()}`;
     // meri opens an issue that @-mentions chao. Forgejo creates a

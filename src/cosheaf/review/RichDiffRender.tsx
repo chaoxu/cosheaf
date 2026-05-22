@@ -12,7 +12,7 @@
 //      CommentThread components into per-line container divs appended after
 //      the matching block.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
@@ -23,6 +23,7 @@ import type { LineComment } from "../api";
 import { escapeHtml } from "../lib/html-escape";
 import { CommentThread, type CommentActions } from "./CommentThread";
 import { groupCommentsByLine } from "./comment-anchors";
+import { useOwnedHtml } from "./use-owned-html";
 
 interface Props {
   source: string;
@@ -68,21 +69,17 @@ export function RichDiffRender({
     };
   }, [source, ctx]);
 
-  // Mount HTML imperatively so React never re-renders the inner tree.
-  useLayoutEffect(() => {
-    const root = containerRef.current;
-    if (!root) return;
-    if (root.dataset.cosheafHtml === html) return;
-    // Unmount any comment-thread roots we appended into the previous HTML
-    // before tearing it down; otherwise React 18+ warns about leaked roots.
-    for (const r of commentRootsRef.current.values()) {
-      queueMicrotask(() => r.unmount());
-    }
-    commentRootsRef.current.clear();
-    root.innerHTML = html;
-    root.dataset.cosheafHtml = html;
-    void import("@chaoxu/coflat-editor/reader").then(({ hydrateMath }) => hydrateMath(root));
-  }, [html]);
+  useOwnedHtml(containerRef, html, {
+    beforeReplace() {
+      for (const r of commentRootsRef.current.values()) {
+        queueMicrotask(() => r.unmount());
+      }
+      commentRootsRef.current.clear();
+    },
+    afterReplace(root) {
+      void import("@chaoxu/coflat-editor/reader").then(({ hydrateMath }) => hydrateMath(root));
+    },
+  });
 
   // Tint added/removed lines.
   useEffect(() => {

@@ -7,7 +7,7 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { api } from "../api";
 import type { DependencyRow, IssueComment, IssueDetail, Label, Milestone, TimelineEvent } from "../api";
-import { IssueBodyRender } from "../document-format/coflat-issue-render";
+import { IssueBodyRender } from "./IssueBodyRender";
 import { formatRelativeTime } from "../lib/format-relative-time";
 import { useWorkspaceContext } from "../workspace-context";
 

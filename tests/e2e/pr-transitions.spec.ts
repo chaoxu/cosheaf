@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createPrAsMeri, loginAs } from "./helpers";
+import { authedApiFetch, authedApiJson, createPrAsMeri, loginAs } from "./helpers";
 
 // PR review state lives in the backing forge. Each transition consumes a PR,
 // so we open a fresh one per test and assert the post-transition state via the
@@ -19,41 +19,28 @@ test.describe.serial("PR review state transitions", () => {
     // review. Verify the approval landed via the typed API.
     await expect
       .poll(
-        async () =>
-          page.evaluate(async (n) => {
-            const token = localStorage.getItem("cosheaf.pat");
-            const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`, {
-              headers: token ? { authorization: `Bearer ${token}` } : undefined,
-            });
-            return ((await r.json()) as { approvals: number }).approvals;
-          }, prNumber),
+        async () => {
+          const reviews = await authedApiJson<{ approvals: number }>(
+            page,
+            `/api/v1/w/flushing-coin/pulls/${prNumber}/reviews`,
+          );
+          return reviews.approvals;
+        },
         { timeout: 15000 },
       )
       .toBeGreaterThanOrEqual(1);
 
     // Admin (chao) merges the now-approved PR.
     await loginAs(page, "chao");
-    const merged = await page.evaluate(async (n) => {
-      const token = localStorage.getItem("cosheaf.pat");
-      const m = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/merge`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ Do: "squash" }),
-      });
-      return m.status;
-    }, prNumber);
+    const merged = await authedApiFetch(page, `/api/v1/w/flushing-coin/pulls/${prNumber}/merge`, {
+      method: "POST",
+      body: JSON.stringify({ Do: "squash" }),
+    }).then((result) => result.status);
     expect(merged).toBe(200);
-    const state = await page.evaluate(async (n) => {
-      const token = localStorage.getItem("cosheaf.pat");
-      const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}`, {
-        headers: token ? { authorization: `Bearer ${token}` } : undefined,
-      });
-      const body = (await r.json()) as { pull: { state: string; merged: boolean } };
-      return body.pull;
-    }, prNumber);
+    const { pull: state } = await authedApiJson<{ pull: { state: string; merged: boolean } }>(
+      page,
+      `/api/v1/w/flushing-coin/pulls/${prNumber}`,
+    );
     expect(state.merged).toBe(true);
   });
 
@@ -71,14 +58,13 @@ test.describe.serial("PR review state transitions", () => {
 
     await expect
       .poll(
-        async () =>
-          page.evaluate(async (n) => {
-            const token = localStorage.getItem("cosheaf.pat");
-            const r = await fetch(`/api/v1/w/flushing-coin/pulls/${n}/reviews`, {
-              headers: token ? { authorization: `Bearer ${token}` } : undefined,
-            });
-            return ((await r.json()) as { rejections: number }).rejections;
-          }, prNumber),
+        async () => {
+          const reviews = await authedApiJson<{ rejections: number }>(
+            page,
+            `/api/v1/w/flushing-coin/pulls/${prNumber}/reviews`,
+          );
+          return reviews.rejections;
+        },
         { timeout: 15000 },
       )
       .toBeGreaterThanOrEqual(1);

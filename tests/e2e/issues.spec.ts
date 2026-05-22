@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loginAs } from "./helpers";
+import { authedApiFetch, loginAs } from "./helpers";
 
 test.describe.serial("Issues", () => {
   test("meri opens an issue, vera comments, meri closes it", async ({ page }) => {
@@ -46,16 +46,9 @@ test.describe.serial("Issues", () => {
   test("chao (owner) labels an issue + a body ref renders as a clickable link", async ({ page }) => {
     // chao defines a label via API then opens the prior issue + applies it.
     await loginAs(page, "chao");
-    await page.evaluate(async () => {
-      const token = localStorage.getItem("cosheaf.pat");
-      await fetch("/api/v1/w/flushing-coin/labels", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ name: "needs-review", color: "facc15" }),
-      });
+    await authedApiFetch(page, "/api/v1/w/flushing-coin/labels", {
+      method: "POST",
+      body: JSON.stringify({ name: "needs-review", color: "facc15" }),
     });
     // The prior spec closed its issue; create a fresh open issue so Activity has one.
     await page.getByTestId("sidebar-tab-inbox").click();
@@ -200,16 +193,9 @@ test.describe.serial("Issues", () => {
   test("Owner creates a milestone via API; can assign + clear on an issue", async ({ page }) => {
     await loginAs(page, "chao");
     // Create milestone server-side (no full UI for create yet)
-    await page.evaluate(async () => {
-      const token = localStorage.getItem("cosheaf.pat");
-      await fetch("/api/v1/w/flushing-coin/milestones", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ title: "v1 polish" }),
-      });
+    await authedApiFetch(page, "/api/v1/w/flushing-coin/milestones", {
+      method: "POST",
+      body: JSON.stringify({ title: "v1 polish" }),
     });
     await page.getByTestId("sidebar-tab-inbox").click();
     await page.getByTestId("new-issue").click();
