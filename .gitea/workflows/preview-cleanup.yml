@@ -19,8 +19,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Compute preview name
-        id: preview
+      - name: Checkout cosheaf
+        uses: actions/checkout@v4
+        with:
+          path: cosheaf
+
+      - name: Remove preview resources with shared helper
+        working-directory: cosheaf
         run: |
           branch="${{ github.event.inputs.branch }}"
           if [ -z "$branch" ]; then
@@ -30,41 +35,15 @@ jobs:
             echo "missing branch name"
             exit 1
           fi
-          slug="$(printf '%s' "$branch" \
-            | tr '[:upper:]' '[:lower:]' \
-            | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' \
-            | cut -c1-40)"
-          if [ -z "$slug" ]; then
-            slug="branch"
-          fi
-          {
-            echo "branch=$branch"
-            echo "slug=$slug"
-            echo "container=cosheaf-preview-$slug"
-            echo "volume=cosheaf-preview-$slug-data"
-            echo "image=cosheaf-preview:$slug"
-            echo "state=/srv/cosheaf/previews/ports.json"
-            echo "lock=/srv/cosheaf/previews/ports.lock"
-          } >> "$GITHUB_OUTPUT"
 
-      - name: Remove preview resources
-        run: |
-          docker rm -f "${{ steps.preview.outputs.container }}" >/dev/null 2>&1 || true
-          docker image rm "${{ steps.preview.outputs.image }}" >/dev/null 2>&1 || true
-          sudo rm -f "/etc/caddy/sites.d/cosheaf-preview-${{ steps.preview.outputs.slug }}.caddy"
-          sudo -n /usr/bin/systemctl reload caddy
-
+          slug="$(node scripts/preview-state.mjs slug "$branch")"
+          keep_volume=""
           delete_volume="${{ github.event.inputs.delete_volume }}"
-          if [ -z "$delete_volume" ] || [ "$delete_volume" = "true" ]; then
-            docker volume rm "${{ steps.preview.outputs.volume }}" >/dev/null 2>&1 || true
+          if [ "$delete_volume" = "false" ]; then
+            keep_volume="--keep-volume"
           fi
 
-          if [ -f "${{ steps.preview.outputs.state }}" ]; then
-            exec 9>"${{ steps.preview.outputs.lock }}"
-            flock 9
-            tmp="$(mktemp)"
-            jq --arg slug "${{ steps.preview.outputs.slug }}" 'del(.[$slug])' "${{ steps.preview.outputs.state }}" > "$tmp"
-            mv "$tmp" "${{ steps.preview.outputs.state }}"
-          fi
+          COSHEAF_PREVIEW_STATE_SCRIPT="$PWD/scripts/preview-state.mjs" \
+            bash scripts/jupiter-preview-host.sh clean-local "$branch" "" "$slug" 3100 3199 "$keep_volume"
 
-          echo "removed preview for ${{ steps.preview.outputs.branch }}"
+          echo "removed preview for $branch"

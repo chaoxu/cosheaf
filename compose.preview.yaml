@@ -20,6 +20,8 @@ services:
       fleet.app: cosheaf
       fleet.kind: preview
       fleet.source.ref: ${COSHEAF_PREVIEW_BRANCH}
+      fleet.source.sha: ${COSHEAF_GIT_SHA:-unknown}
+      fleet.expires_at: ${COSHEAF_PREVIEW_EXPIRES_AT}
       fleet.caddy: /etc/caddy/sites.d/cosheaf-preview-${COSHEAF_PREVIEW_SLUG}.caddy
     env_file:
       - path: ${COSHEAF_ENV_DIR:-/srv/cosheaf}/.env.prod
@@ -55,4 +57,6 @@ volumes:
       fleet.preview: "true"
       fleet.app: cosheaf
       fleet.kind: preview
-
+      fleet.source.ref: ${COSHEAF_PREVIEW_BRANCH}
+      fleet.source.sha: ${COSHEAF_GIT_SHA:-unknown}
+      fleet.expires_at: ${COSHEAF_PREVIEW_EXPIRES_AT}

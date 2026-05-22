@@ -180,12 +180,13 @@ export async function getWorkspaceMarkdownDrift(
   const forgejoSet = new Set(forgejoPaths);
   const onlySidecar = sidecarPaths.filter((p) => !forgejoSet.has(p));
   const onlyForgejo = forgejoPaths.filter((p) => !sidecarSet.has(p));
+  const inSync = sidecarPaths.filter((p) => forgejoSet.has(p)).length;
   return {
     sidecarPaths,
     forgejoPaths,
     onlySidecar,
     onlyForgejo,
-    inSync: sidecarPaths.length + forgejoPaths.length - onlySidecar.length - onlyForgejo.length,
+    inSync,
   };
 }
 

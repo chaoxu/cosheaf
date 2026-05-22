@@ -30,7 +30,7 @@ const program = new Command("jupiter-e2e")
     const destructive = opts.destructive || process.env.COSHEAF_E2E_DESTRUCTIVE === "1";
     const checks = smokeChecks.filter((check) => !check.destructive || destructive);
     const grep = checks.map((check) => check.grep).join("|");
-    run("pnpm", ["exec", "playwright", "test", "tests/e2e/smoke.spec.ts", "--grep", grep], {
+    run("pnpm", ["exec", "playwright", "test", "--config", "playwright.smoke.config.ts", "--grep", grep], {
       env: {
         ...process.env,
         URL: target.url,
@@ -49,4 +49,3 @@ const program = new Command("jupiter-e2e")
   });
 
 program.parse(process.argv);
-

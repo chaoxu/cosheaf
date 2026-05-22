@@ -613,8 +613,6 @@ function SidePanel({
 }): ReactElement {
   return (
     <div
-      data-statusbar
-      data-testid="statusbar"
       className={cn(
         "max-h-[30%] overflow-y-auto border-t px-4 pb-3 pt-2",
         borderColor,
@@ -1216,6 +1214,8 @@ function WorkspaceStatusBar({
 }): ReactElement {
   return (
     <div
+      data-statusbar
+      data-testid="statusbar"
       className={cn(
         "shrink-0 flex min-w-0 items-center gap-2 border-t px-2 h-6 text-xs",
         muted,
