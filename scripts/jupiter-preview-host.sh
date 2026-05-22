@@ -65,6 +65,25 @@ wait_http() {
   return 1
 }
 
+wait_lab_route() {
+  local health_url="${url}/api/v1/health"
+  local helper="/srv/fleet-infra/bin/fleet-wait-lab-route"
+  if [[ -x "$helper" ]]; then
+    "$helper" --timeout 90 --insecure "$health_url"
+    return
+  fi
+
+  echo "warning: $helper missing; falling back to HTTPS curl readiness"
+  for i in $(seq 1 60); do
+    if curl -k -sf "$health_url" >/dev/null; then
+      echo "https ready after ${i}s"
+      return
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 deploy_local() {
   local port
   port="$(allocate_port)"
@@ -91,6 +110,7 @@ ${url} {
 EOF
   sudo -n /usr/bin/systemctl reload caddy
   wait_http "$port"
+  wait_lab_route
   sudo -n docker exec "$container" node dist-server/server/cli.js seed \
     --user chao \
     --password 123123aA \
