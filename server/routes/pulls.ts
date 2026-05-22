@@ -294,6 +294,7 @@ pulls.get("/:slug/pulls/:n/reviews", async (c) => {
   const out = reviews
     .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
     .map((r) => ({
+      id: r.id,
       username: r.user?.login ?? DELETED_USER_LOGIN,
       decision:
         r.state === "APPROVED"

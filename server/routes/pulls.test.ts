@@ -457,10 +457,11 @@ describe("pulls + branches routes", () => {
       const body = (await res.json()) as {
         approvals: number;
         rejections: number;
-        reviews: Array<{ username: string; decision: string }>;
+        reviews: Array<{ id: number; username: string; decision: string }>;
       };
       expect(body.approvals).toBe(2);
       expect(body.rejections).toBe(0);
+      expect(body.reviews.map((r) => r.id)).toEqual([1, 2, 3, 4]);
       expect(body.reviews.find((r) => r.username === "bob")?.decision).toBe("comment");
     });
 

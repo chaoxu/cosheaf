@@ -1113,7 +1113,7 @@ function ApprovalsPanel({
           <ol className="flex flex-col gap-1.5 mt-1 border-t border-[var(--cf-border)] pt-1.5">
             {meaningful.map((a) => (
               <li
-                key={`${a.username}-${a.created_at}`}
+                key={`review-${a.id}`}
                 className="flex flex-col gap-0.5"
               >
                 <div className="flex items-center gap-1.5 text-xs">

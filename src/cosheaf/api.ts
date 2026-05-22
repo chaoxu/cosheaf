@@ -78,6 +78,7 @@ export type OpenPull = PrMeta;
 export type PullReviewEntry = PrMeta & { approvals: number; rejections: number };
 
 export interface ApprovalRecord {
+  id: number;
   username: string;
   decision: Decision;
   comment: string | null;
