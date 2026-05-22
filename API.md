@@ -60,7 +60,6 @@ type ErrorCode =
   | "pat_invalid"       // 401 — backend rejected the stored token; SPA reloads to log in
   | "forbidden"         // 403 — authenticated but lacks the required role
   | "not_found"         // 404
-  | "method_not_allowed" // 405
   | "conflict"          // 409 — backend precondition (merge conflict, dup PR)
   | "backend_failed"    // 502 — backend write rejected; carries details.step
   | "reindex_failed"    // 502 — backend updated but sidecar didn't; retry-safe
@@ -107,45 +106,6 @@ POST /workspaces
 
 Creating a workspace provisions a Forgejo repository, branch protection,
 webhook, `.gitattributes`, and the initial sidecar index.
-
-## Backend Escape Hatch
-
-Normal clients should use the typed Cosheaf routes below. The legacy
-`/api/v1/w/:slug/forgejo/*` route is only an internal/compatibility escape
-hatch while older callers are migrated:
-
-```http
-{METHOD} /w/:slug/forgejo/:tail
-```
-
-Cosheaf anchors `:tail` under the workspace repository:
-
-```http
-/api/v1/repos/{owner}/{repo}/:tail
-```
-
-The caller supplies `Authorization: Bearer <token>` to Cosheaf. Cosheaf
-validates membership and forwards the request to the backing forge with the
-caller's identity. Audit happens at the backing forge access log.
-
-Allowed repo-scoped passthrough prefixes:
-
-- `pulls` with `GET`, `POST`, `PATCH`, `DELETE`
-- `issues` with `GET`, `POST`, `PATCH`, `PUT`, `DELETE`
-- `labels` with `GET`, `POST`, `PATCH`, `DELETE`
-- `milestones` with `GET`, `POST`, `PATCH`, `DELETE`
-- `branches` with `GET`
-- `commits` with `GET`
-- `contents` with `GET`
-- `reviews` with `GET`, `POST`
-- `markdown` with `POST`
-- `activities/feeds` with `GET`
-- `notifications` with `GET`, `PUT`
-
-`pulls/:n/merge` is intentionally blocked in passthrough. Use the typed merge
-route so Cosheaf can run its fresh-admin gate. `contents` and `branches` are
-read-only in passthrough because typed file/branch routes enforce Cosheaf's
-path, branch, frontmatter, and indexing rules.
 
 ## Files
 

@@ -19,7 +19,6 @@ export type ErrorCode =
   | "forbidden"
   | "unauthorized"
   | "conflict"
-  | "method_not_allowed"
   | "bad_gateway"
   | "pat_invalid"
   | "backend_failed"
@@ -51,9 +50,6 @@ export const unauthorized = (msg = "not authenticated") =>
 export const forbidden = (msg: string) => envelope("forbidden", 403, msg);
 
 export const notFound = (msg = "not found") => envelope("not_found", 404, msg);
-
-export const methodNotAllowed = (msg = "method not allowed for this path") =>
-  envelope("method_not_allowed", 405, msg);
 
 export const conflict = (msg: string) => envelope("conflict", 409, msg);
 

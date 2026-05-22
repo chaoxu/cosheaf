@@ -107,10 +107,8 @@ The typed routes live in `routes/pulls.ts`, `routes/issues.ts`,
 `routes/files.ts`, `routes/branches.ts`, and `routes/notifications.ts`. Keep or
 add them when a workflow needs a stable public contract, validation, response
 shaping, sidecar integration, SSE events, or Cosheaf-specific gates (e.g.
-`requireAdminFresh` on merge). The legacy `/api/v1/w/:slug/forgejo/*` route is
-only an internal/compatibility escape hatch while old callers are migrated; do
-not document it as an agent workflow and do not add new SPA or agent usage of
-it.
+`requireAdminFresh` on merge). Do not add a raw backend passthrough route; if a
+normal workflow needs an API surface, add a typed Cosheaf route.
 
 Typed routes are the public contract for Cosheaf document/index behavior:
 
@@ -151,7 +149,7 @@ internally.
 
 Rules of thumb:
 
-- Don't add new public client usage of `/forgejo/...`.
+- Don't add raw backend passthrough routes.
 - Don't expose a backend escape hatch when a typed route guards it (e.g.
   `pulls/:n/merge` must keep running `requireAdminFresh`).
 - Don't mirror backend forge state into SQLite just to filter on it; compose
@@ -269,7 +267,6 @@ server/
     branches.ts    # branch list/create/delete
     issues.ts      # issue UI projections, comments, timeline, dependencies
     notifications.ts # notification feed
-    forgejo-passthrough.ts # /forgejo/* agent escape hatch (audited)
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   main.tsx        # React entry
