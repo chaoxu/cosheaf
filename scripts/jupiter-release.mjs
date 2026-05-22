@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { Command, InvalidArgumentError } from "commander";
+import { output, run, tryOutput } from "./lib/run.mjs";
 
 const environments = {
   prod: {
@@ -12,19 +14,14 @@ const environments = {
   },
 };
 
-function usage() {
-  console.error("usage: node scripts/jupiter-release.mjs <deploy|verify|release|doctor|health|host-doctor> <prod>");
-  process.exit(2);
-}
-
-const [action, envName] = process.argv.slice(2).filter((arg) => arg !== "--");
-const env = environments[envName];
-if (!action || !env) usage();
-
-const port = process.env[env.portEnv] ?? env.defaultPort;
+const actions = ["deploy", "verify", "release", "doctor", "health", "host-doctor"];
 const JUPITER_HOST = process.env.COSHEAF_JUPITER_HOST ?? "jupiter";
 const JUPITER_CHECKOUT = process.env.COSHEAF_JUPITER_CHECKOUT ?? "/home/chaoxu/playground/cosheaf";
 const host = hostIdentity();
+let action = "";
+let envName = "";
+let env = null;
+let port = "";
 
 function hostIdentity() {
   try {
@@ -49,18 +46,6 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
-maybeDelegateToJupiter();
-
-function run(command, args, options = {}) {
-  console.log(`$ ${[command, ...args].join(" ")}`);
-  const result = spawnSync(command, args, {
-    stdio: "inherit",
-    shell: false,
-    ...options,
-  });
-  if (result.status !== 0) process.exit(result.status ?? 1);
-}
-
 function runDocker(args, options = {}) {
   const preserve = "COSHEAF_GIT_SHA,COSHEAF_ENV_DIR,COSHEAF_PROD_PORT,NPM_CONFIG_REGISTRY";
   if (host === "jupiter" && process.env.COSHEAF_DOCKER_NO_SUDO !== "1") {
@@ -70,32 +55,12 @@ function runDocker(args, options = {}) {
   run("docker", args, options);
 }
 
-function output(command, args) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    shell: false,
-  });
-  if (result.status !== 0) {
-    process.stderr.write(result.stderr);
-    process.exit(result.status ?? 1);
-  }
-  return result.stdout.trim();
-}
-
 function outputDocker(args) {
   const preserve = "COSHEAF_GIT_SHA,COSHEAF_ENV_DIR,COSHEAF_PROD_PORT,NPM_CONFIG_REGISTRY";
   if (host === "jupiter" && process.env.COSHEAF_DOCKER_NO_SUDO !== "1") {
     return output("sudo", ["-n", `--preserve-env=${preserve}`, "docker", ...args]);
   }
   return output("docker", args);
-}
-
-function tryOutput(command, args) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    shell: false,
-  });
-  return result.status === 0 ? result.stdout.trim() : "";
 }
 
 function fail(message) {
@@ -212,27 +177,52 @@ function hostDoctor() {
   run("df", ["-h", "/", "/srv"]);
 }
 
-switch (action) {
-  case "deploy":
-    deploy();
-    show();
-    break;
-  case "health":
-    health();
-    break;
-  case "host-doctor":
-    hostDoctor();
-    break;
-  case "doctor":
-    doctor();
-    break;
-  case "verify":
-    verify();
-    break;
-  case "release":
-    release();
-    show();
-    break;
-  default:
-    usage();
+function parseEnvironment(value) {
+  const next = environments[value];
+  if (!next) throw new InvalidArgumentError(`environment must be one of ${Object.keys(environments).join("|")}`);
+  return value;
 }
+
+function parseAction(value) {
+  if (!actions.includes(value)) throw new InvalidArgumentError(`action must be one of ${actions.join("|")}`);
+  return value;
+}
+
+function dispatch() {
+  switch (action) {
+    case "deploy":
+      deploy();
+      show();
+      break;
+    case "health":
+      health();
+      break;
+    case "host-doctor":
+      hostDoctor();
+      break;
+    case "doctor":
+      doctor();
+      break;
+    case "verify":
+      verify();
+      break;
+    case "release":
+      release();
+      show();
+      break;
+  }
+}
+
+new Command("jupiter-release")
+  .description("deploy and verify Cosheaf on jupiter")
+  .argument("<action>", `one of ${actions.join("|")}`, parseAction)
+  .argument("<environment>", `one of ${Object.keys(environments).join("|")}`, parseEnvironment)
+  .action((actionArg, envArg) => {
+    action = actionArg;
+    envName = envArg;
+    env = environments[envName];
+    port = process.env[env.portEnv] ?? env.defaultPort;
+    maybeDelegateToJupiter();
+    dispatch();
+  })
+  .parse(process.argv);
