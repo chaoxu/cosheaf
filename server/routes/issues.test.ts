@@ -186,6 +186,29 @@ describe("issues routes", () => {
     });
   });
 
+  it("normalizes activity limits before forwarding to Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValue(ok([]));
+    const app = appFor(db);
+
+    await app.request("/api/v1/w/w/activities?limit=-5", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.request("/api/v1/w/w/activities?limit=abc", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await app.request("/api/v1/w/w/activities?limit=999", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    const limits = fetchMock.mock.calls.map((call) => {
+      const url = new URL(String(call[0]));
+      return url.searchParams.get("limit");
+    });
+    expect(limits).toEqual(["1", "50", "100"]);
+  });
+
   it("rejects malformed and self dependency mutations before calling Forgejo", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

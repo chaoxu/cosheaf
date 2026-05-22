@@ -399,6 +399,7 @@ export function CosheafApp(): ReactElement {
   }
   return (
     <WorkspaceView
+      key={view.workspace.slug}
       user={view.user}
       workspace={view.workspace}
       onBack={() => {

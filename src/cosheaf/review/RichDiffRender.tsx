@@ -20,6 +20,7 @@ import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
 import DOMPurify from "dompurify";
 import { parseFrontmatterYaml } from "../../../shared/frontmatter-yaml";
 import type { LineComment } from "../api";
+import { escapeHtml } from "../lib/html-escape";
 import { CommentThread, type CommentActions } from "./CommentThread";
 import { groupCommentsByLine } from "./comment-anchors";
 
@@ -49,6 +50,7 @@ export function RichDiffRender({
   const [html, setHtml] = useState("");
   useEffect(() => {
     let cancelled = false;
+    setHtml("");
     async function render(): Promise<void> {
       const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
       const { html: rendered } = renderToHtml(markdownForReaderWithOriginalLines(source), ctx, {
@@ -56,7 +58,11 @@ export function RichDiffRender({
       });
       if (!cancelled) setHtml(DOMPurify.sanitize(rendered));
     }
-    void render();
+    void render().catch(() => {
+      if (!cancelled) {
+        setHtml(DOMPurify.sanitize(`<pre>${escapeHtml(source)}</pre>`));
+      }
+    });
     return () => {
       cancelled = true;
     };

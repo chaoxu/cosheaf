@@ -726,6 +726,10 @@ export class Forgejo {
     });
   }
 
+  async getNotificationThread(id: number): Promise<ForgejoNotificationThread> {
+    return this.req<ForgejoNotificationThread>(`/api/v1/notifications/threads/${id}`);
+  }
+
   async markRepoNotificationsRead(owner: string, repo: string): Promise<void> {
     await this.req(this.repoPath(owner, repo, `notifications`), {
       method: "PUT",

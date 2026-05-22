@@ -202,7 +202,8 @@ issues.delete("/:slug/issues/:number/dependencies", async (c) => {
 // Typed because Forgejo activities encode references in JSON-ish strings; the
 // SPA gets parsed issue refs and normalized timestamps.
 issues.get("/:slug/activities", async (c) => {
-  const limit = Math.min(Number(c.req.query("limit") ?? 50), 100);
+  const rawLimit = Number(c.req.query("limit") ?? 50);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 50;
   const { fj, owner, repo } = c.get("repoCtx");
   const raw = await fj.listRepoActivities(owner, repo, { limit });
   const safe = raw ?? [];

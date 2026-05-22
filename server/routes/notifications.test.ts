@@ -120,14 +120,58 @@ describe("notifications route", () => {
   it("mark-read calls Forgejo PATCH for the thread", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(empty(204));
+    fetchMock
+      .mockResolvedValueOnce(ok({
+        id: 101,
+        unread: true,
+        pinned: false,
+        updated_at: "2026-05-17T10:00:00Z",
+        url: "http://forgejo.test/api/v1/notifications/threads/101",
+        subject: {
+          type: "Issue",
+          title: "Bug A",
+          url: "http://forgejo.test/api/v1/repos/owner/w/issues/42",
+          latest_comment_url: "",
+        },
+        repository: { full_name: "owner/w", name: "w" },
+      }))
+      .mockResolvedValueOnce(empty(204));
     const res = await appFor(db).request("/api/v1/w/w/notifications/101/read", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/notifications/threads/101");
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "GET" });
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/api/v1/notifications/threads/101");
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "PATCH" });
+  });
+
+  it("does not mark a notification thread from another repo as read", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok({
+      id: 101,
+      unread: true,
+      pinned: false,
+      updated_at: "2026-05-17T10:00:00Z",
+      url: "http://forgejo.test/api/v1/notifications/threads/101",
+      subject: {
+        type: "Issue",
+        title: "Bug A",
+        url: "http://forgejo.test/api/v1/repos/owner/other/issues/42",
+        latest_comment_url: "",
+      },
+      repository: { full_name: "owner/other", name: "other" },
+    }));
+
+    const res = await appFor(db).request("/api/v1/w/w/notifications/101/read", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("mark-all marks every thread in the workspace's repo", async () => {
