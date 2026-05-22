@@ -126,6 +126,19 @@ To see the browser check matrix:
 pnpm smoke:list
 ```
 
+For agent/API clients such as autoprover, run the API smoke against the target
+environment:
+
+```sh
+COSHEAF_API_URL=http://localhost:3030/api/v1 pnpm smoke:api
+COSHEAF_API_URL=https://cosheaf.lab/api/v1 pnpm smoke:api
+```
+
+It logs in as the seeded admin and reviewer users, writes a file through the
+typed file route, verifies read-after-write indexing, opens and reviews a PR
+through Forgejo passthrough, merges through Cosheaf's typed merge route, and
+reads the merged file back from `main`.
+
 The direct container ports are:
 
 - production: `3030`
