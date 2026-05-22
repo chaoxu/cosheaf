@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const environments = {
@@ -21,6 +22,34 @@ const env = environments[envName];
 if (!action || !env) usage();
 
 const port = process.env[env.portEnv] ?? env.defaultPort;
+const JUPITER_HOST = process.env.COSHEAF_JUPITER_HOST ?? "jupiter";
+const JUPITER_CHECKOUT = process.env.COSHEAF_JUPITER_CHECKOUT ?? "/home/chaoxu/playground/cosheaf";
+const host = hostIdentity();
+
+function hostIdentity() {
+  try {
+    return readFileSync("/etc/lab-host", "utf8").trim();
+  } catch (_error) {
+    return "unknown";
+  }
+}
+
+function maybeDelegateToJupiter() {
+  if (host === "jupiter" || process.env.COSHEAF_JUPITER_LOCAL === "1") return;
+  const gitSync =
+    action === "deploy" || action === "release"
+      ? "git fetch origin main && git switch main && git pull --ff-only origin main && "
+      : "";
+  const remote = `cd ${shellQuote(JUPITER_CHECKOUT)} && ${gitSync}COSHEAF_JUPITER_LOCAL=1 pnpm jupiter:release -- ${shellQuote(action)} ${shellQuote(envName)}`;
+  run("ssh", [JUPITER_HOST, remote]);
+  process.exit(0);
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+maybeDelegateToJupiter();
 
 function run(command, args, options = {}) {
   console.log(`$ ${[command, ...args].join(" ")}`);
@@ -30,6 +59,15 @@ function run(command, args, options = {}) {
     ...options,
   });
   if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+function runDocker(args, options = {}) {
+  const preserve = "COSHEAF_GIT_SHA,COSHEAF_ENV_DIR,COSHEAF_PROD_PORT,NPM_CONFIG_REGISTRY";
+  if (host === "jupiter" && process.env.COSHEAF_DOCKER_NO_SUDO !== "1") {
+    run("sudo", ["-n", `--preserve-env=${preserve}`, "docker", ...args], options);
+    return;
+  }
+  run("docker", args, options);
 }
 
 function output(command, args) {
@@ -42,6 +80,14 @@ function output(command, args) {
     process.exit(result.status ?? 1);
   }
   return result.stdout.trim();
+}
+
+function outputDocker(args) {
+  const preserve = "COSHEAF_GIT_SHA,COSHEAF_ENV_DIR,COSHEAF_PROD_PORT,NPM_CONFIG_REGISTRY";
+  if (host === "jupiter" && process.env.COSHEAF_DOCKER_NO_SUDO !== "1") {
+    return output("sudo", ["-n", `--preserve-env=${preserve}`, "docker", ...args]);
+  }
+  return output("docker", args);
 }
 
 function tryOutput(command, args) {
@@ -75,13 +121,13 @@ function requireProdReleaseSource(commit) {
 }
 
 function containerEnv(name) {
-  return output("docker", ["exec", env.service, "sh", "-c", `printenv ${name} || true`]) || "unknown";
+  return outputDocker(["exec", env.service, "sh", "-c", `printenv ${name} || true`]) || "unknown";
 }
 
 function deploy() {
   const commit = process.env.COSHEAF_GIT_SHA || tryOutput("git", ["rev-parse", "HEAD"]) || "unknown";
   requireProdReleaseSource(commit);
-  run("docker", [
+  runDocker([
     "compose",
     "--profile",
     env.profile,
@@ -108,12 +154,12 @@ function health() {
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
-  run("docker", ["logs", env.service, "--tail", "100"]);
+  runDocker(["logs", env.service, "--tail", "100"]);
   process.exit(1);
 }
 
 function doctor() {
-  run("docker", [
+  runDocker([
     "compose",
     "--profile",
     env.profile,
@@ -158,8 +204,12 @@ function hostDoctor() {
     console.error("webhook URL should be direct/reachable from Forgejo, not .lab");
     process.exit(1);
   }
-  run("docker", ["exec", "forgejo-cosheaf", "wget", "-qO-", webhookUrl.replace("/api/v1/webhooks/forgejo", "/api/v1/health")]);
+  runDocker(["exec", "forgejo-cosheaf", "wget", "-qO-", webhookUrl.replace("/api/v1/webhooks/forgejo", "/api/v1/health")]);
   run("sudo", ["-n", "/usr/bin/caddy", "validate", "--config", "/etc/caddy/Caddyfile"]);
+  run("curl", ["-sS", "-o", "/dev/null", "-w", "package registry: http=%{http_code}\\n", "http://packages.lab/api/packages/chaoxu/npm/"]);
+  runDocker(["ps", "--filter", `name=${env.service}`, "--format", "container={{.Names}} status={{.Status}} image={{.Image}}"]);
+  runDocker(["system", "df"]);
+  run("df", ["-h", "/", "/srv"]);
 }
 
 switch (action) {

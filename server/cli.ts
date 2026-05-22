@@ -9,8 +9,7 @@ import { getDb, loadConfig } from "./db.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
 import {
-  ensureWorkspaceFile,
-  provisionWorkspace,
+  getWorkspaceMarkdownDrift,
   readWorkspaceFormatFromTopics,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
@@ -24,184 +23,11 @@ import {
   type DocumentFormatId,
 } from "../shared/document-format.js";
 import {
-  COFLAT_SHOWCASE_BIB,
-  COFLAT_SHOWCASE_BIB_PATH,
-  COFLAT_SHOWCASE_IMAGE,
-  COFLAT_SHOWCASE_IMAGE_PATH,
-  COFLAT_SHOWCASE_ISSUE_TITLE,
-  COFLAT_SHOWCASE_PAGE_PATH,
-  coflatFeatureShowcase,
-} from "./seed-fixtures.js";
-
-interface SeedOptions {
-  user: string;
-  password: string;
-  workspace: string;
-  workspaceName: string;
-  defaultMdFormat: DocumentFormatId;
-}
-
-const RENDERING_FIXTURE_ISSUE_TITLE = "Rendering fixture: long Markdown issue";
-const RENDERING_FIXTURE_PR_TITLE = "Rendering fixture: long Markdown PR";
-const RENDERING_FIXTURE_BRANCH = "fixtures/rendering-markdown";
-const RENDERING_FIXTURE_PATH = "notes/rendering-fixture.md";
-const SIDE_BY_SIDE_FIXTURE_PR_TITLE = "Rendering fixture: side-by-side Markdown PR";
-const SIDE_BY_SIDE_FIXTURE_BRANCH = "fixtures/side-by-side-rendering";
-const SIDE_BY_SIDE_FIXTURE_PATH = "hello.md";
-const MERGED_FIXTURE_PR_TITLE = "Rendering fixture: merged Markdown PR";
-const MERGED_FIXTURE_BRANCH = "fixtures/merged-rendering-markdown";
-const MERGED_FIXTURE_PATH = "notes/merged-rendering-fixture.md";
-
-function renderingFixtureIssueBody(workspaceName: string): string {
-  return [
-    "## Purpose",
-    "",
-    `This seed issue exists so ${workspaceName} always has a long Markdown body for checking issue rendering, comments, references, and layout wrapping.`,
-    "",
-    "It intentionally includes multiple block types in one place:",
-    "",
-    "- a page reference to [@hello]",
-    "- an issue-style reference like #1",
-    "- a file-line reference like hello.md#L1-4",
-    "- inline math $a^2 + b^2 = c^2$ and display math",
-    "",
-    "$$",
-    "\\sum_{k=1}^{n} k = \\frac{n(n+1)}{2}",
-    "$$",
-    "",
-    "### Checklist",
-    "",
-    "- [ ] Headings keep a readable vertical rhythm.",
-    "- [ ] Lists, checkboxes, and long paragraphs wrap without overlapping the sidebar.",
-    "- [ ] Bare references become clickable where Cosheaf supports them.",
-    "",
-    "| Surface | What to inspect |",
-    "| --- | --- |",
-    "| Issue body | Long-form Markdown and math |",
-    "| Issue sidebar | Truncated titles and selection state |",
-    "| Browser back | Returning from issue detail to a file |",
-    "",
-    "> This quote is deliberately a little longer than usual, so the renderer has to handle multi-line blockquote wrapping rather than only a one-line sample.",
-    "",
-    "```ts",
-    "export function seededRenderingFixture(): string {",
-    '  return "issue markdown stays readable";',
-    "}",
-    "```",
-  ].join("\n");
-}
-
-function renderingFixturePrBody(): string {
-  return [
-    "## Review focus",
-    "",
-    "This seeded PR gives the review UI a stable long-form description and a Markdown file diff.",
-    "",
-    "Please inspect:",
-    "",
-    "1. the PR header rendering",
-    "2. rich diff rendering for the added Markdown file",
-    "3. references such as [@hello], hello.md#L1-4, and #1",
-    "",
-    "### Notes",
-    "",
-    "- The branch is intentionally left open for manual review testing.",
-    "- The body includes math: $e^{i\\pi} + 1 = 0$.",
-    "- The changed file includes headings, tables, code fences, and long paragraphs.",
-  ].join("\n");
-}
-
-function renderingFixturePage(workspaceName: string): string {
-  return [
-    "---",
-    "id: rendering-fixture",
-    "title: Rendering Fixture",
-    "---",
-    "# Rendering Fixture",
-    "",
-    `This page is seeded on a pull-request branch for ${workspaceName}. It is long enough to exercise the rich diff renderer and the editor's reader mode.`,
-    "",
-    "See [@hello] for the main seed page. This paragraph also mentions hello.md#L1-4 and #1 so bare-reference rewriting can be checked in review surfaces.",
-    "",
-    "## Mathematical block",
-    "",
-    "Inline math should render inside a sentence, for example $x^2 + y^2 = z^2$.",
-    "",
-    "$$",
-    "\\int_0^1 x^2\\,dx = \\frac{1}{3}",
-    "$$",
-    "",
-    "## Table",
-    "",
-    "| Feature | Expected behavior |",
-    "| --- | --- |",
-    "| Headings | Maintain hierarchy |",
-    "| Tables | Keep columns readable |",
-    "| Code fences | Preserve monospace formatting |",
-    "| References | Stay clickable where supported |",
-    "",
-    "## Code fence",
-    "",
-    "```ts",
-    "type SeededSurface = \"issue\" | \"pull-request\" | \"diff\";",
-    "",
-    "export const seededSurface: SeededSurface = \"diff\";",
-    "```",
-    "",
-    "## Long paragraph",
-    "",
-    "The renderer should handle a deliberately long paragraph without clipping or overlapping neighboring UI. This text is verbose on purpose: it gives the sidebar, review header, status bar, and scroll containers enough content to expose wrapping and overflow problems that a tiny fixture would miss.",
-    "",
-    "> A blockquote in the changed file helps verify quote styling in rich diff mode.",
-    "",
-  ].join("\n");
-}
-
-function sideBySideFixturePrBody(): string {
-  return [
-    "## Review focus",
-    "",
-    "This seeded PR modifies an existing Markdown page so the side-by-side rich diff has meaningful base and head panes.",
-    "",
-    "- Base side should show the original `hello.md` body.",
-    "- Head side should show the updated long-form body.",
-    "- References like [@hello], hello.md#L1-4, and #1 should render in the same reader style as issue and PR bodies.",
-  ].join("\n");
-}
-
-function sideBySideFixturePage(workspaceName: string): string {
-  return [
-    "---",
-    "id: hello",
-    "title: Hello",
-    "---",
-    "# Hello",
-    "",
-    `This branch version of the ${workspaceName} hello page gives reviewers a real before/after comparison.`,
-    "",
-    "The paragraph is intentionally longer than the original seed. It should wrap with the same typography and spacing as the editor rich mode, including links such as [@hello], issue references such as #1, and path references such as hello.md#L1-4.",
-    "",
-    "## Side-by-side checks",
-    "",
-    "- The base pane should not be empty.",
-    "- The head pane should show this checklist.",
-    "- Tables and code blocks should keep the same visual language as the editor.",
-    "",
-    "| Pane | Expected content |",
-    "| --- | --- |",
-    "| base | original hello page |",
-    "| head | updated rendering fixture page |",
-    "",
-    "```ts",
-    "export const sideBySideFixture = true;",
-    "```",
-    "",
-    "$$",
-    "a^2 + b^2 = c^2",
-    "$$",
-    "",
-  ].join("\n");
-}
+  SEED_PROFILES,
+  isSeedProfile,
+  seedWorkspace,
+  type SeedOptions,
+} from "./seed.js";
 
 async function readPassword(prompt: string): Promise<string> {
   if (!stdin.isTTY) {
@@ -287,48 +113,53 @@ async function withWorkspace<T>(
   return fn({ config, db, forgejo, workspace: ws });
 }
 
-function valueFlag(args: string[], flag: string): string | undefined {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === flag) {
-      const value = args[i + 1];
-      return value && !value.startsWith("-") ? value : undefined;
-    }
-    if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+function addSeedOptions(command: Command): Command {
+  return command
+    .requiredOption("--user <user>", "Forgejo username to create or seed as")
+    .requiredOption("--password <password>", "Forgejo password for --user")
+    .requiredOption("--workspace <slug>", "workspace repo slug")
+    .option("--workspace-name <name>", "workspace display name; defaults to --workspace")
+    .option("--default-md-format <id>", "workspace markdown format", DEFAULT_DOCUMENT_FORMAT_ID)
+    .option("--profile <profile>", `seed profile (${SEED_PROFILES.join("|")})`, "all");
+}
+
+export function normalizeSeedOptions(opts: {
+  user?: string;
+  password?: string;
+  workspace?: string;
+  workspaceName?: string;
+  defaultMdFormat?: string;
+  profile?: string;
+}): SeedOptions {
+  const { user, password, workspace } = opts;
+  if (!user) throw new InvalidArgumentError("seed requires --user");
+  if (!password) throw new InvalidArgumentError("seed requires --password");
+  if (!workspace) throw new InvalidArgumentError("seed requires --workspace");
+  if (!WORKSPACE_SLUG_RE.test(workspace)) {
+    throw new InvalidArgumentError(`workspace must match ${WORKSPACE_SLUG_RE}`);
   }
-  return undefined;
+  const defaultMdFormat = opts.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID;
+  if (!isDocumentFormatId(defaultMdFormat)) {
+    throw new InvalidArgumentError(`--default-md-format must be a known DocumentFormatId, got: ${defaultMdFormat}`);
+  }
+  const profile = opts.profile ?? "all";
+  if (!isSeedProfile(profile)) {
+    throw new InvalidArgumentError(`--profile must be one of ${SEED_PROFILES.join("|")}, got: ${profile}`);
+  }
+  return {
+    user,
+    password,
+    workspace,
+    workspaceName: opts.workspaceName ?? workspace,
+    defaultMdFormat,
+    profile,
+  };
 }
 
 export function parseSeedOptions(args: string[]): SeedOptions {
-  const user = valueFlag(args, "--user");
-  const password = valueFlag(args, "--password");
-  const workspace = valueFlag(args, "--workspace");
-  const workspaceName = valueFlag(args, "--workspace-name") ?? workspace;
-  const formatRaw = valueFlag(args, "--default-md-format") ?? DEFAULT_DOCUMENT_FORMAT_ID;
-  const missing = [
-    ["--user", user],
-    ["--password", password],
-    ["--workspace", workspace],
-    ["--workspace-name", workspaceName],
-  ]
-    .filter(([, value]) => !value)
-    .map(([flag]) => flag);
-  if (missing.length > 0) {
-    throw new Error(`seed requires ${missing.join(", ")}`);
-  }
-  if (!WORKSPACE_SLUG_RE.test(workspace ?? "")) {
-    throw new Error(`workspace must match ${WORKSPACE_SLUG_RE}`);
-  }
-  if (!isDocumentFormatId(formatRaw)) {
-    throw new Error(`--default-md-format must be a known DocumentFormatId, got: ${formatRaw}`);
-  }
-  return {
-    user: user as string,
-    password: password as string,
-    workspace: workspace as string,
-    workspaceName: workspaceName as string,
-    defaultMdFormat: formatRaw,
-  };
+  const command = addSeedOptions(new Command("seed").exitOverride());
+  command.parse(args, { from: "user" });
+  return normalizeSeedOptions(command.opts());
 }
 
 // Create the Forgejo account if absent. Users live entirely on Forgejo;
@@ -363,283 +194,11 @@ async function userAdd(username: string): Promise<void> {
   await ensureForgejoUser(username, password);
 }
 
-async function seed(args: string[]): Promise<void> {
-  const options = parseSeedOptions(args);
+async function seed(options: SeedOptions): Promise<void> {
   await ensureForgejoUser(options.user, options.password);
 
   const { config, db, forgejo } = ctx();
-  const user = { username: options.user };
-  const { workspace, createdRepo } = await provisionWorkspace(db, forgejo, config, {
-    slug: options.workspace,
-    name: options.workspaceName,
-    user,
-    forgejoUsername: options.user,
-    allowExistingLocal: true,
-    defaultMdFormat: options.defaultMdFormat,
-  });
-  console.log(`${createdRepo ? "created" : "ensured"} workspace ${options.workspace}`);
-
-  const files = [
-    {
-      path: ".gitattributes",
-      content: "*.md text eol=lf -text\n",
-      message: "chore: lock byte-exactness for .md",
-    },
-    {
-      path: "hello.md",
-      content: [
-        "---",
-        "id: hello",
-        "title: Hello",
-        "---",
-        "# Hello",
-        "",
-        `This is the default development page for ${options.workspaceName}.`,
-        "",
-      ].join("\n"),
-      message: "docs: add development hello page",
-    },
-    {
-      path: COFLAT_SHOWCASE_PAGE_PATH,
-      content: coflatFeatureShowcase(options.workspaceName),
-      message: "docs: add coflat feature showcase",
-    },
-    {
-      path: COFLAT_SHOWCASE_BIB_PATH,
-      content: COFLAT_SHOWCASE_BIB,
-      message: "docs: add coflat showcase bibliography",
-    },
-    {
-      path: COFLAT_SHOWCASE_IMAGE_PATH,
-      content: COFLAT_SHOWCASE_IMAGE,
-      message: "docs: add coflat showcase image",
-    },
-  ];
-
-  for (const file of files) {
-    const created = await ensureWorkspaceFile(forgejo, config, workspace.slug, file);
-    if (created) console.log(`created ${file.path}`);
-  }
-  await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
-  await ensureRenderingFixtures(forgejo, config, workspace.slug, options.workspaceName);
-
-  console.log(`seeded dev workspace: user=${options.user} workspace=${options.workspace}`);
-}
-
-async function ensureRenderingFixtures(
-  forgejo: Forgejo,
-  config: ReturnType<typeof loadConfig>,
-  repo: string,
-  workspaceName: string,
-): Promise<void> {
-  const issues = await forgejo.listIssues(config.forgejoOwner, repo, {
-    state: "all",
-    limit: 50,
-    q: RENDERING_FIXTURE_ISSUE_TITLE,
-  });
-  if (issues.some((issue) => issue.title === RENDERING_FIXTURE_ISSUE_TITLE)) {
-    console.log("rendering fixture issue already exists");
-  } else {
-    await forgejo.createIssue(config.forgejoOwner, repo, {
-      title: RENDERING_FIXTURE_ISSUE_TITLE,
-      body: renderingFixtureIssueBody(workspaceName),
-    });
-    console.log("created rendering fixture issue");
-  }
-
-  const showcaseIssues = await forgejo.listIssues(config.forgejoOwner, repo, {
-    state: "all",
-    limit: 50,
-    q: COFLAT_SHOWCASE_ISSUE_TITLE,
-  });
-  if (showcaseIssues.some((issue) => issue.title === COFLAT_SHOWCASE_ISSUE_TITLE)) {
-    console.log("coflat showcase issue already exists");
-  } else {
-    await forgejo.createIssue(config.forgejoOwner, repo, {
-      title: COFLAT_SHOWCASE_ISSUE_TITLE,
-      body: coflatFeatureShowcase(workspaceName),
-    });
-    console.log("created coflat showcase issue");
-  }
-
-  const branch = await forgejo.getBranch(config.forgejoOwner, repo, RENDERING_FIXTURE_BRANCH);
-  if (!branch) {
-    await forgejo.createBranch(config.forgejoOwner, repo, {
-      newBranchName: RENDERING_FIXTURE_BRANCH,
-      oldBranchName: "main",
-    });
-    console.log(`created branch ${RENDERING_FIXTURE_BRANCH}`);
-  }
-
-  const page = renderingFixturePage(workspaceName);
-  const existingFile = await forgejo.getFileMeta(
-    config.forgejoOwner,
-    repo,
-    RENDERING_FIXTURE_BRANCH,
-    RENDERING_FIXTURE_PATH,
-  );
-  if (!existingFile) {
-    await forgejo.putFile(config.forgejoOwner, repo, {
-      branch: RENDERING_FIXTURE_BRANCH,
-      path: RENDERING_FIXTURE_PATH,
-      content: page,
-      message: "docs: add rendering fixture",
-    });
-    console.log(`created ${RENDERING_FIXTURE_PATH} on ${RENDERING_FIXTURE_BRANCH}`);
-  }
-
-  const pulls = await forgejo.listPulls(config.forgejoOwner, repo, "all");
-  if (pulls.some((pull) => pull.title === RENDERING_FIXTURE_PR_TITLE || pull.head.ref === RENDERING_FIXTURE_BRANCH)) {
-    console.log("rendering fixture PR already exists");
-  } else {
-    await forgejo.createPull(config.forgejoOwner, repo, {
-      head: RENDERING_FIXTURE_BRANCH,
-      base: "main",
-      title: RENDERING_FIXTURE_PR_TITLE,
-      body: renderingFixturePrBody(),
-    });
-    console.log("created rendering fixture PR");
-  }
-
-  await ensureSideBySideRenderingFixture(forgejo, config, repo, workspaceName, pulls);
-  await ensureMergedRenderingFixture(forgejo, config, repo, workspaceName, pulls);
-}
-
-async function ensureSideBySideRenderingFixture(
-  forgejo: Forgejo,
-  config: ReturnType<typeof loadConfig>,
-  repo: string,
-  workspaceName: string,
-  pulls: Awaited<ReturnType<Forgejo["listPulls"]>>,
-): Promise<void> {
-  const branch = await forgejo.getBranch(config.forgejoOwner, repo, SIDE_BY_SIDE_FIXTURE_BRANCH);
-  if (!branch) {
-    await forgejo.createBranch(config.forgejoOwner, repo, {
-      newBranchName: SIDE_BY_SIDE_FIXTURE_BRANCH,
-      oldBranchName: "main",
-    });
-    console.log(`created branch ${SIDE_BY_SIDE_FIXTURE_BRANCH}`);
-  }
-  const content = sideBySideFixturePage(workspaceName);
-  const meta = await forgejo.getFileMeta(
-    config.forgejoOwner,
-    repo,
-    SIDE_BY_SIDE_FIXTURE_BRANCH,
-    SIDE_BY_SIDE_FIXTURE_PATH,
-  );
-  const current = meta
-    ? await forgejo.getRawFile(
-        config.forgejoOwner,
-        repo,
-        SIDE_BY_SIDE_FIXTURE_BRANCH,
-        SIDE_BY_SIDE_FIXTURE_PATH,
-      )
-    : null;
-  if (current !== content) {
-    await forgejo.putFile(config.forgejoOwner, repo, {
-      branch: SIDE_BY_SIDE_FIXTURE_BRANCH,
-      path: SIDE_BY_SIDE_FIXTURE_PATH,
-      content,
-      sha: meta?.sha,
-      message: meta
-        ? "docs: update side-by-side rendering fixture"
-        : "docs: add side-by-side rendering fixture",
-    });
-    console.log(`${meta ? "updated" : "created"} ${SIDE_BY_SIDE_FIXTURE_PATH} on ${SIDE_BY_SIDE_FIXTURE_BRANCH}`);
-  }
-  if (pulls.some((pull) => pull.title === SIDE_BY_SIDE_FIXTURE_PR_TITLE || pull.head.ref === SIDE_BY_SIDE_FIXTURE_BRANCH)) {
-    console.log("side-by-side rendering fixture PR already exists");
-    return;
-  }
-  await forgejo.createPull(config.forgejoOwner, repo, {
-    head: SIDE_BY_SIDE_FIXTURE_BRANCH,
-    base: "main",
-    title: SIDE_BY_SIDE_FIXTURE_PR_TITLE,
-    body: sideBySideFixturePrBody(),
-  });
-  console.log("created side-by-side rendering fixture PR");
-}
-
-async function mergePullWithRetry(
-  forgejo: Forgejo,
-  config: ReturnType<typeof loadConfig>,
-  repo: string,
-  index: number,
-): Promise<void> {
-  const attempts = 5;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      await forgejo.mergePull(config.forgejoOwner, repo, index, {
-        Do: "squash",
-        message: "docs: merge rendering fixture",
-        force: true,
-      });
-      return;
-    } catch (err) {
-      const isMergeabilityLag =
-        err instanceof ForgejoError &&
-        err.status === 405 &&
-        err.bodyText.toLowerCase().includes("try again later");
-      if (!isMergeabilityLag || attempt === attempts) {
-        throw err;
-      }
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-    }
-  }
-}
-
-async function ensureMergedRenderingFixture(
-  forgejo: Forgejo,
-  config: ReturnType<typeof loadConfig>,
-  repo: string,
-  workspaceName: string,
-  pulls: Awaited<ReturnType<Forgejo["listPulls"]>>,
-): Promise<void> {
-  const existing = pulls.find((pull) => pull.title === MERGED_FIXTURE_PR_TITLE || pull.head.ref === MERGED_FIXTURE_BRANCH);
-  if (existing?.merged) {
-    console.log("merged rendering fixture PR already exists");
-    return;
-  }
-  const branch = await forgejo.getBranch(config.forgejoOwner, repo, MERGED_FIXTURE_BRANCH);
-  if (!branch) {
-    await forgejo.createBranch(config.forgejoOwner, repo, {
-      newBranchName: MERGED_FIXTURE_BRANCH,
-      oldBranchName: "main",
-    });
-    console.log(`created branch ${MERGED_FIXTURE_BRANCH}`);
-  }
-  const mergedContent = renderingFixturePage(workspaceName)
-    .replace("id: rendering-fixture", "id: merged-rendering-fixture")
-    .replace("title: Rendering Fixture", "title: Merged Rendering Fixture");
-  const existingFile = await forgejo.getFileMeta(
-    config.forgejoOwner,
-    repo,
-    MERGED_FIXTURE_BRANCH,
-    MERGED_FIXTURE_PATH,
-  );
-  if (!existingFile) {
-    await forgejo.putFile(config.forgejoOwner, repo, {
-      branch: MERGED_FIXTURE_BRANCH,
-      path: MERGED_FIXTURE_PATH,
-      content: mergedContent,
-      message: "docs: add merged rendering fixture",
-    });
-    console.log(`created ${MERGED_FIXTURE_PATH} on ${MERGED_FIXTURE_BRANCH}`);
-  }
-  let pr = existing;
-  if (!pr) {
-    pr = await forgejo.createPull(config.forgejoOwner, repo, {
-      head: MERGED_FIXTURE_BRANCH,
-      base: "main",
-      title: MERGED_FIXTURE_PR_TITLE,
-      body: "## Merged rendering fixture\n\nThis PR is merged by the seed so the workspace has at least one completed review-flow artifact.",
-    });
-    console.log("created merged rendering fixture PR");
-  }
-  if (!pr.merged) {
-    await mergePullWithRetry(forgejo, config, repo, pr.number);
-    console.log("merged rendering fixture PR");
-  }
+  await seedWorkspace({ options, db, forgejo, config });
 }
 
 async function workspaceRm(slug: string): Promise<void> {
@@ -855,20 +414,13 @@ async function doctor(): Promise<void> {
 
       results.push(
         await checkWarn(`workspace ${ws.slug}: sidecar in sync with Forgejo tree`, async () => {
-          const tree = await forgejo.getTree(config.forgejoOwner, ws.slug, "main", true);
-          const forgejoCount = tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).length;
-          const sidecarCount = (
-            db
-              .prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?")
-              .get(ws.slug) as { n: number }
-          ).n;
-          if (forgejoCount === sidecarCount) {
-            return { status: "ok", detail: `${sidecarCount} pages` };
+          const drift = await getWorkspaceMarkdownDrift(db, forgejo, config, ws);
+          if (drift.onlySidecar.length === 0 && drift.onlyForgejo.length === 0) {
+            return { status: "ok", detail: `${drift.inSync} pages` };
           }
-          const delta = forgejoCount - sidecarCount;
           return {
             status: "warn",
-            detail: `forgejo=${forgejoCount} sidecar=${sidecarCount} (Δ=${delta >= 0 ? "+" : ""}${delta}); run \`pnpm cli workspace reindex ${ws.slug}\``,
+            detail: `${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only; run \`pnpm cli workspace reindex ${ws.slug}\``,
           };
         }),
       );
@@ -930,31 +482,17 @@ async function inspectWorkspace(slug: string): Promise<void> {
     `workspace ${ws.slug} (${display}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.defaultMdFormat}\n`,
   );
 
-  const sidecarPaths = new Set(
-    (
-      db
-        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_slug = ?")
-        .all(ws.slug) as Array<{ path: string }>
-    ).map((r) => r.path),
-  );
-  let forgejoPaths: Set<string>;
+  let drift;
   try {
-    const tree = await forgejo.getTree(config.forgejoOwner, ws.slug, "main", true);
-    forgejoPaths = new Set(
-      tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).map((e) => e.path),
-    );
+    drift = await getWorkspaceMarkdownDrift(db, forgejo, config, ws);
   } catch (err) {
     console.error(`getTree failed: ${(err as Error).message}`);
     process.exit(1);
   }
 
-  const onlySidecar = [...sidecarPaths].filter((p) => !forgejoPaths.has(p)).sort();
-  const onlyForgejo = [...forgejoPaths].filter((p) => !sidecarPaths.has(p)).sort();
-  const both = sidecarPaths.size + forgejoPaths.size - onlySidecar.length - onlyForgejo.length;
-
-  console.log(`pages: ${both} in sync, ${onlySidecar.length} sidecar-only, ${onlyForgejo.length} forgejo-only`);
-  for (const p of onlySidecar) console.log(`  - sidecar-only: ${p}   (run \`workspace reindex\`)`);
-  for (const p of onlyForgejo) console.log(`  - forgejo-only: ${p}   (webhook missed it; reindex)`);
+  console.log(`pages: ${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only`);
+  for (const p of drift.onlySidecar) console.log(`  - sidecar-only: ${p}   (run \`workspace reindex\`)`);
+  for (const p of drift.onlyForgejo) console.log(`  - forgejo-only: ${p}   (webhook missed it; reindex)`);
 
   console.log();
   const recentHooks = db
@@ -996,36 +534,22 @@ async function inspectWorkspace(slug: string): Promise<void> {
 // is scriptable (e.g. periodic check, CI sanity).
 async function workspaceDriftCheck(slug: string): Promise<void> {
   await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
-  const sidecarPaths = new Set(
-    (
-      db
-        .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_slug = ?")
-        .all(ws.slug) as Array<{ path: string }>
-    ).map((r) => r.path),
-  );
-  let forgejoPaths: Set<string>;
+  let drift;
   try {
-    const tree = await forgejo.getTree(config.forgejoOwner, ws.slug, "main", true);
-    forgejoPaths = new Set(
-      tree.filter((e) => e.type === "blob" && e.path.endsWith(".md")).map((e) => e.path),
-    );
+    drift = await getWorkspaceMarkdownDrift(db, forgejo, config, ws);
   } catch (err) {
     console.error(`drift-check: getTree failed: ${(err as Error).message}`);
     process.exit(2);
   }
 
-  const onlySidecar = [...sidecarPaths].filter((p) => !forgejoPaths.has(p)).sort();
-  const onlyForgejo = [...forgejoPaths].filter((p) => !sidecarPaths.has(p)).sort();
-  const inSync = sidecarPaths.size + forgejoPaths.size - onlySidecar.length - onlyForgejo.length;
-
-  if (onlySidecar.length === 0 && onlyForgejo.length === 0) {
-    console.log(`drift-check ${slug}: clean (${inSync} pages in sync)`);
+  if (drift.onlySidecar.length === 0 && drift.onlyForgejo.length === 0) {
+    console.log(`drift-check ${slug}: clean (${drift.inSync} pages in sync)`);
     return;
   }
 
-  console.log(`drift-check ${slug}: DRIFT (${inSync} in sync, ${onlySidecar.length} sidecar-only, ${onlyForgejo.length} forgejo-only)`);
-  for (const p of onlySidecar) console.log(`  sidecar-only: ${p}`);
-  for (const p of onlyForgejo) console.log(`  forgejo-only: ${p}`);
+  console.log(`drift-check ${slug}: DRIFT (${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only)`);
+  for (const p of drift.onlySidecar) console.log(`  sidecar-only: ${p}`);
+  for (const p of drift.onlyForgejo) console.log(`  forgejo-only: ${p}`);
   console.log(`\nrun \`pnpm cli workspace reindex ${slug}\` to rebuild from Forgejo`);
   process.exit(1);
   });
@@ -1105,13 +629,11 @@ function parseRole(value: string): Role {
 function buildProgram(): Command {
   const program = new Command("cosheaf").description("cosheaf admin CLI").exitOverride();
 
-  program
-    .command("seed")
-    .description("create-or-update a forgejo user and workspace for local development")
-    .allowUnknownOption(true)
-    .allowExcessArguments(true)
-    .helpOption(false)
-    .action((_opts, cmd) => seed(cmd.args));
+  addSeedOptions(
+    program
+      .command("seed")
+      .description("create-or-update a forgejo user and workspace for local development"),
+  ).action((opts) => seed(normalizeSeedOptions(opts)));
 
   const user = program.command("user").description("user management");
   user.command("add <username>").description("create a forgejo user; prompts for password").action(userAdd);

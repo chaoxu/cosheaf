@@ -42,6 +42,36 @@ export class ForgejoError extends Error {
   }
 }
 
+export async function mergePullWithRetry<T>(
+  merge: () => Promise<T>,
+  opts: {
+    attempts?: number;
+    delayMs?: (attempt: number) => number;
+  } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 8;
+  const delayMs = opts.delayMs ?? ((attempt) => 250 * attempt);
+  let lastErr: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await merge();
+    } catch (err) {
+      lastErr = err;
+      const retry =
+        err instanceof ForgejoError &&
+        err.status === 405 &&
+        /try again/i.test(err.bodyText);
+      if (!retry || attempt === attempts) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs(attempt)));
+    }
+  }
+
+  throw lastErr;
+}
+
 interface RequestOpts {
   method?: string;
   query?: Record<string, string | number | undefined>;

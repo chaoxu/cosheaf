@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+action="${1:-}"
+branch="${2:-}"
+sha="${3:-}"
+slug="${4:-}"
+port_start="${5:-3100}"
+port_end="${6:-3199}"
+flag="${7:-}"
+
+ports_file="/srv/cosheaf/previews/ports.json"
+preview_root="/tmp/cosheaf-preview-${slug}"
+archive="/tmp/cosheaf-preview-${slug}.tar"
+container="cosheaf-preview-${slug}"
+volume="cosheaf-preview-${slug}-data"
+image="cosheaf-preview:${slug}"
+caddy="/etc/caddy/sites.d/cosheaf-preview-${slug}.caddy"
+url="https://cosheaf-${slug}.lab"
+state_script="${COSHEAF_PREVIEW_STATE_SCRIPT:-/home/chaoxu/playground/cosheaf/scripts/preview-state.mjs}"
+compose_file="cosheaf/compose.preview.yaml"
+
+allocate_port() {
+  sudo -n mkdir -p "$(dirname "$ports_file")"
+  local used_ports
+  used_ports="$(sudo -n docker ps --format '{{.Ports}}' | sed -nE 's/.*:([0-9]+)->3030.*/\1/p' | sort -n | uniq | tr '\n' ' ')"
+  sudo -n flock "${ports_file}.lock" node "$state_script" allocate "$ports_file" "$slug" "$port_start" "$port_end" $used_ports
+}
+
+delete_port() {
+  sudo -n mkdir -p "$(dirname "$ports_file")"
+  sudo -n flock "${ports_file}.lock" node "$state_script" delete-port "$ports_file" "$slug"
+}
+
+compose() {
+  sudo -n --preserve-env=COSHEAF_GIT_SHA,COSHEAF_ENV_DIR,COSHEAF_PREVIEW_SLUG,COSHEAF_PREVIEW_BRANCH,COSHEAF_PREVIEW_PORT,JUPITER_TAILSCALE_IP,NPM_CONFIG_REGISTRY \
+    docker compose -f "$compose_file" --project-name "cosheaf-preview-${slug}" "$@"
+}
+
+wait_http() {
+  local port="$1"
+  for i in $(seq 1 60); do
+    if curl -sf "http://127.0.0.1:${port}/api/v1/health" >/dev/null; then
+      echo "http ready after ${i}s"
+      return
+    fi
+    sleep 1
+  done
+  sudo -n docker logs "$container" --tail 100
+  exit 1
+}
+
+deploy_local() {
+  local port
+  port="$(allocate_port)"
+  rm -rf "$preview_root"
+  mkdir -p "$preview_root/cosheaf"
+  tar -xf "$archive" -C "$preview_root/cosheaf"
+  cd "$preview_root"
+  export COSHEAF_GIT_SHA="$sha"
+  export COSHEAF_PREVIEW_SLUG="$slug"
+  export COSHEAF_PREVIEW_BRANCH="$branch"
+  export COSHEAF_PREVIEW_PORT="$port"
+  export JUPITER_TAILSCALE_IP="${JUPITER_TAILSCALE_IP:-100.93.22.80}"
+  compose up -d --build --force-recreate cosheaf-preview
+  sudo -n tee "$caddy" >/dev/null <<EOF
+${url} {
+    tls internal
+    reverse_proxy 127.0.0.1:${port}
+}
+EOF
+  sudo -n /usr/bin/systemctl reload caddy
+  wait_http "$port"
+  sudo -n docker exec "$container" node dist-server/server/cli.js seed \
+    --user chao \
+    --password 123123aA \
+    --workspace flushing-coin \
+    --workspace-name "Flushing Coin" \
+    --default-md-format coflat \
+    --profile all
+  echo "preview=${url}"
+  echo "direct=http://100.93.22.80:${port}"
+  echo "container=${container}"
+  echo "volume=${volume}"
+}
+
+clean_local() {
+  if [[ -f "${preview_root}/${compose_file}" ]]; then
+    cd "$preview_root"
+    export COSHEAF_PREVIEW_SLUG="$slug"
+    export COSHEAF_PREVIEW_BRANCH="${branch:-unknown}"
+    export COSHEAF_PREVIEW_PORT="${port_start}"
+    compose down --remove-orphans >/dev/null 2>&1 || true
+  else
+    sudo -n docker rm -f "$container" >/dev/null 2>&1 || true
+  fi
+  sudo -n docker image rm "$image" >/dev/null 2>&1 || true
+  sudo -n rm -f "$caddy"
+  sudo -n /usr/bin/systemctl reload caddy
+  if [[ "$flag" != "--keep-volume" ]]; then
+    sudo -n docker volume rm "$volume" >/dev/null 2>&1 || true
+  fi
+  delete_port
+  echo "removed ${url}"
+}
+
+list_local() {
+  sudo -n docker ps -a \
+    --filter "label=fleet.app=cosheaf" \
+    --filter "label=fleet.kind=preview" \
+    --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'
+}
+
+case "$action" in
+  deploy-local) deploy_local ;;
+  clean-local) clean_local ;;
+  list-local) list_local ;;
+  *) echo "unknown preview host action: $action" >&2; exit 2 ;;
+esac

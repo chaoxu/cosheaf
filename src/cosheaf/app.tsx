@@ -1,15 +1,9 @@
 import type { ReactElement } from "react";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format";
+import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { getClientDocumentFormat } from "./format-registry";
-
-type OutlineEntry = {
-  readonly level: 1 | 2 | 3 | 4 | 5 | 6;
-  readonly text: string;
-  readonly line: number;
-  readonly key: string;
-  readonly number?: string;
-};
+import { blueprintBookThemeManifest } from "@chaoxu/coflat-editor/reader";
+import type { OutlineEntry } from "@chaoxu/coflat-editor";
 import {
   ApiError,
   api,
@@ -230,13 +224,21 @@ type DocumentThemeId = "default" | "blueprint-book";
 const DOCUMENT_THEME_KEY = "cosheaf:document-theme";
 const DOCUMENT_THEMES: Array<{ id: DocumentThemeId; label: string }> = [
   { id: "default", label: "Default" },
-  { id: "blueprint-book", label: "Blueprint" },
+  { id: blueprintBookThemeManifest.id, label: blueprintBookThemeManifest.name },
 ];
 
 function readDocumentTheme(): DocumentThemeId {
   if (typeof localStorage === "undefined") return "default";
   const value = localStorage.getItem(DOCUMENT_THEME_KEY);
   return value === "blueprint-book" ? value : "default";
+}
+
+function useDocumentTheme(): [DocumentThemeId, (theme: DocumentThemeId) => void] {
+  const [documentTheme, setDocumentTheme] = useState<DocumentThemeId>(() => readDocumentTheme());
+  useEffect(() => {
+    localStorage.setItem(DOCUMENT_THEME_KEY, documentTheme);
+  }, [documentTheme]);
+  return [documentTheme, setDocumentTheme];
 }
 
 // URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
@@ -611,6 +613,8 @@ function SidePanel({
 }): ReactElement {
   return (
     <div
+      data-statusbar
+      data-testid="statusbar"
       className={cn(
         "max-h-[30%] overflow-y-auto border-t px-4 pb-3 pt-2",
         borderColor,
@@ -1179,6 +1183,132 @@ function FileRow({
   );
 }
 
+function WorkspaceStatusBar({
+  activeFormatId,
+  busy,
+  currentBranchName,
+  dirty,
+  documentTheme,
+  editorMode,
+  openPath,
+  reviewingPullNumber,
+  role,
+  status,
+  onDocumentThemeChange,
+  onOpenPullRequest,
+  onSave,
+  onToggleEditorMode,
+}: {
+  activeFormatId: DocumentFormatId;
+  busy: boolean;
+  currentBranchName: string | null;
+  dirty: boolean;
+  documentTheme: DocumentThemeId;
+  editorMode: "rich" | "source";
+  openPath: string | null;
+  reviewingPullNumber: number | null;
+  role: Workspace["role"];
+  status: string | null;
+  onDocumentThemeChange: (theme: DocumentThemeId) => void;
+  onOpenPullRequest: (mode: "direct" | "review") => void;
+  onSave: () => void;
+  onToggleEditorMode: () => void;
+}): ReactElement {
+  return (
+    <div
+      className={cn(
+        "shrink-0 flex min-w-0 items-center gap-2 border-t px-2 h-6 text-xs",
+        muted,
+        borderColor,
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
+        {openPath ? (
+          <>
+            <span className="truncate">{openPath}</span>
+            {dirty && <span className="text-[var(--cf-accent)]">●</span>}
+          </>
+        ) : reviewingPullNumber ? null : (
+          <span>no file open</span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0 flex items-center justify-center">
+        <span className="truncate">{status ?? ""}</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5">
+        {activeFormatId === COFLAT_FORMAT_ID && (
+          <select
+            value={documentTheme}
+            onChange={(e) => onDocumentThemeChange(e.target.value as DocumentThemeId)}
+            title="Document theme"
+            data-testid="document-theme-select"
+            className="h-5 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs text-[var(--cf-fg)]"
+          >
+            {DOCUMENT_THEMES.map((theme) => (
+              <option key={theme.id} value={theme.id}>
+                {theme.label}
+              </option>
+            ))}
+          </select>
+        )}
+        {openPath && (
+          <>
+            {activeFormatId === COFLAT_FORMAT_ID && (
+              <button
+                type="button"
+                onClick={onToggleEditorMode}
+                title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
+                className="px-1.5 rounded hover:bg-[var(--cf-hover)]"
+              >
+                {editorMode === "rich" ? "Source" : "Rich"}
+              </button>
+            )}
+            {role !== "read" && (
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={!dirty || busy || !!reviewingPullNumber}
+                className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+              >
+                Save
+              </button>
+            )}
+            {currentBranchName && role !== "read" && (
+              <>
+                <span data-testid="active-branch-name" className="hidden">
+                  {currentBranchName}
+                </span>
+                {role === "admin" && (
+                  <button
+                    type="button"
+                    data-testid="merge-branch"
+                    onClick={() => onOpenPullRequest("direct")}
+                    disabled={busy}
+                    title="Squash-merge this branch into main (⇧⌘P)"
+                    className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                  >
+                    Merge to main
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="open-pull-request"
+                  onClick={() => onOpenPullRequest("review")}
+                  disabled={busy}
+                  title="Open a pull request for this branch"
+                  className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
+                >
+                  Open pull request
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceView({
   user,
   workspace,
@@ -1230,7 +1360,7 @@ function WorkspaceView({
   const [newIssueBusy, setNewIssueBusy] = useState(false);
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
-  const [documentTheme, setDocumentTheme] = useState<DocumentThemeId>(() => readDocumentTheme());
+  const [documentTheme, setDocumentTheme] = useDocumentTheme();
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
   const [reviewState, setReviewState] = useState<{
@@ -1251,10 +1381,6 @@ function WorkspaceView({
   const activeBranchName = reviewBranchName ?? currentBranchName;
   const filesRef = useRef<FileEntry[] | null>(null);
   const openRequestRef = useRef(0);
-
-  useEffect(() => {
-    localStorage.setItem(DOCUMENT_THEME_KEY, documentTheme);
-  }, [documentTheme]);
 
   // Sequence id for tree fetches: any in-flight tree response that isn't
   // the *latest* request is dropped. Without this, the initial-mount fetch
@@ -2620,99 +2746,22 @@ function WorkspaceView({
           {activeBranchName && (
             <span data-testid="active-branch" hidden>{activeBranchName}</span>
           )}
-          <div
-            data-statusbar
-            data-testid="statusbar"
-            className={cn(
-              "shrink-0 flex min-w-0 items-center gap-2 border-t px-2 h-6 text-xs",
-              muted,
-              borderColor,
-            )}
-          >
-            <div className="flex min-w-0 items-center gap-1.5">
-              {openPath ? (
-                <>
-                  <span className="truncate">{openPath}</span>
-                                    {dirty && <span className="text-[var(--cf-accent)]">●</span>}
-                </>
-              ) : reviewingPullNumber ? null : (
-                <span>no file open</span>
-              )}
-            </div>
-            <div className="flex-1 min-w-0 flex items-center justify-center">
-              <span className="truncate">{status ?? ""}</span>
-            </div>
-            <div className="flex shrink-0 items-center gap-0.5">
-              {activeFormatId === COFLAT_FORMAT_ID && (
-                <select
-                  value={documentTheme}
-                  onChange={(e) => setDocumentTheme(e.target.value as DocumentThemeId)}
-                  title="Document theme"
-                  data-testid="document-theme-select"
-                  className="h-5 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs text-[var(--cf-fg)]"
-                >
-                  {DOCUMENT_THEMES.map((theme) => (
-                    <option key={theme.id} value={theme.id}>
-                      {theme.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {openPath && (
-                <>
-                  {activeFormatId === COFLAT_FORMAT_ID && (
-                    <button
-                      type="button"
-                      onClick={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
-                      title={editorMode === "rich" ? "Switch to source mode" : "Switch to rich mode"}
-                      className="px-1.5 rounded hover:bg-[var(--cf-hover)]"
-                    >
-                      {editorMode === "rich" ? "Source" : "Rich"}
-                    </button>
-                  )}
-                  {workspace.role !== "read" && (
-                    <button
-                      type="button"
-                      onClick={save}
-                      disabled={!dirty || busy || !!reviewingPullNumber}
-                      className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
-                    >
-                      Save
-                    </button>
-                  )}
-                  {currentBranchName && workspace.role !== "read" && (
-                    <>
-                      <span data-testid="active-branch-name" className="hidden">
-                        {currentBranchName}
-                      </span>
-                      {workspace.role === "admin" && (
-                        <button
-                          type="button"
-                          data-testid="merge-branch"
-                          onClick={() => openPullRequest("direct")}
-                          disabled={busy}
-                          title="Squash-merge this branch into main (⇧⌘P)"
-                          className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
-                        >
-                          Merge to main
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        data-testid="open-pull-request"
-                        onClick={() => openPullRequest("review")}
-                        disabled={busy}
-                        title="Open a pull request for this branch"
-                        className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
-                      >
-                        Open pull request
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          <WorkspaceStatusBar
+            activeFormatId={activeFormatId}
+            busy={busy}
+            currentBranchName={currentBranchName}
+            dirty={dirty}
+            documentTheme={documentTheme}
+            editorMode={editorMode}
+            openPath={openPath}
+            reviewingPullNumber={reviewingPullNumber}
+            role={workspace.role}
+            status={status}
+            onDocumentThemeChange={setDocumentTheme}
+            onOpenPullRequest={openPullRequest}
+            onSave={save}
+            onToggleEditorMode={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}
+          />
         </main>
       </div>
     </Screen>

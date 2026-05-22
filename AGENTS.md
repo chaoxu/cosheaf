@@ -312,6 +312,33 @@ pnpm test                 # vitest
 pnpm build                # vite build
 ```
 
+## DevX and automation conventions
+
+- Use Commander for CLI argument parsing. Do not add new hand-rolled
+  `process.argv` flag scanners; expose parser-normalization functions for unit
+  tests when scripts have validation worth testing.
+- Jupiter app workloads should be Docker Compose services. Avoid one-off
+  `docker run` service definitions for prod or branch previews; put ports,
+  labels, volumes, healthchecks, and environment contracts in Compose files.
+- Keep Jupiter preview slug, port allocation, and cleanup state in
+  `scripts/preview-state.mjs`. Do not duplicate slug/port JSON handling inside
+  shell snippets.
+- Browser smoke checks should run through Playwright's test runner. Tiny
+  wrappers may delegate to existing scripts during migration, but package
+  scripts and Jupiter E2E entrypoints should use `playwright test` and the
+  shared `scripts/smoke-manifest.mjs` matrix.
+- Use well-known libraries for standard work: Commander for CLI parsing,
+  Docker Compose for container orchestration, Playwright Test for browser
+  flows, DOMPurify/DOM APIs for sanitized HTML transforms, and package-exported
+  types/manifests from `@chaoxu/coflat-editor`.
+- When transforming rendered HTML, sanitize to DOM and traverse nodes
+  (`DocumentFragment`, `TreeWalker`, `querySelectorAll`). Do not regex over
+  HTML strings except for narrow tests or pre-HTML source text.
+- Do not mirror `@chaoxu/coflat-editor` host API types, outline types, or theme
+  manifests in Cosheaf. Import the exported package contracts directly and keep
+  Forgejo-passthrough editor adapters structurally compatible with those
+  contracts.
+
 ## Local Forgejo
 
 Cosheaf's local Forgejo is `http://127.0.0.1:3002` with data/config under

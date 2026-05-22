@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+
+import { Command } from "commander";
+import { smokeChecks } from "./smoke-manifest.mjs";
+import { run } from "./lib/run.mjs";
 
 const targets = {
   prod: {
@@ -10,58 +13,40 @@ const targets = {
   },
 };
 
-function usage() {
-  console.error("usage: node scripts/jupiter-e2e.mjs <prod|URL> [--destructive]");
-  process.exit(2);
+function targetFor(value) {
+  return targets[value] ?? {
+    url: value,
+    workspace: process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin",
+    slug: process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin",
+    pagePath: process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md",
+  };
 }
 
-const [targetArg, maybeDestructive] = process.argv.slice(2).filter((arg) => arg !== "--");
-if (!targetArg) usage();
-
-const destructive = maybeDestructive === "--destructive" || process.env.COSHEAF_E2E_DESTRUCTIVE === "1";
-const target = targets[targetArg] ?? {
-  url: targetArg,
-  workspace: process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin",
-  slug: process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin",
-  pagePath: process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md",
-};
-
-const baseEnv = {
-  ...process.env,
-  URL: target.url,
-  COSHEAF_SMOKE_USER: process.env.COSHEAF_SMOKE_USER ?? "chao",
-  COSHEAF_SMOKE_PASSWORD: process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-  COSHEAF_SMOKE_WORKSPACE: target.workspace,
-  COSHEAF_SMOKE_WORKSPACE_SLUG: target.slug,
-  COSHEAF_SMOKE_PAGE: process.env.COSHEAF_SMOKE_PAGE ?? "Hello",
-  COSHEAF_SMOKE_PAGE_PATH: target.pagePath,
-  COSHEAF_ADMIN_PASSWORD: process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-  COSHEAF_MERI_PASSWORD: process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-  COSHEAF_VERA_PASSWORD: process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-};
-
-const checks = [
-  ["smoke", "scripts/browser-smoke.mjs"],
-  ["issues-nav", "scripts/browser-issues-nav.mjs"],
-  ["rendering-fixtures", "scripts/browser-rendering-fixtures.mjs"],
-  ["reader-editor-parity", "scripts/browser-reader-editor-parity.mjs"],
-];
-if (destructive) {
-  checks.push(["direct-merge", "scripts/browser-flow.mjs"]);
-  checks.push(["review-merge", "scripts/browser-flow-review.mjs"]);
-}
-
-for (const [name, script] of checks) {
-  console.log(`\n== ${name} @ ${target.url}`);
-  const result = spawnSync("node", [script], {
-    stdio: "inherit",
-    env: {
-      ...baseEnv,
-      SCREENSHOT: `/tmp/cosheaf-${targetArg.replace(/[^a-z0-9]/gi, "-")}-${name}.png`,
-      COSHEAF_FLOW_PATH: `${targetArg.replace(/[^a-z0-9]/gi, "-")}-${name}-${Date.now()}.md`,
-    },
+const program = new Command("jupiter-e2e")
+  .argument("<prod-or-url>", "prod or an explicit preview URL")
+  .option("--destructive", "also run mutating merge/review flows", false)
+  .action((targetArg, opts) => {
+    const target = targetFor(targetArg);
+    const destructive = opts.destructive || process.env.COSHEAF_E2E_DESTRUCTIVE === "1";
+    const checks = smokeChecks.filter((check) => !check.destructive || destructive);
+    const grep = checks.map((check) => check.grep).join("|");
+    run("pnpm", ["exec", "playwright", "test", "tests/e2e/smoke.spec.ts", "--grep", grep], {
+      env: {
+        ...process.env,
+        URL: target.url,
+        COSHEAF_SMOKE_USER: process.env.COSHEAF_SMOKE_USER ?? "chao",
+        COSHEAF_SMOKE_PASSWORD: process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
+        COSHEAF_SMOKE_WORKSPACE: target.workspace,
+        COSHEAF_SMOKE_WORKSPACE_SLUG: target.slug,
+        COSHEAF_SMOKE_PAGE: process.env.COSHEAF_SMOKE_PAGE ?? "Hello",
+        COSHEAF_SMOKE_PAGE_PATH: target.pagePath,
+        COSHEAF_ADMIN_PASSWORD: process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
+        COSHEAF_MERI_PASSWORD: process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
+        COSHEAF_VERA_PASSWORD: process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
+      },
+    });
+    console.log(`\nE2E checks passed for ${target.url}`);
   });
-  if (result.status !== 0) process.exit(result.status ?? 1);
-}
 
-console.log(`\nE2E checks passed for ${target.url}`);
+program.parse(process.argv);
+

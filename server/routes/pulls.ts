@@ -31,7 +31,8 @@ import {
   requireMembership,
   requireWriteOnMutation,
 } from "../middleware.js";
-import { ForgejoError, type Forgejo, type ForgejoPull, type ForgejoReview } from "../forgejo.js";
+import { ForgejoError, mergePullWithRetry, type Forgejo } from "../forgejo.js";
+import type { ForgejoPull, ForgejoReview } from "../forgejo-types.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -124,21 +125,12 @@ async function mergeWithRetry(
   opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
 ): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
   const Do = opts.Do ?? "squash";
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 8; attempt++) {
-    try {
-      await fj.mergePull(owner, repo, prNumber, { Do, force: opts.force });
-      return { ok: true };
-    } catch (err) {
-      lastErr = err;
-      if (err instanceof ForgejoError && err.status === 405 && /try again/i.test(err.bodyText)) {
-        await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
-        continue;
-      }
-      return forgejoErrToResult(err);
-    }
+  try {
+    await mergePullWithRetry(() => fj.mergePull(owner, repo, prNumber, { Do, force: opts.force }));
+    return { ok: true };
+  } catch (err) {
+    return forgejoErrToResult(err);
   }
-  return forgejoErrToResult(lastErr);
 }
 
 function forgejoErrToResult(err: unknown): { ok: false; status: number; message: string } {

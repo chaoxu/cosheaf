@@ -8,6 +8,12 @@ import type {
 } from "../editor";
 import type { MountedEditor } from "./coflat-editor";
 
+type Outline = ReturnType<typeof extractOutline>;
+type Store<T> = {
+  get(): T;
+  subscribe(fn: (value: T) => void): () => void;
+};
+
 interface Props {
   value: string;
   mode: "rich" | "source";
@@ -38,16 +44,16 @@ export function MarkdownEditor({
   const saveHandlerRef = useRef(saveHandler);
   const statusEventsRef = useRef(statusEvents);
   const onReadyRef = useRef(onReady);
-  const outlineListenersRef = useRef(new Set<(value: ReturnType<typeof extractOutline>) => void>());
+  const outlineListenersRef = useRef(new Set<(value: Outline) => void>());
   localValueRef.current = localValue;
   saveHandlerRef.current = saveHandler;
   statusEventsRef.current = statusEvents;
   onReadyRef.current = onReady;
 
-  const outline = useMemo(
+  const outline = useMemo<Store<Outline>>(
     () => ({
       get: () => extractOutline(localValueRef.current),
-      subscribe: (fn: (value: ReturnType<typeof extractOutline>) => void) => {
+      subscribe: (fn: (value: Outline) => void) => {
         outlineListenersRef.current.add(fn);
         return () => {
           outlineListenersRef.current.delete(fn);
@@ -78,7 +84,23 @@ export function MarkdownEditor({
       }
     }
     const mounted: MountedEditor = {
+      getDoc: () => localValueRef.current,
+      setDoc(doc) {
+        localValueRef.current = doc;
+        savedValueRef.current = doc;
+        setLocalValue(doc);
+        for (const listener of outlineListenersRef.current) listener(extractOutline(doc));
+      },
+      getMode: () => "source",
+      setMode: () => undefined,
       outline,
+      counts: store(() => countDocument(localValueRef.current)),
+      cursorContext: store(() => ({
+        line: 1,
+        column: 1,
+        from: 0,
+        currentHeadingPath: [],
+      })),
       scrollToLine(line) {
         const textarea = textareaRef.current;
         if (!textarea) return;
@@ -86,6 +108,15 @@ export function MarkdownEditor({
         textarea.focus();
         textarea.setSelectionRange(offset, offset);
       },
+      scrollToPosition(from) {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(from, from);
+      },
+      focus: () => textareaRef.current?.focus(),
+      unmount: () => undefined,
+      isSaved: () => localValueRef.current === savedValueRef.current,
       triggerSave: (reason) => triggerSave(reason),
     };
     onReadyRef.current?.(mounted);
@@ -125,20 +156,38 @@ export function MarkdownEditor({
   );
 }
 
+function store<T>(get: () => T): Store<T> {
+  return {
+    get,
+    subscribe: () => () => undefined,
+  };
+}
+
 function extractOutline(source: string) {
-  const out: Array<{ level: 1 | 2 | 3 | 4 | 5 | 6; text: string; line: number; key: string }> = [];
+  const out: Array<{ level: 1 | 2 | 3 | 4 | 5 | 6; text: string; line: number; from: number; key: string }> = [];
   const lines = source.split(/\n/);
+  let from = 0;
   for (let i = 0; i < lines.length; i++) {
     const match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i] ?? "");
-    if (!match) continue;
-    out.push({
-      level: match[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-      text: match[2],
-      line: i + 1,
-      key: `${i + 1}:${match[2]}`,
-    });
+    if (match) {
+      out.push({
+        level: match[1].length as 1 | 2 | 3 | 4 | 5 | 6,
+        text: match[2],
+        line: i + 1,
+        from,
+        key: `${i + 1}:${match[2]}`,
+      });
+    }
+    from += (lines[i]?.length ?? 0) + 1;
   }
   return out;
+}
+
+function countDocument(source: string) {
+  const body = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  const words = body.trim() ? body.trim().split(/\s+/).length : 0;
+  const paragraphs = body.split(/\n{2,}/).filter((part) => part.trim().length > 0).length;
+  return { words, chars: body.length, paragraphs };
 }
 
 function offsetForLine(source: string, line: number): number {

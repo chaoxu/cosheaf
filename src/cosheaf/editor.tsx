@@ -4,52 +4,14 @@ import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   type MountedEditor,
+  type SaveHandler,
   type StandaloneEditorMode,
+  type StatusEvents,
+  type AssetUploader,
+  type AutocompleteSource,
   mountEditor,
 } from "@chaoxu/coflat-editor";
-
-// The host-API types aren't surfaced as named exports on the main entry, so
-// mirror the minimal shape we use. coflat-editor v0.2.0 host-api contract.
-export interface SaveHandler {
-  save(payload: {
-    source: string;
-    reason: "manual" | "command" | "autosave";
-  }): Promise<{ ok: true } | { ok: false; error: string }>;
-  autosaveDebounceMs?: number;
-  isBusy?(): boolean;
-}
-export interface StatusEvents {
-  onSaveStart?(): void;
-  onSaveSucceeded?(): void;
-  onSaveFailed?(e: { error: string }): void;
-  onDirtyChange?(dirty: boolean): void;
-  onAssetUploading?(e: { placeholderId: string; file: File; progress?: number }): void;
-  onAssetUploadSucceeded?(e: { placeholderId: string; path: string }): void;
-  onAssetUploadFailed?(e: { placeholderId: string; error: string }): void;
-}
-export interface AssetUploader {
-  upload(
-    file: File,
-    env: { from?: string },
-  ): Promise<{ path: string; alt?: string } | { error: string }>;
-  accept?(file: File): null | { reject: string };
-  cancel?(file: File): void;
-}
-export interface AutocompleteSuggestion {
-  id: string;
-  insert: string;
-  display: string;
-  description?: string;
-  icon?: string;
-}
-export interface AutocompleteSource {
-  trigger: string;
-  debounceMs?: number;
-  suggest(
-    prefix: string,
-    env: { from?: string; cursorPos: number; signal: AbortSignal },
-  ): Promise<readonly AutocompleteSuggestion[]>;
-}
+export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource };
 
 interface Props {
   value: string;

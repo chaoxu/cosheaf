@@ -67,17 +67,19 @@ Do not point Cosheaf at the general-purpose Gitea service on port `3001`.
 
 ## Deploy and verify
 
-From the `cosheaf` repo on `jupiter`:
+From the `cosheaf` repo on `saturn` or `jupiter`:
 
 ```sh
 pnpm jupiter:release -- prod
 pnpm jupiter:verify -- prod
 ```
 
-`release` builds/recreates the container and checks HTTP health. `verify` runs
-health plus `pnpm cli doctor` inside the container. Doctor is stricter: on a
-fresh sidecar volume it may report missing recent webhook deliveries until a
-real Forgejo event has arrived.
+When run off-host, the script SSHes to canonical host `jupiter`, fast-forwards
+the Jupiter checkout to `origin/main` for release/deploy, and runs the Docker
+work there. `release` builds/recreates the container and checks HTTP health.
+`verify` runs health plus `pnpm cli doctor` inside the container. Doctor is
+stricter: on a fresh sidecar volume it may report missing recent webhook
+deliveries until a real Forgejo event has arrived.
 
 Docker builds install `@chaoxu/coflat-editor` from the Jupiter Gitea npm
 registry at `http://packages.lab/api/packages/chaoxu/npm/`. Production deploys
@@ -97,7 +99,9 @@ pnpm jupiter:host-doctor -- prod
 ```
 
 This uses Docker, Caddy, curl, and Forgejo's container to verify the public URL,
-direct webhook URL, deployed commit, Caddy config, and local health endpoint.
+direct webhook URL, deployed commit, Caddy config, local health endpoint,
+package registry reachability, Docker status, Docker disk use, and host disk
+headroom.
 The `/api/v1/health` response includes the deployed commit:
 
 ```json
@@ -115,6 +119,12 @@ By default this runs non-destructive login/page, issue-navigation, and seeded
 Markdown rendering checks for long-form issue and PR bodies.
 Add `--destructive` to also run branch-merge and review-merge flows, which
 create and merge test files/PRs.
+
+To see the browser check matrix:
+
+```sh
+pnpm smoke:list
+```
 
 The direct container ports are:
 
@@ -139,8 +149,8 @@ docker compose --profile prod exec cosheaf-prod \
 
 Non-`main` branch pushes run `.gitea/workflows/preview.yml` on `jupiter`. The
 workflow builds the branch image, starts an isolated container named
-`cosheaf-preview-<branch-slug>`, gives it its own SQLite volume, and exposes it
-through Caddy as:
+`cosheaf-preview-<branch-slug>` through `compose.preview.yaml`, gives it its own
+SQLite volume, and exposes it through Caddy as:
 
 ```text
 https://cosheaf-<branch-slug>.lab
@@ -154,12 +164,55 @@ When a branch is deleted, `.gitea/workflows/preview-cleanup.yml` removes the
 preview container, image, Caddy snippet, and SQLite volume. It can also be run
 manually for a named branch.
 
-Preview helper commands on `jupiter`:
+Preview helper commands from `saturn` or `jupiter`:
 
 ```sh
+pnpm jupiter:preview -- deploy my-branch
 pnpm jupiter:preview -- url my-branch
 pnpm jupiter:preview -- list
 pnpm jupiter:preview -- clean my-branch
+```
+
+`deploy` archives the current commit, sends it to `jupiter`, builds a preview
+image with Docker Compose, allocates or reuses a port through
+`scripts/preview-state.mjs` and `/srv/cosheaf/previews/ports.json`, writes the
+Caddy route, seeds the `flushing-coin` fixture with `--profile all`, waits for
+local HTTP health, waits for `.lab` HTTPS health from the caller machine, and
+prints the preview URL, direct Jupiter URL, container, volume, and cleanup
+command. If the `.lab` certificate is not usable yet, the command waits up to
+90 seconds before warning.
+
+Preview containers and volumes carry `fleet.preview=true`, `fleet.app=cosheaf`,
+and `fleet.kind=preview` labels so fleet-infra cleanup can delete unpinned
+previews after 24 hours without touching prod state.
+
+## Seed profiles
+
+`pnpm cli seed` defaults to `--profile all` for backward compatibility. Use a
+smaller profile when a job only needs part of the fixture set:
+
+```sh
+pnpm cli seed --user chao --password 123123aA \
+  --workspace flushing-coin \
+  --workspace-name "Flushing Coin" \
+  --default-md-format coflat \
+  --profile rendering
+```
+
+Profiles:
+
+- `basic`: user, workspace, `.gitattributes`, and `hello.md`.
+- `large-doc`: `basic` plus the Coflat showcase page, bibliography, image, and showcase issue.
+- `rendering`: `large-doc` plus the long Markdown rendering issue.
+- `review-flow`: `rendering` plus PR branches, open PRs, side-by-side fixture, and merged PR fixture.
+- `all`: current full fixture set; same as `review-flow`.
+
+## Infra issues
+
+File host/fleet problems in `fleet-infra`, not this app repo:
+
+```sh
+pnpm infra:issue -- --title "[previews] short title" --body "What happened, evidence, suggested fix."
 ```
 
 ## Promotion flow

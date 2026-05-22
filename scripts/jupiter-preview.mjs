@@ -1,31 +1,29 @@
 #!/usr/bin/env node
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { Command } from "commander";
+import { output, run } from "./lib/run.mjs";
+import { slugForBranch } from "./preview-state.mjs";
 
-function usage() {
-  console.error("usage: node scripts/jupiter-preview.mjs <url|list|clean> [branch] [--keep-volume]");
-  process.exit(2);
+const JUPITER_HOST = process.env.COSHEAF_JUPITER_HOST ?? "jupiter";
+const PORTS = { start: 3100, end: 3199 };
+
+function currentBranch() {
+  return output("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
 }
 
-const [action, branch, flag] = process.argv.slice(2).filter((arg) => arg !== "--");
-if (!action) usage();
-
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    encoding: options.capture ? "utf8" : undefined,
-    stdio: options.capture ? "pipe" : "inherit",
-    shell: false,
-  });
-  if (result.status !== 0 && !options.allowFailure) process.exit(result.status ?? 1);
-  return options.capture ? result.stdout.trim() : "";
+function currentSha() {
+  return output("git", ["rev-parse", "HEAD"]);
 }
 
-function slugForBranch(name) {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-  return slug || "branch";
+function hostIdentity() {
+  try {
+    return readFileSync("/etc/lab-host", "utf8").trim();
+  } catch (_error) {
+    return "unknown";
+  }
 }
 
 function previewFor(name) {
@@ -33,6 +31,7 @@ function previewFor(name) {
   return {
     slug,
     url: `https://cosheaf-${slug}.lab`,
+    directUrl: null,
     container: `cosheaf-preview-${slug}`,
     volume: `cosheaf-preview-${slug}-data`,
     image: `cosheaf-preview:${slug}`,
@@ -40,24 +39,124 @@ function previewFor(name) {
   };
 }
 
-if (action === "url") {
-  if (!branch) usage();
+function waitForHttps(url) {
+  for (let i = 1; i <= 90; i += 1) {
+    const result = spawnSync("curl", ["-sf", `${url}/api/v1/health`], {
+      stdio: "ignore",
+      shell: false,
+    });
+    if (result.status === 0) {
+      console.log(`https ready after ${i}s`);
+      return;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  }
+  console.error(`warning: ${url} did not pass local HTTPS health within 90s`);
+}
+
+function deploy(branch) {
+  const sha = currentSha();
   const p = previewFor(branch);
+  const work = mkdtempSync(path.join(tmpdir(), "cosheaf-preview-"));
+  const archive = path.join(work, `${p.slug}.tar`);
+  try {
+    run("git", ["archive", "--format=tar", "-o", archive, "HEAD"]);
+    if (hostIdentity() === "jupiter") {
+      run("cp", [archive, `/tmp/cosheaf-preview-${p.slug}.tar`]);
+      run("bash", [
+        new URL("./jupiter-preview-host.sh", import.meta.url).pathname,
+        "deploy-local",
+        branch,
+        sha,
+        p.slug,
+        `${PORTS.start}`,
+        `${PORTS.end}`,
+      ]);
+    } else {
+      run("scp", [archive, `${JUPITER_HOST}:/tmp/cosheaf-preview-${p.slug}.tar`]);
+      run("ssh", [
+        JUPITER_HOST,
+        "bash",
+        "-s",
+        "--",
+        "deploy-local",
+        branch,
+        sha,
+        p.slug,
+        `${PORTS.start}`,
+        `${PORTS.end}`,
+      ], {
+        input: readFileSync(new URL("./jupiter-preview-host.sh", import.meta.url)),
+      });
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+  waitForHttps(p.url);
+  console.log("");
   console.log(p.url);
   console.log(`container=${p.container}`);
   console.log(`volume=${p.volume}`);
   console.log(`caddy=${p.caddy}`);
-} else if (action === "list") {
-  run("docker", ["ps", "-a", "--filter", "name=cosheaf-preview-", "--format", "{{.Names}}\t{{.Status}}\t{{.Ports}}"]);
-} else if (action === "clean") {
-  if (!branch) usage();
-  const p = previewFor(branch);
-  run("docker", ["rm", "-f", p.container], { allowFailure: true });
-  run("docker", ["image", "rm", p.image], { allowFailure: true });
-  run("sudo", ["-n", "rm", "-f", p.caddy], { allowFailure: true });
-  run("sudo", ["-n", "/usr/bin/systemctl", "reload", "caddy"]);
-  if (flag !== "--keep-volume") run("docker", ["volume", "rm", p.volume], { allowFailure: true });
-  console.log(`removed ${p.url}`);
-} else {
-  usage();
+  console.log(`cleanup=pnpm jupiter:preview -- clean ${branch}`);
 }
+
+function remote(actionName, branch, keepVolume) {
+  const args = ["bash", "-s", "--", actionName, branch ?? "", "", slugForBranch(branch ?? ""), `${PORTS.start}`, `${PORTS.end}`];
+  if (keepVolume) args.push("--keep-volume");
+  run("ssh", [JUPITER_HOST, ...args], {
+    input: readFileSync(new URL("./jupiter-preview-host.sh", import.meta.url)),
+  });
+}
+
+const program = new Command("jupiter-preview");
+
+program
+  .command("deploy [branch]")
+  .description("deploy a branch preview to jupiter")
+  .action((branch) => deploy(branch ?? currentBranch()));
+
+program
+  .command("url <branch>")
+  .description("print the preview URL and resource names for a branch")
+  .action((branch) => {
+    const p = previewFor(branch);
+    console.log(p.url);
+    console.log(`container=${p.container}`);
+    console.log(`volume=${p.volume}`);
+    console.log(`caddy=${p.caddy}`);
+  });
+
+program
+  .command("list")
+  .description("list jupiter preview containers")
+  .action(() => {
+    if (hostIdentity() === "jupiter") {
+      run("bash", [new URL("./jupiter-preview-host.sh", import.meta.url).pathname, "list-local", "", "", "", `${PORTS.start}`, `${PORTS.end}`]);
+    } else {
+      remote("list-local");
+    }
+  });
+
+program
+  .command("clean <branch>")
+  .description("remove a branch preview from jupiter")
+  .option("--keep-volume", "keep the preview data volume", false)
+  .action((branch, opts) => {
+    if (hostIdentity() === "jupiter" && existsSync("/usr/bin/docker")) {
+      run("bash", [
+        new URL("./jupiter-preview-host.sh", import.meta.url).pathname,
+        "clean-local",
+        branch,
+        "",
+        slugForBranch(branch),
+        `${PORTS.start}`,
+        `${PORTS.end}`,
+        opts.keepVolume ? "--keep-volume" : "",
+      ]);
+    } else {
+      remote("clean-local", branch, opts.keepVolume);
+    }
+  });
+
+program.parse(process.argv);

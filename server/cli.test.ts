@@ -15,14 +15,16 @@ describe("cli seed parsing", () => {
       workspace: "notes",
       workspaceName: "notes",
       defaultMdFormat: "forgejo-passthrough",
+      profile: "all",
     });
   });
 
-  it("accepts --default-md-format=forgejo-passthrough", () => {
+  it("accepts --default-md-format=forgejo-passthrough and seed profiles", () => {
     expect(parseSeedOptions([
       "--user", "chao", "--password=pw", "--workspace", "notes",
       "--default-md-format", "forgejo-passthrough",
-    ])).toMatchObject({ defaultMdFormat: "forgejo-passthrough" });
+      "--profile", "rendering",
+    ])).toMatchObject({ defaultMdFormat: "forgejo-passthrough", profile: "rendering" });
   });
 
   it("rejects unknown markdown formats", () => {
@@ -32,9 +34,16 @@ describe("cli seed parsing", () => {
     ])).toThrow("--default-md-format must be a known DocumentFormatId");
   });
 
+  it("rejects unknown seed profiles", () => {
+    expect(() => parseSeedOptions([
+      "--user", "chao", "--password=pw", "--workspace", "notes",
+      "--profile", "huge",
+    ])).toThrow("--profile must be one of");
+  });
+
   it("rejects missing values and invalid workspace slugs", () => {
     expect(() => parseSeedOptions(["--user", "--password", "pw", "--workspace", "notes"]))
-      .toThrow("seed requires --user");
+      .toThrow("required option '--password <password>' not specified");
     expect(() => parseSeedOptions(["--user", "chao", "--password", "pw", "--workspace", "Bad"]))
       .toThrow("workspace must match");
   });

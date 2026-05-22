@@ -34,6 +34,14 @@ export interface Workspace {
   defaultMdFormat: DocumentFormatId;
 }
 
+export interface WorkspaceMarkdownDrift {
+  sidecarPaths: string[];
+  forgejoPaths: string[];
+  onlySidecar: string[];
+  onlyForgejo: string[];
+  inSync: number;
+}
+
 export interface ProvisionWorkspaceOptions {
   slug: string;
   name: string;
@@ -148,6 +156,37 @@ export async function readWorkspaceFormatFromTopics(
 ): Promise<DocumentFormatId> {
   const topics = await forgejo.listRepoTopics(owner, repoName);
   return documentFormatFromTopics(topics);
+}
+
+export async function getWorkspaceMarkdownDrift(
+  db: Database.Database,
+  forgejo: Forgejo,
+  config: Config,
+  workspace: Pick<Workspace, "slug">,
+): Promise<WorkspaceMarkdownDrift> {
+  const sidecarPaths = (
+    db
+      .prepare("SELECT forgejo_id AS path FROM doc_map WHERE workspace_slug = ?")
+      .all(workspace.slug) as Array<{ path: string }>
+  )
+    .map((r) => r.path)
+    .sort();
+  const tree = await forgejo.getTree(config.forgejoOwner, workspace.slug, "main", true);
+  const forgejoPaths = tree
+    .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
+    .map((e) => e.path)
+    .sort();
+  const sidecarSet = new Set(sidecarPaths);
+  const forgejoSet = new Set(forgejoPaths);
+  const onlySidecar = sidecarPaths.filter((p) => !forgejoSet.has(p));
+  const onlyForgejo = forgejoPaths.filter((p) => !sidecarSet.has(p));
+  return {
+    sidecarPaths,
+    forgejoPaths,
+    onlySidecar,
+    onlyForgejo,
+    inSync: sidecarPaths.length + forgejoPaths.length - onlySidecar.length - onlyForgejo.length,
+  };
 }
 
 export async function ensureWorkspacePermissions(
