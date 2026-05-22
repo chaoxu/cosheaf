@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 action="${1:-}"
 branch="${2:-}"
@@ -62,13 +62,13 @@ wait_http() {
     sleep 1
   done
   sudo -n docker logs "$container" --tail 100
-  exit 1
+  return 1
 }
 
 deploy_local() {
   local port
   port="$(allocate_port)"
-  trap cleanup_failed_deploy ERR
+  trap cleanup_failed_deploy EXIT
   rm -rf "$preview_root"
   mkdir -p "$preview_root/cosheaf"
   tar -xf "$archive" -C "$preview_root/cosheaf"
@@ -104,7 +104,7 @@ EOF
   echo "volume=${volume}"
   echo "expires_at=${COSHEAF_PREVIEW_EXPIRES_AT}"
   deploy_succeeded=1
-  trap - ERR
+  trap - EXIT
 }
 
 clean_local() {
