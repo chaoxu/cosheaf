@@ -47,9 +47,13 @@ test.describe.serial("Issues", () => {
     // chao defines a label via API then opens the prior issue + applies it.
     await loginAs(page, "chao");
     await page.evaluate(async () => {
-      await fetch("/api/v1/w/flushing-coin/forgejo/labels", {
+      const token = localStorage.getItem("cosheaf.pat");
+      await fetch("/api/v1/w/flushing-coin/labels", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ name: "needs-review", color: "facc15" }),
       });
     });
@@ -197,9 +201,13 @@ test.describe.serial("Issues", () => {
     await loginAs(page, "chao");
     // Create milestone server-side (no full UI for create yet)
     await page.evaluate(async () => {
-      await fetch("/api/v1/w/flushing-coin/forgejo/milestones", {
+      const token = localStorage.getItem("cosheaf.pat");
+      await fetch("/api/v1/w/flushing-coin/milestones", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ title: "v1 polish" }),
       });
     });

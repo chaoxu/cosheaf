@@ -129,10 +129,9 @@ DELETE /w/:slug/file?path=<path>&branch=<branch>
 → { "ok": true, "branch": string }
 ```
 
-A Markdown write through a raw backend contents escape hatch is treated as an
-external repository edit. It reaches SQLite through webhook or
-`pnpm cli workspace reindex <slug>` reconciliation, not through immediate typed
-file-route indexing.
+A Markdown write made outside Cosheaf is treated as an external repository
+edit. It reaches SQLite through webhook or `pnpm cli workspace reindex <slug>`
+reconciliation, not through immediate typed file-route indexing.
 
 ## Search, Backlinks, Suggestions
 

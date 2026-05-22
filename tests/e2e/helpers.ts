@@ -8,7 +8,9 @@ import type { Page } from "@playwright/test";
 // without a SPA session should use createPrAsMeri-style explicit Bearer
 // tokens instead.
 export async function loginAs(page: Page, username: string) {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.removeItem("cosheaf.pat"));
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   const inputs = page.locator("form input");
   await inputs.nth(0).fill(username);
   await inputs.nth(1).fill("Cosheaf123!");

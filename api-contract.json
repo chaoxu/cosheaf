@@ -13,11 +13,22 @@
     "/w/:slug/suggest": "Cosheaf document id autocomplete",
     "/w/:slug/events": "workspace SSE",
     "/w/:slug/branches": "user branch prefix and branch cleanup gates",
-    "/w/:slug/pulls/:n/merge": "fresh admin gate before Forgejo merge",
-    "/w/:slug/pulls/:n/files": "Forgejo diff position and SPA file shape",
+    "/w/:slug/pulls": "stable pull request creation/listing DTOs",
+    "/w/:slug/pulls/:n": "stable pull request metadata DTO",
+    "/w/:slug/pulls/:n/merge": "fresh admin gate before backend merge",
+    "/w/:slug/pulls/:n/reviews": "review event vocabulary and approval count DTOs",
+    "/w/:slug/pulls/:n/files": "backend diff position and SPA file shape",
     "/w/:slug/pulls/:n/comments": "line-position mapping for PR review comments",
-    "/w/:slug/pulls/:n/pending-review": "Forgejo PENDING review helper for batched PR review comments",
+    "/w/:slug/pulls/:n/pending-review": "backend pending-review helper for batched PR review comments",
     "/w/:slug/issues": "issue-only SPA rows, mine filter composition, SSE on typed create/comment/dependency routes",
-    "/w/:slug/notifications/:id/read": "Forgejo thread endpoint is not repo-scoped"
+    "/w/:slug/issues/:n/comments": "stable issue comment DTOs",
+    "/w/:slug/issues/:n/state": "issue state change vocabulary and SSE",
+    "/w/:slug/labels": "stable label DTOs and color normalization",
+    "/w/:slug/issues/:n/labels": "issue label assignment without backend body shape",
+    "/w/:slug/milestones": "stable milestone DTOs",
+    "/w/:slug/issues/:n/milestone": "issue milestone assignment without backend body shape",
+    "/w/:slug/markdown/render": "workspace-scoped markdown rendering",
+    "/w/:slug/notifications": "repo-scoped notification DTOs",
+    "/w/:slug/notifications/:id/read": "notification thread mark-read"
   }
 }

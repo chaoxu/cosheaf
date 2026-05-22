@@ -53,11 +53,10 @@ backlinks, FTS search, document lists, branch creation, pull request
 list/detail/open/review/merge, issue comments, labels, milestones,
 notifications, markdown rendering, SSE updates, and merge/admin gates.
 
-File writes have a clear boundary. A Markdown write through a future raw
-contents escape hatch is treated as an external repo edit and reaches the
-SQLite index through webhook/reindex reconciliation. A Markdown write that
-needs immediate Cosheaf document/index behavior should use the typed file
-route.
+File writes have a clear boundary. Markdown writes made outside Cosheaf are
+treated as external repo edits and reach the SQLite index through
+webhook/reindex reconciliation. A Markdown write that needs immediate Cosheaf
+document/index behavior should use the typed file route.
 
 Example Cosheaf calls, all with `Authorization: Bearer <token>`:
 `GET /api/v1/w/flushing-coin/issues?state=open`,

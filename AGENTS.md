@@ -122,16 +122,16 @@ Typed routes are the public contract for Cosheaf document/index behavior:
 - Use typed merge/admin routes where Cosheaf adds freshness checks or other
   UI safety gates before calling the backend forge.
 
-File-write boundary: a Markdown write through a raw backend contents escape
-hatch is an external repository write from Cosheaf's point of view. Webhooks
-and `pnpm cli workspace reindex <slug>` reconcile those writes into SQLite. A
-Markdown write that needs immediate Cosheaf frontmatter/index/SSE behavior
-should go through the typed file route.
+File-write boundary: a Markdown write made outside Cosheaf is an external
+repository write from Cosheaf's point of view. Webhooks and `pnpm cli workspace
+reindex <slug>` reconcile those writes into SQLite. A Markdown write that needs
+immediate Cosheaf frontmatter/index/SSE behavior should go through the typed
+file route.
 
-Cosheaf does not synchronously run the indexer or emit SSE on raw backend
+Cosheaf does not synchronously run the indexer or emit SSE on external backend
 writes. Reconciliation is webhook-only. Callers (including agents) that need
-read-after-write consistency through cosheaf's typed routes must wait for the
-webhook to land or use the typed file route in the first place.
+read-after-write consistency through cosheaf's typed routes must use the typed
+file route in the first place.
 
 Examples for agents using a Cosheaf API token:
 
@@ -150,8 +150,8 @@ internally.
 Rules of thumb:
 
 - Don't add raw backend passthrough routes.
-- Don't expose a backend escape hatch when a typed route guards it (e.g.
-  `pulls/:n/merge` must keep running `requireAdminFresh`).
+- Keep protected operations behind typed routes (e.g. `pulls/:n/merge` must
+  keep running `requireAdminFresh`).
 - Don't mirror backend forge state into SQLite just to filter on it; compose
   backend filters inside typed routes and return stable Cosheaf DTOs.
 
@@ -220,7 +220,7 @@ curl -X PATCH "http://localhost:3030/api/v1/w/$SLUG/issues/17/state" \
 
 Notes for agent retry logic:
 
-- Reading after a raw backend write through cosheaf's typed routes is not
+- Reading after an external backend write through cosheaf's typed routes is not
   immediately consistent — the webhook reconciles asynchronously. If you need
   read-your-write, use the typed file route, which indexes synchronously.
 - Typed `PUT /file`, `PATCH /issues/:n/state`, `DELETE /issues/:n/comments/:id`,

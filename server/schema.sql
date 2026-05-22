@@ -75,5 +75,3 @@ CREATE TABLE IF NOT EXISTS webhook_log (
 
 -- There is no issues mirror: Forgejo's repo-scoped /issues already supports
 -- the same filters and a mirror would drift on partial webhook deliveries.
--- There is no passthrough audit log: Forgejo's own access logging covers
--- it, and a cosheaf-side mirror has no SPA consumer.
