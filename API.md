@@ -100,12 +100,19 @@ GET /workspaces
 → { "workspaces": Workspace[] }
 
 POST /workspaces
-{ "slug": string, "name": string }
+{ "slug": string, "name": string, "default_md_format"?: "forgejo-passthrough" | "coflat" }
 → 201 Workspace
+
+PUT /workspaces/:slug/members/:username
+{ "role": "admin" | "write" | "read" }
+→ { "ok": true, "username": string, "role": "admin" | "write" | "read" }
 ```
 
 Creating a workspace provisions a Forgejo repository, branch protection,
 webhook, `.gitattributes`, and the initial sidecar index.
+Setting workspace members requires workspace admin access. Cosheaf applies the
+role to the underlying repository and keeps the main-branch direct-push
+whitelist in sync for admin users.
 
 ## Files
 

@@ -1,15 +1,19 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
+import { ROLES } from "../../shared/roles.js";
 import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
-import { requireAuth } from "../middleware.js";
+import { ForgejoError } from "../forgejo.js";
+import { invalidateWorkspacePermissionCache, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
+import { setWorkspaceMember } from "../workspace-members.js";
 import {
   documentFormatFromTopics,
+  isDocumentFormatId,
   isFormatTopic,
   normalizeDocumentFormatId,
 } from "../../shared/document-format.js";
-import { bad, conflict } from "./responses.js";
+import { bad, conflict, notFound } from "./responses.js";
 
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
@@ -49,11 +53,17 @@ workspaces.get("/", async (c) => {
 });
 
 workspaces.post("/", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { slug?: string; name?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    slug?: string;
+    name?: string;
+    default_md_format?: string;
+  } | null;
   if (!body?.slug || !body.name)
     return c.json(...bad("slug and name required"));
   if (!WORKSPACE_SLUG_RE.test(body.slug))
     return c.json(...bad("invalid slug"));
+  if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format))
+    return c.json(...bad("invalid default_md_format"));
 
   const db = c.get("db");
   const config = c.get("config");
@@ -73,6 +83,7 @@ workspaces.post("/", async (c) => {
       user,
       forgejoUsername: user.username,
       rollbackCreatedRepoOnLocalFailure: true,
+      defaultMdFormat: body.default_md_format,
     });
     return c.json(
       {
@@ -92,4 +103,36 @@ workspaces.post("/", async (c) => {
       500,
     );
   }
+});
+
+workspaces.put("/:slug/members/:username", requireMembership(), requireAdminFresh, async (c) => {
+  const username = c.req.param("username")?.trim();
+  if (!username) return c.json(...bad("username required"));
+
+  const body = (await c.req.json().catch(() => null)) as { role?: string } | null;
+  if (!body?.role || !(ROLES as readonly string[]).includes(body.role))
+    return c.json(...bad(`role must be ${ROLES.join("|")}`));
+
+  const role = body.role as Role;
+  const config = c.get("config");
+  const ws = c.get("workspace");
+  const fj = c.get("fjAdmin");
+
+  try {
+    await setWorkspaceMember({
+      forgejo: fj,
+      owner: config.forgejoOwner,
+      repo: ws.slug,
+      username,
+      role,
+    });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 404) {
+      return c.json(...notFound("user or workspace not found"));
+    }
+    throw err;
+  }
+
+  invalidateWorkspacePermissionCache(config.forgejoOwner, ws.slug, username);
+  return c.json({ ok: true, username, role });
 });

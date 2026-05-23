@@ -94,6 +94,10 @@ export function _seedPermCacheForTests(
   PERM_CACHE.set(`${owner}/${repo}/${forgejoUsername}`, role, 60_000);
 }
 
+export function invalidateWorkspacePermissionCache(owner: string, repo: string, forgejoUsername: string): void {
+  PERM_CACHE.delete(`${owner}/${repo}/${forgejoUsername}`);
+}
+
 // Bypass the in-process role cache and re-fetch from Forgejo. Use on routes
 // that mutate shared state (merge, branch-protection settings) so a
 // freshly-demoted admin can't keep doing irreversible things for up to the

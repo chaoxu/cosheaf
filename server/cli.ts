@@ -28,6 +28,7 @@ import {
   seedWorkspace,
   type SeedOptions,
 } from "./seed.js";
+import { setWorkspaceMember } from "./workspace-members.js";
 
 async function readPassword(prompt: string): Promise<string> {
   if (!stdin.isTTY) {
@@ -225,24 +226,13 @@ async function workspaceReindex(slug: string): Promise<void> {
 
 async function workspaceMember(slug: string, username: string, role: Role): Promise<void> {
   await withWorkspace(slug, async ({ forgejo, config, workspace: ws }) => {
-    // Forgejo's addCollaborator API returns 404 if the user doesn't exist
-    // on Forgejo, which is the only "user" notion cosheaf has.
-    await forgejo.addCollaborator(config.forgejoOwner, ws.slug, username, role);
-    // Keep the branch-protection push whitelist in sync. Admin can direct-push;
-    // write/read users can't. Adjust on every change so demotion takes effect.
-    const bp = await forgejo.getBranchProtection(config.forgejoOwner, ws.slug, "main");
-    const current = (bp as unknown as { push_whitelist_usernames?: string[] } | null)?.push_whitelist_usernames ?? [];
-    const onList = current.includes(username);
-    if (role === "admin" && !onList) {
-      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, ws.slug, "main", [...current, username]);
-    } else if (role !== "admin" && onList) {
-      await forgejo.patchBranchProtectionPushWhitelist(
-        config.forgejoOwner,
-        ws.slug,
-        "main",
-        current.filter((u) => u !== username),
-      );
-    }
+    await setWorkspaceMember({
+      forgejo,
+      owner: config.forgejoOwner,
+      repo: ws.slug,
+      username,
+      role,
+    });
     console.log(`set ${username} as ${role} in workspace ${slug}`);
   });
 }
