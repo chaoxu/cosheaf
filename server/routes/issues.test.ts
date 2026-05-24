@@ -54,6 +54,17 @@ function forgejoIssue(
   };
 }
 
+function forgejoActivity(id: number, username: string, refName: string, message: string, sha: string): object {
+  return {
+    id,
+    op_type: "commit_repo",
+    act_user: { login: username },
+    ref_name: refName,
+    content: JSON.stringify({ Commits: [{ Sha1: sha, Message: message }] }),
+    created: `2026-05-24T00:00:0${id}Z`,
+  };
+}
+
 const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
@@ -286,6 +297,41 @@ describe("issues routes", () => {
       return url.searchParams.get("limit");
     });
     expect(limits).toEqual(["1", "50", "100"]);
+  });
+
+  it("collapses adjacent edit-branch commit activity", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok([
+      forgejoActivity(3, "alice", "refs/heads/user/alice/wip", "update three.md", "cccc"),
+      forgejoActivity(2, "alice", "refs/heads/user/alice/wip", "update two.md", "bbbb"),
+      forgejoActivity(1, "alice", "refs/heads/user/alice/wip", "update one.md", "aaaa"),
+      forgejoActivity(4, "alice", "refs/heads/main", "merge pull request", "dddd"),
+    ]));
+
+    const res = await appFor(db).request("/api/v1/w/w/activities", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      activities: [
+        {
+          id: 3,
+          op_type: "commit_repo",
+          ref_name: "refs/heads/user/alice/wip",
+          commit_sha: "cccc",
+          commit_message: "update three.md",
+          repeat_count: 3,
+        },
+        {
+          id: 4,
+          op_type: "commit_repo",
+          ref_name: "refs/heads/main",
+          repeat_count: 1,
+        },
+      ],
+    });
   });
 
   it("rejects malformed and self dependency mutations before calling Forgejo", async () => {

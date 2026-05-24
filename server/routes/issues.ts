@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
+import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
 import {
   DELETED_USER_LOGIN,
   type ForgejoIssue,
@@ -398,18 +399,21 @@ issues.get("/:slug/activities", async (c) => {
   const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 50;
   const { fj, owner, repo } = c.get("repoCtx");
   const raw = await fj.listRepoActivities(owner, repo, { limit });
-  const safe = raw ?? [];
+  const safe = collapseNoisyEditBranchCommits(raw ?? []);
   return c.json({
-    activities: safe.map<ActivityRow>((a) => {
+    activities: safe.map<ActivityRow>((item) => {
+      const a = item.activity;
       // The backend encodes content as a JSON array string for many op_types.
       // For comment_*: ["<issue_index>","<body>"]
       // For close_issue, reopen_issue, etc: often just "<issue_index>" or
       // similar — keep raw and let the client parse what it can.
       let refIndex: number | null = null;
       let body: string | null = null;
+      let commit = item.commit;
       if (a.content) {
         try {
-          const parsed: unknown = JSON.parse(a.content);
+          const parsed = parseActivityContent(a.content);
+          commit ??= activityCommitRef(parsed);
           if (Array.isArray(parsed) && parsed.length > 0) {
             const first = parsed[0];
             const n = Number(first);
@@ -430,6 +434,9 @@ issues.get("/:slug/activities", async (c) => {
         ref_index: refIndex,
         ref_name: a.ref_name ?? null,
         comment_body: body,
+        commit_sha: commit?.sha ?? null,
+        commit_message: commit?.message ?? null,
+        repeat_count: item.repeatCount,
         created_at: new Date(a.created).getTime(),
       };
     }),

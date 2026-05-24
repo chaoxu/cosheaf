@@ -1015,6 +1015,11 @@ function ActivityLine({
         );
       })()}
       {desc.extra && <span className="opacity-75">{desc.extra}</span>}
+      {row.repeat_count > 1 && (
+        <span className="rounded-full border border-[var(--cf-border)] px-1.5 py-0.5 text-[11px] opacity-75">
+          {row.repeat_count} commits
+        </span>
+      )}
     </div>
   );
 }
@@ -1045,6 +1050,15 @@ function describeOpType(row: ActivityRow): {
       return { verb: "merged", targetKind: "pr", targetNumber: n, extra: null };
     case "comment_pull":
       return { verb: "commented on", targetKind: "pr", targetNumber: n, extra: null };
+    case "commit_repo": {
+      const message = row.commit_message?.split(/\r?\n/, 1)[0] ?? null;
+      return {
+        verb: row.repeat_count > 1 ? "saved edits to" : "committed to",
+        targetKind: null,
+        targetNumber: null,
+        extra: [row.ref_name, message].filter(Boolean).join(" · ") || null,
+      };
+    }
     case "pull_review":
     case "approve_pull_request":
       return { verb: "approved", targetKind: "pr", targetNumber: n, extra: null };
