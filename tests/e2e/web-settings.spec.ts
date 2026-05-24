@@ -4,6 +4,9 @@ const webBase = "http://localhost:3030";
 const repoBase = `${webBase}/flushing-coin`;
 
 test("account preferences are separate from project settings", async ({ page }) => {
+  const css = await page.request.get(`${webBase}/cosheaf-web.css`);
+  expect(css.ok()).toBe(true);
+
   await page.goto(`${webBase}/login`);
   await page.locator('input[name="username"]').fill("chao");
   await page.locator('input[name="password"]').fill("Cosheaf123!");

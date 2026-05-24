@@ -237,7 +237,7 @@ function ownerlessRepoRewrite(request: Request):
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const [first, second] = parts;
-  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api") return { kind: "none" };
+  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api" || first === "cosheaf-web.css") return { kind: "none" };
 
   const internalRewrite = request.headers.get("x-cosheaf-internal-owner-rewrite");
   if (first === config.forgejoOwner && second && !internalRewrite) {
