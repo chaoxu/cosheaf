@@ -1432,6 +1432,13 @@ function WorkspaceView({
   useEffect(() => {
     setActiveFormatId(workspace.default_md_format);
   }, [workspace.default_md_format]);
+  useEffect(
+    () => () => {
+      outlineUnsubscribeRef.current?.();
+      outlineUnsubscribeRef.current = null;
+    },
+    [],
+  );
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(activeFormatId).editor),
     [activeFormatId],
@@ -1468,6 +1475,7 @@ function WorkspaceView({
   const [newIssueBody, setNewIssueBody] = useState("");
   const [newIssueBusy, setNewIssueBusy] = useState(false);
   const editorRef = useRef<MountedEditor | null>(null);
+  const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [documentTheme] = useDocumentTheme(user.username);
   const [diffViewPreference, setDiffViewPreference] = useDiffViewPreference(user.username);
@@ -2815,9 +2823,10 @@ function WorkspaceView({
                   from={openPath ?? undefined}
                   testId="editor"
                   onReady={(editor) => {
+                    outlineUnsubscribeRef.current?.();
                     editorRef.current = editor;
                     setOutline(editor.outline.get());
-                    editor.outline.subscribe(setOutline);
+                    outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
                     if (pendingScroll && pendingScroll.path === openPath) {
                       editor.scrollToLine(pendingScroll.line, { center: true });
                       setPendingScroll(null);

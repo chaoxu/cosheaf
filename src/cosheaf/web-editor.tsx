@@ -77,6 +77,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
+  const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const branchRef = useRef(branch);
   const currentPathRef = useRef(currentPath);
   const savedPathRef = useRef(savedPath);
@@ -93,6 +94,14 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, pathDirty]);
+
+  useEffect(
+    () => () => {
+      outlineUnsubscribeRef.current?.();
+      outlineUnsubscribeRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const input = document.getElementById("web-editor-path-input");
@@ -277,9 +286,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             from={currentPath}
             testId="editor"
             onReady={(editor) => {
+              outlineUnsubscribeRef.current?.();
               editorRef.current = editor;
               setOutline(editor.outline.get());
-              editor.outline.subscribe(setOutline);
+              outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
             }}
             onChange={(next) => {
               setContent(next);
