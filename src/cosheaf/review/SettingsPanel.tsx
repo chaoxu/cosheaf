@@ -9,7 +9,8 @@ import { api } from "../api";
 import type { Label, Milestone, WorkspaceSettings } from "../api";
 import type { DocumentFormatId } from "../../../shared/document-format";
 import type { DocumentThemeId } from "../document-theme";
-import { DOCUMENT_THEMES } from "../document-theme";
+import type { DiffViewPreference } from "../document-theme";
+import { DIFF_VIEW_MODES, DIFF_VIEW_SHAPES, DOCUMENT_THEMES, normalizeDiffShape } from "../document-theme";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -20,18 +21,27 @@ export function SettingsPanel({
   initialFormatId,
   documentTheme,
   onDocumentThemeChanged,
+  diffViewPreference,
+  onDiffViewPreferenceChanged,
   onFormatChanged,
 }: {
   workspaceSlug: string;
   initialFormatId: DocumentFormatId;
   documentTheme: DocumentThemeId;
   onDocumentThemeChanged: (theme: DocumentThemeId) => void;
+  diffViewPreference: DiffViewPreference;
+  onDiffViewPreferenceChanged: (preference: DiffViewPreference) => void;
   onFormatChanged?: (formatId: DocumentFormatId) => void;
 }): ReactElement {
   return (
     <div className="flex flex-col gap-6 p-4 max-w-3xl">
       <h1 className="text-lg font-semibold">Settings</h1>
-      <UserPreferences documentTheme={documentTheme} onDocumentThemeChanged={onDocumentThemeChanged} />
+      <UserPreferences
+        documentTheme={documentTheme}
+        onDocumentThemeChanged={onDocumentThemeChanged}
+        diffViewPreference={diffViewPreference}
+        onDiffViewPreferenceChanged={onDiffViewPreferenceChanged}
+      />
       <FormatManager
         workspaceSlug={workspaceSlug}
         initialFormatId={initialFormatId}
@@ -46,9 +56,13 @@ export function SettingsPanel({
 function UserPreferences({
   documentTheme,
   onDocumentThemeChanged,
+  diffViewPreference,
+  onDiffViewPreferenceChanged,
 }: {
   documentTheme: DocumentThemeId;
   onDocumentThemeChanged: (theme: DocumentThemeId) => void;
+  diffViewPreference: DiffViewPreference;
+  onDiffViewPreferenceChanged: (preference: DiffViewPreference) => void;
 }): ReactElement {
   return (
     <section data-testid="settings-user-preferences" className="flex flex-col gap-2">
@@ -64,6 +78,44 @@ function UserPreferences({
           {DOCUMENT_THEMES.map((theme) => (
             <option key={theme.id} value={theme.id}>
               {theme.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <span className="text-[var(--cf-muted)]">Changed files default view</span>
+        <select
+          value={diffViewPreference.mode}
+          onChange={(event) => {
+            const mode = event.target.value as DiffViewPreference["mode"];
+            onDiffViewPreferenceChanged({
+              mode,
+              shape: normalizeDiffShape(diffViewPreference.shape, mode),
+            });
+          }}
+          data-testid="settings-diff-mode-select"
+          className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
+        >
+          {DIFF_VIEW_MODES.map((mode) => (
+            <option key={mode.id} value={mode.id}>
+              {mode.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={diffViewPreference.shape}
+          onChange={(event) =>
+            onDiffViewPreferenceChanged({
+              mode: diffViewPreference.mode,
+              shape: normalizeDiffShape(event.target.value, diffViewPreference.mode),
+            })
+          }
+          data-testid="settings-diff-shape-select"
+          className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
+        >
+          {DIFF_VIEW_SHAPES.map((shape) => (
+            <option key={shape.id} value={shape.id} disabled={diffViewPreference.mode === "rich" && shape.id === "unified"}>
+              {shape.label}
             </option>
           ))}
         </select>

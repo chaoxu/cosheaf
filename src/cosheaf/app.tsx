@@ -51,7 +51,13 @@ import { SettingsPanel } from "./review/SettingsPanel";
 import { WorkspaceProvider, useWorkspaceContext } from "./workspace-context";
 import { useReviewComments } from "./use-review-comments";
 import type { DocumentThemeId } from "./document-theme";
-import { readDocumentTheme, writeDocumentTheme } from "./document-theme";
+import type { DiffViewPreference } from "./document-theme";
+import {
+  readDiffViewPreference,
+  readDocumentTheme,
+  writeDiffViewPreference,
+  writeDocumentTheme,
+} from "./document-theme";
 
 type View =
   | { kind: "loading" }
@@ -235,6 +241,25 @@ function useDocumentTheme(username: string): [DocumentThemeId, (theme: DocumentT
     [username],
   );
   return [documentTheme, setDocumentTheme];
+}
+
+function useDiffViewPreference(
+  username: string,
+): [DiffViewPreference, (preference: DiffViewPreference) => void] {
+  const [preference, setPreferenceState] = useState<DiffViewPreference>(() =>
+    readDiffViewPreference(username),
+  );
+  useEffect(() => {
+    setPreferenceState(readDiffViewPreference(username));
+  }, [username]);
+  const setPreference = useCallback(
+    (next: DiffViewPreference) => {
+      writeDiffViewPreference(next, username);
+      setPreferenceState(readDiffViewPreference(username));
+    },
+    [username],
+  );
+  return [preference, setPreference];
 }
 
 // URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
@@ -1342,6 +1367,7 @@ function WorkspaceView({
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
   const [documentTheme, setDocumentTheme] = useDocumentTheme(user.username);
+  const [diffViewPreference, setDiffViewPreference] = useDiffViewPreference(user.username);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
   const [reviewState, setReviewState] = useState<{
@@ -2642,6 +2668,8 @@ function WorkspaceView({
                 initialFormatId={activeFormatId}
                 documentTheme={documentTheme}
                 onDocumentThemeChanged={setDocumentTheme}
+                diffViewPreference={diffViewPreference}
+                onDiffViewPreferenceChanged={setDiffViewPreference}
                 onFormatChanged={setActiveFormatId}
               />
             </div>
@@ -2709,6 +2737,8 @@ function WorkspaceView({
                   loadContent={loadReviewFileContent}
                   comments={reviewState.comments}
                   currentForgejoUsername={user.username}
+                  defaultView={diffViewPreference}
+                  onDefaultViewChanged={setDiffViewPreference}
                   onAddComment={
                     // Hide the inline composer for the author of the PR — even
                     // admins/writers can't review their own changes, so the

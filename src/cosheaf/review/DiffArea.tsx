@@ -5,6 +5,8 @@ import type { LineComment, PrFile } from "../api";
 import { getClientDocumentFormat } from "../format-registry";
 import type { DiffRendererProps, ViewMode, ViewShape } from "./diff-renderer-types";
 import { useWorkspaceContext } from "../workspace-context";
+import type { DiffViewPreference } from "../document-theme";
+import { normalizeDiffShape } from "../document-theme";
 import { SourceDiff } from "./diff-renderers/SourceDiff";
 import { SourceAfterOnly } from "./diff-renderers/SourceAfterOnly";
 import { HeadWithTint } from "./diff-renderers/HeadWithTint";
@@ -35,6 +37,8 @@ export function DiffArea({
   loadContent,
   comments,
   currentForgejoUsername,
+  defaultView,
+  onDefaultViewChanged,
   onAddComment,
   onEditComment,
   onDeleteComment,
@@ -43,19 +47,19 @@ export function DiffArea({
   loadContent: (path: string, side: "base" | "head") => Promise<string>;
   comments: readonly LineComment[];
   currentForgejoUsername?: string;
+  defaultView: DiffViewPreference;
+  onDefaultViewChanged?: (preference: DiffViewPreference) => void;
   onAddComment?: DiffRendererProps["onAddComment"];
   onEditComment?: DiffRendererProps["onEditComment"];
   onDeleteComment?: DiffRendererProps["onDeleteComment"];
 }): ReactElement {
-  const { slug: workspaceSlug, formatId } = useWorkspaceContext();
+  const { formatId } = useWorkspaceContext();
   const fileComments = useMemo(
     () => (file ? comments.filter((c) => c.path === file.path) : []),
     [comments, file],
   );
-  const modeKey = `cosheaf:diff-mode:${workspaceSlug}`;
-  const shapeKey = `cosheaf:diff-shape:${workspaceSlug}`;
-  const [mode, setMode] = useState<ViewMode>(() => readMode(modeKey));
-  const [shape, setShape] = useState<ViewShape>(() => readShape(shapeKey));
+  const [mode, setModeState] = useState<ViewMode>(defaultView.mode);
+  const [shape, setShapeState] = useState<ViewShape>(() => normalizeDiffShape(defaultView.shape, defaultView.mode));
 
   const richAvailable = getClientDocumentFormat(formatId).supportsRichDiff;
 
@@ -67,11 +71,22 @@ export function DiffArea({
   }, [mode, shape, richAvailable]);
 
   useEffect(() => {
-    localStorage.setItem(modeKey, mode);
-  }, [mode, modeKey]);
-  useEffect(() => {
-    localStorage.setItem(shapeKey, shape);
-  }, [shape, shapeKey]);
+    setModeState(defaultView.mode);
+    setShapeState(normalizeDiffShape(defaultView.shape, defaultView.mode));
+  }, [defaultView.mode, defaultView.shape]);
+
+  function setMode(nextMode: ViewMode): void {
+    setModeState(nextMode);
+    const next = { mode: nextMode, shape: normalizeDiffShape(shape, nextMode) };
+    setShapeState(next.shape);
+    onDefaultViewChanged?.(next);
+  }
+
+  function setShape(nextShape: ViewShape): void {
+    const next = { mode, shape: normalizeDiffShape(nextShape, mode) };
+    setShapeState(next.shape);
+    onDefaultViewChanged?.(next);
+  }
 
   if (!file) {
     return (
@@ -171,14 +186,4 @@ function renderView(mode: ViewMode, shape: ViewShape, props: DiffRendererProps):
   // Rich mode: coflat-editor renders the markdown (math, headings, ...).
   if (shape === "split") return <SideBySideRendered {...props} />;
   return <HeadWithTint {...props} />;
-}
-
-function readMode(key: string): ViewMode {
-  const v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  return v === "source" || v === "rich" ? v : "rich";
-}
-
-function readShape(key: string): ViewShape {
-  const v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  return v === "unified" || v === "split" || v === "after" ? v : "after";
 }

@@ -508,6 +508,24 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
             <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
           </nav>
         </header>
+        <script>
+          (() => {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("mode") || url.searchParams.has("shape")) return;
+            const user = document.body.dataset.cosheafUser || "";
+            const legacyModeKey = "cosheaf:diff-mode";
+            const legacyShapeKey = "cosheaf:diff-shape";
+            const modeKey = user ? legacyModeKey + ":" + user : legacyModeKey;
+            const shapeKey = user ? legacyShapeKey + ":" + user : legacyShapeKey;
+            const mode = (localStorage.getItem(modeKey) || localStorage.getItem(legacyModeKey)) === "source" ? "source" : "rich";
+            const rawShape = localStorage.getItem(shapeKey) || localStorage.getItem(legacyShapeKey);
+            const shapeValue = rawShape === "unified" || rawShape === "split" || rawShape === "after" ? rawShape : "after";
+            const shape = mode === "rich" && shapeValue === "unified" ? "after" : shapeValue;
+            url.searchParams.set("mode", mode);
+            url.searchParams.set("shape", shape);
+            window.location.replace(url);
+          })();
+        </script>
         <div class="review-page">
           <nav class="changed-files" aria-label="Changed files">
             ${files
@@ -599,6 +617,17 @@ web.get("/:owner/:repo/settings", async (c) => {
                 <option value="blueprint-book">Blueprint Book</option>
               </select>
             </label>
+            <label>Changed files default view
+              <select data-testid="settings-diff-mode-select" data-diff-mode-user="${escapeAttr(ctx.user)}">
+                <option value="source">Source</option>
+                <option value="rich">Rich</option>
+              </select>
+              <select data-testid="settings-diff-shape-select" data-diff-shape-user="${escapeAttr(ctx.user)}">
+                <option value="unified">Unified</option>
+                <option value="split">Side-by-side</option>
+                <option value="after">After only</option>
+              </select>
+            </label>
           </section>
           <form class="settings-section" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings")}">
             <h2>Workspace settings</h2>
@@ -620,6 +649,38 @@ web.get("/:owner/:repo/settings", async (c) => {
               localStorage.setItem(key, select.value);
               localStorage.setItem(legacyKey, select.value);
             });
+          })();
+          (() => {
+            const modeSelect = document.querySelector("[data-diff-mode-user]");
+            const shapeSelect = document.querySelector("[data-diff-shape-user]");
+            if (!(modeSelect instanceof HTMLSelectElement) || !(shapeSelect instanceof HTMLSelectElement)) return;
+            const legacyModeKey = "cosheaf:diff-mode";
+            const legacyShapeKey = "cosheaf:diff-shape";
+            const user = modeSelect.dataset.diffModeUser || "";
+            const modeKey = user ? legacyModeKey + ":" + user : legacyModeKey;
+            const shapeKey = user ? legacyShapeKey + ":" + user : legacyShapeKey;
+            const normalizeMode = (value) => value === "source" ? "source" : "rich";
+            const normalizeShape = (value, mode) => {
+              const shape = value === "unified" || value === "split" || value === "after" ? value : "after";
+              return mode === "rich" && shape === "unified" ? "after" : shape;
+            };
+            const sync = () => {
+              const mode = normalizeMode(modeSelect.value);
+              const shape = normalizeShape(shapeSelect.value, mode);
+              modeSelect.value = mode;
+              shapeSelect.value = shape;
+              shapeSelect.querySelector('option[value="unified"]').disabled = mode === "rich";
+              localStorage.setItem(modeKey, mode);
+              localStorage.setItem(shapeKey, shape);
+              localStorage.setItem(legacyModeKey, mode);
+              localStorage.setItem(legacyShapeKey, shape);
+            };
+            const initialMode = normalizeMode(localStorage.getItem(modeKey) || localStorage.getItem(legacyModeKey));
+            modeSelect.value = initialMode;
+            shapeSelect.value = normalizeShape(localStorage.getItem(shapeKey) || localStorage.getItem(legacyShapeKey), initialMode);
+            sync();
+            modeSelect.addEventListener("change", sync);
+            shapeSelect.addEventListener("change", sync);
           })();
         </script>
       `,

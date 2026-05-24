@@ -83,6 +83,24 @@ try {
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
   await page.getByRole("link", { name: "Files changed" }).click();
   await page.getByTestId("diff-pane-after").waitFor({ state: "visible", timeout: 10000 });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/settings`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
+  await page.getByTestId("settings-diff-mode-select").selectOption("source");
+  await page.getByTestId("settings-diff-shape-select").selectOption("split");
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
+  await page.getByRole("link", { name: "Files changed" }).click();
+  await page.getByTestId("view-mode-source").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByTestId("diff-pane-split").waitFor({ state: "visible", timeout: 10000 });
+  if (!page.url().includes("mode=source") || !page.url().includes("shape=split")) {
+    throw new Error(`changed-files preference did not apply to URL: ${page.url()}`);
+  }
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/settings`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
+  await page.getByTestId("settings-diff-mode-select").selectOption("rich");
+  await page.getByTestId("settings-diff-shape-select").selectOption("after");
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
+  await page.getByRole("link", { name: "Files changed" }).click();
+  await page.getByTestId("diff-pane-after").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-mode-rich").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-shape-after").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-shape-split").click();
