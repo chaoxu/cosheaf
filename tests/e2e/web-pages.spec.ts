@@ -44,6 +44,13 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.goto(`${repoBase}/issues`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
   await expect(page.locator(".repo-body")).not.toContainText(owner);
+  await expect(page.getByTestId("issue-filters")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("State filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("Label filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("Milestone filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("Author filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("Assignee filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("Search issues")).toBeVisible();
   await page.locator('.list-row[href*="/issues/"]').first().click();
   const issuePath = new URL(page.url()).pathname;
   await expect(page.locator(".thread-header")).toContainText("#");
@@ -56,6 +63,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/pulls`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
+  await expect(page.getByTestId("pull-filters")).toBeVisible();
+  await expect(page.getByTestId("pull-filters").getByLabel("State filter")).toBeVisible();
+  await expect(page.getByTestId("pull-filters").getByLabel("Label filter")).toBeVisible();
+  await expect(page.getByTestId("pull-filters").getByLabel("Milestone filter")).toBeVisible();
+  await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
   await page.locator('.list-row[href*="/pulls/"]').first().click();
   await expect(page.locator(".subtabs")).toContainText("Files changed");
   await expect(page.locator(".thread")).toContainText("pushed commit");

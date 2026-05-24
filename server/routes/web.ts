@@ -24,6 +24,8 @@ import type {
   ForgejoCommit,
   ForgejoIssue,
   ForgejoIssueComment,
+  ForgejoLabel,
+  ForgejoMilestone,
   ForgejoPullReviewComment,
   ForgejoReview,
   ForgejoTimelineEvent,
@@ -332,8 +334,22 @@ web.post("/:owner/:repo/_edit", async (c) => {
 web.get("/:owner/:repo/issues", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const state = c.req.query("state") === "closed" ? "closed" : "open";
-  const issues = await ctx.fj.listIssues(ctx.owner, ctx.repo, { state, limit: 50 });
+  const filters = parseIssueListFilters(c);
+  const [issues, labels, milestones] = await Promise.all([
+    ctx.fj.listIssues(ctx.owner, ctx.repo, {
+      state: filters.state,
+      limit: 50,
+      q: filters.q || undefined,
+      labels: filters.labels || undefined,
+      milestones: filters.milestones || undefined,
+      created_by: filters.createdBy || undefined,
+      assigned_by: filters.assignedBy || undefined,
+      mentioned_by: filters.mentionedBy || undefined,
+      sort: filters.sort || undefined,
+    }),
+    ctx.fj.listLabels(ctx.owner, ctx.repo),
+    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
+  ]);
   return htmlResponse(
     repoPage({
       title: `Issues - ${ctx.repo}`,
@@ -344,9 +360,10 @@ web.get("/:owner/:repo/issues", async (c) => {
       ws: ctx.ws,
       body: `
         <div class="page-title compact">
-          <div><p class="eyebrow">${state}</p><h1>Issues</h1></div>
+          <div><p class="eyebrow">${filters.state}</p><h1>Issues</h1></div>
         </div>
-        ${issueList(ctx.owner, ctx.repo, issues)}
+        ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
+        ${issueList(ctx.owner, ctx.repo, issues, "No matching issues.")}
       `,
     }),
   );
@@ -440,8 +457,18 @@ web.post("/:owner/:repo/issues/:number/state", async (c) => {
 web.get("/:owner/:repo/pulls", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const state = c.req.query("state") === "closed" ? "closed" : "open";
-  const pulls = await ctx.fj.listPulls(ctx.owner, ctx.repo, state);
+  const filters = parsePullListFilters(c);
+  const [pulls, labels, milestones] = await Promise.all([
+    ctx.fj.listPulls(ctx.owner, ctx.repo, {
+      state: filters.state,
+      labels: filters.labels.length > 0 ? filters.labels : undefined,
+      milestone: filters.milestone,
+      poster: filters.author || undefined,
+      sort: filters.sort || undefined,
+    }),
+    ctx.fj.listLabels(ctx.owner, ctx.repo),
+    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
+  ]);
   return htmlResponse(
     repoPage({
       title: `Pull requests - ${ctx.repo}`,
@@ -452,9 +479,10 @@ web.get("/:owner/:repo/pulls", async (c) => {
       ws: ctx.ws,
       body: `
         <div class="page-title compact">
-          <div><p class="eyebrow">${state}</p><h1>Pull requests</h1></div>
+          <div><p class="eyebrow">${filters.state}</p><h1>Pull requests</h1></div>
         </div>
-        ${pullList(ctx.owner, ctx.repo, pulls)}
+        ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
+        ${pullList(ctx.owner, ctx.repo, pulls, "No matching pull requests.")}
       `,
     }),
   );
@@ -1435,22 +1463,237 @@ function userPreferencesScript(): string {
   return `<script src="/cosheaf-preferences.js" defer></script>`;
 }
 
+type WebListState = "open" | "closed" | "all";
+type IssueListSort = "relevance" | "latest" | "oldest" | "recentupdate" | "leastupdate" | "mostcomment" | "leastcomment" | "nearduedate" | "farduedate";
+type PullListSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
+
+interface IssueListFilters {
+  state: WebListState;
+  q: string;
+  labels: string;
+  milestones: string;
+  createdBy: string;
+  assignedBy: string;
+  mentionedBy: string;
+  sort: IssueListSort | "";
+}
+
+interface PullListFilters {
+  state: WebListState;
+  labels: number[];
+  labelValue: string;
+  milestone?: number;
+  milestoneValue: string;
+  author: string;
+  sort: PullListSort | "";
+}
+
+const ISSUE_SORT_OPTIONS: Array<{ value: IssueListSort; label: string }> = [
+  { value: "latest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
+  { value: "recentupdate", label: "Recently updated" },
+  { value: "leastupdate", label: "Least recently updated" },
+  { value: "mostcomment", label: "Most commented" },
+  { value: "leastcomment", label: "Least commented" },
+  { value: "nearduedate", label: "Nearest due date" },
+  { value: "farduedate", label: "Farthest due date" },
+];
+
+const PULL_SORT_OPTIONS: Array<{ value: PullListSort; label: string }> = [
+  { value: "recentupdate", label: "Recently updated" },
+  { value: "oldest", label: "Oldest" },
+  { value: "recentclose", label: "Recently closed" },
+  { value: "leastupdate", label: "Least recently updated" },
+  { value: "mostcomment", label: "Most commented" },
+  { value: "leastcomment", label: "Least commented" },
+  { value: "priority", label: "Priority" },
+];
+
+function parseIssueListFilters(c: Context<AppEnv>): IssueListFilters {
+  const sort = queryText(c, "sort");
+  return {
+    state: parseListState(c.req.query("state")),
+    q: queryText(c, "q"),
+    labels: queryText(c, "labels"),
+    milestones: queryText(c, "milestones"),
+    createdBy: queryText(c, "created_by"),
+    assignedBy: queryText(c, "assigned_by"),
+    mentionedBy: queryText(c, "mentioned_by"),
+    sort: ISSUE_SORT_OPTIONS.some((option) => option.value === sort) ? sort as IssueListSort : "",
+  };
+}
+
+function parsePullListFilters(c: Context<AppEnv>): PullListFilters {
+  const labelValue = queryText(c, "labels");
+  const milestoneValue = queryText(c, "milestone");
+  const sort = queryText(c, "sort");
+  return {
+    state: parseListState(c.req.query("state")),
+    labels: parsePositiveIntList(labelValue),
+    labelValue,
+    milestone: parsePositiveInt(milestoneValue),
+    milestoneValue,
+    author: queryText(c, "author"),
+    sort: PULL_SORT_OPTIONS.some((option) => option.value === sort) ? sort as PullListSort : "",
+  };
+}
+
+function parseListState(value: string | undefined): WebListState {
+  return value === "closed" || value === "all" ? value : "open";
+}
+
+function queryText(c: Context<AppEnv>, name: string): string {
+  return c.req.query(name)?.trim() ?? "";
+}
+
+function parsePositiveInt(value: string): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function parsePositiveIntList(value: string): number[] {
+  return value
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+}
+
+function issueFilterForm(
+  owner: string,
+  repo: string,
+  filters: IssueListFilters,
+  labels: readonly ForgejoLabel[],
+  milestones: readonly ForgejoMilestone[],
+): string {
+  const action = repoHref(owner, repo, "/issues");
+  return `<form class="filter-panel" method="get" action="${action}" data-testid="issue-filters">
+    ${stateField(filters.state)}
+    <label>Label
+      <select name="labels" aria-label="Label filter">
+        <option value="">Any label</option>
+        ${labels.map((label) => `<option value="${escapeAttr(label.name)}"${selected(filters.labels, label.name)}>${escapeHtml(label.name)}</option>`).join("")}
+      </select>
+    </label>
+    <label>Milestone
+      <select name="milestones" aria-label="Milestone filter">
+        <option value="">Any milestone</option>
+        ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
+      </select>
+    </label>
+    <label>Author <input name="created_by" value="${escapeAttr(filters.createdBy)}" placeholder="username" aria-label="Author filter"></label>
+    <label>Assignee <input name="assigned_by" value="${escapeAttr(filters.assignedBy)}" placeholder="username" aria-label="Assignee filter"></label>
+    <label>Mentioned <input name="mentioned_by" value="${escapeAttr(filters.mentionedBy)}" placeholder="username" aria-label="Mentioned filter"></label>
+    <label>Search <input name="q" value="${escapeAttr(filters.q)}" placeholder="title text" aria-label="Search issues"></label>
+    ${sortField(filters.sort, ISSUE_SORT_OPTIONS)}
+    <div class="filter-actions">
+      <button class="button primary" type="submit">Apply filters</button>
+      <a class="button" href="${action}">Reset</a>
+    </div>
+  </form>`;
+}
+
+function pullFilterForm(
+  owner: string,
+  repo: string,
+  filters: PullListFilters,
+  labels: readonly ForgejoLabel[],
+  milestones: readonly ForgejoMilestone[],
+): string {
+  const action = repoHref(owner, repo, "/pulls");
+  return `<form class="filter-panel" method="get" action="${action}" data-testid="pull-filters">
+    ${stateField(filters.state)}
+    <label>Label
+      <select name="labels" aria-label="Label filter">
+        <option value="">Any label</option>
+        ${labels.map((label) => `<option value="${label.id}"${selected(filters.labelValue, String(label.id))}>${escapeHtml(label.name)}</option>`).join("")}
+      </select>
+    </label>
+    <label>Milestone
+      <select name="milestone" aria-label="Milestone filter">
+        <option value="">Any milestone</option>
+        ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
+      </select>
+    </label>
+    <label>Author <input name="author" value="${escapeAttr(filters.author)}" placeholder="username" aria-label="Author filter"></label>
+    ${sortField(filters.sort, PULL_SORT_OPTIONS)}
+    <div class="filter-actions">
+      <button class="button primary" type="submit">Apply filters</button>
+      <a class="button" href="${action}">Reset</a>
+    </div>
+  </form>`;
+}
+
+function stateField(value: WebListState): string {
+  return `<label>State
+    <select name="state" aria-label="State filter">
+      <option value="open"${selected(value, "open")}>Open</option>
+      <option value="closed"${selected(value, "closed")}>Closed</option>
+      <option value="all"${selected(value, "all")}>All states</option>
+    </select>
+  </label>`;
+}
+
+function sortField<T extends string>(value: T | "", options: Array<{ value: T; label: string }>): string {
+  return `<label>Sort
+    <select name="sort" aria-label="Sort filter">
+      <option value="">Default</option>
+      ${options.map((option) => `<option value="${option.value}"${selected(value, option.value)}>${escapeHtml(option.label)}</option>`).join("")}
+    </select>
+  </label>`;
+}
+
+function selected(current: string, value: string): string {
+  return current === value ? " selected" : "";
+}
+
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): string {
   return `<div class="list">${files
     .map((file) => `<a class="list-row" href="${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}"><strong>${escapeHtml(file.path)}</strong><span>${file.size ?? 0} bytes</span></a>`)
     .join("") || `<div class="empty">No Markdown files.</div>`}</div>`;
 }
 
-function issueList(owner: string, repo: string, issues: ForgejoIssue[]): string {
+function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues."): string {
   return `<div class="list">${issues
-    .map((issue) => `<a class="list-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}"><strong>#${issue.number} ${escapeHtml(issue.title)}</strong><span>${escapeHtml(displayLogin(owner, issue.user?.login))} - ${formatDate(issue.created_at)}</span><small>${escapeHtml(issue.state)}</small></a>`)
-    .join("") || `<div class="empty">No issues.</div>`}</div>`;
+    .map((issue) => `<a class="list-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}">
+      <strong>#${issue.number} ${escapeHtml(issue.title)}</strong>
+      <span class="list-meta">
+        ${escapeHtml(displayLogin(owner, issue.user?.login))} - ${formatDate(issue.created_at)}
+        ${issue.milestone ? `<span class="meta-pill">${escapeHtml(issue.milestone.title)}</span>` : ""}
+        ${labelChips(issue.labels)}
+      </span>
+      <small>${escapeHtml(issue.state)}</small>
+    </a>`)
+    .join("") || `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>`;
 }
 
-function pullList(owner: string, repo: string, pulls: ForgejoPull[]): string {
+function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests."): string {
   return `<div class="list">${pulls
-    .map((pull) => `<a class="list-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}"><strong>#${pull.number} ${escapeHtml(pull.title)}</strong><span>${escapeHtml(pull.head.ref)} -> ${escapeHtml(pull.base.ref)}</span><small>${pull.merged ? "merged" : escapeHtml(pull.state)}</small></a>`)
-    .join("") || `<div class="empty">No pull requests.</div>`}</div>`;
+    .map((pull) => `<a class="list-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
+      <strong>#${pull.number} ${escapeHtml(pull.title)}</strong>
+      <span class="list-meta">
+        ${escapeHtml(pull.head.ref)} -&gt; ${escapeHtml(pull.base.ref)}
+        ${pull.milestone ? `<span class="meta-pill">${escapeHtml(pull.milestone.title)}</span>` : ""}
+        ${labelChips(pull.labels ?? [])}
+      </span>
+      <small>${pull.merged ? "merged" : escapeHtml(pull.state)}</small>
+    </a>`)
+    .join("") || `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>`;
+}
+
+function labelChips(labels: readonly ForgejoLabel[]): string {
+  if (labels.length === 0) return "";
+  return `<span class="label-chips">${labels.map(labelChip).join("")}</span>`;
+}
+
+function labelChip(label: ForgejoLabel): string {
+  const color = safeLabelColor(label.color);
+  return `<span class="label-chip" style="background-color:#${color}22;color:#${color}">${escapeHtml(label.name)}</span>`;
+}
+
+function safeLabelColor(value: string): string {
+  const color = value.replace(/^#/, "");
+  return /^[0-9a-fA-F]{6}$/.test(color) ? color : "71717a";
 }
 
 function activityList(ctx: WebCtx, activities: ForgejoActivity[]): string {
