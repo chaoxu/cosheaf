@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,9 +48,8 @@ app.get("/api/v1/health", (c) =>
 );
 
 // If a route handler bubbles a 401 from the backing forge, the caller's token
-// was rejected (revoked, rotated). Surface a typed `pat_invalid` so the SPA can
-// drop the stored token and bounce to login; agents see the same signal and
-// re-acquire a token.
+// was rejected (revoked, rotated). Surface a typed `pat_invalid` so browser
+// islands redirect to login; agents see the same signal and re-acquire a token.
 app.onError((err, c) => {
   if (err instanceof ForgejoError && err.status === 401) {
     const auth = c.req.header("authorization") ?? "";
@@ -102,25 +101,12 @@ for (const assetPath of publicAssetPaths) {
   });
 }
 
-if (existsSync(path.join(distDir, "index.html"))) {
-  app.get("/assets/*", async (c) => {
-    const response = await serveDistFile(c.req.path);
-    return response ?? c.json({ error: "not found" }, 404);
-  });
-}
+app.get("/assets/*", async (c) => {
+  const response = await serveDistFile(c.req.path);
+  return response ?? c.json({ error: "not found" }, 404);
+});
 
 app.route("/", web);
-
-if (existsSync(path.join(distDir, "index.html"))) {
-  app.get("*", async (c, next) => {
-    if (c.req.path.startsWith("/api/")) {
-      return c.json({ error: "not found" }, 404);
-    }
-    const response = await serveDistFile(c.req.path);
-    if (response) return response;
-    await next();
-  });
-}
 
 async function serveDistFile(requestPath: string): Promise<Response | null> {
   const resolvedPath = resolveDistPath(requestPath);
@@ -166,24 +152,19 @@ function resolveDistPath(requestPath: string): string | null {
   } catch (_error) {
     return null;
   }
-  const relativePath = decodedPath === "/" ? "index.html" : decodedPath.replace(/^\/+/, "");
+  const relativePath = decodedPath.replace(/^\/+/, "");
   if (!relativePath || relativePath.split(/[\\/]/).includes("..")) return null;
 
-  let filePath = path.resolve(distDir, relativePath);
+  const filePath = path.resolve(distDir, relativePath);
   if (filePath !== distDir && !filePath.startsWith(`${distDir}${path.sep}`)) return null;
 
   let stat;
   try {
     stat = statSync(filePath);
   } catch (_error) {
-    if (decodedPath === "/app" || decodedPath.startsWith("/app/") || decodedPath === "/w" || decodedPath.startsWith("/w/")) {
-      filePath = path.join(distDir, "index.html");
-      stat = statSync(filePath);
-    } else {
-      return null;
-    }
+    return null;
   }
-  if (stat.isDirectory()) filePath = path.join(filePath, "index.html");
+  if (stat.isDirectory()) return null;
   return filePath;
 }
 

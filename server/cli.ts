@@ -165,8 +165,8 @@ export function parseSeedOptions(args: string[]): SeedOptions {
 
 // Create the Forgejo account if absent. Users live entirely on Forgejo;
 // the password set here is the only password the user has — they type it
-// at cosheaf's login form, cosheaf exchanges it for a PAT, and the SPA
-// stores the PAT.
+// at cosheaf's login form, and cosheaf exchanges it for a PAT-backed
+// HttpOnly cookie.
 async function ensureForgejoUser(
   username: string,
   password: string,

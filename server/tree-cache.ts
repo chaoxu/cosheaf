@@ -1,13 +1,12 @@
 // In-process tree cache. Forgejo's getTree paginates up to ~20 calls for a
-// large repo and the SPA re-fetches on every branch toggle; without a cache,
+// large repo and branch/file pages re-fetch on navigation; without a cache,
 // branch switches feel sluggish even on a warm server. Webhooks invalidate
 // per-repo on push so cached entries can't outlast their source.
 
 import type { ForgejoTreeEntry } from "./forgejo-types.js";
 import { TTLCache } from "./ttl-cache.js";
 
-// Soft cap: pulls.test.ts and the SPA both keep cache pressure low; the cap
-// is here to prevent runaway growth from a script hammering different refs.
+// Soft cap to prevent runaway growth from a script hammering different refs.
 const MAX_ENTRIES = 256;
 const TTL_MS = 5 * 60_000;
 const cache = new TTLCache<string, ForgejoTreeEntry[]>(TTL_MS, { maxEntries: MAX_ENTRIES });

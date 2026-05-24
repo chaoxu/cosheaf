@@ -1,5 +1,5 @@
 // Typed error envelope helpers shared by every route. The shape is what
-// agents and the SPA both consume; pinning it here means a new route
+// agents and browser islands both consume; pinning it here means a new route
 // doesn't reinvent the spelling (`code: "Conflict"` vs `code: "conflict"`).
 //
 // Each helper returns a tuple `[body, status]` you spread into `c.json`:

@@ -3,7 +3,7 @@ import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
-} from "./review/ref-rewriter";
+} from "./ref-rewriter";
 import { readDocumentTheme } from "./document-theme";
 
 interface ReaderPayload {

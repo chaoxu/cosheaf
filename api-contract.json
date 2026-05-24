@@ -2,7 +2,7 @@
   "version": 1,
   "basePath": "/api/v1",
   "auth": {
-    "bearer": "Cosheaf API token in Authorization header; SPA stashes it in localStorage after login"
+    "bearer": "Cosheaf API token in Authorization header; server-rendered pages use the same PAT in the HttpOnly cosheaf_pat cookie"
   },
   "typedRouteRationale": {
     "/w/:slug/file": "Coflat frontmatter/id handling, path validation, branch naming, synchronous indexing, SSE",
@@ -17,10 +17,10 @@
     "/w/:slug/pulls/:n": "stable pull request metadata DTO",
     "/w/:slug/pulls/:n/merge": "fresh admin gate before backend merge",
     "/w/:slug/pulls/:n/reviews": "review event vocabulary and approval count DTOs",
-    "/w/:slug/pulls/:n/files": "backend diff position and SPA file shape",
+    "/w/:slug/pulls/:n/files": "backend diff position and stable PR file shape",
     "/w/:slug/pulls/:n/comments": "line-position mapping for PR review comments",
     "/w/:slug/pulls/:n/pending-review": "backend pending-review helper for batched PR review comments",
-    "/w/:slug/issues": "issue-only SPA rows, mine filter composition, SSE on typed create/comment/dependency routes",
+    "/w/:slug/issues": "issue-only rows, filter composition, SSE on typed create/comment/dependency routes",
     "/w/:slug/issues/:n/comments": "stable issue comment DTOs",
     "/w/:slug/issues/:n/state": "issue state change vocabulary and SSE",
     "/w/:slug/labels": "stable label DTOs and color normalization",

@@ -3,7 +3,7 @@
 // Pairs with SMOKE_CHECKLIST.md, which the operator runs from the freshly
 // seeded state.
 
-const BASE = process.env.URL ?? "http://localhost:5173";
+const BASE = process.env.URL ?? "http://localhost:3030";
 
 console.log(`
 ─────────────────────────────────────────────────────────────────────

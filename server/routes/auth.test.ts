@@ -1,6 +1,6 @@
 // Auth route tests. Stubs global fetch so we exercise the PAT-exchange
 // flow without a live Forgejo. Login does not touch the database: it returns
-// { username, pat } for API/SPAs and also sets an HttpOnly cookie so
+// { username, pat } for API clients and also sets an HttpOnly cookie so
 // server-rendered web pages can authenticate normal GET requests.
 
 import type Database from "better-sqlite3";

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* Rich diff tints. The reader emits `data-source-line` on every block;
-   RichDiffRender toggles these classes onto matching nodes. */
+/* Rich diff tints. Server-rendered PR file views add these classes to
+   reader blocks that expose `data-source-line`. */
 [data-source-line].cf-diff-added {
   background-color: rgba(34, 197, 94, 0.12);
 }
@@ -24,10 +24,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background-color: var(--cf-bg);
   color: var(--cf-fg);
-}
-
-#app {
-  height: 100%;
 }
 
 .cm-host {

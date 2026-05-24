@@ -4,7 +4,7 @@ import { attachPageListeners, loadChromium } from "./browser-utils.mjs";
 
 const chromium = await loadChromium();
 
-const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const APP_URL = process.env.URL ?? "http://localhost:3030/";
 const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-issues-nav.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
@@ -66,7 +66,7 @@ try {
   const firstIssue = page.locator(".list-row").first();
   await firstIssue.waitFor({ state: "visible", timeout: 10000 });
   await firstIssue.click();
-  await page.waitForURL(new RegExp(`/${OWNER}/${WORKSPACE_SLUG}/issues/\\d+$`), { timeout: 10000 });
+  await page.waitForURL(new RegExp(`/(?:${OWNER}/)?${WORKSPACE_SLUG}/issues/\\d+$`), { timeout: 10000 });
   await page.locator(".thread").waitFor({ state: "visible", timeout: 8000 });
   const issueUrl = page.url();
 

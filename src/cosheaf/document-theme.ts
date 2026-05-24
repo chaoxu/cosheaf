@@ -1,7 +1,8 @@
 import { blueprintBookThemeManifest } from "@chaoxu/coflat-editor/reader";
-import type { ViewMode, ViewShape } from "./review/diff-renderer-types";
 
 export type DocumentThemeId = "default" | "blueprint-book";
+export type ViewMode = "source" | "rich";
+export type ViewShape = "unified" | "split" | "after";
 
 const LEGACY_DOCUMENT_THEME_KEY = "cosheaf:document-theme";
 const LEGACY_DIFF_MODE_KEY = "cosheaf:diff-mode";

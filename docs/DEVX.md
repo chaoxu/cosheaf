@@ -23,8 +23,8 @@ pnpm dev:login-state
 - Server-rendered web CSS: `public/cosheaf-web.css`
 - Static asset serving and ownerless route rewrite: `server/index.ts`
 - Page editor island: `src/cosheaf/web-editor.tsx`
-- Legacy SPA shell: `src/cosheaf/app.tsx`
-- SPA project settings panel: `src/cosheaf/review/SettingsPanel.tsx`
+- Coflat reader island: `src/cosheaf/web-reader.ts`
+- Page-island fetch helper: `src/cosheaf/api.ts`
 - Typed files API: `server/routes/files.ts`
 - Typed pull request API: `server/routes/pulls.ts`
 - Typed issues, labels, milestones, timeline, and activity API: `server/routes/issues.ts`

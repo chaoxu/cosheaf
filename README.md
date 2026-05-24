@@ -33,9 +33,9 @@ collaborators through Cosheaf's HTTP API.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
   stream updates over SSE to open browsers.
 - **Cosheaf API token auth** — every request sends an API token as
-  `Authorization: Bearer <token>`. Humans get one via cosheaf's login form
-  (which exchanges the forge credentials for a token and hands it to the SPA);
-  agents send their own token.
+  `Authorization: Bearer <token>`. Humans sign in through cosheaf's
+  server-rendered login form, which exchanges Forgejo credentials for a
+  PAT-backed HttpOnly cookie; agents send their own token.
 - **Cosheaf-first agent API** — agents use typed Cosheaf workspace routes for
   branches, files, pull requests, reviews, issues, labels, milestones,
   notifications, and markdown rendering. The backing forge is an
@@ -73,18 +73,18 @@ cp .env.example .env.dev
 # edit .env.dev with COSHEAF_FORGEJO_TOKEN
 pnpm setup:dev
 pnpm dev:all
-# → http://localhost:5173
+# → http://localhost:3030
 ```
 
-`dev:all` runs the API server (`:3030`) and Vite (`:5173`) together with
-prefixed logs and prints the app/API URLs on startup. Vite proxies `/api/*`
-to the server.
+`dev:all` runs the web/API server (`:3030`) and Vite (`:5173`) together with
+prefixed logs. Open the app on `:3030`; Vite serves page-island modules in
+development.
 
 ## Stack
 
-- TypeScript end-to-end. Hono on the server, React 19 + Tailwind v4 +
-  shadcn primitives in the browser, CodeMirror 6 inside `@chaoxu/coflat-editor`
-  (consumed as a published package; not built here).
+- TypeScript end-to-end. Hono renders the durable web pages; React 19 + Vite
+  power page-owned islands such as the rich editor; CodeMirror 6 lives inside
+  `@chaoxu/coflat-editor` (consumed as a published package; not built here).
 - SQLite via `better-sqlite3`. WAL mode. Forgejo `main` is the page source of
   truth; the DB is a rebuildable index.
 - Forgejo webhooks reconcile external edits; SSE pushes changes to connected
@@ -94,7 +94,7 @@ to the server.
 
 ```
 server/        Hono API, Forgejo client, SQLite sidecar index, pull request workflow
-src/cosheaf/   React UI (login, workspace, file tree, editor, review surfaces)
+src/cosheaf/   Page islands for the editor/reader plus their small fetch client
 scripts/       dev:all spawner, lefthook checks, Forgejo issue + worker-branch tools
 FORMAT.md      Coflat document format reference
 API.md         HTTP API contract (v1) — endpoints, error codes, SSE shape
@@ -105,16 +105,16 @@ DESIGN.md      Product philosophy and trust model
 ## Commands
 
 ```bash
-pnpm dev:all          # API + Vite together (recommended)
+pnpm dev:all          # web/API server + Vite page-island dev server
 pnpm setup:dev        # Seed chao / Flushing Coin / Hello for local testing
 pnpm smoke            # Headless browser smoke test against the dev fixture
                       # For a full manual walkthrough see SMOKE_CHECKLIST.md
 pnpm server           # API only (port 3030)
-pnpm dev              # Vite only
-pnpm build            # Vite production build
-pnpm preview          # Serve the built bundle on 0.0.0.0
+pnpm dev              # Vite page-island dev server only
+pnpm build            # Vite production build for page islands
+pnpm preview          # Preview built island assets on 0.0.0.0
 pnpm test             # vitest run
-pnpm check:stability  # unit/API tests plus browser open/create/PR flows
+pnpm check:stability  # unit/API tests plus server-rendered browser flows
 pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```

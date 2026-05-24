@@ -9,8 +9,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
-    // Force a single @codemirror/state instance across the editor bundle and
-    // the cosheaf shell — otherwise `instanceof` checks across the boundary
+    // Force a single @codemirror/state instance across the page islands and
+    // the editor package, otherwise `instanceof` checks across the boundary
     // fail and CM6 throws "Unrecognized extension value".
     dedupe: [
       "@codemirror/state",
@@ -29,7 +29,6 @@ export default defineConfig({
     manifest: true,
     rollupOptions: {
       input: {
-        app: path.resolve(__dirname, "index.html"),
         "web-editor": path.resolve(__dirname, "src/cosheaf/web-editor.tsx"),
         "web-reader": path.resolve(__dirname, "src/cosheaf/web-reader.ts"),
       },

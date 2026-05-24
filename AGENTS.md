@@ -5,8 +5,7 @@ hold the canonical markdown files, branches, pull requests, reviews, issues,
 and collaborator memberships; SQLite is a derived, rebuildable sidecar index
 for fast reads. There is no cosheaf-side auth state: the credential is a
 Forgejo PAT, sent either as `Authorization: Bearer <token>` by API clients and
-the legacy SPA or as an HttpOnly `cosheaf_pat` cookie for server-rendered web
-pages.
+agents or as an HttpOnly `cosheaf_pat` cookie for server-rendered web pages.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
@@ -68,8 +67,8 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
 
 ## Web UI direction
 
-Cosheaf's primary browser experience is server-rendered, page-based, and
-Forgejo-route-shaped. React is no longer the owner of top-level navigation.
+Cosheaf's browser experience is server-rendered, page-based, and
+Forgejo-route-shaped. React is not the owner of top-level navigation.
 Use normal links and forms for repository, file, issue, pull-request, branch,
 activity, and settings pages; reserve client-side islands for interactions
 that truly need local state (for example a rich Coflat editor or an advanced
@@ -88,19 +87,24 @@ Primary web routes should mirror Forgejo where practical:
 - `/:owner/:repo/settings`
 
 Cosheaf-specific routes should be visibly private/tool-like, e.g.
-`/:owner/:repo/_edit`. Do not add new top-level SPA modes for durable
-resources. If a screen has a durable identity, give it a server route first.
+`/:owner/:repo/_edit`. Do not add top-level SPA modes for durable resources.
+If a screen has a durable identity, give it a server route first.
 
-Webpage mode must preserve the old SPA's feature depth. The intended pattern is
-a server-rendered shell with narrowly scoped React islands, not a downgrade to
-plain forms for rich interactions. Editing, rich review/diff controls, and any
-future interaction that depends on Coflat editor state should reuse the same
-package contracts and host APIs as the legacy SPA (`@chaoxu/coflat-editor`,
-typed Cosheaf API routes, asset upload, autocomplete, dirty/save lifecycle)
-inside a page-owned island.
+The pre-migration SPA shell is deprecated and removed. The archival tag is
+`spa-shell-2026-05-24`; do not restore `index.html`, `src/cosheaf/main.tsx`,
+`src/cosheaf/app.tsx`, browser UI under `/app` or `/w`, localStorage PAT auth,
+or catch-all app-shell fallback routes. Typed `/api/v1/w/*` routes remain the
+public API for agents and page islands; they are not browser UI routes.
 
-Before replacing a SPA-owned view with a server page, run a feature-parity
-checklist against the old surface:
+Server-rendered pages must preserve the old app's useful feature depth. The
+intended pattern is a server-rendered shell with narrowly scoped React islands,
+not a downgrade to plain forms for interactions that need editor state.
+Editing, rich review/diff controls, and future Coflat-editor interactions
+should reuse package contracts and typed Cosheaf API routes inside a
+page-owned island.
+
+When changing a durable web surface, run a feature-parity checklist against
+the server-rendered route:
 
 - editor: Coflat rich/source modes, document theme, outline, dirty state,
   autosave/Cmd-S, manual save, branch context, asset upload, autocomplete,
@@ -117,18 +121,14 @@ checklist against the old surface:
 
 When adding a Vite entrypoint for a page island, verify the production path in
 the same patch: `vite build` must emit the manifest entry, the server must load
-the manifest entry, `/assets/*` must be served before page catch-all routes, and
-a browser smoke must prove the island mounts with no 4xx asset responses. In
+the manifest entry, `/assets/*` must serve built island assets, and a browser
+smoke must prove the island mounts with no 4xx asset responses. In
 local development, server-rendered pages should load island modules from the
 Vite dev server; production should load from the built manifest. Do not let a
 stale local `dist/.vite/manifest.json` override Vite dev assets. If Vite
 injects package CSS with root-relative `/node_modules/*` font or image URLs,
 the dev server route must proxy those URLs before the web router so browser
 smoke can keep enforcing the no-4xx asset invariant.
-
-The pre-migration SPA shell is tagged as `spa-shell-2026-05-24`. Keep legacy
-SPA serving narrowly scoped to `/w/*` or `/app/*` while migration code exists;
-do not reintroduce catch-all SPA fallback for ordinary web routes.
 
 ## Future direction
 
@@ -303,7 +303,8 @@ plugins, or move agent/prover logic into this repo as part of this direction.
 
 - **Server**: Hono on `@hono/node-server`, TypeScript, `better-sqlite3`.
   No cosheaf-side password hashing — the bearer token is the credential.
-- **Client**: React 19 + Vite, single-page app in `src/cosheaf/app.tsx`.
+- **Web**: Server-rendered Hono pages with narrowly scoped React/Vite islands
+  in `src/cosheaf/web-*.tsx?`.
 - **Editor**: `@chaoxu/coflat-editor` (published package; do not vendor it
   back into this repo).
 - **Document format**: Pandoc-flavored markdown per `FORMAT.md`. YAML
@@ -334,10 +335,10 @@ server/
     notifications.ts # notification feed
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
-  main.tsx        # React entry
-  app.tsx         # full single-file UI (sidebar, editor, pull requests, issues, backlinks)
+  web-editor.tsx  # page-owned rich editor island
+  web-reader.ts   # page-owned Coflat reader hydration island
   editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat-editor
-  api.ts          # typed fetch client mirroring server routes
+  api.ts          # small cookie-auth fetch client for page islands
 data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ```
 
@@ -347,7 +348,7 @@ data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 pnpm install
 cp .env.example .env.dev
 pnpm setup:dev              # seed local chao / Flushing Coin / Hello fixture
-pnpm dev                  # Vite dev server (frontend) on :5173
+pnpm dev                  # Vite dev server for page islands on :5173
 pnpm server               # tsx watch on server/index.ts (port 3030 by default)
 pnpm dev:all              # API + Vite together with URL banner
 pnpm smoke                # headless browser smoke test; defaults to setup:dev fixture
@@ -388,7 +389,7 @@ Route owner map:
 - `public/cosheaf-web.css` — server-rendered web CSS.
 - `server/index.ts` — static assets, Vite/dev asset proxy, ownerless repo rewrite, and route mounting.
 - `src/cosheaf/web-editor.tsx` — page editor island.
-- `src/cosheaf/app.tsx` — legacy SPA shell.
+- `src/cosheaf/web-reader.ts` — Coflat reader hydration island.
 - `server/routes/files.ts` — typed file/tree/search/backlink API.
 - `server/routes/pulls.ts` — typed pull/review/merge API.
 - `server/routes/issues.ts` — typed issue/comment/timeline/activity API.
@@ -483,11 +484,11 @@ branch deleted or PR closed unmerged ──▶ closed/discarded
 
 ### Naming conventions
 
-- **snake_case in SQLite rows + wire shapes shared with the SPA.**
+- **snake_case in SQLite rows + stable JSON wire shapes.**
   `workspace_slug`, `cosheaf_id`, `forgejo_id`, `default_md_format`,
   `created_at`, `updated_at`, `author_username`. Shared interfaces in
   `shared/` use snake_case for fields that round-trip through SQL rows
-  or the JSON wire format. The SPA consumes them as-received.
+  or the JSON wire format. API clients consume them as-received.
 - **camelCase in middleware-internal types and function parameters.**
   `WorkspaceContext.defaultMdFormat`, function args like `cosheafId`,
   `forgejoId`, `workspaceSlug`.
@@ -512,7 +513,7 @@ transitions, you usually need to touch in lockstep:
 2. `server/indexer.ts` (page indexing, links, tags, FTS)
 3. `server/routes/pulls.ts`, `server/routes/branches.ts`, and `server/routes/webhooks.ts`
 4. `src/cosheaf/api.ts` (mirrored API types)
-5. UI in `src/cosheaf/app.tsx` if state gates a new affordance
+5. UI in `server/routes/web.ts` and page islands if state gates a new affordance
 
 Add a test under `server/*.test.ts` (or `tests/`) for any new transition.
 
@@ -554,7 +555,7 @@ Generic YAML frontmatter parsing lives in `shared/frontmatter-yaml.ts`; do not
 hide generic frontmatter behavior behind one format implementation. Server
 format implementations are registered in `server/format-registry.ts`.
 
-Every SPA markdown render surface should be checked when changing formats:
+Every server-rendered markdown render surface should be checked when changing formats:
 issue bodies, issue comments, PR descriptions, PR review comments, label and
 milestone descriptions, notification previews, page editor/viewer content, and
 PR file diffs. Rendered HTML inserted into the DOM must pass through DOMPurify.

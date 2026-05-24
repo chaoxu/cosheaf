@@ -38,18 +38,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
-      '@radix-ui/react-slot':
-        specifier: ^1.2.4
-        version: 1.2.4(@types/react@19.2.14)(react@19.2.6)
       better-sqlite3:
         specifier: ^12.9.0
         version: 12.9.0
-      class-variance-authority:
-        specifier: ^0.7.1
-        version: 0.7.1
-      clsx:
-        specifier: ^2.1.1
-        version: 2.1.1
       commander:
         specifier: ^14.0.3
         version: 14.0.3
@@ -68,15 +59,9 @@ importers:
       react:
         specifier: ^19.2.4
         version: 19.2.6
-      react-diff-view:
-        specifier: ^3.3.3
-        version: 3.3.3(react@19.2.6)
       react-dom:
         specifier: ^19.2.4
         version: 19.2.6(react@19.2.6)
-      tailwind-merge:
-        specifier: ^3.5.0
-        version: 3.5.0
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -1562,12 +1547,6 @@ packages:
   citeproc@2.4.63:
     resolution: {integrity: sha512-68F95Bp4UbgZU/DBUGQn0qV3HDZLCdI9+Bb2ByrTaNJDL5VEm9LqaiNaxljsvoaExSLEXe1/r6n2Z06SCzW3/Q==}
 
-  class-variance-authority@0.7.1:
-    resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
-
-  classnames@2.5.1:
-    resolution: {integrity: sha512-saHYOzhIQs6wy2sVxTM6bUDsQO4F50V9RQ22qBpEdCW+I+/Wmke2HOl6lS6dTpdxVhb88/I6+Hs+438c3lfUow==}
-
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
     engines: {node: '>=6'}
@@ -1609,9 +1588,6 @@ packages:
 
   detect-node-es@1.1.0:
     resolution: {integrity: sha512-ypdmJU/TbBby2Dxibuv7ZLW3Bs1QEmM7nHjEANfohJLvE0XVujisn1qPJcZxg+qDucsr+bP6fLD1rPS3AhJ7EQ==}
-
-  diff-match-patch@1.0.5:
-    resolution: {integrity: sha512-IayShXAgj/QMXgB0IWmKx+rOPuGMhqm5w6jvFxmVenXKIzRqTAAsbBPT3kWQeGANj3jGgvcvv4yK6SxqYmikgw==}
 
   dompurify@3.4.3:
     resolution: {integrity: sha512-VVwJidIJcp1hpg2OMXML3ZVRPYSZiq4aX7qBh83BSIpOaRDqI+qxhXjjIWnpzkOXhmp0L81lnoME1mnCc9H48A==}
@@ -1685,9 +1661,6 @@ packages:
   get-tsconfig@4.14.0:
     resolution: {integrity: sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA==}
 
-  gitdiff-parser@0.3.1:
-    resolution: {integrity: sha512-YQJnY8aew65id8okGxKCksH3efDCJ9HzV7M9rsvd65habf39Pkh4cgYJ27AaoDMqo1X98pgNJhNMrm/kpV7UVQ==}
-
   github-from-package@0.0.0:
     resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
@@ -1710,9 +1683,6 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
-
-  js-tokens@4.0.0:
-    resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
   katex@0.16.38:
     resolution: {integrity: sha512-cjHooZUmIAUmDsHBN+1n8LaZdpmbj03LtYeYPyuYB7OuloiaeaV6N4LcfjcnHVzGWjVQmKrxxTrpDcmSzEZQwQ==}
@@ -1851,13 +1821,6 @@ packages:
     resolution: {integrity: sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ==}
     engines: {node: '>= 12.0.0'}
 
-  lodash@4.18.1:
-    resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
-
-  loose-envify@1.4.0:
-    resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
-    hasBin: true
-
   lucide-react@0.577.0:
     resolution: {integrity: sha512-4LjoFv2eEPwYDPg/CUdBJQSDfPyzXCRrVW1X7jrx/trgxnxkHFjnVZINbzvzxjN70dxychOfg+FTYwBiS3pQ5A==}
     peerDependencies:
@@ -1966,11 +1929,6 @@ packages:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
 
-  react-diff-view@3.3.3:
-    resolution: {integrity: sha512-CPveApk6n7ZbkW7T6PoptR7LWAvD9hohTHZ7WnKnu3GZkTfUB5rvg486apPo94iYVi4fZd3Nt+rtBZ5877exoQ==}
-    peerDependencies:
-      react: '>=16.14.0'
-
   react-dom@19.2.6:
     resolution: {integrity: sha512-0prMI+hvBbPjsWnxDLxlCGyM8PN6UuWjEUCYmZhO67xIV9Xasa/r/vDnq+Xyq4Lo27g8QSbO5YzARu0D1Sps3g==}
     peerDependencies:
@@ -2032,9 +1990,6 @@ packages:
     resolution: {integrity: sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA==}
     engines: {node: '>=10'}
     hasBin: true
-
-  shallow-equal@3.1.0:
-    resolution: {integrity: sha512-pfVOw8QZIXpMbhBWvzBISicvToTiM5WBF1EeAUZDDSb5Dt29yl4AYbyywbJFSEsRUMr7gJaxqCdr4L3tQf9wVg==}
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
@@ -2248,9 +2203,6 @@ packages:
   walk-up-path@4.0.0:
     resolution: {integrity: sha512-3hu+tD8YzSLGuFYtPRb48vdhKMi0KQV5sn+uWr8+7dMEq/2G/dtLrdDinkLjqq5TIbIBjYJ4Ax/n3YiaW7QM8A==}
     engines: {node: 20 || >=22}
-
-  warning@4.0.3:
-    resolution: {integrity: sha512-rpJyN222KWIvHJ/F53XSZv0Zl/accqHR8et1kpaMTD/fLCRxtV8iX8czMzY7sVZupTI3zcUTg8eycS2kNF9l6w==}
 
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
@@ -3486,12 +3438,6 @@ snapshots:
 
   citeproc@2.4.63: {}
 
-  class-variance-authority@0.7.1:
-    dependencies:
-      clsx: 2.1.1
-
-  classnames@2.5.1: {}
-
   clsx@2.1.1: {}
 
   cmdk@1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
@@ -3525,8 +3471,6 @@ snapshots:
   detect-libc@2.1.2: {}
 
   detect-node-es@1.1.0: {}
-
-  diff-match-patch@1.0.5: {}
 
   dompurify@3.4.3:
     optionalDependencies:
@@ -3614,8 +3558,6 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
-  gitdiff-parser@0.3.1: {}
-
   github-from-package@0.0.0: {}
 
   graceful-fs@4.2.11: {}
@@ -3629,8 +3571,6 @@ snapshots:
   ini@1.3.8: {}
 
   jiti@2.7.0: {}
-
-  js-tokens@4.0.0: {}
 
   katex@0.16.38:
     dependencies:
@@ -3747,12 +3687,6 @@ snapshots:
       lightningcss-linux-x64-musl: 1.32.0
       lightningcss-win32-arm64-msvc: 1.32.0
       lightningcss-win32-x64-msvc: 1.32.0
-
-  lodash@4.18.1: {}
-
-  loose-envify@1.4.0:
-    dependencies:
-      js-tokens: 4.0.0
 
   lucide-react@0.577.0(react@19.2.6):
     dependencies:
@@ -3896,16 +3830,6 @@ snapshots:
       minimist: 1.2.8
       strip-json-comments: 2.0.1
 
-  react-diff-view@3.3.3(react@19.2.6):
-    dependencies:
-      classnames: 2.5.1
-      diff-match-patch: 1.0.5
-      gitdiff-parser: 0.3.1
-      lodash: 4.18.1
-      react: 19.2.6
-      shallow-equal: 3.1.0
-      warning: 4.0.3
-
   react-dom@19.2.6(react@19.2.6):
     dependencies:
       react: 19.2.6
@@ -3974,8 +3898,6 @@ snapshots:
   scheduler@0.27.0: {}
 
   semver@7.8.0: {}
-
-  shallow-equal@3.1.0: {}
 
   siginfo@2.0.0: {}
 
@@ -4127,10 +4049,6 @@ snapshots:
   w3c-keyname@2.2.8: {}
 
   walk-up-path@4.0.0: {}
-
-  warning@4.0.3:
-    dependencies:
-      loose-envify: 1.4.0
 
   webidl-conversions@3.0.1: {}
 

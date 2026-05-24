@@ -50,7 +50,7 @@ if (blocked.length > 0) {
 
 process.stdout.write(`Cosheaf dev\n`);
 process.stdout.write(`  web: ${apiUrl}\n`);
-process.stdout.write(`  legacy SPA/dev assets: ${viteUrl}\n`);
+process.stdout.write(`  page island dev assets: ${viteUrl}\n`);
 process.stdout.write(`  api: ${apiUrl}\n`);
 process.stdout.write(`  vite proxy: ${proxyUrl}\n\n`);
 

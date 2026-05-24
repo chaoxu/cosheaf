@@ -47,7 +47,7 @@ function bearerFromQuery(c: Context<AppEnv>): string | null {
   return v && v.length > 0 ? v : null;
 }
 
-// PAT-only authentication. API clients and the legacy SPA send the PAT as
+// PAT-only authentication. API clients and agents send the PAT as
 // `Authorization: Bearer <pat>`; server-rendered pages receive the same PAT
 // through an HttpOnly cookie. There is no cosheaf-side user table or session
 // record: the PAT is the credential.

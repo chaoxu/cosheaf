@@ -4,7 +4,7 @@ import { attachPageListeners, loadChromium } from "./browser-utils.mjs";
 
 const chromium = await loadChromium();
 
-const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const APP_URL = process.env.URL ?? "http://localhost:3030/";
 const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-reader-editor-parity.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
@@ -107,7 +107,7 @@ try {
     throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
 
-  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/settings`, { waitUntil: "domcontentloaded" });
+  await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   const themeSelect = page.getByTestId("settings-document-theme-select");
   await themeSelect.waitFor({ state: "visible", timeout: 10000 });
   await themeSelect.selectOption("blueprint-book");
@@ -117,7 +117,7 @@ try {
   if (!blueprintReader.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`settings-selected theme did not apply to reader: ${blueprintReader.rootClass}`);
   }
-  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/settings`, { waitUntil: "domcontentloaded" });
+  await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByTestId("settings-document-theme-select").selectOption("default");
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });

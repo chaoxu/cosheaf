@@ -1,5 +1,5 @@
 // Login exchanges user credentials for a backend token. Cosheaf doesn't hold
-// passwords or sessions; the returned token supports API/SPAs as JSON and
+// passwords or sessions; the returned token supports API clients as JSON and
 // server-rendered pages as an HttpOnly cookie.
 
 import { Hono } from "hono";
@@ -13,7 +13,7 @@ export const auth = new Hono<AppEnv>();
 
 // Token name prefix for cosheaf-issued tokens. Names are intentionally unique per
 // login so an automated smoke login as the same Forgejo user does not revoke an
-// existing browser tab's localStorage PAT.
+// existing browser tab's cookie-backed PAT.
 const TOKEN_NAME_PREFIX = "cosheaf";
 
 // Scopes cosheaf needs. Forgejo's PAT scopes are documented at
@@ -131,10 +131,9 @@ auth.post("/login", async (c) => {
   return c.json({ username: body.username, pat: outcome.pat });
 });
 
-// Logout is a no-op on the server: there is no session to destroy and we
-// deliberately do NOT revoke the backend token (the user might be logged in
-// from another device with the same token). The SPA drops its local copy
-// of the token; the next login mints a fresh one.
+// Logout clears the browser cookie. We deliberately do NOT revoke the backend
+// token because the user might be logged in from another device with the same
+// token; the next login mints a fresh one.
 auth.post("/logout", (c) => {
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.json({ ok: true });

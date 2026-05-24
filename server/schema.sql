@@ -1,8 +1,8 @@
 -- Cosheaf sidecar schema (Forgejo backend).
 
--- Cosheaf stores no auth state. The SPA holds the user's Forgejo PAT in
--- localStorage and sends it as `Authorization: Bearer <pat>` on every
--- request; agents do the same. The PAT is the credential.
+-- Cosheaf stores no auth state. Server-rendered pages receive the user's
+-- Forgejo PAT as an HttpOnly `cosheaf_pat` cookie; API clients and agents
+-- send the same credential as `Authorization: Bearer <pat>`.
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tokens;

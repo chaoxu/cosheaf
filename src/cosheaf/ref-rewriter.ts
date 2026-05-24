@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { parseFrontmatterYaml } from "../../../shared/frontmatter-yaml";
+import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 
 export const REF_PAGE_CLASS = "cosheaf-ref-page";
 export const REF_BUTTON_CLASS = "cosheaf-ref-button";

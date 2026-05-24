@@ -1,15 +1,15 @@
 # Cosheaf API
 
 This document is the human-facing contract for the current HTTP API. The
-implementation source of truth remains `server/routes/*.ts` and the mirrored
-client types in `src/cosheaf/api.ts`.
+implementation source of truth remains `server/routes/*.ts` and the shared
+DTO types under `shared/`.
 
 Base path: `/api/v1`
 
-All JSON routes return `{ error, code }` on expected failures. Every request
-authenticates via `Authorization: Bearer <token>` — the SPA stashes the token
-in localStorage after login, and agents send their own token directly. Cosheaf
-validates the token, resolves workspace membership, and forwards the caller's
+All JSON routes return `{ error, code }` on expected failures. API requests
+authenticate via `Authorization: Bearer <token>`. Server-rendered web pages
+authenticate with the same PAT in an HttpOnly `cosheaf_pat` cookie. Cosheaf
+validates the token, resolves workspace membership, and forwards the caller
 identity on backend-backed operations.
 
 ## Core Types
@@ -57,7 +57,7 @@ multi-step failures (e.g. `step: "reindex"` on settings updates).
 type ErrorCode =
   | "validation"        // 400 — caller payload is malformed or missing fields
   | "unauthorized"      // 401 — no session / bearer token
-  | "pat_invalid"       // 401 — backend rejected the stored token; SPA reloads to log in
+  | "pat_invalid"       // 401 — backend rejected the stored token; client should re-authenticate
   | "forbidden"         // 403 — authenticated but lacks the required role
   | "not_found"         // 404
   | "conflict"          // 409 — backend precondition (merge conflict, dup PR)
@@ -70,9 +70,10 @@ type ErrorCode =
 
 Cosheaf owns the login UX so users do not need to know which forge is the
 backend. Login exchanges username/password credentials for a fresh API token
-and returns it to the SPA, which stashes it in localStorage and sends it as
-`Authorization: Bearer <pat>` on every subsequent request. API clients can
-skip login and send their own Cosheaf API token directly.
+and sets it as an HttpOnly cookie for server-rendered browser pages. The JSON
+response still includes the token for API clients that explicitly call the
+login route; external clients can also skip login and send their own Cosheaf
+API token directly.
 
 ```http
 POST /login
@@ -86,9 +87,8 @@ GET /me
 → { "user": { "username": string } | null }
 ```
 
-Logout is a server-side no-op; the SPA clears localStorage. Cosheaf does not
-revoke the token on logout — revoke it in the backing forge to invalidate it
-across devices.
+Logout clears the browser cookie. Cosheaf does not revoke the token on logout;
+revoke it in the backing forge to invalidate it across devices.
 
 There is no Cosheaf personal-token API yet. Create and revoke tokens in the
 backing forge.
@@ -391,7 +391,7 @@ PUT /w/:slug/settings
 ```
 
 Approval settings map to backend branch protection on `main`. The workspace
-markdown format controls typed file indexing and SPA rendering. Updating
+markdown format controls typed file indexing and server-rendered page output. Updating
 settings requires admin permission.
 
 ## Events

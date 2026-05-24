@@ -167,8 +167,8 @@ issues.get("/:slug/issues/pinned", async (c) => {
   });
 });
 
-// Typed because the SPA consumes a stable IssueDetail DTO with deleted-user
-// fallback and normalized timestamps.
+// Typed because public API clients consume a stable IssueDetail DTO with
+// deleted-user fallback and normalized timestamps.
 issues.get("/:slug/issues/:number", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const number = parseIssueNumber(c.req.param("number"));
@@ -504,7 +504,7 @@ issues.get("/:slug/activities", async (c) => {
   });
 });
 
-// Typed because the SPA timeline uses a narrowed event DTO with normalized
+// Typed because public API clients use a narrowed event DTO with normalized
 // label/milestone/dependency references.
 issues.get("/:slug/issues/:number/timeline", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));

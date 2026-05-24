@@ -8,7 +8,7 @@ import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-uti
 
 const chromium = await loadChromium();
 
-const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const APP_URL = process.env.URL ?? "http://localhost:3030/";
 const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
