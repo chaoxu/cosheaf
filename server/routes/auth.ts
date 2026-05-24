@@ -1,12 +1,12 @@
 // Login exchanges user credentials for a backend token. Cosheaf doesn't hold
-// passwords or sessions; the returned token is sent back to the SPA, stored in
-// localStorage, and used as `Authorization: Bearer <token>` on every
-// subsequent request.
+// passwords or sessions; the returned token supports API/SPAs as JSON and
+// server-rendered pages as an HttpOnly cookie.
 
 import { Hono } from "hono";
+import { deleteCookie, setCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
 import type { AppEnv } from "../types.js";
-import { resolveAuth } from "../middleware.js";
+import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
 import { bad, unauthorized } from "./responses.js";
 
 export const auth = new Hono<AppEnv>();
@@ -44,7 +44,7 @@ export type LoginOutcome =
 // within one cosheaf process. Multi-process deployments would still race.
 const loginQueues = new Map<string, Promise<void>>();
 
-async function exchangeForgejoCredsForPat(
+export async function exchangeForgejoCredsForPat(
   baseUrl: string,
   username: string,
   password: string,
@@ -122,6 +122,12 @@ auth.post("/login", async (c) => {
       502,
     );
   }
+  setCookie(c, AUTH_COOKIE, outcome.pat, {
+    httpOnly: true,
+    sameSite: "Lax",
+    path: "/",
+    secure: c.req.url.startsWith("https://"),
+  });
   return c.json({ username: body.username, pat: outcome.pat });
 });
 
@@ -129,7 +135,10 @@ auth.post("/login", async (c) => {
 // deliberately do NOT revoke the backend token (the user might be logged in
 // from another device with the same token). The SPA drops its local copy
 // of the token; the next login mints a fresh one.
-auth.post("/logout", (c) => c.json({ ok: true }));
+auth.post("/logout", (c) => {
+  deleteCookie(c, AUTH_COOKIE, { path: "/" });
+  return c.json({ ok: true });
+});
 
 auth.get("/me", async (c) => {
   const a = await resolveAuth(c);

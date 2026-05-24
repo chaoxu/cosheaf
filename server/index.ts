@@ -16,6 +16,7 @@ import { pulls } from "./routes/pulls.js";
 import { issues } from "./routes/issues.js";
 import { notifications } from "./routes/notifications.js";
 import { webhooks } from "./routes/webhooks.js";
+import { web } from "./routes/web.js";
 
 const config = loadConfig();
 const db = getDb(config);
@@ -66,6 +67,7 @@ app.route("/api/v1/w", branches);
 app.route("/api/v1/w", issues);
 app.route("/api/v1/w", notifications);
 app.route("/api/v1/webhooks", webhooks);
+app.route("/", web);
 
 const distDir = path.resolve(process.cwd(), "dist");
 if (existsSync(path.join(distDir, "index.html"))) {
@@ -103,8 +105,12 @@ function resolveDistPath(requestPath: string): string | null {
   try {
     stat = statSync(filePath);
   } catch (_error) {
-    filePath = path.join(distDir, "index.html");
-    stat = statSync(filePath);
+    if (decodedPath === "/app" || decodedPath.startsWith("/app/") || decodedPath === "/w" || decodedPath.startsWith("/w/")) {
+      filePath = path.join(distDir, "index.html");
+      stat = statSync(filePath);
+    } else {
+      return null;
+    }
   }
   if (stat.isDirectory()) filePath = path.join(filePath, "index.html");
   return filePath;

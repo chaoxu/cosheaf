@@ -1,7 +1,7 @@
 // Auth route tests. Stubs global fetch so we exercise the PAT-exchange
-// flow without a live Forgejo. After #63, login no longer touches the
-// database or sets a cookie — it just returns { username, pat } and the
-// SPA stashes the PAT in localStorage.
+// flow without a live Forgejo. Login does not touch the database: it returns
+// { username, pat } for API/SPAs and also sets an HttpOnly cookie so
+// server-rendered web pages can authenticate normal GET requests.
 
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
@@ -70,13 +70,15 @@ async function waitForFetchCalls(count: number): Promise<void> {
 }
 
 describe("POST /api/v1/login", () => {
-  it("201 from Forgejo → returns { username, pat } with no Set-Cookie", async () => {
+  it("201 from Forgejo → returns { username, pat } and sets the web auth cookie", async () => {
     const db = freshDb();
     fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-aaa" }));
     const res = await login(db, "alice", "secret");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ username: "alice", pat: "pat-aaa" });
-    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(res.headers.get("set-cookie")).toContain("cosheaf_pat=pat-aaa");
+    expect(res.headers.get("set-cookie")).toContain("HttpOnly");
+    expect(res.headers.get("set-cookie")).toContain("SameSite=Lax");
 
     // Forgejo got Basic auth + a non-shared token name/scopes.
     const [url, init] = fetchMock.mock.calls[0];

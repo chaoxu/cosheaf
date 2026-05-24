@@ -3,9 +3,10 @@
 Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
 hold the canonical markdown files, branches, pull requests, reviews, issues,
 and collaborator memberships; SQLite is a derived, rebuildable sidecar index
-for fast reads. There is no cosheaf-side auth state — the SPA holds the
-Cosheaf API token in localStorage and sends it as `Authorization: Bearer
-<token>` on every request.
+for fast reads. There is no cosheaf-side auth state: the credential is a
+Forgejo PAT, sent either as `Authorization: Bearer <token>` by API clients and
+the legacy SPA or as an HttpOnly `cosheaf_pat` cookie for server-rendered web
+pages.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
@@ -64,6 +65,35 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   not distinguish service-account PATs from human PATs: an agent's review
   counts identically to a human's for required-approvals gating, and an
   agent's commit attribution is whatever Forgejo records.
+
+## Web UI direction
+
+Cosheaf's primary browser experience is server-rendered, page-based, and
+Forgejo-route-shaped. React is no longer the owner of top-level navigation.
+Use normal links and forms for repository, file, issue, pull-request, branch,
+activity, and settings pages; reserve client-side islands for interactions
+that truly need local state (for example a rich Coflat editor or an advanced
+review widget).
+
+Primary web routes should mirror Forgejo where practical:
+
+- `/:owner/:repo`
+- `/:owner/:repo/src/branch/:branch/*path`
+- `/:owner/:repo/raw/branch/:branch/*path`
+- `/:owner/:repo/issues` and `/:owner/:repo/issues/:number`
+- `/:owner/:repo/pulls` and `/:owner/:repo/pulls/:number`
+- `/:owner/:repo/pulls/:number/files`
+- `/:owner/:repo/branches`
+- `/:owner/:repo/activity`
+- `/:owner/:repo/settings`
+
+Cosheaf-specific routes should be visibly private/tool-like, e.g.
+`/:owner/:repo/_edit`. Do not add new top-level SPA modes for durable
+resources. If a screen has a durable identity, give it a server route first.
+
+The pre-migration SPA shell is tagged as `spa-shell-2026-05-24`. Keep legacy
+SPA serving narrowly scoped to `/w/*` or `/app/*` while migration code exists;
+do not reintroduce catch-all SPA fallback for ordinary web routes.
 
 ## Future direction
 

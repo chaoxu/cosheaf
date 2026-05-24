@@ -14,6 +14,7 @@ export interface ApiFetchResult {
 // tokens instead.
 export async function loginAs(page: Page, username: string) {
   await gotoRoot(page);
+  await page.evaluate(() => fetch("/api/v1/logout", { method: "POST" }).catch(() => undefined));
   await page.evaluate(() => localStorage.removeItem("cosheaf.pat"));
   await gotoRoot(page);
   const inputs = page.locator("form input");
@@ -92,6 +93,7 @@ async function loginAsMeriForPat(page: Page): Promise<string> {
     });
     if (!r.ok) throw new Error(`login meri: ${r.status}`);
     const body = (await r.json()) as { pat: string };
+    await fetch("/api/v1/logout", { method: "POST" }).catch(() => undefined);
     return body.pat;
   });
 }
