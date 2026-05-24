@@ -7,6 +7,11 @@ test.describe.serial("PR review surface", () => {
   test("vera walks the review surface end-to-end", async ({ page }) => {
     await loginAs(page, "vera");
     await openReview(page);
+    await expect(page.getByTestId("statusbar")).toContainText("PR #");
+    await expect(page.getByTestId("statusbar")).not.toContainText("Source");
+    await expect(page.getByTestId("statusbar")).not.toContainText("Rich");
+    await expect(page.getByTestId("statusbar")).not.toContainText("Save");
+    await expect(page.getByTestId("document-theme-select")).toHaveCount(0);
 
     // Walk the five reachable (mode, shape) combinations.
     const combos: Array<{ mode: "source" | "rich"; shape: "unified" | "split" | "after"; testId: string }> = [
@@ -40,7 +45,7 @@ test.describe.serial("PR review surface", () => {
     await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
 
     // Add a single-shot comment.
-    await page.locator('[data-testid^="comment-add-new-"]').first().click({ force: true });
+    await page.locator('[data-testid^="comment-add-head-"]').first().click({ force: true });
     const composer = page.getByTestId("inline-composer");
     await expect(composer).toBeVisible();
     await composer.locator("textarea").fill("single-shot from e2e");
@@ -83,7 +88,7 @@ test.describe.serial("PR review surface", () => {
     await expect(
       page.locator('[data-testid="review-toggle-pending"]:has-text("Pending review active")'),
     ).toBeVisible({ timeout: 5000 });
-    await page.locator('[data-testid^="comment-add-new-"]').first().click({ force: true });
+    await page.locator('[data-testid^="comment-add-head-"]').first().click({ force: true });
     await composer.locator("textarea").fill("batched 1");
     await composer.locator('button:has-text("Add comment")').click();
     await expect(composer).toBeHidden({ timeout: 5000 });

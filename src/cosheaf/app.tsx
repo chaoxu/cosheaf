@@ -1213,6 +1213,7 @@ function WorkspaceStatusBar({
   onSave: () => void;
   onToggleEditorMode: () => void;
 }): ReactElement {
+  const isReviewing = reviewingPullNumber !== null;
   return (
     <div
       data-statusbar
@@ -1224,12 +1225,14 @@ function WorkspaceStatusBar({
       )}
     >
       <div className="flex min-w-0 items-center gap-1.5">
-        {openPath ? (
+        {isReviewing ? (
+          <span className="truncate">{`PR #${reviewingPullNumber}`}</span>
+        ) : openPath ? (
           <>
             <span className="truncate">{openPath}</span>
             {dirty && <span className="text-[var(--cf-accent)]">●</span>}
           </>
-        ) : reviewingPullNumber ? null : (
+        ) : (
           <span>no file open</span>
         )}
       </div>
@@ -1237,7 +1240,7 @@ function WorkspaceStatusBar({
         <span className="truncate">{status ?? ""}</span>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
-        {activeFormatId === COFLAT_FORMAT_ID && (
+        {!isReviewing && activeFormatId === COFLAT_FORMAT_ID && (
           <select
             value={documentTheme}
             onChange={(e) => onDocumentThemeChange(e.target.value as DocumentThemeId)}
@@ -1252,7 +1255,7 @@ function WorkspaceStatusBar({
             ))}
           </select>
         )}
-        {openPath && (
+        {!isReviewing && openPath && (
           <>
             {activeFormatId === COFLAT_FORMAT_ID && (
               <button
@@ -1268,7 +1271,7 @@ function WorkspaceStatusBar({
               <button
                 type="button"
                 onClick={onSave}
-                disabled={!dirty || busy || !!reviewingPullNumber}
+                disabled={!dirty || busy}
                 className="px-1.5 rounded hover:bg-[var(--cf-hover)] disabled:opacity-50"
               >
                 Save
