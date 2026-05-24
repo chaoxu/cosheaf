@@ -181,6 +181,18 @@ export interface ForgejoPullFile {
   previous_filename?: string;
 }
 
+export interface ForgejoCommit {
+  sha: string;
+  html_url?: string;
+  commit: {
+    message: string;
+    author?: { name?: string; email?: string; date?: string };
+    committer?: { name?: string; email?: string; date?: string };
+  };
+  author?: ForgejoUser | null;
+  committer?: ForgejoUser | null;
+}
+
 export interface ForgejoPullReviewComment {
   id: number;
   pull_request_review_id: number;

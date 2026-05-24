@@ -11,6 +11,7 @@ import type {
   ForgejoActivity,
   ForgejoBranch,
   ForgejoBranchProtection,
+  ForgejoCommit,
   ForgejoContent,
   ForgejoFileResponse,
   ForgejoHook,
@@ -502,6 +503,10 @@ export class Forgejo {
     return this.req<ForgejoPullFile[]>(this.repoPath(owner, repo, `pulls/${index}/files`));
   }
 
+  async listPullCommits(owner: string, repo: string, index: number): Promise<ForgejoCommit[]> {
+    return this.req<ForgejoCommit[]>(this.repoPath(owner, repo, `pulls/${index}/commits`));
+  }
+
   async getPullDiff(owner: string, repo: string, index: number): Promise<string> {
     return this.req<string>(this.repoPath(owner, repo, `pulls/${index}.diff`), { raw: true });
   }
@@ -866,6 +871,7 @@ function encodeFilePath(p: string): string {
 export type {
   ForgejoIssue,
   ForgejoIssueComment,
+  ForgejoCommit,
   ForgejoLabel,
   ForgejoMilestone,
   ForgejoActivity,

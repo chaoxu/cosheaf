@@ -32,6 +32,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
   await page.locator('.list-row[href*="/pulls/"]').first().click();
   await expect(page.locator(".subtabs")).toContainText("Files changed");
+  await expect(page.locator(".thread")).toContainText("pushed commit");
   await page.locator('.subtabs a[href$="/files"]').click();
   await expect(page.locator(".changed-files")).toBeVisible();
   await expect(page.locator(".diff-panel")).toBeVisible();
