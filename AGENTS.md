@@ -91,6 +91,41 @@ Cosheaf-specific routes should be visibly private/tool-like, e.g.
 `/:owner/:repo/_edit`. Do not add new top-level SPA modes for durable
 resources. If a screen has a durable identity, give it a server route first.
 
+Webpage mode must preserve the old SPA's feature depth. The intended pattern is
+a server-rendered shell with narrowly scoped React islands, not a downgrade to
+plain forms for rich interactions. Editing, rich review/diff controls, and any
+future interaction that depends on Coflat editor state should reuse the same
+package contracts and host APIs as the legacy SPA (`@chaoxu/coflat-editor`,
+typed Cosheaf API routes, asset upload, autocomplete, dirty/save lifecycle)
+inside a page-owned island.
+
+Before replacing a SPA-owned view with a server page, run a feature-parity
+checklist against the old surface:
+
+- editor: Coflat rich/source modes, document theme, outline, dirty state,
+  autosave/Cmd-S, manual save, branch context, asset upload, autocomplete,
+  open-PR and merge affordances
+- PR files: source/rich modes, unified/split/after views, comments, review
+  submission gates, author self-review gate, merge gate, browser navigation
+- issues: markdown rendering, comments, timeline, state changes, labels,
+  milestones, dependencies, browser back/forward
+- settings: current values render, form submit works, permission gates hold
+- auth/assets: cookie login, API bearer login, logout, built `/assets/*`,
+  Vite dev entrypoints, no browser console/page errors
+- layout: desktop and narrow viewport do not hide controls or constrain
+  documents unexpectedly
+
+When adding a Vite entrypoint for a page island, verify the production path in
+the same patch: `vite build` must emit the manifest entry, the server must load
+the manifest entry, `/assets/*` must be served before page catch-all routes, and
+a browser smoke must prove the island mounts with no 4xx asset responses. In
+local development, server-rendered pages should load island modules from the
+Vite dev server; production should load from the built manifest. Do not let a
+stale local `dist/.vite/manifest.json` override Vite dev assets. If Vite
+injects package CSS with root-relative `/node_modules/*` font or image URLs,
+the dev server route must proxy those URLs before the web router so browser
+smoke can keep enforcing the no-4xx asset invariant.
+
 The pre-migration SPA shell is tagged as `spa-shell-2026-05-24`. Keep legacy
 SPA serving narrowly scoped to `/w/*` or `/app/*` while migration code exists;
 do not reintroduce catch-all SPA fallback for ordinary web routes.

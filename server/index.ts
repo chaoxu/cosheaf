@@ -69,6 +69,17 @@ app.route("/api/v1/w", notifications);
 app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
+if (process.env.NODE_ENV !== "production") {
+  app.get("/node_modules/*", async (c) => {
+    const viteOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
+    const response = await fetch(new URL(c.req.path, viteOrigin));
+    return new Response(response.body, {
+      status: response.status,
+      headers: { "content-type": response.headers.get("content-type") ?? contentType(c.req.path) },
+    });
+  });
+}
+
 if (existsSync(path.join(distDir, "index.html"))) {
   app.get("/assets/*", async (c) => {
     const response = await serveDistFile(c.req.path);

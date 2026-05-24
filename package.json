@@ -54,6 +54,7 @@
     "smoke:issues": "playwright test --config playwright.smoke.config.ts --grep @smoke-issues",
     "smoke:rendering": "playwright test --config playwright.smoke.config.ts --grep @smoke-rendering",
     "smoke:reader-parity": "playwright test --config playwright.smoke.config.ts --grep @smoke-reader-parity",
+    "smoke:edit": "playwright test --config playwright.smoke.config.ts --grep @smoke-edit",
     "smoke:api": "node scripts/api-smoke.mjs",
     "test:e2e": "playwright test",
     "check:e2e": "playwright test",

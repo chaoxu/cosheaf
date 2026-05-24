@@ -40,6 +40,16 @@ export const smokeChecks = [
     covers: "Coflat showcase editor rich mode vs full reader document surface",
   },
   {
+    name: "edit-island",
+    command: "pnpm smoke:edit",
+    grep: "@smoke-edit",
+    script: "scripts/browser-edit.mjs",
+    seed: "large-doc",
+    destructive: false,
+    prod: true,
+    covers: "server-rendered edit page, Coflat editor island, Vite assets, controls, outline",
+  },
+  {
     name: "direct-merge",
     command: "pnpm smoke:flow",
     grep: "@smoke-flow",
@@ -60,4 +70,3 @@ export const smokeChecks = [
     covers: "multi-user review and merge flow",
   },
 ];
-

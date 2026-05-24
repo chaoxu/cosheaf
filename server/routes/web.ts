@@ -1034,10 +1034,13 @@ type ViteManifestChunk = {
 let manifestCache: Record<string, ViteManifestChunk> | null | undefined;
 
 function webEditorAssets(): string {
-  const manifest = readViteManifest();
-  if (!manifest) {
+  if (process.env.NODE_ENV !== "production") {
     const devOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
     return `<script type="module" src="${devOrigin}/src/cosheaf/web-editor.tsx"></script>`;
+  }
+  const manifest = readViteManifest();
+  if (!manifest) {
+    return "";
   }
   const entry = manifest["src/cosheaf/web-editor.tsx"];
   if (!entry) return "";
