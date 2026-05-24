@@ -10,7 +10,8 @@ import type { Role } from "../../shared/roles.js";
 import { planIndexPage } from "../indexer.js";
 import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
 import { Forgejo, ForgejoError, mergePullWithRetry, type ForgejoPull } from "../forgejo.js";
-import type { ForgejoIssue, ForgejoTreeEntry } from "../forgejo-types.js";
+import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
+import type { ForgejoIssue, ForgejoPullReviewComment, ForgejoTreeEntry } from "../forgejo-types.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
@@ -463,7 +464,39 @@ web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
   if (event === "APPROVED" || event === "REQUEST_CHANGES" || event === "COMMENT") {
     await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
   }
-  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+  const redirectTo = safeWebRedirect(stringField(form.redirect_to));
+  return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
+web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.user?.login === ctx.user || pull.state === "closed") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const path = safeRel(stringField(form.path) ?? "");
+  const side = stringField(form.side);
+  const line = positiveInt(stringField(form.line) ?? undefined);
+  const body = (stringField(form.body) ?? "").trim();
+  if (!path || (side !== "base" && side !== "head") || !line || !body) {
+    return badRequestPage(ctx.user, "Line comment requires path, side, line, and body.");
+  }
+  const patch = splitDiffByFile(await ctx.fj.getPullDiff(ctx.owner, ctx.repo, pull.number)).get(path);
+  if (!patch) return badRequestPage(ctx.user, "File is not part of this pull request.");
+  const pos = fileLineToWritePosition(patch, line, side);
+  if (!pos) return badRequestPage(ctx.user, "Line is not part of the pull request diff.");
+  await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, {
+    event: "COMMENT",
+    body: "",
+    comments: [{ path, body, ...pos }],
+  });
+  const mode = parseDiffMode(stringField(form.mode) ?? undefined);
+  const shape = parseDiffShape(stringField(form.shape) ?? undefined, mode);
+  return redirect(
+    `${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}?file=${encodeURIComponent(path)}&mode=${mode}&shape=${shape}`,
+  );
 });
 
 web.post("/:owner/:repo/pulls/:number/merge", async (c) => {
@@ -485,12 +518,16 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
   if (!ctx.ok) return ctx.response;
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  const files = await pullFiles(ctx, pull.number);
+  const [files, allComments] = await Promise.all([
+    pullFiles(ctx, pull.number),
+    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number).catch(() => []),
+  ]);
   const selected = c.req.query("file") ?? files[0]?.path ?? "";
   const file = files.find((f) => f.path === selected) ?? files[0] ?? null;
   const mode = parseDiffMode(c.req.query("mode"));
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
+  const fileComments = file ? mapLineComments(file, allComments) : [];
   return htmlResponse(
     repoPage({
       title: `Files #${pull.number} - ${ctx.repo}`,
@@ -527,27 +564,36 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
           })();
         </script>
         <div class="review-page">
-          <nav class="changed-files" aria-label="Changed files">
-            ${files
-              .map(
-                (f) => `
-                  <a class="${f.path === file?.path ? "active" : ""}" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}?file=${encodeURIComponent(f.path)}">
-                    <span>${escapeHtml(f.path)}</span>
-                    <small>+${f.additions} -${f.deletions}</small>
-                  </a>
-                `,
-              )
-              .join("")}
-          </nav>
-          <section class="diff-panel">
-            ${
-              file
-                ? `<div class="diff-title"><strong>${escapeHtml(file.path)}</strong><span>+${file.additions} -${file.deletions}</span></div>
-                  ${diffModeControls(ctx, pull.number, file.path, mode, shape)}
-                  ${await renderPrFileView(ctx, pull, file, mode, shape, versions)}`
-                : `<div class="empty">No changed files.</div>`
-            }
-          </section>
+          <main class="review-main">
+            <nav class="changed-files" aria-label="Changed files">
+              ${files
+                .map(
+                  (f) => `
+                    <a class="${f.path === file?.path ? "active" : ""}" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}?file=${encodeURIComponent(f.path)}">
+                      <span>${escapeHtml(f.path)}</span>
+                      <small>+${f.additions} -${f.deletions}</small>
+                    </a>
+                  `,
+                )
+                .join("")}
+            </nav>
+            <section class="diff-panel">
+              ${
+                file
+                  ? `<div class="diff-title"><strong>${escapeHtml(file.path)}</strong><span>+${file.additions} -${file.deletions}</span></div>
+                    ${diffModeControls(ctx, pull.number, file.path, mode, shape)}
+                    ${await renderPrFileView(ctx, pull, file, mode, shape, versions, fileComments)}`
+                  : `<div class="empty">No changed files.</div>`
+              }
+            </section>
+          </main>
+          <aside class="review-rail">
+            <section class="review-card">
+              <h2>Review</h2>
+              ${renderFileCommentSummary(fileComments)}
+              ${reviewForms(ctx, pull, repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`))}
+            </section>
+          </aside>
         </div>
       `,
     }),
@@ -879,6 +925,16 @@ interface PrFileVersions {
   head: string;
 }
 
+interface WebLineComment {
+  id: number;
+  line: number | null;
+  side: Side;
+  body: string;
+  author: string;
+  createdAt: number;
+  outdated: boolean;
+}
+
 function parseDiffMode(value: string | undefined): DiffMode {
   return value === "source" ? "source" : "rich";
 }
@@ -905,20 +961,23 @@ async function renderPrFileView(
   mode: DiffMode,
   shape: DiffShape,
   versions: PrFileVersions | null,
+  comments: readonly WebLineComment[],
 ): Promise<string> {
   if (mode === "source" && shape === "unified") {
     return `<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
   }
   const nextVersions = versions ?? (await prFileVersions(ctx, pull, file.path));
   const changed = changedLines(file.patch);
+  const commentable = commentableLines(file.patch);
+  const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
   if (mode === "source" && shape === "split") {
     return `<div data-testid="diff-pane-split" class="source-split">
-      ${sourcePane("Base", nextVersions.base, changed.deleted)}
-      ${sourcePane("Head", nextVersions.head, changed.added)}
+      ${sourcePane("Base", nextVersions.base, "base", changed.deleted, commentable.base, comments, commentForm)}
+      ${sourcePane("Head", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}
     </div>`;
   }
   if (mode === "source") {
-    return `<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, changed.added)}</div>`;
+    return `<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}</div>`;
   }
   if (shape === "split") {
     const [base, head] = await Promise.all([
@@ -985,15 +1044,142 @@ function changedLines(patch: string): { added: Set<number>; deleted: Set<number>
   return { added, deleted };
 }
 
-function sourcePane(title: string, source: string, marked: ReadonlySet<number>): string {
+function commentableLines(patch: string): { head: Set<number>; base: Set<number> } {
+  const head = new Set<number>();
+  const base = new Set<number>();
+  let oldLine = 0;
+  let newLine = 0;
+  for (const line of patch.split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      head.add(newLine);
+      newLine += 1;
+      continue;
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      base.add(oldLine);
+      oldLine += 1;
+      continue;
+    }
+    if (line.startsWith(" ") || line === "") {
+      base.add(oldLine);
+      head.add(newLine);
+      oldLine += 1;
+      newLine += 1;
+    }
+  }
+  return { head, base };
+}
+
+function sourcePane(
+  title: string,
+  source: string,
+  side: Side,
+  marked: ReadonlySet<number>,
+  commentable: ReadonlySet<number>,
+  comments: readonly WebLineComment[],
+  form: LineCommentFormOptions | null,
+): string {
   const lines = source.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return `<section><h3>${escapeHtml(title)}</h3><table class="source-lines"><tbody>${lines
     .map((line, index) => {
       const lineNo = index + 1;
-      return `<tr class="${marked.has(lineNo) ? "marked" : ""}"><td>${lineNo}</td><td><pre>${escapeHtml(line)}</pre></td></tr>`;
+      const lineComments = comments.filter((comment) => comment.side === side && comment.line === lineNo);
+      const composer = form && commentable.has(lineNo) ? lineCommentComposer(form, side, lineNo) : "";
+      return `<tr class="${marked.has(lineNo) ? "marked" : ""}" data-testid="source-line-${side}-${lineNo}">
+        <td class="line-action">${composer}</td>
+        <td>${lineNo}</td>
+        <td><pre>${escapeHtml(line)}</pre></td>
+      </tr>${lineComments.map(renderInlineComment).join("")}`;
     })
     .join("")}</tbody></table></section>`;
+}
+
+interface LineCommentFormOptions {
+  action: string;
+  path: string;
+  mode: DiffMode;
+  shape: DiffShape;
+}
+
+function commentFormOptions(
+  ctx: WebCtx,
+  pull: ForgejoPull,
+  filePath: string,
+  mode: DiffMode,
+  shape: DiffShape,
+): LineCommentFormOptions | null {
+  if (ctx.ws.role === "read" || pull.user?.login === ctx.user || pull.state === "closed") return null;
+  return {
+    action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/comments`),
+    path: filePath,
+    mode,
+    shape,
+  };
+}
+
+function lineCommentComposer(form: LineCommentFormOptions, side: Side, line: number): string {
+  return `<details class="line-composer">
+    <summary aria-label="Comment on line ${line}">+</summary>
+    <form method="post" action="${form.action}">
+      <input type="hidden" name="path" value="${escapeAttr(form.path)}">
+      <input type="hidden" name="side" value="${side}">
+      <input type="hidden" name="line" value="${line}">
+      <input type="hidden" name="mode" value="${form.mode}">
+      <input type="hidden" name="shape" value="${form.shape}">
+      <textarea name="body" required></textarea>
+      <button type="submit">Comment</button>
+    </form>
+  </details>`;
+}
+
+function renderInlineComment(comment: WebLineComment): string {
+  return `<tr class="line-comment-row" data-testid="line-comment-${comment.id}">
+    <td></td>
+    <td colspan="2">
+      <div class="line-comment ${comment.outdated ? "outdated" : ""}">
+        <strong>${escapeHtml(comment.author)}</strong>
+        <span>${comment.outdated ? "outdated" : formatDate(comment.createdAt)}</span>
+        <p>${escapeHtml(comment.body)}</p>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function mapLineComments(file: PrFileView, comments: readonly ForgejoPullReviewComment[]): WebLineComment[] {
+  return comments
+    .filter((comment) => comment.path === file.path)
+    .map((comment) => {
+      const pos = comment.position ?? comment.original_position;
+      const mapped = pos === null ? null : positionToFileLine(file.patch, pos);
+      return {
+        id: comment.id,
+        line: mapped?.line ?? null,
+        side: mapped?.side ?? (file.status === "deleted" ? "base" : "head"),
+        body: comment.body,
+        author: comment.user?.login ?? DELETED_USER_LOGIN,
+        createdAt: Date.parse(comment.created_at) || 0,
+        outdated: comment.position === null,
+      };
+    });
+}
+
+function renderFileCommentSummary(comments: readonly WebLineComment[]): string {
+  if (comments.length === 0) return `<div class="file-comments empty">No line comments.</div>`;
+  return `<div class="file-comments">${comments
+    .map(
+      (comment) => `<div class="file-comment ${comment.outdated ? "outdated" : ""}">
+        <div><strong>${escapeHtml(comment.author)}</strong><span>${comment.side}:${comment.line ?? "outdated"}</span></div>
+        <p>${escapeHtml(comment.body)}</p>
+      </div>`,
+    )
+    .join("")}</div>`;
 }
 
 function splitDiffByFile(diff: string): Map<string, string> {
@@ -1013,10 +1199,11 @@ async function deleteBranchQuietly(ctx: WebCtx, branch: string): Promise<void> {
   await ctx.fj.deleteBranch(ctx.owner, ctx.repo, branch).catch(() => undefined);
 }
 
-function reviewForms(ctx: WebCtx, pull: ForgejoPull): string {
+function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): string {
   if (ctx.ws.role === "read" || pull.user?.login === ctx.user || pull.state === "closed") return "";
   return `
     <form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">
+      ${redirectTo ? `<input type="hidden" name="redirect_to" value="${escapeAttr(redirectTo)}">` : ""}
       <textarea name="body" placeholder="Leave a review comment"></textarea>
       <div class="toolbar-actions">
         <button class="button" name="event" value="COMMENT" type="submit">Comment</button>
@@ -1204,8 +1391,18 @@ async function notFoundPage(user: string, message: string): Promise<Response> {
   return htmlResponse(pageShell({ title: "Not found", user, body: `${globalHeader(user)}<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 404);
 }
 
+function badRequestPage(user: string, message: string): Response {
+  return htmlResponse(pageShell({ title: "Bad request", user, body: `${globalHeader(user)}<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 400);
+}
+
 function forbiddenPage(user: string): Response {
   return htmlResponse(pageShell({ title: "Forbidden", user, body: `${globalHeader(user)}<main class="page"><div class="empty">Forbidden</div></main>` }), 403);
+}
+
+function safeWebRedirect(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
 }
 
 function positiveInt(raw: string | undefined): number | null {
@@ -1305,8 +1502,8 @@ const WEB_CSS = `
 .page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:5px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:21px}.compact h1{font-size:19px}.toolbar-actions{display:flex;gap:8px;align-items:center}.repo-summary{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--cf-border);padding:12px 0 14px}.repo-summary h1{font-size:30px;margin:0}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));border:1px solid var(--cf-border)}.summary-grid a{padding:12px;border-left:1px solid var(--cf-border)}.summary-grid a:first-child{border-left:0}.summary-grid strong{display:block;font-size:22px}.summary-grid span{color:var(--cf-muted)}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center}.section-title h2{font-size:16px}.section-title a{color:var(--cf-muted);font-size:13px}.list{border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.list-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:9px 12px;border-top:1px solid var(--cf-border)}.list-row:first-child{border-top:0}.list-row:hover{background:var(--cf-hover)}.list-row span,.list-row small{color:var(--cf-muted)}.empty{padding:18px;color:var(--cf-muted);border:1px solid var(--cf-border);border-radius:6px}
 .document{border-top:1px solid var(--cf-border);padding:14px 0}.cf-theme-scope{--cf-content-max-width:100%;--cf-sidenote-width:0px;--cf-doc-content-padding-inline:clamp(20px,4vw,48px)}.cf-reader{max-width:none;width:100%}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:none}.thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:8px 0}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:14px 0}.comment,.event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
-.review-page{display:grid;gap:8px}.changed-files{display:flex;gap:6px;overflow-x:auto;border:1px solid var(--cf-border);border-radius:6px;padding:6px;background:#fafafa}.changed-files a{display:flex;align-items:center;gap:8px;max-width:360px;min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:4px;background:#fff;white-space:nowrap}.changed-files a span{min-width:0;overflow:hidden;text-overflow:ellipsis}.changed-files a.active{border-color:var(--cf-fg);font-weight:600}.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted);flex:0 0 auto}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td:first-child{width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
+.review-page{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,320px);gap:8px;align-items:start}.review-main{min-width:0}.review-rail{position:sticky;top:48px;display:grid;gap:8px}.review-card{border:1px solid var(--cf-border);border-radius:6px;background:#fff;padding:10px}.review-card h2{font-size:13px;margin:0 0 8px}.changed-files{display:flex;gap:6px;overflow-x:auto;border:1px solid var(--cf-border);border-radius:6px;padding:6px;background:#fafafa}.changed-files a{display:flex;align-items:center;gap:8px;max-width:360px;min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:4px;background:#fff;white-space:nowrap}.changed-files a span{min-width:0;overflow:hidden;text-overflow:ellipsis}.changed-files a.active{border-color:var(--cf-fg);font-weight:600}.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted);flex:0 0 auto}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td.line-action{width:26px;text-align:center;padding-right:4px;color:var(--cf-muted);user-select:none}.source-lines td:nth-child(2){width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.line-composer{position:relative}.line-composer summary{list-style:none;width:18px;height:18px;border:1px solid var(--cf-border);border-radius:4px;background:#fff;line-height:16px;cursor:pointer}.line-composer summary::-webkit-details-marker{display:none}.line-composer form{position:absolute;z-index:3;left:20px;top:0;width:260px;display:grid;gap:6px;border:1px solid var(--cf-border);border-radius:6px;background:#fff;padding:8px;box-shadow:0 6px 18px rgb(0 0 0 / .12)}.line-composer textarea{min-height:74px;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}.line-comment{font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;border:1px solid var(--cf-border);border-radius:6px;margin:5px 0 7px;padding:8px;background:#fff}.line-comment span,.file-comment span{color:var(--cf-muted);font-size:12px;margin-left:8px}.line-comment p,.file-comment p{margin:5px 0 0;white-space:pre-wrap}.file-comments{display:grid;gap:8px}.file-comments.empty{border:0;padding:4px 0}.file-comment{border:1px solid var(--cf-border);border-radius:6px;padding:8px}.file-comment.outdated,.line-comment.outdated{opacity:.72}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
 .edit-page{display:grid;gap:8px}.edit-page .file-toolbar{margin:0}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:18px;max-width:560px}.settings-section{display:grid;gap:10px}.settings-section h2{font-size:16px;margin:0}
 #web-editor-root{height:calc(100vh - 210px);min-height:520px;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-fg)}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
-@media(max-width:800px){.two-col,.review-page{grid-template-columns:1fr}.web-editor-main{grid-template-columns:1fr}.web-editor-outline{display:none}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
+@media(max-width:800px){.two-col,.review-page{grid-template-columns:1fr}.review-rail{position:static}.web-editor-main{grid-template-columns:1fr}.web-editor-outline{display:none}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
 `;
