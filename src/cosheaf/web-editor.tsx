@@ -1,6 +1,5 @@
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { blueprintBookThemeManifest } from "@chaoxu/coflat-editor/reader";
 import type {
   AssetUploader as EditorAssetUploader,
   AutocompleteSource as EditorAutocompleteSource,
@@ -16,12 +15,12 @@ import {
   userBranchPrefix,
 } from "../../shared/conventions";
 import { ApiError, api } from "./api";
+import { readDocumentTheme } from "./document-theme";
+import type { DocumentThemeId } from "./document-theme";
 import { getClientDocumentFormat } from "./format-registry";
 import "@chaoxu/coflat-editor/style.css";
 import "@chaoxu/coflat-editor/themes/blueprint-book.css";
 import "./globals.css";
-
-type DocumentThemeId = "default" | "blueprint-book";
 
 interface EditorConfig {
   slug: string;
@@ -32,17 +31,6 @@ interface EditorConfig {
   username: string;
   role: "admin" | "write" | "read";
   formatId: DocumentFormatId;
-}
-
-const DOCUMENT_THEME_KEY = "cosheaf:document-theme";
-const DOCUMENT_THEMES: Array<{ id: DocumentThemeId; label: string }> = [
-  { id: "default", label: "Default" },
-  { id: blueprintBookThemeManifest.id as DocumentThemeId, label: blueprintBookThemeManifest.name },
-];
-
-function readDocumentTheme(): DocumentThemeId {
-  const value = localStorage.getItem(DOCUMENT_THEME_KEY);
-  return value === "blueprint-book" ? value : "default";
 }
 
 function shortId(): string {
@@ -83,15 +71,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"rich" | "source">("rich");
-  const [documentTheme, setDocumentTheme] = useState<DocumentThemeId>(() => readDocumentTheme());
+  const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const branchRef = useRef(branch);
   branchRef.current = branch;
-
-  useEffect(() => {
-    localStorage.setItem(DOCUMENT_THEME_KEY, documentTheme);
-  }, [documentTheme]);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -277,20 +261,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         <span data-testid="active-branch-name" className="web-editor-branch">
           {branch}
         </span>
-        {config.formatId === COFLAT_FORMAT_ID ? (
-          <select
-            value={documentTheme}
-            onChange={(event) => setDocumentTheme(event.target.value as DocumentThemeId)}
-            title="Document theme"
-            data-testid="document-theme-select"
-          >
-            {DOCUMENT_THEMES.map((theme) => (
-              <option key={theme.id} value={theme.id}>
-                {theme.label}
-              </option>
-            ))}
-          </select>
-        ) : null}
         {config.formatId === COFLAT_FORMAT_ID ? (
           <button type="button" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
             {mode === "rich" ? "Source" : "Rich"}

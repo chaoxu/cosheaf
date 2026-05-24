@@ -2,7 +2,6 @@ import type { ReactElement } from "react";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { getClientDocumentFormat } from "./format-registry";
-import { blueprintBookThemeManifest } from "@chaoxu/coflat-editor/reader";
 import type { OutlineEntry } from "@chaoxu/coflat-editor";
 import {
   ApiError,
@@ -51,6 +50,8 @@ import type {
 import { SettingsPanel } from "./review/SettingsPanel";
 import { WorkspaceProvider, useWorkspaceContext } from "./workspace-context";
 import { useReviewComments } from "./use-review-comments";
+import type { DocumentThemeId } from "./document-theme";
+import { readDocumentTheme, writeDocumentTheme } from "./document-theme";
 
 type View =
   | { kind: "loading" }
@@ -220,24 +221,19 @@ function NewFilePathInput({
 
 const muted = "text-[var(--cf-muted)]";
 const borderColor = "border-[var(--cf-border)]";
-type DocumentThemeId = "default" | "blueprint-book";
-const DOCUMENT_THEME_KEY = "cosheaf:document-theme";
-const DOCUMENT_THEMES: Array<{ id: DocumentThemeId; label: string }> = [
-  { id: "default", label: "Default" },
-  { id: blueprintBookThemeManifest.id, label: blueprintBookThemeManifest.name },
-];
 
-function readDocumentTheme(): DocumentThemeId {
-  if (typeof localStorage === "undefined") return "default";
-  const value = localStorage.getItem(DOCUMENT_THEME_KEY);
-  return value === "blueprint-book" ? value : "default";
-}
-
-function useDocumentTheme(): [DocumentThemeId, (theme: DocumentThemeId) => void] {
-  const [documentTheme, setDocumentTheme] = useState<DocumentThemeId>(() => readDocumentTheme());
+function useDocumentTheme(username: string): [DocumentThemeId, (theme: DocumentThemeId) => void] {
+  const [documentTheme, setDocumentThemeState] = useState<DocumentThemeId>(() => readDocumentTheme(username));
   useEffect(() => {
-    localStorage.setItem(DOCUMENT_THEME_KEY, documentTheme);
-  }, [documentTheme]);
+    setDocumentThemeState(readDocumentTheme(username));
+  }, [username]);
+  const setDocumentTheme = useCallback(
+    (theme: DocumentThemeId) => {
+      writeDocumentTheme(theme, username);
+      setDocumentThemeState(theme);
+    },
+    [username],
+  );
   return [documentTheme, setDocumentTheme];
 }
 
@@ -1187,13 +1183,11 @@ function WorkspaceStatusBar({
   busy,
   currentBranchName,
   dirty,
-  documentTheme,
   editorMode,
   openPath,
   reviewingPullNumber,
   role,
   status,
-  onDocumentThemeChange,
   onOpenPullRequest,
   onSave,
   onToggleEditorMode,
@@ -1202,13 +1196,11 @@ function WorkspaceStatusBar({
   busy: boolean;
   currentBranchName: string | null;
   dirty: boolean;
-  documentTheme: DocumentThemeId;
   editorMode: "rich" | "source";
   openPath: string | null;
   reviewingPullNumber: number | null;
   role: Workspace["role"];
   status: string | null;
-  onDocumentThemeChange: (theme: DocumentThemeId) => void;
   onOpenPullRequest: (mode: "direct" | "review") => void;
   onSave: () => void;
   onToggleEditorMode: () => void;
@@ -1240,21 +1232,6 @@ function WorkspaceStatusBar({
         <span className="truncate">{status ?? ""}</span>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
-        {!isReviewing && activeFormatId === COFLAT_FORMAT_ID && (
-          <select
-            value={documentTheme}
-            onChange={(e) => onDocumentThemeChange(e.target.value as DocumentThemeId)}
-            title="Document theme"
-            data-testid="document-theme-select"
-            className="h-5 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs text-[var(--cf-fg)]"
-          >
-            {DOCUMENT_THEMES.map((theme) => (
-              <option key={theme.id} value={theme.id}>
-                {theme.label}
-              </option>
-            ))}
-          </select>
-        )}
         {!isReviewing && openPath && (
           <>
             {activeFormatId === COFLAT_FORMAT_ID && (
@@ -1364,7 +1341,7 @@ function WorkspaceView({
   const [newIssueBusy, setNewIssueBusy] = useState(false);
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
-  const [documentTheme, setDocumentTheme] = useDocumentTheme();
+  const [documentTheme, setDocumentTheme] = useDocumentTheme(user.username);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
   const [reviewState, setReviewState] = useState<{
@@ -2663,6 +2640,8 @@ function WorkspaceView({
               <SettingsPanel
                 workspaceSlug={workspace.slug}
                 initialFormatId={activeFormatId}
+                documentTheme={documentTheme}
+                onDocumentThemeChanged={setDocumentTheme}
                 onFormatChanged={setActiveFormatId}
               />
             </div>
@@ -2771,13 +2750,11 @@ function WorkspaceView({
             busy={busy}
             currentBranchName={currentBranchName}
             dirty={dirty}
-            documentTheme={documentTheme}
             editorMode={editorMode}
             openPath={openPath}
             reviewingPullNumber={reviewingPullNumber}
             role={workspace.role}
             status={status}
-            onDocumentThemeChange={setDocumentTheme}
             onOpenPullRequest={openPullRequest}
             onSave={save}
             onToggleEditorMode={() => setEditorMode((m) => (m === "rich" ? "source" : "rich"))}

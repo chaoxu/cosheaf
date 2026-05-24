@@ -41,9 +41,11 @@ try {
   await page.goto(editUrl, { waitUntil: "domcontentloaded" });
   await page.getByTestId("editor").waitFor({ state: "visible", timeout: 15000 });
   await page.getByTestId("statusbar").waitFor({ state: "visible", timeout: 10000 });
-  await page.getByTestId("document-theme-select").waitFor({ state: "visible", timeout: 10000 });
   await page.getByRole("button", { name: "Source" }).waitFor({ state: "visible", timeout: 10000 });
   await page.getByRole("heading", { name: "Outline" }).waitFor({ state: "visible", timeout: 10000 });
+  if (await page.getByTestId("document-theme-select").isVisible().catch(() => false)) {
+    throw new Error("document theme selector should live in Settings, not the editor statusbar");
+  }
 
   const stats = await page.evaluate(() => {
     const editor = document.querySelector('[data-testid="editor"]');

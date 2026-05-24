@@ -107,6 +107,19 @@ try {
     throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
 
+  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/settings`, { waitUntil: "domcontentloaded" });
+  const themeSelect = page.getByTestId("settings-document-theme-select");
+  await themeSelect.waitFor({ state: "visible", timeout: 10000 });
+  await themeSelect.selectOption("blueprint-book");
+  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
+  await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
+  const blueprintReader = await readerStats();
+  if (!blueprintReader.rootClass.includes("cf-theme-blueprint-book")) {
+    throw new Error(`settings-selected theme did not apply to reader: ${blueprintReader.rootClass}`);
+  }
+  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/settings`, { waitUntil: "domcontentloaded" });
+  await page.getByTestId("settings-document-theme-select").selectOption("default");
+
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;
   console.log(JSON.stringify({

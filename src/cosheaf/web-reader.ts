@@ -4,6 +4,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./review/ref-rewriter";
+import { readDocumentTheme } from "./document-theme";
 
 interface ReaderPayload {
   source: string;
@@ -17,8 +18,6 @@ interface LocalRefs {
   crossrefs: Map<string, string>;
   citations: Map<string, string>;
 }
-
-const DOCUMENT_THEME_KEY = "cosheaf:document-theme";
 
 function urlPath(value: string): string {
   return value.split("/").map(encodeURIComponent).join("/");
@@ -87,7 +86,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
 }
 
 function applyDocumentTheme(root: HTMLElement): void {
-  const theme = localStorage.getItem(DOCUMENT_THEME_KEY);
+  const theme = readDocumentTheme(document.body.dataset.cosheafUser);
   const scope = root.closest(".cf-theme-scope");
   scope?.classList.toggle("cf-theme-blueprint-book", theme === "blueprint-book");
 }

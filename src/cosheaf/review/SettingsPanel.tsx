@@ -8,6 +8,8 @@ import { Input } from "../components/ui/input";
 import { api } from "../api";
 import type { Label, Milestone, WorkspaceSettings } from "../api";
 import type { DocumentFormatId } from "../../../shared/document-format";
+import type { DocumentThemeId } from "../document-theme";
+import { DOCUMENT_THEMES } from "../document-theme";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -16,15 +18,20 @@ const DEFAULT_LABEL_COLORS = ["e11d48", "f59e0b", "10b981", "3b82f6", "8b5cf6", 
 export function SettingsPanel({
   workspaceSlug,
   initialFormatId,
+  documentTheme,
+  onDocumentThemeChanged,
   onFormatChanged,
 }: {
   workspaceSlug: string;
   initialFormatId: DocumentFormatId;
+  documentTheme: DocumentThemeId;
+  onDocumentThemeChanged: (theme: DocumentThemeId) => void;
   onFormatChanged?: (formatId: DocumentFormatId) => void;
 }): ReactElement {
   return (
     <div className="flex flex-col gap-6 p-4 max-w-3xl">
-      <h1 className="text-lg font-semibold">Workspace settings</h1>
+      <h1 className="text-lg font-semibold">Settings</h1>
+      <UserPreferences documentTheme={documentTheme} onDocumentThemeChanged={onDocumentThemeChanged} />
       <FormatManager
         workspaceSlug={workspaceSlug}
         initialFormatId={initialFormatId}
@@ -33,6 +40,35 @@ export function SettingsPanel({
       <LabelsManager workspaceSlug={workspaceSlug} />
       <MilestonesManager workspaceSlug={workspaceSlug} />
     </div>
+  );
+}
+
+function UserPreferences({
+  documentTheme,
+  onDocumentThemeChanged,
+}: {
+  documentTheme: DocumentThemeId;
+  onDocumentThemeChanged: (theme: DocumentThemeId) => void;
+}): ReactElement {
+  return (
+    <section data-testid="settings-user-preferences" className="flex flex-col gap-2">
+      <h2 className="text-base font-semibold">User preferences</h2>
+      <label className="flex items-center gap-2 text-sm">
+        <span className="text-[var(--cf-muted)]">Document theme</span>
+        <select
+          value={documentTheme}
+          onChange={(event) => onDocumentThemeChanged(event.target.value as DocumentThemeId)}
+          data-testid="settings-document-theme-select"
+          className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
+        >
+          {DOCUMENT_THEMES.map((theme) => (
+            <option key={theme.id} value={theme.id}>
+              {theme.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
   );
 }
 
