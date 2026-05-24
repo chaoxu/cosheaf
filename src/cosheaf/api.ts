@@ -179,10 +179,10 @@ export const api = {
 
   getFile: (slug: string, path: string, branch?: string) =>
     jsonFetch<NoteContent>(`${w(slug)}/file${qs({ path, branch })}`),
-  putFile: (slug: string, path: string, content: string, branch: string) =>
+  putFile: (slug: string, path: string, content: string, branch: string, previousPath?: string) =>
     jsonFetch<{ ok: true; branch: string; meta: DocumentMeta; content?: string; commit?: string }>(
       `${w(slug)}/file${qs({ path, branch })}`,
-      { method: "PUT", body: JSON.stringify({ content }) },
+      { method: "PUT", body: JSON.stringify({ content, previous_path: previousPath }) },
     ),
   deleteFile: (slug: string, path: string, branch: string) =>
     jsonFetch<{ ok: true; branch: string }>(`${w(slug)}/file${qs({ path, branch })}`, {

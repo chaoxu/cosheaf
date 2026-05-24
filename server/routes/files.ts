@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
-import { planIndexPage } from "../indexer.js";
+import { deletePage, planIndexPage } from "../indexer.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import {
   MAX_ASSET_BYTES,
@@ -177,9 +177,12 @@ files.put("/:slug/file", async (c) => {
   const branch = refFromQuery(c);
   if (branch === "main")
     return c.json(...bad("branch required (cannot write to main)"));
-  const body = (await c.req.json().catch(() => null)) as { content?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as { content?: string; previous_path?: string } | null;
   if (body?.content === undefined)
     return c.json(...bad("content required"));
+  const previousRel = safeRel(body.previous_path);
+  if (body.previous_path !== undefined && !previousRel)
+    return c.json(...bad("invalid previous_path"));
 
   await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -198,7 +201,11 @@ files.put("/:slug/file", async (c) => {
   });
   const finalContent = plan.rewrittenContent ?? body.content;
 
+  const isRename = Boolean(previousRel && previousRel !== rel);
   const existing = await fj.getFileMeta(owner, repo, branch, rel);
+  if (isRename && existing)
+    return c.json(...conflict("destination already exists"));
+  const previous = isRename ? await fj.getFileMeta(owner, repo, branch, previousRel as string) : null;
   let r;
   try {
     r = await fj.putFile(owner, repo, {
@@ -206,8 +213,16 @@ files.put("/:slug/file", async (c) => {
       path: rel,
       content: finalContent,
       sha: existing?.sha,
-      message: existing ? `update ${rel}` : `create ${rel}`,
+      message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
     });
+    if (isRename && previous) {
+      await fj.deleteFile(owner, repo, {
+        branch,
+        path: previousRel as string,
+        sha: previous.sha,
+        message: `remove ${previousRel} after rename`,
+      });
+    }
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 409)
       return c.json(...conflict("conflict on push"));
@@ -217,7 +232,9 @@ files.put("/:slug/file", async (c) => {
   // Without this, doc_map / FTS / backlinks would lag until the webhook
   // fires and typed read-after-write (search, suggest, /backlinks) breaks.
   plan.commit();
+  if (isRename) deletePage(db, ws.slug, previousRel as string);
   invalidateBranchTree(owner, repo, branch);
+  if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
   hub.publish(ws.slug, { type: "change", path: rel });
   return c.json({
     ok: true,

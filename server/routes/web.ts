@@ -6,9 +6,9 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { COFLAT_FORMAT_ID, documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
-import type { Role } from "../../shared/roles.js";
-import { planIndexPage } from "../indexer.js";
-import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
+import { ROLES, type Role } from "../../shared/roles.js";
+import { deletePage, planIndexPage } from "../indexer.js";
+import { AUTH_COOKIE, invalidateWorkspacePermissionCache, resolveAuth } from "../middleware.js";
 import { Forgejo, ForgejoError, mergePullWithRetry, type ForgejoPull } from "../forgejo.js";
 import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
 import type {
@@ -23,6 +23,7 @@ import type {
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
+import { setWorkspaceMember } from "../workspace-members.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 
@@ -248,8 +249,9 @@ web.get("/:owner/:repo/_edit", async (c) => {
           ${webEditorAssets()}
           <noscript>
             <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
-              <input type="hidden" name="path" value="${escapeAttr(rel)}">
+              <input type="hidden" name="old_path" value="${escapeAttr(rel)}">
               <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
+              <label>Path <input name="path" value="${escapeAttr(rel)}" required></label>
               <textarea name="content" spellcheck="false">${escapeHtml(content)}</textarea>
               <button class="button primary" type="submit">Save</button>
             </form>
@@ -267,10 +269,11 @@ web.post("/:owner/:repo/_edit", async (c) => {
   const form = await c.req.parseBody();
   const branch = editBranchFor(ctx.user, stringField(form.branch));
   const rel = safeRel(stringField(form.path) ?? undefined);
+  const oldRel = safeRel(stringField(form.old_path) ?? undefined);
   const content = textField(form.content);
   if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
   await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
-  await writeMarkdownFile(ctx, branch, rel, content);
+  await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
 });
 
@@ -622,6 +625,7 @@ web.get("/:owner/:repo/settings", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
   const protection = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null);
+  const accessUpdated = c.req.query("access");
   return htmlResponse(
     repoPage({
       title: `Settings - ${ctx.repo}`,
@@ -659,6 +663,23 @@ web.get("/:owner/:repo/settings", async (c) => {
             <p class="muted">Format: ${escapeHtml(ctx.ws.defaultMdFormat)}</p>
             ${ctx.ws.role === "admin" ? `<button class="button primary" type="submit">Save settings</button>` : ""}
           </form>
+          ${
+            ctx.ws.role === "admin"
+              ? `<form class="settings-section" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
+                  <h2>Access</h2>
+                  <label>Username <input name="username" data-testid="settings-access-username" required></label>
+                  <label>Role
+                    <select name="role" data-testid="settings-access-role">
+                      <option value="write">Write</option>
+                      <option value="read">Read</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
+                  <button class="button primary" type="submit" data-testid="settings-access-submit">Grant access</button>
+                  ${accessUpdated ? `<p class="muted" data-testid="settings-access-saved">${escapeHtml(accessUpdated)}</p>` : ""}
+                </form>`
+              : ""
+          }
         </div>
         <script>
           (() => {
@@ -721,6 +742,29 @@ web.post("/:owner/:repo/settings", async (c) => {
   if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
   else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+});
+
+web.post("/:owner/:repo/settings/access", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
+
+  const body = await c.req.parseBody();
+  const username = stringField(body.username)?.trim();
+  const role = stringField(body.role)?.trim();
+  if (!username || !role || !(ROLES as readonly string[]).includes(role)) {
+    return htmlResponse(pageShell({ title: "Bad request", body: `<main class="auth-page"><p>Invalid access update.</p></main>` }), 400);
+  }
+
+  await setWorkspaceMember({
+    forgejo: c.get("fjAdmin"),
+    owner: ctx.owner,
+    repo: ctx.repo,
+    username,
+    role: role as Role,
+  });
+  invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`${username} · ${role}`)}`);
 });
 
 interface WebCtx {
@@ -846,7 +890,13 @@ async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: st
   if (!exists) await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
 }
 
-async function writeMarkdownFile(ctx: WebCtx, branch: string, rel: string, content: string): Promise<void> {
+async function writeMarkdownFile(
+  ctx: WebCtx,
+  branch: string,
+  rel: string,
+  content: string,
+  previousRel?: string,
+): Promise<void> {
   const plan = planIndexPage(ctx.db, {
     workspaceSlug: ctx.ws.slug,
     filePath: rel,
@@ -854,15 +904,27 @@ async function writeMarkdownFile(ctx: WebCtx, branch: string, rel: string, conte
     formatId: ctx.ws.defaultMdFormat,
   });
   const finalContent = plan.rewrittenContent ?? content;
+  const isRename = Boolean(previousRel && previousRel !== rel);
   const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
+  if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
+  const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
   await ctx.fj.putFile(ctx.owner, ctx.repo, {
     branch,
     path: rel,
     content: finalContent,
     sha: existing?.sha,
-    message: existing ? `update ${rel}` : `create ${rel}`,
+    message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
   });
+  if (isRename && previous) {
+    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+      branch,
+      path: previousRel as string,
+      sha: previous.sha,
+      message: `remove ${previousRel} after rename`,
+    });
+  }
   plan.commit();
+  if (isRename) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }
 
@@ -1652,6 +1714,6 @@ const WEB_CSS = `
 .document{border-top:1px solid var(--cf-border);padding:14px 0}.cf-theme-scope{--cf-content-max-width:100%;--cf-sidenote-width:0px;--cf-doc-content-padding-inline:clamp(20px,4vw,48px)}.cf-reader{max-width:none;width:100%}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:none}.thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:6px 0}.thread-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.thread-header h1{font-size:23px;margin:6px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:10px 0}.comment,.event,.timeline-event{border:0;border-top:1px solid var(--cf-border);border-radius:0;margin:0;padding:7px 0;background:transparent}.timeline-event{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.timeline-event small{margin-left:auto;color:var(--cf-muted)}.timeline-event p{flex-basis:100%;margin:2px 0 0;color:var(--cf-muted)}.comment-meta{color:var(--cf-muted);font-size:12px;border:0;padding:0;margin:0 0 3px}.comment .cf-reader,.comment .markdown-body,.timeline-event .cf-reader,.timeline-event .markdown-body{--cf-doc-content-padding-inline:0;padding:0;max-width:none;font-size:13px}.comment :where(p,ul,ol,pre,blockquote),.timeline-event :where(p,ul,ol,pre,blockquote){margin-top:3px;margin-bottom:3px}.comment :where(h1,h2,h3,h4),.timeline-event :where(h1,h2,h3,h4){margin-top:6px;margin-bottom:3px}.comment-form,.review-form{display:grid;gap:8px;margin:10px 0}.comment-form textarea,.review-form textarea{min-height:72px}
 .review-page{display:grid;gap:8px}.review-main{min-width:0}.review-bottom{display:grid;gap:8px}.review-card{border:0;border-top:1px solid var(--cf-border);border-radius:0;background:transparent;padding:8px 0}.review-card h2{font-size:13px;margin:0 0 6px}.changed-files{display:flex;gap:6px;overflow-x:auto;border:1px solid var(--cf-border);border-radius:6px;padding:6px;background:#fafafa}.changed-files a{display:flex;align-items:center;gap:8px;max-width:360px;min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:4px;background:#fff;white-space:nowrap}.changed-files a span{min-width:0;overflow:hidden;text-overflow:ellipsis}.changed-files a.active{border-color:var(--cf-fg);font-weight:600}.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted);flex:0 0 auto}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td.line-action{width:26px;text-align:center;padding-right:4px;color:var(--cf-muted);user-select:none}.source-lines td:nth-child(2){width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.line-composer{position:relative}.line-composer summary{list-style:none;width:18px;height:18px;border:1px solid var(--cf-border);border-radius:4px;background:transparent;line-height:16px;cursor:pointer}.line-composer summary::-webkit-details-marker{display:none}.line-composer form{position:absolute;z-index:3;left:20px;top:0;width:260px;display:grid;gap:6px;border:1px solid var(--cf-border);border-radius:6px;background:var(--cf-bg);padding:8px;box-shadow:0 6px 18px rgb(0 0 0 / .12)}.line-composer textarea{min-height:74px;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}.line-comment{font:13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;border:0;border-left:2px solid var(--cf-border);border-radius:0;margin:3px 0 4px;padding:4px 0 4px 8px;background:transparent}.line-comment span,.file-comment span{color:var(--cf-muted);font-size:12px;margin-left:8px}.line-comment p,.file-comment p{margin:2px 0 0;white-space:pre-wrap}.file-comments{display:grid;gap:4px}.file-comments.empty{border:0;padding:2px 0;color:var(--cf-muted)}.file-comment{border:0;border-left:2px solid var(--cf-border);border-radius:0;padding:3px 0 3px 8px;background:transparent}.file-comment.outdated,.line-comment.outdated{opacity:.72}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
 .edit-page{display:grid;gap:8px}.edit-page .file-toolbar{margin:0}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:18px;max-width:560px}.settings-section{display:grid;gap:10px}.settings-section h2{font-size:16px;margin:0}
-#web-editor-root{height:calc(100vh - 210px);min-height:520px;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-fg)}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
+#web-editor-root{height:calc(100vh - 210px);min-height:520px;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:170px;display:flex;align-items:center;gap:4px;color:var(--cf-fg)}.web-editor-file input{width:min(360px,32vw);min-width:150px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--cf-fg);padding:2px 4px;font-size:12px}.web-editor-file input:focus{border-color:var(--cf-border);background:var(--cf-bg);outline:none}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
 @media(max-width:800px){.two-col{grid-template-columns:1fr}.web-editor-main{grid-template-columns:1fr}.web-editor-outline{display:none}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
 `;

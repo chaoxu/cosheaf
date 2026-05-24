@@ -66,16 +66,23 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     [config.formatId],
   );
   const [content, setContent] = useState(initialContent);
+  const [currentPath, setCurrentPath] = useState(config.path);
+  const [savedPath, setSavedPath] = useState(config.path);
   const [branch, setBranch] = useState(config.branch);
   const [status, setStatus] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [pathDirty, setPathDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"rich" | "source">("rich");
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const branchRef = useRef(branch);
+  const currentPathRef = useRef(currentPath);
+  const savedPathRef = useRef(savedPath);
   branchRef.current = branch;
+  currentPathRef.current = currentPath;
+  savedPathRef.current = savedPath;
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -93,23 +100,40 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     return `${userBranchPrefix(config.username)}wip-${shortId()}`;
   }, [config.username]);
 
+  const saveSource = useCallback(
+    async (source: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+      const writeBranch = branchForWrite();
+      const nextPath = currentPathRef.current.trim();
+      const previousPath = savedPathRef.current;
+      if (!nextPath.endsWith(".md")) return { ok: false, error: "path must end with .md" };
+      try {
+        const result = await api.putFile(
+          config.slug,
+          nextPath,
+          source,
+          writeBranch,
+          previousPath !== nextPath ? previousPath : undefined,
+        );
+        if (result.content !== undefined) setContent(result.content);
+        setBranch(result.branch);
+        setSavedPath(nextPath);
+        setCurrentPath(nextPath);
+        setPathDirty(false);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
+      }
+    },
+    [branchForWrite, config.slug],
+  );
+
   const saveHandler = useMemo<EditorSaveHandler>(
     () => ({
       autosaveDebounceMs: 1500,
       isBusy: () => busy,
-      save: async (payload) => {
-        const writeBranch = branchForWrite();
-        try {
-          const result = await api.putFile(config.slug, config.path, payload.source, writeBranch);
-          if (result.content !== undefined) setContent(result.content);
-          setBranch(result.branch);
-          return { ok: true as const };
-        } catch (err) {
-          return { ok: false as const, error: err instanceof ApiError ? err.message : "save failed" };
-        }
-      },
+      save: (payload) => saveSource(payload.source),
     }),
-    [branchForWrite, busy, config.path, config.slug],
+    [busy, saveSource],
   );
 
   const statusEvents = useMemo<EditorStatusEvents>(
@@ -171,8 +195,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   );
 
   const save = useCallback(() => {
-    void editorRef.current?.triggerSave("manual");
-  }, []);
+    if (dirty) {
+      void editorRef.current?.triggerSave("manual");
+      return;
+    }
+    if (!pathDirty || busy) return;
+    setBusy(true);
+    setStatus(null);
+    void saveSource(content).then((result) => {
+      setBusy(false);
+      if (result.ok) setStatus("saved");
+      else setStatus(`save failed: ${result.error}`);
+    });
+  }, [busy, content, dirty, pathDirty, saveSource]);
 
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {
@@ -186,12 +221,12 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         const pr = await api.openPull(config.slug, {
           head: branch,
           title: branch,
-          body: `Update ${config.path}`,
+          body: `Update ${currentPath}`,
         });
         if (directMerge) {
           await api.mergePull(config.slug, pr.number, { Do: "squash", force: true });
           setStatus("merged to main");
-          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(config.path)}`;
+          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(currentPath)}`;
           return;
         }
         window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}`;
@@ -201,7 +236,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         setBusy(false);
       }
     },
-    [branch, config.owner, config.path, config.repo, config.slug],
+    [branch, config.owner, config.repo, config.slug, currentPath],
   );
 
   const readerClass =
@@ -214,10 +249,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       <div className="web-editor-main">
         <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
           <ActiveMarkdownEditor
-            key={config.path}
+            key={savedPath}
             value={content}
             mode={mode}
-            from={config.path}
+            from={currentPath}
             testId="editor"
             onReady={(editor) => {
               editorRef.current = editor;
@@ -254,8 +289,18 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       </div>
       <footer className="web-editor-statusbar" data-testid="statusbar">
         <span className="web-editor-file">
-          {config.path}
-          {dirty ? <span className="dirty-dot"> *</span> : null}
+          <input
+            aria-label="File path"
+            data-testid="editor-path-input"
+            value={currentPath}
+            onChange={(event) => {
+              setCurrentPath(event.currentTarget.value);
+              setPathDirty(event.currentTarget.value.trim() !== savedPath);
+              setStatus(null);
+            }}
+            disabled={busy}
+          />
+          {dirty || pathDirty ? <span className="dirty-dot"> *</span> : null}
         </span>
         <span className="web-editor-status">{status ?? ""}</span>
         <span data-testid="active-branch-name" className="web-editor-branch">
@@ -266,7 +311,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             {mode === "rich" ? "Source" : "Rich"}
           </button>
         ) : null}
-        <button type="button" onClick={save} disabled={!dirty || busy}>
+        <button type="button" onClick={save} disabled={(!dirty && !pathDirty) || busy}>
           Save
         </button>
         {branch && branch !== "main" ? (

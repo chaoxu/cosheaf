@@ -11,7 +11,7 @@ import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { freshTestDb, responseOk, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseEmpty, responseOk, seedTestWorkspace } from "./test-fixtures.js";
 
 const config: Config = {
   dataDir: "/tmp/cosheaf-files-test",
@@ -207,6 +207,46 @@ describe("files mutation gates", () => {
       code: "validation",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renames a markdown file on the target branch and updates sidecar rows", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "old.md",
+      bodyText: "---\nid: old\n---\n# Old\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    fetchMock.mockImplementation(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/branches/user%2Falice%2Fwip")) return responseOk({ name: "user/alice/wip" });
+      if (url.includes("/contents/new.md") && (!init?.method || init.method === "GET")) return new Response("not found", { status: 404 });
+      if (url.includes("/contents/old.md") && (!init?.method || init.method === "GET")) return responseOk({ sha: "old-sha" });
+      if (url.includes("/contents/new.md") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { message: string };
+        expect(body.message).toBe("rename old.md to new.md");
+        return responseOk({ commit: { sha: "new-commit" } });
+      }
+      if (url.includes("/contents/old.md") && init?.method === "DELETE") {
+        return responseEmpty(200);
+      }
+      throw new Error(`unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+    });
+
+    const res = await appFor(db).request("/api/v1/w/w/file?path=new.md&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ previous_path: "old.md", content: "---\nid: new\n---\n# New\n" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, branch: "user/alice/wip", commit: "new-commit" });
+    const rows = db
+      .prepare("SELECT cosheaf_id, forgejo_id FROM doc_map WHERE workspace_slug = ? ORDER BY forgejo_id")
+      .all("w");
+    expect(rows).toEqual([{ cosheaf_id: "new", forgejo_id: "new.md" }]);
   });
 });
 
