@@ -55,6 +55,14 @@ async function readerStats() {
       fontSize: getComputedStyle(el).fontSize,
       headingSize: h ? getComputedStyle(h).fontSize : null,
       listStyle: ul ? getComputedStyle(ul).listStyleType : null,
+      mathErrors: el.querySelectorAll(".cf-math-error").length,
+      unresolvedCrossrefs: [...el.querySelectorAll(".cf-crossref-unresolved[data-ref-key]")].map((node) =>
+        node.getAttribute("data-ref-key")
+      ),
+      citations: [...el.querySelectorAll(".cf-citation")].slice(0, 5).map((node) => node.textContent ?? ""),
+      redSample: [...el.querySelectorAll('[class*="error"], [class*="unresolved"]')]
+        .slice(0, 8)
+        .map((node) => node.textContent?.slice(0, 80) ?? ""),
       text: el.textContent?.slice(0, 160) ?? "",
     };
   });
@@ -74,14 +82,29 @@ try {
   if (defaultReader.width < defaultReader.documentWidth * 0.9) {
     throw new Error(`reader is not using document width: ${JSON.stringify(defaultReader)}`);
   }
-  if (!defaultReader.rootClass.includes("cf-theme-blueprint-book")) {
-    throw new Error(`unexpected document theme class: ${defaultReader.rootClass}`);
+  if (!defaultReader.rootClass.includes("cf-theme-scope")) {
+    throw new Error(`missing document theme scope: ${defaultReader.rootClass}`);
+  }
+  if (defaultReader.rootClass.includes("cf-theme-blueprint-book")) {
+    throw new Error(`default reader should match the editor default theme: ${defaultReader.rootClass}`);
   }
   if (!defaultReader.fontSize || !defaultReader.headingSize) {
     throw new Error(`missing document typography: ${JSON.stringify(defaultReader)}`);
   }
   if (defaultReader.listStyle !== "disc") {
     throw new Error(`reader list markers missing: ${defaultReader.listStyle}`);
+  }
+  if (defaultReader.mathErrors !== 0) {
+    throw new Error(`reader has math render errors: ${JSON.stringify(defaultReader)}`);
+  }
+  if (defaultReader.unresolvedCrossrefs.length !== 0) {
+    throw new Error(`reader has unresolved local crossrefs: ${JSON.stringify(defaultReader)}`);
+  }
+  if (!defaultReader.citations.includes("[1]")) {
+    throw new Error(`reader did not resolve bibliography citations: ${JSON.stringify(defaultReader)}`);
+  }
+  if (defaultReader.redSample.length !== 0) {
+    throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
