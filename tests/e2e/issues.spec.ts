@@ -167,8 +167,11 @@ test.describe.serial("Issues", () => {
 
   test("Settings panel: owner creates a label and a milestone", async ({ page }) => {
     await loginAs(page, "chao");
+    await page.getByTestId("file-hello.md").click();
+    await expect(page.getByTestId("editor")).toBeVisible({ timeout: 8000 });
     await expect(page.getByTestId("sidebar-tab-settings")).toBeVisible();
     await page.getByTestId("sidebar-tab-settings").click();
+    await expect(page.getByTestId("settings-labels")).toBeVisible({ timeout: 8000 });
 
     // Create a label
     await page.getByTestId("settings-label-name").fill("needs-review");

@@ -1928,6 +1928,22 @@ function WorkspaceView({
 
   const selectSidebarView = useCallback(
     (view: WorkspaceSidebarView) => {
+      if (view === "settings") {
+        if (dirtyRef.current && !confirm("Discard unsaved changes?")) return;
+        clearOpenFile();
+        setReviewingPullNumber(null);
+        setReviewBranchName(null);
+        setViewingIssue(null);
+        setNewIssueOpen(false);
+        setSidebarView(view);
+        navigate({
+          kind: "workspace",
+          slug: workspace.slug,
+          filePath: null,
+          sidebarView: view,
+        });
+        return;
+      }
       setSidebarView(view);
       if (view !== "issues") {
         setViewingIssue(null);
@@ -1944,7 +1960,7 @@ function WorkspaceView({
         sidebarView: view,
       });
     },
-    [workspace.slug, issuesScope, inboxQuery, refreshIssues, refreshPinned],
+    [clearOpenFile, workspace.slug, issuesScope, inboxQuery, refreshIssues, refreshPinned],
   );
 
   useEffect(() => {
