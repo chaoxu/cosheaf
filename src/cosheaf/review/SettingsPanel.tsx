@@ -6,11 +6,8 @@ import { cn } from "../lib/utils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { api } from "../api";
-import type { Label, Milestone, WorkspaceSettings } from "../api";
+import type { Label, Milestone, Role, WorkspaceSettings } from "../api";
 import type { DocumentFormatId } from "../../../shared/document-format";
-import type { DocumentThemeId } from "../document-theme";
-import type { DiffViewPreference } from "../document-theme";
-import { DIFF_VIEW_MODES, DIFF_VIEW_SHAPES, DOCUMENT_THEMES, normalizeDiffShape } from "../document-theme";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -19,107 +16,84 @@ const DEFAULT_LABEL_COLORS = ["e11d48", "f59e0b", "10b981", "3b82f6", "8b5cf6", 
 export function SettingsPanel({
   workspaceSlug,
   initialFormatId,
-  documentTheme,
-  onDocumentThemeChanged,
-  diffViewPreference,
-  onDiffViewPreferenceChanged,
   onFormatChanged,
 }: {
   workspaceSlug: string;
   initialFormatId: DocumentFormatId;
-  documentTheme: DocumentThemeId;
-  onDocumentThemeChanged: (theme: DocumentThemeId) => void;
-  diffViewPreference: DiffViewPreference;
-  onDiffViewPreferenceChanged: (preference: DiffViewPreference) => void;
   onFormatChanged?: (formatId: DocumentFormatId) => void;
 }): ReactElement {
   return (
     <div className="flex flex-col gap-6 p-4 max-w-3xl">
       <h1 className="text-lg font-semibold">Settings</h1>
-      <UserPreferences
-        documentTheme={documentTheme}
-        onDocumentThemeChanged={onDocumentThemeChanged}
-        diffViewPreference={diffViewPreference}
-        onDiffViewPreferenceChanged={onDiffViewPreferenceChanged}
-      />
       <FormatManager
         workspaceSlug={workspaceSlug}
         initialFormatId={initialFormatId}
         onFormatChanged={onFormatChanged}
       />
+      <AccessManager workspaceSlug={workspaceSlug} />
       <LabelsManager workspaceSlug={workspaceSlug} />
       <MilestonesManager workspaceSlug={workspaceSlug} />
     </div>
   );
 }
 
-function UserPreferences({
-  documentTheme,
-  onDocumentThemeChanged,
-  diffViewPreference,
-  onDiffViewPreferenceChanged,
-}: {
-  documentTheme: DocumentThemeId;
-  onDocumentThemeChanged: (theme: DocumentThemeId) => void;
-  diffViewPreference: DiffViewPreference;
-  onDiffViewPreferenceChanged: (preference: DiffViewPreference) => void;
-}): ReactElement {
+function AccessManager({ workspaceSlug }: { workspaceSlug: string }): ReactElement {
+  const [username, setUsername] = useState("");
+  const [role, setRole] = useState<Role>("write");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ username: string; role: Role } | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextUsername = username.trim();
+    if (!nextUsername) return;
+    setBusy(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const result = await api.setWorkspaceMember(workspaceSlug, nextUsername, role);
+      setSaved({ username: result.username, role: result.role });
+      setUsername("");
+      setRole("write");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <section data-testid="settings-user-preferences" className="flex flex-col gap-2">
-      <h2 className="text-base font-semibold">User preferences</h2>
-      <label className="flex items-center gap-2 text-sm">
-        <span className="text-[var(--cf-muted)]">Document theme</span>
+    <section data-testid="settings-access" className="flex flex-col gap-2">
+      <h2 className="text-base font-semibold">Access</h2>
+      <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+        <Input
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          placeholder="Username"
+          data-testid="settings-access-username"
+          className="h-8 text-sm w-48"
+        />
         <select
-          value={documentTheme}
-          onChange={(event) => onDocumentThemeChanged(event.target.value as DocumentThemeId)}
-          data-testid="settings-document-theme-select"
+          value={role}
+          onChange={(event) => setRole(event.target.value as Role)}
+          data-testid="settings-access-role"
           className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
         >
-          {DOCUMENT_THEMES.map((theme) => (
-            <option key={theme.id} value={theme.id}>
-              {theme.label}
-            </option>
-          ))}
+          <option value="write">Write</option>
+          <option value="read">Read</option>
+          <option value="admin">Admin</option>
         </select>
-      </label>
-      <label className="flex items-center gap-2 text-sm">
-        <span className="text-[var(--cf-muted)]">Changed files default view</span>
-        <select
-          value={diffViewPreference.mode}
-          onChange={(event) => {
-            const mode = event.target.value as DiffViewPreference["mode"];
-            onDiffViewPreferenceChanged({
-              mode,
-              shape: normalizeDiffShape(diffViewPreference.shape, mode),
-            });
-          }}
-          data-testid="settings-diff-mode-select"
-          className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
-        >
-          {DIFF_VIEW_MODES.map((mode) => (
-            <option key={mode.id} value={mode.id}>
-              {mode.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={diffViewPreference.shape}
-          onChange={(event) =>
-            onDiffViewPreferenceChanged({
-              mode: diffViewPreference.mode,
-              shape: normalizeDiffShape(event.target.value, diffViewPreference.mode),
-            })
-          }
-          data-testid="settings-diff-shape-select"
-          className="h-8 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 text-sm"
-        >
-          {DIFF_VIEW_SHAPES.map((shape) => (
-            <option key={shape.id} value={shape.id} disabled={diffViewPreference.mode === "rich" && shape.id === "unified"}>
-              {shape.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        <Button size="sm" type="submit" data-testid="settings-access-submit" disabled={busy || !username.trim()}>
+          Grant access
+        </Button>
+      </form>
+      {saved && (
+        <div className="text-xs text-green-700" data-testid="settings-access-saved">
+          {saved.username} · {saved.role}
+        </div>
+      )}
+      {error && <div className="text-xs text-red-600">{error}</div>}
     </section>
   );
 }

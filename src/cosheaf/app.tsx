@@ -1366,7 +1366,7 @@ function WorkspaceView({
   const [newIssueBusy, setNewIssueBusy] = useState(false);
   const editorRef = useRef<MountedEditor | null>(null);
   const [editorMode, setEditorMode] = useState<"rich" | "source">("rich");
-  const [documentTheme, setDocumentTheme] = useDocumentTheme(user.username);
+  const [documentTheme] = useDocumentTheme(user.username);
   const [diffViewPreference, setDiffViewPreference] = useDiffViewPreference(user.username);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [reviewingPullNumber, setReviewingPullNumber] = useState<number | null>(null);
@@ -2666,10 +2666,6 @@ function WorkspaceView({
               <SettingsPanel
                 workspaceSlug={workspace.slug}
                 initialFormatId={activeFormatId}
-                documentTheme={documentTheme}
-                onDocumentThemeChanged={setDocumentTheme}
-                diffViewPreference={diffViewPreference}
-                onDiffViewPreferenceChanged={setDiffViewPreference}
                 onFormatChanged={setActiveFormatId}
               />
             </div>

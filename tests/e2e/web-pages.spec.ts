@@ -23,6 +23,19 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
   await expect(page.locator(".repo-header")).not.toContainText(owner);
+  await page.getByRole("link", { name: "chao" }).click();
+  await expect(page).toHaveURL(`${webBase}/account/settings`);
+  await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
+  await page.getByTestId("settings-document-theme-select").selectOption("blueprint-book");
+  await page.getByTestId("settings-diff-mode-select").selectOption("rich");
+  await page.getByTestId("settings-diff-shape-select").selectOption("after");
+  await page.goto(`${repoBase}/settings`);
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Settings");
+  await expect(page.getByTestId("settings-user-preferences")).toHaveCount(0);
+  await expect(page.locator(".repo-body")).toContainText("Review policy");
+  await expect(page.locator(".repo-body")).toContainText("Access");
+  await expect(page.getByTestId("settings-access")).toBeVisible();
+
   await page.goto(`${webBase}/${owner}/${repo}/src/branch/main/hello.md`);
   await expect(page).toHaveURL(`${repoBase}/src/branch/main/hello.md`);
   await expect(page.locator(".file-toolbar")).toContainText("hello.md");
