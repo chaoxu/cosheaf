@@ -16,7 +16,7 @@ export const smokeChecks = [
     script: "scripts/browser-issues-nav.mjs",
     seed: "basic",
     destructive: false,
-    prod: true,
+    prod: false,
     covers: "issue view navigation and browser back behavior",
   },
   {
@@ -26,7 +26,7 @@ export const smokeChecks = [
     script: "scripts/browser-rendering-fixtures.mjs",
     seed: "all",
     destructive: false,
-    prod: true,
+    prod: false,
     covers: "long issue body, PR body, rich diff, merged/side-by-side fixtures",
   },
   {
@@ -36,7 +36,7 @@ export const smokeChecks = [
     script: "scripts/browser-reader-editor-parity.mjs",
     seed: "large-doc",
     destructive: false,
-    prod: true,
+    prod: false,
     covers: "Coflat showcase editor rich mode vs full reader document surface",
   },
   {

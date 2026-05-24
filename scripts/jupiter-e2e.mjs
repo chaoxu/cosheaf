@@ -7,9 +7,11 @@ import { run } from "./lib/run.mjs";
 const targets = {
   prod: {
     url: "https://cosheaf.lab/",
-    workspace: "Flushing Coin",
-    slug: "flushing-coin",
+    workspace: "poa-network-game",
+    slug: "poa-network-game",
+    page: "POA Network Game",
     pagePath: "hello.md",
+    prod: true,
   },
 };
 
@@ -18,7 +20,9 @@ function targetFor(value) {
     url: value,
     workspace: process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin",
     slug: process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin",
+    page: process.env.COSHEAF_SMOKE_PAGE ?? "Hello",
     pagePath: process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md",
+    prod: false,
   };
 }
 
@@ -28,7 +32,7 @@ const program = new Command("jupiter-e2e")
   .action((targetArg, opts) => {
     const target = targetFor(targetArg);
     const destructive = opts.destructive || process.env.COSHEAF_E2E_DESTRUCTIVE === "1";
-    const checks = smokeChecks.filter((check) => !check.destructive || destructive);
+    const checks = smokeChecks.filter((check) => (!target.prod || check.prod) && (!check.destructive || destructive));
     const grep = checks.map((check) => check.grep).join("|");
     run("pnpm", ["exec", "playwright", "test", "--config", "playwright.smoke.config.ts", "--grep", grep], {
       env: {
@@ -38,7 +42,7 @@ const program = new Command("jupiter-e2e")
         COSHEAF_SMOKE_PASSWORD: process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
         COSHEAF_SMOKE_WORKSPACE: target.workspace,
         COSHEAF_SMOKE_WORKSPACE_SLUG: target.slug,
-        COSHEAF_SMOKE_PAGE: process.env.COSHEAF_SMOKE_PAGE ?? "Hello",
+        COSHEAF_SMOKE_PAGE: target.page,
         COSHEAF_SMOKE_PAGE_PATH: target.pagePath,
         COSHEAF_ADMIN_PASSWORD: process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
         COSHEAF_MERI_PASSWORD: process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
