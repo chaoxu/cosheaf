@@ -35,8 +35,8 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('.subtabs a[href$="/files"]').click();
   await expect(page.locator(".changed-files")).toBeVisible();
   await expect(page.locator(".diff-panel")).toBeVisible();
-  await expect(page.locator(".review-rail")).toBeVisible();
-  await expect(page.locator(".review-rail")).toContainText("Review");
+  await expect(page.locator(".review-bottom")).toBeVisible();
+  await expect(page.locator(".review-bottom")).toContainText("Review");
   await expect(page.getByTestId("view-mode-source")).toBeVisible();
   await expect(page.getByTestId("view-mode-rich")).toBeVisible();
   await expect(page.getByTestId("view-shape-unified")).toBeVisible();
