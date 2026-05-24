@@ -1190,10 +1190,10 @@ async function renderPullTimeline(
 ): Promise<string> {
   const items: WebTimelineItem[] = [
     ...timeline
-      .filter((event) => event.type !== "comment" && event.type !== "pull_push")
+      .filter((event) => event.type !== "comment" && event.type !== "pull_push" && event.type !== "review")
       .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
     ...reviews
-      .filter((review) => review.state !== "PENDING")
+      .filter((review) => review.state !== "PENDING" && (review.state !== "COMMENT" || Boolean(review.body?.trim())))
       .map((review) => ({ kind: "review" as const, ts: parseDateMs(review.submitted_at), review })),
     ...comments.map((comment) => ({
       kind: "line-comment" as const,
