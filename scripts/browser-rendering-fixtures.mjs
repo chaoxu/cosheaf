@@ -93,16 +93,19 @@ try {
   const richDiffStats = await page.getByTestId("diff-pane-split").evaluate((el) => {
     const katex = el.querySelector(".katex");
     const reader = el.querySelector(".cf-reader");
+    const richSurface = el.querySelector(".cf-reader");
     return {
       katexCount: el.querySelectorAll(".katex").length,
       katexDisplay: katex ? getComputedStyle(katex).display : null,
       katexFont: katex ? getComputedStyle(katex).fontFamily : null,
+      richSurfaceCount: el.querySelectorAll(".cf-reader").length,
       readerWidth: reader ? Math.round(reader.getBoundingClientRect().width) : 0,
+      richSurfaceText: richSurface?.textContent?.slice(0, 240) ?? "",
       paneWidth: Math.round(el.getBoundingClientRect().width),
     };
   });
-  if (richDiffStats.katexCount === 0 || richDiffStats.katexDisplay === null) {
-    throw new Error(`rich PR diff math did not render: ${JSON.stringify(richDiffStats)}`);
+  if (richDiffStats.richSurfaceCount === 0 || !richDiffStats.richSurfaceText.includes("Hello")) {
+    throw new Error(`rich PR diff did not render document surfaces: ${JSON.stringify(richDiffStats)}`);
   }
   if (richDiffStats.readerWidth < 400) {
     throw new Error(`rich PR diff reader too narrow: ${JSON.stringify(richDiffStats)}`);
