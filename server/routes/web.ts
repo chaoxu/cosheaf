@@ -326,14 +326,14 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
           </header>
           <div class="comment">
             <div class="comment-meta">${escapeHtml(issue.user?.login ?? DELETED_USER_LOGIN)}</div>
-            <div class="markdown-body">${body}</div>
+            <div class="markdown-body cf-reader cf-doc-surface cf-doc-flow">${body}</div>
           </div>
           ${renderedComments
             .map(
               (comment) => `
                 <div class="comment">
                   <div class="comment-meta">${escapeHtml(comment.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(comment.created_at)}</div>
-                  <div class="markdown-body">${comment.renderedBody}</div>
+                  <div class="markdown-body cf-reader cf-doc-surface cf-doc-flow">${comment.renderedBody}</div>
                 </div>
               `,
             )
@@ -416,7 +416,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
           </header>
           <div class="comment">
             <div class="comment-meta">${escapeHtml(pull.user?.login ?? DELETED_USER_LOGIN)}</div>
-            <div class="markdown-body">${body || "<p>No description.</p>"}</div>
+            <div class="markdown-body cf-reader cf-doc-surface cf-doc-flow">${body || "<p>No description.</p>"}</div>
           </div>
           ${reviews
             .filter((r) => r.state !== "PENDING")
@@ -691,7 +691,7 @@ async function renderMarkdown(
   const { body } = parseFrontmatterYaml(source);
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
     const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
-    return renderToHtml(body, {
+    const html = renderToHtml(body, {
       linkResolver: {
         resolve: (href: string) => {
           const resolved = resolveRepoLink(ctx, href, opts.branch ?? "main", opts.documentPath ?? "");
@@ -699,8 +699,16 @@ async function renderMarkdown(
         },
       },
     }).html;
+    return rewriteRenderedRepoUrls(html, ctx, opts.branch ?? "main", opts.documentPath ?? "");
   }
   return ctx.fj.renderMarkdown(ctx.owner, ctx.repo, body);
+}
+
+function rewriteRenderedRepoUrls(html: string, ctx: WebCtx, branch: string, documentPath: string): string {
+  return html.replace(/\b(src|href)="([^"]+)"/g, (match, attr: string, href: string) => {
+    const resolved = resolveRepoLink(ctx, href, branch, documentPath);
+    return resolved ? `${attr}="${escapeAttr(resolved)}"` : match;
+  });
 }
 
 function resolveRepoLink(ctx: WebCtx, href: string, branch: string, documentPath: string): string | null {
