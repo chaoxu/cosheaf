@@ -33,6 +33,7 @@ import { setWorkspaceMember } from "../workspace-members.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
+import { escapeAttr, escapeHtml } from "./html-escape.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 
@@ -1744,19 +1745,6 @@ function decodePathPart(value: string): string {
 
 function urlPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
-}
-
-function escapeHtml(value: string | number): string {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value);
 }
 
 function displayLogin(owner: string, login: string | null | undefined): string {

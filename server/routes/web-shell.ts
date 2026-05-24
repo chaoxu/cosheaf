@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { escapeAttr, escapeHtml } from "./html-escape.js";
 
 export function pageShell(opts: {
   title: string;
@@ -91,12 +92,4 @@ function collectCss(
     css.push(href);
   }
   return css;
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[ch] ?? ch);
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value);
 }
