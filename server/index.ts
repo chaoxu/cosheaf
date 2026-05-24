@@ -18,6 +18,7 @@ import { issues } from "./routes/issues.js";
 import { notifications } from "./routes/notifications.js";
 import { webhooks } from "./routes/webhooks.js";
 import { web } from "./routes/web.js";
+import { contentTypeForPath } from "./content-type.js";
 
 const config = loadConfig();
 const db = getDb(config);
@@ -84,7 +85,7 @@ if (process.env.NODE_ENV !== "production") {
     const response = await fetch(new URL(c.req.path, viteOrigin));
     return new Response(response.body, {
       status: response.status,
-      headers: { "content-type": response.headers.get("content-type") ?? contentType(c.req.path) },
+      headers: { "content-type": response.headers.get("content-type") ?? contentTypeForPath(c.req.path) },
     });
   });
 }
@@ -125,14 +126,14 @@ async function serveDistFile(requestPath: string): Promise<Response | null> {
   const resolvedPath = resolveDistPath(requestPath);
   if (!resolvedPath) return null;
   const body = await readFile(resolvedPath);
-  return new Response(body, { headers: { "content-type": contentType(resolvedPath) } });
+  return new Response(body, { headers: { "content-type": contentTypeForPath(resolvedPath) } });
 }
 
 async function servePublicOrDistFile(requestPath: string): Promise<Response | null> {
   const publicPath = resolveStaticPath(publicDir, requestPath);
   if (publicPath) {
     const body = await readFile(publicPath);
-    return new Response(body, { headers: { "content-type": contentType(publicPath) } });
+    return new Response(body, { headers: { "content-type": contentTypeForPath(publicPath) } });
   }
   return serveDistFile(requestPath);
 }
@@ -155,7 +156,7 @@ async function serveCoflatEditorAsset(requestPath: string): Promise<Response | n
     return null;
   }
   const body = await readFile(filePath);
-  return new Response(body, { headers: { "content-type": contentType(filePath) } });
+  return new Response(body, { headers: { "content-type": contentTypeForPath(filePath) } });
 }
 
 function resolveDistPath(requestPath: string): string | null {
@@ -202,30 +203,6 @@ function resolveStaticPath(root: string, requestPath: string): string | null {
     return stat.isFile() ? filePath : null;
   } catch (_error) {
     return null;
-  }
-}
-
-function contentType(filePath: string): string {
-  switch (path.extname(filePath)) {
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-    case ".mjs":
-      return "text/javascript; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    case ".woff":
-      return "font/woff";
-    case ".woff2":
-      return "font/woff2";
-    case ".ttf":
-      return "font/ttf";
-    default:
-      return "application/octet-stream";
   }
 }
 

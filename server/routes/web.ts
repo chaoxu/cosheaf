@@ -16,6 +16,7 @@ import {
   type ActivityFeedItem,
 } from "../activity-feed.js";
 import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
+import { contentTypeForPath } from "../content-type.js";
 import type {
   ForgejoActivity,
   ForgejoCommit,
@@ -1712,27 +1713,4 @@ function formatDate(value: string | number | null | undefined): string {
   if (!value) return "";
   const date = typeof value === "number" ? new Date(value) : new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
-}
-
-function contentTypeForPath(filePath: string): string {
-  const ext = filePath.toLowerCase().split(".").pop();
-  switch (ext) {
-    case "svg":
-      return "image/svg+xml";
-    case "png":
-      return "image/png";
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "gif":
-      return "image/gif";
-    case "webp":
-      return "image/webp";
-    case "css":
-      return "text/css; charset=utf-8";
-    case "js":
-      return "text/javascript; charset=utf-8";
-    default:
-      return "text/plain; charset=utf-8";
-  }
 }
