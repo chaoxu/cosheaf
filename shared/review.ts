@@ -1,5 +1,7 @@
 // Types shared by server and client for the PR review surface.
 
+import type { Label } from "./issues.js";
+
 export type PrFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
 
 export interface PrFile {
@@ -37,4 +39,8 @@ export interface PrMeta {
   additions_total: number;
   deletions_total: number;
   files_changed: number;
+  labels: Label[];
+  milestone: { id: number; title: string } | null;
+  requested_reviewers: string[];
+  requested_reviewer_teams: string[];
 }

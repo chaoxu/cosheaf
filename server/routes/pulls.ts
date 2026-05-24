@@ -34,7 +34,7 @@ import {
   requireWriteOnMutation,
 } from "../middleware.js";
 import { ForgejoError, mergePullWithRetry, type Forgejo } from "../forgejo.js";
-import type { ForgejoPull, ForgejoReview } from "../forgejo-types.js";
+import type { ForgejoLabel, ForgejoPull, ForgejoReview } from "../forgejo-types.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -69,6 +69,50 @@ function normalizeStatus(s: string): PrFileStatus {
   return "modified";
 }
 
+function labelScope(label: ForgejoLabel): string | null {
+  if (!label.exclusive) return null;
+  const slash = label.name.lastIndexOf("/");
+  return slash > 0 ? label.name.slice(0, slash) : null;
+}
+
+function toLabel(label: ForgejoLabel) {
+  return {
+    id: label.id,
+    name: label.name,
+    color: label.color,
+    description: label.description,
+    exclusive: Boolean(label.exclusive),
+    is_archived: Boolean(label.is_archived),
+    scope: labelScope(label),
+  };
+}
+
+function validateLabelSelection(
+  requestedIds: number[],
+  allLabels: ForgejoLabel[],
+  currentLabels: ForgejoLabel[],
+): { ok: true } | { ok: false; message: string } {
+  const byId = new Map(allLabels.map((label) => [label.id, label]));
+  const currentIds = new Set(currentLabels.map((label) => label.id));
+  const seenScopes = new Map<string, string>();
+  for (const id of requestedIds) {
+    const label = byId.get(id);
+    if (!label) return { ok: false, message: `unknown label id ${id}` };
+    if (label.is_archived && !currentIds.has(id)) {
+      return { ok: false, message: `archived label cannot be newly assigned: ${label.name}` };
+    }
+    const scope = labelScope(label);
+    if (scope) {
+      const existing = seenScopes.get(scope);
+      if (existing && existing !== label.name) {
+        return { ok: false, message: `only one label in scope ${scope} can be assigned` };
+      }
+      seenScopes.set(scope, label.name);
+    }
+  }
+  return { ok: true };
+}
+
 function prMeta(pull: ForgejoPull): PrMeta {
   return {
     number: pull.number,
@@ -87,7 +131,30 @@ function prMeta(pull: ForgejoPull): PrMeta {
     additions_total: pull.additions ?? 0,
     deletions_total: pull.deletions ?? 0,
     files_changed: pull.changed_files ?? 0,
+    labels: (pull.labels ?? []).map(toLabel),
+    milestone: pull.milestone ? { id: pull.milestone.id, title: pull.milestone.title } : null,
+    requested_reviewers: (pull.requested_reviewers ?? []).map((u) => u.login),
+    requested_reviewer_teams: (pull.requested_reviewers_teams ?? []).map((t) => t.username ?? t.name),
   };
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value?.trim()) return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+function parsePositiveIntList(value: string | undefined): number[] | undefined {
+  if (!value?.trim()) return undefined;
+  const ids = value.split(",").map((part) => Number(part.trim())).filter((n) => Number.isInteger(n) && n > 0);
+  return ids.length > 0 ? ids : undefined;
+}
+
+type PullSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
+
+function parsePullSort(value: string | undefined): PullSort {
+  const allowed = new Set(["oldest", "recentupdate", "recentclose", "leastupdate", "mostcomment", "leastcomment", "priority"]);
+  return (value && allowed.has(value) ? value : "recentupdate") as PullSort;
 }
 
 // Latest-per-user approval count, ignoring older reviews from the same user.
@@ -165,7 +232,13 @@ pulls.get("/:slug/pulls", async (c) => {
   const state: "open" | "closed" | "all" =
     stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
   const { fj, owner, repo } = c.get("repoCtx");
-  const rows = await fj.listPulls(owner, repo, state);
+  const rows = await fj.listPulls(owner, repo, {
+    state,
+    labels: parsePositiveIntList(c.req.query("labels")),
+    milestone: parsePositiveInt(c.req.query("milestone")),
+    poster: c.req.query("author")?.trim() || undefined,
+    sort: parsePullSort(c.req.query("sort")),
+  });
   return c.json({ pulls: rows.map(prMeta) });
 });
 
@@ -208,6 +281,50 @@ pulls.post("/:slug/pulls", async (c) => {
     }
     throw err;
   }
+});
+
+pulls.patch("/:slug/pulls/:n", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const body = (await c.req.json().catch(() => null)) as {
+    title?: unknown;
+    body?: unknown;
+  } | null;
+  const patch: { title?: string; body?: string } = {};
+  if (body?.title !== undefined) {
+    if (typeof body.title !== "string" || !body.title.trim()) return c.json(...bad("title required"));
+    patch.title = body.title.trim();
+  }
+  if (body?.body !== undefined) {
+    if (typeof body.body !== "string") return c.json(...bad("body must be a string"));
+    patch.body = body.body;
+  }
+  if (patch.title === undefined && patch.body === undefined) return c.json(...bad("title or body required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  const pull = await fj.editPull(owner, repo, n, patch);
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
+  return c.json({ pull: prMeta(pull) });
+});
+
+pulls.put("/:slug/pulls/:n/labels", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const body = (await c.req.json().catch(() => null)) as { labels?: unknown } | null;
+  if (!Array.isArray(body?.labels) || !body.labels.every((id) => Number.isInteger(id) && id > 0)) {
+    return c.json(...bad("labels must be positive integer ids"));
+  }
+  const labelIds = body.labels as number[];
+  const { fj, owner, repo } = c.get("repoCtx");
+  const [allLabels, pull] = await Promise.all([
+    fj.listLabels(owner, repo),
+    fj.getPull(owner, repo, n),
+  ]);
+  if (!pull) return c.json(...notFound());
+  const validation = validateLabelSelection(labelIds, allLabels, pull.labels ?? []);
+  if (!validation.ok) return c.json(...bad(validation.message));
+  const updated = await fj.editPull(owner, repo, n, { labels: labelIds });
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
+  return c.json({ pull: prMeta(updated) });
 });
 
 
@@ -350,6 +467,55 @@ pulls.post("/:slug/pulls/:n/reviews", async (c) => {
 
   const counts = await approvalCounts(fj, owner, repo, n);
   return c.json({ ok: true, approvals: counts.approvals, rejections: counts.rejections });
+});
+
+function parseReviewers(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const reviewers = raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean);
+  return reviewers.length > 0 ? [...new Set(reviewers)] : null;
+}
+
+pulls.get("/:slug/pulls/:n/review-requests", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  const [pull, reviewers] = await Promise.all([
+    fj.getPull(owner, repo, n),
+    fj.listPullReviewers(owner, repo),
+  ]);
+  if (!pull) return c.json(...notFound());
+  return c.json({
+    requested_reviewers: prMeta(pull).requested_reviewers,
+    requested_reviewer_teams: prMeta(pull).requested_reviewer_teams,
+    available_reviewers: reviewers.map((u) => u.login).filter((login) => login !== pull.user?.login),
+  });
+});
+
+pulls.post("/:slug/pulls/:n/review-requests", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const body = (await c.req.json().catch(() => null)) as { reviewers?: unknown } | null;
+  const reviewers = parseReviewers(body?.reviewers);
+  if (!reviewers) return c.json(...bad("reviewers required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.createPullReviewRequests(owner, repo, n, reviewers);
+  const pull = await fj.getPull(owner, repo, n);
+  if (!pull) return c.json(...notFound());
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
+  return c.json({ pull: prMeta(pull) }, 201);
+});
+
+pulls.delete("/:slug/pulls/:n/review-requests", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const body = (await c.req.json().catch(() => null)) as { reviewers?: unknown } | null;
+  const reviewers = parseReviewers(body?.reviewers);
+  if (!reviewers) return c.json(...bad("reviewers required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.deletePullReviewRequests(owner, repo, n, reviewers);
+  const pull = await fj.getPull(owner, repo, n);
+  c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
+  return c.json({ pull: pull ? prMeta(pull) : null });
 });
 
 // ---------- line comments ----------

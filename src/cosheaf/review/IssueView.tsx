@@ -16,6 +16,7 @@ const muted = "text-[var(--cf-muted)]";
 export function IssueView({
   number,
   currentForgejoUsername,
+  canEdit = false,
   canManageLabels,
   canPin = false,
   isPinned = false,
@@ -27,6 +28,7 @@ export function IssueView({
 }: {
   number: number;
   currentForgejoUsername?: string;
+  canEdit?: boolean;
   canManageLabels?: boolean;
   canPin?: boolean;
   isPinned?: boolean;
@@ -48,6 +50,9 @@ export function IssueView({
   const [blocks, setBlocks] = useState<DependencyRow[]>([]);
   const [addDepNum, setAddDepNum] = useState("");
   const [draft, setDraft] = useState("");
+  const [editingIssue, setEditingIssue] = useState(false);
+  const [issueTitleDraft, setIssueTitleDraft] = useState("");
+  const [issueBodyDraft, setIssueBodyDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -93,12 +98,43 @@ export function IssueView({
 
   async function toggleLabel(id: number) {
     if (!issue) return;
+    const label = allLabels.find((l) => l.id === id);
+    if (!label) return;
     const has = issue.labels.some((l) => l.id === id);
+    if (!has && label.is_archived) return;
     const next = has
       ? issue.labels.filter((l) => l.id !== id).map((l) => l.id)
-      : [...issue.labels.map((l) => l.id), id];
+      : [
+          ...issue.labels
+            .filter((l) => !label.exclusive || !label.scope || l.scope !== label.scope)
+            .map((l) => l.id),
+          id,
+        ];
     await api.setIssueLabels(workspaceSlug, number, next);
     await refresh();
+  }
+
+  async function saveIssueEdits() {
+    if (!issue || busy) return;
+    const title = issueTitleDraft.trim();
+    if (!title) {
+      setError("title required");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateIssue(workspaceSlug, number, {
+        title,
+        body: issueBodyDraft,
+      });
+      setEditingIssue(false);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to edit issue");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submitComment() {
@@ -153,7 +189,32 @@ export function IssueView({
             <span>by @{issue.author_username}</span>
             <span className={cn("ml-auto", muted)}>#{issue.number}</span>
           </div>
-          <h1 className="text-lg font-semibold truncate">{issue.title}</h1>
+          {editingIssue ? (
+            <div className="flex flex-col gap-2">
+              <FocusedTextarea
+                value={issueTitleDraft}
+                onChange={setIssueTitleDraft}
+                rows={1}
+                className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 text-lg font-semibold"
+              />
+              <FocusedTextarea
+                value={issueBodyDraft}
+                onChange={setIssueBodyDraft}
+                rows={5}
+                className="w-full resize-y rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-2 py-1 text-sm"
+              />
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setEditingIssue(false)} disabled={busy}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={saveIssueEdits} disabled={busy || !issueTitleDraft.trim()}>
+                  Save
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <h1 className="text-lg font-semibold truncate">{issue.title}</h1>
+          )}
           {(issue.labels.length > 0 || canManageLabels) && (
             <div className="flex flex-wrap items-center gap-1 mt-1 relative">
               {issue.labels.map((l) => (
@@ -183,13 +244,16 @@ export function IssueView({
                       )}
                       {allLabels.map((l) => {
                         const checked = issue.labels.some((x) => x.id === l.id);
+                        const disabled = l.is_archived && !checked;
                         return (
                           <button
                             key={l.id}
                             type="button"
                             data-testid={`label-toggle-${l.id}`}
                             onClick={() => toggleLabel(l.id)}
-                            className="flex items-center gap-2 w-full px-2 py-1 text-xs hover:bg-[var(--cf-hover)] rounded"
+                            disabled={disabled}
+                            title={disabled ? "Archived labels cannot be newly assigned" : l.exclusive && l.scope ? `Only one ${l.scope} label can be assigned` : undefined}
+                            className="flex items-center gap-2 w-full px-2 py-1 text-xs hover:bg-[var(--cf-hover)] rounded disabled:opacity-45"
                           >
                             <span aria-hidden>{checked ? "✓" : " "}</span>
                             <span
@@ -197,6 +261,8 @@ export function IssueView({
                               style={{ backgroundColor: `#${l.color}` }}
                             />
                             <span>{l.name}</span>
+                            {l.exclusive && l.scope && <span className={cn("ml-auto", muted)}>{l.scope}</span>}
+                            {l.is_archived && <span className={cn("ml-auto", muted)}>archived</span>}
                           </button>
                         );
                       })}
@@ -282,6 +348,19 @@ export function IssueView({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {canEdit && !editingIssue && <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            data-testid="issue-edit"
+            onClick={() => {
+              setIssueTitleDraft(issue.title);
+              setIssueBodyDraft(issue.body);
+              setEditingIssue(true);
+            }}
+          >
+            Edit
+          </Button>}
           {canPin && <Button
             variant="ghost"
             size="sm"
@@ -310,7 +389,7 @@ export function IssueView({
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-auto px-4 py-3 flex flex-col gap-4">
-        <div className="rounded border border-[var(--cf-border)] p-3">
+        {!editingIssue && <div className="rounded border border-[var(--cf-border)] p-3">
           <div className={cn("text-xs mb-2", muted)}>
             <strong className="text-[var(--cf-fg)]">@{issue.author_username}</strong> opened this issue
           </div>
@@ -332,7 +411,7 @@ export function IssueView({
               <em className={muted}>(no description)</em>
             )}
           </div>
-        </div>
+        </div>}
         <div className="grid grid-cols-2 gap-3">
             <DependencySection
               testIdPrefix="depends-on"

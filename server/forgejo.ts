@@ -78,7 +78,7 @@ export async function mergePullWithRetry<T>(
 
 interface RequestOpts {
   method?: string;
-  query?: Record<string, string | number | undefined>;
+  query?: Record<string, string | number | Array<string | number> | undefined>;
   body?: unknown;
   raw?: boolean;
   expectEmpty?: boolean;
@@ -91,7 +91,12 @@ export class Forgejo {
     const url = new URL(p.startsWith("/") ? this.cfg.baseUrl + p : p);
     if (opts.query) {
       for (const [k, v] of Object.entries(opts.query)) {
-        if (v !== undefined) url.searchParams.set(k, String(v));
+        if (v === undefined) continue;
+        if (Array.isArray(v)) {
+          for (const item of v) url.searchParams.append(k, String(item));
+        } else {
+          url.searchParams.set(k, String(v));
+        }
       }
     }
     const headers: Record<string, string> = {
@@ -468,12 +473,31 @@ export class Forgejo {
     return this.reqOpt<ForgejoPull>(this.repoPath(owner, repo, `pulls/${index}`));
   }
 
-  async listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<ForgejoPull[]> {
+  async listPulls(
+    owner: string,
+    repo: string,
+    opts: {
+      state?: "open" | "closed" | "all";
+      labels?: number[];
+      milestone?: number;
+      poster?: string;
+      sort?: "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
+    } | "open" | "closed" | "all" = {},
+  ): Promise<ForgejoPull[]> {
+    const options = typeof opts === "string" ? { state: opts } : opts;
     const out: ForgejoPull[] = [];
     let page = 1;
     while (true) {
       const r = await this.req<ForgejoPull[]>(this.repoPath(owner, repo, `pulls`), {
-        query: { state, page, limit: 50, sort: "newest" },
+        query: {
+          state: options.state ?? "open",
+          page,
+          limit: 50,
+          sort: options.sort ?? "recentupdate",
+          milestone: options.milestone,
+          poster: options.poster,
+          labels: options.labels,
+        },
       });
       if (!r || r.length === 0) break;
       out.push(...r);
@@ -484,10 +508,39 @@ export class Forgejo {
     return out;
   }
 
-  async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed" }): Promise<ForgejoPull> {
+  async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed"; labels?: number[]; milestone?: number }): Promise<ForgejoPull> {
     return this.req<ForgejoPull>(this.repoPath(owner, repo, `pulls/${index}`), {
       method: "PATCH",
       body: patch,
+    });
+  }
+
+  async listPullReviewers(owner: string, repo: string): Promise<ForgejoUser[]> {
+    return this.req<ForgejoUser[]>(this.repoPath(owner, repo, "reviewers"));
+  }
+
+  async createPullReviewRequests(
+    owner: string,
+    repo: string,
+    index: number,
+    reviewers: string[],
+  ): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `pulls/${index}/requested_reviewers`), {
+      method: "POST",
+      body: { reviewers },
+    });
+  }
+
+  async deletePullReviewRequests(
+    owner: string,
+    repo: string,
+    index: number,
+    reviewers: string[],
+  ): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `pulls/${index}/requested_reviewers`), {
+      method: "DELETE",
+      body: { reviewers },
+      expectEmpty: true,
     });
   }
 
@@ -622,6 +675,10 @@ export class Forgejo {
       // Forgejo accepts these as repo-scoped filters; values are Forgejo usernames.
       assigned_by?: string;
       created_by?: string;
+      mentioned_by?: string;
+      labels?: string;
+      milestones?: string;
+      sort?: "relevance" | "latest" | "oldest" | "recentupdate" | "leastupdate" | "mostcomment" | "leastcomment" | "nearduedate" | "farduedate";
       // Title/body free-text search. Forgejo's `q` is title-only on /issues.
       q?: string;
     } = {},
@@ -633,6 +690,10 @@ export class Forgejo {
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.assigned_by) params.set("assigned_by", opts.assigned_by);
     if (opts.created_by) params.set("created_by", opts.created_by);
+    if (opts.mentioned_by) params.set("mentioned_by", opts.mentioned_by);
+    if (opts.labels) params.set("labels", opts.labels);
+    if (opts.milestones) params.set("milestones", opts.milestones);
+    if (opts.sort) params.set("sort", opts.sort);
     if (opts.q) params.set("q", opts.q);
     return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues?${params.toString()}`));
   }
@@ -645,7 +706,7 @@ export class Forgejo {
     owner: string,
     repo: string,
     number: number,
-    patch: { state?: "open" | "closed"; milestone?: number },
+    patch: { title?: string; body?: string; state?: "open" | "closed"; milestone?: number; assignees?: string[] },
   ): Promise<ForgejoIssue> {
     return this.req<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}`), {
       method: "PATCH",
@@ -708,7 +769,7 @@ export class Forgejo {
   async createLabel(
     owner: string,
     repo: string,
-    opts: { name: string; color: string; description?: string },
+    opts: { name: string; color: string; description?: string; exclusive?: boolean; is_archived?: boolean },
   ): Promise<ForgejoLabel> {
     return this.req<ForgejoLabel>(this.repoPath(owner, repo, `labels`), {
       method: "POST",

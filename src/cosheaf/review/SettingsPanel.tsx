@@ -170,6 +170,7 @@ function LabelsManager({ workspaceSlug }: { workspaceSlug: string }): ReactEleme
   const [labels, setLabels] = useState<Label[]>([]);
   const [name, setName] = useState("");
   const [color, setColor] = useState(DEFAULT_LABEL_COLORS[0]);
+  const [exclusive, setExclusive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -193,8 +194,9 @@ function LabelsManager({ workspaceSlug }: { workspaceSlug: string }): ReactEleme
     setBusy(true);
     setError(null);
     try {
-      await api.createLabel(workspaceSlug, { name: name.trim(), color });
+      await api.createLabel(workspaceSlug, { name: name.trim(), color, exclusive });
       setName("");
+      setExclusive(false);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "create failed");
@@ -222,6 +224,8 @@ function LabelsManager({ workspaceSlug }: { workspaceSlug: string }): ReactEleme
                   aria-hidden
                 />
                 {l.name}
+                {l.exclusive && l.scope && <span className={muted}>{l.scope}</span>}
+                {l.is_archived && <span className={muted}>archived</span>}
               </span>
             </li>
           ))}
@@ -251,6 +255,15 @@ function LabelsManager({ workspaceSlug }: { workspaceSlug: string }): ReactEleme
             />
           ))}
         </div>
+        <label className={cn("flex items-center gap-1 text-xs", muted)}>
+          <input
+            type="checkbox"
+            checked={exclusive}
+            onChange={(event) => setExclusive(event.target.checked)}
+            data-testid="settings-label-exclusive"
+          />
+          Scoped
+        </label>
         <Button size="sm" type="submit" data-testid="settings-label-create" disabled={busy || !name.trim()}>
           Add label
         </Button>

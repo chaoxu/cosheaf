@@ -14,7 +14,9 @@ import {
   type Decision,
   type FileEntry,
   type IssueRow,
+  type Label,
   type LineComment,
+  type Milestone,
   type NotificationRow,
   type OpenPull,
   type PrMeta,
@@ -64,6 +66,22 @@ type View =
   | { kind: "login" }
   | { kind: "workspaces"; user: User }
   | { kind: "workspace"; user: User; workspace: Workspace };
+
+interface WorkItemFilters {
+  state: "open" | "closed" | "all";
+  labelId: string;
+  milestoneId: string;
+  author: string;
+  assignee: string;
+}
+
+const DEFAULT_WORK_ITEM_FILTERS: WorkItemFilters = {
+  state: "open",
+  labelId: "",
+  milestoneId: "",
+  author: "",
+  assignee: "",
+};
 
 function SidebarTab({
   active,
@@ -771,6 +789,10 @@ function InboxOrActivity({
   setScope,
   query,
   setQuery,
+  filters,
+  setFilters,
+  labels,
+  milestones,
   onRefresh,
   onOpenPullReview,
   onOpenIssue,
@@ -791,6 +813,10 @@ function InboxOrActivity({
   setScope: (s: "mine" | "all") => void;
   query: string;
   setQuery: (q: string) => void;
+  filters: WorkItemFilters;
+  setFilters: (filters: WorkItemFilters) => void;
+  labels: readonly Label[];
+  milestones: readonly Milestone[];
   onRefresh: () => void;
   onOpenPullReview: (entry: PullReviewEntry) => void;
   onOpenIssue: (number: number) => void;
@@ -813,6 +839,10 @@ function InboxOrActivity({
   const visiblePulls = q
     ? sourcePulls.filter((qe) => qe.title.toLowerCase().includes(q))
     : sourcePulls;
+  const statePrefix = filters.state === "closed" ? "Closed" : filters.state === "all" ? "All" : "Open";
+  const pullSectionTitle = useOpenList || filters.state !== "open"
+    ? `${statePrefix} pull requests`
+    : "Pull requests awaiting your review";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-3 px-2 py-1">
@@ -859,9 +889,65 @@ function InboxOrActivity({
           className="h-7 text-xs"
         />
       </div>
+      {(isInbox || isIssues) && (
+        <div className="grid grid-cols-2 gap-1 px-2 pb-1">
+          <select
+            value={filters.state}
+            onChange={(event) => setFilters({ ...filters, state: event.target.value as WorkItemFilters["state"] })}
+            className="h-7 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs"
+            aria-label="State filter"
+          >
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+            <option value="all">All states</option>
+          </select>
+          <select
+            value={filters.labelId}
+            onChange={(event) => setFilters({ ...filters, labelId: event.target.value })}
+            className="h-7 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs"
+            aria-label="Label filter"
+          >
+            <option value="">Any label</option>
+            {labels.map((label) => (
+              <option key={label.id} value={String(label.id)}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.milestoneId}
+            onChange={(event) => setFilters({ ...filters, milestoneId: event.target.value })}
+            className="h-7 rounded border border-[var(--cf-border)] bg-[var(--cf-bg)] px-1 text-xs"
+            aria-label="Milestone filter"
+          >
+            <option value="">Any milestone</option>
+            {milestones.map((milestone) => (
+              <option key={milestone.id} value={String(milestone.id)}>
+                {milestone.title}
+              </option>
+            ))}
+          </select>
+          <Input
+            value={filters.author}
+            onChange={(event) => setFilters({ ...filters, author: event.target.value })}
+            placeholder="Author"
+            className="h-7 text-xs"
+            aria-label="Author filter"
+          />
+          {isIssues && (
+            <Input
+              value={filters.assignee}
+              onChange={(event) => setFilters({ ...filters, assignee: event.target.value })}
+              placeholder="Assignee"
+              className="h-7 text-xs"
+              aria-label="Assignee filter"
+            />
+          )}
+        </div>
+      )}
       {visiblePulls.length === 0 && issues.length === 0 && notifications.length === 0 && (
         <div className={cn("px-3 py-2 text-xs", muted)}>
-          {isInbox ? "Nothing waiting on you." : isIssues ? "No open issues." : "No open activity."}
+          {isInbox ? "Nothing waiting on you." : isIssues ? "No matching issues." : "No matching activity."}
         </div>
       )}
       {isInbox && notifications.length > 0 && (
@@ -909,7 +995,7 @@ function InboxOrActivity({
       )}
       {visiblePulls.length > 0 && (
         <div className="px-2 pt-2 pb-1 text-[11px] uppercase tracking-wide opacity-70">
-          {useOpenList ? "Open pull requests" : "Pull requests awaiting your review"}
+          {pullSectionTitle}
         </div>
       )}
       <ul className="m-0 p-0">
@@ -1353,6 +1439,9 @@ function WorkspaceView({
   const [issues, setIssues] = useState<IssueRow[] | null>(null);
   const [issuesScope, setIssuesScope] = useState<"mine" | "all">("mine");
   const [inboxQuery, setInboxQuery] = useState("");
+  const [workItemFilters, setWorkItemFilters] = useState<WorkItemFilters>(DEFAULT_WORK_ITEM_FILTERS);
+  const [filterLabels, setFilterLabels] = useState<Label[]>([]);
+  const [filterMilestones, setFilterMilestones] = useState<Milestone[]>([]);
   const [openPrs, setOpenPrs] = useState<OpenPull[] | null>(null);
   const [pinnedIssues, setPinnedIssues] = useState<IssueRow[]>([]);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
@@ -1851,8 +1940,14 @@ function WorkspaceView({
   }, [openPath, reviewingPullNumber]);
 
   const refreshPulls = useCallback(() => {
+    const label = workItemFilters.labelId ? Number(workItemFilters.labelId) : undefined;
+    const milestone = workItemFilters.milestoneId ? Number(workItemFilters.milestoneId) : undefined;
     api
-      .listPulls(workspace.slug, "open")
+      .listPulls(workspace.slug, workItemFilters.state, {
+        label: Number.isInteger(label) ? label : undefined,
+        milestone: Number.isInteger(milestone) ? milestone : undefined,
+        author: workItemFilters.author,
+      })
       .then((pulls) =>
         Promise.all(
           pulls.map(async (p) => {
@@ -1867,24 +1962,30 @@ function WorkspaceView({
       )
       .then(setReviewPulls)
       .catch(() => setReviewPulls([]));
-  }, [workspace.slug]);
+  }, [workspace.slug, workItemFilters]);
   useEffect(() => {
     refreshPullsRef.current = refreshPulls;
   }, [refreshPulls]);
 
   const refreshIssues = useCallback(
     (scope: "mine" | "all", panel: "inbox" | "issues" | "activity", q: string) => {
-      const filter = (panel === "inbox" || panel === "issues") && scope === "mine" ? "mine" : undefined;
+      const labelName = filterLabels.find((label) => String(label.id) === workItemFilters.labelId)?.name;
+      const explicitPeople = workItemFilters.author.trim() || workItemFilters.assignee.trim();
+      const filter = (panel === "inbox" || panel === "issues") && scope === "mine" && !explicitPeople ? "mine" : undefined;
       api
         .listIssues(workspace.slug, {
-          state: "open",
+          state: workItemFilters.state,
           ...(filter ? { filter } : {}),
           ...(q.trim() ? { q } : {}),
+          ...(labelName ? { label: labelName } : {}),
+          ...(workItemFilters.milestoneId ? { milestone: workItemFilters.milestoneId } : {}),
+          ...(workItemFilters.author.trim() ? { created_by: workItemFilters.author.trim() } : {}),
+          ...(workItemFilters.assignee.trim() ? { assigned_by: workItemFilters.assignee.trim() } : {}),
         })
         .then((r) => setIssues(r.issues))
         .catch(() => setIssues([]));
     },
-    [workspace.slug],
+    [workspace.slug, filterLabels, workItemFilters],
   );
 
   // Fetch issues whenever the user opens Inbox/Issues/Activity, switches scope, or
@@ -1896,7 +1997,7 @@ function WorkspaceView({
       }, 150);
       return () => clearTimeout(handle);
     }
-  }, [sidebarView, issuesScope, inboxQuery, refreshIssues]);
+  }, [sidebarView, issuesScope, inboxQuery, workItemFilters, refreshIssues]);
 
   const refreshNotifs = useCallback(() => {
     api
@@ -1914,14 +2015,24 @@ function WorkspaceView({
     return () => clearInterval(t);
   }, [sidebarView, refreshNotifs]);
 
-  // Eagerly fetch every open PR once per workspace — used by Activity, the
-  // Inbox All scope, and #N cross-reference resolution.
+  // Eagerly fetch PRs for the active filters; Activity, Inbox All, and #N
+  // cross-reference resolution reuse this list.
   useEffect(() => {
     api
-      .listPulls(workspace.slug, "open")
+      .listPulls(workspace.slug, workItemFilters.state, {
+        label: workItemFilters.labelId ? Number(workItemFilters.labelId) : undefined,
+        milestone: workItemFilters.milestoneId ? Number(workItemFilters.milestoneId) : undefined,
+        author: workItemFilters.author,
+      })
       .then(setOpenPrs)
       .catch(() => setOpenPrs([]));
-  }, [workspace.slug]);
+  }, [workspace.slug, workItemFilters]);
+
+  useEffect(() => {
+    if (sidebarView !== "inbox" && sidebarView !== "issues" && sidebarView !== "activity") return;
+    api.listLabels(workspace.slug).then((r) => setFilterLabels(r.labels)).catch(() => setFilterLabels([]));
+    api.listMilestones(workspace.slug, "all").then((r) => setFilterMilestones(r.milestones)).catch(() => setFilterMilestones([]));
+  }, [sidebarView, workspace.slug]);
 
   const refreshPinned = useCallback(async () => {
     try {
@@ -2364,6 +2475,10 @@ function WorkspaceView({
               setScope={setIssuesScope}
               query={inboxQuery}
               setQuery={setInboxQuery}
+              filters={workItemFilters}
+              setFilters={setWorkItemFilters}
+              labels={filterLabels}
+              milestones={filterMilestones}
               onRefresh={() => {
                 refreshPulls();
                 refreshPinned();
@@ -2568,6 +2683,7 @@ function WorkspaceView({
             <IssueView
               number={viewingIssue}
               currentForgejoUsername={user.username}
+              canEdit={workspace.role !== "read"}
               canManageLabels={workspace.role === "admin"}
               canPin={workspace.role === "admin"}
               isPinned={pinnedIssues.some((p) => p.number === viewingIssue)}
@@ -2722,7 +2838,13 @@ function WorkspaceView({
           )}
           {reviewingPullNumber && (
             <>
-              {reviewState.pr && <PrHeader pr={reviewState.pr} />}
+              {reviewState.pr && (
+                <PrHeader
+                  pr={reviewState.pr}
+                  canEdit={workspace.role !== "read"}
+                  onUpdated={(pr) => setReviewState((s) => ({ ...s, pr }))}
+                />
+              )}
               <div className="min-h-0 shrink-0">
                 <DiffArea
                   file={

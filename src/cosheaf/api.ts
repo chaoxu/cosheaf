@@ -241,8 +241,18 @@ export const api = {
 
   // ---------- Pulls ----------
 
-  listPulls: (slug: string, state: "open" | "closed" | "all" = "open") =>
-    jsonFetch<{ pulls: PrMeta[] }>(`${w(slug)}/pulls?state=${state}`).then((r) => r.pulls),
+  listPulls: (
+    slug: string,
+    state: "open" | "closed" | "all" = "open",
+    filters: { label?: number; milestone?: number; author?: string; sort?: string } = {},
+  ) => {
+    const q = new URLSearchParams({ state });
+    if (filters.label) q.set("labels", String(filters.label));
+    if (filters.milestone) q.set("milestone", String(filters.milestone));
+    if (filters.author?.trim()) q.set("author", filters.author.trim());
+    if (filters.sort) q.set("sort", filters.sort);
+    return jsonFetch<{ pulls: PrMeta[] }>(`${w(slug)}/pulls?${q}`).then((r) => r.pulls);
+  },
   openPull: (
     slug: string,
     payload: { head: string; base?: string; title?: string; body?: string },
@@ -253,6 +263,16 @@ export const api = {
     }),
   getPull: (slug: string, prNumber: number) =>
     jsonFetch<{ pull: PrMeta }>(`${w(slug)}/pulls/${prNumber}`).then((r) => r.pull),
+  updatePull: (slug: string, prNumber: number, body: { title?: string; body?: string }) =>
+    jsonFetch<{ pull: PrMeta }>(`${w(slug)}/pulls/${prNumber}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }).then((r) => r.pull),
+  setPullLabels: (slug: string, prNumber: number, labels: number[]) =>
+    jsonFetch<{ pull: PrMeta }>(`${w(slug)}/pulls/${prNumber}/labels`, {
+      method: "PUT",
+      body: JSON.stringify({ labels }),
+    }).then((r) => r.pull),
   mergePull: (
     slug: string,
     prNumber: number,
@@ -286,6 +306,22 @@ export const api = {
     jsonFetch<{ reviews: ApprovalRecord[]; approvals: number; rejections: number }>(
       `${w(slug)}/pulls/${prNumber}/reviews`,
     ),
+  listReviewRequests: (slug: string, prNumber: number) =>
+    jsonFetch<{
+      requested_reviewers: string[];
+      requested_reviewer_teams: string[];
+      available_reviewers: string[];
+    }>(`${w(slug)}/pulls/${prNumber}/review-requests`),
+  requestPullReviewers: (slug: string, prNumber: number, reviewers: string[]) =>
+    jsonFetch<{ pull: PrMeta }>(`${w(slug)}/pulls/${prNumber}/review-requests`, {
+      method: "POST",
+      body: JSON.stringify({ reviewers }),
+    }).then((r) => r.pull),
+  removePullReviewers: (slug: string, prNumber: number, reviewers: string[]) =>
+    jsonFetch<{ pull: PrMeta | null }>(`${w(slug)}/pulls/${prNumber}/review-requests`, {
+      method: "DELETE",
+      body: JSON.stringify({ reviewers }),
+    }).then((r) => r.pull),
 
   // ---------- Line comments on a PR ----------
 
@@ -347,17 +383,36 @@ export const api = {
   // ---- issues ----
   listIssues: (
     slug: string,
-    opts: { state?: "open" | "closed" | "all"; filter?: "mine" | "assigned" | "all"; q?: string } = {},
+    opts: {
+      state?: "open" | "closed" | "all";
+      filter?: "mine" | "assigned" | "all";
+      q?: string;
+      label?: string;
+      milestone?: string;
+      assigned_by?: string;
+      created_by?: string;
+      sort?: string;
+    } = {},
   ) => {
     const qs = new URLSearchParams();
     if (opts.state) qs.set("state", opts.state);
     if (opts.filter) qs.set("filter", opts.filter);
     if (opts.q && opts.q.trim()) qs.set("q", opts.q.trim());
+    if (opts.label) qs.set("labels", opts.label);
+    if (opts.milestone) qs.set("milestones", opts.milestone);
+    if (opts.assigned_by?.trim()) qs.set("assigned_by", opts.assigned_by.trim());
+    if (opts.created_by?.trim()) qs.set("created_by", opts.created_by.trim());
+    if (opts.sort) qs.set("sort", opts.sort);
     const q = qs.toString();
     return jsonFetch<{ issues: IssueRow[] }>(`${w(slug)}/issues${q ? `?${q}` : ""}`);
   },
   getIssue: (slug: string, number: number) =>
     jsonFetch<IssueDetail>(`${w(slug)}/issues/${number}`),
+  updateIssue: (slug: string, number: number, body: { title?: string; body?: string }) =>
+    jsonFetch<Pick<IssueDetail, "number" | "title" | "body" | "state">>(`${w(slug)}/issues/${number}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   getIssueComments: (slug: string, number: number) =>
     jsonFetch<{ comments: IssueComment[] }>(`${w(slug)}/issues/${number}/comments`),
   createIssue: (slug: string, body: { title: string; body: string }) =>
@@ -400,7 +455,7 @@ export const api = {
     }),
   listLabels: (slug: string) =>
     jsonFetch<{ labels: Label[] }>(`${w(slug)}/labels`),
-  createLabel: (slug: string, body: { name: string; color: string; description?: string }) =>
+  createLabel: (slug: string, body: { name: string; color: string; description?: string; exclusive?: boolean }) =>
     jsonFetch<Label>(`${w(slug)}/labels`, {
       method: "POST",
       headers: { "content-type": "application/json" },

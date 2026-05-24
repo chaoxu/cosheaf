@@ -45,11 +45,32 @@ function forgejoIssue(
   number: number,
   title: string,
   opts: { state?: "open" | "closed"; isPr?: boolean } = {},
-): { number: number; title: string; state: "open" | "closed"; pull_request?: object | null } {
+): {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  labels: Array<{ id: number; name: string; color: string; exclusive?: boolean; is_archived?: boolean }>;
+  comments: number;
+  created_at: string;
+  updated_at: string;
+  user: { login: string };
+  assignees: [];
+  closed_at: null;
+  pull_request?: object | null;
+} {
   return {
     number,
     title,
+    body: "",
     state: opts.state ?? "open",
+    labels: [],
+    comments: 0,
+    created_at: "2026-05-20T00:00:00Z",
+    updated_at: "2026-05-20T00:01:00Z",
+    user: { login: "alice" },
+    assignees: [],
+    closed_at: null,
     pull_request: opts.isPr ? {} : null,
   };
 }
@@ -115,11 +136,31 @@ describe("issues routes", () => {
     await expect(res.json()).resolves.toEqual({ ok: true, state: "closed" });
   });
 
+  it("PATCH /issues/:number edits the Forgejo issue title and body", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Retitled"), body: "Updated" }));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ title: " Retitled ", body: "Updated" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      title: "Retitled",
+      body: "Updated",
+    });
+    await expect(res.json()).resolves.toMatchObject({ title: "Retitled", body: "Updated" });
+  });
+
   it("serves labels, milestones, and markdown rendering without backend-shaped paths", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock
-      .mockResolvedValueOnce(ok([{ id: 1, name: "bug", color: "ff0000", description: "broken" }]))
+      .mockResolvedValueOnce(ok([{ id: 1, name: "bug", color: "ff0000", description: "broken", exclusive: false, is_archived: false }]))
       .mockResolvedValueOnce(ok([{ id: 2, title: "v1", description: "ship", state: "open", open_issues: 1, closed_issues: 0, due_on: null }]))
       .mockResolvedValueOnce(new Response("<p>Hello</p>", { status: 200, headers: { "content-type": "text/html" } }));
 
@@ -172,6 +213,27 @@ describe("issues routes", () => {
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain("assigned_by=alice");
+  });
+
+  it("maps Forgejo-native issue filters", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockImplementation(async () => ok([]));
+
+    const res = await appFor(db).request(
+      "/api/v1/w/w/issues?state=all&labels=bug&milestones=2&created_by=meri&assigned_by=vera&q=refactor&sort=oldest",
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+
+    expect(res.status).toBe(200);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get("state")).toBe("all");
+    expect(url.searchParams.get("labels")).toBe("bug");
+    expect(url.searchParams.get("milestones")).toBe("2");
+    expect(url.searchParams.get("created_by")).toBe("meri");
+    expect(url.searchParams.get("assigned_by")).toBe("vera");
+    expect(url.searchParams.get("q")).toBe("refactor");
+    expect(url.searchParams.get("sort")).toBe("oldest");
   });
 
   it("does not mask Forgejo upstream failures as missing issues", async () => {
@@ -262,6 +324,96 @@ describe("issues routes", () => {
     expect(blocks.status).toBe(200);
     expect(await blocks.json()).toEqual({
       issues: [{ number: 12, title: "Blocked theorem", state: "closed", is_pr: false }],
+    });
+  });
+
+  it("rejects newly assigning archived labels", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock
+      .mockResolvedValueOnce(ok([{ id: 3, name: "old", color: "888888", is_archived: true }]))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [3] }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects multiple exclusive labels from the same scope", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock
+      .mockResolvedValueOnce(ok([
+        { id: 1, name: "kind/bug", color: "ff0000", exclusive: true },
+        { id: 2, name: "kind/task", color: "00ff00", exclusive: true },
+      ]))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [1, 2] }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("only one label in scope kind");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not treat slashless exclusive labels as scoped labels", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const labels = [
+      { id: 1, name: "bug", color: "ff0000", exclusive: true },
+      { id: 2, name: "task", color: "00ff00", exclusive: true },
+    ];
+    fetchMock
+      .mockResolvedValueOnce(ok(labels))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(labels));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [1, 2] }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      labels: [
+        { name: "bug", scope: null },
+        { name: "task", scope: null },
+      ],
+    });
+  });
+
+  it("allows keeping archived labels that are already attached", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const archived = { id: 3, name: "old", color: "888888", is_archived: true };
+    fetchMock
+      .mockResolvedValueOnce(ok([archived]))
+      .mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem"), labels: [archived] }))
+      .mockResolvedValueOnce(ok([archived]));
+
+    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [3] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[2][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7/labels",
+    );
+    await expect(res.json()).resolves.toMatchObject({
+      labels: [{ id: 3, name: "old", is_archived: true }],
     });
   });
 

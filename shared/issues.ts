@@ -8,6 +8,9 @@ export interface Label {
   name: string;
   color: string;
   description?: string;
+  exclusive: boolean;
+  is_archived: boolean;
+  scope: string | null;
 }
 
 export interface IssueRow {
@@ -15,7 +18,7 @@ export interface IssueRow {
   title: string;
   state: "open" | "closed";
   author_username: string;
-  labels: string[];
+  labels: Label[];
   comment_count: number;
   created_at: number;
   updated_at: number;

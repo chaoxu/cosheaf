@@ -27,7 +27,7 @@ function toIssueRow(i: ForgejoIssue): IssueRow {
     title: i.title,
     state: i.state,
     author_username: i.user?.login ?? DELETED_USER_LOGIN,
-    labels: i.labels.map((l) => l.name),
+    labels: i.labels.map(toLabel),
     comment_count: i.comments,
     created_at: new Date(i.created_at).getTime(),
     updated_at: new Date(i.updated_at).getTime(),
@@ -44,12 +44,21 @@ function toIssueComment(cm: ForgejoIssueComment): IssueComment {
   };
 }
 
+function labelScope(label: ForgejoLabel): string | null {
+  if (!label.exclusive) return null;
+  const slash = label.name.lastIndexOf("/");
+  return slash > 0 ? label.name.slice(0, slash) : null;
+}
+
 function toLabel(label: ForgejoLabel): Label {
   return {
     id: label.id,
     name: label.name,
     color: label.color,
     description: label.description,
+    exclusive: Boolean(label.exclusive),
+    is_archived: Boolean(label.is_archived),
+    scope: labelScope(label),
   };
 }
 
@@ -84,6 +93,54 @@ function parseId(value: unknown): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+function trimmedQuery(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+type IssueSort = "relevance" | "latest" | "oldest" | "recentupdate" | "leastupdate" | "mostcomment" | "leastcomment" | "nearduedate" | "farduedate";
+
+function parseIssueSort(value: string | undefined): IssueSort | undefined {
+  const allowed = new Set([
+    "relevance",
+    "latest",
+    "oldest",
+    "recentupdate",
+    "leastupdate",
+    "mostcomment",
+    "leastcomment",
+    "nearduedate",
+    "farduedate",
+  ]);
+  return value && allowed.has(value) ? value as IssueSort : undefined;
+}
+
+function validateLabelSelection(
+  requestedIds: number[],
+  allLabels: ForgejoLabel[],
+  currentLabels: ForgejoLabel[],
+): { ok: true } | { ok: false; message: string } {
+  const byId = new Map(allLabels.map((label) => [label.id, label]));
+  const currentIds = new Set(currentLabels.map((label) => label.id));
+  const seenScopes = new Map<string, string>();
+  for (const id of requestedIds) {
+    const label = byId.get(id);
+    if (!label) return { ok: false, message: `unknown label id ${id}` };
+    if (label.is_archived && !currentIds.has(id)) {
+      return { ok: false, message: `archived label cannot be newly assigned: ${label.name}` };
+    }
+    const scope = labelScope(label);
+    if (scope) {
+      const existing = seenScopes.get(scope);
+      if (existing && existing !== label.name) {
+        return { ok: false, message: `only one label in scope ${scope} can be assigned` };
+      }
+      seenScopes.set(scope, label.name);
+    }
+  }
+  return { ok: true };
+}
+
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
 issues.use("/:slug/*", requireMembership());
@@ -99,6 +156,12 @@ issues.get("/:slug/issues", async (c) => {
   const filter = c.req.query("filter");
   const q = c.req.query("q") ?? undefined;
   const username = c.get("user").username;
+  const labels = trimmedQuery(c.req.query("labels"));
+  const milestones = trimmedQuery(c.req.query("milestones"));
+  const assignedBy = trimmedQuery(c.req.query("assigned_by"));
+  const createdBy = trimmedQuery(c.req.query("created_by"));
+  const mentionedBy = trimmedQuery(c.req.query("mentioned_by"));
+  const sort = parseIssueSort(c.req.query("sort"));
   // The sidecar used to compute these locally; the backend repo-scoped issues
   // endpoint already supports the same filters. The caller's token is what the
   // backend client is bound to, so created_by/assigned_by use their identity.
@@ -106,8 +169,8 @@ issues.get("/:slug/issues", async (c) => {
     // "mine" = authored OR assigned. Forgejo doesn't OR these server-side,
     // so two calls + dedupe. They're cheap and the response is small.
     const [authored, assigned] = await Promise.all([
-      fj.listIssues(owner, repo, { state, q, created_by: username }),
-      fj.listIssues(owner, repo, { state, q, assigned_by: username }),
+      fj.listIssues(owner, repo, { state, q, labels, milestones, mentioned_by: mentionedBy, sort, created_by: username }),
+      fj.listIssues(owner, repo, { state, q, labels, milestones, mentioned_by: mentionedBy, sort, assigned_by: username }),
     ]);
     const byNum = new Map<number, IssueRow>();
     for (const i of [...authored, ...assigned]) {
@@ -119,7 +182,12 @@ issues.get("/:slug/issues", async (c) => {
   const list = await fj.listIssues(owner, repo, {
     state,
     q,
-    ...(filter === "assigned" ? { assigned_by: username } : {}),
+    labels,
+    milestones,
+    mentioned_by: mentionedBy,
+    sort,
+    ...(filter === "assigned" ? { assigned_by: username } : assignedBy ? { assigned_by: assignedBy } : {}),
+    ...(createdBy ? { created_by: createdBy } : {}),
   });
   return c.json({ issues: list.filter((i) => !i.pull_request).map(toIssueRow) });
 });
@@ -159,7 +227,7 @@ issues.get("/:slug/issues/:number", async (c) => {
       state: issue.state,
       author_username: issue.user?.login ?? DELETED_USER_LOGIN,
       assignees: (issue.assignees ?? []).map((a) => a.login),
-      labels: issue.labels.map((l) => ({ id: l.id, name: l.name, color: l.color })),
+      labels: issue.labels.map(toLabel),
       milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,
       comment_count: issue.comments,
       created_at: new Date(issue.created_at).getTime(),
@@ -206,6 +274,35 @@ issues.patch("/:slug/issues/:number/state", async (c) => {
   const issue = await fj.editIssue(owner, repo, number, { state: body.state });
   c.get("sse").publish(ws.slug, { type: "issue", number, action: body.state === "closed" ? "closed" : "reopened" });
   return c.json({ ok: true, state: issue.state });
+});
+
+issues.patch("/:slug/issues/:number", async (c) => {
+  const ws = c.get("workspace");
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json(...bad("bad number"));
+  const body = (await c.req.json().catch(() => null)) as {
+    title?: unknown;
+    body?: unknown;
+  } | null;
+  const patch: { title?: string; body?: string } = {};
+  if (body?.title !== undefined) {
+    if (typeof body.title !== "string" || !body.title.trim()) return c.json(...bad("title required"));
+    patch.title = body.title.trim();
+  }
+  if (body?.body !== undefined) {
+    if (typeof body.body !== "string") return c.json(...bad("body must be a string"));
+    patch.body = body.body;
+  }
+  if (patch.title === undefined && patch.body === undefined) return c.json(...bad("title or body required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  const issue = await fj.editIssue(owner, repo, number, patch);
+  c.get("sse").publish(ws.slug, { type: "issue", number, action: "edited" });
+  return c.json({
+    number: issue.number,
+    title: issue.title,
+    body: issue.body,
+    state: issue.state,
+  });
 });
 
 issues.get("/:slug/issues/:number/comments", async (c) => {
@@ -261,6 +358,7 @@ issues.post("/:slug/labels", async (c) => {
     name?: unknown;
     color?: unknown;
     description?: unknown;
+    exclusive?: unknown;
   } | null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const color = typeof body?.color === "string" ? body.color.trim().replace(/^#/, "") : "";
@@ -271,6 +369,7 @@ issues.post("/:slug/labels", async (c) => {
     name,
     color,
     description: typeof body?.description === "string" ? body.description : undefined,
+    exclusive: body?.exclusive === true,
   });
   return c.json(toLabel(label), 201);
 });
@@ -282,8 +381,15 @@ issues.put("/:slug/issues/:number/labels", async (c) => {
   if (!Array.isArray(body?.labels) || !body.labels.every((id) => Number.isInteger(id) && id > 0)) {
     return c.json(...bad("labels must be positive integer ids"));
   }
+  const labelIds = body.labels as number[];
   const { fj, owner, repo } = c.get("repoCtx");
-  const labels = await fj.setIssueLabels(owner, repo, number, body.labels);
+  const [allLabels, issue] = await Promise.all([
+    fj.listLabels(owner, repo),
+    fj.getIssue(owner, repo, number),
+  ]);
+  const validation = validateLabelSelection(labelIds, allLabels, issue.labels);
+  if (!validation.ok) return c.json(...bad(validation.message));
+  const labels = await fj.setIssueLabels(owner, repo, number, labelIds);
   return c.json({ labels: labels.map(toLabel) });
 });
 

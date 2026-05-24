@@ -117,7 +117,7 @@ describe("pulls + branches routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "http://forgejo.test/api/v1/repos/owner/w/pulls?state=all&page=1&limit=50&sort=newest",
+      "http://forgejo.test/api/v1/repos/owner/w/pulls?state=all&page=1&limit=50&sort=recentupdate",
     );
     await expect(res.json()).resolves.toMatchObject({
       pulls: [
@@ -130,6 +130,26 @@ describe("pulls + branches routes", () => {
         },
       ],
     });
+  });
+
+  it("GET /pulls maps Forgejo-native filters", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok([]));
+
+    const res = await appFor(db).request(
+      "/api/v1/w/w/pulls?state=all&labels=4&milestone=2&author=meri&sort=oldest",
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+
+    expect(res.status).toBe(200);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get("state")).toBe("all");
+    expect(url.searchParams.get("labels")).toBe("4");
+    expect(url.searchParams.get("milestone")).toBe("2");
+    expect(url.searchParams.get("poster")).toBe("meri");
+    expect(url.searchParams.get("sort")).toBe("oldest");
   });
 
   it("GET /pulls/:n returns stable Cosheaf PR metadata", async () => {
@@ -150,6 +170,101 @@ describe("pulls + branches routes", () => {
         title: "Review me",
         head_ref: "user/alice/wip",
         base_ref: "main",
+      },
+    });
+  });
+
+  it("PATCH /pulls/:n edits the Forgejo PR title and body", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok(pull({ number: 7, title: "Retitled", body: "Updated body" })));
+
+    const res = await appFor(db).request("/api/v1/w/w/pulls/7", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ title: " Retitled ", body: "Updated body" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls/7");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      title: "Retitled",
+      body: "Updated body",
+    });
+    await expect(res.json()).resolves.toMatchObject({ pull: { title: "Retitled", body: "Updated body" } });
+  });
+
+  it("PUT /pulls/:n/labels validates scoped labels before editing Forgejo PR labels", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock
+      .mockResolvedValueOnce(ok([
+        { id: 1, name: "kind/bug", color: "ff0000", exclusive: true },
+        { id: 2, name: "kind/task", color: "00ff00", exclusive: true },
+      ]))
+      .mockResolvedValueOnce(ok(pull({ labels: [] })));
+
+    const res = await appFor(db).request("/api/v1/w/w/pulls/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [1, 2] }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("PUT /pulls/:n/labels writes valid labels through Forgejo", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    const label = { id: 1, name: "kind/bug", color: "ff0000", exclusive: true };
+    fetchMock
+      .mockResolvedValueOnce(ok([label]))
+      .mockResolvedValueOnce(ok(pull({ labels: [] })))
+      .mockResolvedValueOnce(ok(pull({ labels: [label] })));
+
+    const res = await appFor(db).request("/api/v1/w/w/pulls/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [1] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls/7");
+    expect(fetchMock.mock.calls[2][1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({ labels: [1] });
+    await expect(res.json()).resolves.toMatchObject({ pull: { labels: [{ name: "kind/bug", scope: "kind" }] } });
+  });
+
+  it("PUT /pulls/:n/labels allows slashless exclusive labels", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    const labels = [
+      { id: 1, name: "bug", color: "ff0000", exclusive: true },
+      { id: 2, name: "task", color: "00ff00", exclusive: true },
+    ];
+    fetchMock
+      .mockResolvedValueOnce(ok(labels))
+      .mockResolvedValueOnce(ok(pull({ labels: [] })))
+      .mockResolvedValueOnce(ok(pull({ labels })));
+
+    const res = await appFor(db).request("/api/v1/w/w/pulls/7/labels", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ labels: [1, 2] }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      pull: {
+        labels: [
+          { name: "bug", scope: null },
+          { name: "task", scope: null },
+        ],
       },
     });
   });
@@ -308,6 +423,73 @@ describe("pulls + branches routes", () => {
       expect((await post({ path: "x.md", line: 1, side: "head", body: "  \n" })).status).toBe(400);
       // No fetch should have been made — all rejections happen at parse time.
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("review requests", () => {
+    it("GET /pulls/:n/review-requests returns requested and available reviewers", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(ok(pull({
+          requested_reviewers: [{ login: "vera" }],
+          requested_reviewers_teams: [{ name: "analysis" }],
+          user: { login: "alice" },
+        })))
+        .mockResolvedValueOnce(ok([{ login: "alice" }, { login: "vera" }, { login: "meri" }]));
+
+      const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({
+        requested_reviewers: ["vera"],
+        requested_reviewer_teams: ["analysis"],
+        available_reviewers: ["vera", "meri"],
+      });
+    });
+
+    it("POST /pulls/:n/review-requests requests reviewers through Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(ok([]))
+        .mockResolvedValueOnce(ok(pull({ requested_reviewers: [{ login: "vera" }] })));
+
+      const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ reviewers: ["vera", "vera", "  "] }),
+      });
+
+      expect(res.status).toBe(201);
+      expect(String(fetchMock.mock.calls[0][0])).toBe(
+        "http://forgejo.test/api/v1/repos/owner/w/pulls/7/requested_reviewers",
+      );
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reviewers: ["vera"] });
+      await expect(res.json()).resolves.toMatchObject({ pull: { requested_reviewers: ["vera"] } });
+    });
+
+    it("DELETE /pulls/:n/review-requests cancels reviewers through Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(empty(204))
+        .mockResolvedValueOnce(ok(pull({ requested_reviewers: [] })));
+
+      const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ reviewers: ["vera"] }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reviewers: ["vera"] });
     });
   });
 

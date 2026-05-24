@@ -189,10 +189,18 @@ POST /w/:slug/pulls
 { "head": string, "base"?: string, "title"?: string, "body"?: string }
 → PrMeta
 
-GET /w/:slug/pulls?state=open|closed|all
+GET /w/:slug/pulls?state=open|closed|all&labels=<id>&milestone=<id>&author=<username>&sort=<sort>
 → { "pulls": PrMeta[] }
 
 GET /w/:slug/pulls/:n
+→ { "pull": PrMeta }
+
+PATCH /w/:slug/pulls/:n
+{ "title"?: string, "body"?: string }
+→ { "pull": PrMeta }
+
+PUT /w/:slug/pulls/:n/labels
+{ "labels": number[] }
 → { "pull": PrMeta }
 
 POST /w/:slug/pulls/:n/merge
@@ -204,8 +212,8 @@ POST /w/:slug/pulls/:n/close
 ```
 
 Cosheaf returns `PrMeta`: `number`, `title`, `body`, `state`, `merged`,
-author, head/base refs and SHAs, timestamps, mergeability, and changed-file
-counts.
+author, head/base refs and SHAs, timestamps, mergeability, changed-file counts,
+labels, milestone, and requested reviewers.
 
 ## Pull Request Reviews And Comments
 
@@ -222,6 +230,17 @@ POST /w/:slug/pulls/:n/reviews
 
 GET /w/:slug/pulls/:n/reviews
 → { "reviews": ApprovalRecord[], "approvals": number, "rejections": number }
+
+GET /w/:slug/pulls/:n/review-requests
+→ { "requested_reviewers": string[], "requested_reviewer_teams": string[], "available_reviewers": string[] }
+
+POST /w/:slug/pulls/:n/review-requests
+{ "reviewers": string[] }
+→ { "pull": PrMeta }
+
+DELETE /w/:slug/pulls/:n/review-requests
+{ "reviewers": string[] }
+→ { "pull": PrMeta | null }
 
 GET /w/:slug/pulls/:n/comments
 → { "comments": LineComment[] }
@@ -260,7 +279,7 @@ Issue routes return normalized Cosheaf DTOs and are the public surface for
 issue automation.
 
 ```http
-GET /w/:slug/issues?state=open|closed|all&filter=mine|assigned|all&q=<query>
+GET /w/:slug/issues?state=open|closed|all&filter=mine|assigned|all&q=<query>&labels=<name>&milestones=<id-or-name>&created_by=<username>&assigned_by=<username>&sort=<sort>
 → { "issues": IssueRow[] }
 
 GET /w/:slug/issues/pinned
@@ -268,6 +287,10 @@ GET /w/:slug/issues/pinned
 
 GET /w/:slug/issues/:n
 → IssueDetail
+
+PATCH /w/:slug/issues/:n
+{ "title"?: string, "body"?: string }
+→ { "number": number, "title": string, "body": string, "state": "open" | "closed" }
 
 POST /w/:slug/issues
 { "title": string, "body": string }
@@ -314,7 +337,7 @@ GET /w/:slug/labels
 → { "labels": Label[] }
 
 POST /w/:slug/labels
-{ "name": string, "color": string, "description"?: string }
+{ "name": string, "color": string, "description"?: string, "exclusive"?: boolean }
 → Label
 
 PUT /w/:slug/issues/:n/labels

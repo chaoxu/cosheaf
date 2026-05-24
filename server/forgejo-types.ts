@@ -11,7 +11,7 @@ export interface ForgejoIssue {
   state: "open" | "closed";
   user: { id: number; login: string } | null;
   assignees: Array<{ id: number; login: string }> | null;
-  labels: Array<{ id: number; name: string; color: string }>;
+  labels: ForgejoLabel[];
   milestone?: { id: number; title: string; state: "open" | "closed" } | null;
   comments: number;
   created_at: string;
@@ -81,6 +81,8 @@ export interface ForgejoLabel {
   name: string;
   color: string;
   description?: string;
+  exclusive?: boolean;
+  is_archived?: boolean;
 }
 
 // Forgejo's API returns `user: null` for actions attributed to a deleted
@@ -166,6 +168,10 @@ export interface ForgejoPull {
   additions?: number;
   deletions?: number;
   changed_files?: number;
+  labels?: ForgejoLabel[];
+  milestone?: { id: number; title: string; state: "open" | "closed" } | null;
+  requested_reviewers?: ForgejoUser[];
+  requested_reviewers_teams?: Array<{ id: number; name: string; username?: string }>;
   head: { ref: string; sha: string; label: string };
   base: { ref: string; sha: string };
   user: ForgejoUser | null;
