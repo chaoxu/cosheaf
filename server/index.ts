@@ -67,9 +67,17 @@ app.route("/api/v1/w", branches);
 app.route("/api/v1/w", issues);
 app.route("/api/v1/w", notifications);
 app.route("/api/v1/webhooks", webhooks);
-app.route("/", web);
 
 const distDir = path.resolve(process.cwd(), "dist");
+if (existsSync(path.join(distDir, "index.html"))) {
+  app.get("/assets/*", async (c) => {
+    const response = await serveDistFile(c.req.path);
+    return response ?? c.json({ error: "not found" }, 404);
+  });
+}
+
+app.route("/", web);
+
 if (existsSync(path.join(distDir, "index.html"))) {
   app.get("*", async (c, next) => {
     if (c.req.path.startsWith("/api/")) {

@@ -57,8 +57,12 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     `${webBase}/${owner}/${repo}/_edit?branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`,
   );
   await expect(page.locator(".edit-page")).toBeVisible();
-  await page.locator('textarea[name="content"]').fill(`# Web Page E2E\n\nThis was saved through a server-rendered form.\n`);
-  await page.locator('button:has-text("Save")').click();
-  await expect(page).toHaveURL(`${webBase}/${owner}/${repo}/src/branch/${branch}/${path}`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page.getByTestId("document-theme-select")).toBeVisible();
+  await page.getByRole("button", { name: "Source" }).click();
+  await page.locator(".cm-content").fill(`# Web Page E2E\n\nThis was saved through a server-rendered editor.\n`);
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("statusbar")).toContainText("saved");
+  await page.goto(`${webBase}/${owner}/${repo}/src/branch/${branch}/${path}`);
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
 });

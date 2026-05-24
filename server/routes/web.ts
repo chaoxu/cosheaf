@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import type Database from "better-sqlite3";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { posix as pathPosix } from "node:path";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { COFLAT_FORMAT_ID, documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
@@ -238,15 +240,33 @@ web.get("/:owner/:repo/_edit", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       body: `
-        <form class="edit-page" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
+        <section class="edit-page">
           <div class="file-toolbar">
             <div><p class="eyebrow">Edit on branch</p><h1>${escapeHtml(rel)}</h1></div>
-            <button class="button primary" type="submit">Save</button>
+            <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}">Cancel</a>
           </div>
-          <input type="hidden" name="path" value="${escapeAttr(rel)}">
-          <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
-          <textarea name="content" spellcheck="false">${escapeHtml(content)}</textarea>
-        </form>
+          <div
+            id="web-editor-root"
+            data-slug="${escapeAttr(ctx.repo)}"
+            data-owner="${escapeAttr(ctx.owner)}"
+            data-repo="${escapeAttr(ctx.repo)}"
+            data-path="${escapeAttr(rel)}"
+            data-branch="${escapeAttr(branch)}"
+            data-username="${escapeAttr(ctx.user)}"
+            data-role="${escapeAttr(ctx.ws.role)}"
+            data-format-id="${escapeAttr(ctx.ws.defaultMdFormat)}"
+          ></div>
+          <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
+          ${webEditorAssets()}
+          <noscript>
+            <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
+              <input type="hidden" name="path" value="${escapeAttr(rel)}">
+              <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
+              <textarea name="content" spellcheck="false">${escapeHtml(content)}</textarea>
+              <button class="button primary" type="submit">Save</button>
+            </form>
+          </noscript>
+        </section>
       `,
     }),
   );
@@ -1005,6 +1025,57 @@ function pageShell(opts: { title: string; user?: string; body: string }): string
     </html>`;
 }
 
+type ViteManifestChunk = {
+  file: string;
+  css?: string[];
+  imports?: string[];
+};
+
+let manifestCache: Record<string, ViteManifestChunk> | null | undefined;
+
+function webEditorAssets(): string {
+  const manifest = readViteManifest();
+  if (!manifest) {
+    const devOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
+    return `<script type="module" src="${devOrigin}/src/cosheaf/web-editor.tsx"></script>`;
+  }
+  const entry = manifest["src/cosheaf/web-editor.tsx"];
+  if (!entry) return "";
+  const cssLinks = collectCss(manifest, entry, new Set<string>())
+    .map((href) => `<link rel="stylesheet" href="/${escapeAttr(href)}">`)
+    .join("");
+  return `${cssLinks}<script type="module" src="/${escapeAttr(entry.file)}"></script>`;
+}
+
+function readViteManifest(): Record<string, ViteManifestChunk> | null {
+  if (manifestCache !== undefined) return manifestCache;
+  const manifestPath = path.resolve(process.cwd(), "dist/.vite/manifest.json");
+  if (!existsSync(manifestPath)) {
+    manifestCache = null;
+    return manifestCache;
+  }
+  manifestCache = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, ViteManifestChunk>;
+  return manifestCache;
+}
+
+function collectCss(
+  manifest: Record<string, ViteManifestChunk>,
+  chunk: ViteManifestChunk,
+  seen: Set<string>,
+): string[] {
+  const css: string[] = [];
+  for (const imported of chunk.imports ?? []) {
+    const importedChunk = manifest[imported];
+    if (importedChunk) css.push(...collectCss(manifest, importedChunk, seen));
+  }
+  for (const href of chunk.css ?? []) {
+    if (seen.has(href)) continue;
+    seen.add(href);
+    css.push(href);
+  }
+  return css;
+}
+
 function globalHeader(user: string): string {
   return `<header class="global-header">
     <a class="brand" href="/">Cosheaf</a>
@@ -1100,6 +1171,10 @@ function escapeAttr(value: string): string {
   return escapeHtml(value);
 }
 
+function jsonScript(value: unknown): string {
+  return JSON.stringify(value).replaceAll("<", "\\u003c");
+}
+
 function formatDate(value: string | number | null | undefined): string {
   if (!value) return "";
   const date = typeof value === "number" ? new Date(value) : new Date(value);
@@ -1141,5 +1216,6 @@ const WEB_CSS = `
 .document{border-top:1px solid var(--cf-border);padding:20px 0}.cf-reader{max-width:980px}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:72ch}.thread{max-width:980px}.thread-header{border-bottom:1px solid var(--cf-border);padding:12px 0}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:20px 0}.comment,.event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
 .review-page{display:grid;grid-template-columns:280px 1fr;gap:16px}.changed-files{border:1px solid var(--cf-border);border-radius:6px;align-self:start}.changed-files h2{font-size:15px;margin:0;padding:10px;border-bottom:1px solid var(--cf-border)}.changed-files a{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-top:1px solid var(--cf-border)}.changed-files a.active,.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted)}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td:first-child{width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
 .edit-page{display:grid;gap:12px}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:12px;max-width:560px}
-@media(max-width:800px){.two-col,.review-page{grid-template-columns:1fr}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
+#web-editor-root{min-height:70vh;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:70vh;min-height:560px;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-fg)}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
+@media(max-width:800px){.two-col,.review-page{grid-template-columns:1fr}.web-editor-main{grid-template-columns:1fr}.web-editor-outline{display:none}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
 `;

@@ -1,6 +1,7 @@
 import type { KnipConfig } from "knip";
 
 const config: KnipConfig = {
+  entry: ["src/cosheaf/web-editor.tsx"],
   project: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
   ignoreDependencies: [
     // Loaded via @tailwindcss/vite, not imported directly.

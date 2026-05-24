@@ -26,6 +26,13 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: true,
+    manifest: true,
+    rollupOptions: {
+      input: {
+        app: path.resolve(__dirname, "index.html"),
+        "web-editor": path.resolve(__dirname, "src/cosheaf/web-editor.tsx"),
+      },
+    },
   },
   optimizeDeps: {
     include: [
