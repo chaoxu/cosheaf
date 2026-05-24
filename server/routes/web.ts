@@ -16,6 +16,8 @@ import {
   type ActivityFeedItem,
 } from "../activity-feed.js";
 import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
+import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
+import { resolveBranchPath } from "../branch-path.js";
 import { contentTypeForPath } from "../content-type.js";
 import type {
   ForgejoActivity,
@@ -900,23 +902,6 @@ async function markdownFiles(fj: Forgejo, owner: string, repo: string, ref: stri
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-async function resolveBranchPath(
-  fj: Forgejo,
-  owner: string,
-  repo: string,
-  rest: string,
-): Promise<{ branch: string; path: string } | null> {
-  const clean = rest.replace(/^\/+/, "");
-  const branches = await fj.listBranches(owner, repo);
-  const sorted = branches.map((b) => b.name).sort((a, b) => b.length - a.length);
-  for (const branch of sorted) {
-    if (clean === branch) return { branch, path: "" };
-    if (clean.startsWith(`${branch}/`)) return { branch, path: clean.slice(branch.length + 1) };
-  }
-  if (!clean) return { branch: "main", path: "" };
-  return null;
-}
-
 async function renderMarkdown(
   ctx: WebCtx,
   source: string,
@@ -1111,68 +1096,6 @@ function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode:
 
 function prFilesHref(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): string {
   return `${repoHref(ctx.owner, ctx.repo, `/pulls/${prNumber}/files`)}?file=${encodeURIComponent(filePath)}&mode=${mode}&shape=${shape}`;
-}
-
-function changedLines(patch: string): { added: Set<number>; deleted: Set<number> } {
-  const added = new Set<number>();
-  const deleted = new Set<number>();
-  let oldLine = 0;
-  let newLine = 0;
-  for (const line of patch.split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-    if (hunk) {
-      oldLine = Number(hunk[1]);
-      newLine = Number(hunk[2]);
-      continue;
-    }
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      added.add(newLine);
-      newLine += 1;
-      continue;
-    }
-    if (line.startsWith("-") && !line.startsWith("---")) {
-      deleted.add(oldLine);
-      oldLine += 1;
-      continue;
-    }
-    if (line.startsWith(" ") || line === "") {
-      oldLine += 1;
-      newLine += 1;
-    }
-  }
-  return { added, deleted };
-}
-
-function commentableLines(patch: string): { head: Set<number>; base: Set<number> } {
-  const head = new Set<number>();
-  const base = new Set<number>();
-  let oldLine = 0;
-  let newLine = 0;
-  for (const line of patch.split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-    if (hunk) {
-      oldLine = Number(hunk[1]);
-      newLine = Number(hunk[2]);
-      continue;
-    }
-    if (line.startsWith("+") && !line.startsWith("+++")) {
-      head.add(newLine);
-      newLine += 1;
-      continue;
-    }
-    if (line.startsWith("-") && !line.startsWith("---")) {
-      base.add(oldLine);
-      oldLine += 1;
-      continue;
-    }
-    if (line.startsWith(" ") || line === "") {
-      base.add(oldLine);
-      head.add(newLine);
-      oldLine += 1;
-      newLine += 1;
-    }
-  }
-  return { head, base };
 }
 
 function sourcePane(
@@ -1425,13 +1348,8 @@ function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): strin
 
 function renderPatch(patch: string): string {
   if (!patch) return `<pre class="patch empty">No textual diff.</pre>`;
-  const rows = patch
-    .split("\n")
-    .filter((line) => !line.startsWith("diff --git ") && !line.startsWith("index ") && !line.startsWith("--- ") && !line.startsWith("+++ "))
-    .map((line) => {
-      const kind = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : line.startsWith("@@") ? "hunk" : "ctx";
-      return `<tr class="${kind}"><td class="sign">${escapeHtml(line[0] ?? "")}</td><td><pre>${escapeHtml(line.slice(kind === "ctx" ? 0 : 1))}</pre></td></tr>`;
-    })
+  const rows = patchRows(patch)
+    .map((row) => `<tr class="${row.kind}"><td class="sign">${escapeHtml(row.sign)}</td><td><pre>${escapeHtml(row.text)}</pre></td></tr>`)
     .join("");
   return `<table class="patch"><tbody>${rows}</tbody></table>`;
 }

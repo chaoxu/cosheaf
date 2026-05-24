@@ -4,20 +4,9 @@
 // Logs in, opens a workspace/page, captures the rendered document state +
 // screenshot, and prints page errors. Defaults match `pnpm setup:dev`.
 
-import path from "node:path";
-import { existsSync } from "node:fs";
+import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
 
-// Resolve playwright from a global pnpm install if not in node_modules locally.
-const candidates = [
-  path.join(process.cwd(), "node_modules/playwright/index.js"),
-  "/Users/chaoxu/Library/pnpm/global/5/node_modules/playwright/index.js",
-];
-const playwrightPath = candidates.find(existsSync);
-if (!playwrightPath) {
-  console.error("playwright not found; install via `pnpm add -g playwright` and `pnpm exec playwright install chromium`");
-  process.exit(1);
-}
-const { chromium } = (await import(playwrightPath)).default;
+const chromium = await loadChromium();
 
 const APP_URL = process.env.URL ?? "http://localhost:5173/";
 const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
@@ -44,22 +33,11 @@ const page = await context.newPage();
 
 const consoleMessages = [];
 const pageErrors = [];
-page.on("console", async (msg) => {
-  const args = await Promise.all(msg.args().map((a) => a.jsonValue().catch(() => "[unserializable]")));
-  consoleMessages.push(`[${msg.type()}] ${msg.text()} | ${JSON.stringify(args).slice(0, 400)}`);
-});
-page.on("pageerror", (err) => pageErrors.push(`${err.name}: ${err.message}\n${err.stack ?? ""}`));
+const badResponses = [];
+attachPageListeners(page, { consoleSink: consoleMessages, errorSink: pageErrors, badResponseSink: badResponses });
 
 await page.goto(WEB_URL, { waitUntil: "networkidle" });
-
-// Login if presented.
-if (await page.locator('text=username').count() > 0) {
-  const inputs = page.locator("input");
-  await inputs.nth(0).fill(USERNAME);
-  await inputs.nth(1).fill(PASSWORD);
-  await page.locator('button:has-text("Sign in")').click();
-  await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 }).catch(() => {});
-}
+await signInIfNeeded(page, USERNAME, PASSWORD);
 
 // Open the seeded page.
 const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL).toString();
@@ -84,7 +62,7 @@ const sizes = await page.evaluate(() => {
 const documentText = await page.locator(".document").first().innerText().catch(() => "");
 await page.screenshot({ path: SCREENSHOT, fullPage: false });
 
-const ok = pageErrors.length === 0 && sizes.document && documentText.length > 0;
+const ok = pageErrors.length === 0 && badResponses.length === 0 && sizes.document && documentText.length > 0;
 
 console.log(JSON.stringify({
   ok,
@@ -95,6 +73,7 @@ console.log(JSON.stringify({
   sizes,
   documentTextPreview: documentText.slice(0, 300),
   consoleSample: consoleMessages.slice(-10),
+  badResponses,
   pageErrors,
   screenshot: SCREENSHOT,
 }, null, 2));

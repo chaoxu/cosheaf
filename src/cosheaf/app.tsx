@@ -60,6 +60,7 @@ import {
   writeDiffViewPreference,
   writeDocumentTheme,
 } from "./document-theme";
+import { navigate, parseRoute, type WorkspaceSidebarView } from "./app-routing";
 
 type View =
   | { kind: "loading" }
@@ -278,70 +279,6 @@ function useDiffViewPreference(
     [username],
   );
   return [preference, setPreference];
-}
-
-// URL ↔ view kind mapping. File-open state lives inside WorkspaceView for now;
-// workspace switching and the workspaces list participate in browser history.
-type RoutePath =
-  | { kind: "workspaces" }
-  | {
-      kind: "workspace";
-      slug: string;
-      filePath: string | null;
-      sidebarView?: WorkspaceSidebarView | null;
-      issueNumber?: number | null;
-      newIssue?: boolean;
-    };
-
-type WorkspaceSidebarView = "pages" | "inbox" | "issues" | "activity" | "outline" | "linter" | "settings";
-
-function parseRoute(): RoutePath {
-  const path = window.location.pathname;
-  const m = /^\/w\/([^/]+)(?:\/(.*))?$/.exec(path);
-  if (m) {
-    const filePath = m[2] ? decodeURIComponent(m[2]) : null;
-    const params = new URLSearchParams(window.location.search);
-    const view = params.get("view");
-    const issue = Number(params.get("issue"));
-    const sidebarView =
-      view === "inbox" ||
-      view === "issues" ||
-      view === "activity" ||
-      view === "outline" ||
-      view === "linter" ||
-      view === "settings"
-        ? view
-        : null;
-    return {
-      kind: "workspace",
-      slug: m[1],
-      filePath,
-      sidebarView,
-      issueNumber: Number.isInteger(issue) && issue > 0 ? issue : null,
-      newIssue: params.get("newIssue") === "1",
-    };
-  }
-  return { kind: "workspaces" };
-}
-
-function routeUrl(r: RoutePath): string {
-  if (r.kind === "workspaces") return "/";
-  const base = r.filePath
-    ? `/w/${r.slug}/${r.filePath.split("/").map(encodeURIComponent).join("/")}`
-    : `/w/${r.slug}`;
-  const params = new URLSearchParams();
-  if (r.sidebarView && r.sidebarView !== "pages") params.set("view", r.sidebarView);
-  if (r.issueNumber) params.set("issue", String(r.issueNumber));
-  if (r.newIssue) params.set("newIssue", "1");
-  const query = params.toString();
-  return query ? `${base}?${query}` : base;
-}
-
-function navigate(r: RoutePath, mode: "push" | "replace" = "push"): void {
-  const url = routeUrl(r);
-  if (window.location.pathname + window.location.search === url) return;
-  if (mode === "replace") window.history.replaceState(null, "", url);
-  else window.history.pushState(null, "", url);
 }
 
 export function CosheafApp(): ReactElement {
