@@ -73,6 +73,7 @@ app.route("/api/v1/w", notifications);
 app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
+const publicDir = path.resolve(process.cwd(), "public");
 const coflatEditorDistDir = path.dirname(
   requireResolve("@chaoxu/coflat-editor/style.css"),
 );
@@ -89,6 +90,11 @@ if (process.env.NODE_ENV !== "production") {
 
 app.get("/vendor/coflat-editor/*", async (c) => {
   const response = await serveCoflatEditorAsset(c.req.path);
+  return response ?? c.json({ error: "not found" }, 404);
+});
+
+app.get("/cosheaf-web.css", async (c) => {
+  const response = await servePublicOrDistFile(c.req.path);
   return response ?? c.json({ error: "not found" }, 404);
 });
 
@@ -117,6 +123,15 @@ async function serveDistFile(requestPath: string): Promise<Response | null> {
   if (!resolvedPath) return null;
   const body = await readFile(resolvedPath);
   return new Response(body, { headers: { "content-type": contentType(resolvedPath) } });
+}
+
+async function servePublicOrDistFile(requestPath: string): Promise<Response | null> {
+  const publicPath = resolveStaticPath(publicDir, requestPath);
+  if (publicPath) {
+    const body = await readFile(publicPath);
+    return new Response(body, { headers: { "content-type": contentType(publicPath) } });
+  }
+  return serveDistFile(requestPath);
 }
 
 async function serveCoflatEditorAsset(requestPath: string): Promise<Response | null> {
@@ -166,6 +181,25 @@ function resolveDistPath(requestPath: string): string | null {
   }
   if (stat.isDirectory()) filePath = path.join(filePath, "index.html");
   return filePath;
+}
+
+function resolveStaticPath(root: string, requestPath: string): string | null {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(requestPath);
+  } catch (_error) {
+    return null;
+  }
+  const relativePath = decodedPath.replace(/^\/+/, "");
+  if (!relativePath || relativePath.split(/[\\/]/).includes("..")) return null;
+  const filePath = path.resolve(root, relativePath);
+  if (filePath !== root && !filePath.startsWith(`${root}${path.sep}`)) return null;
+  try {
+    const stat = statSync(filePath);
+    return stat.isFile() ? filePath : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function contentType(filePath: string): string {

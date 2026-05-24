@@ -369,6 +369,32 @@ pnpm test                 # vitest
 pnpm build                # vite build
 ```
 
+## DevX quick map
+
+Use `docs/DEVX.md` when you need the shortest path to a route owner,
+verification command, browser login-state helper, or Jupiter release command.
+
+Fast gates:
+
+- `pnpm check:local` — static checks, unit tests, and production build.
+- `pnpm check:web` — server-rendered web end-to-end flow; requires `pnpm dev:all`.
+- `pnpm check:web:settings` — focused account/project settings E2E; requires `pnpm dev:all`.
+- `pnpm dev:login-state` — writes `.playwright/cosheaf-chao-state.json` for local manual browser scripts; requires `pnpm dev:all`.
+
+Route owner map:
+
+- `server/routes/web.ts` — server-rendered web routes and HTML fragments.
+- `server/routes/web-shell.ts` — shared page shell, global header, and Vite island asset tags.
+- `public/cosheaf-web.css` — server-rendered web CSS.
+- `server/index.ts` — static assets, Vite/dev asset proxy, ownerless repo rewrite, and route mounting.
+- `src/cosheaf/web-editor.tsx` — page editor island.
+- `src/cosheaf/app.tsx` — legacy SPA shell.
+- `server/routes/files.ts` — typed file/tree/search/backlink API.
+- `server/routes/pulls.ts` — typed pull/review/merge API.
+- `server/routes/issues.ts` — typed issue/comment/timeline/activity API.
+- `server/activity-feed.ts` — activity normalization and noisy edit-branch collapse.
+- `shared/issues.ts` — shared issue/activity DTOs.
+
 ## DevX and automation conventions
 
 - Use Commander for CLI argument parsing. Do not add new hand-rolled
