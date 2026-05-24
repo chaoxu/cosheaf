@@ -82,17 +82,18 @@ test.describe.serial("Issues", () => {
     await page.getByTestId("new-issue-body").fill("To be referenced.");
     await page.getByTestId("new-issue-submit").click();
     await expect(page.getByTestId("issue-view")).toBeVisible();
-
     await page.getByTestId("sidebar-tab-inbox").click();
+    const targetRow = page.locator('li [data-testid^="issue-"]').filter({ hasText: "Target issue" }).first();
+    await expect(targetRow).toBeVisible({ timeout: 8000 });
+    const targetIssueNumber = (await targetRow.getAttribute("data-testid"))?.match(/^issue-(\d+)$/)?.[1];
+    expect(targetIssueNumber).toBeTruthy();
+
     await page.getByTestId("new-issue").click();
     await page.getByTestId("new-issue-title").fill("Source issue");
-    // Reference issue #1 (the first one seeded by globalSetup is #1; the
-    // ones we just opened are #2, #3 — we reference #2 which is "Target".
-    // Use #2 explicitly since title search will narrow.
-    await page.getByTestId("new-issue-body").fill("Closes #2 — fixes the proof.");
+    await page.getByTestId("new-issue-body").fill(`Closes #${targetIssueNumber} — fixes the proof.`);
     await page.getByTestId("new-issue-submit").click();
     await expect(page.getByTestId("issue-view")).toBeVisible();
-    await expect(page.getByTestId("ref-num-2")).toBeVisible();
+    await expect(page.getByTestId(`ref-num-${targetIssueNumber}`)).toBeVisible();
 
     // Search narrows the inbox to titles matching the query.
     await page.getByTestId("sidebar-tab-inbox").click();
