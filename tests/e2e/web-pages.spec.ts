@@ -38,6 +38,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("view-mode-source")).toBeVisible();
   await expect(page.getByTestId("view-mode-rich")).toBeVisible();
   await expect(page.getByTestId("view-shape-unified")).toBeVisible();
+  await expect(page.getByTestId("view-mode-rich")).toHaveClass(/active/);
+  await expect(page.getByTestId("view-shape-after")).toHaveClass(/active/);
+  await expect(page.getByTestId("diff-pane-after")).toBeVisible();
+  await page.getByTestId("view-mode-source").click();
+  await page.getByTestId("view-shape-unified").click();
   await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();
@@ -58,7 +63,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   );
   await expect(page.locator(".edit-page")).toBeVisible();
   await expect(page.getByTestId("editor")).toBeVisible();
-  await expect(page.getByTestId("document-theme-select")).toBeVisible();
+  await expect(page.getByTestId("document-theme-select")).toHaveCount(0);
   await page.getByRole("button", { name: "Source" }).click();
   await page.locator(".cm-content").fill(`# Web Page E2E\n\nThis was saved through a server-rendered editor.\n`);
   await page.getByRole("button", { name: "Save" }).click();

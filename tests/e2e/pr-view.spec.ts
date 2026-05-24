@@ -12,6 +12,9 @@ test.describe.serial("PR review surface", () => {
     await expect(page.getByTestId("statusbar")).not.toContainText("Rich");
     await expect(page.getByTestId("statusbar")).not.toContainText("Save");
     await expect(page.getByTestId("document-theme-select")).toHaveCount(0);
+    await expect(page.getByTestId("view-mode-rich")).toHaveClass(/font-medium/);
+    await expect(page.getByTestId("view-shape-after")).toHaveClass(/font-medium/);
+    await expect(page.getByTestId("diff-pane-after")).toBeVisible();
 
     // Walk the five reachable (mode, shape) combinations.
     const combos: Array<{ mode: "source" | "rich"; shape: "unified" | "split" | "after"; testId: string }> = [

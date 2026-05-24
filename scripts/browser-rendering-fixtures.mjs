@@ -82,7 +82,10 @@ try {
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
   await page.getByRole("link", { name: "Files changed" }).click();
-  await page.getByTestId("view-mode-rich").click();
+  await page.getByTestId("diff-pane-after").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByTestId("view-mode-rich").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByTestId("view-shape-after").waitFor({ state: "visible", timeout: 10000 });
+  await page.getByTestId("view-shape-split").click();
   await page.getByTestId("diff-pane-split").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("This is the default development page").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("This branch version of the Flushing Coin hello page").waitFor({ state: "visible", timeout: 10000 });

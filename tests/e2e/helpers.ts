@@ -43,14 +43,7 @@ export async function openReview(page: Page, expectMarker = "Pythagoras") {
   await demo.waitFor({ state: "visible" });
   await demo.click();
   await page.getByTestId("pr-header").waitFor({ state: "visible" });
-  // Default mode/shape lands on Source + Unified.
-  await page.getByTestId("view-mode-source").click();
-  await page.getByTestId("view-shape-unified").click();
-  await page.getByTestId("diff-pane-unified").waitFor({ state: "visible" });
-  await page
-    .locator(`[data-testid="diff-pane-unified"] >> text=${expectMarker}`)
-    .first()
-    .waitFor({ timeout: 8000 });
+  await page.locator(`text=${expectMarker}`).first().waitFor({ timeout: 8000 });
 }
 
 export async function authedApiFetch(

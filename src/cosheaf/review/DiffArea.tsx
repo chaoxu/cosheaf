@@ -62,7 +62,7 @@ export function DiffArea({
   // If the active combination became invalid (e.g. user switched mode and
   // landed on Rich+Unified), nudge the shape to a valid one.
   useEffect(() => {
-    if (isDisabled(mode, shape)) setShape("split");
+    if (isDisabled(mode, shape)) setShape("after");
     if (!richAvailable && mode === "rich") setMode("source");
   }, [mode, shape, richAvailable]);
 
@@ -175,10 +175,10 @@ function renderView(mode: ViewMode, shape: ViewShape, props: DiffRendererProps):
 
 function readMode(key: string): ViewMode {
   const v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  return v === "source" || v === "rich" ? v : "source";
+  return v === "source" || v === "rich" ? v : "rich";
 }
 
 function readShape(key: string): ViewShape {
   const v = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
-  return v === "unified" || v === "split" || v === "after" ? v : "unified";
+  return v === "unified" || v === "split" || v === "after" ? v : "after";
 }

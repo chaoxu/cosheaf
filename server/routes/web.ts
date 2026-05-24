@@ -819,12 +819,12 @@ interface PrFileVersions {
 }
 
 function parseDiffMode(value: string | undefined): DiffMode {
-  return value === "rich" ? "rich" : "source";
+  return value === "source" ? "source" : "rich";
 }
 
 function parseDiffShape(value: string | undefined, mode: DiffMode): DiffShape {
-  const shape = value === "split" || value === "after" ? value : "unified";
-  return mode === "rich" && shape === "unified" ? "split" : shape;
+  const shape = value === "unified" || value === "split" || value === "after" ? value : "after";
+  return mode === "rich" && shape === "unified" ? "after" : shape;
 }
 
 async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, filePath: string): Promise<PrFileVersions> {
