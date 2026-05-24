@@ -90,6 +90,9 @@ export interface ActivityRow {
   ref_index: number | null;
   ref_name: string | null;
   comment_body: string | null;
+  commit_sha: string | null;
+  commit_message: string | null;
+  repeat_count: number;
   created_at: number;
 }
 

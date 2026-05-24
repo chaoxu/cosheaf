@@ -15,6 +15,7 @@ data/
 .claude/worktrees/
 .playwright-mcp/
 .playwright-cli/
+.playwright/
 output/
 __pycache__/
 test-results/
