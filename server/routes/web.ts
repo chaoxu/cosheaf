@@ -91,7 +91,7 @@ web.get("/", async (c) => {
             ${repos
               .map(
                 (repo) => `
-                  <a class="list-row" href="/${encodeURIComponent(config.forgejoOwner)}/${encodeURIComponent(repo.name)}">
+                  <a class="list-row" href="${repoHref(config.forgejoOwner, repo.name)}">
                     <strong>${escapeHtml(repo.name)}</strong>
                     <span>${escapeHtml(repo.description ?? "")}</span>
                     <small>${escapeHtml(repo.role)}</small>
@@ -1529,7 +1529,6 @@ function repoPage(opts: {
       <main class="repo-page">
         <header class="repo-header">
           <div>
-            <a class="owner" href="/"> ${escapeHtml(opts.owner)}</a>
             <h1><a href="${repoHref(opts.owner, opts.repo)}">${escapeHtml(opts.repo)}</a></h1>
           </div>
           <span class="role">${escapeHtml(opts.ws.role)}</span>
@@ -1823,14 +1822,16 @@ function editBranchFor(username: string, requested: string | null | undefined): 
   return trimmed && trimmed !== "main" ? trimmed : `user/${username}/web-edit`;
 }
 
-function repoHref(owner: string, repo: string, suffix = ""): string {
-  return `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
+function repoHref(_owner: string, repo: string, suffix = ""): string {
+  return `/${encodeURIComponent(repo)}${suffix}`;
 }
 
 function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {
-  const prefix = repoHref(owner, repo, suffix);
   const path = c.req.path;
-  return path.startsWith(prefix) ? decodePathPart(path.slice(prefix.length)) : "";
+  const canonicalPrefix = repoHref(owner, repo, suffix);
+  if (path.startsWith(canonicalPrefix)) return decodePathPart(path.slice(canonicalPrefix.length));
+  const internalPrefix = `/${encodeURIComponent(owner)}${canonicalPrefix}`;
+  return path.startsWith(internalPrefix) ? decodePathPart(path.slice(internalPrefix.length)) : "";
 }
 
 function decodePathPart(value: string): string {

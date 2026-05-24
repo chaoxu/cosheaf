@@ -33,6 +33,9 @@ app.use("*", async (c, next) => {
   c.set("config", config);
   c.set("fjAdmin", fjAdmin);
   c.set("sse", sse);
+  const rewrite = ownerlessRepoRewrite(c.req.raw);
+  if (rewrite.kind === "redirect") return c.redirect(rewrite.location, rewrite.status);
+  if (rewrite.kind === "forward") return app.fetch(rewrite.request);
   await next();
 });
 
@@ -191,6 +194,51 @@ function contentType(filePath: string): string {
 
 function requireResolve(id: string): string {
   return fileURLToPath(import.meta.resolve(id));
+}
+
+function ownerlessRepoRewrite(request: Request):
+  | { kind: "none" }
+  | { kind: "redirect"; location: string; status: 307 | 308 }
+  | { kind: "forward"; request: Request } {
+  const url = new URL(request.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  const [first, second] = parts;
+  if (!first || first === "login" || first === "logout" || first === "assets" || first === "api") return { kind: "none" };
+
+  const internalRewrite = request.headers.get("x-cosheaf-internal-owner-rewrite");
+  if (first === config.forgejoOwner && second && !internalRewrite) {
+    return {
+      kind: "redirect",
+      location: `/${parts.slice(1).map(encodeURIComponent).join("/")}${url.search}`,
+      status: request.method === "GET" ? 308 : 307,
+    };
+  }
+
+  if (first !== config.forgejoOwner && !internalRewrite && isOwnerlessRepoPath(parts)) {
+    const internalUrl = new URL(request.url);
+    internalUrl.pathname = `/${encodeURIComponent(config.forgejoOwner)}${url.pathname}`;
+    const headers = new Headers(request.headers);
+    headers.set("x-cosheaf-internal-owner-rewrite", "1");
+    return { kind: "forward", request: cloneForUrl(request, internalUrl, headers) };
+  }
+
+  return { kind: "none" };
+}
+
+function isOwnerlessRepoPath(parts: readonly string[]): boolean {
+  if (parts.length === 1) return true;
+  return ["_edit", "activity", "branches", "commits", "issues", "pulls", "raw", "settings", "src"].includes(parts[1] ?? "");
+}
+
+function cloneForUrl(request: Request, url: URL, headers: Headers): Request {
+  if (request.method === "GET" || request.method === "HEAD") {
+    return new Request(url, { headers, method: request.method });
+  }
+  return new Request(url, {
+    body: request.body,
+    headers,
+    method: request.method,
+  });
 }
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
