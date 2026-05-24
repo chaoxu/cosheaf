@@ -56,8 +56,8 @@ test.describe.serial("PR review surface", () => {
     await expect(composer).toBeHidden({ timeout: 5000 });
 
     // Edit own.
-    await page.waitForTimeout(800);
     const editButtons = page.locator('[data-testid^="comment-edit-"]');
+    await expect(editButtons.first()).toBeVisible({ timeout: 5000 });
     expect(await editButtons.count()).toBeGreaterThan(0);
     await editButtons.first().click();
     const cid = (await editButtons.first().getAttribute("data-testid"))?.split("-").pop();

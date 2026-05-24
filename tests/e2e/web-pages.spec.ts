@@ -73,6 +73,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("view-mode-source").click();
   await page.getByTestId("view-shape-unified").click();
   await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();
   await expect(page.locator(".line-composer summary").first()).toBeVisible();
@@ -81,6 +82,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".line-composer summary").first()).toBeVisible();
   await page.getByTestId("view-mode-rich").click();
   await expect(page).toHaveURL(/mode=rich/);
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
   await expect(page.getByTestId("view-shape-unified")).toHaveClass(/disabled/);
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();

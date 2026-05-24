@@ -25,7 +25,7 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
-    sourcemap: true,
+    sourcemap: process.env.COSHEAF_SOURCEMAP === "1",
     manifest: true,
     rollupOptions: {
       input: {

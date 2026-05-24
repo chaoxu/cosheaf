@@ -30,6 +30,7 @@ import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import { setWorkspaceMember } from "../workspace-members.js";
+import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
@@ -208,7 +209,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       active: "files",
       user,
       ws,
-      readerAssets: true,
+      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <div class="file-toolbar">
           <div>
@@ -372,7 +373,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
       active: "issues",
       user: ctx.user,
       ws: ctx.ws,
-      readerAssets: true,
+      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <article class="thread">
           <header class="thread-header">
@@ -475,7 +476,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
       active: "pulls",
       user: ctx.user,
       ws: ctx.ws,
-      readerAssets: true,
+      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <article class="thread">
           <header class="thread-header">
@@ -559,7 +560,9 @@ web.post("/:owner/:repo/pulls/:number/merge", async (c) => {
   await mergePullWithRetry(() =>
     ctx.fj.mergePull(ctx.owner, ctx.repo, pull.number, { Do: "squash" }),
   );
-  await deleteBranchQuietly(ctx, pull.head.ref);
+  if (pull.head.ref && pull.head.ref !== "main") {
+    await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, pull.head.ref);
+  }
   invalidateRepoTrees(ctx.owner, ctx.repo);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 });
@@ -587,7 +590,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
       active: "pulls",
       user: ctx.user,
       ws: ctx.ws,
-      readerAssets: true,
+      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && mode === "rich",
       body: `
         <header class="thread-header">
           <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
@@ -1444,11 +1447,6 @@ function reviewStateLabel(state: string): string {
 
 function splitDiffByFile(diff: string): Map<string, string> {
   return new Map(splitUnifiedDiff(diff).map((file) => [file.path, file.patch]));
-}
-
-async function deleteBranchQuietly(ctx: WebCtx, branch: string): Promise<void> {
-  if (!branch || branch === "main") return;
-  await ctx.fj.deleteBranch(ctx.owner, ctx.repo, branch).catch(() => undefined);
 }
 
 function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): string {
