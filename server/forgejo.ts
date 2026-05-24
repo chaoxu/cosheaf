@@ -507,6 +507,10 @@ export class Forgejo {
     return this.req<ForgejoCommit[]>(this.repoPath(owner, repo, `pulls/${index}/commits`));
   }
 
+  async getCommit(owner: string, repo: string, sha: string): Promise<ForgejoCommit> {
+    return this.req<ForgejoCommit>(this.repoPath(owner, repo, `git/commits/${encodeURIComponent(sha)}`));
+  }
+
   async getPullDiff(owner: string, repo: string, index: number): Promise<string> {
     return this.req<string>(this.repoPath(owner, repo, `pulls/${index}.diff`), { raw: true });
   }

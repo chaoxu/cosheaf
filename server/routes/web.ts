@@ -12,6 +12,7 @@ import { AUTH_COOKIE, invalidateWorkspacePermissionCache, resolveAuth } from "..
 import { Forgejo, ForgejoError, mergePullWithRetry, type ForgejoPull } from "../forgejo.js";
 import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
 import type {
+  ForgejoActivity,
   ForgejoCommit,
   ForgejoIssue,
   ForgejoIssueComment,
@@ -650,9 +651,42 @@ web.get("/:owner/:repo/activity", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       body: `<div class="page-title compact"><h1>Activity</h1></div>
-        <div class="list">${activities
-          .map((a) => `<div class="list-row"><strong>${escapeHtml(a.act_user?.login ?? "system")}</strong><span>${escapeHtml(a.op_type)} - ${formatDate(a.created)}</span></div>`)
-          .join("") || `<div class="empty">No activity.</div>`}</div>`,
+        ${activityList(ctx, activities)}`,
+    }),
+  );
+});
+
+web.get("/:owner/:repo/commits/:sha", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const sha = c.req.param("sha");
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
+  const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch((err) => {
+    if (err instanceof ForgejoError && err.status === 404) return null;
+    throw err;
+  });
+  if (!commit) return notFoundPage(ctx.user, "Commit not found");
+  return htmlResponse(
+    repoPage({
+      title: `${commit.sha.slice(0, 10)} - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "activity",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: `
+        <div class="page-title compact">
+          <div>
+            <p class="eyebrow">Commit</p>
+            <h1>${escapeHtml(commit.sha.slice(0, 10))}</h1>
+          </div>
+        </div>
+        <div class="commit-card">
+          <pre>${escapeHtml(commit.commit.message.trim() || "(no commit message)")}</pre>
+          <p>${escapeHtml(commit.commit.author?.name ?? commit.author?.login ?? "unknown")} - ${formatDate(commit.commit.author?.date)}</p>
+          <code>${escapeHtml(commit.sha)}</code>
+        </div>
+      `,
     }),
   );
 });
@@ -1625,6 +1659,125 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[]): string {
     .join("") || `<div class="empty">No pull requests.</div>`}</div>`;
 }
 
+function activityList(ctx: WebCtx, activities: ForgejoActivity[]): string {
+  return `<div class="list">${activities.map((activity) => activityRow(ctx, activity)).join("") || `<div class="empty">No activity.</div>`}</div>`;
+}
+
+function activityRow(ctx: WebCtx, activity: ForgejoActivity): string {
+  const rendered = renderActivity(ctx, activity);
+  return `<div class="list-row activity-row" data-testid="activity-row">
+    <strong>${escapeHtml(activity.act_user?.login ?? "system")}</strong>
+    <span>${rendered.summary}</span>
+    <small>${formatDate(activity.created)}</small>
+  </div>`;
+}
+
+function renderActivity(ctx: WebCtx, activity: ForgejoActivity): { summary: string } {
+  const branch = branchFromRef(activity.ref_name);
+  const content = parseActivityContent(activity.content);
+  const pr = activityPullRef(content);
+  const issue = activityIssueRef(content, activity.comment?.issue_url);
+  const commit = activityCommitRef(content);
+  const branchHtml = branch ? activityBranchHtml(ctx, branch) : "";
+  const commitHtml = commit ? activityCommitHtml(ctx, commit.sha) : "";
+  switch (activity.op_type) {
+    case "commit_repo": {
+      const message = commit?.message ? `: ${escapeHtml(firstLine(commit.message))}` : "";
+      const target = commitHtml || branchHtml;
+      return { summary: `committed${message}${target ? ` ${target}` : ""}${branchHtml && commitHtml ? ` on ${branchHtml}` : ""}` };
+    }
+    case "create_pull_request":
+      if (pr) return { summary: `opened ${activityPullHtml(ctx, pr.number)}${pr.label ? `: ${escapeHtml(pr.label)}` : ""}` };
+      return { summary: "opened a pull request" };
+    case "merge_pull_request":
+      if (pr) return { summary: `merged ${activityPullHtml(ctx, pr.number)}${pr.label ? ` from ${escapeHtml(pr.label)}` : ""}` };
+      return { summary: "merged a pull request" };
+    case "comment_pull":
+      if (pr) return { summary: `commented on ${activityPullHtml(ctx, pr.number)}` };
+      return { summary: "commented on a pull request" };
+    case "close_issue":
+      if (issue) return { summary: `closed ${activityIssueHtml(ctx, issue)}` };
+      return { summary: "closed an issue" };
+    case "reopen_issue":
+      if (issue) return { summary: `reopened ${activityIssueHtml(ctx, issue)}` };
+      return { summary: "reopened an issue" };
+    case "comment_issue":
+      if (issue) return { summary: `commented on ${activityIssueHtml(ctx, issue)}` };
+      return { summary: "commented on an issue" };
+    case "delete_branch":
+      return { summary: `deleted branch ${branch ? escapeHtml(branch) : ""}` };
+    default:
+      return { summary: `${escapeHtml(activity.op_type)}${branchHtml ? ` on ${branchHtml}` : ""}` };
+  }
+}
+
+function activityCommitHtml(ctx: WebCtx, sha: string): string {
+  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/commits/${encodeURIComponent(sha)}`)}">${escapeHtml(sha.slice(0, 10))}</a>`;
+}
+
+function activityPullHtml(ctx: WebCtx, number: number): string {
+  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}`)}">pull request #${number}</a>`;
+}
+
+function activityIssueHtml(ctx: WebCtx, number: number): string {
+  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${number}`)}">issue #${number}</a>`;
+}
+
+function activityBranchHtml(ctx: WebCtx, branch: string): string {
+  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}">${escapeHtml(branch)}</a>`;
+}
+
+function branchFromRef(ref: string | undefined): string | null {
+  if (!ref) return null;
+  return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
+}
+
+function firstLine(value: string): string {
+  return value.split(/\r?\n/, 1)[0] ?? value;
+}
+
+function parseActivityContent(content: string | undefined): unknown {
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as unknown;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function activityPullRef(value: unknown): { number: number; label: string } | null {
+  if (!Array.isArray(value) || value.length < 2 || typeof value[1] !== "string") return null;
+  const number = Number(value[0]);
+  if (!Number.isInteger(number) || number <= 0) return null;
+  return { number, label: value[1] };
+}
+
+function activityIssueRef(value: unknown, issueUrl: string | undefined): number | null {
+  if (Array.isArray(value)) {
+    const number = Number(value[0]);
+    if (Number.isInteger(number) && number > 0) return number;
+  }
+  const match = issueUrl?.match(/\/issues\/(\d+)(?:$|[#?])/);
+  if (!match) return null;
+  const number = Number(match[1]);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function activityCommitRef(value: unknown): { sha: string; message: string } | null {
+  if (!isRecord(value)) return null;
+  const commits = value.Commits;
+  if (!Array.isArray(commits)) return null;
+  for (const commit of commits) {
+    if (!isRecord(commit) || typeof commit.Sha1 !== "string") continue;
+    return { sha: commit.Sha1, message: typeof commit.Message === "string" ? commit.Message : "" };
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function htmlResponse(body: string, status = 200): Response {
   return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
@@ -1746,7 +1899,7 @@ const WEB_CSS = `
 .repo-header{display:flex;justify-content:space-between;align-items:end;gap:16px;border-bottom:1px solid var(--cf-border);padding:2px 0 6px}.repo-header h1{font-size:21px;margin:0}.owner,.eyebrow,.muted{color:var(--cf-muted)}.role,.state{border:1px solid var(--cf-border);border-radius:999px;padding:2px 8px;text-transform:uppercase;font-size:11px}.state.open{background:#f6f6f6}.state.closed{background:#eee}.state.merged{background:#e9e7ff}
 .repo-tabs,.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--cf-border);margin-bottom:8px}.repo-tabs a,.subtabs a{padding:6px 12px;color:var(--cf-muted)}.repo-tabs a.active,.subtabs a.active{color:var(--cf-fg);border-bottom:2px solid var(--cf-fg);font-weight:600}.repo-body{padding-bottom:20px}
 .page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:5px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:21px}.compact h1{font-size:19px}.toolbar-actions{display:flex;gap:8px;align-items:center}.repo-summary{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--cf-border);padding:12px 0 14px}.repo-summary h1{font-size:30px;margin:0}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));border:1px solid var(--cf-border)}.summary-grid a{padding:12px;border-left:1px solid var(--cf-border)}.summary-grid a:first-child{border-left:0}.summary-grid strong{display:block;font-size:22px}.summary-grid span{color:var(--cf-muted)}
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center}.section-title h2{font-size:16px}.section-title a{color:var(--cf-muted);font-size:13px}.list{border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.list-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:9px 12px;border-top:1px solid var(--cf-border)}.list-row:first-child{border-top:0}.list-row:hover{background:var(--cf-hover)}.list-row span,.list-row small{color:var(--cf-muted)}.empty{padding:18px;color:var(--cf-muted);border:1px solid var(--cf-border);border-radius:6px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center}.section-title h2{font-size:16px}.section-title a{color:var(--cf-muted);font-size:13px}.list{border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.list-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:9px 12px;border-top:1px solid var(--cf-border)}.list-row:first-child{border-top:0}.list-row:hover{background:var(--cf-hover)}.list-row span,.list-row small{color:var(--cf-muted)}.activity-row{grid-template-columns:160px minmax(0,1fr) auto}.inline-link{color:var(--cf-fg);text-decoration:underline;text-underline-offset:2px}.commit-card{border:1px solid var(--cf-border);border-radius:6px;padding:12px;display:grid;gap:8px}.commit-card pre{margin:0;white-space:pre-wrap;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.commit-card p{margin:0;color:var(--cf-muted)}.empty{padding:18px;color:var(--cf-muted);border:1px solid var(--cf-border);border-radius:6px}
 .document{border-top:1px solid var(--cf-border);padding:14px 0}.cf-theme-scope{--cf-content-max-width:100%;--cf-sidenote-width:0px;--cf-doc-content-padding-inline:clamp(20px,4vw,48px)}.cf-reader{max-width:none;width:100%}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:none}.thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:6px 0}.thread-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.thread-header h1{font-size:23px;margin:6px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:10px 0}.comment,.event,.timeline-event{border:0;border-top:1px solid var(--cf-border);border-radius:0;margin:0;padding:7px 0;background:transparent}.timeline-event{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.timeline-event small{margin-left:auto;color:var(--cf-muted)}.timeline-event p{flex-basis:100%;margin:2px 0 0;color:var(--cf-muted)}.comment-meta{color:var(--cf-muted);font-size:12px;border:0;padding:0;margin:0 0 3px}.comment .cf-reader,.comment .markdown-body,.timeline-event .cf-reader,.timeline-event .markdown-body{--cf-doc-content-padding-inline:0;padding:0;max-width:none;font-size:13px}.comment :where(p,ul,ol,pre,blockquote),.timeline-event :where(p,ul,ol,pre,blockquote){margin-top:3px;margin-bottom:3px}.comment :where(h1,h2,h3,h4),.timeline-event :where(h1,h2,h3,h4){margin-top:6px;margin-bottom:3px}.comment-form,.review-form{display:grid;gap:8px;margin:10px 0}.comment-form textarea,.review-form textarea{min-height:72px}
 .review-page{display:grid;gap:8px}.review-main{min-width:0}.review-bottom{display:grid;gap:8px}.review-card{border:0;border-top:1px solid var(--cf-border);border-radius:0;background:transparent;padding:8px 0}.review-card h2{font-size:13px;margin:0 0 6px}.changed-files{display:flex;gap:6px;overflow-x:auto;border:1px solid var(--cf-border);border-radius:6px;padding:6px;background:#fafafa}.changed-files a{display:flex;align-items:center;gap:8px;max-width:360px;min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:4px;background:#fff;white-space:nowrap}.changed-files a span{min-width:0;overflow:hidden;text-overflow:ellipsis}.changed-files a.active{border-color:var(--cf-fg);font-weight:600}.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted);flex:0 0 auto}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td.line-action{width:26px;text-align:center;padding-right:4px;color:var(--cf-muted);user-select:none}.source-lines td:nth-child(2){width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.line-composer{position:relative}.line-composer summary{list-style:none;width:18px;height:18px;border:1px solid var(--cf-border);border-radius:4px;background:transparent;line-height:16px;cursor:pointer}.line-composer summary::-webkit-details-marker{display:none}.line-composer form{position:absolute;z-index:3;left:20px;top:0;width:260px;display:grid;gap:6px;border:1px solid var(--cf-border);border-radius:6px;background:var(--cf-bg);padding:8px;box-shadow:0 6px 18px rgb(0 0 0 / .12)}.line-composer textarea{min-height:74px;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}.line-comment{font:13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;border:0;border-left:2px solid var(--cf-border);border-radius:0;margin:3px 0 4px;padding:4px 0 4px 8px;background:transparent}.line-comment span,.file-comment span{color:var(--cf-muted);font-size:12px;margin-left:8px}.line-comment p,.file-comment p{margin:2px 0 0;white-space:pre-wrap}.file-comments{display:grid;gap:4px}.file-comments.empty{border:0;padding:2px 0;color:var(--cf-muted)}.file-comment{border:0;border-left:2px solid var(--cf-border);border-radius:0;padding:3px 0 3px 8px;background:transparent}.file-comment.outdated,.line-comment.outdated{opacity:.72}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
 .edit-page{display:grid;gap:8px}.edit-page .file-toolbar{margin:0}.edit-titlebar h1{display:flex;align-items:center;gap:4px}.edit-titlebar h1 input{width:min(760px,70vw);border:1px solid transparent;border-radius:5px;background:transparent;color:var(--cf-fg);font:inherit;padding:1px 3px;margin-left:-3px}.edit-titlebar h1 input:focus{border-color:var(--cf-border);background:var(--cf-bg);outline:none}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:18px;max-width:560px}.settings-section{display:grid;gap:10px}.settings-section h2{font-size:16px;margin:0}

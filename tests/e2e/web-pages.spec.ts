@@ -84,4 +84,18 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("statusbar")).toContainText("saved");
   await page.goto(`${webBase}/${owner}/${repo}/src/branch/${branch}/${path}`);
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
+
+  await page.goto(`${webBase}/${owner}/${repo}/activity`);
+  await expect(page.getByTestId("activity-row").filter({ hasText: "reopened" }).first().locator('a[href$="/issues/2"]')).toBeVisible();
+  await expect
+    .poll(async () => {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      return page.getByTestId("activity-row").filter({ hasText: branch }).count();
+    })
+    .toBeGreaterThan(0);
+  const saveActivity = page.getByTestId("activity-row").filter({ hasText: branch }).first();
+  await expect(saveActivity).toBeVisible();
+  await expect(saveActivity.locator('a[href*="/commits/"]')).toBeVisible();
+  await saveActivity.locator('a[href*="/commits/"]').click();
+  await expect(page.locator(".commit-card")).toContainText("create web-page-e2e.md");
 });
