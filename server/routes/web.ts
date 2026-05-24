@@ -327,6 +327,8 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   const body = await renderMarkdown(ctx, issue.body ?? "");
   const timelineHtml = await renderIssueTimeline(ctx, comments, timeline ?? []);
+  const nextIssueState = issue.state === "open" ? "closed" : "open";
+  const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   return htmlResponse(
     repoPage({
       title: `#${issue.number} ${issue.title}`,
@@ -339,7 +341,17 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
         <article class="thread">
           <header class="thread-header">
             <span class="state ${issue.state}">${escapeHtml(issue.state)}</span>
-            <h1>${escapeHtml(issue.title)} <span>#${issue.number}</span></h1>
+            <div class="thread-title-row">
+              <h1>${escapeHtml(issue.title)} <span>#${issue.number}</span></h1>
+              ${
+                ctx.ws.role === "read"
+                  ? ""
+                  : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/state`)}">
+                       <input type="hidden" name="state" value="${nextIssueState}">
+                       <button class="button" type="submit" data-testid="issue-toggle-state">${stateActionLabel}</button>
+                     </form>`
+              }
+            </div>
             <p>by ${escapeHtml(issue.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(issue.created_at)}</p>
           </header>
           <div class="issue-document">
@@ -368,6 +380,19 @@ web.post("/:owner/:repo/issues/:number/comments", async (c) => {
   const body = stringField((await c.req.parseBody()).body);
   if (number && body) await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number ?? ""}`));
+});
+
+web.post("/:owner/:repo/issues/:number/state", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const state = stringField((await c.req.parseBody()).state);
+  if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
+  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { state });
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: state === "closed" ? "closed" : "reopened" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 });
 
 web.get("/:owner/:repo/pulls", async (c) => {

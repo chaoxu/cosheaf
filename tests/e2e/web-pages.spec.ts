@@ -29,6 +29,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
   await page.locator('.list-row[href*="/issues/"]').first().click();
   await expect(page.locator(".thread-header")).toContainText("#");
+  await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
+  await page.getByTestId("issue-toggle-state").click();
+  await expect(page.getByTestId("issue-toggle-state")).toHaveText("Reopen");
+  await page.getByTestId("issue-toggle-state").click();
+  await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
   await expect(page.locator(".comment-form")).toBeVisible();
 
   await page.goto(`${webBase}/${owner}/${repo}/pulls`);
