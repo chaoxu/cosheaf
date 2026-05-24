@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import type Database from "better-sqlite3";
+import { posix as pathPosix } from "node:path";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { COFLAT_FORMAT_ID, documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
 import type { Role } from "../../shared/roles.js";
@@ -170,7 +171,10 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
     throw err;
   });
   if (content === null) return notFoundPage(user, "File not found");
-  const rendered = await renderMarkdown(ctx, content);
+  if (!rel.endsWith(".md")) {
+    return new Response(content, { headers: { "content-type": contentTypeForPath(rel) } });
+  }
+  const rendered = await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel });
   return htmlResponse(
     repoPage({
       title: `${rel} - ${repo}`,
@@ -679,13 +683,34 @@ async function resolveBranchPath(
   return null;
 }
 
-async function renderMarkdown(ctx: WebCtx, source: string): Promise<string> {
+async function renderMarkdown(
+  ctx: WebCtx,
+  source: string,
+  opts: { branch?: string; documentPath?: string } = {},
+): Promise<string> {
   const { body } = parseFrontmatterYaml(source);
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
     const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
-    return renderToHtml(body).html;
+    return renderToHtml(body, {
+      linkResolver: {
+        resolve: (href: string) => {
+          const resolved = resolveRepoLink(ctx, href, opts.branch ?? "main", opts.documentPath ?? "");
+          return resolved ? { href: resolved } : null;
+        },
+      },
+    }).html;
   }
   return ctx.fj.renderMarkdown(ctx.owner, ctx.repo, body);
+}
+
+function resolveRepoLink(ctx: WebCtx, href: string, branch: string, documentPath: string): string | null {
+  const clean = href.trim();
+  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) return null;
+  const [withoutHash, hash = ""] = clean.split("#", 2);
+  const baseDir = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/")) : "";
+  const rel = safeRel(pathPosix.normalize(pathPosix.join(baseDir, withoutHash)));
+  if (!rel) return null;
+  return `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
@@ -940,6 +965,29 @@ function formatDate(value: string | number | null | undefined): string {
   if (!value) return "";
   const date = typeof value === "number" ? new Date(value) : new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function contentTypeForPath(filePath: string): string {
+  const ext = filePath.toLowerCase().split(".").pop();
+  switch (ext) {
+    case "svg":
+      return "image/svg+xml";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "css":
+      return "text/css; charset=utf-8";
+    case "js":
+      return "text/javascript; charset=utf-8";
+    default:
+      return "text/plain; charset=utf-8";
+  }
 }
 
 const WEB_CSS = `

@@ -1,7 +1,7 @@
-// Headless browser smoke test for the cosheaf frontend.
+// Headless browser smoke test for the primary server-rendered web UI.
 // Usage: node scripts/browser-smoke.mjs
 //
-// Logs in, opens a workspace/page, captures the rendered editor state +
+// Logs in, opens a workspace/page, captures the rendered document state +
 // screenshot, and prints page errors. Defaults match `pnpm setup:dev`.
 
 import path from "node:path";
@@ -19,12 +19,13 @@ if (!playwrightPath) {
 }
 const { chromium } = (await import(playwrightPath)).default;
 
-const URL = process.env.URL ?? "http://localhost:5173/";
+const APP_URL = process.env.URL ?? "http://localhost:5173/";
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const WORKSPACE = process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
 const PAGE = process.env.COSHEAF_SMOKE_PAGE ?? "Hello";
 const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md";
 
@@ -40,7 +41,7 @@ page.on("console", async (msg) => {
 });
 page.on("pageerror", (err) => pageErrors.push(`${err.name}: ${err.message}\n${err.stack ?? ""}`));
 
-await page.goto(URL, { waitUntil: "networkidle" });
+await page.goto(APP_URL, { waitUntil: "networkidle" });
 
 // Login if presented.
 if (await page.locator('text=username').count() > 0) {
@@ -48,17 +49,14 @@ if (await page.locator('text=username').count() > 0) {
   await inputs.nth(0).fill(USERNAME);
   await inputs.nth(1).fill(PASSWORD);
   await page.locator('button:has-text("Sign in")').click();
-  await page.waitForSelector("aside", { timeout: 5000 }).catch(() => {});
+  await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 }).catch(() => {});
 }
 
-// Click into the seeded workspace.
-await page.getByTestId(`workspace-${WORKSPACE_SLUG}`).click();
-await page.waitForSelector("aside", { timeout: 5000 }).catch(() => {});
-await page.waitForTimeout(500);
-
 // Open the seeded page.
-await page.getByTestId(`file-${PAGE_PATH}`).click();
-await page.waitForTimeout(2000);
+const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, APP_URL).toString();
+await page.goto(fileUrl, { waitUntil: "networkidle" });
+await page.getByRole("heading", { name: PAGE_PATH }).waitFor({ state: "visible", timeout: 10000 });
+await page.getByText(PAGE).first().waitFor({ state: "visible", timeout: 10000 });
 
 const sizes = await page.evaluate(() => {
   const get = (sel) => {
@@ -68,19 +66,16 @@ const sizes = await page.evaluate(() => {
     return { w: Math.round(r.width), h: Math.round(r.height) };
   };
   return {
-    "cm-host": get(".cm-host"),
-    "cm-editor": get(".cm-editor"),
-    "cm-content": get(".cm-content"),
+    document: get(".document"),
+    reader: get(".cf-reader"),
     main: get("main"),
-    aside: get("aside"),
-    statusbar: get("[data-statusbar]"),
   };
 });
 
-const editorText = await page.locator(".cm-content").first().innerText().catch(() => "");
+const documentText = await page.locator(".document").first().innerText().catch(() => "");
 await page.screenshot({ path: SCREENSHOT, fullPage: false });
 
-const ok = pageErrors.length === 0 && sizes["cm-content"] && editorText.length > 0;
+const ok = pageErrors.length === 0 && sizes.document && documentText.length > 0;
 
 console.log(JSON.stringify({
   ok,
@@ -89,7 +84,7 @@ console.log(JSON.stringify({
   page: PAGE,
   pagePath: PAGE_PATH,
   sizes,
-  editorTextPreview: editorText.slice(0, 300),
+  documentTextPreview: documentText.slice(0, 300),
   consoleSample: consoleMessages.slice(-10),
   pageErrors,
   screenshot: SCREENSHOT,

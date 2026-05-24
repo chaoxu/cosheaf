@@ -8,8 +8,8 @@ const APP_URL = process.env.URL ?? "http://localhost:5173/";
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-issues-nav.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
+const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
-const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md";
 const VIEWPORT = { width: 1280, height: 800 };
 
 const browser = await chromium.launch({ headless: true });
@@ -34,7 +34,7 @@ async function ensureSignedIn() {
     await inputs.nth(1).fill(PASSWORD);
     await signIn.click();
   }
-  await page.getByTestId(`workspace-${WORKSPACE_SLUG}`).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByRole("link", { name: new RegExp(`^${WORKSPACE_SLUG}\\b`) }).waitFor({ state: "visible", timeout: 10000 });
 }
 
 try {
@@ -51,45 +51,34 @@ try {
     if (frame === page.mainFrame()) navigations.push(frame.url());
   });
 
-  targetFileUrl = new URL(`/w/${WORKSPACE_SLUG}/${PAGE_PATH}`, APP_URL).toString();
+  targetFileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, APP_URL).toString();
   await page.goto(targetFileUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForURL(`**/w/${WORKSPACE_SLUG}/${PAGE_PATH}`, { timeout: 8000 });
-  await page.locator(".cm-content").first().waitFor({ state: "visible", timeout: 12000 });
-
-  await page.getByTestId("sidebar-tab-issues").click();
-  await page.waitForURL(`**/w/${WORKSPACE_SLUG}/${PAGE_PATH}?view=issues`, { timeout: 8000 });
-
-  const firstIssue = page.locator('[data-testid^="issue-"]').first();
-  const hasIssue = await firstIssue.waitFor({ state: "visible", timeout: 5000 }).then(() => true, () => false);
-  if (!hasIssue) {
-    await page.getByTestId("new-issue").click();
-    await page.getByTestId("new-issue-title").fill(`Issue nav smoke ${Date.now()}`);
-    await page.getByTestId("new-issue-submit").click();
-  } else {
-    await firstIssue.click();
-  }
-  await page.waitForURL(/issue=\d+/, { timeout: 10000 });
-  await page.getByTestId("issue-view").waitFor({ state: "visible", timeout: 8000 });
+  await page.getByRole("heading", { name: "Issues" }).waitFor({ state: "visible", timeout: 10000 });
+  const firstIssue = page.locator(".list-row").first();
+  await firstIssue.waitFor({ state: "visible", timeout: 10000 });
+  await firstIssue.click();
+  await page.waitForURL(new RegExp(`/${OWNER}/${WORKSPACE_SLUG}/issues/\\d+$`), { timeout: 10000 });
+  await page.locator(".thread").waitFor({ state: "visible", timeout: 8000 });
   const issueUrl = page.url();
 
   await page.goBack({ waitUntil: "domcontentloaded" });
-  await page.locator(".cm-content").first().waitFor({ state: "visible", timeout: 12000 });
+  await page.getByRole("heading", { name: "Issues" }).waitFor({ state: "visible", timeout: 12000 });
   const backUrl = page.url();
-  const status = await page.getByTestId("statusbar").innerText().catch(() => "");
+  const issueCount = await page.locator(".list-row").count();
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok =
     pageErrors.length === 0 &&
     badResponses.length === 0 &&
-    issueUrl.includes("issue=") &&
-    backUrl.includes(`/${PAGE_PATH}?view=issues`) &&
-    status.includes(PAGE_PATH);
+    /\/issues\/\d+$/.test(new URL(issueUrl).pathname) &&
+    new URL(backUrl).pathname.endsWith(`/${WORKSPACE_SLUG}/issues`) &&
+    issueCount > 0;
 
   console.log(JSON.stringify({
     ok,
     issueUrl,
     backUrl,
-    status,
+    issueCount,
     consoleSample: consoleMessages.slice(-10),
     badResponses,
     pageErrors,
