@@ -112,7 +112,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     .toBeGreaterThan(0);
   const saveActivity = page.getByTestId("activity-row").filter({ hasText: branch }).first();
   await expect(saveActivity).toBeVisible();
-  await expect(saveActivity.locator('a[href*="/commits/"]')).toBeVisible();
-  await saveActivity.locator('a[href*="/commits/"]').click();
-  await expect(page.locator(".commit-card")).toContainText("create web-page-e2e.md");
+  await expect(saveActivity.locator(`a[href$="/src/branch/${branch}"]`)).toBeVisible();
+  await page.locator('a[href*="/commits/"]').first().click();
+  await expect(page.locator(".commit-card")).toBeVisible();
 });

@@ -33,6 +33,7 @@ import { setWorkspaceMember } from "../workspace-members.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
+import { splitUnifiedDiff } from "../diff-splitter.js";
 
 export const web = new Hono<AppEnv>();
 
@@ -207,6 +208,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       active: "files",
       user,
       ws,
+      readerAssets: true,
       body: `
         <div class="file-toolbar">
           <div>
@@ -370,6 +372,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
       active: "issues",
       user: ctx.user,
       ws: ctx.ws,
+      readerAssets: true,
       body: `
         <article class="thread">
           <header class="thread-header">
@@ -472,6 +475,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
       active: "pulls",
       user: ctx.user,
       ws: ctx.ws,
+      readerAssets: true,
       body: `
         <article class="thread">
           <header class="thread-header">
@@ -583,6 +587,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
       active: "pulls",
       user: ctx.user,
       ws: ctx.ws,
+      readerAssets: true,
       body: `
         <header class="thread-header">
           <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
@@ -1438,15 +1443,7 @@ function reviewStateLabel(state: string): string {
 }
 
 function splitDiffByFile(diff: string): Map<string, string> {
-  const sections = new Map<string, string>();
-  const chunks = diff.split(/^diff --git /m).filter(Boolean);
-  for (const chunk of chunks) {
-    const text = `diff --git ${chunk}`;
-    const first = text.split("\n", 1)[0] ?? "";
-    const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(first);
-    if (match) sections.set(match[2], text);
-  }
-  return sections;
+  return new Map(splitUnifiedDiff(diff).map((file) => [file.path, file.patch]));
 }
 
 async function deleteBranchQuietly(ctx: WebCtx, branch: string): Promise<void> {
@@ -1495,10 +1492,12 @@ function repoPage(opts: {
   user: string;
   ws: WorkspaceContext;
   body: string;
+  readerAssets?: boolean;
 }): string {
   return pageShell({
     title: opts.title,
     user: opts.user,
+    readerAssets: opts.readerAssets,
     body: `
       ${globalHeader(opts.user)}
       <main class="repo-page">

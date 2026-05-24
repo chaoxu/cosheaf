@@ -26,8 +26,12 @@ test("account preferences are separate from project settings", async ({ page }) 
 
   await page.goto(`${repoBase}/settings`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Settings");
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
   await expect(page.getByTestId("settings-user-preferences")).toHaveCount(0);
   await expect(page.locator(".repo-body")).toContainText("Review policy");
   await expect(page.locator(".repo-body")).toContainText("Access");
   await expect(page.getByTestId("settings-access")).toBeVisible();
+
+  await page.goto(`${repoBase}/src/branch/main/hello.md`);
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
 });

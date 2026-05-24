@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-export function pageShell(opts: { title: string; user?: string; body: string }): string {
+export function pageShell(opts: { title: string; user?: string; body: string; readerAssets?: boolean }): string {
   return `<!doctype html>
     <html lang="en">
       <head>
@@ -10,7 +10,7 @@ export function pageShell(opts: { title: string; user?: string; body: string }):
         <title>${escapeHtml(opts.title)} - Cosheaf</title>
         <link rel="stylesheet" href="/vendor/coflat-editor/editor.css">
         <link rel="stylesheet" href="/vendor/coflat-editor/themes/blueprint-book.css">
-        ${webReaderAssets()}
+        ${opts.readerAssets ? webReaderAssets() : ""}
         <link rel="stylesheet" href="/cosheaf-web.css">
       </head>
       <body data-cosheaf-user="${escapeAttr(opts.user ?? "")}">${opts.body}</body>
