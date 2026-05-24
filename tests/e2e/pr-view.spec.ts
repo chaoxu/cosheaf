@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { loginAs, openReview } from "./helpers";
+import { createModifiedPrAsMeri, loginAs, openReview } from "./helpers";
 
 // One serial flow: walking the PR review surface as vera, then as meri
 // (author, restricted), verifying every visible affordance.
@@ -122,5 +122,27 @@ test.describe.serial("PR review surface", () => {
     await expect(page.getByTestId("review-comment")).toBeDisabled();
     await expect(page.locator('[data-testid^="comment-add-"]')).toHaveCount(0);
     await expect(page.locator('[data-testid^="comment-edit-"]')).toHaveCount(0);
+  });
+
+  test("source side-by-side uses source diff CSS without omit guides", async ({ page }) => {
+    const { title } = await createModifiedPrAsMeri(page);
+
+    await loginAs(page, "vera");
+    await page.getByTestId("sidebar-tab-inbox").click();
+    await page.locator('[data-testid^="review-pull-"]', { hasText: title }).click();
+    await page.getByTestId("pr-header").waitFor({ state: "visible" });
+    await page.getByTestId("view-mode-source").click();
+    await page.getByTestId("view-shape-split").click();
+    await expect(page.getByTestId("diff-pane-split")).toBeVisible();
+
+    await expect(page.getByTestId("diff-pane-split")).toHaveClass(/cf-source-diff-split/);
+    const omitGuideContent = await page.evaluate(() => {
+      const omit = document.querySelector(
+        '[data-testid="diff-pane-split"] .diff-line-new-only .diff-gutter-omit',
+      );
+      if (!omit) throw new Error("expected a split diff inserted-row omit gutter");
+      return getComputedStyle(omit, "::before").content;
+    });
+    expect(omitGuideContent).toBe("none");
   });
 });

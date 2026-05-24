@@ -1,7 +1,7 @@
 /* Theme overrides for react-diff-view. Match cosheaf's monochrome shell
    and the green/red tints used by the other renderers. */
 
-.cf-unified-diff {
+.cf-source-diff {
   --diff-background-color: var(--cf-bg);
   --diff-text-color: var(--cf-fg);
   --diff-font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -19,23 +19,28 @@
   --diff-omit-gutter-line-color: var(--cf-muted);
 }
 
-.cf-unified-diff .diff-line {
+.cf-source-diff .diff-line {
   line-height: 1.4;
 }
 
-.cf-unified-diff .diff-gutter {
+.cf-source-diff .diff-gutter {
   position: relative;
   color: var(--cf-muted);
   padding: 0 0.5ch;
   min-width: 4ch;
 }
 
-.cf-unified-diff .diff-code {
+.cf-source-diff .diff-code {
   padding: 0 0 0 0.5em;
 }
 
-.cf-unified-diff .diff-gutter-col {
+.cf-source-diff .diff-gutter-col {
   width: 4ch;
+}
+
+.cf-source-diff .diff-line-new-only .diff-gutter-omit::before,
+.cf-source-diff .diff-line-old-only .diff-gutter-omit::before {
+  content: none;
 }
 
 .cf-gutter-with-add {
@@ -67,28 +72,7 @@
   transition: opacity 80ms;
 }
 
-.cf-unified-diff tr:hover .cf-gutter-add,
+.cf-source-diff tr:hover .cf-gutter-add,
 .cf-gutter-add:focus {
   opacity: 1;
-}
-
-.cf-source-gutter-add {
-  position: absolute;
-  right: -10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 14px;
-  height: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  line-height: 1;
-  border-radius: 3px;
-  background: var(--cf-accent);
-  color: var(--cf-accent-fg);
-  cursor: pointer;
-  z-index: 1;
-  box-shadow: 0 0 0 2px var(--cf-bg);
-  transition: opacity 80ms;
 }

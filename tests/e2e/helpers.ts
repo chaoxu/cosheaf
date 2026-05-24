@@ -82,14 +82,9 @@ export async function authedApiJson<T>(
   return JSON.parse(result.body) as T;
 }
 
-export async function createPrAsMeri(page: Page): Promise<{ branch: string; prNumber: number }> {
-  // Drive the API through the page's origin (Vite proxies /api → 3030).
-  // Post-#63 auth: log in to grab a PAT and send it as Bearer on every
-  // subsequent fetch. We don't touch localStorage here because these are raw
-  // API drivers, not the SPA — callers that need an authed SPA session
-  // should use loginAs(page, ...) which goes through the UI.
+async function loginAsMeriForPat(page: Page): Promise<string> {
   await page.goto("/");
-  const pat = await page.evaluate(async () => {
+  return page.evaluate(async () => {
     const r = await fetch("/api/v1/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -99,6 +94,35 @@ export async function createPrAsMeri(page: Page): Promise<{ branch: string; prNu
     const body = (await r.json()) as { pat: string };
     return body.pat;
   });
+}
+
+async function openPullAsMeri(page: Page, pat: string, branch: string, title: string): Promise<number> {
+  const pub = await page.evaluate(
+    async ({ br, token, prTitle }) => {
+      const r = await fetch("/api/v1/w/flushing-coin/pulls", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ head: br, title: prTitle }),
+      });
+      return { status: r.status, body: await r.text() };
+    },
+    { br: branch, token: pat, prTitle: title },
+  );
+  if (pub.status !== 201) throw new Error(`openPull: ${pub.status} ${pub.body.slice(0, 200)}`);
+  const { number: prNumber } = JSON.parse(pub.body) as { number: number };
+  return prNumber;
+}
+
+export async function createPrAsMeri(page: Page): Promise<{ branch: string; prNumber: number }> {
+  // Drive the API through the page's origin (Vite proxies /api → 3030).
+  // Post-#63 auth: log in to grab a PAT and send it as Bearer on every
+  // subsequent fetch. We don't touch localStorage here because these are raw
+  // API drivers, not the SPA — callers that need an authed SPA session
+  // should use loginAs(page, ...) which goes through the UI.
+  const pat = await loginAsMeriForPat(page);
   const fileName = `e2e-${Date.now()}.md`;
   const branch = `user/meri/e2e-${Date.now()}`;
   const result = await page.evaluate(
@@ -123,21 +147,48 @@ export async function createPrAsMeri(page: Page): Promise<{ branch: string; prNu
   );
   if (result.status !== 200) throw new Error(`putFile: ${result.status} ${result.body.slice(0, 200)}`);
 
-  const pub = await page.evaluate(
-    async ({ br, token }) => {
-      const r = await fetch("/api/v1/w/flushing-coin/pulls", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
+  const prNumber = await openPullAsMeri(page, pat, branch, "e2e PR");
+  return { branch, prNumber };
+}
+
+export async function createModifiedPrAsMeri(
+  page: Page,
+): Promise<{ branch: string; prNumber: number; title: string }> {
+  const pat = await loginAsMeriForPat(page);
+  const stamp = Date.now();
+  const branch = `user/meri/e2e-modified-${stamp}`;
+  const title = `e2e modified PR ${stamp}`;
+  const content = `---
+id: hello
+title: Hello
+---
+# Hello
+
+This file now has an edited opening paragraph for split source CSS testing.
+
+- Existing list item
+- New list item with a longer line that should wrap consistently in both source diff layouts.
+`;
+
+  const put = await page.evaluate(
+    async ({ br, token, body }) => {
+      const r = await fetch(
+        `/api/v1/w/flushing-coin/file?path=hello.md&branch=${encodeURIComponent(br)}`,
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ content: body }),
         },
-        body: JSON.stringify({ head: br, title: "e2e PR" }),
-      });
+      );
       return { status: r.status, body: await r.text() };
     },
-    { br: branch, token: pat },
+    { br: branch, token: pat, body: content },
   );
-  if (pub.status !== 201) throw new Error(`openPull: ${pub.status} ${pub.body.slice(0, 200)}`);
-  const { number: prNumber } = JSON.parse(pub.body);
-  return { branch, prNumber };
+  if (put.status !== 200) throw new Error(`putFile: ${put.status} ${put.body.slice(0, 200)}`);
+
+  const prNumber = await openPullAsMeri(page, pat, branch, title);
+  return { branch, prNumber, title };
 }

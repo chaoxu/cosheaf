@@ -13,7 +13,7 @@ import { CommentThread } from "../CommentThread";
 import { InlineComposer } from "../InlineComposer";
 import { groupCommentsByLine } from "../comment-anchors";
 import type { AddCommentTarget, DiffRendererProps } from "../diff-renderer-types";
-import "./unified.css";
+import "./source-diff.css";
 
 const muted = "text-[var(--cf-muted)]";
 
@@ -121,7 +121,7 @@ export function SourceDiff({
   }
 
   return (
-    <div data-testid={testId} className="cf-unified-diff text-[12.5px]">
+    <div data-testid={testId} className={`cf-source-diff cf-source-diff-${viewType} text-[12.5px]`}>
       <Diff
         viewType={viewType}
         diffType={parsed.type}
