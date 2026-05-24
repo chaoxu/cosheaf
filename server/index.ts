@@ -74,6 +74,7 @@ app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
 const publicDir = path.resolve(process.cwd(), "public");
+const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-pr-diff-defaults.js"]);
 const coflatEditorDistDir = path.dirname(
   requireResolve("@chaoxu/coflat-editor/style.css"),
 );
@@ -93,10 +94,12 @@ app.get("/vendor/coflat-editor/*", async (c) => {
   return response ?? c.json({ error: "not found" }, 404);
 });
 
-app.get("/cosheaf-web.css", async (c) => {
-  const response = await servePublicOrDistFile(c.req.path);
-  return response ?? c.json({ error: "not found" }, 404);
-});
+for (const assetPath of publicAssetPaths) {
+  app.get(assetPath, async (c) => {
+    const response = await servePublicOrDistFile(c.req.path);
+    return response ?? c.json({ error: "not found" }, 404);
+  });
+}
 
 if (existsSync(path.join(distDir, "index.html"))) {
   app.get("/assets/*", async (c) => {
@@ -237,7 +240,7 @@ function ownerlessRepoRewrite(request: Request):
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const [first, second] = parts;
-  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api" || first === "cosheaf-web.css") return { kind: "none" };
+  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api" || publicAssetPaths.has(url.pathname)) return { kind: "none" };
 
   const internalRewrite = request.headers.get("x-cosheaf-internal-owner-rewrite");
   if (first === config.forgejoOwner && second && !internalRewrite) {

@@ -6,6 +6,10 @@ const repoBase = `${webBase}/flushing-coin`;
 test("account preferences are separate from project settings", async ({ page }) => {
   const css = await page.request.get(`${webBase}/cosheaf-web.css`);
   expect(css.ok()).toBe(true);
+  const preferencesJs = await page.request.get(`${webBase}/cosheaf-preferences.js`);
+  expect(preferencesJs.ok()).toBe(true);
+  const diffDefaultsJs = await page.request.get(`${webBase}/cosheaf-pr-diff-defaults.js`);
+  expect(diffDefaultsJs.ok()).toBe(true);
 
   await page.goto(`${webBase}/login`);
   await page.locator('input[name="username"]').fill("chao");

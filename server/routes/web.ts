@@ -595,24 +595,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
             <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
           </nav>
         </header>
-        <script>
-          (() => {
-            const url = new URL(window.location.href);
-            if (url.searchParams.has("mode") || url.searchParams.has("shape")) return;
-            const user = document.body.dataset.cosheafUser || "";
-            const legacyModeKey = "cosheaf:diff-mode";
-            const legacyShapeKey = "cosheaf:diff-shape";
-            const modeKey = user ? legacyModeKey + ":" + user : legacyModeKey;
-            const shapeKey = user ? legacyShapeKey + ":" + user : legacyShapeKey;
-            const mode = (localStorage.getItem(modeKey) || localStorage.getItem(legacyModeKey)) === "source" ? "source" : "rich";
-            const rawShape = localStorage.getItem(shapeKey) || localStorage.getItem(legacyShapeKey);
-            const shapeValue = rawShape === "unified" || rawShape === "split" || rawShape === "after" ? rawShape : "after";
-            const shape = mode === "rich" && shapeValue === "unified" ? "after" : shapeValue;
-            url.searchParams.set("mode", mode);
-            url.searchParams.set("shape", shape);
-            window.location.replace(url);
-          })();
-        </script>
+        <script src="/cosheaf-pr-diff-defaults.js"></script>
         <div class="review-page">
           <main class="review-main">
             <nav class="changed-files" aria-label="Changed files">
@@ -1580,53 +1563,7 @@ function userPreferencesSection(user: string): string {
 }
 
 function userPreferencesScript(): string {
-  return `<script>
-    (() => {
-      const select = document.querySelector("[data-document-theme-user]");
-      if (!(select instanceof HTMLSelectElement)) return;
-      const legacyKey = "cosheaf:document-theme";
-      const user = select.dataset.documentThemeUser || "";
-      const key = user ? legacyKey + ":" + user : legacyKey;
-      const normalize = (value) => value === "blueprint-book" ? value : "default";
-      select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
-      select.addEventListener("change", () => {
-        localStorage.setItem(key, select.value);
-        localStorage.setItem(legacyKey, select.value);
-      });
-    })();
-    (() => {
-      const modeSelect = document.querySelector("[data-diff-mode-user]");
-      const shapeSelect = document.querySelector("[data-diff-shape-user]");
-      if (!(modeSelect instanceof HTMLSelectElement) || !(shapeSelect instanceof HTMLSelectElement)) return;
-      const legacyModeKey = "cosheaf:diff-mode";
-      const legacyShapeKey = "cosheaf:diff-shape";
-      const user = modeSelect.dataset.diffModeUser || "";
-      const modeKey = user ? legacyModeKey + ":" + user : legacyModeKey;
-      const shapeKey = user ? legacyShapeKey + ":" + user : legacyShapeKey;
-      const normalizeMode = (value) => value === "source" ? "source" : "rich";
-      const normalizeShape = (value, mode) => {
-        const shape = value === "unified" || value === "split" || value === "after" ? value : "after";
-        return mode === "rich" && shape === "unified" ? "after" : shape;
-      };
-      const sync = () => {
-        const mode = normalizeMode(modeSelect.value);
-        const shape = normalizeShape(shapeSelect.value, mode);
-        modeSelect.value = mode;
-        shapeSelect.value = shape;
-        shapeSelect.querySelector('option[value="unified"]').disabled = mode === "rich";
-        localStorage.setItem(modeKey, mode);
-        localStorage.setItem(shapeKey, shape);
-        localStorage.setItem(legacyModeKey, mode);
-        localStorage.setItem(legacyShapeKey, shape);
-      };
-      const initialMode = normalizeMode(localStorage.getItem(modeKey) || localStorage.getItem(legacyModeKey));
-      modeSelect.value = initialMode;
-      shapeSelect.value = normalizeShape(localStorage.getItem(shapeKey) || localStorage.getItem(legacyShapeKey), initialMode);
-      sync();
-      modeSelect.addEventListener("change", sync);
-      shapeSelect.addEventListener("change", sync);
-    })();
-  </script>`;
+  return `<script src="/cosheaf-preferences.js" defer></script>`;
 }
 
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): string {
