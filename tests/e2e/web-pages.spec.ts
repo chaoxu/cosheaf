@@ -35,6 +35,21 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('.subtabs a[href$="/files"]').click();
   await expect(page.locator(".changed-files")).toBeVisible();
   await expect(page.locator(".diff-panel")).toBeVisible();
+  await expect(page.getByTestId("view-mode-source")).toBeVisible();
+  await expect(page.getByTestId("view-mode-rich")).toBeVisible();
+  await expect(page.getByTestId("view-shape-unified")).toBeVisible();
+  await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
+  await page.getByTestId("view-shape-split").click();
+  await expect(page.getByTestId("diff-pane-split")).toBeVisible();
+  await page.getByTestId("view-shape-after").click();
+  await expect(page.getByTestId("diff-pane-after")).toBeVisible();
+  await page.getByTestId("view-mode-rich").click();
+  await expect(page).toHaveURL(/mode=rich/);
+  await expect(page.getByTestId("view-shape-unified")).toHaveClass(/disabled/);
+  await page.getByTestId("view-shape-split").click();
+  await expect(page.getByTestId("diff-pane-split")).toBeVisible();
+  await page.getByTestId("view-shape-after").click();
+  await expect(page.getByTestId("diff-pane-after")).toBeVisible();
 
   const branch = `user/chao/web-pages-${Date.now()}`;
   const path = "web-page-e2e.md";

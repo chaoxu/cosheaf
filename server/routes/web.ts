@@ -469,6 +469,9 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
   const files = await pullFiles(ctx, pull.number);
   const selected = c.req.query("file") ?? files[0]?.path ?? "";
   const file = files.find((f) => f.path === selected) ?? files[0] ?? null;
+  const mode = parseDiffMode(c.req.query("mode"));
+  const shape = parseDiffShape(c.req.query("shape"), mode);
+  const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
   return htmlResponse(
     repoPage({
       title: `Files #${pull.number} - ${ctx.repo}`,
@@ -503,7 +506,9 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
           <section class="diff-panel">
             ${
               file
-                ? `<div class="diff-title"><strong>${escapeHtml(file.path)}</strong><span>+${file.additions} -${file.deletions}</span></div>${renderPatch(file.patch)}`
+                ? `<div class="diff-title"><strong>${escapeHtml(file.path)}</strong><span>+${file.additions} -${file.deletions}</span></div>
+                  ${diffModeControls(ctx, pull.number, file.path, mode, shape)}
+                  ${await renderPrFileView(ctx, pull, file, mode, shape, versions)}`
                 : `<div class="empty">No changed files.</div>`
             }
           </section>
@@ -767,6 +772,133 @@ async function pullFiles(ctx: WebCtx, number: number) {
   }));
 }
 
+type DiffMode = "source" | "rich";
+type DiffShape = "unified" | "split" | "after";
+
+interface PrFileView {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+interface PrFileVersions {
+  base: string;
+  head: string;
+}
+
+function parseDiffMode(value: string | undefined): DiffMode {
+  return value === "rich" ? "rich" : "source";
+}
+
+function parseDiffShape(value: string | undefined, mode: DiffMode): DiffShape {
+  const shape = value === "split" || value === "after" ? value : "unified";
+  return mode === "rich" && shape === "unified" ? "split" : shape;
+}
+
+async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, filePath: string): Promise<PrFileVersions> {
+  const read = (ref: string) =>
+    ctx.fj.getRawFile(ctx.owner, ctx.repo, ref, filePath).catch((err) => {
+      if (err instanceof ForgejoError && err.status === 404) return "";
+      throw err;
+    });
+  const [base, head] = await Promise.all([read(pull.base.ref), read(pull.head.ref)]);
+  return { base, head };
+}
+
+async function renderPrFileView(
+  ctx: WebCtx,
+  pull: ForgejoPull,
+  file: PrFileView,
+  mode: DiffMode,
+  shape: DiffShape,
+  versions: PrFileVersions | null,
+): Promise<string> {
+  if (mode === "source" && shape === "unified") {
+    return `<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
+  }
+  const nextVersions = versions ?? (await prFileVersions(ctx, pull, file.path));
+  const changed = changedLines(file.patch);
+  if (mode === "source" && shape === "split") {
+    return `<div data-testid="diff-pane-split" class="source-split">
+      ${sourcePane("Base", nextVersions.base, changed.deleted)}
+      ${sourcePane("Head", nextVersions.head, changed.added)}
+    </div>`;
+  }
+  if (mode === "source") {
+    return `<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, changed.added)}</div>`;
+  }
+  if (shape === "split") {
+    const [base, head] = await Promise.all([
+      renderMarkdown(ctx, nextVersions.base, { branch: pull.base.ref, documentPath: file.path }),
+      renderMarkdown(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path }),
+    ]);
+    return `<div data-testid="diff-pane-split" class="rich-split">
+      <section><h3>Base</h3><div class="cf-reader cf-doc-surface cf-doc-flow cf-rich-diff">${base}</div></section>
+      <section><h3>Head</h3><div class="cf-reader cf-doc-surface cf-doc-flow cf-rich-diff">${head}</div></section>
+    </div>`;
+  }
+  const head = await renderMarkdown(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path });
+  return `<div data-testid="diff-pane-after" class="rich-after cf-reader cf-doc-surface cf-doc-flow cf-rich-diff">${head}</div>`;
+}
+
+function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): string {
+  const href = (nextMode: DiffMode, nextShape: DiffShape) =>
+    `${repoHref(ctx.owner, ctx.repo, `/pulls/${prNumber}/files`)}?file=${encodeURIComponent(filePath)}&mode=${nextMode}&shape=${nextShape}`;
+  const modeLink = (id: DiffMode, label: string) =>
+    `<a data-testid="view-mode-${id}" class="${mode === id ? "active" : ""}" href="${href(id, parseDiffShape(shape, id))}">${label}</a>`;
+  const shapeLink = (id: DiffShape, label: string) => {
+    if (mode === "rich" && id === "unified") return `<span data-testid="view-shape-unified" class="disabled">Unified</span>`;
+    return `<a data-testid="view-shape-${id}" class="${shape === id ? "active" : ""}" href="${href(mode, id)}">${label}</a>`;
+  };
+  return `<div class="diff-controls">
+    <div><span>View:</span>${modeLink("source", "Source")}${modeLink("rich", "Rich")}</div>
+    <div><span>Shape:</span>${shapeLink("unified", "Unified")}${shapeLink("split", "Side-by-side")}${shapeLink("after", "After only")}</div>
+  </div>`;
+}
+
+function changedLines(patch: string): { added: Set<number>; deleted: Set<number> } {
+  const added = new Set<number>();
+  const deleted = new Set<number>();
+  let oldLine = 0;
+  let newLine = 0;
+  for (const line of patch.split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunk) {
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[2]);
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      added.add(newLine);
+      newLine += 1;
+      continue;
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      deleted.add(oldLine);
+      oldLine += 1;
+      continue;
+    }
+    if (line.startsWith(" ") || line === "") {
+      oldLine += 1;
+      newLine += 1;
+    }
+  }
+  return { added, deleted };
+}
+
+function sourcePane(title: string, source: string, marked: ReadonlySet<number>): string {
+  const lines = source.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return `<section><h3>${escapeHtml(title)}</h3><table class="source-lines"><tbody>${lines
+    .map((line, index) => {
+      const lineNo = index + 1;
+      return `<tr class="${marked.has(lineNo) ? "marked" : ""}"><td>${lineNo}</td><td><pre>${escapeHtml(line)}</pre></td></tr>`;
+    })
+    .join("")}</tbody></table></section>`;
+}
+
 function splitDiffByFile(diff: string): Map<string, string> {
   const sections = new Map<string, string>();
   const chunks = diff.split(/^diff --git /m).filter(Boolean);
@@ -1007,7 +1139,7 @@ const WEB_CSS = `
 .page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:14px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:24px}.compact h1{font-size:20px}.toolbar-actions{display:flex;gap:8px;align-items:center}.repo-summary{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--cf-border);padding:14px 0 18px}.repo-summary h1{font-size:30px;margin:0}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));border:1px solid var(--cf-border)}.summary-grid a{padding:12px;border-left:1px solid var(--cf-border)}.summary-grid a:first-child{border-left:0}.summary-grid strong{display:block;font-size:22px}.summary-grid span{color:var(--cf-muted)}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center}.section-title h2{font-size:16px}.section-title a{color:var(--cf-muted);font-size:13px}.list{border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.list-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:9px 12px;border-top:1px solid var(--cf-border)}.list-row:first-child{border-top:0}.list-row:hover{background:var(--cf-hover)}.list-row span,.list-row small{color:var(--cf-muted)}.empty{padding:18px;color:var(--cf-muted);border:1px solid var(--cf-border);border-radius:6px}
 .document{border-top:1px solid var(--cf-border);padding:20px 0}.cf-reader{max-width:980px}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:72ch}.thread{max-width:980px}.thread-header{border-bottom:1px solid var(--cf-border);padding:12px 0}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:20px 0}.comment,.event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
-.review-page{display:grid;grid-template-columns:280px 1fr;gap:16px}.changed-files{border:1px solid var(--cf-border);border-radius:6px;align-self:start}.changed-files h2{font-size:15px;margin:0;padding:10px;border-bottom:1px solid var(--cf-border)}.changed-files a{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-top:1px solid var(--cf-border)}.changed-files a.active,.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted)}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}
+.review-page{display:grid;grid-template-columns:280px 1fr;gap:16px}.changed-files{border:1px solid var(--cf-border);border-radius:6px;align-self:start}.changed-files h2{font-size:15px;margin:0;padding:10px;border-bottom:1px solid var(--cf-border)}.changed-files a{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-top:1px solid var(--cf-border)}.changed-files a.active,.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted)}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td:first-child{width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
 .edit-page{display:grid;gap:12px}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:12px;max-width:560px}
 @media(max-width:800px){.two-col,.review-page{grid-template-columns:1fr}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
 `;
