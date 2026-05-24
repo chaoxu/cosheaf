@@ -86,13 +86,35 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
+      if (!dirty && !pathDirty) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  }, [dirty, pathDirty]);
+
+  useEffect(() => {
+    const input = document.getElementById("web-editor-path-input");
+    if (!(input instanceof HTMLInputElement)) return;
+    const onInput = () => {
+      setCurrentPath(input.value);
+      setPathDirty(input.value.trim() !== savedPathRef.current);
+      setStatus(null);
+    };
+    input.addEventListener("input", onInput);
+    return () => input.removeEventListener("input", onInput);
+  }, []);
+
+  useEffect(() => {
+    const input = document.getElementById("web-editor-path-input");
+    if (input instanceof HTMLInputElement) {
+      if (input.value !== currentPath) input.value = currentPath;
+      input.disabled = busy;
+    }
+    const dirtyMark = document.getElementById("web-editor-path-dirty");
+    if (dirtyMark instanceof HTMLElement) dirtyMark.hidden = !dirty && !pathDirty;
+  }, [busy, currentPath, dirty, pathDirty]);
 
   const branchForWrite = useCallback(() => {
     const current = branchRef.current;
@@ -288,20 +310,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         </aside>
       </div>
       <footer className="web-editor-statusbar" data-testid="statusbar">
-        <span className="web-editor-file">
-          <input
-            aria-label="File path"
-            data-testid="editor-path-input"
-            value={currentPath}
-            onChange={(event) => {
-              setCurrentPath(event.currentTarget.value);
-              setPathDirty(event.currentTarget.value.trim() !== savedPath);
-              setStatus(null);
-            }}
-            disabled={busy}
-          />
-          {dirty || pathDirty ? <span className="dirty-dot"> *</span> : null}
-        </span>
         <span className="web-editor-status">{status ?? ""}</span>
         <span data-testid="active-branch-name" className="web-editor-branch">
           {branch}
