@@ -20,6 +20,7 @@ if (!playwrightPath) {
 const { chromium } = (await import(playwrightPath)).default;
 
 const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
@@ -28,6 +29,14 @@ const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coi
 const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
 const PAGE = process.env.COSHEAF_SMOKE_PAGE ?? "Hello";
 const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md";
+
+function serverRenderedOrigin(value) {
+  const url = new URL(value);
+  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") {
+    url.port = "3030";
+  }
+  return url.toString();
+}
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -41,7 +50,7 @@ page.on("console", async (msg) => {
 });
 page.on("pageerror", (err) => pageErrors.push(`${err.name}: ${err.message}\n${err.stack ?? ""}`));
 
-await page.goto(APP_URL, { waitUntil: "networkidle" });
+await page.goto(WEB_URL, { waitUntil: "networkidle" });
 
 // Login if presented.
 if (await page.locator('text=username').count() > 0) {
@@ -53,7 +62,7 @@ if (await page.locator('text=username').count() > 0) {
 }
 
 // Open the seeded page.
-const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, APP_URL).toString();
+const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL).toString();
 await page.goto(fileUrl, { waitUntil: "networkidle" });
 await page.getByRole("heading", { name: PAGE_PATH }).waitFor({ state: "visible", timeout: 10000 });
 await page.getByText(PAGE).first().waitFor({ state: "visible", timeout: 10000 });

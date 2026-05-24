@@ -4,7 +4,6 @@ import { deleteCookie, setCookie } from "hono/cookie";
 import type Database from "better-sqlite3";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { posix as pathPosix } from "node:path";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { COFLAT_FORMAT_ID, documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
 import type { Role } from "../../shared/roles.js";
@@ -201,7 +200,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
           </div>
         </div>
         <article class="document cf-theme-scope cf-theme-blueprint-book">
-          <div class="cf-reader cf-doc-surface cf-doc-flow">${rendered}</div>
+          ${markdownSurface(ctx, rendered)}
         </article>
       `,
     }),
@@ -345,15 +344,15 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
             <p>by ${escapeHtml(issue.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(issue.created_at)}</p>
           </header>
           <div class="issue-document">
-            <div class="markdown-body cf-reader cf-doc-surface cf-doc-flow">${body}</div>
+            ${markdownSurface(ctx, body)}
           </div>
           ${renderedComments
             .map(
               (comment) => `
-                <div class="comment">
-                  <div class="comment-meta">${escapeHtml(comment.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(comment.created_at)}</div>
-                  <div class="markdown-body cf-reader cf-doc-surface cf-doc-flow">${comment.renderedBody}</div>
-                </div>
+                  <div class="comment">
+                    <div class="comment-meta">${escapeHtml(comment.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(comment.created_at)}</div>
+                  ${markdownSurface(ctx, comment.renderedBody)}
+                  </div>
               `,
             )
             .join("")}
@@ -435,7 +434,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
           </header>
           <div class="comment">
             <div class="comment-meta">${escapeHtml(pull.user?.login ?? DELETED_USER_LOGIN)}</div>
-            <div class="markdown-body cf-reader cf-doc-surface cf-doc-flow">${body || "<p>No description.</p>"}</div>
+            ${body ? markdownSurface(ctx, body) : `<p>No description.</p>`}
           </div>
           ${reviews
             .filter((r) => r.state !== "PENDING")
@@ -510,8 +509,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
           </nav>
         </header>
         <div class="review-page">
-          <aside class="changed-files">
-            <h2>Changed files</h2>
+          <nav class="changed-files" aria-label="Changed files">
             ${files
               .map(
                 (f) => `
@@ -522,7 +520,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
                 `,
               )
               .join("")}
-          </aside>
+          </nav>
           <section class="diff-panel">
             ${
               file
@@ -714,35 +712,20 @@ async function renderMarkdown(
 ): Promise<string> {
   const { body } = parseFrontmatterYaml(source);
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
-    const { renderToHtml } = await import("@chaoxu/coflat-editor/reader");
-    const html = renderToHtml(body, {
-      linkResolver: {
-        resolve: (href: string) => {
-          const resolved = resolveRepoLink(ctx, href, opts.branch ?? "main", opts.documentPath ?? "");
-          return resolved ? { href: resolved } : null;
-        },
-      },
-    }).html;
-    return rewriteRenderedRepoUrls(html, ctx, opts.branch ?? "main", opts.documentPath ?? "");
+    return coflatReaderIsland(ctx, source, opts);
   }
   return ctx.fj.renderMarkdown(ctx.owner, ctx.repo, body);
 }
 
-function rewriteRenderedRepoUrls(html: string, ctx: WebCtx, branch: string, documentPath: string): string {
-  return html.replace(/\b(src|href)="([^"]+)"/g, (match, attr: string, href: string) => {
-    const resolved = resolveRepoLink(ctx, href, branch, documentPath);
-    return resolved ? `${attr}="${escapeAttr(resolved)}"` : match;
-  });
-}
-
-function resolveRepoLink(ctx: WebCtx, href: string, branch: string, documentPath: string): string | null {
-  const clean = href.trim();
-  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) return null;
-  const [withoutHash, hash = ""] = clean.split("#", 2);
-  const baseDir = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/")) : "";
-  const rel = safeRel(pathPosix.normalize(pathPosix.join(baseDir, withoutHash)));
-  if (!rel) return null;
-  return `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+function coflatReaderIsland(ctx: WebCtx, source: string, opts: { branch?: string; documentPath?: string }): string {
+  const payload = {
+    source,
+    owner: ctx.owner,
+    repo: ctx.repo,
+    branch: opts.branch ?? "main",
+    path: opts.documentPath ?? "",
+  };
+  return `<div class="cf-reader cf-doc-surface cf-doc-flow coflat-reader-island" data-reader-branch="${escapeAttr(payload.branch)}"><script type="application/json">${jsonScript(payload)}</script></div>`;
 }
 
 async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
@@ -854,13 +837,19 @@ async function renderPrFileView(
       renderMarkdown(ctx, nextVersions.base, { branch: pull.base.ref, documentPath: file.path }),
       renderMarkdown(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path }),
     ]);
-    return `<div data-testid="diff-pane-split" class="rich-split">
-      <section><h3>Base</h3><div class="cf-reader cf-doc-surface cf-doc-flow cf-rich-diff">${base}</div></section>
-      <section><h3>Head</h3><div class="cf-reader cf-doc-surface cf-doc-flow cf-rich-diff">${head}</div></section>
+    return `<div data-testid="diff-pane-split" class="rich-split cf-theme-scope cf-theme-blueprint-book">
+      <section><h3>Base</h3>${markdownSurface(ctx, base, "cf-rich-diff")}</section>
+      <section><h3>Head</h3>${markdownSurface(ctx, head, "cf-rich-diff")}</section>
     </div>`;
   }
   const head = await renderMarkdown(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path });
-  return `<div data-testid="diff-pane-after" class="rich-after cf-reader cf-doc-surface cf-doc-flow cf-rich-diff">${head}</div>`;
+  return `<div data-testid="diff-pane-after" class="rich-after cf-theme-scope cf-theme-blueprint-book">${markdownSurface(ctx, head, "cf-rich-diff")}</div>`;
+}
+
+function markdownSurface(ctx: WebCtx, rendered: string, extraClass = ""): string {
+  if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) return rendered;
+  const className = ["markdown-body", "cf-reader", "cf-doc-surface", "cf-doc-flow", extraClass].filter(Boolean).join(" ");
+  return `<div class="${className}">${rendered}</div>`;
 }
 
 function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): string {
@@ -1019,6 +1008,9 @@ function pageShell(opts: { title: string; user?: string; body: string }): string
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${escapeHtml(opts.title)} - Cosheaf</title>
+        <link rel="stylesheet" href="/vendor/coflat-editor/editor.css">
+        <link rel="stylesheet" href="/vendor/coflat-editor/themes/blueprint-book.css">
+        ${webReaderAssets()}
         <style>${WEB_CSS}</style>
       </head>
       <body>${opts.body}</body>
@@ -1034,15 +1026,23 @@ type ViteManifestChunk = {
 let manifestCache: Record<string, ViteManifestChunk> | null | undefined;
 
 function webEditorAssets(): string {
+  return viteEntryAssets("src/cosheaf/web-editor.tsx");
+}
+
+function webReaderAssets(): string {
+  return viteEntryAssets("src/cosheaf/web-reader.ts");
+}
+
+function viteEntryAssets(entryId: string): string {
   if (process.env.NODE_ENV !== "production") {
     const devOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
-    return `<script type="module" src="${devOrigin}/src/cosheaf/web-editor.tsx"></script>`;
+    return `<script type="module" src="${devOrigin}/${entryId}"></script>`;
   }
   const manifest = readViteManifest();
   if (!manifest) {
     return "";
   }
-  const entry = manifest["src/cosheaf/web-editor.tsx"];
+  const entry = manifest[entryId];
   if (!entry) return "";
   const cssLinks = collectCss(manifest, entry, new Set<string>())
     .map((href) => `<link rel="stylesheet" href="/${escapeAttr(href)}">`)
@@ -1210,15 +1210,15 @@ function contentTypeForPath(filePath: string): string {
 const WEB_CSS = `
 :root{--cf-bg:#fff;--cf-fg:#111;--cf-muted:#71717a;--cf-border:#dedede;--cf-hover:#e7e7e7;--cf-accent:#18181b;--cf-accent-fg:#fff}
 *{box-sizing:border-box}body{margin:0;background:var(--cf-bg);color:var(--cf-fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}a{color:inherit;text-decoration:none}button,input,textarea{font:inherit}
-.global-header{height:42px;border-bottom:1px solid var(--cf-border);display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#fafafa;position:sticky;top:0;z-index:2}.brand{font-weight:700}.global-header form{display:flex;align-items:center;gap:10px;color:var(--cf-muted)}button,.button{border:1px solid var(--cf-border);background:#fff;border-radius:5px;padding:6px 10px;cursor:pointer}.button.primary,button.primary{background:var(--cf-accent);border-color:var(--cf-accent);color:var(--cf-accent-fg)}
-.page,.repo-page{max-width:1180px;margin:0 auto;padding:18px}.auth-page{min-height:100vh;display:grid;place-items:center}.auth-card{width:min(360px,calc(100vw - 32px));display:grid;gap:12px;border:1px solid var(--cf-border);padding:18px}.auth-card h1{margin:0 0 8px}.auth-card label,.edit-page label,.settings-page label{display:grid;gap:5px;color:var(--cf-muted)}input,textarea{border:1px solid var(--cf-border);border-radius:5px;padding:8px;background:#fff;color:var(--cf-fg)}
-.repo-header{display:flex;justify-content:space-between;align-items:end;gap:16px;border-bottom:1px solid var(--cf-border);padding:8px 0 12px}.repo-header h1{font-size:26px;margin:0}.owner,.eyebrow,.muted{color:var(--cf-muted)}.role,.state{border:1px solid var(--cf-border);border-radius:999px;padding:2px 8px;text-transform:uppercase;font-size:11px}.state.open{background:#f6f6f6}.state.closed{background:#eee}.state.merged{background:#e9e7ff}
-.repo-tabs,.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--cf-border);margin-bottom:16px}.repo-tabs a,.subtabs a{padding:10px 12px;color:var(--cf-muted)}.repo-tabs a.active,.subtabs a.active{color:var(--cf-fg);border-bottom:2px solid var(--cf-fg);font-weight:600}.repo-body{padding-bottom:40px}
-.page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:14px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:24px}.compact h1{font-size:20px}.toolbar-actions{display:flex;gap:8px;align-items:center}.repo-summary{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--cf-border);padding:14px 0 18px}.repo-summary h1{font-size:30px;margin:0}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));border:1px solid var(--cf-border)}.summary-grid a{padding:12px;border-left:1px solid var(--cf-border)}.summary-grid a:first-child{border-left:0}.summary-grid strong{display:block;font-size:22px}.summary-grid span{color:var(--cf-muted)}
+.global-header{height:36px;border-bottom:1px solid var(--cf-border);display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#fafafa;position:sticky;top:0;z-index:2}.brand{font-weight:700}.global-header form{display:flex;align-items:center;gap:10px;color:var(--cf-muted)}button,.button{border:1px solid var(--cf-border);background:#fff;border-radius:5px;padding:5px 9px;cursor:pointer}.button.primary,button.primary{background:var(--cf-accent);border-color:var(--cf-accent);color:var(--cf-accent-fg)}
+.page,.repo-page{width:100%;max-width:none;margin:0;padding:8px 16px}.auth-page{min-height:100vh;display:grid;place-items:center}.auth-card{width:min(360px,calc(100vw - 32px));display:grid;gap:12px;border:1px solid var(--cf-border);padding:18px}.auth-card h1{margin:0 0 8px}.auth-card label,.edit-page label,.settings-page label{display:grid;gap:5px;color:var(--cf-muted)}input,textarea{border:1px solid var(--cf-border);border-radius:5px;padding:8px;background:#fff;color:var(--cf-fg)}
+.repo-header{display:flex;justify-content:space-between;align-items:end;gap:16px;border-bottom:1px solid var(--cf-border);padding:2px 0 6px}.repo-header h1{font-size:21px;margin:0}.owner,.eyebrow,.muted{color:var(--cf-muted)}.role,.state{border:1px solid var(--cf-border);border-radius:999px;padding:2px 8px;text-transform:uppercase;font-size:11px}.state.open{background:#f6f6f6}.state.closed{background:#eee}.state.merged{background:#e9e7ff}
+.repo-tabs,.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--cf-border);margin-bottom:8px}.repo-tabs a,.subtabs a{padding:6px 12px;color:var(--cf-muted)}.repo-tabs a.active,.subtabs a.active{color:var(--cf-fg);border-bottom:2px solid var(--cf-fg);font-weight:600}.repo-body{padding-bottom:20px}
+.page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:5px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:21px}.compact h1{font-size:19px}.toolbar-actions{display:flex;gap:8px;align-items:center}.repo-summary{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--cf-border);padding:12px 0 14px}.repo-summary h1{font-size:30px;margin:0}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));border:1px solid var(--cf-border)}.summary-grid a{padding:12px;border-left:1px solid var(--cf-border)}.summary-grid a:first-child{border-left:0}.summary-grid strong{display:block;font-size:22px}.summary-grid span{color:var(--cf-muted)}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center}.section-title h2{font-size:16px}.section-title a{color:var(--cf-muted);font-size:13px}.list{border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.list-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:9px 12px;border-top:1px solid var(--cf-border)}.list-row:first-child{border-top:0}.list-row:hover{background:var(--cf-hover)}.list-row span,.list-row small{color:var(--cf-muted)}.empty{padding:18px;color:var(--cf-muted);border:1px solid var(--cf-border);border-radius:6px}
-.document{border-top:1px solid var(--cf-border);padding:20px 0}.cf-reader{max-width:980px}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:72ch}.thread{max-width:980px}.thread-header{border-bottom:1px solid var(--cf-border);padding:12px 0}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:20px 0}.comment,.event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
-.review-page{display:grid;grid-template-columns:280px 1fr;gap:16px}.changed-files{border:1px solid var(--cf-border);border-radius:6px;align-self:start}.changed-files h2{font-size:15px;margin:0;padding:10px;border-bottom:1px solid var(--cf-border)}.changed-files a{display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-top:1px solid var(--cf-border)}.changed-files a.active,.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted)}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td:first-child{width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
-.edit-page{display:grid;gap:12px}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:12px;max-width:560px}
-#web-editor-root{min-height:70vh;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:70vh;min-height:560px;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-fg)}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
+.document{border-top:1px solid var(--cf-border);padding:14px 0}.cf-theme-scope{--cf-content-max-width:100%;--cf-sidenote-width:0px;--cf-doc-content-padding-inline:16px}.cf-reader{max-width:none;width:100%}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:none}.thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:8px 0}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:14px 0}.comment,.event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
+.review-page{display:grid;gap:8px}.changed-files{display:flex;gap:6px;overflow-x:auto;border:1px solid var(--cf-border);border-radius:6px;padding:6px;background:#fafafa}.changed-files a{display:flex;align-items:center;gap:8px;max-width:360px;min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:4px;background:#fff;white-space:nowrap}.changed-files a span{min-width:0;overflow:hidden;text-overflow:ellipsis}.changed-files a.active{border-color:var(--cf-fg);font-weight:600}.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted);flex:0 0 auto}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td:first-child{width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
+.edit-page{display:grid;gap:8px}.edit-page .file-toolbar{margin:0}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:12px;max-width:560px}
+#web-editor-root{height:calc(100vh - 210px);min-height:520px;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-fg)}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
 @media(max-width:800px){.two-col,.review-page{grid-template-columns:1fr}.web-editor-main{grid-template-columns:1fr}.web-editor-outline{display:none}.summary-grid{grid-template-columns:1fr}.repo-summary{display:block}.list-row{grid-template-columns:1fr}.global-header{position:static}}
 `;

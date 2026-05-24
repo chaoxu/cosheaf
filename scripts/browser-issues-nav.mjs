@@ -5,12 +5,21 @@ import { attachPageListeners, loadChromium } from "./browser-utils.mjs";
 const chromium = await loadChromium();
 
 const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-issues-nav.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const VIEWPORT = { width: 1280, height: 800 };
+
+function serverRenderedOrigin(value) {
+  const url = new URL(value);
+  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") {
+    url.port = "3030";
+  }
+  return url.toString();
+}
 
 const browser = await chromium.launch({ headless: true });
 let context = await browser.newContext({ viewport: VIEWPORT });
@@ -38,7 +47,7 @@ async function ensureSignedIn() {
 }
 
 try {
-  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "networkidle" });
   await ensureSignedIn();
   postLoginUrl = page.url();
 
@@ -51,7 +60,7 @@ try {
     if (frame === page.mainFrame()) navigations.push(frame.url());
   });
 
-  targetFileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, APP_URL).toString();
+  targetFileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString();
   await page.goto(targetFileUrl, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Issues" }).waitFor({ state: "visible", timeout: 10000 });
   const firstIssue = page.locator(".list-row").first();

@@ -31,6 +31,7 @@ export default defineConfig({
       input: {
         app: path.resolve(__dirname, "index.html"),
         "web-editor": path.resolve(__dirname, "src/cosheaf/web-editor.tsx"),
+        "web-reader": path.resolve(__dirname, "src/cosheaf/web-reader.ts"),
       },
     },
   },

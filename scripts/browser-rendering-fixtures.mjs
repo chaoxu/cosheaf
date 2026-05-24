@@ -5,6 +5,7 @@ import { attachPageListeners, loadChromium } from "./browser-utils.mjs";
 const chromium = await loadChromium();
 
 const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-rendering-fixtures.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
@@ -14,6 +15,14 @@ const ISSUE_TITLE = "Rendering fixture: long Markdown issue";
 const COFLAT_SHOWCASE_ISSUE_TITLE = "Rendering fixture: Coflat feature showcase";
 const PR_TITLE = "Rendering fixture: long Markdown PR";
 const SIDE_BY_SIDE_PR_TITLE = "Rendering fixture: side-by-side Markdown PR";
+
+function serverRenderedOrigin(value) {
+  const url = new URL(value);
+  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") {
+    url.port = "3030";
+  }
+  return url.toString();
+}
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -35,10 +44,10 @@ async function ensureSignedIn() {
 }
 
 try {
-  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "networkidle" });
   await ensureSignedIn();
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, APP_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString(), { waitUntil: "networkidle" });
   await page.getByText(ISSUE_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(ISSUE_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
@@ -47,7 +56,7 @@ try {
   await issueView.getByText("Checklist").waitFor({ state: "visible", timeout: 10000 });
   await issueView.getByText("seededRenderingFixture").waitFor({ state: "visible", timeout: 10000 });
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, APP_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString(), { waitUntil: "networkidle" });
   await page.getByText(COFLAT_SHOWCASE_ISSUE_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(COFLAT_SHOWCASE_ISSUE_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
@@ -61,7 +70,7 @@ try {
     throw new Error("coflat showcase issue did not use the full document reader surface");
   }
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, APP_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
   await page.getByText(PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(PR_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
@@ -69,13 +78,32 @@ try {
   await prHeader.getByText("Review focus").waitFor({ state: "visible", timeout: 10000 });
   await prHeader.getByText("rich diff rendering").waitFor({ state: "visible", timeout: 10000 });
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, APP_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
   await page.getByRole("link", { name: "Files changed" }).click();
+  await page.getByTestId("view-mode-rich").click();
+  await page.getByTestId("diff-pane-split").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("This is the default development page").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("This branch version of the Flushing Coin hello page").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("sideBySideFixture").waitFor({ state: "visible", timeout: 10000 });
+  const richDiffStats = await page.getByTestId("diff-pane-split").evaluate((el) => {
+    const katex = el.querySelector(".katex");
+    const reader = el.querySelector(".cf-reader");
+    return {
+      katexCount: el.querySelectorAll(".katex").length,
+      katexDisplay: katex ? getComputedStyle(katex).display : null,
+      katexFont: katex ? getComputedStyle(katex).fontFamily : null,
+      readerWidth: reader ? Math.round(reader.getBoundingClientRect().width) : 0,
+      paneWidth: Math.round(el.getBoundingClientRect().width),
+    };
+  });
+  if (richDiffStats.katexCount === 0 || richDiffStats.katexDisplay === null) {
+    throw new Error(`rich PR diff math did not render: ${JSON.stringify(richDiffStats)}`);
+  }
+  if (richDiffStats.readerWidth < 400) {
+    throw new Error(`rich PR diff reader too narrow: ${JSON.stringify(richDiffStats)}`);
+  }
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;

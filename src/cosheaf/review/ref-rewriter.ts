@@ -12,10 +12,14 @@ const BARE_REF_RE =
   /(^|[\s(])(\[@([\w.:-]+)\]|[\w./-]+\.md(?:#L\d+(?:-\d+)?|#[\w-]+)?|#\d+)(?=\b|[\s).,;:!?]|$)/g;
 
 export function sanitizeAndRewriteRefs(rendered: string): string {
+  return fragmentToHtml(sanitizeAndRewriteRefsFragment(rendered));
+}
+
+export function sanitizeAndRewriteRefsFragment(rendered: string): DocumentFragment {
   const fragment = DOMPurify.sanitize(rendered, { RETURN_DOM_FRAGMENT: true }) as DocumentFragment;
   rewriteRefsInFragment(fragment);
   injectPageRefTestIds(fragment);
-  return fragmentToHtml(fragment);
+  return fragment;
 }
 
 export function plainTextToRefHtml(text: string): string {

@@ -5,12 +5,21 @@ import { attachPageListeners, loadChromium } from "./browser-utils.mjs";
 const chromium = await loadChromium();
 
 const APP_URL = process.env.URL ?? "http://localhost:5173/";
+const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-reader-editor-parity.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
+
+function serverRenderedOrigin(value) {
+  const url = new URL(value);
+  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") {
+    url.port = "3030";
+  }
+  return url.toString();
+}
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -52,15 +61,18 @@ async function readerStats() {
 }
 
 try {
-  await page.goto(APP_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "networkidle" });
   await ensureSignedIn();
-  await page.goto(`${APP_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
   await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("Frontmatter and Structure Editing").waitFor({ state: "visible", timeout: 10000 });
 
   const defaultReader = await readerStats();
   if (defaultReader.documentWidth < 900) {
     throw new Error(`document width too narrow: document=${defaultReader.documentWidth}`);
+  }
+  if (defaultReader.width < defaultReader.documentWidth * 0.9) {
+    throw new Error(`reader is not using document width: ${JSON.stringify(defaultReader)}`);
   }
   if (!defaultReader.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`unexpected document theme class: ${defaultReader.rootClass}`);

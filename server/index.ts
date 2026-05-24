@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AppEnv } from "./types.js";
 import { getDb, loadConfig } from "./db.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
@@ -69,6 +70,9 @@ app.route("/api/v1/w", notifications);
 app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
+const coflatEditorDistDir = path.dirname(
+  requireResolve("@chaoxu/coflat-editor/style.css"),
+);
 if (process.env.NODE_ENV !== "production") {
   app.get("/node_modules/*", async (c) => {
     const viteOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
@@ -79,6 +83,11 @@ if (process.env.NODE_ENV !== "production") {
     });
   });
 }
+
+app.get("/vendor/coflat-editor/*", async (c) => {
+  const response = await serveCoflatEditorAsset(c.req.path);
+  return response ?? c.json({ error: "not found" }, 404);
+});
 
 if (existsSync(path.join(distDir, "index.html"))) {
   app.get("/assets/*", async (c) => {
@@ -105,6 +114,27 @@ async function serveDistFile(requestPath: string): Promise<Response | null> {
   if (!resolvedPath) return null;
   const body = await readFile(resolvedPath);
   return new Response(body, { headers: { "content-type": contentType(resolvedPath) } });
+}
+
+async function serveCoflatEditorAsset(requestPath: string): Promise<Response | null> {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(requestPath);
+  } catch (_error) {
+    return null;
+  }
+  const relativePath = decodedPath.replace(/^\/vendor\/coflat-editor\/?/, "") || "editor.css";
+  if (!relativePath || relativePath.split(/[\\/]/).includes("..")) return null;
+  const filePath = path.resolve(coflatEditorDistDir, relativePath);
+  if (filePath !== coflatEditorDistDir && !filePath.startsWith(`${coflatEditorDistDir}${path.sep}`)) return null;
+  try {
+    const stat = statSync(filePath);
+    if (!stat.isFile()) return null;
+  } catch (_error) {
+    return null;
+  }
+  const body = await readFile(filePath);
+  return new Response(body, { headers: { "content-type": contentType(filePath) } });
 }
 
 function resolveDistPath(requestPath: string): string | null {
@@ -142,6 +172,7 @@ function contentType(filePath: string): string {
     case ".html":
       return "text/html; charset=utf-8";
     case ".js":
+    case ".mjs":
       return "text/javascript; charset=utf-8";
     case ".json":
       return "application/json; charset=utf-8";
@@ -151,9 +182,15 @@ function contentType(filePath: string): string {
       return "font/woff";
     case ".woff2":
       return "font/woff2";
+    case ".ttf":
+      return "font/ttf";
     default:
       return "application/octet-stream";
   }
+}
+
+function requireResolve(id: string): string {
+  return fileURLToPath(import.meta.resolve(id));
 }
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
