@@ -353,7 +353,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
                      </form>`
               }
             </div>
-            <p>by ${escapeHtml(issue.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(issue.created_at)}</p>
+            <p>by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
           </header>
           <div class="issue-document">
             ${markdownSurface(ctx, body)}
@@ -448,14 +448,14 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
               <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
               <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
             </div>
-            <p>${escapeHtml(pull.head.ref)} into ${escapeHtml(pull.base.ref)} - by ${escapeHtml(pull.user?.login ?? DELETED_USER_LOGIN)}</p>
+            <p>${escapeHtml(pull.head.ref)} into ${escapeHtml(pull.base.ref)} - by ${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
           <div class="comment">
-            <div class="comment-meta">${escapeHtml(pull.user?.login ?? DELETED_USER_LOGIN)}</div>
+            <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
             ${body ? markdownSurface(ctx, body) : `<p>No description.</p>`}
           </div>
           ${timelineHtml}
@@ -542,7 +542,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
   const mode = parseDiffMode(c.req.query("mode"));
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
-  const fileComments = file ? mapLineComments(file, allComments) : [];
+  const fileComments = file ? mapLineComments(ctx, file, allComments) : [];
   return htmlResponse(
     repoPage({
       title: `Files #${pull.number} - ${ctx.repo}`,
@@ -683,7 +683,7 @@ web.get("/:owner/:repo/commits/:sha", async (c) => {
         </div>
         <div class="commit-card">
           <pre>${escapeHtml(commit.commit.message.trim() || "(no commit message)")}</pre>
-          <p>${escapeHtml(commit.commit.author?.name ?? commit.author?.login ?? "unknown")} - ${formatDate(commit.commit.author?.date)}</p>
+          <p>${escapeHtml(displayLogin(ctx.owner, commit.commit.author?.name ?? commit.author?.login))} - ${formatDate(commit.commit.author?.date)}</p>
           <code>${escapeHtml(commit.sha)}</code>
         </div>
       `,
@@ -1262,7 +1262,7 @@ function renderInlineComment(comment: WebLineComment): string {
   </tr>`;
 }
 
-function mapLineComments(file: PrFileView, comments: readonly ForgejoPullReviewComment[]): WebLineComment[] {
+function mapLineComments(ctx: WebCtx, file: PrFileView, comments: readonly ForgejoPullReviewComment[]): WebLineComment[] {
   return comments
     .filter((comment) => comment.path === file.path)
     .map((comment) => {
@@ -1273,7 +1273,7 @@ function mapLineComments(file: PrFileView, comments: readonly ForgejoPullReviewC
         line: mapped?.line ?? null,
         side: mapped?.side ?? (file.status === "deleted" ? "base" : "head"),
         body: comment.body,
-        author: comment.user?.login ?? DELETED_USER_LOGIN,
+        author: displayLogin(ctx.owner, comment.user?.login),
         createdAt: Date.parse(comment.created_at) || 0,
         outdated: comment.position === null,
       };
@@ -1341,14 +1341,14 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
   if (item.kind === "comment") {
     const body = await renderMarkdown(ctx, item.comment.body);
     return `<div class="comment">
-      <div class="comment-meta">${escapeHtml(item.comment.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(item.comment.created_at)}</div>
+      <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} - ${formatDate(item.comment.created_at)}</div>
       ${markdownSurface(ctx, body)}
     </div>`;
   }
   if (item.kind === "line-comment") {
     const body = await renderMarkdown(ctx, item.comment.body);
     return `<div class="comment">
-      <div class="comment-meta">${escapeHtml(item.comment.user?.login ?? DELETED_USER_LOGIN)} commented on ${escapeHtml(item.comment.path)} - ${formatDate(item.comment.created_at)}</div>
+      <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} commented on ${escapeHtml(item.comment.path)} - ${formatDate(item.comment.created_at)}</div>
       ${markdownSurface(ctx, body)}
     </div>`;
   }
@@ -1356,7 +1356,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
     const label = reviewStateLabel(item.review.state);
     const body = item.review.body ? await renderMarkdown(ctx, item.review.body) : "";
     return `<div class="timeline-event">
-      <strong>${escapeHtml(item.review.user?.login ?? DELETED_USER_LOGIN)}</strong>
+      <strong>${escapeHtml(displayLogin(ctx.owner, item.review.user?.login))}</strong>
       <span>${escapeHtml(label)}</span>
       <small>${formatDate(item.review.submitted_at)}</small>
       ${body ? markdownSurface(ctx, body) : ""}
@@ -1364,7 +1364,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
   }
   if (item.kind === "commit") {
     return `<div class="timeline-event">
-      <strong>${escapeHtml(item.commit.author?.login ?? item.commit.commit.author?.name ?? DELETED_USER_LOGIN)}</strong>
+      <strong>${escapeHtml(displayLogin(ctx.owner, item.commit.author?.login ?? item.commit.commit.author?.name))}</strong>
       <span>pushed commit <code>${escapeHtml(item.commit.sha.slice(0, 10))}</code></span>
       <small>${formatDate(commitDateMs(item.commit))}</small>
       <p>${escapeHtml(firstCommitLine(item.commit.commit.message))}</p>
@@ -1373,7 +1373,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
   const description = describeWebTimelineEvent(item.event);
   if (!description) return "";
   return `<div class="timeline-event">
-    ${item.event.user?.login ? `<strong>${escapeHtml(item.event.user.login)}</strong>` : ""}
+    ${item.event.user?.login ? `<strong>${escapeHtml(displayLogin(ctx.owner, item.event.user.login))}</strong>` : ""}
     <span>${description}</span>
     <small>${formatDate(item.event.created_at)}</small>
   </div>`;
@@ -1648,7 +1648,7 @@ function fileList(owner: string, repo: string, branch: string, files: ForgejoTre
 
 function issueList(owner: string, repo: string, issues: ForgejoIssue[]): string {
   return `<div class="list">${issues
-    .map((issue) => `<a class="list-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}"><strong>#${issue.number} ${escapeHtml(issue.title)}</strong><span>${escapeHtml(issue.user?.login ?? DELETED_USER_LOGIN)} - ${formatDate(issue.created_at)}</span><small>${escapeHtml(issue.state)}</small></a>`)
+    .map((issue) => `<a class="list-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}"><strong>#${issue.number} ${escapeHtml(issue.title)}</strong><span>${escapeHtml(displayLogin(owner, issue.user?.login))} - ${formatDate(issue.created_at)}</span><small>${escapeHtml(issue.state)}</small></a>`)
     .join("") || `<div class="empty">No issues.</div>`}</div>`;
 }
 
@@ -1665,7 +1665,7 @@ function activityList(ctx: WebCtx, activities: ForgejoActivity[]): string {
 function activityRow(ctx: WebCtx, activity: ForgejoActivity): string {
   const rendered = renderActivity(ctx, activity);
   return `<div class="list-row activity-row" data-testid="activity-row">
-    <strong>${escapeHtml(activity.act_user?.login ?? "system")}</strong>
+    <strong>${escapeHtml(displayLogin(ctx.owner, activity.act_user?.login))}</strong>
     <span>${rendered.summary}</span>
     <small>${formatDate(activity.created)}</small>
   </div>`;
@@ -1857,6 +1857,11 @@ function escapeHtml(value: string | number): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value);
+}
+
+function displayLogin(owner: string, login: string | null | undefined): string {
+  if (!login) return DELETED_USER_LOGIN;
+  return login === owner ? "project" : login;
 }
 
 function jsonScript(value: unknown): string {

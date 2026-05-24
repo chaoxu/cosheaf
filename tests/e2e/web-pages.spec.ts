@@ -30,6 +30,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/issues`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
+  await expect(page.locator(".repo-body")).not.toContainText(owner);
   await page.locator('.list-row[href*="/issues/"]').first().click();
   await expect(page.locator(".thread-header")).toContainText("#");
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
