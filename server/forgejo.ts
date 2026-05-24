@@ -683,19 +683,21 @@ export class Forgejo {
       q?: string;
     } = {},
   ): Promise<ForgejoIssue[]> {
-    const params = new URLSearchParams();
-    params.set("type", "issues"); // exclude PRs; Forgejo's /issues endpoint returns both
-    if (opts.state) params.set("state", opts.state);
-    if (opts.page) params.set("page", String(opts.page));
-    if (opts.limit) params.set("limit", String(opts.limit));
-    if (opts.assigned_by) params.set("assigned_by", opts.assigned_by);
-    if (opts.created_by) params.set("created_by", opts.created_by);
-    if (opts.mentioned_by) params.set("mentioned_by", opts.mentioned_by);
-    if (opts.labels) params.set("labels", opts.labels);
-    if (opts.milestones) params.set("milestones", opts.milestones);
-    if (opts.sort) params.set("sort", opts.sort);
-    if (opts.q) params.set("q", opts.q);
-    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues?${params.toString()}`));
+    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, "issues"), {
+      query: {
+        type: "issues", // exclude PRs; Forgejo's /issues endpoint returns both
+        state: opts.state,
+        page: opts.page,
+        limit: opts.limit,
+        assigned_by: opts.assigned_by,
+        created_by: opts.created_by,
+        mentioned_by: opts.mentioned_by,
+        labels: opts.labels,
+        milestones: opts.milestones,
+        sort: opts.sort,
+        q: opts.q,
+      },
+    });
   }
 
   async getIssue(owner: string, repo: string, number: number): Promise<ForgejoIssue> {

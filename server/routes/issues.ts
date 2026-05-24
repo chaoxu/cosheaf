@@ -6,7 +6,6 @@ import {
   DELETED_USER_LOGIN,
   type ForgejoIssue,
   type ForgejoIssueComment,
-  type ForgejoLabel,
   type ForgejoMilestone,
 } from "../forgejo-types.js";
 import type {
@@ -15,10 +14,10 @@ import type {
   IssueComment,
   IssueDetail,
   IssueRow,
-  Label,
   Milestone,
   TimelineEvent,
 } from "../../shared/issues.js";
+import { toLabel, validateLabelSelection } from "./label-utils.js";
 import { bad, notFound } from "./responses.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
@@ -41,24 +40,6 @@ function toIssueComment(cm: ForgejoIssueComment): IssueComment {
     author_username: cm.user?.login ?? DELETED_USER_LOGIN,
     created_at: Date.parse(cm.created_at) || 0,
     updated_at: Date.parse(cm.updated_at) || 0,
-  };
-}
-
-function labelScope(label: ForgejoLabel): string | null {
-  if (!label.exclusive) return null;
-  const slash = label.name.lastIndexOf("/");
-  return slash > 0 ? label.name.slice(0, slash) : null;
-}
-
-function toLabel(label: ForgejoLabel): Label {
-  return {
-    id: label.id,
-    name: label.name,
-    color: label.color,
-    description: label.description,
-    exclusive: Boolean(label.exclusive),
-    is_archived: Boolean(label.is_archived),
-    scope: labelScope(label),
   };
 }
 
@@ -113,32 +94,6 @@ function parseIssueSort(value: string | undefined): IssueSort | undefined {
     "farduedate",
   ]);
   return value && allowed.has(value) ? value as IssueSort : undefined;
-}
-
-function validateLabelSelection(
-  requestedIds: number[],
-  allLabels: ForgejoLabel[],
-  currentLabels: ForgejoLabel[],
-): { ok: true } | { ok: false; message: string } {
-  const byId = new Map(allLabels.map((label) => [label.id, label]));
-  const currentIds = new Set(currentLabels.map((label) => label.id));
-  const seenScopes = new Map<string, string>();
-  for (const id of requestedIds) {
-    const label = byId.get(id);
-    if (!label) return { ok: false, message: `unknown label id ${id}` };
-    if (label.is_archived && !currentIds.has(id)) {
-      return { ok: false, message: `archived label cannot be newly assigned: ${label.name}` };
-    }
-    const scope = labelScope(label);
-    if (scope) {
-      const existing = seenScopes.get(scope);
-      if (existing && existing !== label.name) {
-        return { ok: false, message: `only one label in scope ${scope} can be assigned` };
-      }
-      seenScopes.set(scope, label.name);
-    }
-  }
-  return { ok: true };
 }
 
 export const issues = new Hono<AppEnv>();
