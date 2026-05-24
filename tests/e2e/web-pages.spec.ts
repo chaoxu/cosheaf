@@ -14,9 +14,12 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.getByRole("link", { name: "flushing-coin" }).click();
   await expect(page).toHaveURL(`${webBase}/${owner}/${repo}`);
-  await expect(page.locator(".repo-tabs")).toContainText("Code");
+  await expect(page.locator(".repo-tabs")).toContainText("Files");
   await expect(page.locator(".repo-tabs")).toContainText("Issues");
   await expect(page.locator(".repo-tabs")).toContainText("Pull Requests");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
+  await expect(page.locator(".repo-body")).toContainText("hello.md");
+  await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
   await page.goto(`${webBase}/${owner}/${repo}/src/branch/main/hello.md`);
   await expect(page.locator(".file-toolbar")).toContainText("hello.md");
@@ -33,6 +36,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('.list-row[href*="/pulls/"]').first().click();
   await expect(page.locator(".subtabs")).toContainText("Files changed");
   await expect(page.locator(".thread")).toContainText("pushed commit");
+  await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
   await page.locator('.subtabs a[href$="/files"]').click();
   await expect(page.locator(".changed-files")).toBeVisible();
   await expect(page.locator(".diff-panel")).toBeVisible();

@@ -108,41 +108,21 @@ web.get("/:owner/:repo", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
   const { owner, repo, fj, ws, user } = ctx;
-  const [pulls, issues, files] = await Promise.all([
-    fj.listPulls(owner, repo, "open").catch(() => []),
-    fj.listIssues(owner, repo, { state: "open", limit: 10 }).catch(() => []),
-    markdownFiles(fj, owner, repo, "main").catch(() => []),
-  ]);
+  const files = await markdownFiles(fj, owner, repo, "main").catch(() => []);
   return htmlResponse(
     repoPage({
-      title: repo,
+      title: `Files - ${repo}`,
       owner,
       repo,
-      active: "code",
+      active: "files",
       user,
       ws,
       body: `
-        <section class="repo-summary">
-          <div>
-            <p class="eyebrow">Repository</p>
-            <h1>${escapeHtml(repo)}</h1>
-          </div>
-          <div class="summary-grid">
-            <a href="${repoHref(owner, repo, "/src/branch/main")}"><strong>${files.length}</strong><span>Markdown files</span></a>
-            <a href="${repoHref(owner, repo, "/issues")}"><strong>${issues.length}</strong><span>Open issues</span></a>
-            <a href="${repoHref(owner, repo, "/pulls")}"><strong>${pulls.length}</strong><span>Open PRs</span></a>
-          </div>
-        </section>
-        <div class="two-col">
-          <section>
-            <div class="section-title"><h2>Files</h2><a href="${repoHref(owner, repo, "/src/branch/main")}">Browse</a></div>
-            ${fileList(owner, repo, "main", files.slice(0, 20))}
-          </section>
-          <section>
-            <div class="section-title"><h2>Pull requests</h2><a href="${repoHref(owner, repo, "/pulls")}">View all</a></div>
-            ${pullList(owner, repo, pulls.slice(0, 8))}
-          </section>
+        <div class="page-title compact">
+          <div><p class="eyebrow">Branch</p><h1>main</h1></div>
+          <a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}">New file</a>
         </div>
+        ${fileList(owner, repo, "main", files)}
       `,
     }),
   );
@@ -161,7 +141,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
         title: `${repo}: ${resolved.branch}`,
         owner,
         repo,
-        active: "code",
+        active: "files",
         user,
         ws,
         body: `
@@ -190,7 +170,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       title: `${rel} - ${repo}`,
       owner,
       repo,
-      active: "code",
+      active: "files",
       user,
       ws,
       body: `
@@ -244,7 +224,7 @@ web.get("/:owner/:repo/_edit", async (c) => {
       title: `Edit ${rel}`,
       owner: ctx.owner,
       repo: ctx.repo,
-      active: "code",
+      active: "files",
       user: ctx.user,
       ws: ctx.ws,
       body: `
@@ -424,7 +404,10 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
         <article class="thread">
           <header class="thread-header">
             <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
-            <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
+            <div class="thread-title-row">
+              <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
+              <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
+            </div>
             <p>${escapeHtml(pull.head.ref)} into ${escapeHtml(pull.base.ref)} - by ${escapeHtml(pull.user?.login ?? DELETED_USER_LOGIN)}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
@@ -531,7 +514,10 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
       body: `
         <header class="thread-header">
           <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
-          <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
+          <div class="thread-title-row">
+            <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
+            <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
+          </div>
           <nav class="subtabs">
             <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
             <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
@@ -601,7 +587,7 @@ web.get("/:owner/:repo/branches", async (c) => {
       title: `Branches - ${ctx.repo}`,
       owner: ctx.owner,
       repo: ctx.repo,
-      active: "code",
+      active: "files",
       user: ctx.user,
       ws: ctx.ws,
       body: `<div class="page-title compact"><h1>Branches</h1></div>
@@ -1398,7 +1384,7 @@ function repoPage(opts: {
   title: string;
   owner: string;
   repo: string;
-  active: "code" | "issues" | "pulls" | "activity" | "settings";
+  active: "files" | "issues" | "pulls" | "activity" | "settings";
   user: string;
   ws: WorkspaceContext;
   body: string;
@@ -1417,7 +1403,7 @@ function repoPage(opts: {
           <span class="role">${escapeHtml(opts.ws.role)}</span>
         </header>
         <nav class="repo-tabs">
-          ${tab(opts, "code", "Code", "")}
+          ${tab(opts, "files", "Files", "")}
           ${tab(opts, "issues", "Issues", "/issues")}
           ${tab(opts, "pulls", "Pull Requests", "/pulls")}
           ${tab(opts, "activity", "Activity", "/activity")}
@@ -1663,7 +1649,7 @@ const WEB_CSS = `
 .repo-tabs,.subtabs{display:flex;gap:4px;border-bottom:1px solid var(--cf-border);margin-bottom:8px}.repo-tabs a,.subtabs a{padding:6px 12px;color:var(--cf-muted)}.repo-tabs a.active,.subtabs a.active{color:var(--cf-fg);border-bottom:2px solid var(--cf-fg);font-weight:600}.repo-body{padding-bottom:20px}
 .page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:5px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:21px}.compact h1{font-size:19px}.toolbar-actions{display:flex;gap:8px;align-items:center}.repo-summary{display:flex;justify-content:space-between;gap:20px;align-items:center;border-bottom:1px solid var(--cf-border);padding:12px 0 14px}.repo-summary h1{font-size:30px;margin:0}.summary-grid{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));border:1px solid var(--cf-border)}.summary-grid a{padding:12px;border-left:1px solid var(--cf-border)}.summary-grid a:first-child{border-left:0}.summary-grid strong{display:block;font-size:22px}.summary-grid span{color:var(--cf-muted)}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:18px}.section-title{display:flex;justify-content:space-between;align-items:center}.section-title h2{font-size:16px}.section-title a{color:var(--cf-muted);font-size:13px}.list{border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.list-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:9px 12px;border-top:1px solid var(--cf-border)}.list-row:first-child{border-top:0}.list-row:hover{background:var(--cf-hover)}.list-row span,.list-row small{color:var(--cf-muted)}.empty{padding:18px;color:var(--cf-muted);border:1px solid var(--cf-border);border-radius:6px}
-.document{border-top:1px solid var(--cf-border);padding:14px 0}.cf-theme-scope{--cf-content-max-width:100%;--cf-sidenote-width:0px;--cf-doc-content-padding-inline:clamp(20px,4vw,48px)}.cf-reader{max-width:none;width:100%}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:none}.thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:8px 0}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:14px 0}.comment,.event,.timeline-event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.timeline-event{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fafafa}.timeline-event small{margin-left:auto;color:var(--cf-muted)}.timeline-event p{flex-basis:100%;margin:4px 0 0;color:var(--cf-muted)}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
+.document{border-top:1px solid var(--cf-border);padding:14px 0}.cf-theme-scope{--cf-content-max-width:100%;--cf-sidenote-width:0px;--cf-doc-content-padding-inline:clamp(20px,4vw,48px)}.cf-reader{max-width:none;width:100%}.cf-doc-flow h1,.markdown-body h1{font-size:30px;line-height:1.15}.cf-doc-flow p,.markdown-body p{max-width:none}.thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:8px 0}.thread-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.thread-header h1{font-size:24px;margin:8px 0}.thread-header h1 span{color:var(--cf-muted);font-weight:400}.issue-document{border-bottom:1px solid var(--cf-border);padding:14px 0}.comment,.event,.timeline-event{border:1px solid var(--cf-border);border-radius:6px;margin:12px 0;padding:12px}.timeline-event{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:#fafafa}.timeline-event small{margin-left:auto;color:var(--cf-muted)}.timeline-event p{flex-basis:100%;margin:4px 0 0;color:var(--cf-muted)}.comment-meta{color:var(--cf-muted);font-size:13px;border-bottom:1px solid var(--cf-border);padding-bottom:8px;margin-bottom:10px}.comment-form,.review-form{display:grid;gap:10px;margin:14px 0}.comment-form textarea,.review-form textarea{min-height:92px}
 .review-page{display:grid;gap:8px}.review-main{min-width:0}.review-bottom{display:grid;gap:8px}.review-card{border:1px solid var(--cf-border);border-radius:6px;background:#fff;padding:10px}.review-card h2{font-size:13px;margin:0 0 8px}.changed-files{display:flex;gap:6px;overflow-x:auto;border:1px solid var(--cf-border);border-radius:6px;padding:6px;background:#fafafa}.changed-files a{display:flex;align-items:center;gap:8px;max-width:360px;min-width:0;padding:5px 8px;border:1px solid transparent;border-radius:4px;background:#fff;white-space:nowrap}.changed-files a span{min-width:0;overflow:hidden;text-overflow:ellipsis}.changed-files a.active{border-color:var(--cf-fg);font-weight:600}.changed-files a:hover{background:var(--cf-hover)}.changed-files small{color:var(--cf-muted);flex:0 0 auto}.diff-panel{min-width:0;border:1px solid var(--cf-border);border-radius:6px;overflow:auto}.diff-title{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.diff-controls{display:flex;gap:18px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--cf-border);background:#fff}.diff-controls div{display:flex;gap:4px;align-items:center}.diff-controls span{color:var(--cf-muted);font-size:12px}.diff-controls a,.diff-controls .disabled{font-size:12px;padding:4px 7px;border-radius:4px}.diff-controls a:hover,.diff-controls a.active{background:var(--cf-hover);color:var(--cf-fg)}.diff-controls .disabled{opacity:.4}.patch{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.patch td{vertical-align:top;padding:0}.patch pre{margin:0;white-space:pre-wrap;word-break:break-word}.patch .sign{width:28px;text-align:center;color:var(--cf-muted);user-select:none}.patch tr.add{background:rgb(34 197 94 / .09)}.patch tr.del{background:rgb(239 68 68 / .09)}.patch tr.hunk{background:#f3f3f3;color:var(--cf-muted)}.source-split,.rich-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}.source-split section,.rich-split section{min-width:0;border-left:1px solid var(--cf-border);padding:0 10px 14px}.source-split section:first-child,.rich-split section:first-child{border-left:0}.source-split h3,.rich-split h3,.source-after h3{font-size:12px;color:var(--cf-muted);font-weight:500;margin:0 -10px 8px;padding:8px 10px;border-bottom:1px solid var(--cf-border);background:#fafafa}.source-lines{width:100%;border-collapse:collapse;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.source-lines td{vertical-align:top;padding:0}.source-lines td.line-action{width:26px;text-align:center;padding-right:4px;color:var(--cf-muted);user-select:none}.source-lines td:nth-child(2){width:42px;text-align:right;padding-right:10px;color:var(--cf-muted);user-select:none}.source-lines pre{margin:0;white-space:pre-wrap;word-break:break-word}.source-lines tr.marked{background:rgb(34 197 94 / .09)}.source-split section:first-child .source-lines tr.marked{background:rgb(239 68 68 / .09)}.line-composer{position:relative}.line-composer summary{list-style:none;width:18px;height:18px;border:1px solid var(--cf-border);border-radius:4px;background:#fff;line-height:16px;cursor:pointer}.line-composer summary::-webkit-details-marker{display:none}.line-composer form{position:absolute;z-index:3;left:20px;top:0;width:260px;display:grid;gap:6px;border:1px solid var(--cf-border);border-radius:6px;background:#fff;padding:8px;box-shadow:0 6px 18px rgb(0 0 0 / .12)}.line-composer textarea{min-height:74px;font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}.line-comment{font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;border:1px solid var(--cf-border);border-radius:6px;margin:5px 0 7px;padding:8px;background:#fff}.line-comment span,.file-comment span{color:var(--cf-muted);font-size:12px;margin-left:8px}.line-comment p,.file-comment p{margin:5px 0 0;white-space:pre-wrap}.file-comments{display:grid;gap:8px}.file-comments.empty{border:0;padding:4px 0}.file-comment{border:1px solid var(--cf-border);border-radius:6px;padding:8px}.file-comment.outdated,.line-comment.outdated{opacity:.72}.rich-after{padding:12px}.rich-split .cf-reader{max-width:none}
 .edit-page{display:grid;gap:8px}.edit-page .file-toolbar{margin:0}.edit-page textarea{min-height:62vh;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.settings-page{display:grid;gap:18px;max-width:560px}.settings-section{display:grid;gap:10px}.settings-section h2{font-size:16px;margin:0}
 #web-editor-root{height:calc(100vh - 210px);min-height:520px;border:1px solid var(--cf-border);border-radius:6px;overflow:hidden}.web-editor-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--cf-bg);color:var(--cf-fg)}.web-editor-main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px}.web-editor-main .cm-host{min-width:0;min-height:0;display:flex;flex-direction:column}.web-editor-main .cm-editor{height:100%;min-height:0}.web-editor-outline{border-left:1px solid var(--cf-border);background:#fafafa;overflow:auto}.web-editor-outline h2{font-size:13px;margin:0;padding:9px 10px;border-bottom:1px solid var(--cf-border)}.web-editor-outline ol{list-style:none;margin:0;padding:6px 0}.web-editor-outline li button{width:100%;border:0;border-radius:0;background:transparent;text-align:left;padding:4px 10px;font-size:13px}.web-editor-outline li button:hover{background:var(--cf-hover)}.web-editor-outline p{color:var(--cf-muted);font-size:13px;padding:0 10px}.web-editor-loading{padding:16px;color:var(--cf-muted)}.web-editor-statusbar{height:30px;border-top:1px solid var(--cf-border);display:flex;align-items:center;gap:8px;padding:0 8px;font-size:12px;color:var(--cf-muted);background:#fff}.web-editor-statusbar button,.web-editor-statusbar select{font-size:12px;padding:2px 6px}.web-editor-file{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cf-fg)}.web-editor-status{flex:1;text-align:center;min-width:80px}.web-editor-branch{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dirty-dot{color:var(--cf-accent)}
