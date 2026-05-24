@@ -199,7 +199,7 @@ function rewriteRenderedRepoUrls(root: ParentNode, payload: ReaderPayload): void
     const attr = el instanceof HTMLImageElement ? "src" : "href";
     const value = el.getAttribute(attr);
     if (!value) continue;
-    const resolved = resolveRepoLink(payload, value);
+    const resolved = el instanceof HTMLImageElement ? resolveRawRepoLink(payload, value) : resolveRepoLink(payload, value);
     if (resolved) el.setAttribute(attr, resolved);
   }
 }
@@ -219,7 +219,7 @@ function installRefNavigation(): void {
       event.preventDefault();
       const match = /^\/([^/]+)\/([^/]+)/.exec(window.location.pathname);
       if (!match) return;
-      const branch = document.querySelector<HTMLElement>("[data-reader-branch]")?.dataset.readerBranch ?? "main";
+      const branch = ref.closest<HTMLElement>("[data-reader-branch]")?.dataset.readerBranch ?? "main";
       const line = ref.dataset.refFrom ? `#L${ref.dataset.refFrom}${ref.dataset.refTo && ref.dataset.refTo !== ref.dataset.refFrom ? `-${ref.dataset.refTo}` : ""}` : "";
       window.location.href = `/${match[1]}/${match[2]}/src/branch/${urlPath(branch)}/${urlPath(ref.dataset.refPath)}${line}`;
     }

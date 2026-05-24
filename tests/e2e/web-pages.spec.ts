@@ -45,6 +45,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
   await expect(page.locator(".repo-body")).not.toContainText(owner);
   await page.locator('.list-row[href*="/issues/"]').first().click();
+  const issuePath = new URL(page.url()).pathname;
   await expect(page.locator(".thread-header")).toContainText("#");
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
   await page.getByTestId("issue-toggle-state").click();
@@ -73,6 +74,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("view-mode-source").click();
   await page.getByTestId("view-shape-unified").click();
   await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
+  await expect(page.locator(".changed-files a").first()).toHaveAttribute("href", /mode=source&shape=unified/);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();
@@ -105,7 +107,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
 
   await page.goto(`${repoBase}/activity`);
-  await expect(page.getByTestId("activity-row").filter({ hasText: "reopened" }).first().locator('a[href$="/issues/2"]')).toBeVisible();
+  await expect(page.getByTestId("activity-row").filter({ hasText: "reopened" }).first().locator(`a[href$="${issuePath}"]`)).toBeVisible();
   await expect
     .poll(async () => {
       await page.reload({ waitUntil: "domcontentloaded" });

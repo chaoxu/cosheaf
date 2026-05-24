@@ -34,6 +34,7 @@ import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 import { escapeAttr, escapeHtml } from "./html-escape.js";
+import { webTimelineDescriptionHtml } from "./web-timeline.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 
@@ -242,7 +243,7 @@ web.get("/:owner/:repo/raw/branch/*", async (c) => {
   const rel = safeRel(resolved.path);
   if (!rel) return new Response("not found", { status: 404 });
   const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel);
-  return new Response(content, { headers: { "content-type": "text/plain; charset=utf-8" } });
+  return new Response(content, { headers: { "content-type": contentTypeForPath(rel) } });
 });
 
 web.get("/:owner/:repo/_edit", async (c) => {
@@ -611,7 +612,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
               ${files
                 .map(
                   (f) => `
-                    <a class="${f.path === file?.path ? "active" : ""}" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}?file=${encodeURIComponent(f.path)}">
+                    <a class="${f.path === file?.path ? "active" : ""}" href="${prFilesHref(ctx, pull.number, f.path, mode, shape)}">
                       <span>${escapeHtml(f.path)}</span>
                       <small>+${f.additions} -${f.deletions}</small>
                     </a>
@@ -1094,8 +1095,7 @@ function markdownSurface(ctx: WebCtx, rendered: string, extraClass = ""): string
 }
 
 function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): string {
-  const href = (nextMode: DiffMode, nextShape: DiffShape) =>
-    `${repoHref(ctx.owner, ctx.repo, `/pulls/${prNumber}/files`)}?file=${encodeURIComponent(filePath)}&mode=${nextMode}&shape=${nextShape}`;
+  const href = (nextMode: DiffMode, nextShape: DiffShape) => prFilesHref(ctx, prNumber, filePath, nextMode, nextShape);
   const modeLink = (id: DiffMode, label: string) =>
     `<a data-testid="view-mode-${id}" class="${mode === id ? "active" : ""}" href="${href(id, parseDiffShape(shape, id))}">${label}</a>`;
   const shapeLink = (id: DiffShape, label: string) => {
@@ -1106,6 +1106,10 @@ function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode:
     <div><span>View:</span>${modeLink("source", "Source")}${modeLink("rich", "Rich")}</div>
     <div><span>Shape:</span>${shapeLink("unified", "Unified")}${shapeLink("split", "Side-by-side")}${shapeLink("after", "After only")}</div>
   </div>`;
+}
+
+function prFilesHref(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): string {
+  return `${repoHref(ctx.owner, ctx.repo, `/pulls/${prNumber}/files`)}?file=${encodeURIComponent(filePath)}&mode=${mode}&shape=${shape}`;
 }
 
 function changedLines(patch: string): { added: Set<number>; deleted: Set<number> } {
@@ -1354,65 +1358,13 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
       <p>${escapeHtml(firstCommitLine(item.commit.commit.message))}</p>
     </div>`;
   }
-  const description = describeWebTimelineEvent(item.event);
+  const description = webTimelineDescriptionHtml(item.event);
   if (!description) return "";
   return `<div class="timeline-event">
     ${item.event.user?.login ? `<strong>${escapeHtml(displayLogin(ctx.owner, item.event.user.login))}</strong>` : ""}
     <span>${description}</span>
     <small>${formatDate(item.event.created_at)}</small>
   </div>`;
-}
-
-function describeWebTimelineEvent(event: ForgejoTimelineEvent): string {
-  switch (event.type) {
-    case "close":
-      return "closed this";
-    case "reopen":
-      return "reopened this";
-    case "merge":
-      return "merged this";
-    case "label":
-      return event.label ? `added the ${event.label.name} label` : "changed labels";
-    case "unlabel":
-      return event.label ? `removed the ${event.label.name} label` : "changed labels";
-    case "assignees":
-      return event.assignee
-        ? `${event.removed_assignee ? "unassigned" : "assigned"} ${event.assignee.login}`
-        : "changed assignees";
-    case "change_title":
-      return `renamed from "${event.old_title ?? ""}" to "${event.new_title ?? ""}"`;
-    case "milestone":
-      return event.milestone ? `added this to milestone ${event.milestone.title}` : "changed milestone";
-    case "demilestone":
-      return event.milestone ? `removed this from milestone ${event.milestone.title}` : "changed milestone";
-    case "commit_ref":
-      return event.ref_commit_sha ? `referenced this in commit ${event.ref_commit_sha.slice(0, 10)}` : "referenced this";
-    case "issue_ref":
-    case "comment_ref":
-      return refIssueNumber(event) ? `referenced this in #${refIssueNumber(event)}` : "referenced this";
-    case "pull_ref":
-      return refIssueNumber(event) ? `referenced this in pull request #${refIssueNumber(event)}` : "referenced this in a pull request";
-    case "dependency_added":
-      return event.dependent_issue ? `added dependency #${event.dependent_issue.number}` : "added dependency";
-    case "dependency_removed":
-      return event.dependent_issue ? `removed dependency #${event.dependent_issue.number}` : "removed dependency";
-    case "pin":
-      return "pinned this";
-    case "unpin":
-      return "unpinned this";
-    default:
-      return event.type.replaceAll("_", " ");
-  }
-}
-
-function refIssueNumber(event: ForgejoTimelineEvent): number | null {
-  const ref = event.ref_issue as unknown;
-  if (typeof ref === "number") return ref;
-  if (ref && typeof ref === "object" && "number" in ref) {
-    const number = (ref as { number?: unknown }).number;
-    return typeof number === "number" ? number : null;
-  }
-  return null;
 }
 
 function compareTimelineItems(a: WebTimelineItem, b: WebTimelineItem): number {
