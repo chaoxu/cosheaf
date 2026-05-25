@@ -39,6 +39,7 @@ import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 import { escapeAttr, escapeHtml } from "./html-escape.js";
+import { validateLabelSelection } from "./label-utils.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -374,13 +375,14 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   if (!ctx.ok) return ctx.response;
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const [issue, comments, timeline] = await Promise.all([
+  const [issue, comments, timeline, allLabels] = await Promise.all([
     ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
       if (err instanceof ForgejoError && err.status === 404) return null;
       throw err;
     }),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   const body = await renderMarkdown(ctx, issue.body ?? "");
@@ -416,6 +418,14 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
           <div class="issue-document">
             ${markdownSurface(ctx, body)}
           </div>
+          ${issueEditForm(ctx, issue)}
+          ${labelEditForm({
+            testId: "issue-label-form",
+            action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`),
+            disabled: ctx.ws.role === "read",
+            labels: allLabels,
+            currentLabels: issue.labels,
+          })}
           ${timelineHtml}
           ${
             ctx.ws.role === "read"
@@ -429,6 +439,40 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
       `,
     }),
   );
+});
+
+web.post("/:owner/:repo/issues/:number/edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const form = await c.req.parseBody();
+  const title = stringField(form.title);
+  const body = textField(form.body);
+  if (!title || body === null) return badRequestPage(ctx.user, "Issue title and description are required.");
+  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { title, body });
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+});
+
+web.post("/:owner/:repo/issues/:number/labels", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const form = await c.req.parseBody({ all: true });
+  const labelIds = positiveIntFields(form.labels);
+  const [allLabels, issue] = await Promise.all([
+    ctx.fj.listLabels(ctx.owner, ctx.repo),
+    ctx.fj.getIssue(ctx.owner, ctx.repo, number),
+  ]);
+  const validation = validateLabelSelection(labelIds, allLabels, issue.labels);
+  if (!validation.ok) return badRequestPage(ctx.user, validation.message);
+  await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelIds);
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 });
 
 web.post("/:owner/:repo/issues/:number/comments", async (c) => {
@@ -493,11 +537,13 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
   if (!ctx.ok) return ctx.response;
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  const [reviews, comments, timeline, commits] = await Promise.all([
+  const [reviews, comments, timeline, commits, allLabels, availableReviewers] = await Promise.all([
     ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number).catch(() => []),
+    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const body = await renderMarkdown(ctx, pull.body ?? "");
   const timelineHtml = await renderPullTimeline(ctx, reviews, comments, timeline ?? [], commits);
@@ -528,12 +574,79 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
             <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
             ${body ? markdownSurface(ctx, body) : `<p>No description.</p>`}
           </div>
+          ${pullEditForm(ctx, pull)}
+          ${labelEditForm({
+            testId: "pull-label-form",
+            action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`),
+            disabled: ctx.ws.role === "read" || pull.state === "closed",
+            labels: allLabels,
+            currentLabels: pull.labels ?? [],
+          })}
+          ${reviewRequestPanel(ctx, pull, availableReviewers)}
           ${timelineHtml}
           ${reviewForms(ctx, pull)}
         </article>
       `,
     }),
   );
+});
+
+web.post("/:owner/:repo/pulls/:number/edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const title = stringField(form.title);
+  const body = textField(form.body);
+  if (!title || body === null) return badRequestPage(ctx.user, "Pull request title and description are required.");
+  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { title, body });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
+web.post("/:owner/:repo/pulls/:number/labels", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody({ all: true });
+  const labelIds = positiveIntFields(form.labels);
+  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
+  const validation = validateLabelSelection(labelIds, allLabels, pull.labels ?? []);
+  if (!validation.ok) return badRequestPage(ctx.user, validation.message);
+  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { labels: labelIds });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
+web.post("/:owner/:repo/pulls/:number/review-requests", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody({ all: true });
+  const reviewers = stringFields(form.reviewers);
+  if (reviewers.length === 0) return badRequestPage(ctx.user, "At least one reviewer is required.");
+  await ctx.fj.createPullReviewRequests(ctx.owner, ctx.repo, pull.number, reviewers);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
+web.post("/:owner/:repo/pulls/:number/review-requests/delete", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const reviewer = stringField((await c.req.parseBody()).reviewer);
+  if (!reviewer) return badRequestPage(ctx.user, "Reviewer is required.");
+  await ctx.fj.deletePullReviewRequests(ctx.owner, ctx.repo, pull.number, [reviewer]);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 });
 
 web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
@@ -1232,6 +1345,108 @@ function renderFileCommentSummary(comments: readonly WebLineComment[]): string {
     .join("")}</div>`;
 }
 
+function issueEditForm(ctx: WebCtx, issue: ForgejoIssue): string {
+  if (ctx.ws.role === "read") return "";
+  return `<details class="comment-form" data-testid="issue-edit-form">
+    <summary>Edit issue title and description</summary>
+    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}">
+      <label>Title <input name="title" value="${escapeAttr(issue.title)}" required></label>
+      <label>Description <textarea name="body">${escapeHtml(issue.body ?? "")}</textarea></label>
+      <button class="button primary" type="submit">Save issue</button>
+    </form>
+  </details>`;
+}
+
+function pullEditForm(ctx: WebCtx, pull: ForgejoPull): string {
+  if (ctx.ws.role === "read" || pull.state === "closed") return "";
+  return `<details class="comment-form" data-testid="pull-edit-form">
+    <summary>Edit pull request title and description</summary>
+    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">
+      <label>Title <input name="title" value="${escapeAttr(pull.title)}" required></label>
+      <label>Description <textarea name="body">${escapeHtml(pull.body ?? "")}</textarea></label>
+      <button class="button primary" type="submit">Save pull request</button>
+    </form>
+  </details>`;
+}
+
+function labelEditForm(opts: {
+  testId: string;
+  action: string;
+  disabled: boolean;
+  labels: readonly ForgejoLabel[];
+  currentLabels: readonly ForgejoLabel[];
+}): string {
+  if (opts.disabled) return "";
+  const currentIds = new Set(opts.currentLabels.map((label) => label.id));
+  const rows = opts.labels.map((label) => {
+    const checked = currentIds.has(label.id) ? " checked" : "";
+    const disabled = label.is_archived && !currentIds.has(label.id) ? " disabled" : "";
+    const scope = labelScope(label);
+    const flags = [
+      scope ? `scope:${scope}` : "",
+      label.is_archived ? "archived" : "",
+    ].filter(Boolean).join(" ");
+    return `<label class="checkbox-row">
+      <input type="checkbox" name="labels" value="${label.id}"${checked}${disabled}>
+      <span>${escapeHtml(label.name)}${flags ? ` <small>${escapeHtml(flags)}</small>` : ""}</span>
+    </label>`;
+  });
+  return `<details class="comment-form" data-testid="${opts.testId}">
+    <summary>Edit labels</summary>
+    <form method="post" action="${opts.action}">
+      <div class="checkbox-list">${rows.join("") || `<div class="empty">No labels.</div>`}</div>
+      <button class="button primary" type="submit">Save labels</button>
+    </form>
+  </details>`;
+}
+
+function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): string {
+  const requested = pull.requested_reviewers ?? [];
+  const requestedTeams = pull.requested_reviewers_teams ?? [];
+  const requestedLogins = new Set(requested.map((reviewer) => reviewer.login));
+  const available = availableReviewers.filter((reviewer) => !requestedLogins.has(reviewer.login));
+  const requestedHtml =
+    requested.length === 0 && requestedTeams.length === 0
+      ? `<div class="empty">No requested reviewers.</div>`
+      : `<div class="label-chips">
+          ${requested.map((reviewer) => reviewerRequestChip(ctx, pull, reviewer.login)).join("")}
+          ${requestedTeams.map((team) => `<span class="meta-pill">${escapeHtml(team.username ?? team.name)}</span>`).join("")}
+        </div>`;
+  const requestForm =
+    ctx.ws.role === "read" || pull.state === "closed"
+      ? ""
+      : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
+          <label>Request reviewers
+            <select name="reviewers" multiple size="${Math.min(Math.max(available.length, 2), 6)}">
+              ${available.map((reviewer) => `<option value="${escapeAttr(reviewer.login)}">${escapeHtml(displayLogin(ctx.owner, reviewer.login))}</option>`).join("")}
+            </select>
+          </label>
+          <button class="button" type="submit">Request review</button>
+        </form>`;
+  return `<section class="comment-form" data-testid="pull-review-requests">
+    <h2>Requested reviewers</h2>
+    ${requestedHtml}
+    ${requestForm}
+  </section>`;
+}
+
+function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): string {
+  const remove =
+    ctx.ws.role === "read" || pull.state === "closed"
+      ? ""
+      : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests/delete`)}">
+          <input type="hidden" name="reviewer" value="${escapeAttr(reviewer)}">
+          <button class="button" type="submit">Remove</button>
+        </form>`;
+  return `<span class="meta-pill">${escapeHtml(displayLogin(ctx.owner, reviewer))}${remove}</span>`;
+}
+
+function labelScope(label: ForgejoLabel): string | null {
+  if (!label.exclusive) return null;
+  const slash = label.name.lastIndexOf("/");
+  return slash > 0 ? label.name.slice(0, slash) : null;
+}
+
 type WebTimelineItem =
   | { kind: "comment"; ts: number; comment: ForgejoIssueComment }
   | { kind: "event"; ts: number; event: ForgejoTimelineEvent }
@@ -1830,6 +2045,17 @@ function stringField(value: unknown): string | null {
 
 function textField(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function stringFields(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))];
+}
+
+function positiveIntFields(value: unknown): number[] {
+  return stringFields(value)
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item > 0);
 }
 
 function editBranchFor(username: string, requested: string | null | undefined): string {

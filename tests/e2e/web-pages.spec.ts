@@ -54,6 +54,8 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('.list-row[href*="/issues/"]').first().click();
   const issuePath = new URL(page.url()).pathname;
   await expect(page.locator(".thread-header")).toContainText("#");
+  await expect(page.getByTestId("issue-edit-form")).toBeVisible();
+  await expect(page.getByTestId("issue-label-form")).toBeVisible();
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
   await page.getByTestId("issue-toggle-state").click();
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Reopen");
@@ -70,6 +72,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
   await page.locator('.list-row[href*="/pulls/"]').first().click();
   await expect(page.locator(".subtabs")).toContainText("Files changed");
+  await expect(page.getByTestId("pull-edit-form")).toBeVisible();
+  await expect(page.getByTestId("pull-label-form")).toBeVisible();
+  await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await expect(page.locator(".thread")).toContainText("pushed commit");
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
   await page.locator('.subtabs a[href$="/files"]').click();
