@@ -12,13 +12,10 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
   await expect(page.locator(".global-header")).toContainText("chao");
-  await expect(page.locator(".global-header")).toHaveCSS("position", "fixed");
+  await expect(page.locator(".global-header")).toHaveCSS("position", "static");
 
   await page.getByRole("link", { name: "flushing-coin" }).click();
   await expect(page).toHaveURL(repoBase);
-  const headerTop = await page.locator(".global-header").boundingBox().then((box) => box?.y);
-  await page.evaluate(() => window.scrollTo(0, 200));
-  await expect.poll(async () => page.locator(".global-header").boundingBox().then((box) => box?.y)).toBe(headerTop);
   await expect(page.locator(".repo-tabs")).toContainText("Files");
   await expect(page.locator(".repo-tabs")).toContainText("Issues");
   await expect(page.locator(".repo-tabs")).toContainText("Pull Requests");
@@ -128,6 +125,10 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
 
   await page.goto(`${repoBase}/activity`);
+  const headerTop = await page.locator(".global-header").boundingBox().then((box) => box?.y);
+  await page.evaluate(() => window.scrollTo(0, 200));
+  await expect.poll(async () => page.locator(".global-header").boundingBox().then((box) => box?.y)).toBeLessThan(headerTop ?? 0);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await expect(page.getByTestId("activity-row").filter({ hasText: "reopened" }).first().locator(`a[href$="${issuePath}"]`)).toBeVisible();
   await expect
     .poll(async () => {
