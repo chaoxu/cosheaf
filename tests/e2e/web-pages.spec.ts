@@ -12,9 +12,13 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
   await expect(page.locator(".global-header")).toContainText("chao");
+  await expect(page.locator(".global-header")).toHaveCSS("position", "fixed");
 
   await page.getByRole("link", { name: "flushing-coin" }).click();
   await expect(page).toHaveURL(repoBase);
+  const headerTop = await page.locator(".global-header").boundingBox().then((box) => box?.y);
+  await page.evaluate(() => window.scrollTo(0, 200));
+  await expect.poll(async () => page.locator(".global-header").boundingBox().then((box) => box?.y)).toBe(headerTop);
   await expect(page.locator(".repo-tabs")).toContainText("Files");
   await expect(page.locator(".repo-tabs")).toContainText("Issues");
   await expect(page.locator(".repo-tabs")).toContainText("Pull Requests");
@@ -61,7 +65,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Reopen");
   await page.getByTestId("issue-toggle-state").click();
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
-  await expect(page.locator(".comment-form")).toBeVisible();
+  await expect(page.locator('form.comment-form[action$="/comments"]')).toBeVisible();
 
   await page.goto(`${repoBase}/pulls`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
