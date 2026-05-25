@@ -39,7 +39,7 @@ import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 import { escapeAttr, escapeHtml } from "./html-escape.js";
-import { webTimelineDescriptionHtml } from "./web-timeline.js";
+import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 
@@ -1320,7 +1320,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
 }
 
 function compareTimelineItems(a: WebTimelineItem, b: WebTimelineItem): number {
-  return a.ts - b.ts;
+  return compareWebTimelineItems(a, b);
 }
 
 function parseDateMs(value: string | number | null | undefined): number {

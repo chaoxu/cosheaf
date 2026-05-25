@@ -1,9 +1,29 @@
 import type { ForgejoTimelineEvent } from "../forgejo-types.js";
 import { escapeHtml } from "./html-escape.js";
 
+export interface WebTimelineSortItem {
+  kind: "comment" | "event" | "review" | "line-comment" | "commit";
+  ts: number;
+  event?: Pick<ForgejoTimelineEvent, "id" | "type">;
+  review?: { id: number };
+  comment?: { id: number };
+  commit?: { sha: string };
+}
+
 export function webTimelineDescriptionHtml(event: ForgejoTimelineEvent): string {
   const description = webTimelineDescriptionText(event);
   return description ? escapeHtml(description) : "";
+}
+
+export function compareWebTimelineItems(a: WebTimelineSortItem, b: WebTimelineSortItem): number {
+  const byTimestamp = a.ts - b.ts;
+  if (byTimestamp !== 0) return byTimestamp;
+  const byRank = timelineTieRank(a) - timelineTieRank(b);
+  if (byRank !== 0) return byRank;
+  const aId = timelineNumericId(a);
+  const bId = timelineNumericId(b);
+  if (aId !== null && bId !== null && aId !== bId) return aId - bId;
+  return timelineStringId(a).localeCompare(timelineStringId(b));
 }
 
 export function webTimelineDescriptionText(event: ForgejoTimelineEvent): string {
@@ -56,4 +76,26 @@ function refIssueNumber(event: ForgejoTimelineEvent): number | null {
     return typeof number === "number" ? number : null;
   }
   return null;
+}
+
+function timelineTieRank(item: WebTimelineSortItem): number {
+  if (item.kind === "commit") return 10;
+  if (item.kind === "comment") return 20;
+  if (item.kind === "line-comment") return 30;
+  if (item.kind === "review") return 40;
+  if (item.kind === "event" && isTerminalTimelineEvent(item.event?.type)) return 60;
+  return 50;
+}
+
+function isTerminalTimelineEvent(type: string | undefined): boolean {
+  return type === "merge" || type === "close";
+}
+
+function timelineNumericId(item: WebTimelineSortItem): number | null {
+  return item.event?.id ?? item.review?.id ?? item.comment?.id ?? null;
+}
+
+function timelineStringId(item: WebTimelineSortItem): string {
+  if (item.commit) return `${item.kind}:${item.commit.sha}`;
+  return item.kind;
 }

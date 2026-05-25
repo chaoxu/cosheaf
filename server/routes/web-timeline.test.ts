@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ForgejoTimelineEvent } from "../forgejo-types.js";
-import { webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
+import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
 function event(fields: Partial<ForgejoTimelineEvent>): ForgejoTimelineEvent {
   return {
@@ -22,5 +22,27 @@ describe("web timeline descriptions", () => {
     expect(webTimelineDescriptionText(event({ type: "issue_ref", ref_issue: { number: 42 } as unknown as number }))).toBe(
       "referenced this in #42",
     );
+  });
+});
+
+describe("web timeline ordering", () => {
+  it("shows a submitted review before a same-second merge event", () => {
+    const ts = Date.parse("2026-05-24T22:05:44Z");
+    const items = [
+      { kind: "event" as const, ts, event: { id: 25, type: "merge" } },
+      { kind: "review" as const, ts, review: { id: 18 } },
+    ].sort(compareWebTimelineItems);
+
+    expect(items.map((item) => item.kind)).toEqual(["review", "event"]);
+  });
+
+  it("keeps same-kind ties deterministic by Forgejo id", () => {
+    const ts = Date.parse("2026-05-24T22:05:44Z");
+    const items = [
+      { kind: "event" as const, ts, event: { id: 25, type: "label" } },
+      { kind: "event" as const, ts, event: { id: 24, type: "milestone" } },
+    ].sort(compareWebTimelineItems);
+
+    expect(items.map((item) => item.event?.id)).toEqual([24, 25]);
   });
 });
