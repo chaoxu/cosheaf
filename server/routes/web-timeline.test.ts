@@ -29,7 +29,7 @@ describe("web timeline ordering", () => {
   it("shows a submitted review before a same-second merge event", () => {
     const ts = Date.parse("2026-05-24T22:05:44Z");
     const items = [
-      { kind: "event" as const, ts, event: { id: 25, type: "merge" } },
+      { kind: "event" as const, ts, event: { id: 25, type: "merge_pull" } },
       { kind: "review" as const, ts, review: { id: 18 } },
     ].sort(compareWebTimelineItems);
 

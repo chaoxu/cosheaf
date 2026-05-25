@@ -88,7 +88,7 @@ function timelineTieRank(item: WebTimelineSortItem): number {
 }
 
 function isTerminalTimelineEvent(type: string | undefined): boolean {
-  return type === "merge" || type === "close";
+  return type === "merge" || type === "merge_pull" || type === "close";
 }
 
 function timelineNumericId(item: WebTimelineSortItem): number | null {
