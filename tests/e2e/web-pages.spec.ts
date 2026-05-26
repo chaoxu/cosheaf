@@ -65,7 +65,12 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Branches" })).toBeVisible();
 
   await page.goto(`${repoBase}/src/branch/main/notes/plain-text.txt`);
-  await expect(page.getByTestId("file-preview-text")).toContainText("intentionally not Markdown");
+  const plainTextRawPath = "/flushing-coin/raw/branch/main/notes/plain-text.txt";
+  const plainTextRawHref = `${webBase}${plainTextRawPath}`;
+  await expect(page.getByTestId("file-preview-text-raw")).toHaveAttribute("data", plainTextRawPath);
+  const plainTextRaw = await page.request.get(plainTextRawHref);
+  expect(plainTextRaw.ok()).toBe(true);
+  expect(await plainTextRaw.text()).toContain("intentionally not Markdown");
   await expect(page.locator(".cf-reader")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Edit text" })).toBeVisible();
 
@@ -81,7 +86,12 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("text-edit-form").locator('textarea[name="content"]').fill("Updated plain text fixture.\n");
   await page.getByTestId("text-edit-form").getByRole("button", { name: "Save" }).click();
   await expect(page).toHaveURL(`${repoBase}/src/branch/${textBranch}/notes/plain-text.txt`);
-  await expect(page.getByTestId("file-preview-text")).toContainText("Updated plain text fixture.");
+  const updatedTextRawPath = `/flushing-coin/raw/branch/${textBranch}/notes/plain-text.txt`;
+  const updatedTextRawHref = `${webBase}${updatedTextRawPath}`;
+  await expect(page.getByTestId("file-preview-text-raw")).toHaveAttribute("data", updatedTextRawPath);
+  const updatedTextRaw = await page.request.get(updatedTextRawHref);
+  expect(updatedTextRaw.ok()).toBe(true);
+  expect(await updatedTextRaw.text()).toContain("Updated plain text fixture.");
   await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
 
   const branchToDelete = `user/chao/delete-me-${Date.now()}`;

@@ -44,6 +44,7 @@ test("account preferences are separate from project settings", async ({ page }) 
   await expect(
     page.locator(".cf-doc-block--theorem .cf-block-attr-title").filter({ hasText: "Hover Preview Stress Test" }).first(),
   ).toBeVisible();
+  await expect(page.locator(".cf-doc-block--theorem > .cf-block-header")).toHaveCount(0);
   const showcaseImage = page.locator('img[src*="/raw/branch/main/showcase/hover-preview-figure.svg"]').first();
   await expect(showcaseImage).toBeVisible();
   const showcaseImageSrc = await showcaseImage.getAttribute("src");

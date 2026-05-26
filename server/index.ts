@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { compress } from "hono/compress";
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -89,6 +90,10 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
+app.use("/assets/*", compress());
+app.use("/vendor/coflat-editor/*", compress());
+for (const assetPath of publicAssetPaths) app.use(assetPath, compress());
+
 app.get("/vendor/coflat-editor/*", async (c) => {
   const response = await serveCoflatEditorAsset(c.req.path);
   return response ?? c.json({ error: "not found" }, 404);
@@ -114,14 +119,14 @@ async function serveDistFile(requestPath: string): Promise<Response | null> {
   const resolvedPath = resolveDistPath(requestPath);
   if (!resolvedPath) return null;
   const body = await readFile(resolvedPath);
-  return new Response(body, { headers: { "content-type": contentTypeForPath(resolvedPath) } });
+  return new Response(body, { headers: staticFileHeaders(resolvedPath, cacheControlForRequestPath(requestPath)) });
 }
 
 async function servePublicOrDistFile(requestPath: string): Promise<Response | null> {
   const publicPath = resolveStaticPath(publicDir, requestPath);
   if (publicPath) {
     const body = await readFile(publicPath);
-    return new Response(body, { headers: { "content-type": contentTypeForPath(publicPath) } });
+    return new Response(body, { headers: staticFileHeaders(publicPath, "public, max-age=60") });
   }
   return serveDistFile(requestPath);
 }
@@ -144,7 +149,22 @@ async function serveCoflatEditorAsset(requestPath: string): Promise<Response | n
     return null;
   }
   const body = await readFile(filePath);
-  return new Response(body, { headers: { "content-type": contentTypeForPath(filePath) } });
+  return new Response(body, { headers: staticFileHeaders(filePath, cacheControlForRequestPath(requestPath)) });
+}
+
+function staticFileHeaders(filePath: string, cacheControl: string): Record<string, string> {
+  return {
+    "cache-control": cacheControl,
+    "content-type": contentTypeForPath(filePath),
+    vary: "Accept-Encoding",
+  };
+}
+
+function cacheControlForRequestPath(requestPath: string): string {
+  if (requestPath.startsWith("/assets/")) return "public, max-age=31536000, immutable";
+  if (requestPath.startsWith("/vendor/coflat-editor/fonts/")) return "public, max-age=31536000, immutable";
+  if (requestPath.startsWith("/vendor/coflat-editor/")) return "public, max-age=86400";
+  return "public, max-age=60";
 }
 
 function resolveDistPath(requestPath: string): string | null {

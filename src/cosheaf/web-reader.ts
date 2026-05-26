@@ -1,11 +1,7 @@
 import { renderToHtml, hydrateMath, type DocumentContext } from "@chaoxu/coflat-editor/reader";
 import { extractReferences } from "@chaoxu/coflat-editor/parse";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
-import {
-  collectCoflatBlockEntries,
-  extractCoflatXrefTargets,
-  type CoflatBlockEntry,
-} from "../../shared/coflat-xrefs";
+import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
@@ -103,7 +99,6 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const refs = await localRefs(payload, parsed.frontmatter);
   const rendered = renderToHtml(parsed.body, documentContext(payload, refs)).html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
-  decorateRenderedBlocks(fragment, parsed.body);
   fixLabeledDisplayMath(fragment);
   resolveRenderedCrossrefs(fragment, refs.crossrefs);
   rewriteRenderedRepoUrls(fragment, payload);
@@ -189,97 +184,6 @@ function escapeHtml(value: string): string {
         return "&#39;";
     }
   });
-}
-
-function decorateRenderedBlocks(root: ParentNode, source: string): void {
-  const entries = collectCoflatBlockEntries(source);
-  let searchFrom = 0;
-  for (const block of root.querySelectorAll<HTMLElement>(".cf-doc-block")) {
-    if (block.querySelector(":scope > .cf-block-header, :scope > .cf-block-caption")) continue;
-    const type = blockTypeFromElement(block);
-    if (!type) continue;
-    const entryIndex = findBlockEntry(entries, searchFrom, type, block.id || undefined);
-    const entry = entryIndex >= 0 ? entries[entryIndex] : null;
-    if (!entry) continue;
-    searchFrom = entryIndex + 1;
-    decorateRenderedBlock(block, entry);
-  }
-}
-
-function blockTypeFromElement(block: HTMLElement): string | null {
-  for (const className of block.classList) {
-    if (className.startsWith("cf-doc-block--")) return className.slice("cf-doc-block--".length);
-  }
-  return null;
-}
-
-function findBlockEntry(entries: CoflatBlockEntry[], start: number, type: string, id?: string): number {
-  for (let index = start; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (entry.type !== type) continue;
-    if (id && entry.id && entry.id !== id) continue;
-    return index;
-  }
-  return -1;
-}
-
-function decorateRenderedBlock(block: HTMLElement, entry: CoflatBlockEntry): void {
-  if (entry.definition.captionPosition === "below") {
-    const caption = document.createElement("div");
-    caption.className = "cf-block-caption cf-doc-block-caption";
-    caption.append(blockHeader(entry));
-    if (entry.title) caption.append(document.createTextNode(entry.title));
-    block.append(caption);
-    return;
-  }
-
-  if (entry.definition.headerPosition === "inline") {
-    const paragraph = firstChildWithClass(block, "cf-doc-paragraph") ?? prependHeaderParagraph(block);
-    paragraph.prepend(blockHeader(entry));
-    return;
-  }
-
-  const header = document.createElement("p");
-  header.className = "cf-doc-paragraph cf-block-header cf-doc-block-header";
-  header.append(blockHeader(entry));
-  if (entry.title) header.append(blockTitle(entry.title));
-  block.prepend(header);
-}
-
-function firstChildWithClass(parent: HTMLElement, className: string): HTMLElement | null {
-  for (const child of parent.children) {
-    if (child instanceof HTMLElement && child.classList.contains(className)) return child;
-  }
-  return null;
-}
-
-function prependHeaderParagraph(block: HTMLElement): HTMLElement {
-  const paragraph = document.createElement("p");
-  paragraph.className = "cf-doc-paragraph";
-  block.prepend(paragraph);
-  return paragraph;
-}
-
-function blockHeader(entry: CoflatBlockEntry): HTMLElement {
-  const label = document.createElement("span");
-  label.className = "cf-block-header-rendered cf-doc-block-label";
-  label.textContent = entry.displayLabel;
-  return label;
-}
-
-function blockTitle(title: string): HTMLElement {
-  const span = document.createElement("span");
-  span.className = "cf-block-attr-title cf-doc-block-title";
-  const open = document.createElement("span");
-  open.className = "cf-block-title-paren";
-  open.textContent = "(";
-  const content = document.createElement("span");
-  content.textContent = title;
-  const close = document.createElement("span");
-  close.className = "cf-block-title-paren";
-  close.textContent = ")";
-  span.append(open, content, close);
-  return span;
 }
 
 async function localCitations(payload: ReaderPayload, frontmatter: Record<string, unknown>): Promise<Map<string, string>> {

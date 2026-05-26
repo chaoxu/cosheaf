@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { compress } from "hono/compress";
 import { deleteCookie, setCookie } from "hono/cookie";
 import type Database from "better-sqlite3";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
@@ -48,6 +49,7 @@ import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 
 export const web = new Hono<AppEnv>();
+web.use("*", compress());
 
 web.get("/login", (_c) =>
   htmlResponse(
@@ -224,7 +226,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
   });
   if (!meta) return notFoundPage(user, "File not found");
   const kind = fileKindForPath(rel);
-  const content = kind === "markdown" || kind === "text" ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const content = kind === "markdown" ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
   const rendered =
     kind === "markdown" && content !== null
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
@@ -307,7 +309,7 @@ web.get("/:owner/:repo/raw/branch/*", async (c) => {
   const rel = safeRel(resolved.path);
   if (!rel) return new Response("not found", { status: 404 });
   const content = await ctx.fj.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
-  return new Response(content, { headers: repositoryRawHeadersForPath(rel) });
+  return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
 });
 
 web.get("/:owner/:repo/_edit", async (c) => {
@@ -1504,8 +1506,10 @@ function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, c
     </article>`;
   }
   if (kind === "text") {
-    return `<article class="file-preview file-preview-source" data-testid="file-preview-text">
-      <pre><code>${escapeHtml(content ?? "")}</code></pre>
+    return `<article class="file-preview file-preview-embed" data-testid="file-preview-text">
+      <object data-testid="file-preview-text-raw" data="${escapeAttr(rawHref)}" type="text/plain">
+        <p>Text preview is not available in this browser. <a class="inline-link" href="${escapeAttr(rawHref)}">Open the raw file.</a></p>
+      </object>
     </article>`;
   }
   if (kind === "pdf") {
