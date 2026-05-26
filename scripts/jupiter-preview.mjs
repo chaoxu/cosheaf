@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { Command } from "commander";
-import { output, run } from "./lib/run.mjs";
+import { output, run, tryOutput } from "./lib/run.mjs";
 import { slugForBranch } from "./preview-state.mjs";
 
 const JUPITER_HOST = process.env.COSHEAF_JUPITER_HOST ?? "jupiter";
@@ -16,6 +16,10 @@ function currentBranch() {
 
 function currentSha() {
   return output("git", ["rev-parse", "HEAD"]);
+}
+
+function currentRemote() {
+  return tryOutput("git", ["config", "--get", "remote.origin.url"]) || "unknown";
 }
 
 function hostIdentity() {
@@ -56,6 +60,7 @@ function waitForHttps(url) {
 
 function deploy(branch) {
   const sha = currentSha();
+  const remote = currentRemote();
   const p = previewFor(branch);
   const work = mkdtempSync(path.join(tmpdir(), "cosheaf-preview-"));
   const archive = path.join(work, `${p.slug}.tar`);
@@ -69,6 +74,7 @@ function deploy(branch) {
         branch,
         sha,
         p.slug,
+        remote,
         `${PORTS.start}`,
         `${PORTS.end}`,
       ]);
@@ -83,6 +89,7 @@ function deploy(branch) {
         branch,
         sha,
         p.slug,
+        remote,
         `${PORTS.start}`,
         `${PORTS.end}`,
       ], {
@@ -102,7 +109,7 @@ function deploy(branch) {
 }
 
 function remote(actionName, branch, keepVolume) {
-  const args = ["bash", "-s", "--", actionName, branch ?? "", "", slugForBranch(branch ?? ""), `${PORTS.start}`, `${PORTS.end}`];
+  const args = ["bash", "-s", "--", actionName, branch ?? "", "", slugForBranch(branch ?? ""), "unknown", `${PORTS.start}`, `${PORTS.end}`];
   if (keepVolume) args.push("--keep-volume");
   run("ssh", [JUPITER_HOST, ...args], {
     input: readFileSync(new URL("./jupiter-preview-host.sh", import.meta.url)),
@@ -132,7 +139,7 @@ program
   .description("list jupiter preview containers")
   .action(() => {
     if (hostIdentity() === "jupiter") {
-      run("bash", [new URL("./jupiter-preview-host.sh", import.meta.url).pathname, "list-local", "", "", "", `${PORTS.start}`, `${PORTS.end}`]);
+      run("bash", [new URL("./jupiter-preview-host.sh", import.meta.url).pathname, "list-local", "", "", "", "unknown", `${PORTS.start}`, `${PORTS.end}`]);
     } else {
       remote("list-local");
     }
@@ -150,6 +157,7 @@ program
         branch,
         "",
         slugForBranch(branch),
+        "unknown",
         `${PORTS.start}`,
         `${PORTS.end}`,
         opts.keepVolume ? "--keep-volume" : "",

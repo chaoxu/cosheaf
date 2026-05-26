@@ -196,8 +196,11 @@ command. If the `.lab` certificate is not usable yet, the command waits up to
 90 seconds before warning.
 
 Preview containers and volumes carry `fleet.preview=true`, `fleet.app=cosheaf`,
-and `fleet.kind=preview` labels so fleet-infra cleanup can delete unpinned
-previews after 24 hours without touching prod state.
+`fleet.kind=preview`, source remote/ref/SHA, and `fleet.expires_at` labels so
+fleet-infra cleanup can delete unpinned previews after 24 hours without
+touching prod state. The preview helper installs Caddy snippets through
+`/srv/fleet-infra/bin/fleet-install-caddy-snippet` so snippet validation,
+reloads, and `.lab` route readiness stay host-owned.
 
 ## Seed profiles
 
