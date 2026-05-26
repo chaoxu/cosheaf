@@ -19,6 +19,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs")).toContainText("Files");
   await expect(page.locator(".repo-tabs")).toContainText("Issues");
   await expect(page.locator(".repo-tabs")).toContainText("Pull Requests");
+  await expect(page.locator(".repo-tabs")).toContainText("Notifications");
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
   await expect(page.locator(".repo-body")).toContainText("hello.md");
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
@@ -36,11 +37,40 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-body")).toContainText("Review policy");
   await expect(page.locator(".repo-body")).toContainText("Access");
   await expect(page.getByTestId("settings-access")).toBeVisible();
+  const labelName = `web-label-${Date.now()}`;
+  const milestoneName = `web-milestone-${Date.now()}`;
+  await expect(page.getByTestId("settings-labels")).toBeVisible();
+  await page.getByTestId("settings-label-name").fill(labelName);
+  await page.getByTestId("settings-label-color").fill("2f6fed");
+  await page.getByTestId("settings-label-submit").click();
+  await expect(page.getByTestId("settings-labels")).toContainText(labelName);
+  await expect(page.getByTestId("settings-milestones")).toBeVisible();
+  await page.getByTestId("settings-milestone-title").fill(milestoneName);
+  await page.getByTestId("settings-milestone-submit").click();
+  await expect(page.getByTestId("settings-milestones")).toContainText(milestoneName);
 
   await page.goto(`${webBase}/${owner}/${repo}/src/branch/main/hello.md`);
   await expect(page).toHaveURL(`${repoBase}/src/branch/main/hello.md`);
   await expect(page.locator(".file-toolbar")).toContainText("hello.md");
   await expect(page.locator(".cf-reader")).toContainText("Hello");
+  await expect(page.getByRole("link", { name: "Branches" })).toBeVisible();
+
+  const branchToDelete = `user/chao/delete-me-${Date.now()}`;
+  await page.goto(`${repoBase}/branches`);
+  await expect(page.getByTestId("branch-create-form")).toBeVisible();
+  await page.getByTestId("branch-create-name").fill(branchToDelete);
+  await page.getByRole("button", { name: "Create branch" }).click();
+  await expect(page).toHaveURL(`${repoBase}/src/branch/${branchToDelete}`);
+  await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
+  await page.goto(`${repoBase}/branches`);
+  const createdBranchRow = page.locator(".branch-row", { hasText: branchToDelete });
+  await expect(createdBranchRow).toBeVisible();
+  await createdBranchRow.getByTestId("branch-delete").click();
+  await expect(page.locator(".branch-row", { hasText: branchToDelete })).toHaveCount(0);
+
+  await page.goto(`${repoBase}/notifications`);
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Notifications");
+  await expect(page.getByTestId("notification-list")).toBeVisible();
 
   await page.goto(`${repoBase}/issues`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
@@ -63,12 +93,34 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".thread-header")).toContainText("#");
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   await expect(page.getByTestId("issue-label-form")).toBeVisible();
+  await expect(page.getByTestId("issue-relations")).toBeVisible();
+  await expect(page.getByTestId("issue-toggle-pin")).toHaveText("Pin issue");
+  await page.getByTestId("issue-toggle-pin").click();
+  await expect(page.getByTestId("issue-toggle-pin")).toHaveText("Unpin");
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
-  await page.getByTestId("issue-toggle-state").click();
+  await Promise.all([
+    page.waitForResponse((res) => res.url().endsWith(`${issuePath}/state`) && res.request().method() === "POST"),
+    page.getByTestId("issue-toggle-state").click(),
+  ]);
+  await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Reopen");
-  await page.getByTestId("issue-toggle-state").click();
+  await Promise.all([
+    page.waitForResponse((res) => res.url().endsWith(`${issuePath}/state`) && res.request().method() === "POST"),
+    page.getByTestId("issue-toggle-state").click(),
+  ]);
+  await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
+  await page.locator('input[aria-label="Depends on issue number"]').fill("1");
+  await page.locator('form[action$="/dependencies"]').filter({ hasText: "Add" }).first().getByRole("button", { name: "Add" }).click();
+  await expect(page.getByTestId("issue-relations")).toContainText("#1");
   await expect(page.locator('form.comment-form[action$="/comments"]')).toBeVisible();
+  await page.locator('form.comment-form[action$="/comments"] textarea[name="body"]').fill("issue comment before edit");
+  await page.locator('form.comment-form[action$="/comments"]').getByRole("button", { name: "Comment" }).click();
+  await expect(page.locator(".comment").filter({ hasText: "issue comment before edit" })).toBeVisible();
+  await page.getByTestId("issue-comment-actions").last().locator("summary").click();
+  await page.getByTestId("issue-comment-actions").last().locator('textarea[name="body"]').fill("issue comment after edit");
+  await page.getByTestId("issue-comment-actions").last().getByRole("button", { name: "Save comment" }).click();
+  await expect(page.locator(".comment").filter({ hasText: "issue comment after edit" })).toBeVisible();
 
   await page.goto(`${repoBase}/pulls`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
@@ -84,12 +136,26 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-filters").getByLabel("Milestone filter")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
   await page.locator('.list-row[href*="/pulls/"]', { hasText: "e2e demo PR" }).click();
+  const demoPrPath = new URL(page.url()).pathname;
   await expect(page.locator(".subtabs")).toContainText("Files changed");
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();
   await expect(page.getByTestId("pull-label-form")).toBeVisible();
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await expect(page.locator(".thread")).toContainText("pushed commit");
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
+  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close pull request");
+  await Promise.all([
+    page.waitForResponse((res) => res.url().endsWith(`${demoPrPath}/state`) && res.request().method() === "POST"),
+    page.getByTestId("pull-toggle-state").click(),
+  ]);
+  await page.goto(`${webBase}${demoPrPath}`);
+  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Reopen pull request");
+  await Promise.all([
+    page.waitForResponse((res) => res.url().endsWith(`${demoPrPath}/state`) && res.request().method() === "POST"),
+    page.getByTestId("pull-toggle-state").click(),
+  ]);
+  await page.goto(`${webBase}${demoPrPath}`);
+  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close pull request");
   await page.locator('.subtabs a[href$="/files"]').click();
   await expect(page.locator(".changed-files")).toBeVisible();
   await expect(page.locator(".diff-panel")).toBeVisible();

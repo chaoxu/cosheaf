@@ -222,7 +222,7 @@ function ownerlessRepoRewrite(request: Request):
 
 function isOwnerlessRepoPath(parts: readonly string[]): boolean {
   if (parts.length === 1) return true;
-  return ["_edit", "activity", "branches", "commits", "issues", "pulls", "raw", "settings", "src"].includes(parts[1] ?? "");
+  return ["_edit", "activity", "branches", "commits", "issues", "notifications", "pulls", "raw", "settings", "src"].includes(parts[1] ?? "");
 }
 
 function cloneForUrl(request: Request, url: URL, headers: Headers): Request {

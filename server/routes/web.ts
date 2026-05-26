@@ -27,6 +27,7 @@ import type {
   ForgejoIssueComment,
   ForgejoLabel,
   ForgejoMilestone,
+  ForgejoNotificationThread,
   ForgejoPullReviewComment,
   ForgejoReview,
   ForgejoTimelineEvent,
@@ -165,11 +166,14 @@ web.get("/:owner/:repo", async (c) => {
       body: `
         <div class="page-title compact">
           <div><p class="eyebrow">Branch</p><h1>main</h1></div>
-          ${
-            ws.role === "read"
-              ? ""
-              : `<a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}">New file</a>`
-          }
+          <div class="toolbar-actions">
+            <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+            ${
+              ws.role === "read"
+                ? ""
+                : `<a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}">New file</a>`
+            }
+          </div>
         </div>
         ${fileList(owner, repo, "main", files)}
       `,
@@ -196,18 +200,15 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
         body: `
           <div class="page-title compact">
             <div><p class="eyebrow">Branch</p><h1>${escapeHtml(resolved.branch)}</h1></div>
-            ${
-              ws.role === "read"
-                ? ""
-                : `<div class="toolbar-actions">
-                    ${
-                      resolved.branch === "main"
-                        ? ""
-                        : `<a class="button primary" href="${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main">Open pull request</a>`
-                    }
-                    <a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}">New file</a>
-                  </div>`
-            }
+            <div class="toolbar-actions">
+              <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+              ${
+                ws.role === "read"
+                  ? ""
+                  : `${resolved.branch === "main" ? "" : `<a class="button primary" href="${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main">Open pull request</a>`}
+                    <a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}">New file</a>`
+              }
+            </div>
           </div>
           ${fileList(owner, repo, resolved.branch, files)}
         `,
@@ -241,6 +242,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
             <h1>${escapeHtml(rel)}</h1>
           </div>
           <div class="toolbar-actions">
+            <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
             <a class="button" href="${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">Raw</a>
             ${
               ws.role === "read" || resolved.branch === "main"
@@ -252,6 +254,14 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
                 ? ""
                 : `<a class="button primary" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}">Edit</a>`
             }
+            ${
+              ws.role === "read" || resolved.branch === "main"
+                ? ""
+                : `<form class="inline-form" method="post" action="${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">
+                    <input type="hidden" name="action" value="delete">
+                    <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
+                  </form>`
+            }
           </div>
         </div>
         <article class="document cf-theme-scope">
@@ -260,6 +270,29 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       `,
     }),
   );
+});
+
+web.post("/:owner/:repo/src/branch/*", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  if (stringField(form.action) !== "delete") return badRequestPage(ctx.user, "Unsupported file action.");
+  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/src/branch/"));
+  if (!resolved?.path) return notFoundPage(ctx.user, "File not found");
+  if (resolved.branch === "main") return forbiddenPage(ctx.user);
+  const rel = safeRel(resolved.path);
+  if (!rel) return notFoundPage(ctx.user, "File not found");
+  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel);
+  if (!meta) return notFoundPage(ctx.user, "File not found");
+  await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+    branch: resolved.branch,
+    path: rel,
+    sha: meta.sha,
+    message: `delete ${rel}`,
+  });
+  invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(resolved.branch)}`);
 });
 
 web.get("/:owner/:repo/raw/branch/*", async (c) => {
@@ -458,7 +491,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   if (!ctx.ok) return ctx.response;
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const [issue, comments, timeline, allLabels] = await Promise.all([
+  const [issue, comments, timeline, allLabels, dependencies, blocks, pinnedIssues] = await Promise.all([
     ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
       if (err instanceof ForgejoError && err.status === 404) return null;
       throw err;
@@ -466,10 +499,14 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.fj.listIssueDependencies(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.fj.listIssueBlocks(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.fj.listPinnedIssues(ctx.owner, ctx.repo).catch(() => []),
   ]);
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
   const body = await renderMarkdown(ctx, issue.body ?? "");
-  const timelineHtml = await renderIssueTimeline(ctx, comments, timeline ?? []);
+  const timelineHtml = await renderIssueTimeline(ctx, issue.number, comments, timeline ?? []);
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   return htmlResponse(
@@ -490,13 +527,19 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
               ${
                 ctx.ws.role === "read"
                   ? ""
-                  : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/state`)}">
-                       <input type="hidden" name="state" value="${nextIssueState}">
-                       <button class="button" type="submit" data-testid="issue-toggle-state">${stateActionLabel}</button>
-                     </form>`
+                  : `<div class="toolbar-actions">
+                      <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
+                        <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
+                        <button class="button" type="submit" data-testid="issue-toggle-pin">${isPinned ? "Unpin" : "Pin issue"}</button>
+                      </form>
+                      <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/state`)}">
+                        <input type="hidden" name="state" value="${nextIssueState}">
+                        <button class="button" type="submit" data-testid="issue-toggle-state">${stateActionLabel}</button>
+                      </form>
+                    </div>`
               }
             </div>
-            <p>by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
+            <p>${isPinned ? `<span class="meta-pill">pinned</span> ` : ""}by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
           </header>
           <div class="issue-document">
             ${markdownSurface(ctx, body)}
@@ -509,6 +552,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
             labels: allLabels,
             currentLabels: issue.labels,
           })}
+          ${issueRelationsPanel(ctx, issue, dependencies, blocks)}
           ${timelineHtml}
           ${
             ctx.ws.role === "read"
@@ -566,6 +610,78 @@ web.post("/:owner/:repo/issues/:number/comments", async (c) => {
   const body = stringField((await c.req.parseBody()).body);
   if (number && body) await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number ?? ""}`));
+});
+
+web.post("/:owner/:repo/issues/:number/comments/:id/edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  const id = positiveInt(c.req.param("id"));
+  const body = stringField((await c.req.parseBody()).body);
+  if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
+  if (!body) return badRequestPage(ctx.user, "Comment body is required.");
+  await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+});
+
+web.post("/:owner/:repo/issues/:number/comments/:id/delete", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  const id = positiveInt(c.req.param("id"));
+  if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
+  await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+});
+
+web.post("/:owner/:repo/issues/:number/pin", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const pinned = stringField((await c.req.parseBody()).pinned);
+  if (pinned === "true") await ctx.fj.pinIssue(ctx.owner, ctx.repo, number);
+  else if (pinned === "false") await ctx.fj.unpinIssue(ctx.owner, ctx.repo, number);
+  else return badRequestPage(ctx.user, "Pinned state is required.");
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+});
+
+web.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const form = await c.req.parseBody();
+  const index = positiveInt(stringField(form.index) ?? undefined);
+  const relation = stringField(form.relation);
+  if (!index || index === number) return badRequestPage(ctx.user, "A different issue number is required.");
+  if (relation === "blocks") await ctx.fj.addIssueDependency(ctx.owner, ctx.repo, index, number);
+  else if (relation === "depends_on") await ctx.fj.addIssueDependency(ctx.owner, ctx.repo, number, index);
+  else return badRequestPage(ctx.user, "Relation is required.");
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+});
+
+web.post("/:owner/:repo/issues/:number/dependencies/delete", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const form = await c.req.parseBody();
+  const index = positiveInt(stringField(form.index) ?? undefined);
+  const relation = stringField(form.relation);
+  if (!index) return badRequestPage(ctx.user, "Issue number is required.");
+  if (relation === "blocks") await ctx.fj.removeIssueBlock(ctx.owner, ctx.repo, number, index);
+  else if (relation === "depends_on") await ctx.fj.removeIssueDependency(ctx.owner, ctx.repo, number, index);
+  else return badRequestPage(ctx.user, "Relation is required.");
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 });
 
 web.post("/:owner/:repo/issues/:number/state", async (c) => {
@@ -712,7 +828,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const body = await renderMarkdown(ctx, pull.body ?? "");
-  const timelineHtml = await renderPullTimeline(ctx, reviews, comments, timeline ?? [], commits);
+  const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
   return htmlResponse(
     repoPage({
       title: `#${pull.number} ${pull.title}`,
@@ -728,7 +844,10 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
             <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
             <div class="thread-title-row">
               <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
-              <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
+              <div class="toolbar-actions">
+                <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
+                ${pullStateForm(ctx, pull)}
+              </div>
             </div>
             <p>${escapeHtml(pull.head.ref)} into ${escapeHtml(pull.base.ref)} - by ${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</p>
             <nav class="subtabs">
@@ -788,6 +907,20 @@ web.post("/:owner/:repo/pulls/:number/labels", async (c) => {
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 });
 
+web.post("/:owner/:repo/pulls/:number/state", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.merged) return forbiddenPage(ctx.user);
+  const state = stringField((await c.req.parseBody()).state);
+  if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
+  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { state });
+  c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: state === "closed" ? "closed" : "reopened" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
 web.post("/:owner/:repo/pulls/:number/review-requests", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
@@ -830,6 +963,31 @@ web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
   }
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
+web.post("/:owner/:repo/pulls/:number/comments/:id/edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  const id = positiveInt(c.req.param("id"));
+  const body = stringField((await c.req.parseBody()).body);
+  if (!pull || !id) return notFoundPage(ctx.user, "Comment not found");
+  if (!body) return badRequestPage(ctx.user, "Comment body is required.");
+  await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+});
+
+web.post("/:owner/:repo/pulls/:number/comments/:id/delete", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  const id = positiveInt(c.req.param("id"));
+  const reviewId = positiveInt(stringField((await c.req.parseBody()).review_id) ?? undefined);
+  if (!pull || !id || !reviewId) return notFoundPage(ctx.user, "Comment not found");
+  await ctx.fj.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 });
 
 web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
@@ -956,7 +1114,11 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
 web.get("/:owner/:repo/branches", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
+  const [branches, pulls] = await Promise.all([
+    ctx.fj.listBranches(ctx.owner, ctx.repo),
+    ctx.fj.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
+  ]);
+  const openHeads = new Set(pulls.map((pull) => pull.head.ref));
   return htmlResponse(
     repoPage({
       title: `Branches - ${ctx.repo}`,
@@ -965,12 +1127,83 @@ web.get("/:owner/:repo/branches", async (c) => {
       active: "files",
       user: ctx.user,
       ws: ctx.ws,
-      body: `<div class="page-title compact"><h1>Branches</h1></div>
-        <div class="list">${branches
-          .map((b) => `<a class="list-row" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(b.name)}"><strong>${escapeHtml(b.name)}</strong><span>${escapeHtml(b.commit.id.slice(0, 10))}</span></a>`)
-          .join("")}</div>`,
+      body: `
+        <div class="page-title compact"><h1>Branches</h1></div>
+        ${branchCreatePanel(ctx, branches)}
+        ${branchList(ctx, branches, openHeads)}
+      `,
     }),
   );
+});
+
+web.post("/:owner/:repo/branches/new", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const name = stringField(form.name);
+  const base = stringField(form.base) ?? "main";
+  if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
+  if (!validBranchName(base)) return badRequestPage(ctx.user, "Valid base branch is required.");
+  try {
+    await ctx.fj.createBranch(ctx.owner, ctx.repo, { newBranchName: name, oldBranchName: base });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 409) {
+      return badRequestPage(ctx.user, "Branch already exists.");
+    }
+    throw err;
+  }
+  invalidateRepoTrees(ctx.owner, ctx.repo);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(name)}`);
+});
+
+web.post("/:owner/:repo/branches/delete", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const name = stringField((await c.req.parseBody()).name);
+  if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
+  await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, name);
+  invalidateRepoTrees(ctx.owner, ctx.repo);
+  return redirect(repoHref(ctx.owner, ctx.repo, "/branches"));
+});
+
+web.get("/:owner/:repo/notifications", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const threads = await ctx.fj.listRepoNotifications(ctx.owner, ctx.repo, {
+    statusTypes: ["unread"],
+    subjectTypes: ["Issue", "Pull"],
+  }).catch(() => []);
+  return htmlResponse(
+    repoPage({
+      title: `Notifications - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "notifications",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: notificationsPage(ctx, threads),
+    }),
+  );
+});
+
+web.post("/:owner/:repo/notifications/:id/read", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const id = positiveInt(c.req.param("id"));
+  if (!id) return notFoundPage(ctx.user, "Notification not found");
+  const thread = await ctx.fj.getNotificationThread(id);
+  if (thread.repository.full_name !== `${ctx.owner}/${ctx.repo}`) return notFoundPage(ctx.user, "Notification not found");
+  await ctx.fj.markNotificationRead(id);
+  return redirect(repoHref(ctx.owner, ctx.repo, "/notifications"));
+});
+
+web.post("/:owner/:repo/notifications/read-all", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  await ctx.fj.markRepoNotificationsRead(ctx.owner, ctx.repo);
+  return redirect(repoHref(ctx.owner, ctx.repo, "/notifications"));
 });
 
 web.get("/:owner/:repo/activity", async (c) => {
@@ -1029,7 +1262,11 @@ web.get("/:owner/:repo/commits/:sha", async (c) => {
 web.get("/:owner/:repo/settings", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const protection = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null);
+  const [protection, labels, milestones] = await Promise.all([
+    ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null),
+    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
+  ]);
   const accessUpdated = c.req.query("access");
   return htmlResponse(
     repoPage({
@@ -1064,6 +1301,8 @@ web.get("/:owner/:repo/settings", async (c) => {
               ${ctx.ws.role === "admin" ? `<div class="settings-actions"><button class="button primary" type="submit">Save settings</button></div>` : ""}
             </form>
           </section>
+          ${labelSettingsSection(ctx, labels)}
+          ${milestoneSettingsSection(ctx, milestones)}
           <section class="settings-section">
             <div class="settings-section-header">
               <h2>Access</h2>
@@ -1106,6 +1345,33 @@ web.post("/:owner/:repo/settings", async (c) => {
   const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
   if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
   else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+});
+
+web.post("/:owner/:repo/settings/labels", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const name = stringField(form.name);
+  const color = (stringField(form.color) ?? "").replace(/^#/, "");
+  const description = textField(form.description) ?? "";
+  const exclusive = stringField(form.exclusive) === "on";
+  if (!name) return badRequestPage(ctx.user, "Label name is required.");
+  if (!/^[0-9a-fA-F]{6}$/.test(color)) return badRequestPage(ctx.user, "Label color must be six hex digits.");
+  await ctx.fj.createLabel(ctx.owner, ctx.repo, { name, color, description, exclusive });
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+});
+
+web.post("/:owner/:repo/settings/milestones", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const title = stringField(form.title);
+  const description = textField(form.description) ?? "";
+  if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
+  await ctx.fj.createMilestone(ctx.owner, ctx.repo, { title, description });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 });
 
@@ -1511,6 +1777,16 @@ function renderFileCommentSummary(comments: readonly WebLineComment[]): string {
     .join("")}</div>`;
 }
 
+function pullStateForm(ctx: WebCtx, pull: ForgejoPull): string {
+  if (ctx.ws.role === "read" || pull.merged) return "";
+  const nextState = pull.state === "open" ? "closed" : "open";
+  const label = pull.state === "open" ? "Close pull request" : "Reopen pull request";
+  return `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
+    <input type="hidden" name="state" value="${nextState}">
+    <button class="button" type="submit" data-testid="pull-toggle-state">${label}</button>
+  </form>`;
+}
+
 function issueEditForm(ctx: WebCtx, issue: ForgejoIssue): string {
   if (ctx.ws.role === "read") return "";
   return `<details class="comment-form" data-testid="issue-edit-form">
@@ -1521,6 +1797,60 @@ function issueEditForm(ctx: WebCtx, issue: ForgejoIssue): string {
       <button class="button primary" type="submit">Save issue</button>
     </form>
   </details>`;
+}
+
+function issueRelationsPanel(
+  ctx: WebCtx,
+  issue: ForgejoIssue,
+  dependencies: readonly ForgejoIssue[],
+  blocks: readonly ForgejoIssue[],
+): string {
+  return `<section class="relation-panel" data-testid="issue-relations">
+    <h2>Issue relations</h2>
+    <div class="relation-grid">
+      ${issueRelationList(ctx, issue, "depends_on", "Depends on", dependencies)}
+      ${issueRelationList(ctx, issue, "blocks", "Blocks", blocks)}
+    </div>
+  </section>`;
+}
+
+function issueRelationList(
+  ctx: WebCtx,
+  issue: ForgejoIssue,
+  relation: "depends_on" | "blocks",
+  title: string,
+  issues: readonly ForgejoIssue[],
+): string {
+  const rows = issues
+    .map(
+      (item) => `<div class="relation-row">
+        <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${item.number}`)}">#${item.number} ${escapeHtml(item.title)}</a>
+        <span class="state ${item.state}">${escapeHtml(item.state)}</span>
+        ${
+          ctx.ws.role === "read"
+            ? ""
+            : `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies/delete`)}">
+                <input type="hidden" name="relation" value="${relation}">
+                <input type="hidden" name="index" value="${item.number}">
+                <button class="button" type="submit">Remove</button>
+              </form>`
+        }
+      </div>`,
+    )
+    .join("");
+  const form =
+    ctx.ws.role === "read"
+      ? ""
+      : `<form class="inline-add-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies`)}">
+          <input type="hidden" name="relation" value="${relation}">
+          <input name="index" inputmode="numeric" pattern="[0-9]+" placeholder="Issue #" aria-label="${escapeAttr(title)} issue number">
+          <button class="button" type="submit">Add</button>
+        </form>`;
+  return `<section class="relation-card">
+    <h3>${escapeHtml(title)}</h3>
+    ${rows || `<div class="empty compact-empty">None.</div>`}
+    ${form}
+  </section>`;
 }
 
 function pullEditForm(ctx: WebCtx, pull: ForgejoPull): string {
@@ -1614,19 +1944,20 @@ function labelScope(label: ForgejoLabel): string | null {
 }
 
 type WebTimelineItem =
-  | { kind: "comment"; ts: number; comment: ForgejoIssueComment }
+  | { kind: "comment"; ts: number; number: number; comment: ForgejoIssueComment }
   | { kind: "event"; ts: number; event: ForgejoTimelineEvent }
   | { kind: "review"; ts: number; review: ForgejoReview }
-  | { kind: "line-comment"; ts: number; comment: ForgejoPullReviewComment }
+  | { kind: "line-comment"; ts: number; number: number; comment: ForgejoPullReviewComment }
   | { kind: "commit"; ts: number; commit: ForgejoCommit };
 
 async function renderIssueTimeline(
   ctx: WebCtx,
+  number: number,
   comments: readonly ForgejoIssueComment[],
   timeline: readonly ForgejoTimelineEvent[],
 ): Promise<string> {
   const items: WebTimelineItem[] = [
-    ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), comment })),
+    ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), number, comment })),
     ...timeline
       .filter((event) => event.type !== "comment")
       .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
@@ -1636,6 +1967,7 @@ async function renderIssueTimeline(
 
 async function renderPullTimeline(
   ctx: WebCtx,
+  number: number,
   reviews: readonly ForgejoReview[],
   comments: readonly ForgejoPullReviewComment[],
   timeline: readonly ForgejoTimelineEvent[],
@@ -1651,11 +1983,41 @@ async function renderPullTimeline(
     ...comments.map((comment) => ({
       kind: "line-comment" as const,
       ts: parseDateMs(comment.created_at),
+      number,
       comment,
     })),
     ...commits.map((commit) => ({ kind: "commit" as const, ts: commitDateMs(commit), commit })),
   ].sort(compareTimelineItems);
   return (await Promise.all(items.map((item) => renderTimelineItem(ctx, item)))).join("");
+}
+
+function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): string {
+  if (ctx.ws.role === "read") return "";
+  return `<details class="comment-actions" data-testid="issue-comment-actions">
+    <summary>Comment actions</summary>
+    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/edit`)}">
+      <textarea name="body" required>${escapeHtml(comment.body)}</textarea>
+      <button class="button primary" type="submit">Save comment</button>
+    </form>
+    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/delete`)}">
+      <button class="button danger" type="submit">Delete comment</button>
+    </form>
+  </details>`;
+}
+
+function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): string {
+  if (ctx.ws.role === "read") return "";
+  return `<details class="comment-actions" data-testid="pull-comment-actions">
+    <summary>Comment actions</summary>
+    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`)}">
+      <textarea name="body" required>${escapeHtml(comment.body)}</textarea>
+      <button class="button primary" type="submit">Save comment</button>
+    </form>
+    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/delete`)}">
+      <input type="hidden" name="review_id" value="${comment.pull_request_review_id}">
+      <button class="button danger" type="submit">Delete comment</button>
+    </form>
+  </details>`;
 }
 
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<string> {
@@ -1664,6 +2026,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
     return `<div class="comment">
       <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} - ${formatDate(item.comment.created_at)}</div>
       ${markdownSurface(ctx, body)}
+      ${issueCommentActions(ctx, item.number, item.comment)}
     </div>`;
   }
   if (item.kind === "line-comment") {
@@ -1671,6 +2034,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
     return `<div class="comment">
       <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} commented on ${escapeHtml(item.comment.path)} - ${formatDate(item.comment.created_at)}</div>
       ${markdownSurface(ctx, body)}
+      ${pullCommentActions(ctx, item.number, item.comment)}
     </div>`;
   }
   if (item.kind === "review") {
@@ -1767,7 +2131,7 @@ function repoPage(opts: {
   title: string;
   owner: string;
   repo: string;
-  active: "files" | "issues" | "pulls" | "activity" | "settings";
+  active: "files" | "issues" | "pulls" | "notifications" | "activity" | "settings";
   user: string;
   ws: WorkspaceContext;
   body: string;
@@ -1790,6 +2154,7 @@ function repoPage(opts: {
           ${tab(opts, "files", "Files", "")}
           ${tab(opts, "issues", "Issues", "/issues")}
           ${tab(opts, "pulls", "Pull Requests", "/pulls")}
+          ${tab(opts, "notifications", "Notifications", "/notifications")}
           ${tab(opts, "activity", "Activity", "/activity")}
           ${tab(opts, "settings", "Settings", "/settings")}
         </nav>
@@ -2039,6 +2404,130 @@ function branchOptions(branches: readonly ForgejoBranch[], selectedBranch: strin
 
 function branchAfter(branches: readonly ForgejoBranch[], base: string): string {
   return branches.find((branch) => branch.name !== base)?.name ?? branches[0]?.name ?? "";
+}
+
+function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): string {
+  if (ctx.ws.role === "read") return "";
+  return `<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
+    <label>New branch
+      <input name="name" placeholder="user/${escapeAttr(ctx.user)}/work" required data-testid="branch-create-name">
+    </label>
+    <label>Base
+      <select name="base" data-testid="branch-create-base">
+        ${branchOptions(branches, "main")}
+      </select>
+    </label>
+    <div class="filter-actions">
+      <button class="button primary" type="submit">Create branch</button>
+    </div>
+  </form>`;
+}
+
+function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: ReadonlySet<string>): string {
+  return `<div class="list">${branches
+    .map((branch) => {
+      const hasOpenPr = openHeads.has(branch.name);
+      return `<div class="list-row branch-row">
+        <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}"><strong>${escapeHtml(branch.name)}</strong></a>
+        <span>${escapeHtml(branch.commit.id.slice(0, 10))}${hasOpenPr ? ` <span class="meta-pill">open PR</span>` : ""}</span>
+        ${
+          ctx.ws.role === "read" || branch.name === "main" || hasOpenPr
+            ? "<span></span>"
+            : `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
+                <input type="hidden" name="name" value="${escapeAttr(branch.name)}">
+                <button class="button danger" type="submit" data-testid="branch-delete">Delete</button>
+              </form>`
+        }
+      </div>`;
+    })
+    .join("") || `<div class="empty">No branches.</div>`}</div>`;
+}
+
+function notificationsPage(ctx: WebCtx, threads: readonly ForgejoNotificationThread[]): string {
+  return `
+    <div class="page-title compact">
+      <div><p class="eyebrow">Unread</p><h1>Notifications</h1></div>
+      ${
+        threads.length === 0
+          ? ""
+          : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, "/notifications/read-all")}">
+              <button class="button" type="submit" data-testid="notifications-read-all">Mark all read</button>
+            </form>`
+      }
+    </div>
+    <div class="list" data-testid="notification-list">
+      ${threads.map((thread) => notificationRow(ctx, thread)).join("") || `<div class="empty">No unread notifications.</div>`}
+    </div>
+  `;
+}
+
+function notificationRow(ctx: WebCtx, thread: ForgejoNotificationThread): string {
+  const href = notificationHref(ctx, thread);
+  const kind = thread.subject.type === "Pull" ? "Pull request" : thread.subject.type;
+  return `<div class="list-row">
+    <a class="inline-link" href="${href}"><strong>${escapeHtml(thread.subject.title)}</strong></a>
+    <span>${escapeHtml(kind)} - ${formatDate(thread.updated_at)}</span>
+    <form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/notifications/${thread.id}/read`)}">
+      <button class="button" type="submit">Mark read</button>
+    </form>
+  </div>`;
+}
+
+function notificationHref(ctx: WebCtx, thread: ForgejoNotificationThread): string {
+  const match = thread.subject.url.match(/\/(?:issues|pulls)\/(\d+)(?:$|[?#])/);
+  const number = match ? Number(match[1]) : null;
+  if (!number) return repoHref(ctx.owner, ctx.repo, "/notifications");
+  return thread.subject.type === "Pull"
+    ? repoHref(ctx.owner, ctx.repo, `/pulls/${number}`)
+    : repoHref(ctx.owner, ctx.repo, `/issues/${number}`);
+}
+
+function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): string {
+  return `<section class="settings-section" data-testid="settings-labels">
+    <div class="settings-section-header">
+      <h2>Labels</h2>
+      <p>Labels are repository labels from Forgejo.</p>
+    </div>
+    <div class="settings-form">
+      <div class="label-chips">${labels.map(labelChip).join("") || `<span class="muted">No labels.</span>`}</div>
+      ${
+        ctx.ws.role === "admin"
+          ? `<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/labels")}">
+              <label class="settings-row"><span>Name</span><input name="name" required data-testid="settings-label-name"></label>
+              <label class="settings-row"><span>Color</span><input name="color" value="71717a" pattern="[0-9a-fA-F]{6}" required data-testid="settings-label-color"></label>
+              <label class="settings-row"><span>Description</span><input name="description"></label>
+              <label class="settings-row"><span>Exclusive</span><input name="exclusive" type="checkbox" value="on"></label>
+              <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-label-submit">Create label</button></div>
+            </form>`
+          : `<p class="muted">Only project admins can create labels.</p>`
+      }
+    </div>
+  </section>`;
+}
+
+function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMilestone[]): string {
+  return `<section class="settings-section" data-testid="settings-milestones">
+    <div class="settings-section-header">
+      <h2>Milestones</h2>
+      <p>Milestones are repository milestones from Forgejo.</p>
+    </div>
+    <div class="settings-form">
+      <div class="list mini-list">
+        ${milestones
+          .map((milestone) => `<div class="list-row"><strong>${escapeHtml(milestone.title)}</strong><span>${escapeHtml(milestone.state)} - ${milestone.open_issues} open, ${milestone.closed_issues} closed</span></div>`)
+          .join("") || `<div class="empty">No milestones.</div>`}
+      </div>
+      ${
+        ctx.ws.role === "admin"
+          ? `<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/milestones")}">
+              <label class="settings-row"><span>Title</span><input name="title" required data-testid="settings-milestone-title"></label>
+              <label class="settings-row"><span>Description</span><input name="description"></label>
+              <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-milestone-submit">Create milestone</button></div>
+            </form>`
+          : `<p class="muted">Only project admins can create milestones.</p>`
+      }
+    </div>
+  </section>`;
 }
 
 function issueFilterForm(
@@ -2323,6 +2812,16 @@ function positiveIntFields(value: unknown): number[] {
   return stringFields(value)
     .map((item) => Number(item))
     .filter((item) => Number.isInteger(item) && item > 0);
+}
+
+function validBranchName(value: string | null | undefined): value is string {
+  return Boolean(
+    value &&
+      /^[A-Za-z0-9._/-]+$/.test(value) &&
+      !value.includes("..") &&
+      !value.startsWith("/") &&
+      !value.endsWith("/"),
+  );
 }
 
 function editBranchFor(username: string, requested: string | null | undefined): string {
