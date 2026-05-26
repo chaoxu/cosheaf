@@ -8,6 +8,7 @@ import type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
 } from "@chaoxu/coflat-editor";
+import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import {
   MAX_ASSET_BYTES,
@@ -18,6 +19,10 @@ import { ApiError, api } from "./api";
 import { readDocumentTheme } from "./document-theme";
 import type { DocumentThemeId } from "./document-theme";
 import { getClientDocumentFormat } from "./format-registry";
+import {
+  coflatDocumentContext,
+  loadCoflatRefs,
+} from "./coflat-document-context";
 import "@chaoxu/coflat-editor/style.css";
 import "@chaoxu/coflat-editor/themes/blueprint-book.css";
 import "./globals.css";
@@ -75,6 +80,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<"rich" | "source">("rich");
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
+  const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
+  const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -102,6 +109,41 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     },
     [],
   );
+
+  useEffect(() => {
+    if (config.formatId !== COFLAT_FORMAT_ID) {
+      setDocumentContext(null);
+      setDocumentContextReady(true);
+      return;
+    }
+    let cancelled = false;
+    setDocumentContextReady(false);
+    void loadCoflatRefs({
+      source: initialContent,
+      owner: config.owner,
+      repo: config.repo,
+      branch: config.branch,
+      path: config.path,
+    }).then((refs) => {
+      if (cancelled) return;
+      setDocumentContext(
+        coflatDocumentContext(
+          {
+            source: initialContent,
+            owner: config.owner,
+            repo: config.repo,
+            branch: config.branch,
+            path: config.path,
+          },
+          refs,
+        ),
+      );
+      setDocumentContextReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.branch, config.formatId, config.owner, config.path, config.repo, initialContent]);
 
   useEffect(() => {
     const input = document.getElementById("web-editor-path-input");
@@ -279,27 +321,32 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     <div className={readerClass}>
       <div className="web-editor-main">
         <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
-          <ActiveMarkdownEditor
-            key={savedPath}
-            value={content}
-            mode={mode}
-            from={currentPath}
-            testId="editor"
-            onReady={(editor) => {
-              outlineUnsubscribeRef.current?.();
-              editorRef.current = editor;
-              setOutline(editor.outline.get());
-              outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
-            }}
-            onChange={(next) => {
-              setContent(next);
-              setStatus(null);
-            }}
-            saveHandler={saveHandler}
-            statusEvents={statusEvents}
-            assetUploader={assetUploader}
-            autocompleteSources={autocompleteSources}
-          />
+          {documentContextReady ? (
+            <ActiveMarkdownEditor
+              key={savedPath}
+              value={content}
+              mode={mode}
+              from={currentPath}
+              documentContext={documentContext ?? undefined}
+              testId="editor"
+              onReady={(editor) => {
+                outlineUnsubscribeRef.current?.();
+                editorRef.current = editor;
+                setOutline(editor.outline.get());
+                outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
+              }}
+              onChange={(next) => {
+                setContent(next);
+                setStatus(null);
+              }}
+              saveHandler={saveHandler}
+              statusEvents={statusEvents}
+              assetUploader={assetUploader}
+              autocompleteSources={autocompleteSources}
+            />
+          ) : (
+            <div className="web-editor-loading">Loading editor...</div>
+          )}
         </Suspense>
         <aside className="web-editor-outline" aria-label="Outline">
           <h2>Outline</h2>

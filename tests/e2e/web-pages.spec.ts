@@ -64,6 +64,15 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   );
   await expect(page.getByRole("link", { name: "Branches" })).toBeVisible();
 
+  await page.goto(`${repoBase}/_edit?branch=main&path=hello.md`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  const editorCrossFileTheorem = page.locator('.cm-content [data-ref-key="thm:coin-conservation"]');
+  await expect(editorCrossFileTheorem).toContainText("Theorem 1");
+  await expect(editorCrossFileTheorem.locator("a")).toHaveAttribute(
+    "href",
+    "/flushing-coin/src/branch/user/chao/web-edit/theory/cross-file-theorem.md#thm%3Acoin-conservation",
+  );
+
   await page.goto(`${repoBase}/src/branch/main/notes/plain-text.txt`);
   const plainTextRawPath = "/flushing-coin/raw/branch/main/notes/plain-text.txt";
   const plainTextRawHref = `${webBase}${plainTextRawPath}`;

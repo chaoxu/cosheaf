@@ -11,6 +11,7 @@ import {
   type AutocompleteSource,
   mountEditor,
 } from "@chaoxu/coflat-editor";
+import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
 export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource };
 
 interface Props {
@@ -25,6 +26,8 @@ interface Props {
   readOnly?: boolean;
   /** Source-file path for relative-ref resolution (forwarded to coflat). */
   from?: string;
+  /** Reader-compatible link/ref/citation resolver context. */
+  documentContext?: DocumentContext;
   /** Cmd-S / autosave / triggerSave dispatch. */
   saveHandler?: SaveHandler;
   /** Fire-and-forget lifecycle events (save, dirty, asset upload). */
@@ -44,6 +47,7 @@ export function MarkdownEditor({
   extensions,
   readOnly,
   from,
+  documentContext,
   saveHandler,
   statusEvents,
   assetUploader,
@@ -104,6 +108,7 @@ export function MarkdownEditor({
       // module type doesn't yet surface it. Drop the cast when typecheck
       // sees the field directly.
       ...(from ? ({ from } as { from: string }) : {}),
+      ...(documentContext ? { context: documentContext } : {}),
       ...(saveHandler ? { saveHandler: stableSaveHandler } : {}),
       ...(statusEvents ? { statusEvents: stableStatusEvents } : {}),
       ...(assetUploader ? { assetUploader: stableAssetUploader } : {}),
