@@ -45,7 +45,7 @@ function previewFor(name) {
 
 function waitForHttps(url) {
   for (let i = 1; i <= 90; i += 1) {
-    const result = spawnSync("curl", ["-sf", `${url}/api/v1/health`], {
+    const result = spawnSync("curl", ["-k", "-sf", `${url}/api/v1/health`], {
       stdio: "ignore",
       shell: false,
     });
