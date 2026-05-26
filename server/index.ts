@@ -101,6 +101,8 @@ for (const assetPath of publicAssetPaths) {
   });
 }
 
+app.get("/favicon.ico", (c) => c.redirect("/favicon.svg", 302));
+
 app.get("/assets/*", async (c) => {
   const response = await serveDistFile(c.req.path);
   return response ?? c.json({ error: "not found" }, 404);
@@ -198,7 +200,7 @@ function ownerlessRepoRewrite(request: Request):
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const [first, second] = parts;
-  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api" || publicAssetPaths.has(url.pathname)) return { kind: "none" };
+  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api" || first === "favicon.ico" || publicAssetPaths.has(url.pathname)) return { kind: "none" };
 
   const internalRewrite = request.headers.get("x-cosheaf-internal-owner-rewrite");
   if (first === config.forgejoOwner && second && !internalRewrite) {

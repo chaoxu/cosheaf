@@ -22,6 +22,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs")).toContainText("Notifications");
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
   await expect(page.locator(".repo-body")).toContainText("hello.md");
+  await expect(page.locator(".repo-body")).toContainText("theory/cross-file-theorem.md");
+  await expect(page.locator(".repo-body")).toContainText("notes/plain-text.txt");
+  await expect(page.locator(".repo-body")).toContainText("docs/sample.pdf");
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
   await expect(page.locator(".repo-header")).not.toContainText(owner);
@@ -53,7 +56,33 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page).toHaveURL(`${repoBase}/src/branch/main/hello.md`);
   await expect(page.locator(".file-toolbar")).toContainText("hello.md");
   await expect(page.locator(".cf-reader")).toContainText("Hello");
+  const crossFileTheorem = page.getByRole("link", { name: "Theorem 1" });
+  await expect(crossFileTheorem).toBeVisible();
+  await expect(crossFileTheorem).toHaveAttribute(
+    "href",
+    "/flushing-coin/src/branch/main/theory/cross-file-theorem.md#thm%3Acoin-conservation",
+  );
   await expect(page.getByRole("link", { name: "Branches" })).toBeVisible();
+
+  await page.goto(`${repoBase}/src/branch/main/notes/plain-text.txt`);
+  await expect(page.getByTestId("file-preview-text")).toContainText("intentionally not Markdown");
+  await expect(page.locator(".cf-reader")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Edit text" })).toBeVisible();
+
+  await page.goto(`${repoBase}/src/branch/main/docs/sample.pdf`);
+  await expect(page.getByTestId("file-preview-pdf")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Edit text" })).toHaveCount(0);
+
+  const textBranch = `user/chao/text-file-${Date.now()}`;
+  await page.goto(
+    `${repoBase}/_edit?branch=${encodeURIComponent(textBranch)}&path=${encodeURIComponent("notes/plain-text.txt")}`,
+  );
+  await expect(page.getByTestId("text-edit-form")).toBeVisible();
+  await page.getByTestId("text-edit-form").locator('textarea[name="content"]').fill("Updated plain text fixture.\n");
+  await page.getByTestId("text-edit-form").getByRole("button", { name: "Save" }).click();
+  await expect(page).toHaveURL(`${repoBase}/src/branch/${textBranch}/notes/plain-text.txt`);
+  await expect(page.getByTestId("file-preview-text")).toContainText("Updated plain text fixture.");
+  await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
 
   const branchToDelete = `user/chao/delete-me-${Date.now()}`;
   await page.goto(`${repoBase}/branches`);

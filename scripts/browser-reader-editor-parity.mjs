@@ -46,15 +46,25 @@ async function readerStats() {
     const ul = el.querySelector(".cf-doc-list--unordered, ul");
     const root = el.closest(".cf-theme-scope");
     const document = el.closest(".document");
+    const styles = getComputedStyle(el);
     return {
       rootClass: root?.className ?? "",
       documentWidth: document ? Math.round(document.getBoundingClientRect().width) : 0,
       width: Math.round(el.getBoundingClientRect().width),
-      padding: getComputedStyle(el).padding,
-      font: getComputedStyle(el).fontFamily,
-      fontSize: getComputedStyle(el).fontSize,
+      maxWidth: styles.maxWidth,
+      padding: styles.padding,
+      paddingTop: styles.paddingTop,
+      paddingInline: [styles.paddingLeft, styles.paddingRight],
+      font: styles.fontFamily,
+      fontSize: styles.fontSize,
+      lineHeight: styles.lineHeight,
       headingSize: h ? getComputedStyle(h).fontSize : null,
+      headingNumber: h?.getAttribute("data-section-number") ?? null,
+      headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
+        .slice(0, 8)
+        .map((node) => node.getAttribute("data-section-number")),
       listStyle: ul ? getComputedStyle(ul).listStyleType : null,
+      listMarkers: el.querySelectorAll(".cf-list-bullet, .cf-list-number").length,
       mathErrors: el.querySelectorAll(".cf-math-error").length,
       unresolvedCrossrefs: [...el.querySelectorAll(".cf-crossref-unresolved[data-ref-key]")].map((node) =>
         node.getAttribute("data-ref-key")
@@ -68,6 +78,62 @@ async function readerStats() {
   });
 }
 
+async function editorStats() {
+  return page.locator(".cm-content").first().evaluate((el) => {
+    const h = el.querySelector(".cf-doc-heading, h1, h2");
+    const ul = el.querySelector(".cf-doc-list--unordered, ul");
+    const root = el.closest(".cf-theme-scope");
+    const styles = getComputedStyle(el);
+    return {
+      rootClass: root?.className ?? "",
+      width: Math.round(el.getBoundingClientRect().width),
+      maxWidth: styles.maxWidth,
+      padding: styles.padding,
+      paddingTop: styles.paddingTop,
+      paddingInline: [styles.paddingLeft, styles.paddingRight],
+      font: styles.fontFamily,
+      fontSize: styles.fontSize,
+      lineHeight: styles.lineHeight,
+      headingNumber: h?.getAttribute("data-section-number") ?? null,
+      headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
+        .slice(0, 8)
+        .map((node) => node.getAttribute("data-section-number")),
+      listStyle: ul ? getComputedStyle(ul).listStyleType : null,
+      listMarkers: el.querySelectorAll(".cf-list-bullet, .cf-list-number").length,
+      text: el.textContent?.slice(0, 160) ?? "",
+    };
+  });
+}
+
+function assertReaderEditorParity(reader, editor) {
+  const comparable = ["paddingTop", "fontSize", "lineHeight"];
+  for (const key of comparable) {
+    if (reader[key] !== editor[key]) {
+      throw new Error(`reader/editor ${key} mismatch: ${JSON.stringify({ reader, editor })}`);
+    }
+  }
+  if (!reader.maxWidth.includes("800px") || !editor.maxWidth.includes("800px")) {
+    throw new Error(`reader/editor max-width contract mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (reader.paddingInline.join("/") !== editor.paddingInline.join("/")) {
+    throw new Error(`reader/editor horizontal padding mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (!reader.font.includes("KaTeX_Main") || !editor.font.includes("KaTeX_Main")) {
+    throw new Error(`reader/editor content font mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (Math.abs(reader.width - editor.width) > 8) {
+    throw new Error(`reader/editor column width mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  const readerNumbers = reader.headingNumbers.filter(Boolean).slice(0, 4);
+  const editorNumbers = editor.headingNumbers.filter(Boolean).slice(0, readerNumbers.length);
+  if (readerNumbers.join("/") !== editorNumbers.join("/")) {
+    throw new Error(`reader/editor heading numbering mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (editor.listMarkers === 0) {
+    throw new Error(`editor package list markers missing: ${JSON.stringify({ reader, editor })}`);
+  }
+}
+
 try {
   await page.goto(WEB_URL, { waitUntil: "networkidle" });
   await ensureSignedIn();
@@ -79,8 +145,8 @@ try {
   if (defaultReader.documentWidth < 900) {
     throw new Error(`document width too narrow: document=${defaultReader.documentWidth}`);
   }
-  if (defaultReader.width < defaultReader.documentWidth * 0.9) {
-    throw new Error(`reader is not using document width: ${JSON.stringify(defaultReader)}`);
+  if (defaultReader.maxWidth !== "800px" || defaultReader.width < 760 || defaultReader.width > 820) {
+    throw new Error(`reader is not using package document column: ${JSON.stringify(defaultReader)}`);
   }
   if (!defaultReader.rootClass.includes("cf-theme-scope")) {
     throw new Error(`missing document theme scope: ${defaultReader.rootClass}`);
@@ -91,8 +157,11 @@ try {
   if (!defaultReader.fontSize || !defaultReader.headingSize) {
     throw new Error(`missing document typography: ${JSON.stringify(defaultReader)}`);
   }
-  if (defaultReader.listStyle !== "disc") {
-    throw new Error(`reader list markers missing: ${defaultReader.listStyle}`);
+  if (defaultReader.listStyle !== "none" || defaultReader.listMarkers === 0) {
+    throw new Error(`reader package list markers missing: ${JSON.stringify(defaultReader)}`);
+  }
+  if (!defaultReader.headingNumber) {
+    throw new Error(`reader heading numbering missing: ${JSON.stringify(defaultReader)}`);
   }
   if (defaultReader.mathErrors !== 0) {
     throw new Error(`reader has math render errors: ${JSON.stringify(defaultReader)}`);
@@ -120,11 +189,23 @@ try {
   await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByTestId("settings-document-theme-select").selectOption("default");
 
+  await page.goto(
+    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=main&path=${encodeURIComponent(SHOWCASE_PATH)}`,
+    { waitUntil: "domcontentloaded" },
+  );
+  await page.locator(".cm-content").waitFor({ state: "visible", timeout: 10000 });
+  const defaultEditor = await editorStats();
+  if (defaultEditor.rootClass.includes("cf-theme-blueprint-book")) {
+    throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
+  }
+  assertReaderEditorParity(defaultReader, defaultEditor);
+
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;
   console.log(JSON.stringify({
     ok,
     defaultReader,
+    defaultEditor,
     consoleSample: consoleMessages.slice(-10),
     badResponses,
     pageErrors,

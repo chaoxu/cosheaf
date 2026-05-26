@@ -94,6 +94,22 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
     ).run(p.workspaceSlug, cosheafId, p.filePath, title ?? "", parsed.body);
     prep(db, "DELETE FROM backlinks WHERE workspace_slug = ? AND src_id = ?")
       .run(p.workspaceSlug, cosheafId);
+    prep(db, "DELETE FROM xref_targets WHERE workspace_slug = ? AND source_path = ?")
+      .run(p.workspaceSlug, p.filePath);
+    const insertXrefTarget = prep(
+      db,
+      "INSERT OR IGNORE INTO xref_targets (workspace_slug, target_id, source_path, kind, display_label, line) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (const target of format.extractXrefTargets?.(parsed.body) ?? []) {
+      insertXrefTarget.run(
+        p.workspaceSlug,
+        target.id,
+        p.filePath,
+        target.kind,
+        target.label,
+        target.line,
+      );
+    }
     const insertBacklink = prep(
       db,
       "INSERT OR IGNORE INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
@@ -154,6 +170,8 @@ function deletePageRows(db: Database.Database, workspaceSlug: string, cosheafId:
   prep(db, "DELETE FROM notes_fts WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
   prep(db, "DELETE FROM backlinks WHERE workspace_slug = ? AND src_id = ?").run(workspaceSlug, cosheafId);
   prep(db, "DELETE FROM page_tags WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
+  prep(db, "DELETE FROM xref_targets WHERE workspace_slug = ? AND source_path IN (SELECT forgejo_id FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?)")
+    .run(workspaceSlug, workspaceSlug, cosheafId);
   prep(db, "DELETE FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
 }
 
@@ -175,7 +193,10 @@ function resolveLinkTarget(
   if (link.kind === "id") {
     const row = prep(db, "SELECT cosheaf_id FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?")
       .get(workspaceSlug, link.ref) as { cosheaf_id: string } | undefined;
-    return row?.cosheaf_id ?? link.ref;
+    if (row) return row.cosheaf_id;
+    const target = prep(db, "SELECT target_id FROM xref_targets WHERE workspace_slug = ? AND target_id = ? LIMIT 1")
+      .get(workspaceSlug, link.ref) as { target_id: string } | undefined;
+    return target?.target_id ?? link.ref;
   }
   const [linkPath] = link.ref.split("#", 1);
   if (!linkPath) return null;

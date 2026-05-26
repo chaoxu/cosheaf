@@ -251,10 +251,19 @@ export async function ensureWorkspaceFile(
   forgejo: Forgejo,
   config: Config,
   repoName: string,
-  file: { path: string; content: string; message: string },
+  file: { path: string; content: string | Buffer; message: string },
 ): Promise<boolean> {
   const meta = await forgejo.getFileMeta(config.forgejoOwner, repoName, "main", file.path);
   if (meta) return false;
+  if (Buffer.isBuffer(file.content)) {
+    await forgejo.putFileBytes(config.forgejoOwner, repoName, {
+      branch: "main",
+      path: file.path,
+      content: file.content,
+      message: file.message,
+    });
+    return true;
+  }
   await forgejo.putFile(config.forgejoOwner, repoName, {
     branch: "main",
     path: file.path,

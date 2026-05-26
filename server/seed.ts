@@ -43,7 +43,7 @@ const MERGED_FIXTURE_PR_TITLE = "Rendering fixture: merged Markdown PR";
 const MERGED_FIXTURE_BRANCH = "fixtures/merged-rendering-markdown";
 const MERGED_FIXTURE_PATH = "notes/merged-rendering-fixture.md";
 
-type SeedFile = { path: string; content: string; message: string };
+type SeedFile = { path: string; content: string | Buffer; message: string };
 
 export function isSeedProfile(value: string): value is SeedProfile {
   return (SEED_PROFILES as readonly string[]).includes(value);
@@ -213,6 +213,31 @@ function sideBySideFixturePage(workspaceName: string): string {
   ].join("\n");
 }
 
+function samplePdfFixture(): Buffer {
+  const stream = "BT /F1 18 Tf 36 90 Td (Cosheaf PDF preview fixture) Tj ET\n";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>\n",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>\n",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\n",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\n",
+    `<< /Length ${stream.length} >>\nstream\n${stream}endstream\n`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, body] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf, "ascii"));
+    pdf += `${index + 1} 0 obj\n${body}endobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf, "ascii");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (const offset of offsets.slice(1)) {
+    pdf += `${offset.toString().padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(pdf, "ascii");
+}
+
 export async function seedWorkspace(args: {
   options: SeedOptions;
   db: Database.Database;
@@ -265,8 +290,41 @@ function seedFiles(options: SeedOptions): SeedFile[] {
         "",
         `This is the default development page for ${options.workspaceName}.`,
         "",
+        "Cross-file reference fixture: [@thm:coin-conservation].",
+        "",
       ].join("\n"),
       message: "docs: add development hello page",
+    },
+    {
+      path: "theory/cross-file-theorem.md",
+      content: [
+        "---",
+        "id: cross-file-theorem",
+        "title: Cross-file theorem fixture",
+        "---",
+        "# Cross-file theorem fixture",
+        "",
+        '::: {#thm:coin-conservation .theorem title="Coin Conservation"}',
+        "A flushed coin stays accountable across file boundaries.",
+        ":::",
+        "",
+      ].join("\n"),
+      message: "docs: add cross-file theorem fixture",
+    },
+    {
+      path: "notes/plain-text.txt",
+      content: [
+        "Cosheaf plain text fixture",
+        "",
+        "This file is intentionally not Markdown. It should appear in the file browser, render in a plain text preview, and use the text editor rather than the Coflat editor.",
+        "",
+      ].join("\n"),
+      message: "docs: add plain text preview fixture",
+    },
+    {
+      path: "docs/sample.pdf",
+      content: samplePdfFixture(),
+      message: "docs: add pdf preview fixture",
     },
   ];
   if (profileIncludes(options.profile, "large-doc")) {

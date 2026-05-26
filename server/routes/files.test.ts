@@ -104,13 +104,13 @@ describe("files validation route", () => {
     indexPage(db, {
       workspaceSlug: "w",
       filePath: "source.md",
-      bodyText: "---\nid: source\n---\n# Source\n\nSee [@target], [@missing], and [Gone](gone.md).\n",
+      bodyText: "---\nid: source\n---\n# Source\n\nSee [@target], [@thm:target], [@missing], and [Gone](gone.md).\n",
       formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "w",
       filePath: "target.md",
-      bodyText: "---\nid: target\n---\n# Target\n",
+      bodyText: "---\nid: target\n---\n# Target\n\n::: {#thm:target .theorem}\nTarget theorem.\n:::\n",
       formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
@@ -147,6 +147,31 @@ describe("files validation route", () => {
       orphan_labels: [
         { id: "orphan", path: "orphan.md", title: "Orphan" },
         { id: "source", path: "source.md", title: "Source" },
+      ],
+    });
+  });
+});
+
+describe("files refs route", () => {
+  it("resolves page ids and Coflat theorem ids to file targets", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "target.md",
+      bodyText: "---\nid: target\n---\n# Target\n\n::: {#thm:target .theorem}\nTarget theorem.\n:::\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const res = await appFor(db).request("/api/v1/w/w/refs?ids=target,thm:target,missing", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      refs: [
+        { id: "target", path: "target.md", kind: "page", label: "Target" },
+        { id: "thm:target", path: "target.md", kind: "block", label: "Theorem 1", fragment: "thm:target", line: 3 },
       ],
     });
   });
@@ -266,7 +291,10 @@ describe("files tree cache", () => {
       }
       if (url.includes("/git/trees/main")) {
         return responseOk({
-          tree: [{ type: "blob", path: "main.md", size: 1 }],
+          tree: [
+            { type: "blob", path: "main.md", size: 1 },
+            { type: "blob", path: "notes/plain.txt", size: 2 },
+          ],
           truncated: false,
         });
       }
@@ -277,13 +305,18 @@ describe("files tree cache", () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(first.status).toBe(200);
-    expect(await first.json()).toEqual({ files: [{ path: "main.md", size: 1 }] });
+    expect(await first.json()).toEqual({
+      files: [
+        { path: "main.md", size: 1, kind: "markdown" },
+        { path: "notes/plain.txt", size: 2, kind: "text" },
+      ],
+    });
 
     branchExists = true;
     const second = await appFor(db).request("/api/v1/w/w/tree?branch=user/stale", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(second.status).toBe(200);
-    expect(await second.json()).toEqual({ files: [{ path: "branch.md", size: 2 }] });
+    expect(await second.json()).toEqual({ files: [{ path: "branch.md", size: 2, kind: "markdown" }] });
   });
 });

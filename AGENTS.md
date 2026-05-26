@@ -436,6 +436,7 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 
 - `doc_map(workspace_slug, cosheaf_id, forgejo_id, title, created_at)` — pages only.
 - `backlinks(workspace_slug, src_id, src_path, target_id, target_label, line)`
+- `xref_targets(workspace_slug, target_id, source_path, kind, display_label, line)` — rebuildable Coflat heading/equation/block labels for cross-file `[@...]` resolution.
 - `notes_fts` — FTS5 virtual table over title + body, keyed by `workspace_slug`.
 - `page_tags(workspace_slug, cosheaf_id, tag)`
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.

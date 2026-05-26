@@ -9,6 +9,7 @@ import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
 } from "../../shared/conventions.js";
+import { fileKindForPath } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 import { bad, conflict, notFound } from "./responses.js";
 
@@ -123,8 +124,8 @@ files.get("/:slug/tree", async (c) => {
     }
   }
   const out = tree
-    .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
-    .map((e) => ({ path: e.path, size: e.size ?? 0 }))
+    .filter((e) => e.type === "blob")
+    .map((e) => ({ path: e.path, size: e.size ?? 0, kind: fileKindForPath(e.path) }))
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const docs = c
@@ -286,7 +287,7 @@ files.get("/:slug/suggest", (c) => {
   // Other triggers return empty until we add e.g. tag completion.
   if (trigger !== "[@") return c.json({ suggestions: [] });
   const term = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-  const rows = c
+  const pageRows = c
     .get("db")
     .prepare(
       "SELECT cosheaf_id AS id, title FROM doc_map " +
@@ -295,12 +296,81 @@ files.get("/:slug/suggest", (c) => {
         "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
     )
     .all(ws.slug, term, term, limit) as Array<{ id: string; title: string | null }>;
+  const remaining = Math.max(0, limit - pageRows.length);
+  const xrefRows = remaining === 0
+    ? []
+    : c
+        .get("db")
+        .prepare(
+          "SELECT target_id AS id, display_label AS title, source_path AS path FROM xref_targets " +
+            "WHERE workspace_slug = ? AND " +
+            "(target_id LIKE ? ESCAPE '\\' OR display_label LIKE ? ESCAPE '\\') " +
+            "ORDER BY length(target_id), target_id LIMIT ?",
+        )
+        .all(ws.slug, term, term, remaining) as Array<{ id: string; title: string; path: string }>;
   return c.json({
-    suggestions: rows.map((r) => ({
-      id: r.id,
-      insert: `${r.id}]`,
-      display: r.title ? `${r.id} — ${r.title}` : r.id,
-    })),
+    suggestions: [
+      ...pageRows.map((r) => ({
+        id: r.id,
+        insert: `${r.id}]`,
+        display: r.title ? `${r.id} — ${r.title}` : r.id,
+      })),
+      ...xrefRows.map((r) => ({
+        id: r.id,
+        insert: `${r.id}]`,
+        display: `${r.id} — ${r.title} (${r.path})`,
+      })),
+    ],
+  });
+});
+
+files.get("/:slug/refs", (c) => {
+  const ids = [
+    ...new Set(
+      (c.req.query("ids") ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => /^[\w.:-]+$/.test(id))
+        .slice(0, 50),
+    ),
+  ];
+  if (ids.length === 0) return c.json({ refs: [] });
+  const ws = c.get("workspace");
+  const placeholders = ids.map(() => "?").join(",");
+  const pageRows = c
+    .get("db")
+    .prepare(
+      `SELECT cosheaf_id AS id, forgejo_id AS path, COALESCE(title, cosheaf_id) AS label
+         FROM doc_map
+        WHERE workspace_slug = ? AND cosheaf_id IN (${placeholders})`,
+    )
+    .all(ws.slug, ...ids) as Array<{ id: string; path: string; label: string }>;
+  const xrefRows = c
+    .get("db")
+    .prepare(
+      `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
+         FROM xref_targets
+        WHERE workspace_slug = ? AND target_id IN (${placeholders})
+        ORDER BY source_path`,
+    )
+    .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>;
+  return c.json({
+    refs: [
+      ...pageRows.map((r) => ({
+        id: r.id,
+        path: r.path,
+        kind: "page",
+        label: r.label,
+      })),
+      ...xrefRows.map((r) => ({
+        id: r.id,
+        path: r.path,
+        kind: r.kind,
+        label: r.label,
+        fragment: r.id,
+        line: r.line,
+      })),
+    ],
   });
 });
 
@@ -413,11 +483,22 @@ files.get("/:slug/validation", (c) => {
          LEFT JOIN doc_map src
            ON src.workspace_slug = b.workspace_slug
           AND src.cosheaf_id = b.src_id
-         LEFT JOIN doc_map target
-           ON target.workspace_slug = b.workspace_slug
-          AND target.cosheaf_id = b.target_id
         WHERE b.workspace_slug = ?
-          AND (b.target_id IS NULL OR target.cosheaf_id IS NULL)
+          AND (
+            b.target_id IS NULL
+            OR (
+              NOT EXISTS (
+                SELECT 1 FROM doc_map target
+                 WHERE target.workspace_slug = b.workspace_slug
+                   AND target.cosheaf_id = b.target_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM xref_targets target
+                 WHERE target.workspace_slug = b.workspace_slug
+                   AND target.target_id = b.target_id
+              )
+            )
+          )
         ORDER BY b.src_path, b.line, b.target_label`,
     )
     .all(ws.slug) as WorkspaceValidation["broken_refs"];

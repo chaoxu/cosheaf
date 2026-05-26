@@ -1,5 +1,11 @@
 import { renderToHtml, hydrateMath, type DocumentContext } from "@chaoxu/coflat-editor/reader";
+import { extractReferences } from "@chaoxu/coflat-editor/parse";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
+import {
+  collectCoflatBlockEntries,
+  extractCoflatXrefTargets,
+  type CoflatBlockEntry,
+} from "../../shared/coflat-xrefs";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
@@ -15,53 +21,23 @@ interface ReaderPayload {
 }
 
 interface LocalRefs {
-  crossrefs: Map<string, string>;
+  crossrefs: Map<string, RenderedCrossref>;
   citations: Map<string, string>;
 }
 
-interface BlockDefinition {
-  title: string;
-  numbered: boolean;
-  counter?: string;
-  headerPosition?: "inline";
-  captionPosition?: "below";
-  displayHeader?: boolean;
+interface RenderedCrossref {
+  label: string;
+  href?: string;
 }
 
-interface BlockEntry {
-  type: string;
-  id?: string;
-  title?: string;
-  displayTitle: string;
-  displayLabel: string;
-  number?: number;
-  definition: BlockDefinition;
+interface WorkspaceRef {
+  id: string;
+  path: string;
+  kind: "page" | "block" | "equation" | "heading";
+  label: string;
+  fragment?: string;
+  line?: number | null;
 }
-
-interface ParsedBlockAttrs {
-  id?: string;
-  classes: string[];
-  flags: string[];
-  keyValues: Record<string, string>;
-}
-
-const blockDefinitions: Record<string, BlockDefinition> = {
-  theorem: { title: "Theorem", numbered: true, counter: "theorem" },
-  lemma: { title: "Lemma", numbered: true, counter: "theorem" },
-  corollary: { title: "Corollary", numbered: true, counter: "theorem" },
-  proposition: { title: "Proposition", numbered: true, counter: "theorem" },
-  conjecture: { title: "Conjecture", numbered: true, counter: "theorem" },
-  problem: { title: "Problem", numbered: true, counter: "theorem" },
-  definition: { title: "Definition", numbered: true, counter: "definition" },
-  algorithm: { title: "Algorithm", numbered: true, counter: "algorithm" },
-  figure: { title: "Figure", numbered: true, counter: "figure", captionPosition: "below" },
-  table: { title: "Table", numbered: true, counter: "table", captionPosition: "below" },
-  proof: { title: "Proof", numbered: false, headerPosition: "inline" },
-  remark: { title: "Remark", numbered: false },
-  example: { title: "Example", numbered: false },
-  note: { title: "Note", numbered: false },
-  blockquote: { title: "Blockquote", numbered: false, displayHeader: false },
-};
 
 function urlPath(value: string): string {
   return value.split("/").map(encodeURIComponent).join("/");
@@ -76,15 +52,15 @@ function resolveRepoLink(payload: ReaderPayload, href: string): string | null {
   const baseDir = payload.path.includes("/") ? payload.path.slice(0, payload.path.lastIndexOf("/")) : "";
   const normalized = new URL(withoutHash, `https://cosheaf.invalid/${baseDir ? `${baseDir}/` : ""}`).pathname.slice(1);
   if (!normalized || normalized.split("/").includes("..")) return null;
-  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 function resolveRawRepoLink(payload: ReaderPayload, href: string): string | null {
   const resolved = resolveRepoLink(payload, href);
   if (!resolved) return null;
-  const prefix = `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/`;
+  const prefix = `/${urlPath(payload.repo)}/src/branch/`;
   if (!resolved.startsWith(prefix)) return null;
-  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/raw/branch/${resolved.slice(prefix.length)}`;
+  return `/${urlPath(payload.repo)}/raw/branch/${resolved.slice(prefix.length)}`;
 }
 
 function documentContext(payload: ReaderPayload, refs: LocalRefs): DocumentContext {
@@ -97,12 +73,17 @@ function documentContext(payload: ReaderPayload, refs: LocalRefs): DocumentConte
     },
     refResolver: {
       resolve: (key) => {
+        const crossref = refs.crossrefs.get(key);
+        if (crossref) {
+          return {
+            content: escapeHtml(crossref.label),
+            href: crossref.href,
+            className: "cf-crossref",
+          };
+        }
         const citation = refs.citations.get(key);
         if (citation) return { content: citation, className: "cf-citation" };
-        return {
-          content: `[@${key}]`,
-          className: `${REF_BUTTON_CLASS} cosheaf-ref-page`,
-        };
+        return null;
       },
     },
   };
@@ -137,102 +118,81 @@ function applyDocumentTheme(root: HTMLElement): void {
 }
 
 async function localRefs(payload: ReaderPayload, frontmatter: Record<string, unknown>): Promise<LocalRefs> {
+  const crossrefs = localCrossrefs(payload.source);
+  for (const [key, ref] of await workspaceCrossrefs(payload, payload.source)) {
+    if (!crossrefs.has(key)) crossrefs.set(key, ref);
+  }
   return {
-    crossrefs: localCrossrefs(payload.source),
+    crossrefs,
     citations: await localCitations(payload, frontmatter),
   };
 }
 
-function localCrossrefs(source: string): Map<string, string> {
-  const refs = new Map<string, string>();
-  let equationNumber = 0;
-  for (const match of source.matchAll(/(?:\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\])\s*\{#(eq:[^}\s]+)\}/g)) {
-    equationNumber += 1;
-    refs.set(match[1], `Eq. (${equationNumber})`);
-  }
-
-  for (const block of collectBlockEntries(source)) {
-    if (!block.id) continue;
-    refs.set(block.id, block.displayLabel);
+function localCrossrefs(source: string): Map<string, RenderedCrossref> {
+  const refs = new Map<string, RenderedCrossref>();
+  for (const target of extractCoflatXrefTargets(source)) {
+    refs.set(target.id, { label: target.label, href: `#${encodeURIComponent(target.id)}` });
   }
   return refs;
 }
 
-function collectBlockEntries(source: string): BlockEntry[] {
-  const entries: BlockEntry[] = [];
-  const counters = new Map<string, number>();
-  for (const line of source.split("\n")) {
-    const match = /^:{3,}\s*\{([^}]*)\}/.exec(line.trim());
-    if (!match) continue;
-    const attrs = parseBlockAttrs(match[1]);
-    const type = attrs.classes[0]?.toLowerCase();
-    if (!type) continue;
-    const definition = blockDefinition(type, attrs);
-    if (definition.displayHeader === false) continue;
-    const numbered = blockNumbered(definition, attrs);
-    const counter = attrs.keyValues.counter || definition.counter || type;
-    const number = numbered ? (counters.get(counter) ?? 0) + 1 : undefined;
-    if (number !== undefined) counters.set(counter, number);
-    const displayTitle = attrs.keyValues.label || definition.title;
-    entries.push({
-      type,
-      id: attrs.id,
-      title: attrs.keyValues.title,
-      displayTitle,
-      displayLabel: number !== undefined ? `${displayTitle} ${number}` : displayTitle,
-      number,
-      definition,
+async function workspaceCrossrefs(payload: ReaderPayload, source: string): Promise<Map<string, RenderedCrossref>> {
+  const keys = referencedKeys(source);
+  if (keys.length === 0) return new Map();
+  try {
+    const response = await fetch(`/api/v1/w/${encodeURIComponent(payload.repo)}/refs?ids=${encodeURIComponent(keys.join(","))}`, {
+      credentials: "same-origin",
     });
-  }
-  return entries;
-}
-
-function parseBlockAttrs(input: string): ParsedBlockAttrs {
-  const attrs: ParsedBlockAttrs = { classes: [], flags: [], keyValues: {} };
-  for (const token of attributeTokens(input)) {
-    if (token.startsWith("#")) attrs.id = token.slice(1);
-    else if (token.startsWith(".")) attrs.classes.push(token.slice(1));
-    else if (token === "-") attrs.flags.push(token);
-    else {
-      const eq = token.indexOf("=");
-      if (eq > 0) attrs.keyValues[token.slice(0, eq)] = unquoteAttr(token.slice(eq + 1));
+    if (!response.ok) return new Map();
+    const body = (await response.json()) as { refs?: WorkspaceRef[] };
+    const refs = new Map<string, RenderedCrossref>();
+    for (const ref of body.refs ?? []) {
+      if (refs.has(ref.id)) continue;
+      refs.set(ref.id, {
+        label: ref.label,
+        href: refHref(payload, ref),
+      });
     }
+    return refs;
+  } catch (_error) {
+    return new Map();
   }
-  return attrs;
 }
 
-function attributeTokens(input: string): string[] {
-  return input.match(/[^\s=]+=(?:"[^"]*"|'[^']*'|[^\s]+)|"[^"]*"|'[^']*'|\S+/g) ?? [];
+function referencedKeys(source: string): string[] {
+  return [
+    ...new Set(
+      extractReferences(source)
+        .filter((ref) => (ref.kind === "ref" || ref.kind === "crossref") && ref.key)
+        .map((ref) => ref.key as string),
+    ),
+  ];
 }
 
-function unquoteAttr(value: string): string {
-  if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
-  }
-  return value;
+function refHref(payload: ReaderPayload, ref: WorkspaceRef): string {
+  const fragment = ref.fragment ? `#${encodeURIComponent(ref.fragment)}` : "";
+  return `/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(ref.path)}${fragment}`;
 }
 
-function blockDefinition(type: string, attrs: ParsedBlockAttrs): BlockDefinition {
-  const base = blockDefinitions[type] ?? { title: titleCase(type), numbered: true, counter: type };
-  return {
-    ...base,
-    ...(attrs.keyValues.label ? { title: attrs.keyValues.label } : {}),
-  };
-}
-
-function titleCase(value: string): string {
-  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
-}
-
-function blockNumbered(definition: BlockDefinition, attrs: ParsedBlockAttrs): boolean {
-  if (attrs.flags.includes("-") || attrs.classes.includes("unnumbered")) return false;
-  const numbered = attrs.keyValues.numbered;
-  if (numbered === undefined) return definition.numbered;
-  return !["false", "0", "no"].includes(numbered.toLowerCase());
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case "\"":
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
 }
 
 function decorateRenderedBlocks(root: ParentNode, source: string): void {
-  const entries = collectBlockEntries(source);
+  const entries = collectCoflatBlockEntries(source);
   let searchFrom = 0;
   for (const block of root.querySelectorAll<HTMLElement>(".cf-doc-block")) {
     if (block.querySelector(":scope > .cf-block-header, :scope > .cf-block-caption")) continue;
@@ -253,7 +213,7 @@ function blockTypeFromElement(block: HTMLElement): string | null {
   return null;
 }
 
-function findBlockEntry(entries: BlockEntry[], start: number, type: string, id?: string): number {
+function findBlockEntry(entries: CoflatBlockEntry[], start: number, type: string, id?: string): number {
   for (let index = start; index < entries.length; index += 1) {
     const entry = entries[index];
     if (entry.type !== type) continue;
@@ -263,7 +223,7 @@ function findBlockEntry(entries: BlockEntry[], start: number, type: string, id?:
   return -1;
 }
 
-function decorateRenderedBlock(block: HTMLElement, entry: BlockEntry): void {
+function decorateRenderedBlock(block: HTMLElement, entry: CoflatBlockEntry): void {
   if (entry.definition.captionPosition === "below") {
     const caption = document.createElement("div");
     caption.className = "cf-block-caption cf-doc-block-caption";
@@ -300,7 +260,7 @@ function prependHeaderParagraph(block: HTMLElement): HTMLElement {
   return paragraph;
 }
 
-function blockHeader(entry: BlockEntry): HTMLElement {
+function blockHeader(entry: CoflatBlockEntry): HTMLElement {
   const label = document.createElement("span");
   label.className = "cf-block-header-rendered cf-doc-block-label";
   label.textContent = entry.displayLabel;
@@ -360,14 +320,28 @@ function displayMathBody(raw: string): string {
   return raw;
 }
 
-function resolveRenderedCrossrefs(root: ParentNode, crossrefs: Map<string, string>): void {
-  for (const el of root.querySelectorAll<HTMLElement>(".cf-crossref-unresolved[data-ref-key]")) {
+function resolveRenderedCrossrefs(root: ParentNode, crossrefs: Map<string, RenderedCrossref>): void {
+  for (const el of root.querySelectorAll<HTMLElement>(".cf-crossref[data-ref-key], .cf-crossref-unresolved[data-ref-key]")) {
     const key = el.dataset.refKey;
-    const label = key ? crossrefs.get(key) : null;
-    if (!label) continue;
+    const ref = key ? crossrefs.get(key) : null;
+    if (!ref) continue;
     el.classList.remove("cf-crossref-unresolved");
     el.classList.add("cf-crossref");
-    el.textContent = label;
+    if (!ref.href) {
+      el.textContent = ref.label;
+      continue;
+    }
+    if (el instanceof HTMLAnchorElement) {
+      el.href = ref.href;
+      el.textContent = ref.label;
+      continue;
+    }
+    const link = document.createElement("a");
+    link.className = el.className;
+    link.dataset.refKey = key;
+    link.href = ref.href;
+    link.textContent = ref.label;
+    el.replaceWith(link);
   }
 }
 
@@ -387,20 +361,28 @@ function installRefNavigation(): void {
     const ref = target?.closest<HTMLElement>(`.${REF_BUTTON_CLASS}`);
     if (!ref) return;
     const kind = ref.dataset.refKind;
+    const repoPrefix = currentRepoPrefix();
+    if (!repoPrefix) return;
     if (kind === "num" && ref.dataset.refNum) {
       event.preventDefault();
-      const match = /^\/([^/]+)\/([^/]+)/.exec(window.location.pathname);
-      if (match) window.location.href = `/${match[1]}/${match[2]}/issues/${encodeURIComponent(ref.dataset.refNum)}`;
+      window.location.href = `${repoPrefix}/issues/${encodeURIComponent(ref.dataset.refNum)}`;
     }
     if (kind === "path" && ref.dataset.refPath) {
       event.preventDefault();
-      const match = /^\/([^/]+)\/([^/]+)/.exec(window.location.pathname);
-      if (!match) return;
       const branch = ref.closest<HTMLElement>("[data-reader-branch]")?.dataset.readerBranch ?? "main";
       const line = ref.dataset.refFrom ? `#L${ref.dataset.refFrom}${ref.dataset.refTo && ref.dataset.refTo !== ref.dataset.refFrom ? `-${ref.dataset.refTo}` : ""}` : "";
-      window.location.href = `/${match[1]}/${match[2]}/src/branch/${urlPath(branch)}/${urlPath(ref.dataset.refPath)}${line}`;
+      window.location.href = `${repoPrefix}/src/branch/${urlPath(branch)}/${urlPath(ref.dataset.refPath)}${line}`;
     }
   });
+}
+
+function currentRepoPrefix(): string | null {
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts.length === 0) return null;
+  const repoRoute = new Set(["src", "raw", "_edit", "issues", "pulls", "branches", "activity", "settings", "notifications"]);
+  if (parts[1] && repoRoute.has(parts[1])) return `/${urlPath(parts[0])}`;
+  if (parts.length >= 2) return `/${urlPath(parts[0])}/${urlPath(parts[1])}`;
+  return `/${urlPath(parts[0])}`;
 }
 
 for (const root of document.querySelectorAll<HTMLElement>(".coflat-reader-island")) {

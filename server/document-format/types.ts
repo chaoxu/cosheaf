@@ -10,6 +10,13 @@ export interface DocumentLink {
   to: number;
 }
 
+export interface DocumentXrefTarget {
+  id: string;
+  kind: "block" | "equation" | "heading";
+  label: string;
+  line: number;
+}
+
 export interface DocumentFormat {
   id: string;
   displayName: string;
@@ -18,4 +25,5 @@ export interface DocumentFormat {
   serializeDocument(frontmatter: Frontmatter, body: string): string;
   extractTitle(body: string): string | null;
   extractLinks(body: string): DocumentLink[];
+  extractXrefTargets?(body: string): DocumentXrefTarget[];
 }

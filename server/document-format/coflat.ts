@@ -4,6 +4,7 @@ import {
   parseFrontmatterYaml,
   serializeFrontmatterYaml,
 } from "../../shared/frontmatter-yaml.js";
+import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { DocumentFormat, DocumentLink, Frontmatter, ParsedDocument } from "./types.js";
 
@@ -17,6 +18,7 @@ export const coflatMarkdownFormat: DocumentFormat = {
   serializeDocument,
   extractTitle,
   extractLinks,
+  extractXrefTargets: extractCoflatXrefTargets,
 };
 
 function parseDocument(content: string): ParsedDocument {

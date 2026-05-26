@@ -165,6 +165,40 @@ describe("indexPage", () => {
     expect(labels).toEqual(["[@targetid]", "[link](other.md)"]);
   });
 
+  it("indexes Coflat cross-reference targets for cross-file resolution", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "theory.md",
+      bodyText: [
+        "---",
+        "id: theory",
+        "---",
+        "# Theory {#sec:theory}",
+        "",
+        "$$x = y$$ {#eq:identity}",
+        "",
+        '::: {#thm:identity .theorem title="Identity"}',
+        "Every value equals itself.",
+        ":::",
+        "",
+      ].join("\n"),
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const targets = db
+      .prepare("SELECT target_id, source_path, kind, display_label FROM xref_targets WHERE workspace_slug = 'w' ORDER BY target_id")
+      .all() as Array<{ target_id: string; source_path: string; kind: string; display_label: string }>;
+    expect(targets).toEqual([
+      { target_id: "eq:identity", source_path: "theory.md", kind: "equation", display_label: "Eq. (1)" },
+      { target_id: "sec:theory", source_path: "theory.md", kind: "heading", display_label: "Section 1" },
+      { target_id: "thm:identity", source_path: "theory.md", kind: "block", display_label: "Theorem 1" },
+    ]);
+
+    deletePage(db, "w", "theory.md");
+    expect(db.prepare("SELECT count(*) AS c FROM xref_targets WHERE workspace_slug = 'w'").get()).toEqual({ c: 0 });
+  });
+
   it("indexes with trigram tokenizer for CJK search", () => {
     const db = freshDb();
     indexPage(db, {

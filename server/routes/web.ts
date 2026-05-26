@@ -4,6 +4,7 @@ import { deleteCookie, setCookie } from "hono/cookie";
 import type Database from "better-sqlite3";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { COFLAT_FORMAT_ID, documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
+import { fileKindForPath, fileKindLabel, type FileKind } from "../../shared/file-kind.js";
 import { ROLES, type Role } from "../../shared/roles.js";
 import { deletePage, planIndexPage } from "../indexer.js";
 import { AUTH_COOKIE, invalidateWorkspacePermissionCache, resolveAuth } from "../middleware.js";
@@ -18,7 +19,7 @@ import {
 import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
 import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
 import { resolveBranchPath } from "../branch-path.js";
-import { contentTypeForPath } from "../content-type.js";
+import { repositoryRawHeadersForPath } from "../content-type.js";
 import type {
   ForgejoActivity,
   ForgejoBranch,
@@ -154,7 +155,7 @@ web.get("/:owner/:repo", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
   const { owner, repo, fj, ws, user } = ctx;
-  const files = await markdownFiles(fj, owner, repo, "main").catch(() => []);
+  const files = await repoFiles(fj, owner, repo, "main").catch(() => []);
   return htmlResponse(
     repoPage({
       title: `Files - ${repo}`,
@@ -187,7 +188,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
   const { owner, repo, fj, ws, user } = ctx;
   const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
-  const files = await markdownFiles(fj, owner, repo, resolved.branch);
+  const files = await repoFiles(fj, owner, repo, resolved.branch);
   if (!resolved.path) {
     return htmlResponse(
       repoPage({
@@ -217,15 +218,17 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
   }
   const rel = safeRel(resolved.path);
   if (!rel) return notFoundPage(user, "File not found");
-  const content = await fj.getRawFile(owner, repo, resolved.branch, rel).catch((err) => {
+  const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch((err) => {
     if (err instanceof ForgejoError && err.status === 404) return null;
     throw err;
   });
-  if (content === null) return notFoundPage(user, "File not found");
-  if (!rel.endsWith(".md")) {
-    return new Response(content, { headers: { "content-type": contentTypeForPath(rel) } });
-  }
-  const rendered = await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel });
+  if (!meta) return notFoundPage(user, "File not found");
+  const kind = fileKindForPath(rel);
+  const content = kind === "markdown" || kind === "text" ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const rendered =
+    kind === "markdown" && content !== null
+      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
+      : null;
   return htmlResponse(
     repoPage({
       title: `${rel} - ${repo}`,
@@ -234,12 +237,13 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       active: "files",
       user,
       ws,
-      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+      readerAssets: kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <div class="file-toolbar">
           <div>
             <p class="eyebrow">${escapeHtml(resolved.branch)}</p>
             <h1>${escapeHtml(rel)}</h1>
+            <p class="file-meta">${escapeHtml(fileKindLabel(kind))} <span>${formatBytes(meta.size)}</span></p>
           </div>
           <div class="toolbar-actions">
             <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
@@ -252,7 +256,9 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
             ${
               ws.role === "read"
                 ? ""
-                : `<a class="button primary" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}">Edit</a>`
+                : editableFileKind(kind)
+                  ? `<a class="button primary" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
+                  : ""
             }
             ${
               ws.role === "read" || resolved.branch === "main"
@@ -264,9 +270,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
             }
           </div>
         </div>
-        <article class="document cf-theme-scope">
-          ${markdownSurface(ctx, rendered)}
-        </article>
+        ${filePreview(ctx, resolved.branch, rel, kind, rendered ?? content)}
       `,
     }),
   );
@@ -302,8 +306,8 @@ web.get("/:owner/:repo/raw/branch/*", async (c) => {
   if (!resolved?.path) return new Response("not found", { status: 404 });
   const rel = safeRel(resolved.path);
   if (!rel) return new Response("not found", { status: 404 });
-  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel);
-  return new Response(content, { headers: { "content-type": contentTypeForPath(rel) } });
+  const content = await ctx.fj.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
+  return new Response(content, { headers: repositoryRawHeadersForPath(rel) });
 });
 
 web.get("/:owner/:repo/_edit", async (c) => {
@@ -312,6 +316,8 @@ web.get("/:owner/:repo/_edit", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const branch = editBranchFor(ctx.user, c.req.query("branch"));
   const rel = safeRel(c.req.query("path") || "new.md") ?? "new.md";
+  const kind = fileKindForPath(rel);
+  if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
   const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, rel).catch(async (err) => {
     if (err instanceof ForgejoError && err.status === 404) {
       return ctx.fj.getRawFile(ctx.owner, ctx.repo, "main", rel).catch(() => "");
@@ -326,7 +332,7 @@ web.get("/:owner/:repo/_edit", async (c) => {
       active: "files",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: kind === "markdown" ? `
         <section class="edit-page">
           <div class="file-toolbar edit-titlebar">
             <div>
@@ -366,7 +372,7 @@ web.get("/:owner/:repo/_edit", async (c) => {
             </form>
           </noscript>
         </section>
-      `,
+      ` : textEditPage(ctx, branch, rel, content),
     }),
   );
 });
@@ -382,7 +388,14 @@ web.post("/:owner/:repo/_edit", async (c) => {
   const content = textField(form.content);
   if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
   await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
-  await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
+  const kind = fileKindForPath(rel);
+  if (kind === "markdown") {
+    await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
+  } else if (kind === "text") {
+    await writeTextFile(ctx, branch, rel, content, oldRel ?? undefined);
+  } else {
+    return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
+  }
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
 });
 
@@ -505,7 +518,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   ]);
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
-  const body = await renderMarkdown(ctx, issue.body ?? "");
+  const body = await renderMarkdownSurface(ctx, issue.body ?? "", { surface: "thread" });
   const timelineHtml = await renderIssueTimeline(ctx, issue.number, comments, timeline ?? []);
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
@@ -542,7 +555,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
             <p>${isPinned ? `<span class="meta-pill">pinned</span> ` : ""}by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
           </header>
           <div class="issue-document">
-            ${markdownSurface(ctx, body)}
+            ${body}
           </div>
           ${issueEditForm(ctx, issue)}
           ${labelEditForm({
@@ -827,7 +840,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
     ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
   ]);
-  const body = await renderMarkdown(ctx, pull.body ?? "");
+  const body = await renderMarkdownSurface(ctx, pull.body ?? "", { surface: "thread" });
   const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
   return htmlResponse(
     repoPage({
@@ -857,7 +870,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
           </header>
           <div class="comment">
             <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
-            ${body ? markdownSurface(ctx, body) : `<p>No description.</p>`}
+            ${body ? body : `<p>No description.</p>`}
           </div>
           ${pullEditForm(ctx, pull)}
           ${labelEditForm({
@@ -1468,17 +1481,81 @@ function roleFromPermissions(p: { admin?: boolean; push?: boolean; pull?: boolea
   return "none";
 }
 
-async function markdownFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
+async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
   const tree = await fj.getTree(owner, repo, ref, true);
   return tree
-    .filter((entry) => entry.type === "blob" && entry.path.endsWith(".md"))
+    .filter((entry) => entry.type === "blob")
     .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function editableFileKind(kind: FileKind): boolean {
+  return kind === "markdown" || kind === "text";
+}
+
+function rawFileHref(owner: string, repo: string, branch: string, rel: string): string {
+  return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
+}
+
+function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, content: string | null): string {
+  const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
+  if (kind === "markdown") {
+    return `<article class="document cf-theme-scope" data-testid="file-preview-markdown">
+      ${markdownSurface(ctx, content ?? "")}
+    </article>`;
+  }
+  if (kind === "text") {
+    return `<article class="file-preview file-preview-source" data-testid="file-preview-text">
+      <pre><code>${escapeHtml(content ?? "")}</code></pre>
+    </article>`;
+  }
+  if (kind === "pdf") {
+    return `<article class="file-preview file-preview-embed">
+      <object data-testid="file-preview-pdf" data="${escapeAttr(rawHref)}" type="application/pdf">
+        <p>PDF preview is not available in this browser. <a class="inline-link" href="${escapeAttr(rawHref)}">Open the raw file.</a></p>
+      </object>
+    </article>`;
+  }
+  if (kind === "image") {
+    return `<article class="file-preview file-preview-image">
+      <img data-testid="file-preview-image" src="${escapeAttr(rawHref)}" alt="${escapeAttr(rel)}">
+    </article>`;
+  }
+  return `<article class="file-preview file-preview-fallback" data-testid="file-preview-raw">
+    <p>No inline preview is available for this file type.</p>
+    <a class="button" href="${escapeAttr(rawHref)}">Open raw file</a>
+  </article>`;
+}
+
+function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string): string {
+  return `<section class="edit-page text-edit-page">
+    <div class="file-toolbar edit-titlebar">
+      <div><p class="eyebrow">Edit text on branch</p><h1>${escapeHtml(rel)}</h1></div>
+      <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}">Cancel</a>
+    </div>
+    <form class="compose-form" data-testid="text-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
+      <input type="hidden" name="old_path" value="${escapeAttr(rel)}">
+      <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
+      <label>Path <input name="path" value="${escapeAttr(rel)}" required></label>
+      <textarea class="text-file-editor" name="content" spellcheck="false">${escapeHtml(content)}</textarea>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save</button>
+      </div>
+    </form>
+  </section>`;
+}
+
+type MarkdownSurface = "document" | "thread" | "diff";
+
+function coflatSurfaceClass(surface: MarkdownSurface): string {
+  if (surface === "thread") return "cf-reader-compact";
+  if (surface === "diff") return "cf-rich-diff cf-reader-compact";
+  return "";
 }
 
 async function renderMarkdown(
   ctx: WebCtx,
   source: string,
-  opts: { branch?: string; documentPath?: string } = {},
+  opts: { branch?: string; documentPath?: string; surface?: MarkdownSurface } = {},
 ): Promise<string> {
   const { body } = parseFrontmatterYaml(source);
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
@@ -1487,7 +1564,20 @@ async function renderMarkdown(
   return ctx.fj.renderMarkdown(ctx.owner, ctx.repo, body);
 }
 
-function coflatReaderIsland(ctx: WebCtx, source: string, opts: { branch?: string; documentPath?: string }): string {
+async function renderMarkdownSurface(
+  ctx: WebCtx,
+  source: string,
+  opts: { branch?: string; documentPath?: string; surface?: MarkdownSurface } = {},
+): Promise<string> {
+  const rendered = await renderMarkdown(ctx, source, opts);
+  return markdownSurface(ctx, rendered, opts.surface ?? "document");
+}
+
+function coflatReaderIsland(
+  ctx: WebCtx,
+  source: string,
+  opts: { branch?: string; documentPath?: string; surface?: MarkdownSurface },
+): string {
   const payload = {
     source,
     owner: ctx.owner,
@@ -1495,7 +1585,10 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: { branch?: string
     branch: opts.branch ?? "main",
     path: opts.documentPath ?? "",
   };
-  return `<div class="cf-reader cf-doc-surface cf-doc-flow coflat-reader-island" data-reader-branch="${escapeAttr(payload.branch)}"><script type="application/json">${jsonScript(payload)}</script></div>`;
+  const className = ["cf-reader", "cf-doc-surface", "cf-doc-flow", "coflat-reader-island", coflatSurfaceClass(opts.surface ?? "document")]
+    .filter(Boolean)
+    .join(" ");
+  return `<div class="${escapeAttr(className)}" data-reader-branch="${escapeAttr(payload.branch)}"><script type="application/json">${jsonScript(payload)}</script></div>`;
 }
 
 async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
@@ -1539,6 +1632,36 @@ async function writeMarkdownFile(
   }
   plan.commit();
   if (isRename) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
+  invalidateBranchTree(ctx.owner, ctx.repo, branch);
+}
+
+async function writeTextFile(
+  ctx: WebCtx,
+  branch: string,
+  rel: string,
+  content: string,
+  previousRel?: string,
+): Promise<void> {
+  const isRename = Boolean(previousRel && previousRel !== rel);
+  const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
+  if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
+  const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
+  await ctx.fj.putFile(ctx.owner, ctx.repo, {
+    branch,
+    path: rel,
+    content,
+    sha: existing?.sha,
+    message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
+  });
+  if (isRename && previous) {
+    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+      branch,
+      path: previousRel as string,
+      sha: previous.sha,
+      message: `remove ${previousRel} after rename`,
+    });
+    if ((previousRel as string).endsWith(".md")) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
+  }
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }
 
@@ -1635,21 +1758,35 @@ async function renderPrFileView(
   }
   if (shape === "split") {
     const [base, head] = await Promise.all([
-      renderMarkdown(ctx, nextVersions.base, { branch: pull.base.ref, documentPath: file.path }),
-      renderMarkdown(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path }),
+      renderMarkdownSurface(ctx, nextVersions.base, {
+        branch: pull.base.ref,
+        documentPath: file.path,
+        surface: "diff",
+      }),
+      renderMarkdownSurface(ctx, nextVersions.head, {
+        branch: pull.head.ref,
+        documentPath: file.path,
+        surface: "diff",
+      }),
     ]);
     return `<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
-      <section><h3>Base</h3>${markdownSurface(ctx, base, "cf-rich-diff")}</section>
-      <section><h3>Head</h3>${markdownSurface(ctx, head, "cf-rich-diff")}</section>
+      <section><h3>Base</h3>${base}</section>
+      <section><h3>Head</h3>${head}</section>
     </div>`;
   }
-  const head = await renderMarkdown(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path });
-  return `<div data-testid="diff-pane-after" class="rich-after cf-theme-scope">${markdownSurface(ctx, head, "cf-rich-diff")}</div>`;
+  const head = await renderMarkdownSurface(ctx, nextVersions.head, {
+    branch: pull.head.ref,
+    documentPath: file.path,
+    surface: "diff",
+  });
+  return `<div data-testid="diff-pane-after" class="rich-after cf-theme-scope">${head}</div>`;
 }
 
-function markdownSurface(ctx: WebCtx, rendered: string, extraClass = ""): string {
+function markdownSurface(ctx: WebCtx, rendered: string, surface: MarkdownSurface = "document"): string {
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) return rendered;
-  const className = ["markdown-body", "cf-reader", "cf-doc-surface", "cf-doc-flow", extraClass].filter(Boolean).join(" ");
+  const className = ["markdown-body", "cf-reader", "cf-doc-surface", "cf-doc-flow", coflatSurfaceClass(surface)]
+    .filter(Boolean)
+    .join(" ");
   return `<div class="${className}">${rendered}</div>`;
 }
 
@@ -2022,29 +2159,29 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
 
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<string> {
   if (item.kind === "comment") {
-    const body = await renderMarkdown(ctx, item.comment.body);
+    const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
     return `<div class="comment">
       <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} - ${formatDate(item.comment.created_at)}</div>
-      ${markdownSurface(ctx, body)}
+      ${body}
       ${issueCommentActions(ctx, item.number, item.comment)}
     </div>`;
   }
   if (item.kind === "line-comment") {
-    const body = await renderMarkdown(ctx, item.comment.body);
+    const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
     return `<div class="comment">
       <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} commented on ${escapeHtml(item.comment.path)} - ${formatDate(item.comment.created_at)}</div>
-      ${markdownSurface(ctx, body)}
+      ${body}
       ${pullCommentActions(ctx, item.number, item.comment)}
     </div>`;
   }
   if (item.kind === "review") {
     const label = reviewStateLabel(item.review.state);
-    const body = item.review.body ? await renderMarkdown(ctx, item.review.body) : "";
+    const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
     return `<div class="timeline-event">
       <strong>${escapeHtml(displayLogin(ctx.owner, item.review.user?.login))}</strong>
       <span>${escapeHtml(label)}</span>
       <small>${formatDate(item.review.submitted_at)}</small>
-      ${body ? markdownSurface(ctx, body) : ""}
+      ${body}
     </div>`;
   }
   if (item.kind === "commit") {
@@ -2618,10 +2755,23 @@ function selected(current: string, value: string): string {
   return current === value ? " selected" : "";
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): string {
   return `<div class="list">${files
-    .map((file) => `<a class="list-row" href="${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}"><strong>${escapeHtml(file.path)}</strong><span>${file.size ?? 0} bytes</span></a>`)
-    .join("") || `<div class="empty">No Markdown files.</div>`}</div>`;
+    .map((file) => {
+      const kind = fileKindForPath(file.path);
+      return `<a class="list-row" href="${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}">
+        <strong>${escapeHtml(file.path)}</strong>
+        <span>${escapeHtml(fileKindLabel(kind))}</span>
+        <small>${formatBytes(file.size ?? 0)}</small>
+      </a>`;
+    })
+    .join("") || `<div class="empty">No files.</div>`}</div>`;
 }
 
 function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues."): string {

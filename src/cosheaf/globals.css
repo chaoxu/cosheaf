@@ -42,19 +42,3 @@ body {
 .cm-scroller {
   overflow: auto;
 }
-
-.cf-theme-scope:not(.cf-theme-blueprint-book) {
-  --cf-content-max-width: 100%;
-  --cf-sidenote-width: 0px;
-  --cf-doc-content-padding-inline: clamp(20px, 4vw, 48px);
-}
-
-.cf-reader-inline {
-  max-width: none;
-  margin-inline: 0;
-  padding: 0;
-}
-
-.cf-rich-diff.cf-reader-inline {
-  padding: 0.75rem 1rem;
-}

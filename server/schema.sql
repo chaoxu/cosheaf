@@ -55,6 +55,21 @@ CREATE TABLE IF NOT EXISTS backlinks (
 );
 CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks (workspace_slug, target_id);
 
+-- Derived cross-reference targets inside Coflat Markdown pages. These are
+-- rebuildable from Forgejo Markdown files and let page A resolve
+-- `[@thm:...]` / `[@eq:...]` labels that are defined in page B.
+CREATE TABLE IF NOT EXISTS xref_targets (
+  workspace_slug TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('block', 'equation', 'heading')),
+  display_label TEXT NOT NULL,
+  line INTEGER,
+  PRIMARY KEY (workspace_slug, target_id, source_path)
+);
+CREATE INDEX IF NOT EXISTS idx_xref_targets_id ON xref_targets (workspace_slug, target_id);
+CREATE INDEX IF NOT EXISTS idx_xref_targets_path ON xref_targets (workspace_slug, source_path);
+
 CREATE TABLE IF NOT EXISTS page_tags (
   workspace_slug TEXT NOT NULL,
   cosheaf_id TEXT NOT NULL,

@@ -81,6 +81,7 @@ interface RequestOpts {
   query?: Record<string, string | number | Array<string | number> | undefined>;
   body?: unknown;
   raw?: boolean;
+  rawBytes?: boolean;
   expectEmpty?: boolean;
 }
 
@@ -113,6 +114,7 @@ export class Forgejo {
     if (!res.ok) {
       throw new ForgejoError(res.status, await res.text(), opts.method ?? "GET", p);
     }
+    if (opts.rawBytes) return Buffer.from(await res.arrayBuffer()) as unknown as T;
     if (opts.raw) return (await res.text()) as unknown as T;
     if (opts.expectEmpty || res.status === 204) return undefined as T;
     const txt = await res.text();
@@ -343,6 +345,13 @@ export class Forgejo {
     return this.req<string>(this.repoPath(owner, repo, `raw/${encodeFilePath(filepath)}`), {
       query: { ref },
       raw: true,
+    });
+  }
+
+  async getRawFileBytes(owner: string, repo: string, ref: string, filepath: string): Promise<Buffer> {
+    return this.req<Buffer>(this.repoPath(owner, repo, `raw/${encodeFilePath(filepath)}`), {
+      query: { ref },
+      rawBytes: true,
     });
   }
 

@@ -12,6 +12,7 @@ const ALLOWED_TABLES = new Set([
   // Derived document index from Forgejo content (rebuildable via reindex)
   "doc_map",
   "backlinks",
+  "xref_targets",
   "page_tags",
   "notes_fts",
   // FTS5 virtual table emits configuration rows in sqlite_master:

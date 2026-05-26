@@ -9,6 +9,7 @@ export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: 
   db.prepare("DELETE FROM doc_map WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM notes_fts WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM backlinks WHERE workspace_slug = ?").run(workspaceSlug);
+  db.prepare("DELETE FROM xref_targets WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM page_tags WHERE workspace_slug = ?").run(workspaceSlug);
 }
 
