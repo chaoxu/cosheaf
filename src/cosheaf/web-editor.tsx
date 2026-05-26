@@ -20,8 +20,10 @@ import { readDocumentTheme } from "./document-theme";
 import type { DocumentThemeId } from "./document-theme";
 import { getClientDocumentFormat } from "./format-registry";
 import {
+  type CoflatLocalRefs,
   coflatDocumentContext,
   loadCoflatRefs,
+  resolveUnresolvedCoflatReferences,
 } from "./coflat-document-context";
 import "@chaoxu/coflat-editor/style.css";
 import "@chaoxu/coflat-editor/themes/blueprint-book.css";
@@ -82,6 +84,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
+  const [coflatRefs, setCoflatRefs] = useState<CoflatLocalRefs | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -113,6 +116,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   useEffect(() => {
     if (config.formatId !== COFLAT_FORMAT_ID) {
       setDocumentContext(null);
+      setCoflatRefs(null);
       setDocumentContextReady(true);
       return;
     }
@@ -126,6 +130,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       path: config.path,
     }).then((refs) => {
       if (cancelled) return;
+      setCoflatRefs(refs);
       setDocumentContext(
         coflatDocumentContext(
           {
@@ -144,6 +149,28 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       cancelled = true;
     };
   }, [config.branch, config.formatId, config.owner, config.path, config.repo, initialContent]);
+
+  useEffect(() => {
+    if (!coflatRefs) return;
+    const root = document.getElementById("web-editor-root");
+    if (!root) return;
+    let queued = false;
+    const reconcile = () => {
+      queued = false;
+      resolveUnresolvedCoflatReferences(root, coflatRefs);
+    };
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      window.requestAnimationFrame(reconcile);
+    };
+    schedule();
+    const observer = new MutationObserver(schedule);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+    };
+  }, [coflatRefs]);
 
   useEffect(() => {
     const input = document.getElementById("web-editor-path-input");

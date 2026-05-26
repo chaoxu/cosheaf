@@ -72,6 +72,21 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     "href",
     "/flushing-coin/src/branch/user/chao/web-edit/theory/cross-file-theorem.md#thm%3Acoin-conservation",
   );
+  await page.goto(`${repoBase}/_edit?branch=main&path=coflat-feature-showcase.md`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => {
+        const scroller = document.querySelector(".cm-scroller");
+        if (scroller) scroller.scrollTop = 2400;
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+        return {
+          unresolved: document.querySelectorAll(".cm-content .cf-crossref-unresolved, .cm-content .cf-citation-unresolved").length,
+          tableText: [...document.querySelectorAll(".cf-table-widget")].map((el) => el.textContent ?? "").join("\n"),
+        };
+      }),
+    )
+    .toEqual(expect.objectContaining({ unresolved: 0, tableText: expect.stringContaining("[1]") }));
 
   await page.goto(`${repoBase}/src/branch/main/notes/plain-text.txt`);
   const plainTextRawPath = "/flushing-coin/raw/branch/main/notes/plain-text.txt";

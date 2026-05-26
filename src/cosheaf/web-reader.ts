@@ -10,6 +10,7 @@ import {
   loadCoflatRefs,
   resolveRepoLink,
   resolveRawRepoLink,
+  resolveUnresolvedCoflatReferences,
   type CoflatDocumentPayload,
   type RenderedCrossref,
   urlPath,
@@ -31,6 +32,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
   fixLabeledDisplayMath(fragment);
   resolveRenderedCrossrefs(fragment, refs.crossrefs);
+  resolveUnresolvedCoflatReferences(fragment, refs);
   rewriteRenderedRepoUrls(fragment, payload);
   root.replaceChildren(fragment);
   hydrateMath(root);

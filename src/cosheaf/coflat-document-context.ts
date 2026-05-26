@@ -80,6 +80,20 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
   };
 }
 
+export function resolveUnresolvedCoflatReferences(root: ParentNode, refs: CoflatLocalRefs): void {
+  for (const el of root.querySelectorAll<HTMLElement>(".cf-crossref-unresolved, .cf-citation-unresolved")) {
+    const key = el.dataset.refKey ?? sourceReferenceKey(el.textContent ?? "");
+    if (!key) continue;
+    const crossref = refs.crossrefs.get(key);
+    if (crossref) {
+      rewriteReferenceElement(el, key, crossref.label, "cf-crossref", crossref.href);
+      continue;
+    }
+    const citation = refs.citations.get(key);
+    if (citation) rewriteReferenceElement(el, key, citation, "cf-citation");
+  }
+}
+
 export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<CoflatLocalRefs> {
   const parsed = parseFrontmatterYaml(payload.source);
   const crossrefs = localCrossrefs(payload.source);
@@ -90,6 +104,32 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
     crossrefs,
     citations: await localCitations(payload, parsed.frontmatter),
   };
+}
+
+function sourceReferenceKey(value: string): string | null {
+  const bracketed = /^\s*\[@([^;\]\s]+)\]\s*$/.exec(value);
+  if (bracketed) return bracketed[1];
+  const narrative = /^\s*@([A-Za-z0-9:._-]+)\s*$/.exec(value);
+  return narrative?.[1] ?? null;
+}
+
+function rewriteReferenceElement(el: HTMLElement, key: string, text: string, className: string, href?: string): void {
+  el.classList.remove("cf-crossref-unresolved", "cf-citation-unresolved");
+  el.classList.add(className);
+  el.dataset.refKey = key;
+  if (!href) {
+    el.textContent = text;
+    return;
+  }
+  if (el instanceof HTMLAnchorElement) {
+    el.href = href;
+    el.textContent = text;
+    return;
+  }
+  const link = document.createElement("a");
+  link.href = href;
+  link.textContent = text;
+  el.replaceChildren(link);
 }
 
 function localCrossrefs(source: string): Map<string, RenderedCrossref> {
@@ -158,16 +198,21 @@ function escapeHtml(value: string): string {
 async function localCitations(payload: CoflatDocumentPayload, frontmatter: Record<string, unknown>): Promise<Map<string, string>> {
   const bibliography = typeof frontmatter.bibliography === "string" ? frontmatter.bibliography : null;
   if (!bibliography) return new Map();
-  const resolved = resolveRawRepoLink(payload, bibliography);
-  if (!resolved) return new Map();
+  const rawUrls = [
+    resolveRawRepoLink(payload, bibliography),
+    payload.branch === "main" ? null : resolveRawRepoLink({ ...payload, branch: "main" }, bibliography),
+  ].filter((value): value is string => Boolean(value));
   try {
-    const response = await fetch(resolved, { credentials: "same-origin" });
-    if (!response.ok) return new Map();
-    const keys = bibtexCitationKeys(await response.text());
-    return new Map(keys.map((key, index) => [key, `[${index + 1}]`]));
+    for (const url of rawUrls) {
+      const response = await fetch(url, { credentials: "same-origin" });
+      if (!response.ok) continue;
+      const keys = bibtexCitationKeys(await response.text());
+      return new Map(keys.map((key, index) => [key, `[${index + 1}]`]));
+    }
   } catch (_error) {
     return new Map();
   }
+  return new Map();
 }
 
 function bibtexCitationKeys(source: string): string[] {
