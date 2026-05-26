@@ -52,8 +52,14 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-filters").getByLabel("Author filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Assignee filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Search issues")).toBeVisible();
-  await page.locator('.list-row[href*="/issues/"]').first().click();
+  await page.getByRole("link", { name: "New issue" }).click();
+  await expect(page.getByTestId("issue-create-form")).toBeVisible();
+  const issueTitle = `Web issue ${Date.now()}`;
+  await page.getByTestId("issue-create-title").fill(issueTitle);
+  await page.getByTestId("issue-create-body").fill("Created from the server-rendered new issue form.");
+  await page.getByTestId("issue-create-submit").click();
   const issuePath = new URL(page.url()).pathname;
+  await expect(page.locator(".thread-header")).toContainText(issueTitle);
   await expect(page.locator(".thread-header")).toContainText("#");
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   await expect(page.getByTestId("issue-label-form")).toBeVisible();
@@ -66,12 +72,18 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/pulls`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
+  await expect(page.getByRole("link", { name: "New pull request" })).toHaveAttribute("href", "/flushing-coin/pulls/new");
+  await page.getByRole("link", { name: "New pull request" }).click();
+  await expect(page.getByTestId("pull-create-form")).toBeVisible();
+  await expect(page.getByTestId("pull-create-base")).toBeVisible();
+  await expect(page.getByTestId("pull-create-head")).toBeVisible();
+  await page.goto(`${repoBase}/pulls`);
   await expect(page.getByTestId("pull-filters")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("State filter")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Label filter")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Milestone filter")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
-  await page.locator('.list-row[href*="/pulls/"]').first().click();
+  await page.locator('.list-row[href*="/pulls/"]', { hasText: "e2e demo PR" }).click();
   await expect(page.locator(".subtabs")).toContainText("Files changed");
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();
   await expect(page.getByTestId("pull-label-form")).toBeVisible();
@@ -123,6 +135,17 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("statusbar")).toContainText("saved");
   await page.goto(`${repoBase}/src/branch/${branch}/${path}`);
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
+  await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
+  await page.getByRole("link", { name: "Open pull request" }).click();
+  await expect(page.getByTestId("pull-create-form")).toBeVisible();
+  await expect(page.getByTestId("pull-create-head")).toHaveValue(branch);
+  const prTitle = `Web PR ${Date.now()}`;
+  await page.getByTestId("pull-create-title").fill(prTitle);
+  await page.getByTestId("pull-create-body").fill("Opened from the server-rendered new pull request form.");
+  await page.getByTestId("pull-create-submit").click();
+  await expect(page).toHaveURL(/\/pulls\/\d+$/);
+  await expect(page.locator(".thread-header")).toContainText(prTitle);
+  await expect(page.getByRole("link", { name: "Files changed" })).toBeVisible();
 
   await page.goto(`${repoBase}/activity`);
   const headerTop = await page.locator(".global-header").boundingBox().then((box) => box?.y);
