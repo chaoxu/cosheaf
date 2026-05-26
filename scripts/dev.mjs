@@ -53,6 +53,10 @@ process.stdout.write(`  web: ${apiUrl}\n`);
 process.stdout.write(`  page island dev assets: ${viteUrl}\n`);
 process.stdout.write(`  api: ${apiUrl}\n`);
 process.stdout.write(`  vite proxy: ${proxyUrl}\n\n`);
+process.stdout.write(`Agent checks\n`);
+process.stdout.write(`  route browser check: pnpm devx:verify-route\n`);
+process.stdout.write(`  changed-file gates: pnpm devx:what-to-run\n`);
+process.stdout.write(`  smoke matrix: pnpm smoke:list\n\n`);
 
 const procs = [
   {

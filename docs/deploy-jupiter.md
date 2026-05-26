@@ -72,6 +72,7 @@ From the `cosheaf` repo on `saturn` or `jupiter`:
 ```sh
 pnpm jupiter:release -- prod
 pnpm jupiter:verify -- prod
+pnpm jupiter:release:checked
 ```
 
 When run off-host, the script SSHes to canonical host `jupiter`, fast-forwards
@@ -113,12 +114,17 @@ For browser checks from a machine with Playwright installed, run:
 ```sh
 pnpm jupiter:e2e -- prod
 pnpm jupiter:e2e -- https://cosheaf-my-branch.lab
+pnpm jupiter:verify:web
+pnpm devx:verify-route -- --url https://cosheaf.lab --route /poa-network-game-oracle-first/activity
 ```
 
 By default this runs non-destructive login/page, issue-navigation, and seeded
 Markdown rendering checks for long-form issue and PR bodies.
 Add `--destructive` to also run branch-merge and review-merge flows, which
 create and merge test files/PRs.
+Use `devx:verify-route` when a visual route behavior, asset response, filter
+surface, or console-error regression needs direct browser confirmation after a
+release; health alone is not enough for UI regressions.
 
 To see the browser check matrix:
 

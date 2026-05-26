@@ -7,9 +7,9 @@ import { run } from "./lib/run.mjs";
 const targets = {
   prod: {
     url: "https://cosheaf.lab/",
-    workspace: "poa-network-game",
-    slug: "poa-network-game",
-    page: "POA Network Game",
+    workspace: "poa-network-game-oracle-first",
+    slug: "poa-network-game-oracle-first",
+    page: "Hello",
     pagePath: "hello.md",
     prod: true,
   },
