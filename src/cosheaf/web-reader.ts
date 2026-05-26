@@ -19,6 +19,50 @@ interface LocalRefs {
   citations: Map<string, string>;
 }
 
+interface BlockDefinition {
+  title: string;
+  numbered: boolean;
+  counter?: string;
+  headerPosition?: "inline";
+  captionPosition?: "below";
+  displayHeader?: boolean;
+}
+
+interface BlockEntry {
+  type: string;
+  id?: string;
+  title?: string;
+  displayTitle: string;
+  displayLabel: string;
+  number?: number;
+  definition: BlockDefinition;
+}
+
+interface ParsedBlockAttrs {
+  id?: string;
+  classes: string[];
+  flags: string[];
+  keyValues: Record<string, string>;
+}
+
+const blockDefinitions: Record<string, BlockDefinition> = {
+  theorem: { title: "Theorem", numbered: true, counter: "theorem" },
+  lemma: { title: "Lemma", numbered: true, counter: "theorem" },
+  corollary: { title: "Corollary", numbered: true, counter: "theorem" },
+  proposition: { title: "Proposition", numbered: true, counter: "theorem" },
+  conjecture: { title: "Conjecture", numbered: true, counter: "theorem" },
+  problem: { title: "Problem", numbered: true, counter: "theorem" },
+  definition: { title: "Definition", numbered: true, counter: "definition" },
+  algorithm: { title: "Algorithm", numbered: true, counter: "algorithm" },
+  figure: { title: "Figure", numbered: true, counter: "figure", captionPosition: "below" },
+  table: { title: "Table", numbered: true, counter: "table", captionPosition: "below" },
+  proof: { title: "Proof", numbered: false, headerPosition: "inline" },
+  remark: { title: "Remark", numbered: false },
+  example: { title: "Example", numbered: false },
+  note: { title: "Note", numbered: false },
+  blockquote: { title: "Blockquote", numbered: false, displayHeader: false },
+};
+
 function urlPath(value: string): string {
   return value.split("/").map(encodeURIComponent).join("/");
 }
@@ -78,6 +122,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const refs = await localRefs(payload, parsed.frontmatter);
   const rendered = renderToHtml(parsed.body, documentContext(payload, refs)).html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
+  decorateRenderedBlocks(fragment, parsed.body);
   fixLabeledDisplayMath(fragment);
   resolveRenderedCrossrefs(fragment, refs.crossrefs);
   rewriteRenderedRepoUrls(fragment, payload);
@@ -106,43 +151,175 @@ function localCrossrefs(source: string): Map<string, string> {
     refs.set(match[1], `Eq. (${equationNumber})`);
   }
 
-  const blockCounters = new Map<string, number>();
-  for (const line of source.split("\n")) {
-    const match = /^:{3,}\s*\{([^}]*)\}/.exec(line.trim());
-    if (!match) continue;
-    const id = /(?:^|\s)#([^\s}]+)/.exec(match[1])?.[1];
-    const type = /(?:^|\s)\.([^\s}]+)/.exec(match[1])?.[1];
-    if (!id || !type) continue;
-    const label = blockTypeLabel(type);
-    if (!label) continue;
-    const next = (blockCounters.get(label) ?? 0) + 1;
-    blockCounters.set(label, next);
-    refs.set(id, `${label} ${next}`);
+  for (const block of collectBlockEntries(source)) {
+    if (!block.id) continue;
+    refs.set(block.id, block.displayLabel);
   }
   return refs;
 }
 
-function blockTypeLabel(type: string): string | null {
-  switch (type) {
-    case "theorem":
-      return "Theorem";
-    case "proposition":
-      return "Proposition";
-    case "lemma":
-      return "Lemma";
-    case "corollary":
-      return "Corollary";
-    case "conjecture":
-      return "Conjecture";
-    case "definition":
-      return "Definition";
-    case "figure":
-      return "Figure";
-    case "table":
-      return "Table";
-    default:
-      return null;
+function collectBlockEntries(source: string): BlockEntry[] {
+  const entries: BlockEntry[] = [];
+  const counters = new Map<string, number>();
+  for (const line of source.split("\n")) {
+    const match = /^:{3,}\s*\{([^}]*)\}/.exec(line.trim());
+    if (!match) continue;
+    const attrs = parseBlockAttrs(match[1]);
+    const type = attrs.classes[0]?.toLowerCase();
+    if (!type) continue;
+    const definition = blockDefinition(type, attrs);
+    if (definition.displayHeader === false) continue;
+    const numbered = blockNumbered(definition, attrs);
+    const counter = attrs.keyValues.counter || definition.counter || type;
+    const number = numbered ? (counters.get(counter) ?? 0) + 1 : undefined;
+    if (number !== undefined) counters.set(counter, number);
+    const displayTitle = attrs.keyValues.label || definition.title;
+    entries.push({
+      type,
+      id: attrs.id,
+      title: attrs.keyValues.title,
+      displayTitle,
+      displayLabel: number !== undefined ? `${displayTitle} ${number}` : displayTitle,
+      number,
+      definition,
+    });
   }
+  return entries;
+}
+
+function parseBlockAttrs(input: string): ParsedBlockAttrs {
+  const attrs: ParsedBlockAttrs = { classes: [], flags: [], keyValues: {} };
+  for (const token of attributeTokens(input)) {
+    if (token.startsWith("#")) attrs.id = token.slice(1);
+    else if (token.startsWith(".")) attrs.classes.push(token.slice(1));
+    else if (token === "-") attrs.flags.push(token);
+    else {
+      const eq = token.indexOf("=");
+      if (eq > 0) attrs.keyValues[token.slice(0, eq)] = unquoteAttr(token.slice(eq + 1));
+    }
+  }
+  return attrs;
+}
+
+function attributeTokens(input: string): string[] {
+  return input.match(/[^\s=]+=(?:"[^"]*"|'[^']*'|[^\s]+)|"[^"]*"|'[^']*'|\S+/g) ?? [];
+}
+
+function unquoteAttr(value: string): string {
+  if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function blockDefinition(type: string, attrs: ParsedBlockAttrs): BlockDefinition {
+  const base = blockDefinitions[type] ?? { title: titleCase(type), numbered: true, counter: type };
+  return {
+    ...base,
+    ...(attrs.keyValues.label ? { title: attrs.keyValues.label } : {}),
+  };
+}
+
+function titleCase(value: string): string {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
+}
+
+function blockNumbered(definition: BlockDefinition, attrs: ParsedBlockAttrs): boolean {
+  if (attrs.flags.includes("-") || attrs.classes.includes("unnumbered")) return false;
+  const numbered = attrs.keyValues.numbered;
+  if (numbered === undefined) return definition.numbered;
+  return !["false", "0", "no"].includes(numbered.toLowerCase());
+}
+
+function decorateRenderedBlocks(root: ParentNode, source: string): void {
+  const entries = collectBlockEntries(source);
+  let searchFrom = 0;
+  for (const block of root.querySelectorAll<HTMLElement>(".cf-doc-block")) {
+    if (block.querySelector(":scope > .cf-block-header, :scope > .cf-block-caption")) continue;
+    const type = blockTypeFromElement(block);
+    if (!type) continue;
+    const entryIndex = findBlockEntry(entries, searchFrom, type, block.id || undefined);
+    const entry = entryIndex >= 0 ? entries[entryIndex] : null;
+    if (!entry) continue;
+    searchFrom = entryIndex + 1;
+    decorateRenderedBlock(block, entry);
+  }
+}
+
+function blockTypeFromElement(block: HTMLElement): string | null {
+  for (const className of block.classList) {
+    if (className.startsWith("cf-doc-block--")) return className.slice("cf-doc-block--".length);
+  }
+  return null;
+}
+
+function findBlockEntry(entries: BlockEntry[], start: number, type: string, id?: string): number {
+  for (let index = start; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (entry.type !== type) continue;
+    if (id && entry.id && entry.id !== id) continue;
+    return index;
+  }
+  return -1;
+}
+
+function decorateRenderedBlock(block: HTMLElement, entry: BlockEntry): void {
+  if (entry.definition.captionPosition === "below") {
+    const caption = document.createElement("div");
+    caption.className = "cf-block-caption cf-doc-block-caption";
+    caption.append(blockHeader(entry));
+    if (entry.title) caption.append(document.createTextNode(entry.title));
+    block.append(caption);
+    return;
+  }
+
+  if (entry.definition.headerPosition === "inline") {
+    const paragraph = firstChildWithClass(block, "cf-doc-paragraph") ?? prependHeaderParagraph(block);
+    paragraph.prepend(blockHeader(entry));
+    return;
+  }
+
+  const header = document.createElement("p");
+  header.className = "cf-doc-paragraph cf-block-header cf-doc-block-header";
+  header.append(blockHeader(entry));
+  if (entry.title) header.append(blockTitle(entry.title));
+  block.prepend(header);
+}
+
+function firstChildWithClass(parent: HTMLElement, className: string): HTMLElement | null {
+  for (const child of parent.children) {
+    if (child instanceof HTMLElement && child.classList.contains(className)) return child;
+  }
+  return null;
+}
+
+function prependHeaderParagraph(block: HTMLElement): HTMLElement {
+  const paragraph = document.createElement("p");
+  paragraph.className = "cf-doc-paragraph";
+  block.prepend(paragraph);
+  return paragraph;
+}
+
+function blockHeader(entry: BlockEntry): HTMLElement {
+  const label = document.createElement("span");
+  label.className = "cf-block-header-rendered cf-doc-block-label";
+  label.textContent = entry.displayLabel;
+  return label;
+}
+
+function blockTitle(title: string): HTMLElement {
+  const span = document.createElement("span");
+  span.className = "cf-block-attr-title cf-doc-block-title";
+  const open = document.createElement("span");
+  open.className = "cf-block-title-paren";
+  open.textContent = "(";
+  const content = document.createElement("span");
+  content.textContent = title;
+  const close = document.createElement("span");
+  close.className = "cf-block-title-paren";
+  close.textContent = ")";
+  span.append(open, content, close);
+  return span;
 }
 
 async function localCitations(payload: ReaderPayload, frontmatter: Record<string, unknown>): Promise<Map<string, string>> {
