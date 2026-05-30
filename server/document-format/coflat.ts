@@ -36,7 +36,7 @@ function extractTitle(body: string): string | null {
 function extractLinks(body: string): DocumentLink[] {
   const out: DocumentLink[] = [];
   for (const ref of extractReferences(body)) {
-    if (ref.kind === "crossref" && ref.key) {
+    if (ref.kind === "crossref" && ref.bracketed && ref.key) {
       out.push({ kind: "id", ref: ref.key, raw: `[@${ref.key}]`, from: ref.from, to: ref.to });
     } else if (ref.kind === "link" && ref.href) {
       if (!/\.md(?:#[^)\s]+)?$/.test(ref.href)) continue;
