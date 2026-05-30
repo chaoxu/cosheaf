@@ -8,8 +8,13 @@ data/
 .env.prod
 .env.staging
 .env.testing
+.npmrc
 *.tsbuildinfo
 .worktrees/
+.claude
+.codex
+.orc.toml
+.shou.toml
 .claude/state/
 .claude/settings.local.json
 .claude/worktrees/

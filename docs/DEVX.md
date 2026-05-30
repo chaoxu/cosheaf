@@ -62,18 +62,6 @@ pnpm dev:login-state
 - Focused settings E2E: `tests/e2e/web-settings.spec.ts`
   - Verify with `pnpm check:web:settings`.
 
-## Jupiter
-
-- Release prod on `jupiter`: `pnpm jupiter:release`
-- Verify prod on `jupiter`: `pnpm jupiter:verify`
-- Live URL: `https://cosheaf.lab`
-- Prod container: `cosheaf-prod`
-- Doctor command run by verify: `node dist-server/server/cli.js doctor`
-
-Release only from `main`. The release script SSHes to `jupiter`, fast-forwards
-`/home/chaoxu/playground/cosheaf`, rebuilds the Compose image, recreates
-`cosheaf-prod`, waits for health, and prints the deployed git SHA.
-
 ## Common Issue Templates
 
 Forgejo templates live in `.gitea/ISSUE_TEMPLATE/`:

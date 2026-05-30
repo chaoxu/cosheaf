@@ -5,7 +5,6 @@ import path from "node:path";
 
 const candidates = [
   path.join(process.cwd(), "node_modules/playwright/index.js"),
-  "/Users/chaoxu/Library/pnpm/global/5/node_modules/playwright/index.js",
 ];
 
 export async function loadChromium() {

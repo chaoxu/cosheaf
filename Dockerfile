@@ -24,8 +24,14 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
   && apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ pkg-config rsync
 
+COPY coflat-editor/package.json coflat-editor/pnpm-lock.yaml coflat-editor/tsconfig*.json coflat-editor/vite.editor.config.ts ./coflat-editor/
+COPY coflat-editor/patches ./coflat-editor/patches
+COPY coflat-editor/src ./coflat-editor/src
 COPY cosheaf ./cosheaf
 
+RUN --mount=type=cache,id=coflat-editor-pnpm-store,target=/pnpm/store,sharing=locked \
+  pnpm --dir coflat-editor install --frozen-lockfile
+RUN pnpm --dir coflat-editor build
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir cosheaf install --frozen-lockfile --ignore-scripts
 RUN pnpm --dir cosheaf rebuild better-sqlite3 esbuild

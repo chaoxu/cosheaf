@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
+    "setup:deps": "pnpm --dir ../coflat-editor install --frozen-lockfile && pnpm --dir ../coflat-editor build",
     "dev:worktree": "node scripts/dev-worktree.mjs",
     "dev:login-state": "node scripts/web-login-state.mjs",
     "devx": "node scripts/devx.mjs ready",
@@ -46,14 +47,6 @@
     "check:merge": "pnpm check:static && pnpm check:unit",
     "issue": "node scripts/issue.mjs",
     "merge-task": "node scripts/merge-task.mjs",
-    "jupiter:deploy": "node scripts/jupiter-release.mjs deploy",
-    "jupiter:verify": "node scripts/jupiter-release.mjs verify",
-    "jupiter:verify:web": "node scripts/web-route-check.mjs --url https://cosheaf.lab --route /poa-network-game-oracle-first/activity --route /poa-network-game-oracle-first/issues --route /poa-network-game-oracle-first/pulls",
-    "jupiter:release:checked": "pnpm jupiter:release && pnpm jupiter:verify:web",
-    "jupiter:release": "node scripts/jupiter-release.mjs release",
-    "jupiter:host-doctor": "node scripts/jupiter-release.mjs host-doctor",
-    "jupiter:e2e": "node scripts/jupiter-e2e.mjs",
-    "jupiter:preview": "node scripts/jupiter-preview.mjs",
     "infra:issue": "node scripts/infra-issue.mjs",
     "smoke": "playwright test --config playwright.smoke.config.ts --grep @smoke-basic",
     "smoke:list": "node scripts/smoke-list.mjs",
@@ -80,7 +73,7 @@
     ]
   },
   "dependencies": {
-    "@chaoxu/coflat-editor": "0.2.4",
+    "@chaoxu/coflat-editor": "file:../coflat-editor",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/language": "^6.12.2",

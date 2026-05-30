@@ -69,7 +69,7 @@ function normalizeBaseUrl(value) {
 
 function defaultPassword(url) {
   if (process.env.COSHEAF_SMOKE_PASSWORD) return process.env.COSHEAF_SMOKE_PASSWORD;
-  return url.includes("cosheaf.lab") ? "123123aA" : "Cosheaf123!";
+  return "Cosheaf123!";
 }
 
 async function login(page, base, username, pass) {

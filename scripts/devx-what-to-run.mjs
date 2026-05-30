@@ -57,11 +57,10 @@ const rules = [
   },
   {
     id: "deploy",
-    matches: [/^Dockerfile$/, /^compose/, /^scripts\/jupiter-/, /^docs\/deploy-jupiter\.md$/],
+    matches: [/^Dockerfile$/, /^compose/],
     commands: [
-      command("pnpm jupiter:host-doctor -- prod", "jupiter host/container prerequisites"),
-      command("pnpm jupiter:verify", "prod health and container doctor"),
-      command("pnpm jupiter:e2e -- prod", "prod browser smoke matrix"),
+      command("pnpm build", "container image and production asset inputs"),
+      command("pnpm smoke", "browser smoke against the local fixture"),
     ],
   },
   {

@@ -9,8 +9,7 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ORIGIN_REMOTE="${ORIGIN_REMOTE:-origin}"
 GITHUB_REMOTE_NAME="${GITHUB_REMOTE_NAME:-github}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
-GITHUB_USER="${GITHUB_USER:-chaoxu}"
-GITHUB_REPO="${GITHUB_REPO:-chaoxu/coflat}"
+GITHUB_REPO="${GITHUB_REPO:-}"
 DRY_RUN_FLAG=""
 PUSH_ARGS=(--force --no-verify)
 SCHEDULED_MODE=0
@@ -40,7 +39,11 @@ if [ "$SCHEDULED_MODE" -ne 1 ] && [ ! -t 1 ]; then
 fi
 
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  GITHUB_PUSH_TARGET="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+  if [ -z "$GITHUB_REPO" ]; then
+    echo "Error: set GITHUB_REPO=owner/name when using GITHUB_TOKEN." >&2
+    exit 1
+  fi
+  GITHUB_PUSH_TARGET="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
 elif git -C "$REPO_DIR" remote get-url "$GITHUB_REMOTE_NAME" >/dev/null 2>&1; then
   GITHUB_PUSH_TARGET="$GITHUB_REMOTE_NAME"
 else
