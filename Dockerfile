@@ -27,6 +27,8 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
 COPY coflat-editor/package.json coflat-editor/pnpm-lock.yaml coflat-editor/tsconfig*.json coflat-editor/vite.editor.config.ts ./coflat-editor/
 COPY coflat-editor/patches ./coflat-editor/patches
 COPY coflat-editor/src ./coflat-editor/src
+COPY coflat-editor/scripts ./coflat-editor/scripts
+COPY coflat-editor/*.ts coflat-editor/*.tsx ./coflat-editor/
 COPY cosheaf ./cosheaf
 
 RUN --mount=type=cache,id=coflat-editor-pnpm-store,target=/pnpm/store,sharing=locked \
