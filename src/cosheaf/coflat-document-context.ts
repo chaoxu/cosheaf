@@ -167,7 +167,7 @@ function referencedKeys(source: string): string[] {
   return [
     ...new Set(
       extractReferences(source)
-        .filter((ref) => (ref.kind === "ref" || ref.kind === "crossref") && ref.key)
+        .filter((ref) => ref.kind === "crossref" && ref.key)
         .map((ref) => ref.key as string),
     ),
   ];

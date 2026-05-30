@@ -91,6 +91,7 @@ export function MarkdownEditor({
         setLocalValue(doc);
         for (const listener of outlineListenersRef.current) listener(extractOutline(doc));
       },
+      setContext: () => undefined,
       getMode: () => "source",
       setMode: () => undefined,
       outline,
