@@ -88,7 +88,10 @@ GET /me
 ```
 
 Logout clears the browser cookie. Cosheaf does not revoke the token on logout;
-revoke it in the backing forge to invalidate it across devices.
+revoke it in the backing forge to invalidate it across devices. Cosheaf keeps
+one cached Forgejo PAT per username so repeated logins do not create a new
+Forgejo token every time; each login still validates the password with Forgejo
+before returning the cached PAT.
 
 There is no Cosheaf personal-token API yet. Create and revoke tokens in the
 backing forge.

@@ -44,6 +44,9 @@ async function readerStats() {
   return page.locator(".cf-reader").first().evaluate((el) => {
     const h = el.querySelector(".cf-doc-heading, h1, h2");
     const ul = el.querySelector(".cf-doc-list--unordered, ul");
+    const displayMath = el.querySelector(".cf-doc-display-math");
+    const katex = displayMath?.querySelector(".katex");
+    const katexDisplay = displayMath?.querySelector(".katex-display");
     const root = el.closest(".cf-theme-scope");
     const document = el.closest(".document");
     const styles = getComputedStyle(el);
@@ -58,6 +61,9 @@ async function readerStats() {
       font: styles.fontFamily,
       fontSize: styles.fontSize,
       lineHeight: styles.lineHeight,
+      displayMathSize: displayMath ? getComputedStyle(displayMath).fontSize : null,
+      katexSize: katex ? getComputedStyle(katex).fontSize : null,
+      katexDisplayMargin: katexDisplay ? getComputedStyle(katexDisplay).margin : null,
       headingSize: h ? getComputedStyle(h).fontSize : null,
       headingNumber: h?.getAttribute("data-section-number") ?? null,
       headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
@@ -82,6 +88,9 @@ async function editorStats() {
   return page.locator(".cm-content").first().evaluate((el) => {
     const h = el.querySelector(".cf-doc-heading, h1, h2");
     const ul = el.querySelector(".cf-doc-list--unordered, ul");
+    const displayMath = el.querySelector(".cf-doc-display-math");
+    const katex = displayMath?.querySelector(".katex");
+    const katexDisplay = displayMath?.querySelector(".katex-display");
     const root = el.closest(".cf-theme-scope");
     const styles = getComputedStyle(el);
     return {
@@ -94,6 +103,9 @@ async function editorStats() {
       font: styles.fontFamily,
       fontSize: styles.fontSize,
       lineHeight: styles.lineHeight,
+      displayMathSize: displayMath ? getComputedStyle(displayMath).fontSize : null,
+      katexSize: katex ? getComputedStyle(katex).fontSize : null,
+      katexDisplayMargin: katexDisplay ? getComputedStyle(katexDisplay).margin : null,
       headingNumber: h?.getAttribute("data-section-number") ?? null,
       headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
         .slice(0, 8)
@@ -123,6 +135,12 @@ function assertReaderEditorParity(reader, editor) {
   }
   if (Math.abs(reader.width - editor.width) > 8) {
     throw new Error(`reader/editor column width mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (reader.katexSize !== editor.katexSize || reader.katexSize !== reader.displayMathSize) {
+    throw new Error(`reader/editor display math size mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (reader.katexDisplayMargin !== editor.katexDisplayMargin) {
+    throw new Error(`reader/editor display math margin mismatch: ${JSON.stringify({ reader, editor })}`);
   }
   const readerNumbers = reader.headingNumbers.filter(Boolean).slice(0, 4);
   const editorNumbers = editor.headingNumbers.filter(Boolean).slice(0, readerNumbers.length);

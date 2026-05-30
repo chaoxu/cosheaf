@@ -146,6 +146,42 @@ describe("POST /api/v1/login", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("reuses a cached PAT after revalidating the password", async () => {
+    const db = freshDb();
+    fetchMock
+      .mockResolvedValueOnce(ok({ sha1: "pat-hen" }))
+      .mockResolvedValueOnce(failure(400, { message: "access token name has been used already" }))
+      .mockResolvedValueOnce(ok({ login: "hen" }, 200));
+
+    const first = await login(db, "hen", "secret");
+    const second = await login(db, "hen", "secret");
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ username: "hen", pat: "pat-hen" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name)
+      .toBe(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name);
+    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/user");
+    expect(((fetchMock.mock.calls[2][1] as RequestInit).headers as Record<string, string>).authorization)
+      .toBe("token pat-hen");
+  });
+
+  it("does not return a cached PAT when the password is wrong", async () => {
+    const db = freshDb();
+    db.prepare(`
+      INSERT INTO login_tokens (username, pat, token_name, created_at, updated_at)
+      VALUES ('ivy', 'pat-ivy', 'cosheaf-existing', 1, 1)
+    `).run();
+    fetchMock.mockResolvedValueOnce(failure(401, { message: "bad" }));
+
+    const res = await login(db, "ivy", "wrong");
+
+    expect(res.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://forgejo.test/api/v1/users/ivy/tokens");
+  });
+
   it("400 when username or password missing", async () => {
     const db = freshDb();
     const res = await appFor(db).request("/api/v1/login", {

@@ -3,6 +3,7 @@
 // server-rendered pages as an HttpOnly cookie.
 
 import { Hono } from "hono";
+import type Database from "better-sqlite3";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
 import type { AppEnv } from "../types.js";
@@ -30,9 +31,20 @@ const TOKEN_SCOPES = [
 ];
 
 interface CreateTokenResponse { sha1: string }
+interface ForgejoUserResponse { login?: string }
+interface CachedLoginToken {
+  pat: string;
+  token_name: string;
+}
 
 export type LoginOutcome =
   | { kind: "ok"; pat: string }
+  | { kind: "bad_credentials" }
+  | { kind: "upstream_unavailable"; detail: string };
+
+type CreateTokenOutcome =
+  | { kind: "created"; pat: string }
+  | { kind: "name_taken" }
   | { kind: "bad_credentials" }
   | { kind: "upstream_unavailable"; detail: string };
 
@@ -45,6 +57,7 @@ export type LoginOutcome =
 const loginQueues = new Map<string, Promise<void>>();
 
 export async function exchangeForgejoCredsForPat(
+  db: Database.Database,
   baseUrl: string,
   username: string,
   password: string,
@@ -52,7 +65,7 @@ export async function exchangeForgejoCredsForPat(
   const previous = loginQueues.get(username) ?? Promise.resolve();
   const run = (async (): Promise<LoginOutcome> => {
     await previous.catch(() => undefined);
-    return exchangeForgejoCredsForPatRaw(baseUrl, username, password);
+    return exchangeForgejoCredsForPatRaw(db, baseUrl, username, password);
   })();
   const tail = run.then(
     () => undefined,
@@ -67,10 +80,64 @@ export async function exchangeForgejoCredsForPat(
 }
 
 async function exchangeForgejoCredsForPatRaw(
+  db: Database.Database,
   baseUrl: string,
   username: string,
   password: string,
 ): Promise<LoginOutcome> {
+  const cached = db
+    .prepare("SELECT pat, token_name FROM login_tokens WHERE username = ?")
+    .get(username) as CachedLoginToken | undefined;
+  if (cached) {
+    const credentialCheck = await createForgejoToken(baseUrl, username, password, cached.token_name);
+    if (credentialCheck.kind === "bad_credentials" || credentialCheck.kind === "upstream_unavailable") {
+      return credentialCheck;
+    }
+    if (credentialCheck.kind === "created") {
+      storeLoginToken(db, username, credentialCheck.pat, cached.token_name);
+      return { kind: "ok", pat: credentialCheck.pat };
+    }
+
+    const patCheck = await verifyStoredPat(baseUrl, username, cached.pat);
+    if (patCheck.kind === "ok") return { kind: "ok", pat: cached.pat };
+    if (patCheck.kind !== "bad_credentials") return patCheck;
+    db.prepare("DELETE FROM login_tokens WHERE username = ?").run(username);
+
+    const reminted = await mintAndStoreLoginToken(db, baseUrl, username, password);
+    if (reminted.kind === "ok") return reminted;
+    if (reminted.kind === "bad_credentials") {
+      return { kind: "upstream_unavailable", detail: "cached token was revoked and token name is unavailable" };
+    }
+    return reminted;
+  }
+
+  return mintAndStoreLoginToken(db, baseUrl, username, password);
+}
+
+async function mintAndStoreLoginToken(
+  db: Database.Database,
+  baseUrl: string,
+  username: string,
+  password: string,
+): Promise<LoginOutcome> {
+  const tokenName = `${TOKEN_NAME_PREFIX}-${randomUUID()}`;
+  const created = await createForgejoToken(baseUrl, username, password, tokenName);
+  if (created.kind === "created") {
+    storeLoginToken(db, username, created.pat, tokenName);
+    return { kind: "ok", pat: created.pat };
+  }
+  if (created.kind === "name_taken") {
+    return { kind: "upstream_unavailable", detail: "token name already exists" };
+  }
+  return created;
+}
+
+async function createForgejoToken(
+  baseUrl: string,
+  username: string,
+  password: string,
+  tokenName: string,
+): Promise<CreateTokenOutcome> {
   const url = `${baseUrl}/api/v1/users/${encodeURIComponent(username)}/tokens`;
   const basic = Buffer.from(`${username}:${password}`).toString("base64");
   const headers = {
@@ -78,21 +145,16 @@ async function exchangeForgejoCredsForPatRaw(
     "content-type": "application/json",
     accept: "application/json",
   };
-  const tokenName = `${TOKEN_NAME_PREFIX}-${randomUUID()}`;
   const body = JSON.stringify({ name: tokenName, scopes: TOKEN_SCOPES });
 
-  // Forgejo returns 400 (current) or 422 (older) when the token name is
-  // already taken. The name includes a UUID, so this should be effectively
-  // impossible; treat it as an upstream failure instead of deleting another
-  // login's still-valid token.
-  const create = async () => fetch(url, { method: "POST", headers, body });
   let res: Response;
   try {
-    res = await create();
+    res = await fetch(url, { method: "POST", headers, body });
   } catch (err) {
     return { kind: "upstream_unavailable", detail: (err as Error).message };
   }
   if (res.status === 401 || res.status === 403) return { kind: "bad_credentials" };
+  if (res.status === 400 || res.status === 422) return { kind: "name_taken" };
   if (res.status >= 500 || res.status === 429) {
     return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
   }
@@ -101,7 +163,56 @@ async function exchangeForgejoCredsForPatRaw(
   }
   const parsed = (await res.json().catch(() => null)) as CreateTokenResponse | null;
   if (!parsed?.sha1) return { kind: "upstream_unavailable", detail: "missing sha1 in response" };
-  return { kind: "ok", pat: parsed.sha1 };
+  return { kind: "created", pat: parsed.sha1 };
+}
+
+function storeLoginToken(
+  db: Database.Database,
+  username: string,
+  pat: string,
+  tokenName: string,
+): void {
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO login_tokens (username, pat, token_name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(username) DO UPDATE SET
+      pat = excluded.pat,
+      token_name = excluded.token_name,
+      updated_at = excluded.updated_at
+  `).run(username, pat, tokenName, now, now);
+}
+
+async function verifyStoredPat(
+  baseUrl: string,
+  username: string,
+  pat: string,
+): Promise<LoginOutcome> {
+  return verifyForgejoUser(baseUrl, username, `token ${pat}`);
+}
+
+async function verifyForgejoUser(
+  baseUrl: string,
+  username: string,
+  authorization: string,
+): Promise<LoginOutcome> {
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/api/v1/user`, {
+      headers: { authorization, accept: "application/json" },
+    });
+  } catch (err) {
+    return { kind: "upstream_unavailable", detail: (err as Error).message };
+  }
+  if (res.status === 401 || res.status === 403) return { kind: "bad_credentials" };
+  if (res.status >= 500 || res.status === 429) {
+    return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
+  }
+  if (!res.ok) return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
+
+  const parsed = (await res.json().catch(() => null)) as ForgejoUserResponse | null;
+  if (parsed?.login !== username) return { kind: "bad_credentials" };
+  return { kind: "ok", pat: "" };
 }
 
 auth.post("/login", async (c) => {
@@ -112,7 +223,12 @@ auth.post("/login", async (c) => {
     return c.json(...bad("missing credentials"));
 
   const config = c.get("config");
-  const outcome = await exchangeForgejoCredsForPat(config.forgejoUrl, body.username, body.password);
+  const outcome = await exchangeForgejoCredsForPat(
+    c.get("db"),
+    config.forgejoUrl,
+    body.username,
+    body.password,
+  );
   if (outcome.kind === "bad_credentials") {
     return c.json(...unauthorized("invalid credentials"));
   }
@@ -131,9 +247,8 @@ auth.post("/login", async (c) => {
   return c.json({ username: body.username, pat: outcome.pat });
 });
 
-// Logout clears the browser cookie. We deliberately do NOT revoke the backend
-// token because the user might be logged in from another device with the same
-// token; the next login mints a fresh one.
+// Logout clears the browser cookie. We deliberately do NOT revoke the cached
+// backend token because other API clients may still use it.
 auth.post("/logout", (c) => {
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.json({ ok: true });

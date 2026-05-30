@@ -1,11 +1,23 @@
 -- Cosheaf sidecar schema (Forgejo backend).
 
--- Cosheaf stores no auth state. Server-rendered pages receive the user's
--- Forgejo PAT as an HttpOnly `cosheaf_pat` cookie; API clients and agents
--- send the same credential as `Authorization: Bearer <pat>`.
+-- Cosheaf stores no passwords or sessions. Server-rendered pages receive the
+-- user's Forgejo PAT as an HttpOnly `cosheaf_pat` cookie; API clients and
+-- agents send the same credential as `Authorization: Bearer <pat>`.
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tokens;
+
+-- Cached Cosheaf-issued Forgejo PATs. Forgejo only returns a PAT secret when
+-- it is created, so reusing one across logins requires a local credential
+-- cache. Login still validates the password with Forgejo before returning a
+-- cached PAT.
+CREATE TABLE IF NOT EXISTS login_tokens (
+  username TEXT PRIMARY KEY,
+  pat TEXT NOT NULL,
+  token_name TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 
 -- No workspaces table. The workspace slug IS the Forgejo repository name,
 -- the display name comes from the Forgejo repo description, and the

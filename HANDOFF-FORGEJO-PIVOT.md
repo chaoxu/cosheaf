@@ -1,6 +1,6 @@
 # Handoff: Forgejo backend pivot
 
-You're picking up an architectural rewrite of Cosheaf's server layer. The goal is to replace `server/`'s internals with an adapter that uses **vanilla Forgejo** as the backing store for canonical content, change history, and workflow primitives. The frontend, the public HTTP API, and the autoprover client all stay the same.
+You're picking up an architectural rewrite of Cosheaf's server layer. The goal is to replace `server/`'s internals with an adapter that uses **vanilla Forgejo** as the backing store for canonical content, change history, and workflow primitives. The frontend, the public HTTP API, and the coverify client all stay the same.
 
 **The complete technical specification is in cosheaf issue #7.** Read it before doing anything else.
 
@@ -13,13 +13,13 @@ This handoff document gives you the orientation that's not in the issue: project
 Cosheaf is a math knowledge base. It's used by:
 
 - **Humans** writing math via a Vite/React frontend (in `src/`) with a Coflat editor.
-- **Autoprover** (a sibling Python CLI in `../autoprover/`), which runs LLM agents that explore, propose, repair, and review math documents.
+- **Coverify** (a sibling Python CLI in `../coverify/`), which runs LLM agents that explore, propose, repair, and review math documents.
 
 The current server (`server/`) is a Hono app with sqlite + filesystem storage. It implements its own workflow state machine: documents transition through `draft → unreviewed → {golden, rejected}`, with `proposal` and `review` document types attached to approval rows.
 
 The project's vocabulary (page, proposal, review, comment, issue) is being mapped onto GitHub-style entities (file, PR, PullReview, comment, issue). Forgejo is the GitHub-clone open-source forge we're using as the backing store.
 
-**v0 of autoprover already works against the current Cosheaf.** This pivot is so the system scales (multi-file atomic updates, free webhooks for event-driven daemon, mature workflow code instead of ours, free git history and mirroring, free OAuth machinery).
+**v0 of coverify already works against the current Cosheaf.** This pivot is so the system scales (multi-file atomic updates, free webhooks for event-driven daemon, mature workflow code instead of ours, free git history and mirroring, free OAuth machinery).
 
 ---
 
@@ -41,13 +41,13 @@ Every endpoint that exists today must keep:
 - Same response body shape (down to field names, types, and shape)
 - Same error codes (e.g. `code: "validation"`, `code: "conflict"`, `code: "not_found"`)
 
-The frontend and autoprover both depend on this contract. **Test with both clients** as part of validation.
+The frontend and coverify both depend on this contract. **Test with both clients** as part of validation.
 
 To enumerate current endpoints: `grep -rEn '\.(get|post|put|delete|patch)\(' server/routes/`. The issue #7 has a complete mapping table — every endpoint listed there must continue to work.
 
-### 3. Autoprover's client (`../autoprover/src/autoprover/cosheaf.py`)
+### 3. Coverify's client (`../coverify/src/coverify/cosheaf.py`)
 
-Zero changes. Its method signatures and the wire calls they make must keep working byte-identically. This client is the strongest test of the API contract: if every autoprover test passes against your new server, the contract is preserved.
+Zero changes. Its method signatures and the wire calls they make must keep working byte-identically. This client is the strongest test of the API contract: if every coverify test passes against your new server, the contract is preserved.
 
 ### 4. Coflat byte-exactness
 
@@ -81,8 +81,8 @@ Read these files in order before writing any code:
 4. **`server/routes/workspaces.ts`**: workspace creation and listing.
 5. **`server/workflow.ts`**: the state machine you're replacing. Understand what it does so you know what to translate.
 6. **`server/indexer.ts`** and **`server/links.ts`**: current FTS and backlinks logic. The new versions will live in your sidecar.
-7. **`../autoprover/src/autoprover/cosheaf.py`**: the client. Each method tells you exactly what API surface you must preserve.
-8. **`../autoprover/scripts/smoke-cosheaf`**: end-to-end integration test. Reading this tells you the canonical happy + reject paths.
+7. **`../coverify/src/coverify/cosheaf.py`**: the client. Each method tells you exactly what API surface you must preserve.
+8. **`../coverify/scripts/smoke-cosheaf`**: end-to-end integration test. Reading this tells you the canonical happy + reject paths.
 
 Then look at the **Forgejo API spec**:
 
@@ -109,14 +109,14 @@ You can extract the "current implementation's response shape" by hitting the exi
 ### Integration validation (when most of the adapter is built)
 
 ```sh
-# In autoprover repo
-cd ../autoprover
+# In coverify repo
+cd ../coverify
 ./scripts/check                  # all 49 unit tests pass
 ./scripts/smoke-cosheaf          # happy path + reject-then-repair path,
                                  # against your new Cosheaf adapter
 ```
 
-`smoke-cosheaf` is the canonical end-to-end test. If it passes, the adapter preserves the contract well enough for autoprover.
+`smoke-cosheaf` is the canonical end-to-end test. If it passes, the adapter preserves the contract well enough for coverify.
 
 ### Frontend validation (final)
 
@@ -133,10 +133,10 @@ pnpm dev                         # frontend must still run
 
 Validation criteria from the issue:
 
-1. All 49 autoprover tests pass.
+1. All 49 coverify tests pass.
 2. `scripts/smoke-cosheaf` passes (both happy and reject paths).
 3. `scripts/check-verifier-safety` runs to completion with a real verifier.
-4. Manual `autoprover cycle` test produces a PR in Forgejo's UI.
+4. Manual `coverify cycle` test produces a PR in Forgejo's UI.
 5. Coflat byte-exact round-trip verified.
 6. Frontend builds and runs unchanged.
 
@@ -152,7 +152,7 @@ When all six are green, stop. Don't expand scope to UX improvements, performance
 
 3. **Cosheaf doc ids must be stable across sidecar rebuilds**. Persist them in page frontmatter (the spec recommends this).
 
-4. **The autoprover client uses Cosheaf doc ids, not PR numbers**. Don't leak Forgejo internals (PR numbers, commit SHAs) through the public API; map everything through the sidecar's `doc_map`.
+4. **The coverify client uses Cosheaf doc ids, not PR numbers**. Don't leak Forgejo internals (PR numbers, commit SHAs) through the public API; map everything through the sidecar's `doc_map`.
 
 5. **`smoke-cosheaf` invokes a Cosheaf instance via the `pnpm cli` admin tooling**. Make sure your CLI handlers (`server/cli.ts`) keep working post-pivot — they're how workspaces and users get seeded for tests.
 
@@ -162,25 +162,25 @@ When all six are green, stop. Don't expand scope to UX improvements, performance
 
 ---
 
-## Working with autoprover during the pivot
+## Working with coverify during the pivot
 
-Autoprover should keep running against the current Cosheaf during the pivot. Don't change autoprover's code. The way to test your new adapter is:
+Coverify should keep running against the current Cosheaf during the pivot. Don't change coverify's code. The way to test your new adapter is:
 
 1. Run your new adapter on a different port (`COSHEAF_PORT=3031`).
-2. Set autoprover's `COSHEAF_URL` to point at the new adapter.
-3. Run autoprover commands and tests.
-4. Compare behavior against the autoprover-on-old-Cosheaf baseline.
+2. Set coverify's `COSHEAF_URL` to point at the new adapter.
+3. Run coverify commands and tests.
+4. Compare behavior against the coverify-on-old-Cosheaf baseline.
 
-This means the pivot ships as a swap: when ready, point autoprover (and the frontend) at the new server, retire the old one, run the migration script.
+This means the pivot ships as a swap: when ready, point coverify (and the frontend) at the new server, retire the old one, run the migration script.
 
 ---
 
 ## Summary
 
 - Read cosheaf#7 first. It is the spec.
-- Don't touch the frontend or autoprover client.
+- Don't touch the frontend or coverify client.
 - Preserve the public API contract exactly.
-- Build the adapter, validate at each step, run autoprover tests against it.
+- Build the adapter, validate at each step, run coverify tests against it.
 - Stop when the validation criteria are green.
 
 If you hit a question the spec doesn't answer, prefer the option that minimizes change to anything outside `server/`. If you have to break the contract for a real reason, surface that as a comment on cosheaf#7 before doing it.

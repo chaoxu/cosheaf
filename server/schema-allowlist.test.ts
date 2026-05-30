@@ -23,6 +23,8 @@ const ALLOWED_TABLES = new Set([
   "notes_fts_config",
   // Webhook idempotency
   "webhook_log",
+  // Cosheaf-issued Forgejo PAT cache; login validates credentials before reuse
+  "login_tokens",
 ]);
 
 describe("sqlite schema allowlist (#36 — no Forgejo state mirror)", () => {

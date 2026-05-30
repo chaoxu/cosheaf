@@ -2,10 +2,10 @@
 
 Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
 hold the canonical markdown files, branches, pull requests, reviews, issues,
-and collaborator memberships; SQLite is a derived, rebuildable sidecar index
-for fast reads. There is no cosheaf-side auth state: the credential is a
-Forgejo PAT, sent either as `Authorization: Bearer <token>` by API clients and
-agents or as an HttpOnly `cosheaf_pat` cookie for server-rendered web pages.
+and collaborator memberships; SQLite is a derived sidecar for fast reads and
+small Cosheaf-owned credentials. The credential is a Forgejo PAT, sent either
+as `Authorization: Bearer <token>` by API clients and agents or as an HttpOnly
+`cosheaf_pat` cookie for server-rendered web pages.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
@@ -25,7 +25,7 @@ formats can be added cleanly later; register formats through the format
 registry rather than reaching into one implementation's internals.
 Don't add another format until one is asked for.
 
-Agents (autoprover and friends) are out of scope here. They will live in a
+Agents (Coverify and friends) are out of scope here. They will live in a
 separate layer and participate as ordinary Forgejo write-access collaborators
 over the same HTTP API. Keep cosheaf's surface usable without any automation.
 
@@ -49,13 +49,14 @@ over the same HTTP API. Keep cosheaf's surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, and webhook dedupe — keyed by Forgejo repo slug. There
-  is no users, sessions, or workspaces table; identity, workspace registry,
-  memberships, branches, pull requests, issues, labels, milestones, and
-  notifications all live on Forgejo and are read on demand (the workspace
-  format lives in a `cosheaf-format-*` repo topic). Passthrough calls
-  are not audited locally — Forgejo's access log is the trail. The page
-  index is rebuildable from Forgejo via `pnpm cli workspace reindex <slug>`.
+  links, FTS index, webhook dedupe, and cached Cosheaf-issued Forgejo PATs —
+  keyed by Forgejo repo slug or username. There is no users, sessions, or
+  workspaces table; identity, workspace registry, memberships, branches, pull
+  requests, issues, labels, milestones, and notifications all live on Forgejo
+  and are read on demand (the workspace format lives in a `cosheaf-format-*`
+  repo topic). Passthrough calls are not audited locally — Forgejo's access log
+  is the trail. The page index is rebuildable from Forgejo via
+  `pnpm cli workspace reindex <slug>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
@@ -305,8 +306,8 @@ plugins, or move agent/prover logic into this repo as part of this direction.
   No cosheaf-side password hashing — the bearer token is the credential.
 - **Web**: Server-rendered Hono pages with narrowly scoped React/Vite islands
   in `src/cosheaf/web-*.tsx?`.
-- **Editor**: `@chaoxu/coflat-editor` (published package; do not vendor it
-  back into this repo).
+- **Editor**: `@chaoxu/coflat-editor` from a sibling checkout or public
+  package; do not vendor it back into this repo.
 - **Document format**: Pandoc-flavored markdown per `FORMAT.md`. YAML
   frontmatter for `id`, `title`, `type`, `status`, `target`.
 - **Package manager**: pnpm.
@@ -565,7 +566,7 @@ becomes a real bottleneck.
 
 ## Things this repo is NOT
 
-- It is not the coflat editor. The editor is a published package
+- It is not the coflat editor. The editor is a sibling package
   (`@chaoxu/coflat-editor`); see its own repo for editor-internal debug
   helpers, browser harness, perf scripts, etc. None of `__cmView`,
   `__cmDebug`, `pnpm test:browser`, `pnpm chrome`, `scripts/perf-*` apply

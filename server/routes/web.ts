@@ -74,7 +74,12 @@ web.post("/login", async (c) => {
   const username = stringField(form.username);
   const password = stringField(form.password);
   if (!username || !password) return redirect("/login?error=missing");
-  const outcome = await exchangeForgejoCredsForPat(c.get("config").forgejoUrl, username, password);
+  const outcome = await exchangeForgejoCredsForPat(
+    c.get("db"),
+    c.get("config").forgejoUrl,
+    username,
+    password,
+  );
   if (outcome.kind !== "ok") return redirect("/login?error=invalid");
   setCookie(c, AUTH_COOKIE, outcome.pat, {
     httpOnly: true,

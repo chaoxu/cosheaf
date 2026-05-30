@@ -108,9 +108,9 @@ invalidate derived views, and publish SSE events to open browsers.
 If webhooks are missed, `pnpm cli workspace reindex <slug>` rebuilds the page
 index from Forgejo `main` and removes stale page index rows.
 
-## Autoprover Boundary
+## Coverify Boundary
 
-The autoprover layer is intentionally out of this repo. It will:
+The Coverify layer is intentionally out of this repo. It will:
 
 - authenticate with ordinary Forgejo PATs through Cosheaf bearer auth
 - subscribe to SSE events
