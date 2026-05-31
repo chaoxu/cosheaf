@@ -752,15 +752,15 @@ web.get("/:owner/:repo/chat", async (c) => {
       .join("") || `<div class="empty">No chats yet.</div>`;
   return htmlResponse(
     repoPage({
-      title: `Public chat - ${ctx.repo}`,
+      title: `Chat - ${ctx.repo}`,
       owner: ctx.owner,
       repo: ctx.repo,
       active: "chat",
       user: ctx.user,
       ws: ctx.ws,
       body: `
-        <div class="page-title compact"><div><h1>Public chat</h1></div></div>
-        <p class="muted">Public to everyone with access to this workspace — chats are not private.</p>
+        <div class="page-title compact"><div><h1>Chat</h1></div></div>
+        <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
         ${
           ctx.ws.role === "read"
             ? ""
@@ -813,7 +813,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
   );
   return htmlResponse(
     repoPage({
-      title: `${issue.title} - Public chat`,
+      title: `${issue.title} - Chat`,
       owner: ctx.owner,
       repo: ctx.repo,
       active: "chat",
@@ -822,7 +822,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <div class="page-title compact"><div><h1>${escapeHtml(issue.title)}</h1></div></div>
-        <p class="muted">Public to everyone with access to this workspace — chats are not private.</p>
+        <p class="chat-notice">Everyone with access to this workspace can see this chat — it's not private.</p>
         <div class="chat-thread">
           ${renderedTurns.join("")}
           ${chatReplyPending(turns) ? chatPendingTurn() : ""}
@@ -2443,7 +2443,7 @@ function repoPage(opts: {
           ${tab(opts, "files", "Files", "")}
           ${tab(opts, "issues", "Issues", "/issues")}
           ${tab(opts, "pulls", "Pull Requests", "/pulls")}
-          ${tab(opts, "chat", "Public Chat", "/chat")}
+          ${tab(opts, "chat", "Chat", "/chat")}
           ${tab(opts, "notifications", "Notifications", "/notifications")}
           ${tab(opts, "activity", "Activity", "/activity")}
           ${tab(opts, "settings", "Settings", "/settings")}
