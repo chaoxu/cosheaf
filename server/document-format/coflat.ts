@@ -1,4 +1,4 @@
-import { extractReferences } from "@chaoxu/coflat-editor/parse";
+import { extractReferences } from "@chaoxu/coflat/parse";
 import {
   extractFirstH1,
   parseFrontmatterYaml,

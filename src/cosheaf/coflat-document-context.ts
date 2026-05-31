@@ -1,5 +1,5 @@
-import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
-import { extractReferences } from "@chaoxu/coflat-editor/parse";
+import type { DocumentContext } from "@chaoxu/coflat/reader";
+import { extractReferences } from "@chaoxu/coflat/parse";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 

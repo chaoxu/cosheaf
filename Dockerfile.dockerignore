@@ -2,8 +2,8 @@
 
 !cosheaf/
 !cosheaf/**
-!coflat-editor/
-!coflat-editor/**
+!coflat/
+!coflat/**
 
 cosheaf/.git
 cosheaf/.DS_Store
@@ -16,11 +16,11 @@ cosheaf/.vite
 cosheaf/data
 cosheaf/.env*
 
-coflat-editor/.git
-coflat-editor/.DS_Store
-coflat-editor/node_modules
-coflat-editor/dist
-coflat-editor/test-results
-coflat-editor/.playwright-*
-coflat-editor/.vite
-coflat-editor/.env*
+coflat/.git
+coflat/.DS_Store
+coflat/node_modules
+coflat/dist
+coflat/test-results
+coflat/.playwright-*
+coflat/.vite
+coflat/.env*

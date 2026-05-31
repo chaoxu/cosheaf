@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
-    "setup:deps": "pnpm --dir ../coflat-editor install --frozen-lockfile && pnpm --dir ../coflat-editor build",
+    "setup:deps": "pnpm --dir ../coflat install --frozen-lockfile && pnpm --dir ../coflat build",
     "dev:worktree": "node scripts/dev-worktree.mjs",
     "dev:login-state": "node scripts/web-login-state.mjs",
     "devx": "node scripts/devx.mjs ready",
@@ -73,7 +73,7 @@
     ]
   },
   "dependencies": {
-    "@chaoxu/coflat-editor": "file:../coflat-editor",
+    "@chaoxu/coflat": "file:../coflat",
     "@codemirror/autocomplete": "^6.20.1",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/language": "^6.12.2",

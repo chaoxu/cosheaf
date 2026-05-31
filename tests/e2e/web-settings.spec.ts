@@ -29,7 +29,7 @@ test("account preferences are separate from project settings", async ({ page }) 
   await page.goto(`${repoBase}/settings`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Settings");
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
-  await expect(page.locator('link[href*="/vendor/coflat-editor/"]')).toHaveCount(0);
+  await expect(page.locator('link[href*="/vendor/coflat/"]')).toHaveCount(0);
   await expect(page.getByTestId("settings-user-preferences")).toHaveCount(0);
   await expect(page.locator(".repo-body")).toContainText("Review policy");
   await expect(page.locator(".repo-body")).toContainText("Access");
@@ -37,7 +37,7 @@ test("account preferences are separate from project settings", async ({ page }) 
 
   await page.goto(`${repoBase}/src/branch/main/hello.md`);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
-  await expect(page.locator('link[href*="/vendor/coflat-editor/"]')).not.toHaveCount(0);
+  await expect(page.locator('link[href*="/vendor/coflat/"]')).not.toHaveCount(0);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md`);
   await expect(page.locator(".cf-doc-block--theorem .cf-block-header-rendered").filter({ hasText: "Theorem 1" }).first()).toBeVisible();

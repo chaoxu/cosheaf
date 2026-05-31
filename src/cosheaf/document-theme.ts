@@ -1,4 +1,4 @@
-import { blueprintBookThemeManifest } from "@chaoxu/coflat-editor/reader";
+import { blueprintBookThemeManifest } from "@chaoxu/coflat/reader";
 
 export type DocumentThemeId = "default" | "blueprint-book";
 export type ViewMode = "source" | "rich";

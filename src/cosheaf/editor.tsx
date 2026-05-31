@@ -10,8 +10,8 @@ import {
   type AssetUploader,
   type AutocompleteSource,
   mountEditor,
-} from "@chaoxu/coflat-editor";
-import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
+} from "@chaoxu/coflat";
+import type { DocumentContext } from "@chaoxu/coflat/reader";
 export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource };
 
 interface Props {

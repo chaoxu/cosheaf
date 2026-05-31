@@ -3,7 +3,7 @@
 ## Summary
 
 Cosheaf should eventually replace the standalone Coflat app shell while keeping
-`@chaoxu/coflat-editor` as the editor package. Cosheaf owns workspaces, users,
+`@chaoxu/coflat` as the editor package. Cosheaf owns workspaces, users,
 issues, branches, pull requests, Forgejo storage, search, backlinks, assets, and
 optional operations around canonical markdown files.
 
@@ -24,7 +24,7 @@ remains page-oriented rather than math-native.
 
 The future split should be:
 
-- `@chaoxu/coflat-editor`: document editing, parsing, rich/source rendering, and
+- `@chaoxu/coflat`: document editing, parsing, rich/source rendering, and
   in-editor Coflat semantics.
 - `cosheaf`: Forgejo-backed canonical storage, branches, pull requests, issues,
   review gates, search, backlinks, assets, and optional document operations.
@@ -49,7 +49,7 @@ Forgejo-backed workspace.
 
 3. Editor configuration bridge
 
-   Pass workspace and document configuration into `@chaoxu/coflat-editor`
+   Pass workspace and document configuration into `@chaoxu/coflat`
    instead of treating the editor as a raw markdown textarea. This includes
    project config, frontmatter-derived options, asset resolution, and
    read-only/review contexts.

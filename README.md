@@ -84,8 +84,8 @@ development.
 
 - TypeScript end-to-end. Hono renders the durable web pages; React 19 + Vite
   power page-owned islands such as the rich editor; CodeMirror 6 lives inside
-  `@chaoxu/coflat-editor`. For source builds before the package is published
-  from a public registry, clone `coflat-editor` next to this repo.
+  `@chaoxu/coflat`. For source builds before the package is published
+  from a public registry, clone `coflat` next to this repo.
 - SQLite via `better-sqlite3`. WAL mode. Forgejo `main` is the page source of
   truth; the DB is a rebuildable index.
 - Forgejo webhooks reconcile external edits; SSE pushes changes to connected
@@ -106,7 +106,7 @@ DESIGN.md      Product philosophy and trust model
 ## Commands
 
 ```bash
-pnpm setup:deps      # Build sibling ../coflat-editor for source installs
+pnpm setup:deps      # Build sibling ../coflat for source installs
 pnpm dev:all          # web/API server + Vite page-island dev server
 pnpm setup:dev        # Seed chao / Flushing Coin / Hello for local testing
 pnpm smoke            # Headless browser smoke test against the dev fixture

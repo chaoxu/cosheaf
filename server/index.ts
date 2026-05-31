@@ -77,7 +77,7 @@ const distDir = path.resolve(process.cwd(), "dist");
 const publicDir = path.resolve(process.cwd(), "public");
 const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-pr-diff-defaults.js", "/favicon.svg"]);
 const coflatEditorDistDir = path.dirname(
-  requireResolve("@chaoxu/coflat-editor/style.css"),
+  requireResolve("@chaoxu/coflat/style.css"),
 );
 if (process.env.NODE_ENV !== "production") {
   app.get("/node_modules/*", async (c) => {
@@ -91,10 +91,10 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use("/assets/*", compress());
-app.use("/vendor/coflat-editor/*", compress());
+app.use("/vendor/coflat/*", compress());
 for (const assetPath of publicAssetPaths) app.use(assetPath, compress());
 
-app.get("/vendor/coflat-editor/*", async (c) => {
+app.get("/vendor/coflat/*", async (c) => {
   const response = await serveCoflatEditorAsset(c.req.path);
   return response ?? c.json({ error: "not found" }, 404);
 });
@@ -138,7 +138,7 @@ async function serveCoflatEditorAsset(requestPath: string): Promise<Response | n
   } catch (_error) {
     return null;
   }
-  const relativePath = decodedPath.replace(/^\/vendor\/coflat-editor\/?/, "") || "editor.css";
+  const relativePath = decodedPath.replace(/^\/vendor\/coflat\/?/, "") || "editor.css";
   if (!relativePath || relativePath.split(/[\\/]/).includes("..")) return null;
   const filePath = path.resolve(coflatEditorDistDir, relativePath);
   if (filePath !== coflatEditorDistDir && !filePath.startsWith(`${coflatEditorDistDir}${path.sep}`)) return null;
@@ -162,8 +162,8 @@ function staticFileHeaders(filePath: string, cacheControl: string): Record<strin
 
 function cacheControlForRequestPath(requestPath: string): string {
   if (requestPath.startsWith("/assets/")) return "public, max-age=31536000, immutable";
-  if (requestPath.startsWith("/vendor/coflat-editor/fonts/")) return "public, max-age=31536000, immutable";
-  if (requestPath.startsWith("/vendor/coflat-editor/")) return "public, max-age=86400";
+  if (requestPath.startsWith("/vendor/coflat/fonts/")) return "public, max-age=31536000, immutable";
+  if (requestPath.startsWith("/vendor/coflat/")) return "public, max-age=86400";
   return "public, max-age=60";
 }
 

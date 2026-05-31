@@ -126,12 +126,12 @@ that should become an HTTP API feature usable by humans too.
   No password hashing — the Forgejo PAT is the credential, exchanged at
   login and sent as `Authorization: Bearer <pat>` on every request.
 - **Client**: React 19, Vite, Tailwind v4, shadcn-style primitives, and
-  `@chaoxu/coflat-editor`.
+  `@chaoxu/coflat`.
 - **Format**: Coflat-flavored Pandoc markdown per `FORMAT.md`.
 
 ## Out Of Scope
 
-- The editor implementation itself; it lives in `@chaoxu/coflat-editor`.
+- The editor implementation itself; it lives in `@chaoxu/coflat`.
 - Agent/prover orchestration.
 - Built-in Pandoc export and desktop-native behavior. These may return later as
   optional Cosheaf operations rather than core requirements; see

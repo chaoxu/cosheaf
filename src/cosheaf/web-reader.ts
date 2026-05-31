@@ -1,4 +1,4 @@
-import { renderToHtml, hydrateMath } from "@chaoxu/coflat-editor/reader";
+import { renderToHtml, hydrateMath } from "@chaoxu/coflat/reader";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import {
   REF_BUTTON_CLASS,

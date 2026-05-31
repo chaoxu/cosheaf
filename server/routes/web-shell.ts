@@ -16,8 +16,8 @@ export function pageShell(opts: {
         <title>${escapeHtml(opts.title)} - Cosheaf</title>
         ${
           opts.readerAssets
-            ? `<link rel="stylesheet" href="/vendor/coflat-editor/editor.css">
-        <link rel="stylesheet" href="/vendor/coflat-editor/themes/blueprint-book.css">`
+            ? `<link rel="stylesheet" href="/vendor/coflat/editor.css">
+        <link rel="stylesheet" href="/vendor/coflat/themes/blueprint-book.css">`
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}

@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
+import type { DocumentContext } from "@chaoxu/coflat/reader";
 import {
   COFLAT_FORMAT_ID,
   DEFAULT_DOCUMENT_FORMAT_ID,
@@ -12,7 +12,7 @@ import type {
   EditorSaveHandler,
   EditorStatusEvents,
   MountedEditor,
-} from "./document-format/coflat-editor";
+} from "./document-format/coflat";
 
 interface EditorProps {
   value: string;
@@ -47,7 +47,7 @@ register({
   displayName: "Coflat Markdown",
   supportsRichDiff: true,
   editor: () =>
-    import("./document-format/coflat-editor").then((m) => ({
+    import("./document-format/coflat").then((m) => ({
       default: m.MarkdownEditor as unknown as ComponentType<EditorProps>,
     })),
 });

@@ -6,7 +6,7 @@ import type {
   SaveHandler,
   StatusEvents,
 } from "../editor";
-import type { MountedEditor } from "./coflat-editor";
+import type { MountedEditor } from "./coflat";
 
 type Outline = ReturnType<typeof extractOutline>;
 type Store<T> = {

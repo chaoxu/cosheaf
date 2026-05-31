@@ -7,8 +7,8 @@ import type {
   OutlineEntry,
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
-} from "@chaoxu/coflat-editor";
-import type { DocumentContext } from "@chaoxu/coflat-editor/reader";
+} from "@chaoxu/coflat";
+import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import {
   MAX_ASSET_BYTES,
@@ -25,8 +25,8 @@ import {
   loadCoflatRefs,
   resolveUnresolvedCoflatReferences,
 } from "./coflat-document-context";
-import "@chaoxu/coflat-editor/style.css";
-import "@chaoxu/coflat-editor/themes/blueprint-book.css";
+import "@chaoxu/coflat/style.css";
+import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
 
 interface EditorConfig {

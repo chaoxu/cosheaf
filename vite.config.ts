@@ -59,16 +59,16 @@ export default defineConfig({
       // hydrateMath dynamic-imports katex; pre-bundle so it's ready on first paint.
       "katex",
     ],
-    // `@chaoxu/coflat-editor` is a `file:` link. pnpm's content-addressed
-    // folder name (`.pnpm/@chaoxu+coflat-editor@file+..+coflat-editor_<hash>/`)
+    // `@chaoxu/coflat` is a `file:` link. pnpm's content-addressed
+    // folder name (`.pnpm/@chaoxu+coflat@file+..+coflat_<hash>/`)
     // changes whenever the editor source is touched, but optimizeDeps caches
     // pin the old hash → ENOENT → blank page. Excluding all entries means
     // Vite resolves them on the fly against the live tree. The editor is
     // already a single bundled .mjs so there's nothing to pre-bundle.
     exclude: [
-      "@chaoxu/coflat-editor",
-      "@chaoxu/coflat-editor/reader",
-      "@chaoxu/coflat-editor/parse",
+      "@chaoxu/coflat",
+      "@chaoxu/coflat/reader",
+      "@chaoxu/coflat/parse",
     ],
   },
   server: {

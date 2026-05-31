@@ -102,7 +102,7 @@ with `default_md_format = forgejo-passthrough` via the settings panel.
 | Backlinks panel | Populated from `[@id]` and `[text](path.md)` links | Empty (passthrough's extractLinks returns []) |
 | Linter tab | Broken-ref rows if any | Empty |
 | PR rich-diff view | Source-line-attributed side-by-side | Falls back to plain source diff |
-| Editor | `@chaoxu/coflat-editor` MarkdownEditor | Plain textarea |
+| Editor | `@chaoxu/coflat` MarkdownEditor | Plain textarea |
 
 Each section ~5 minutes; whole checklist runnable in ~30 min if everything
 green. Anything red → file an issue with the failing step.

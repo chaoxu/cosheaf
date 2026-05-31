@@ -306,7 +306,7 @@ plugins, or move agent/prover logic into this repo as part of this direction.
   No cosheaf-side password hashing — the bearer token is the credential.
 - **Web**: Server-rendered Hono pages with narrowly scoped React/Vite islands
   in `src/cosheaf/web-*.tsx?`.
-- **Editor**: `@chaoxu/coflat-editor` from a sibling checkout or public
+- **Editor**: `@chaoxu/coflat` from a sibling checkout or public
   package; do not vendor it back into this repo.
 - **Document format**: Pandoc-flavored markdown per `FORMAT.md`. YAML
   frontmatter for `id`, `title`, `type`, `status`, `target`.
@@ -338,7 +338,7 @@ server/
 src/cosheaf/
   web-editor.tsx  # page-owned rich editor island
   web-reader.ts   # page-owned Coflat reader hydration island
-  editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat-editor
+  editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat
   api.ts          # small cookie-auth fetch client for page islands
 data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ```
@@ -415,11 +415,11 @@ Route owner map:
 - Use well-known libraries for standard work: Commander for CLI parsing,
   Docker Compose for container orchestration, Playwright Test for browser
   flows, DOMPurify/DOM APIs for sanitized HTML transforms, and package-exported
-  types/manifests from `@chaoxu/coflat-editor`.
+  types/manifests from `@chaoxu/coflat`.
 - When transforming rendered HTML, sanitize to DOM and traverse nodes
   (`DocumentFragment`, `TreeWalker`, `querySelectorAll`). Do not regex over
   HTML strings except for narrow tests or pre-HTML source text.
-- Do not mirror `@chaoxu/coflat-editor` host API types, outline types, or theme
+- Do not mirror `@chaoxu/coflat` host API types, outline types, or theme
   manifests in Cosheaf. Import the exported package contracts directly and keep
   Forgejo-passthrough editor adapters structurally compatible with those
   contracts.
@@ -549,7 +549,7 @@ coflat` at seed time.
   repo-scoped `/markdown` API. It preserves YAML frontmatter but extracts no
   backlinks; rich rendered diffs are unavailable and the review UI falls back
   to source diffs.
-- `coflat`: Coflat-flavored markdown using `@chaoxu/coflat-editor` parser and
+- `coflat`: Coflat-flavored markdown using `@chaoxu/coflat` parser and
   reader. Coflat-only features include `[@id]` backlinks, bare-ref rewriting
   for issue/page references, and source-line-attributed rich diffs.
 
@@ -567,7 +567,7 @@ becomes a real bottleneck.
 ## Things this repo is NOT
 
 - It is not the coflat editor. The editor is a sibling package
-  (`@chaoxu/coflat-editor`); see its own repo for editor-internal debug
+  (`@chaoxu/coflat`); see its own repo for editor-internal debug
   helpers, browser harness, perf scripts, etc. None of `__cmView`,
   `__cmDebug`, `pnpm test:browser`, `pnpm chrome`, `scripts/perf-*` apply
   here.
