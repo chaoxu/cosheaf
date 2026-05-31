@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ForgejoIssue, ForgejoIssueComment } from "../forgejo-types.js";
-import { chatLiveScript, chatReplyPending, chatTitleFrom, chatTurns, renderChatTurn } from "./web-chat.js";
+import { chatLiveScript, chatReplyPending, chatTitleFrom, chatTurns, isChatIssue, renderChatTurn } from "./web-chat.js";
 
 const BOT = "coverify";
 
@@ -78,6 +78,14 @@ describe("renderChatTurn", () => {
     const html = renderChatTurn(turns[1], "<p>ok</p>");
     expect(html).toContain("chat-turn--assistant");
     expect(html).toContain(">Coverify<");
+  });
+});
+
+describe("isChatIssue", () => {
+  it("is true only when the chat label is present (not just because the API returned the issue)", () => {
+    expect(isChatIssue({ labels: [{ id: 1, name: "chat", color: "8b5cf6" }] })).toBe(true);
+    expect(isChatIssue({ labels: [{ id: 2, name: "bug", color: "f00" }] })).toBe(false);
+    expect(isChatIssue({ labels: [] })).toBe(false);
   });
 });
 

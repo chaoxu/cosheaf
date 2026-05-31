@@ -53,6 +53,7 @@ import {
   chatReplyPending,
   chatTitleFrom,
   chatTurns,
+  isChatIssue,
   renderChatTurn,
 } from "./web-chat.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
@@ -449,7 +450,7 @@ web.get("/:owner/:repo/issues", async (c) => {
           ${ctx.ws.role === "read" ? "" : `<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
-        ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !issue.labels.some((label) => label.name === CHAT_LABEL)), "No matching issues.")}
+        ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
       `,
     }),
   );
@@ -740,7 +741,9 @@ async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promis
 web.get("/:owner/:repo/chat", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const chats = await ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 });
+  const chats = (await ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 })).filter(
+    isChatIssue,
+  );
   const rows =
     chats
       .map(
@@ -804,7 +807,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
     }),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
   ]);
-  if (!issue || issue.pull_request || !issue.labels.some((label) => label.name === CHAT_LABEL)) {
+  if (!issue || issue.pull_request || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
   }
   const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
@@ -848,7 +851,7 @@ web.post("/:owner/:repo/chat/:number/send", async (c) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
-  if (!issue || !issue.labels.some((label) => label.name === CHAT_LABEL)) {
+  if (!issue || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
   }
   const message = stringField((await c.req.parseBody()).message);

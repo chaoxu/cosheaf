@@ -4,6 +4,14 @@ import type { ForgejoIssue, ForgejoIssueComment } from "../forgejo-types.js";
 // "new" route applies it, so the list can find exactly those issues.
 export const CHAT_LABEL = "chat";
 
+// True only if the issue actually carries the chat label. Forgejo's
+// `labels=chat` list filter silently returns everything when no such label
+// exists in the repo, so we must verify the label ourselves rather than trust
+// the query — keeping the list, the thread, and the Issues-tab hiding consistent.
+export function isChatIssue(issue: Pick<ForgejoIssue, "labels">): boolean {
+  return issue.labels.some((label) => label.name === CHAT_LABEL);
+}
+
 export interface ChatTurn {
   role: "user" | "assistant";
   author: string;
