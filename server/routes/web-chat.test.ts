@@ -86,7 +86,8 @@ describe("chatLiveScript", () => {
     const s = chatLiveScript("flushing-coin", 7);
     expect(s).toContain('new EventSource("/api/v1/w/flushing-coin/events")');
     expect(s).toContain('d.type==="issue"&&d.number===7');
-    expect(s).toContain("location.reload()");
+    expect(s).toContain('querySelector(".chat-thread")');
+    expect(s).not.toContain("location.reload");
   });
 });
 

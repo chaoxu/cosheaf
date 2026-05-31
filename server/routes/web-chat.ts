@@ -60,11 +60,12 @@ export function chatPendingTurn(): string {
     </div>`;
 }
 
-// Subscribe to the workspace SSE stream (cookie-authed, same origin) and refresh
-// once when THIS issue gets an event — i.e. when coverify posts its reply. This
-// is event-driven, not a timer: it fires when content actually changes, then
-// stops. Rendered only while a reply is pending.
+// Subscribe to the workspace SSE stream (cookie-authed, same origin) and, when
+// THIS issue gets an event (e.g. coverify posts its reply), fetch the thread and
+// swap just the .chat-thread contents in place — no full-page reload. Event-
+// driven, not a timer; stops once the reply has landed. Rendered only while a
+// reply is pending.
 export function chatLiveScript(slug: string, issue: number): string {
   const url = `/api/v1/w/${encodeURIComponent(slug)}/events`;
-  return `<script>(function(){try{var es=new EventSource(${JSON.stringify(url)});es.onmessage=function(ev){try{var d=JSON.parse(ev.data);if(d&&d.type==="issue"&&d.number===${issue}){es.close();location.reload();}}catch(e){}};window.addEventListener("pagehide",function(){es.close();});}catch(e){}})();</script>`;
+  return `<script>(function(){try{var es=new EventSource(${JSON.stringify(url)});es.onmessage=function(ev){try{var d=JSON.parse(ev.data);if(!(d&&d.type==="issue"&&d.number===${issue}))return;fetch(location.href,{credentials:"same-origin"}).then(function(r){return r.text();}).then(function(html){var next=new DOMParser().parseFromString(html,"text/html").querySelector(".chat-thread");var cur=document.querySelector(".chat-thread");if(next&&cur){cur.innerHTML=next.innerHTML;cur.scrollIntoView(false);if(!cur.querySelector(".chat-pending"))es.close();}}).catch(function(){});}catch(e){}};window.addEventListener("pagehide",function(){es.close();});}catch(e){}})();</script>`;
 }

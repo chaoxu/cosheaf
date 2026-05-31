@@ -825,8 +825,9 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
         <p class="muted">Public to everyone with access to this workspace — chats are not private.</p>
         <div class="chat-thread">
           ${renderedTurns.join("")}
-          ${chatReplyPending(turns) ? chatPendingTurn() + chatLiveScript(ctx.repo, number) : ""}
+          ${chatReplyPending(turns) ? chatPendingTurn() : ""}
         </div>
+        ${chatReplyPending(turns) ? chatLiveScript(ctx.repo, number) : ""}
         ${
           ctx.ws.role === "read"
             ? ""
