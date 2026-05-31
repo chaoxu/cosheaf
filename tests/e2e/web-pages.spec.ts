@@ -156,11 +156,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".thread-header")).toContainText(issueTitle);
   await expect(page.locator(".thread-header")).toContainText("#");
   await expect(page.getByTestId("issue-edit-button")).toBeVisible();
-  await expect(page.getByTestId("issue-edit-form")).not.toHaveAttribute("open", "");
   await page.getByTestId("issue-edit-button").click();
-  await expect(page).toHaveURL(/edit=1#issue-edit-form$/);
-  await expect(page.getByTestId("issue-edit-form")).toHaveAttribute("open", "");
+  await expect(page).toHaveURL(/\/issues\/\d+\/edit$/);
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
+  await expect(page.getByTestId("issue-edit-form").locator('textarea[name="body"]')).toBeVisible();
+  await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("issue-label-form")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
   await expect(page.getByTestId("issue-toggle-pin")).toHaveText("Pin issue");

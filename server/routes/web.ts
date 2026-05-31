@@ -544,7 +544,6 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   const timelineHtml = await renderIssueTimeline(ctx, issue.number, comments, timeline ?? []);
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
-  const editIssueOpen = c.req.query("edit") === "1";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
   return htmlResponse(
     repoPage({
@@ -564,7 +563,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
               ${
                 canEditIssue
                   ? `<div class="toolbar-actions">
-                      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`)}?edit=1#issue-edit-form" data-testid="issue-edit-button">Edit issue</a>
+                      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}" data-testid="issue-edit-button">Edit issue</a>
                       <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
                         <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
                         <button class="button" type="submit" data-testid="issue-toggle-pin">${isPinned ? "Unpin" : "Pin issue"}</button>
@@ -583,7 +582,6 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
           <div class="issue-document">
             ${body}
           </div>
-          ${canEditIssue ? issueEditForm(ctx, issue, editIssueOpen) : ""}
           ${
             chatBackedIssue
               ? ""
@@ -607,6 +605,31 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
           }
         </article>
       `,
+    }),
+  );
+});
+
+web.get("/:owner/:repo/issues/:number/edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
+    if (err instanceof ForgejoError && err.status === 404) return null;
+    throw err;
+  });
+  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
+  return htmlResponse(
+    repoPage({
+      title: `Edit #${issue.number} - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "issues",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: issueEditPage(ctx, issue),
     }),
   );
 });
@@ -1770,6 +1793,24 @@ function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string)
   </section>`;
 }
 
+function issueEditPage(ctx: WebCtx, issue: ForgejoIssue): string {
+  return `<section class="edit-page issue-edit-page">
+    <div class="file-toolbar edit-titlebar">
+      <div><p class="eyebrow">Edit issue</p><h1>#${issue.number}</h1></div>
+      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`)}">Cancel</a>
+    </div>
+    <form class="compose-form" data-testid="issue-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}">
+      <label>Title <input name="title" value="${escapeAttr(issue.title)}" required></label>
+      <label>Issue body
+        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${escapeHtml(issue.body ?? "")}</textarea>
+      </label>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save issue</button>
+      </div>
+    </form>
+  </section>`;
+}
+
 type MarkdownSurface = "document" | "thread" | "diff";
 
 function coflatSurfaceClass(surface: MarkdownSurface): string {
@@ -2148,18 +2189,6 @@ function pullStateForm(ctx: WebCtx, pull: ForgejoPull): string {
     <input type="hidden" name="state" value="${nextState}">
     <button class="button" type="submit" data-testid="pull-toggle-state">${label}</button>
   </form>`;
-}
-
-function issueEditForm(ctx: WebCtx, issue: ForgejoIssue, open = false): string {
-  if (ctx.ws.role === "read") return "";
-  return `<details id="issue-edit-form" class="comment-form issue-edit-form" data-testid="issue-edit-form"${open ? " open" : ""}>
-    <summary>Edit issue</summary>
-    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}">
-      <label>Title <input name="title" value="${escapeAttr(issue.title)}" required></label>
-      <label>Description <textarea name="body">${escapeHtml(issue.body ?? "")}</textarea></label>
-      <button class="button primary" type="submit">Save issue</button>
-    </form>
-  </details>`;
 }
 
 async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<Response | null> {
