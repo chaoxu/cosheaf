@@ -208,6 +208,19 @@ export async function ensureWorkspacePermissions(
     }
   }
 
+  if (config.coverifyBotLogin && config.coverifyBotLogin !== config.forgejoOwner) {
+    try {
+      // The Coverify chat bot needs write access in every workspace so it can
+      // read chat threads and post replies; otherwise chats there sit at
+      // "thinking…" forever (the reply worker can't see workspaces it isn't on).
+      await forgejo.addCollaborator(config.forgejoOwner, repoName, config.coverifyBotLogin, "write");
+    } catch (err) {
+      if (!(err instanceof ForgejoError && err.status === 409)) {
+        console.warn(`coverify bot addCollaborator failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
   try {
     // The whitelist needs both the workspace owner (direct-push from the UI)
     // and `config.forgejoOwner` (the admin identity used by provisioning and
