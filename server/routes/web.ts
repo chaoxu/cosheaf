@@ -795,10 +795,16 @@ async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promis
 // chatgpt-style sessions sidebar: a "New chat" entry plus one row per chat,
 // with the active one highlighted. Shared by the list and thread views.
 function listChats(ctx: WebCtx) {
-  return ctx.fj
-    .listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 })
-    .then((issues) => issues.filter(isChatIssue))
-    .catch(() => [] as ForgejoIssue[]);
+  return Promise.all([
+    ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
+    ctx.fj.listIssues(ctx.owner, ctx.repo, { state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
+  ]).then(([labeled, recent]) => {
+    const byNumber = new Map<number, ForgejoIssue>();
+    for (const issue of [...labeled, ...recent]) {
+      if (isChatIssue(issue)) byNumber.set(issue.number, issue);
+    }
+    return [...byNumber.values()].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  });
 }
 
 function chatSidebar(owner: string, repo: string, chats: ForgejoIssue[], active: number | null, role: string): string {

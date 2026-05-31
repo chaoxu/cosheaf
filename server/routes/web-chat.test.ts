@@ -107,10 +107,15 @@ describe("renderChatTurn", () => {
 });
 
 describe("isChatIssue", () => {
-  it("is true only when the chat label is present (not just because the API returned the issue)", () => {
+  it("is true when the chat label is present", () => {
     expect(isChatIssue({ labels: [{ id: 1, name: "chat", color: "8b5cf6" }] })).toBe(true);
     expect(isChatIssue({ labels: [{ id: 2, name: "bug", color: "f00" }] })).toBe(false);
     expect(isChatIssue({ labels: [] })).toBe(false);
+  });
+
+  it("accepts hidden chat metadata as a fallback for direct chat links", () => {
+    expect(isChatIssue({ labels: [], body: chatIssueBody("Q", "main") })).toBe(true);
+    expect(isChatIssue({ labels: [], body: "<!-- cosheaf-chat-meta\n{}\n-->\nQ" })).toBe(false);
   });
 });
 

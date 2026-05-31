@@ -6,12 +6,13 @@ export const CHAT_LABEL = "chat";
 export const CHAT_META_MARKER = "cosheaf-chat-meta";
 const CHAT_META_RE = new RegExp(`<!--\\s*${CHAT_META_MARKER}\\s*(\\{[\\s\\S]*?\\})\\s*-->`, "m");
 
-// True only if the issue actually carries the chat label. Forgejo's
-// `labels=chat` list filter silently returns everything when no such label
-// exists in the repo, so we must verify the label ourselves rather than trust
-// the query — keeping the list, the thread, and the Issues-tab hiding consistent.
-export function isChatIssue(issue: Pick<ForgejoIssue, "labels">): boolean {
-  return issue.labels.some((label) => label.name === CHAT_LABEL);
+// True when the issue is chat-backed. The label is the preferred marker, but
+// the hidden chat metadata also counts so direct /chat/:number links survive if
+// a migrated or API-created chat is missing the label. Forgejo's `labels=chat`
+// list filter silently returns everything when no such label exists in the repo,
+// so callers that use the filter must still verify this predicate themselves.
+export function isChatIssue(issue: Pick<ForgejoIssue, "labels"> & { body?: string | null }): boolean {
+  return issue.labels.some((label) => label.name === CHAT_LABEL) || chatMetadata(issue.body ?? "").kind === "cosheaf-chat";
 }
 
 export interface ChatTurn {
