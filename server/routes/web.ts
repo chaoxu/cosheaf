@@ -542,6 +542,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   const timelineHtml = await renderIssueTimeline(ctx, issue.number, comments, timeline ?? []);
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
+  const editIssueOpen = c.req.query("edit") === "1";
   return htmlResponse(
     repoPage({
       title: `#${issue.number} ${issue.title}`,
@@ -561,6 +562,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
                 ctx.ws.role === "read"
                   ? ""
                   : `<div class="toolbar-actions">
+                      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`)}?edit=1#issue-edit-form" data-testid="issue-edit-button">Edit issue</a>
                       <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
                         <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
                         <button class="button" type="submit" data-testid="issue-toggle-pin">${isPinned ? "Unpin" : "Pin issue"}</button>
@@ -577,7 +579,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
           <div class="issue-document">
             ${body}
           </div>
-          ${issueEditForm(ctx, issue)}
+          ${issueEditForm(ctx, issue, editIssueOpen)}
           ${labelEditForm({
             testId: "issue-label-form",
             action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`),
@@ -2115,9 +2117,9 @@ function pullStateForm(ctx: WebCtx, pull: ForgejoPull): string {
   </form>`;
 }
 
-function issueEditForm(ctx: WebCtx, issue: ForgejoIssue): string {
+function issueEditForm(ctx: WebCtx, issue: ForgejoIssue, open = false): string {
   if (ctx.ws.role === "read") return "";
-  return `<details class="comment-form" data-testid="issue-edit-form">
+  return `<details id="issue-edit-form" class="comment-form" data-testid="issue-edit-form"${open ? " open" : ""}>
     <summary>Edit issue title and description</summary>
     <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}">
       <label>Title <input name="title" value="${escapeAttr(issue.title)}" required></label>

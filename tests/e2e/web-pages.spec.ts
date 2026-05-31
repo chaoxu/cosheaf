@@ -154,6 +154,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   const issuePath = new URL(page.url()).pathname;
   await expect(page.locator(".thread-header")).toContainText(issueTitle);
   await expect(page.locator(".thread-header")).toContainText("#");
+  await expect(page.getByTestId("issue-edit-button")).toBeVisible();
+  await expect(page.getByTestId("issue-edit-form")).not.toHaveAttribute("open", "");
+  await page.getByTestId("issue-edit-button").click();
+  await expect(page).toHaveURL(/edit=1#issue-edit-form$/);
+  await expect(page.getByTestId("issue-edit-form")).toHaveAttribute("open", "");
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   await expect(page.getByTestId("issue-label-form")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
