@@ -57,6 +57,7 @@ import {
   chatTurns,
   isChatIssue,
   renderChatTurn,
+  stripChatMetadata,
 } from "./web-chat.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
@@ -537,12 +538,14 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
     ctx.fj.listPinnedIssues(ctx.owner, ctx.repo).catch(() => []),
   ]);
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  const chatBackedIssue = isChatIssue(issue);
   const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
-  const body = await renderMarkdownSurface(ctx, issue.body ?? "", { surface: "thread" });
+  const body = await renderMarkdownSurface(ctx, chatBackedIssue ? stripChatMetadata(issue.body ?? "") : issue.body ?? "", { surface: "thread" });
   const timelineHtml = await renderIssueTimeline(ctx, issue.number, comments, timeline ?? []);
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const editIssueOpen = c.req.query("edit") === "1";
+  const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
   return htmlResponse(
     repoPage({
       title: `#${issue.number} ${issue.title}`,
@@ -559,9 +562,8 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
             <div class="thread-title-row">
               <h1>${escapeHtml(issue.title)} <span>#${issue.number}</span></h1>
               ${
-                ctx.ws.role === "read"
-                  ? ""
-                  : `<div class="toolbar-actions">
+                canEditIssue
+                  ? `<div class="toolbar-actions">
                       <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`)}?edit=1#issue-edit-form" data-testid="issue-edit-button">Edit issue</a>
                       <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
                         <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
@@ -572,25 +574,31 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
                         <button class="button" type="submit" data-testid="issue-toggle-state">${stateActionLabel}</button>
                       </form>
                     </div>`
+                  : ""
               }
             </div>
             <p>${isPinned ? `<span class="meta-pill">pinned</span> ` : ""}by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
           </header>
+          ${chatBackedIssue ? `<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
           <div class="issue-document">
             ${body}
           </div>
-          ${issueEditForm(ctx, issue, editIssueOpen)}
-          ${labelEditForm({
-            testId: "issue-label-form",
-            action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`),
-            disabled: ctx.ws.role === "read",
-            labels: allLabels,
-            currentLabels: issue.labels,
-          })}
-          ${issueRelationsPanel(ctx, issue, dependencies, blocks)}
+          ${canEditIssue ? issueEditForm(ctx, issue, editIssueOpen) : ""}
+          ${
+            chatBackedIssue
+              ? ""
+              : labelEditForm({
+                  testId: "issue-label-form",
+                  action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`),
+                  disabled: ctx.ws.role === "read",
+                  labels: allLabels,
+                  currentLabels: issue.labels,
+                })
+          }
+          ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}
           ${timelineHtml}
           ${
-            ctx.ws.role === "read"
+            ctx.ws.role === "read" || chatBackedIssue
               ? ""
               : `<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
                    <textarea name="body" placeholder="Leave a comment" required></textarea>
@@ -609,6 +617,8 @@ web.post("/:owner/:repo/issues/:number/edit", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   const form = await c.req.parseBody();
   const title = stringField(form.title);
   const body = textField(form.body);
@@ -630,6 +640,7 @@ web.post("/:owner/:repo/issues/:number/labels", async (c) => {
     ctx.fj.listLabels(ctx.owner, ctx.repo),
     ctx.fj.getIssue(ctx.owner, ctx.repo, number),
   ]);
+  if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
   const validation = validateLabelSelection(labelIds, allLabels, issue.labels);
   if (!validation.ok) return badRequestPage(ctx.user, validation.message);
   await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelIds);
@@ -642,6 +653,10 @@ web.post("/:owner/:repo/issues/:number/comments", async (c) => {
   if (!ctx.ok) return ctx.response;
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
+  if (number) {
+    const immutable = await rejectChatIssueMutation(ctx, number);
+    if (immutable) return immutable;
+  }
   const body = stringField((await c.req.parseBody()).body);
   if (number && body) await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number ?? ""}`));
@@ -655,6 +670,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/edit", async (c) => {
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
   if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
@@ -667,6 +684,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/delete", async (c) => {
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 });
@@ -677,6 +696,8 @@ web.post("/:owner/:repo/issues/:number/pin", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   const pinned = stringField((await c.req.parseBody()).pinned);
   if (pinned === "true") await ctx.fj.pinIssue(ctx.owner, ctx.repo, number);
   else if (pinned === "false") await ctx.fj.unpinIssue(ctx.owner, ctx.repo, number);
@@ -691,6 +712,8 @@ web.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   const form = await c.req.parseBody();
   const index = positiveInt(stringField(form.index) ?? undefined);
   const relation = stringField(form.relation);
@@ -708,6 +731,8 @@ web.post("/:owner/:repo/issues/:number/dependencies/delete", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   const form = await c.req.parseBody();
   const index = positiveInt(stringField(form.index) ?? undefined);
   const relation = stringField(form.relation);
@@ -725,6 +750,8 @@ web.post("/:owner/:repo/issues/:number/state", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   const state = stringField((await c.req.parseBody()).state);
   if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
   await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { state });
@@ -861,7 +888,14 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role)}
           <section class="chat-main">
-            <div class="chat-main-head"><p class="eyebrow">Branch ${escapeHtml(chatBranch)}</p><h1>${escapeHtml(issue.title)}</h1></div>
+            <div class="chat-main-head">
+              <div>
+                <p class="eyebrow">Issue #${issue.number} · workspace-visible chat</p>
+                <h1>${escapeHtml(issue.title)}</h1>
+                <p class="chat-context">Repository snapshot: ${escapeHtml(chatBranch)}</p>
+              </div>
+              <div class="toolbar-actions"><button class="button" type="button" onclick="navigator.clipboard?.writeText(location.href)">Copy link</button></div>
+            </div>
             <div class="chat-thread">
               ${renderedTurns.join("")}
               ${chatReplyPending(turns) ? chatPendingTurn() : ""}
@@ -1286,7 +1320,6 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
                   (f) => `
                     <a class="${f.path === file?.path ? "active" : ""}" href="${prFilesHref(ctx, pull.number, f.path, mode, shape)}">
                       <span>${escapeHtml(f.path)}</span>
-                      <small>+${f.additions} -${f.deletions}</small>
                     </a>
                   `,
                 )
@@ -2119,14 +2152,27 @@ function pullStateForm(ctx: WebCtx, pull: ForgejoPull): string {
 
 function issueEditForm(ctx: WebCtx, issue: ForgejoIssue, open = false): string {
   if (ctx.ws.role === "read") return "";
-  return `<details id="issue-edit-form" class="comment-form" data-testid="issue-edit-form"${open ? " open" : ""}>
-    <summary>Edit issue title and description</summary>
+  return `<details id="issue-edit-form" class="comment-form issue-edit-form" data-testid="issue-edit-form"${open ? " open" : ""}>
+    <summary>Edit issue</summary>
     <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}">
       <label>Title <input name="title" value="${escapeAttr(issue.title)}" required></label>
       <label>Description <textarea name="body">${escapeHtml(issue.body ?? "")}</textarea></label>
       <button class="button primary" type="submit">Save issue</button>
     </form>
   </details>`;
+}
+
+async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<Response | null> {
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
+    if (err instanceof ForgejoError && err.status === 404) return null;
+    throw err;
+  });
+  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : null;
+}
+
+function chatIssueReadOnlyPage(user: string): Response {
+  return badRequestPage(user, "Chat-backed issues are read-only from the issue UI. Continue the transcript from the Chat tab.");
 }
 
 function issueRelationsPanel(
@@ -2286,13 +2332,23 @@ async function renderIssueTimeline(
   comments: readonly ForgejoIssueComment[],
   timeline: readonly ForgejoTimelineEvent[],
 ): Promise<string> {
+  const referenceEvents = timeline.filter((event) => event.type !== "comment" && isReferenceTimelineEvent(event.type));
+  const visibleEvents = timeline.filter((event) => event.type !== "comment" && !isReferenceTimelineEvent(event.type));
   const items: WebTimelineItem[] = [
     ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), number, comment })),
-    ...timeline
-      .filter((event) => event.type !== "comment")
-      .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
+    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
   ].sort(compareTimelineItems);
-  return (await Promise.all(items.map((item) => renderTimelineItem(ctx, item)))).join("");
+  const visibleHtml = (await Promise.all(items.map((item) => renderTimelineItem(ctx, item)))).join("");
+  if (referenceEvents.length === 0) return visibleHtml;
+  const referenceItems = referenceEvents
+    .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event }))
+    .sort(compareTimelineItems);
+  const referenceHtml = (await Promise.all(referenceItems.map((item) => renderTimelineItem(ctx, item)))).join("");
+  return `${visibleHtml}<details class="timeline-collapsed"><summary>References (${referenceEvents.length})</summary>${referenceHtml}</details>`;
+}
+
+function isReferenceTimelineEvent(type: string): boolean {
+  return type === "commit_ref" || type === "issue_ref" || type === "comment_ref" || type === "pull_ref";
 }
 
 async function renderPullTimeline(
@@ -2869,29 +2925,36 @@ function issueFilterForm(
   milestones: readonly ForgejoMilestone[],
 ): string {
   const action = repoHref(owner, repo, "/issues");
-  return `<form class="filter-panel" method="get" action="${action}" data-testid="issue-filters">
-    ${stateField(filters.state)}
-    <label>Label
-      <select name="labels" aria-label="Label filter">
-        <option value="">Any label</option>
-        ${labels.map((label) => `<option value="${escapeAttr(label.name)}"${selected(filters.labels, label.name)}>${escapeHtml(label.name)}</option>`).join("")}
-      </select>
-    </label>
-    <label>Milestone
-      <select name="milestones" aria-label="Milestone filter">
-        <option value="">Any milestone</option>
-        ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
-      </select>
-    </label>
-    <label>Author <input name="created_by" value="${escapeAttr(filters.createdBy)}" placeholder="username" aria-label="Author filter"></label>
-    <label>Assignee <input name="assigned_by" value="${escapeAttr(filters.assignedBy)}" placeholder="username" aria-label="Assignee filter"></label>
-    <label>Mentioned <input name="mentioned_by" value="${escapeAttr(filters.mentionedBy)}" placeholder="username" aria-label="Mentioned filter"></label>
-    <label>Search <input name="q" value="${escapeAttr(filters.q)}" placeholder="title text" aria-label="Search issues"></label>
-    ${sortField(filters.sort, ISSUE_SORT_OPTIONS)}
-    <div class="filter-actions">
-      <button class="button primary" type="submit">Apply filters</button>
-      <a class="button" href="${action}">Reset</a>
+  return `<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters">
+    <div class="filter-basic">
+      ${stateField(filters.state)}
+      <label class="filter-search">Search <input name="q" value="${escapeAttr(filters.q)}" placeholder="title text" aria-label="Search issues"></label>
+      ${sortField(filters.sort, ISSUE_SORT_OPTIONS)}
+      <div class="filter-actions">
+        <button class="button primary" type="submit">Apply</button>
+        <a class="button" href="${action}">Reset</a>
+      </div>
     </div>
+    <details class="filter-advanced">
+      <summary>Advanced filters</summary>
+      <div class="filter-advanced-grid">
+        <label>Label
+          <select name="labels" aria-label="Label filter">
+            <option value="">Any label</option>
+            ${labels.map((label) => `<option value="${escapeAttr(label.name)}"${selected(filters.labels, label.name)}>${escapeHtml(label.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Milestone
+          <select name="milestones" aria-label="Milestone filter">
+            <option value="">Any milestone</option>
+            ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Author <input name="created_by" value="${escapeAttr(filters.createdBy)}" placeholder="username" aria-label="Author filter"></label>
+        <label>Assignee <input name="assigned_by" value="${escapeAttr(filters.assignedBy)}" placeholder="username" aria-label="Assignee filter"></label>
+        <label>Mentioned <input name="mentioned_by" value="${escapeAttr(filters.mentionedBy)}" placeholder="username" aria-label="Mentioned filter"></label>
+      </div>
+    </details>
   </form>`;
 }
 
@@ -2903,26 +2966,33 @@ function pullFilterForm(
   milestones: readonly ForgejoMilestone[],
 ): string {
   const action = repoHref(owner, repo, "/pulls");
-  return `<form class="filter-panel" method="get" action="${action}" data-testid="pull-filters">
-    ${stateField(filters.state)}
-    <label>Label
-      <select name="labels" aria-label="Label filter">
-        <option value="">Any label</option>
-        ${labels.map((label) => `<option value="${label.id}"${selected(filters.labelValue, String(label.id))}>${escapeHtml(label.name)}</option>`).join("")}
-      </select>
-    </label>
-    <label>Milestone
-      <select name="milestone" aria-label="Milestone filter">
-        <option value="">Any milestone</option>
-        ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
-      </select>
-    </label>
-    <label>Author <input name="author" value="${escapeAttr(filters.author)}" placeholder="username" aria-label="Author filter"></label>
-    ${sortField(filters.sort, PULL_SORT_OPTIONS)}
-    <div class="filter-actions">
-      <button class="button primary" type="submit">Apply filters</button>
-      <a class="button" href="${action}">Reset</a>
+  return `<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters">
+    <div class="filter-basic">
+      ${stateField(filters.state)}
+      ${sortField(filters.sort, PULL_SORT_OPTIONS)}
+      <div class="filter-actions">
+        <button class="button primary" type="submit">Apply</button>
+        <a class="button" href="${action}">Reset</a>
+      </div>
     </div>
+    <details class="filter-advanced">
+      <summary>Advanced filters</summary>
+      <div class="filter-advanced-grid">
+        <label>Label
+          <select name="labels" aria-label="Label filter">
+            <option value="">Any label</option>
+            ${labels.map((label) => `<option value="${label.id}"${selected(filters.labelValue, String(label.id))}>${escapeHtml(label.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Milestone
+          <select name="milestone" aria-label="Milestone filter">
+            <option value="">Any milestone</option>
+            ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Author <input name="author" value="${escapeAttr(filters.author)}" placeholder="username" aria-label="Author filter"></label>
+      </div>
+    </details>
   </form>`;
 }
 
@@ -2970,29 +3040,36 @@ function fileList(owner: string, repo: string, branch: string, files: ForgejoTre
 
 function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues."): string {
   return `<div class="list">${issues
-    .map((issue) => `<a class="list-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}">
-      <strong>#${issue.number} ${escapeHtml(issue.title)}</strong>
-      <span class="list-meta">
-        ${escapeHtml(displayLogin(owner, issue.user?.login))} - ${formatDate(issue.created_at)}
-        ${issue.milestone ? `<span class="meta-pill">${escapeHtml(issue.milestone.title)}</span>` : ""}
-        ${labelChips(issue.labels)}
+    .map((issue) => `<a class="list-row issue-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}">
+      <span class="list-row-main">
+        <span class="list-row-title"><span class="state ${issue.state}">${escapeHtml(issue.state)}</span><strong>${escapeHtml(issue.title)}</strong><span class="muted">#${issue.number}</span></span>
+        <span class="list-meta">
+          ${escapeHtml(displayLogin(owner, issue.user?.login))} opened ${formatDate(issue.created_at)}
+          ${issue.milestone ? `<span class="meta-pill">${escapeHtml(issue.milestone.title)}</span>` : ""}
+          ${labelChips(issue.labels)}
+        </span>
       </span>
-      <small>${escapeHtml(issue.state)}</small>
+      <small>${issue.comments ? `${issue.comments} comments` : "No comments"}</small>
     </a>`)
     .join("") || `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>`;
 }
 
 function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests."): string {
   return `<div class="list">${pulls
-    .map((pull) => `<a class="list-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
-      <strong>#${pull.number} ${escapeHtml(pull.title)}</strong>
-      <span class="list-meta">
-        ${escapeHtml(pull.head.ref)} -&gt; ${escapeHtml(pull.base.ref)}
-        ${pull.milestone ? `<span class="meta-pill">${escapeHtml(pull.milestone.title)}</span>` : ""}
-        ${labelChips(pull.labels ?? [])}
+    .map((pull) => {
+      const state = pull.merged ? "merged" : pull.state;
+      return `<a class="list-row pull-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
+      <span class="list-row-main">
+        <span class="list-row-title"><span class="state ${state}">${escapeHtml(state)}</span><strong>${escapeHtml(pull.title)}</strong><span class="muted">#${pull.number}</span></span>
+        <span class="list-meta">
+          ${escapeHtml(pull.head.ref)} -&gt; ${escapeHtml(pull.base.ref)}
+          ${pull.milestone ? `<span class="meta-pill">${escapeHtml(pull.milestone.title)}</span>` : ""}
+          ${labelChips(pull.labels ?? [])}
+        </span>
       </span>
-      <small>${pull.merged ? "merged" : escapeHtml(pull.state)}</small>
-    </a>`)
+      <small>updated ${formatDate(pull.updated_at)}</small>
+    </a>`;
+    })
     .join("") || `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>`;
 }
 
@@ -3053,6 +3130,9 @@ function renderActivity(ctx: WebCtx, item: ActivityFeedItem): { summary: string 
     case "comment_pull":
       if (pr) return { summary: `commented on ${activityPullHtml(ctx, pr.number)}` };
       return { summary: "commented on a pull request" };
+    case "create_issue":
+      if (issue) return { summary: `opened ${activityIssueHtml(ctx, issue)}` };
+      return { summary: "opened an issue" };
     case "close_issue":
       if (issue) return { summary: `closed ${activityIssueHtml(ctx, issue)}` };
       return { summary: "closed an issue" };

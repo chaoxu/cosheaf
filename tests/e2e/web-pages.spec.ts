@@ -140,11 +140,12 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-body")).not.toContainText(owner);
   await expect(page.getByTestId("issue-filters")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("State filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByLabel("Search issues")).toBeVisible();
+  await page.getByTestId("issue-filters").locator("summary").click();
   await expect(page.getByTestId("issue-filters").getByLabel("Label filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Milestone filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Author filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Assignee filter")).toBeVisible();
-  await expect(page.getByTestId("issue-filters").getByLabel("Search issues")).toBeVisible();
   await page.getByRole("link", { name: "New issue" }).click();
   await expect(page.getByTestId("issue-create-form")).toBeVisible();
   const issueTitle = `Web issue ${Date.now()}`;
@@ -200,6 +201,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.goto(`${repoBase}/pulls`);
   await expect(page.getByTestId("pull-filters")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("State filter")).toBeVisible();
+  await page.getByTestId("pull-filters").locator("summary").click();
   await expect(page.getByTestId("pull-filters").getByLabel("Label filter")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Milestone filter")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
