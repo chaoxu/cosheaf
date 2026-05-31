@@ -128,7 +128,24 @@ function currentRepoPrefix(): string | null {
   return `/${urlPath(parts[0])}`;
 }
 
-for (const root of document.querySelectorAll<HTMLElement>(".coflat-reader-island")) {
-  void renderIsland(root);
+function hydrateIslandsIn(scope: ParentNode): void {
+  for (const root of scope.querySelectorAll<HTMLElement>(".coflat-reader-island")) void renderIsland(root);
 }
+
+hydrateIslandsIn(document);
+
+// Islands inserted after initial load — e.g. the chat thread swapping in new
+// turns on a live update — must hydrate too, so watch for them rather than
+// scanning only once. renderIsland is a no-op on an already-hydrated island
+// (its JSON payload script is gone), so re-notification is harmless.
+new MutationObserver((mutations) => {
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.matches(".coflat-reader-island")) void renderIsland(node);
+      hydrateIslandsIn(node);
+    }
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
 installRefNavigation();
