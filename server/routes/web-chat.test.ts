@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ForgejoIssue, ForgejoIssueComment } from "../forgejo-types.js";
-import { chatReplyPending, chatTitleFrom, chatTurns, renderChatTurn } from "./web-chat.js";
+import { chatLiveScript, chatReplyPending, chatTitleFrom, chatTurns, renderChatTurn } from "./web-chat.js";
 
 const BOT = "coverify";
 
@@ -78,6 +78,15 @@ describe("renderChatTurn", () => {
     const html = renderChatTurn(turns[1], "<p>ok</p>");
     expect(html).toContain("chat-turn--assistant");
     expect(html).toContain(">Coverify<");
+  });
+});
+
+describe("chatLiveScript", () => {
+  it("subscribes to the workspace events stream and reloads on this issue's event", () => {
+    const s = chatLiveScript("flushing-coin", 7);
+    expect(s).toContain('new EventSource("/api/v1/w/flushing-coin/events")');
+    expect(s).toContain('d.type==="issue"&&d.number===7');
+    expect(s).toContain("location.reload()");
   });
 });
 

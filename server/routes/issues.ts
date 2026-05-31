@@ -277,6 +277,7 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
   if (!text.trim()) return c.json(...bad("comment body required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const comment = await fj.createIssueComment(owner, repo, number, text);
+  c.get("sse").publish(c.get("workspace").slug, { type: "issue", number, action: "commented" });
   return c.json(toIssueComment(comment), 201);
 });
 

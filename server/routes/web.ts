@@ -48,6 +48,7 @@ import { escapeAttr, escapeHtml } from "./html-escape.js";
 import { validateLabelSelection } from "./label-utils.js";
 import {
   CHAT_LABEL,
+  chatLiveScript,
   chatPendingTurn,
   chatReplyPending,
   chatTitleFrom,
@@ -822,7 +823,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
         <div class="page-title compact"><div><h1>${escapeHtml(issue.title)}</h1></div></div>
         <div class="chat-thread">
           ${renderedTurns.join("")}
-          ${chatReplyPending(turns) ? chatPendingTurn() : ""}
+          ${chatReplyPending(turns) ? chatPendingTurn() + chatLiveScript(ctx.repo, number) : ""}
         </div>
         ${
           ctx.ws.role === "read"
@@ -850,6 +851,7 @@ web.post("/:owner/:repo/chat/:number/send", async (c) => {
   const message = stringField((await c.req.parseBody()).message);
   if (message) {
     await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, message);
+    c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "commented" });
     runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: number });
   }
   return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${number}`));

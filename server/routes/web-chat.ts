@@ -53,11 +53,18 @@ export function chatTitleFrom(message: string): string {
 }
 
 // The "thinking…" placeholder turn shown while coverify still owes a reply.
-// Static — no auto-reload; a full-page poll is janky and would loop forever
-// when no reply is coming. Live updates should ride the SSE hub instead.
 export function chatPendingTurn(): string {
   return `<div class="chat-turn chat-turn--assistant chat-pending">
       <div class="chat-role">Coverify</div>
       <div class="chat-bubble">thinking…</div>
     </div>`;
+}
+
+// Subscribe to the workspace SSE stream (cookie-authed, same origin) and refresh
+// once when THIS issue gets an event — i.e. when coverify posts its reply. This
+// is event-driven, not a timer: it fires when content actually changes, then
+// stops. Rendered only while a reply is pending.
+export function chatLiveScript(slug: string, issue: number): string {
+  const url = `/api/v1/w/${encodeURIComponent(slug)}/events`;
+  return `<script>(function(){try{var es=new EventSource(${JSON.stringify(url)});es.onmessage=function(ev){try{var d=JSON.parse(ev.data);if(d&&d.type==="issue"&&d.number===${issue}){es.close();location.reload();}}catch(e){}};window.addEventListener("pagehide",function(){es.close();});}catch(e){}})();</script>`;
 }
