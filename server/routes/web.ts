@@ -738,21 +738,34 @@ async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promis
   return created.id;
 }
 
+// chatgpt-style sessions sidebar: a "New chat" entry plus one row per chat,
+// with the active one highlighted. Shared by the list and thread views.
+function listChats(ctx: WebCtx) {
+  return ctx.fj
+    .listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 })
+    .then((issues) => issues.filter(isChatIssue))
+    .catch(() => [] as ForgejoIssue[]);
+}
+
+function chatSidebar(owner: string, repo: string, chats: ForgejoIssue[], active: number | null, role: string): string {
+  const newChat =
+    role === "read"
+      ? ""
+      : `<a class="chat-new-link${active === null ? " active" : ""}" href="${repoHref(owner, repo, "/chat")}">+ New chat</a>`;
+  const sessions =
+    chats
+      .map(
+        (chat) =>
+          `<a class="chat-session${chat.number === active ? " active" : ""}" href="${repoHref(owner, repo, `/chat/${chat.number}`)}" title="${escapeAttr(chat.title)}">${escapeHtml(chat.title)}</a>`,
+      )
+      .join("") || `<div class="chat-sessions-empty">No chats yet</div>`;
+  return `<aside class="chat-sidebar">${newChat}<nav class="chat-sessions">${sessions}</nav></aside>`;
+}
+
 web.get("/:owner/:repo/chat", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const chats = (await ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 })).filter(
-    isChatIssue,
-  );
-  const rows =
-    chats
-      .map(
-        (chat) => `<a class="list-row" href="${repoHref(ctx.owner, ctx.repo, `/chat/${chat.number}`)}">
-        <strong>${escapeHtml(chat.title)}</strong>
-        <span class="list-meta">${escapeHtml(displayLogin(ctx.owner, chat.user?.login))} - ${formatDate(chat.created_at)}</span>
-      </a>`,
-      )
-      .join("") || `<div class="empty">No chats yet.</div>`;
+  const chats = await listChats(ctx);
   return htmlResponse(
     repoPage({
       title: `Chat - ${ctx.repo}`,
@@ -762,17 +775,21 @@ web.get("/:owner/:repo/chat", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       body: `
-        <div class="page-title compact"><div><h1>Chat</h1></div></div>
-        <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
-        ${
-          ctx.ws.role === "read"
-            ? ""
-            : `<form class="chat-new" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
-                 <textarea name="message" placeholder="Start a chat with Coverify" required></textarea>
-                 <button class="button primary" type="submit">New chat</button>
-               </form>`
-        }
-        <div class="list">${rows}</div>
+        <div class="chat-app">
+          ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role)}
+          <section class="chat-main">
+            <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
+            ${
+              ctx.ws.role === "read"
+                ? `<div class="chat-blank">Read-only access — you can't start chats here.</div>`
+                : `<div class="chat-blank">Start a new chat with Coverify, or pick a session on the left.</div>
+                   <form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
+                     <textarea name="message" placeholder="Start a chat with Coverify" required></textarea>
+                     <button class="button primary" type="submit">Send</button>
+                   </form>`
+            }
+          </section>
+        </div>
       `,
     }),
   );
@@ -800,12 +817,13 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
   if (!ctx.ok) return ctx.response;
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
-  const [issue, comments] = await Promise.all([
+  const [issue, comments, chats] = await Promise.all([
     ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
       if (err instanceof ForgejoError && err.status === 404) return null;
       throw err;
     }),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
+    listChats(ctx),
   ]);
   if (!issue || issue.pull_request || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
@@ -824,21 +842,25 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
       ws: ctx.ws,
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
-        <div class="page-title compact"><div><h1>${escapeHtml(issue.title)}</h1></div></div>
-        <p class="chat-notice">Everyone with access to this workspace can see this chat — it's not private.</p>
-        <div class="chat-thread">
-          ${renderedTurns.join("")}
-          ${chatReplyPending(turns) ? chatPendingTurn() : ""}
+        <div class="chat-app">
+          ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role)}
+          <section class="chat-main">
+            <div class="chat-main-head"><h1>${escapeHtml(issue.title)}</h1></div>
+            <div class="chat-thread">
+              ${renderedTurns.join("")}
+              ${chatReplyPending(turns) ? chatPendingTurn() : ""}
+            </div>
+            ${chatReplyPending(turns) ? chatLiveScript(ctx.repo, number) : ""}
+            ${
+              ctx.ws.role === "read"
+                ? ""
+                : `<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
+                     <textarea name="message" placeholder="Message Coverify" required></textarea>
+                     <button class="button primary" type="submit">Send</button>
+                   </form>`
+            }
+          </section>
         </div>
-        ${chatReplyPending(turns) ? chatLiveScript(ctx.repo, number) : ""}
-        ${
-          ctx.ws.role === "read"
-            ? ""
-            : `<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
-                 <textarea name="message" placeholder="Message Coverify" required></textarea>
-                 <button class="button primary" type="submit">Send</button>
-               </form>`
-        }
       `,
     }),
   );
