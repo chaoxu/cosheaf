@@ -449,7 +449,7 @@ web.get("/:owner/:repo/issues", async (c) => {
           ${ctx.ws.role === "read" ? "" : `<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
-        ${issueList(ctx.owner, ctx.repo, issues, "No matching issues.")}
+        ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !issue.labels.some((label) => label.name === CHAT_LABEL)), "No matching issues.")}
       `,
     }),
   );
@@ -752,19 +752,20 @@ web.get("/:owner/:repo/chat", async (c) => {
       .join("") || `<div class="empty">No chats yet.</div>`;
   return htmlResponse(
     repoPage({
-      title: `Chat - ${ctx.repo}`,
+      title: `Public chat - ${ctx.repo}`,
       owner: ctx.owner,
       repo: ctx.repo,
       active: "chat",
       user: ctx.user,
       ws: ctx.ws,
       body: `
-        <div class="page-title compact"><div><h1>Chat</h1></div></div>
+        <div class="page-title compact"><div><h1>Public chat</h1></div></div>
+        <p class="muted">Public to everyone with access to this workspace — chats are not private.</p>
         ${
           ctx.ws.role === "read"
             ? ""
             : `<form class="chat-new" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
-                 <textarea name="message" placeholder="Start a new chat with Coverify" required></textarea>
+                 <textarea name="message" placeholder="Start a public chat with Coverify" required></textarea>
                  <button class="button primary" type="submit">New chat</button>
                </form>`
         }
@@ -812,7 +813,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
   );
   return htmlResponse(
     repoPage({
-      title: `${issue.title} - Chat`,
+      title: `${issue.title} - Public chat`,
       owner: ctx.owner,
       repo: ctx.repo,
       active: "chat",
@@ -821,6 +822,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <div class="page-title compact"><div><h1>${escapeHtml(issue.title)}</h1></div></div>
+        <p class="muted">Public to everyone with access to this workspace — chats are not private.</p>
         <div class="chat-thread">
           ${renderedTurns.join("")}
           ${chatReplyPending(turns) ? chatPendingTurn() + chatLiveScript(ctx.repo, number) : ""}
@@ -2440,7 +2442,7 @@ function repoPage(opts: {
           ${tab(opts, "files", "Files", "")}
           ${tab(opts, "issues", "Issues", "/issues")}
           ${tab(opts, "pulls", "Pull Requests", "/pulls")}
-          ${tab(opts, "chat", "Chat", "/chat")}
+          ${tab(opts, "chat", "Public Chat", "/chat")}
           ${tab(opts, "notifications", "Notifications", "/notifications")}
           ${tab(opts, "activity", "Activity", "/activity")}
           ${tab(opts, "settings", "Settings", "/settings")}
