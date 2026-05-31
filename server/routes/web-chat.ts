@@ -52,12 +52,12 @@ export function chatTitleFrom(message: string): string {
   return firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
 }
 
-// The "thinking…" placeholder turn shown while coverify works, plus a tiny
-// auto-reload so the reply appears without a manual refresh.
+// The "thinking…" placeholder turn shown while coverify still owes a reply.
+// Static — no auto-reload; a full-page poll is janky and would loop forever
+// when no reply is coming. Live updates should ride the SSE hub instead.
 export function chatPendingTurn(): string {
   return `<div class="chat-turn chat-turn--assistant chat-pending">
       <div class="chat-role">Coverify</div>
       <div class="chat-bubble">thinking…</div>
-    </div>
-    <script>setTimeout(function(){location.reload();},4000);</script>`;
+    </div>`;
 }

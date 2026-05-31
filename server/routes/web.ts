@@ -802,7 +802,9 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
     }),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
   ]);
-  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Chat not found");
+  if (!issue || issue.pull_request || !issue.labels.some((label) => label.name === CHAT_LABEL)) {
+    return notFoundPage(ctx.user, "Chat not found");
+  }
   const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
   const renderedTurns = await Promise.all(
     turns.map(async (turn) => renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" }))),
@@ -841,6 +843,10 @@ web.post("/:owner/:repo/chat/:number/send", async (c) => {
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
+  if (!issue || !issue.labels.some((label) => label.name === CHAT_LABEL)) {
+    return notFoundPage(ctx.user, "Chat not found");
+  }
   const message = stringField((await c.req.parseBody()).message);
   if (message) {
     await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, message);
