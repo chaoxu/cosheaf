@@ -765,7 +765,7 @@ web.get("/:owner/:repo/chat", async (c) => {
           ctx.ws.role === "read"
             ? ""
             : `<form class="chat-new" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
-                 <textarea name="message" placeholder="Start a public chat with Coverify" required></textarea>
+                 <textarea name="message" placeholder="Start a chat with Coverify" required></textarea>
                  <button class="button primary" type="submit">New chat</button>
                </form>`
         }
