@@ -7,7 +7,7 @@ const program = new Command("api-smoke")
   .option("--workspace <slug>", "workspace slug", process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin")
   .option("--admin-user <name>", "admin username", process.env.COSHEAF_SMOKE_USER ?? "chao")
   .option("--admin-password <password>", "admin password", process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!")
-  .option("--reviewer-user <name>", "reviewer username", process.env.COSHEAF_REVIEWER_USER ?? "vera")
+  .option("--reviewer-user <name>", "reviewer username", process.env.COSHEAF_REVIEWER_USER ?? "test-vera")
   .option("--reviewer-password <password>", "reviewer password", process.env.COSHEAF_REVIEWER_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!")
   .option("--keep-open", "leave the PR open instead of merging it", false)
   .parse(process.argv);

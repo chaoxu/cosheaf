@@ -143,7 +143,7 @@ describe("pulls + branches routes", () => {
     fetchMock.mockResolvedValueOnce(ok([]));
 
     const res = await appFor(db).request(
-      "/api/v1/w/w/pulls?state=all&labels=4&milestone=2&author=meri&sort=oldest",
+      "/api/v1/w/w/pulls?state=all&labels=4&milestone=2&author=test-meri&sort=oldest",
       { headers: { authorization: `Bearer ${token}` } },
     );
 
@@ -152,7 +152,7 @@ describe("pulls + branches routes", () => {
     expect(url.searchParams.get("state")).toBe("all");
     expect(url.searchParams.get("labels")).toBe("4");
     expect(url.searchParams.get("milestone")).toBe("2");
-    expect(url.searchParams.get("poster")).toBe("meri");
+    expect(url.searchParams.get("poster")).toBe("test-meri");
     expect(url.searchParams.get("sort")).toBe("oldest");
   });
 
@@ -373,7 +373,7 @@ describe("pulls + branches routes", () => {
     it("POST /pulls/:n/reviews rejects a read user with 403", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "bob", "read");
+      const token = seedUser(db, 1, "test-bob", "read");
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -385,7 +385,7 @@ describe("pulls + branches routes", () => {
     it("POST /pulls/:n/close rejects a read user with 403", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "bob", "read");
+      const token = seedUser(db, 1, "test-bob", "read");
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/close", {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
@@ -396,7 +396,7 @@ describe("pulls + branches routes", () => {
     it("POST /pulls/:n/comments rejects a read user with 403", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "bob", "read");
+      const token = seedUser(db, 1, "test-bob", "read");
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -437,11 +437,11 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       fetchMock
         .mockResolvedValueOnce(ok(pull({
-          requested_reviewers: [{ login: "vera" }],
+          requested_reviewers: [{ login: "test-vera" }],
           requested_reviewers_teams: [{ name: "analysis" }],
           user: { login: "alice" },
         })))
-        .mockResolvedValueOnce(ok([{ login: "alice" }, { login: "vera" }, { login: "meri" }]));
+        .mockResolvedValueOnce(ok([{ login: "alice" }, { login: "test-vera" }, { login: "test-meri" }]));
 
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
         headers: { authorization: `Bearer ${token}` },
@@ -449,9 +449,9 @@ describe("pulls + branches routes", () => {
 
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toEqual({
-        requested_reviewers: ["vera"],
+        requested_reviewers: ["test-vera"],
         requested_reviewer_teams: ["analysis"],
-        available_reviewers: ["vera", "meri"],
+        available_reviewers: ["test-vera", "test-meri"],
       });
     });
 
@@ -461,20 +461,20 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       fetchMock
         .mockResolvedValueOnce(ok([]))
-        .mockResolvedValueOnce(ok(pull({ requested_reviewers: [{ login: "vera" }] })));
+        .mockResolvedValueOnce(ok(pull({ requested_reviewers: [{ login: "test-vera" }] })));
 
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ reviewers: ["vera", "vera", "  "] }),
+        body: JSON.stringify({ reviewers: ["test-vera", "test-vera", "  "] }),
       });
 
       expect(res.status).toBe(201);
       expect(String(fetchMock.mock.calls[0][0])).toBe(
         "http://forgejo.test/api/v1/repos/owner/w/pulls/7/requested_reviewers",
       );
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reviewers: ["vera"] });
-      await expect(res.json()).resolves.toMatchObject({ pull: { requested_reviewers: ["vera"] } });
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reviewers: ["test-vera"] });
+      await expect(res.json()).resolves.toMatchObject({ pull: { requested_reviewers: ["test-vera"] } });
     });
 
     it("DELETE /pulls/:n/review-requests cancels reviewers through Forgejo", async () => {
@@ -488,12 +488,12 @@ describe("pulls + branches routes", () => {
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
         method: "DELETE",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ reviewers: ["vera"] }),
+        body: JSON.stringify({ reviewers: ["test-vera"] }),
       });
 
       expect(res.status).toBe(200);
       expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reviewers: ["vera"] });
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ reviewers: ["test-vera"] });
     });
   });
 
@@ -595,7 +595,7 @@ describe("pulls + branches routes", () => {
               name: "feature/passthrough",
               commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z", author: { username: "alice" } },
             },
-            { name: "user/bob/wip-9", commit: { id: "b9", author: { username: "bob" } } },
+            { name: "user/test-bob/wip-9", commit: { id: "b9", author: { username: "test-bob" } } },
           ]),
         )
         // listPulls "open"
@@ -606,7 +606,7 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { branches: Array<{ name: string }> };
       // wip-1 excluded (open PR by alice), feature/passthrough kept (alice
-      // authored, no PR), bob excluded (different author), main excluded
+      // authored, no PR), test-bob excluded (different author), main excluded
       // (also has no open-PR check but does have an unrelated commit shape).
       expect(body.branches.map((b) => b.name).sort()).toEqual(
         ["feature/passthrough", "main"].sort(),
@@ -671,20 +671,20 @@ describe("pulls + branches routes", () => {
       fetchMock
         .mockResolvedValueOnce(
           ok([
-            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
-            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:01:00Z" },
-            { id: 3, state: "APPROVED", body: "", user: { login: "meri" }, submitted_at: "2026-05-16T00:02:00Z" },
-            { id: 4, state: "COMMENT", body: "q", user: { login: "bob" }, submitted_at: "2026-05-16T00:03:00Z" },
+            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "test-vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "test-vera" }, submitted_at: "2026-05-16T00:01:00Z" },
+            { id: 3, state: "APPROVED", body: "", user: { login: "test-meri" }, submitted_at: "2026-05-16T00:02:00Z" },
+            { id: 4, state: "COMMENT", body: "q", user: { login: "test-bob" }, submitted_at: "2026-05-16T00:03:00Z" },
           ]),
         )
         // approvalCounts uses listReviews — same data. Reused under the hood;
         // implementation calls it twice (once for output, once for counts).
         .mockResolvedValueOnce(
           ok([
-            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
-            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:01:00Z" },
-            { id: 3, state: "APPROVED", body: "", user: { login: "meri" }, submitted_at: "2026-05-16T00:02:00Z" },
-            { id: 4, state: "COMMENT", body: "q", user: { login: "bob" }, submitted_at: "2026-05-16T00:03:00Z" },
+            { id: 1, state: "REQUEST_CHANGES", body: "", user: { login: "test-vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+            { id: 2, state: "APPROVED", body: "lgtm", user: { login: "test-vera" }, submitted_at: "2026-05-16T00:01:00Z" },
+            { id: 3, state: "APPROVED", body: "", user: { login: "test-meri" }, submitted_at: "2026-05-16T00:02:00Z" },
+            { id: 4, state: "COMMENT", body: "q", user: { login: "test-bob" }, submitted_at: "2026-05-16T00:03:00Z" },
           ]),
         );
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
@@ -699,7 +699,7 @@ describe("pulls + branches routes", () => {
       expect(body.approvals).toBe(2);
       expect(body.rejections).toBe(0);
       expect(body.reviews.map((r) => r.id)).toEqual([1, 2, 3, 4]);
-      expect(body.reviews.find((r) => r.username === "bob")?.decision).toBe("comment");
+      expect(body.reviews.find((r) => r.username === "test-bob")?.decision).toBe("comment");
     });
 
     it("DISMISSED invalidates an earlier APPROVED from the same user (#56)", async () => {
@@ -707,8 +707,8 @@ describe("pulls + branches routes", () => {
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
       const reviews = [
-        { id: 1, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
-        { id: 2, state: "DISMISSED", body: "", user: { login: "vera" }, submitted_at: "2026-05-16T00:01:00Z" },
+        { id: 1, state: "APPROVED", body: "lgtm", user: { login: "test-vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+        { id: 2, state: "DISMISSED", body: "", user: { login: "test-vera" }, submitted_at: "2026-05-16T00:01:00Z" },
       ];
       fetchMock
         .mockResolvedValueOnce(ok(reviews))
@@ -749,7 +749,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(new Response("not found", { status: 404 })) // aggregate comments endpoint absent
         .mockResolvedValueOnce(ok([])) // files
         .mockResolvedValueOnce(new Response("", { status: 200 })) // diff
-        .mockResolvedValueOnce(ok([{ id: 11, state: "COMMENT", body: "", user: { login: "bob" } }])) // reviews
+        .mockResolvedValueOnce(ok([{ id: 11, state: "COMMENT", body: "", user: { login: "test-bob" } }])) // reviews
         .mockResolvedValueOnce(new Response("forgejo down", { status: 503 })); // per-review comments
 
       const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {

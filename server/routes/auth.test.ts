@@ -98,7 +98,7 @@ describe("POST /api/v1/login", () => {
   it("401 from Forgejo → bad credentials, no cookie", async () => {
     const db = freshDb();
     fetchMock.mockResolvedValueOnce(failure(401, { message: "bad" }));
-    const res = await login(db, "bob", "wrong");
+    const res = await login(db, "test-bob", "wrong");
     expect(res.status).toBe(401);
     expect(((await res.json()) as { code: string }).code).toBe("unauthorized");
     expect(res.headers.get("set-cookie")).toBeNull();

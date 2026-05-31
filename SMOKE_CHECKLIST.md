@@ -47,11 +47,11 @@ with `default_md_format = forgejo-passthrough` via the settings panel.
 - [ ] On a `user/<me>/wip-…` branch with at least one save, click
       **Open pull request**. The PR is created and the browser lands on
       `/flushing-coin/pulls/:number`.
-- [ ] As a second user (`vera` / write role), open `/flushing-coin/pulls/:number`
+- [ ] As a second user (`test-vera` / write role), open `/flushing-coin/pulls/:number`
       and submit **Request changes** with a comment.
 - [ ] Back as the author: edit + Save on the same head branch. Refresh the PR
       conversation and files pages; the new commits and diffs appear.
-- [ ] Approve as `vera`. Merge as `chao` from the server-rendered PR page
+- [ ] Approve as `test-vera`. Merge as `chao` from the server-rendered PR page
       (admin gate runs requireAdminFresh).
 - [ ] Close an unmerged PR through the typed API if the web close form is not
       present yet.
@@ -89,8 +89,8 @@ with `default_md_format = forgejo-passthrough` via the settings panel.
       it in sync; drift-check is clean again.
 
 ## 11. Read-only role
-- [ ] Set a third user (`bob`) to `read` role via `/flushing-coin/settings`
-      access controls or Forgejo collaborators. Sign in as bob.
+- [ ] Set a third user (`test-bob`) to `read` role via `/flushing-coin/settings`
+      access controls or Forgejo collaborators. Sign in as test-bob.
 - [ ] New/edit/save/merge affordances are hidden or forbidden. Reading files,
       issues, pull requests, and activity still works.
 

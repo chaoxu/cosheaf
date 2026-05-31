@@ -236,7 +236,7 @@ describe("issues routes", () => {
     fetchMock.mockImplementation(async () => ok([]));
 
     const res = await appFor(db).request(
-      "/api/v1/w/w/issues?state=all&labels=bug&milestones=2&created_by=meri&assigned_by=vera&q=refactor&sort=oldest",
+      "/api/v1/w/w/issues?state=all&labels=bug&milestones=2&created_by=test-meri&assigned_by=test-vera&q=refactor&sort=oldest",
       { headers: { authorization: `Bearer ${token}` } },
     );
 
@@ -245,8 +245,8 @@ describe("issues routes", () => {
     expect(url.searchParams.get("state")).toBe("all");
     expect(url.searchParams.get("labels")).toBe("bug");
     expect(url.searchParams.get("milestones")).toBe("2");
-    expect(url.searchParams.get("created_by")).toBe("meri");
-    expect(url.searchParams.get("assigned_by")).toBe("vera");
+    expect(url.searchParams.get("created_by")).toBe("test-meri");
+    expect(url.searchParams.get("assigned_by")).toBe("test-vera");
     expect(url.searchParams.get("q")).toBe("refactor");
     expect(url.searchParams.get("sort")).toBe("oldest");
   });

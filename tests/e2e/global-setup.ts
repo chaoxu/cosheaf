@@ -26,9 +26,9 @@ async function loginForPat(username: string, password: string): Promise<string> 
 }
 
 async function seedReviewablePr(): Promise<void> {
-  const meriPat = await loginForPat("meri", "Cosheaf123!");
+  const meriPat = await loginForPat("test-meri", "Cosheaf123!");
 
-  const branch = "user/meri/e2e-demo";
+  const branch = "user/test-meri/e2e-demo";
 
   for (const file of [
     { path: "demo.md", content: "# Pythagoras\n\nIn a right triangle, a^2 + b^2 = c^2.\n\nProof: similar triangles.\n" },
@@ -53,7 +53,7 @@ async function seedReviewablePr(): Promise<void> {
   if (!opened.ok) throw new Error(`seedReviewablePr openPull: ${opened.status}`);
   const { number: prNumber } = (await opened.json()) as { number: number };
 
-  const veraPat = await loginForPat("vera", "Cosheaf123!");
+  const veraPat = await loginForPat("test-vera", "Cosheaf123!");
   for (const comment of [
     { path: "demo.md", line: 5, body: "Should we cite Euclid's Elements I.47?" },
     { path: "demo2.md", line: 3, body: "This companion note needs a source." },

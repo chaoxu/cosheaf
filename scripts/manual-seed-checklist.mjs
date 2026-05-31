@@ -24,9 +24,9 @@ if (process.argv.includes("--json")) {
         forgejoUrl: "http://127.0.0.1:3002",
         users: [
           { username: "chao", password: "Cosheaf123!", role: "admin", workspaces: ["flushing-coin", "passthrough-demo"] },
-          { username: "vera", password: "Cosheaf123!", role: "write", workspaces: ["flushing-coin", "passthrough-demo"] },
-          { username: "meri", password: "Cosheaf123!", role: "write", workspaces: ["flushing-coin", "passthrough-demo"] },
-          { username: "bob", password: "Cosheaf123!", role: "read", workspaces: ["flushing-coin", "passthrough-demo"] },
+          { username: "test-vera", password: "Cosheaf123!", role: "write", workspaces: ["flushing-coin", "passthrough-demo"] },
+          { username: "test-meri", password: "Cosheaf123!", role: "write", workspaces: ["flushing-coin", "passthrough-demo"] },
+          { username: "test-bob", password: "Cosheaf123!", role: "read", workspaces: ["flushing-coin", "passthrough-demo"] },
         ],
         workspaces: [
           { slug: "flushing-coin", format: "coflat" },
@@ -53,9 +53,9 @@ console.log(`
   Users (all password: Cosheaf123!):
 
     chao   admin  on both workspaces
-    vera   write  on both workspaces
-    meri   write  on both workspaces
-    bob    read   on both workspaces
+    test-vera   write  on both workspaces
+    test-meri   write  on both workspaces
+    test-bob    read   on both workspaces
 
   Workspaces:
 

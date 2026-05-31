@@ -271,7 +271,7 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
       if (url.endsWith("/api/v1/repos/owner/w/collaborators/chao/permission") && method === "GET") {
         return responseOk({ permission: "admin" });
       }
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/vera") && method === "PUT") {
+      if (url.endsWith("/api/v1/repos/owner/w/collaborators/test-vera") && method === "PUT") {
         return responseEmpty(204);
       }
       if (url.endsWith("/api/v1/repos/owner/w/branch_protections/main") && method === "GET") {
@@ -280,16 +280,16 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
       return responseOk({});
     });
 
-    const res = await app.request("/api/v1/workspaces/w/members/vera", {
+    const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ role: "write" }),
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, username: "vera", role: "write" });
+    expect(await res.json()).toEqual({ ok: true, username: "test-vera", role: "write" });
     expect(calls).toContainEqual({
-      url: "http://forgejo.test/api/v1/repos/owner/w/collaborators/vera",
+      url: "http://forgejo.test/api/v1/repos/owner/w/collaborators/test-vera",
       method: "PUT",
       body: { permission: "write" },
     });
@@ -309,7 +309,7 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
       if (url.endsWith("/api/v1/repos/owner/w/collaborators/chao/permission") && method === "GET") {
         return responseOk({ permission: "admin" });
       }
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/vera") && method === "PUT") {
+      if (url.endsWith("/api/v1/repos/owner/w/collaborators/test-vera") && method === "PUT") {
         return responseEmpty(204);
       }
       if (url.endsWith("/api/v1/repos/owner/w/branch_protections/main") && method === "GET") {
@@ -322,7 +322,7 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
       return responseOk({});
     });
 
-    const res = await app.request("/api/v1/workspaces/w/members/vera", {
+    const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ role: "admin" }),
@@ -332,7 +332,7 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
     expect(whitelistPatch).toEqual({
       enable_push: true,
       enable_push_whitelist: true,
-      push_whitelist_usernames: ["chao", "vera"],
+      push_whitelist_usernames: ["chao", "test-vera"],
     });
   });
 
@@ -349,7 +349,7 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
       return responseOk({});
     });
 
-    const res = await app.request("/api/v1/workspaces/w/members/vera", {
+    const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ role: "write" }),
@@ -365,7 +365,7 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
 
     fetchMock.mockResolvedValueOnce(responseOk({ permission: "admin" }));
 
-    const res = await app.request("/api/v1/workspaces/w/members/vera", {
+    const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ role: "maintainer" }),
