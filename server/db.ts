@@ -1,7 +1,7 @@
-import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +31,13 @@ export interface Config {
   forgejoOwner: string;
   webhookSecret: string;
   webhookUrl: string;
+  // Coverify chat-reply shell-out. The bot account is distinct from the human
+  // user; coverify authenticates to the Cosheaf API with its own token and
+  // posts the reply itself. An empty token soft-disables the chat reply.
+  coverifyCmd: string;
+  coverifyApiUrl: string;
+  coverifyBotToken: string;
+  coverifyBotLogin: string;
 }
 
 function required(name: string): string {
@@ -62,6 +69,10 @@ export function loadConfig(): Config {
     forgejoOwner: withDefault("COSHEAF_FORGEJO_OWNER", "cosheaf-admin"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),
     webhookUrl: withDefault("COSHEAF_WEBHOOK_URL", "http://127.0.0.1:3030/api/v1/webhooks/forgejo"),
+    coverifyCmd: withDefault("COSHEAF_COVERIFY_CMD", "coverify"),
+    coverifyApiUrl: withDefault("COSHEAF_COVERIFY_API_URL", "http://127.0.0.1:3030/api/v1"),
+    coverifyBotToken: withDefault("COSHEAF_COVERIFY_BOT_TOKEN", ""),
+    coverifyBotLogin: withDefault("COSHEAF_COVERIFY_BOT_LOGIN", "coverify"),
   };
 }
 

@@ -24,6 +24,10 @@ const config: Config = {
   forgejoOwner: "owner",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
+  coverifyCmd: "coverify",
+  coverifyApiUrl: "http://cosheaf.test/api/v1",
+  coverifyBotToken: "",
+  coverifyBotLogin: "coverify",
 };
 
 function freshDb(): Database.Database {

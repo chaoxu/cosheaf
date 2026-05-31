@@ -1,26 +1,26 @@
-import { Hono } from "hono";
+import type Database from "better-sqlite3";
 import type { Context } from "hono";
+import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { deleteCookie, setCookie } from "hono/cookie";
-import type Database from "better-sqlite3";
-import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { COFLAT_FORMAT_ID, documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
-import { fileKindForPath, fileKindLabel, type FileKind } from "../../shared/file-kind.js";
+import { type FileKind, fileKindForPath, fileKindLabel } from "../../shared/file-kind.js";
+import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { ROLES, type Role } from "../../shared/roles.js";
-import { deletePage, planIndexPage } from "../indexer.js";
-import { AUTH_COOKIE, invalidateWorkspacePermissionCache, resolveAuth } from "../middleware.js";
-import { Forgejo, ForgejoError, mergePullWithRetry, type ForgejoPull } from "../forgejo.js";
 import {
+  type ActivityFeedItem,
   activityCommitRef,
   branchFromRef,
   collapseNoisyEditBranchCommits,
   parseActivityContent,
-  type ActivityFeedItem,
 } from "../activity-feed.js";
-import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
-import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
 import { resolveBranchPath } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
+import { runCoverifyChatReply } from "../coverify-cli.js";
+import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
+import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
+import { splitUnifiedDiff } from "../diff-splitter.js";
+import { Forgejo, ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
 import type {
   ForgejoActivity,
   ForgejoBranch,
@@ -36,17 +36,26 @@ import type {
   ForgejoTreeEntry,
 } from "../forgejo-types.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
-import type { AppEnv, WorkspaceContext } from "../types.js";
+import { deletePage, planIndexPage } from "../indexer.js";
+import { AUTH_COOKIE, invalidateWorkspacePermissionCache, resolveAuth } from "../middleware.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
-import { setWorkspaceMember } from "../workspace-members.js";
+import type { AppEnv, WorkspaceContext } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
+import { setWorkspaceMember } from "../workspace-members.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { safeRel } from "./files.js";
 import { escapeAttr, escapeHtml } from "./html-escape.js";
 import { validateLabelSelection } from "./label-utils.js";
-import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
+import {
+  CHAT_LABEL,
+  chatPendingTurn,
+  chatReplyPending,
+  chatTitleFrom,
+  chatTurns,
+  renderChatTurn,
+} from "./web-chat.js";
 import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
-import { splitUnifiedDiff } from "../diff-splitter.js";
+import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
 
 export const web = new Hono<AppEnv>();
 web.use("*", compress());
@@ -715,6 +724,129 @@ web.post("/:owner/:repo/issues/:number/state", async (c) => {
   await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { state });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: state === "closed" ? "closed" : "reopened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+});
+
+// Find the "chat" label id, creating it once if missing. Chats are issues
+// carrying this label, applied only by the chat "new" route.
+async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promise<number> {
+  const labels = await fj.listLabels(owner, repo);
+  const existing = labels.find((label) => label.name === CHAT_LABEL);
+  if (existing) return existing.id;
+  const created = await fj.createLabel(owner, repo, { name: CHAT_LABEL, color: "8b5cf6", description: "Coverify chat" });
+  return created.id;
+}
+
+web.get("/:owner/:repo/chat", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const chats = await ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 });
+  const rows =
+    chats
+      .map(
+        (chat) => `<a class="list-row" href="${repoHref(ctx.owner, ctx.repo, `/chat/${chat.number}`)}">
+        <strong>${escapeHtml(chat.title)}</strong>
+        <span class="list-meta">${escapeHtml(displayLogin(ctx.owner, chat.user?.login))} - ${formatDate(chat.created_at)}</span>
+      </a>`,
+      )
+      .join("") || `<div class="empty">No chats yet.</div>`;
+  return htmlResponse(
+    repoPage({
+      title: `Chat - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "chat",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: `
+        <div class="page-title compact"><div><h1>Chat</h1></div></div>
+        ${
+          ctx.ws.role === "read"
+            ? ""
+            : `<form class="chat-new" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
+                 <textarea name="message" placeholder="Start a new chat with Coverify" required></textarea>
+                 <button class="button primary" type="submit">New chat</button>
+               </form>`
+        }
+        <div class="list">${rows}</div>
+      `,
+    }),
+  );
+});
+
+web.post("/:owner/:repo/chat/new", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const message = stringField((await c.req.parseBody()).message);
+  if (!message) return redirect(repoHref(ctx.owner, ctx.repo, "/chat"));
+  const labelId = await ensureChatLabel(ctx.fj, ctx.owner, ctx.repo);
+  const issue = await ctx.fj.createIssue(ctx.owner, ctx.repo, {
+    title: chatTitleFrom(message),
+    body: message,
+    labels: [labelId],
+  });
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
+  runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: issue.number });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${issue.number}`));
+});
+
+web.get("/:owner/:repo/chat/:number", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Chat not found");
+  const [issue, comments] = await Promise.all([
+    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
+      if (err instanceof ForgejoError && err.status === 404) return null;
+      throw err;
+    }),
+    ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
+  ]);
+  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Chat not found");
+  const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
+  const renderedTurns = await Promise.all(
+    turns.map(async (turn) => renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" }))),
+  );
+  return htmlResponse(
+    repoPage({
+      title: `${issue.title} - Chat`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "chat",
+      user: ctx.user,
+      ws: ctx.ws,
+      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+      body: `
+        <div class="page-title compact"><div><h1>${escapeHtml(issue.title)}</h1></div></div>
+        <div class="chat-thread">
+          ${renderedTurns.join("")}
+          ${chatReplyPending(turns) ? chatPendingTurn() : ""}
+        </div>
+        ${
+          ctx.ws.role === "read"
+            ? ""
+            : `<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
+                 <textarea name="message" placeholder="Message Coverify" required></textarea>
+                 <button class="button primary" type="submit">Send</button>
+               </form>`
+        }
+      `,
+    }),
+  );
+});
+
+web.post("/:owner/:repo/chat/:number/send", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Chat not found");
+  const message = stringField((await c.req.parseBody()).message);
+  if (message) {
+    await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, message);
+    runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: number });
+  }
+  return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${number}`));
 });
 
 web.get("/:owner/:repo/pulls", async (c) => {
@@ -2277,7 +2409,7 @@ function repoPage(opts: {
   title: string;
   owner: string;
   repo: string;
-  active: "files" | "issues" | "pulls" | "notifications" | "activity" | "settings";
+  active: "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
   user: string;
   ws: WorkspaceContext;
   body: string;
@@ -2300,6 +2432,7 @@ function repoPage(opts: {
           ${tab(opts, "files", "Files", "")}
           ${tab(opts, "issues", "Issues", "/issues")}
           ${tab(opts, "pulls", "Pull Requests", "/pulls")}
+          ${tab(opts, "chat", "Chat", "/chat")}
           ${tab(opts, "notifications", "Notifications", "/notifications")}
           ${tab(opts, "activity", "Activity", "/activity")}
           ${tab(opts, "settings", "Settings", "/settings")}
