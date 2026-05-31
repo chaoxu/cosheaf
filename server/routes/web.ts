@@ -48,6 +48,8 @@ import { escapeAttr, escapeHtml } from "./html-escape.js";
 import { validateLabelSelection } from "./label-utils.js";
 import {
   CHAT_LABEL,
+  chatBranchFromBody,
+  chatIssueBody,
   chatLiveScript,
   chatPendingTurn,
   chatReplyPending,
@@ -765,7 +767,10 @@ function chatSidebar(owner: string, repo: string, chats: ForgejoIssue[], active:
 web.get("/:owner/:repo/chat", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const chats = await listChats(ctx);
+  const [chats, branches] = await Promise.all([
+    listChats(ctx),
+    ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listBranches(ctx.owner, ctx.repo),
+  ]);
   return htmlResponse(
     repoPage({
       title: `Chat - ${ctx.repo}`,
@@ -784,6 +789,9 @@ web.get("/:owner/:repo/chat", async (c) => {
                 ? `<div class="chat-blank">Read-only access — you can't start chats here.</div>`
                 : `<div class="chat-blank">Start a new chat with Coverify, or pick a session on the left.</div>
                    <form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
+                     <label>Branch
+                       <select name="branch">${branchOptions(branches, "main")}</select>
+                     </label>
                      <textarea name="message" placeholder="Start a chat with Coverify" required></textarea>
                      <button class="button primary" type="submit">Send</button>
                    </form>`
@@ -799,12 +807,17 @@ web.post("/:owner/:repo/chat/new", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
-  const message = stringField((await c.req.parseBody()).message);
+  const form = await c.req.parseBody();
+  const message = stringField(form.message);
   if (!message) return redirect(repoHref(ctx.owner, ctx.repo, "/chat"));
+  const branch = stringField(form.branch) || "main";
+  if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+  const branchExists = await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
+  if (!branchExists) return badRequestPage(ctx.user, "Branch does not exist.");
   const labelId = await ensureChatLabel(ctx.fj, ctx.owner, ctx.repo);
   const issue = await ctx.fj.createIssue(ctx.owner, ctx.repo, {
     title: chatTitleFrom(message),
-    body: message,
+    body: chatIssueBody(message, branch),
     labels: [labelId],
   });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
@@ -828,6 +841,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
   if (!issue || issue.pull_request || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
   }
+  const chatBranch = chatBranchFromBody(issue.body ?? "") ?? "main";
   const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
   const renderedTurns = await Promise.all(
     turns.map(async (turn) => renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" }))),
@@ -845,7 +859,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role)}
           <section class="chat-main">
-            <div class="chat-main-head"><h1>${escapeHtml(issue.title)}</h1></div>
+            <div class="chat-main-head"><p class="eyebrow">Branch ${escapeHtml(chatBranch)}</p><h1>${escapeHtml(issue.title)}</h1></div>
             <div class="chat-thread">
               ${renderedTurns.join("")}
               ${chatReplyPending(turns) ? chatPendingTurn() : ""}

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ForgejoIssue, ForgejoIssueComment } from "../forgejo-types.js";
-import { chatLiveScript, chatReplyPending, chatTitleFrom, chatTurns, isChatIssue, renderChatTurn } from "./web-chat.js";
+import {
+  chatBranchFromBody,
+  chatIssueBody,
+  chatLiveScript,
+  chatReplyPending,
+  chatTitleFrom,
+  chatTurns,
+  isChatIssue,
+  renderChatTurn,
+  stripChatMetadata,
+} from "./web-chat.js";
 
 const BOT = "coverify";
 
@@ -47,6 +57,21 @@ describe("chatTurns", () => {
   it("skips empty/whitespace bodies", () => {
     const turns = chatTurns(issue({ body: "  " }), [comment("alice", "real"), comment(BOT, "")], BOT);
     expect(turns.map((t) => t.body)).toEqual(["real"]);
+  });
+
+  it("hides machine metadata from the visible turn body", () => {
+    const body = chatIssueBody("Prove the branch lemma.", "agent/math");
+    const turns = chatTurns(issue({ body }), [], BOT);
+    expect(turns.map((t) => t.body)).toEqual(["Prove the branch lemma."]);
+  });
+});
+
+describe("chat metadata", () => {
+  it("records the pinned branch in a hidden markdown comment", () => {
+    const body = chatIssueBody("Q", "agent/math");
+    expect(body).toContain("cosheaf-chat-meta");
+    expect(chatBranchFromBody(body)).toBe("agent/math");
+    expect(stripChatMetadata(body)).toBe("Q");
   });
 });
 

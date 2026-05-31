@@ -68,7 +68,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("editor")).toBeVisible();
   const editorCrossFileTheorem = page.locator('.cm-content [data-ref-key="thm:coin-conservation"]');
   await expect(editorCrossFileTheorem).toContainText("Theorem 1");
-  await expect(editorCrossFileTheorem.locator("a")).toHaveAttribute(
+  await expect(editorCrossFileTheorem.locator("a").first()).toHaveAttribute(
     "href",
     "/flushing-coin/src/branch/user/chao/web-edit/theory/cross-file-theorem.md#thm%3Acoin-conservation",
   );

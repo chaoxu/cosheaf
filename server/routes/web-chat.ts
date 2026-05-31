@@ -3,6 +3,8 @@ import type { ForgejoIssue, ForgejoIssueComment } from "../forgejo-types.js";
 // The label that marks an issue as created through the chat UI. Only the chat
 // "new" route applies it, so the list can find exactly those issues.
 export const CHAT_LABEL = "chat";
+export const CHAT_META_MARKER = "cosheaf-chat-meta";
+const CHAT_META_RE = new RegExp(`<!--\\s*${CHAT_META_MARKER}\\s*(\\{[\\s\\S]*?\\})\\s*-->`, "m");
 
 // True only if the issue actually carries the chat label. Forgejo's
 // `labels=chat` list filter silently returns everything when no such label
@@ -19,6 +21,34 @@ export interface ChatTurn {
   createdAt: string;
 }
 
+export function chatMetadataComment(metadata: Record<string, unknown>): string {
+  return `<!-- ${CHAT_META_MARKER}\n${JSON.stringify(metadata, null, 2)}\n-->`;
+}
+
+export function chatIssueBody(message: string, branch: string): string {
+  return `${chatMetadataComment({ kind: "cosheaf-chat", branch })}\n\n${message.trim()}`.trim();
+}
+
+export function chatMetadata(body: string): Record<string, unknown> {
+  const match = body.match(CHAT_META_RE);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[1]) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+export function chatBranchFromBody(body: string): string | null {
+  const branch = chatMetadata(body).branch;
+  return typeof branch === "string" && branch.trim() ? branch : null;
+}
+
+export function stripChatMetadata(body: string): string {
+  return body.replace(CHAT_META_RE, "").trim();
+}
+
 // Build the conversation from an issue: the opening post is the first turn and
 // each comment is a turn. A turn is the assistant's iff its author is the bot
 // account; everything else is the user. Mirrors coverify's extract_turns so
@@ -26,9 +56,10 @@ export interface ChatTurn {
 export function chatTurns(issue: ForgejoIssue, comments: ForgejoIssueComment[], botLogin: string): ChatTurn[] {
   const turns: ChatTurn[] = [];
   const push = (author: string | null | undefined, body: string, createdAt: string) => {
-    if (!body.trim()) return;
+    const visibleBody = stripChatMetadata(body);
+    if (!visibleBody.trim()) return;
     const login = author ?? "";
-    turns.push({ role: login && login === botLogin ? "assistant" : "user", author: login, body, createdAt });
+    turns.push({ role: login && login === botLogin ? "assistant" : "user", author: login, body: visibleBody, createdAt });
   };
   push(issue.user?.login, issue.body ?? "", issue.created_at);
   for (const comment of comments) push(comment.user?.login, comment.body ?? "", comment.created_at);
