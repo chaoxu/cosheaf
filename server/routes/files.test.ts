@@ -148,11 +148,70 @@ describe("files validation route", () => {
           line: 6,
         },
       ],
+      duplicate_xrefs: [],
       orphan_labels: [
         { id: "orphan", path: "orphan.md", title: "Orphan" },
         { id: "source", path: "source.md", title: "Source" },
       ],
     });
+  });
+
+  it("reports duplicate Coflat xref ids", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "a.md",
+      bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "b.md",
+      bodyText: "---\nid: b\n---\n# B\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const res = await appFor(db).request("/api/v1/w/w/validation", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { duplicate_xrefs: Array<{ id: string; paths: string; count: number }> };
+    expect(body.duplicate_xrefs).toEqual([{ id: "thm:dup", paths: "a.md, b.md", count: 2 }]);
+  });
+
+  it("reports duplicate Coflat xref ids inside one file", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "a.md",
+      bodyText: [
+        "---",
+        "id: a",
+        "---",
+        "# A",
+        "",
+        "::: {#thm:dup .theorem}",
+        "A.",
+        ":::",
+        "",
+        "::: {#thm:dup .theorem}",
+        "B.",
+        ":::",
+        "",
+      ].join("\n"),
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const res = await appFor(db).request("/api/v1/w/w/validation", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { duplicate_xrefs: Array<{ id: string; paths: string; count: number }> };
+    expect(body.duplicate_xrefs).toEqual([{ id: "thm:dup", paths: "a.md (2 definitions)", count: 2 }]);
   });
 });
 
@@ -177,6 +236,51 @@ describe("files refs route", () => {
         { id: "target", path: "target.md", kind: "page", label: "Target" },
         { id: "thm:target", path: "target.md", kind: "block", label: "Theorem 1", fragment: "thm:target", line: 3 },
       ],
+      ambiguous_refs: [],
+    });
+  });
+
+  it("does not silently resolve duplicate Coflat theorem ids", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    for (const filePath of ["a.md", "b.md"]) {
+      indexPage(db, {
+        workspaceSlug: "w",
+        filePath,
+        bodyText: `---\nid: ${filePath[0]}\n---\n# ${filePath[0].toUpperCase()}\n\n::: {#thm:dup .theorem}\nDuplicate.\n:::\n`,
+        formatId: COFLAT_FORMAT_ID,
+      });
+    }
+
+    const res = await appFor(db).request("/api/v1/w/w/refs?ids=thm:dup", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      refs: [],
+      ambiguous_refs: [{ id: "thm:dup", paths: ["a.md", "b.md"] }],
+    });
+  });
+
+  it("does not silently resolve duplicate Coflat theorem ids inside one file", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    indexPage(db, {
+      workspaceSlug: "w",
+      filePath: "a.md",
+      bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const res = await appFor(db).request("/api/v1/w/w/refs?ids=thm:dup", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      refs: [],
+      ambiguous_refs: [{ id: "thm:dup", paths: ["a.md (2 definitions)"] }],
     });
   });
 });

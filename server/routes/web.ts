@@ -245,11 +245,13 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
   });
   if (!meta) return notFoundPage(user, "File not found");
   const kind = fileKindForPath(rel);
-  const content = kind === "markdown" ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const sourceView = c.req.query("view") === "source";
+  const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
   const rendered =
-    kind === "markdown" && content !== null
+    kind === "markdown" && content !== null && !sourceView
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
       : null;
+  const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   return htmlResponse(
     repoPage({
       title: `${rel} - ${repo}`,
@@ -258,7 +260,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       active: "files",
       user,
       ws,
-      readerAssets: kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+      readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <div class="file-toolbar">
           <div>
@@ -269,6 +271,13 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
           <div class="toolbar-actions">
             <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
             <a class="button" href="${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">Raw</a>
+            ${
+              kind === "markdown"
+                ? sourceView
+                  ? `<a class="button" href="${fileHref}">Rendered</a>`
+                  : `<a class="button" href="${fileHref}?view=source">Source</a>`
+                : ""
+            }
             ${
               ws.role === "read" || resolved.branch === "main"
                 ? ""
@@ -291,7 +300,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
             }
           </div>
         </div>
-        ${filePreview(ctx, resolved.branch, rel, kind, rendered ?? content)}
+        ${filePreview(ctx, resolved.branch, rel, kind, rendered ?? content, sourceView)}
       `,
     }),
   );
@@ -1749,8 +1758,9 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
-function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, content: string | null): string {
+function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, content: string | null, sourceView = false): string {
   const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
+  if (sourceView && content !== null) return sourceFilePreview(content);
   if (kind === "markdown") {
     return `<article class="document cf-theme-scope" data-testid="file-preview-markdown">
       ${markdownSurface(ctx, content ?? "")}
@@ -1778,6 +1788,37 @@ function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, c
   return `<article class="file-preview file-preview-fallback" data-testid="file-preview-raw">
     <p>No inline preview is available for this file type.</p>
     <a class="button" href="${escapeAttr(rawHref)}">Open raw file</a>
+  </article>`;
+}
+
+function sourceFilePreview(content: string): string {
+  const lines = content.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return `<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">
+    <table class="source-lines"><tbody>${lines
+      .map((line, index) => {
+        const lineNo = index + 1;
+        return `<tr id="L${lineNo}" data-testid="source-line-${lineNo}">
+          <td class="line-action"></td>
+          <td><a href="#L${lineNo}">${lineNo}</a></td>
+          <td><pre>${escapeHtml(line)}</pre></td>
+        </tr>`;
+      })
+      .join("")}</tbody></table>
+    <script>
+      (() => {
+        const match = /^#L(\\d+)(?:-(?:L)?(\\d+))?$/.exec(window.location.hash);
+        if (!match) return;
+        const first = Number(match[1]);
+        const last = Number(match[2] || match[1]);
+        const start = Math.max(1, Math.min(first, last));
+        const end = Math.max(first, last);
+        for (let line = start; line <= end; line += 1) {
+          document.getElementById("L" + line)?.classList.add("marked");
+        }
+        document.getElementById("L" + start)?.scrollIntoView({ block: "center" });
+      })();
+    </script>
   </article>`;
 }
 

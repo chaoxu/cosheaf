@@ -96,11 +96,23 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
       .run(p.workspaceSlug, cosheafId);
     prep(db, "DELETE FROM xref_targets WHERE workspace_slug = ? AND source_path = ?")
       .run(p.workspaceSlug, p.filePath);
+    prep(db, "DELETE FROM xref_target_duplicates WHERE workspace_slug = ? AND source_path = ?")
+      .run(p.workspaceSlug, p.filePath);
     const insertXrefTarget = prep(
       db,
       "INSERT OR IGNORE INTO xref_targets (workspace_slug, target_id, source_path, kind, display_label, line) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    for (const target of format.extractXrefTargets?.(parsed.body) ?? []) {
+    const xrefTargets = format.extractXrefTargets?.(parsed.body) ?? [];
+    const duplicateCounts = new Map<string, number>();
+    for (const target of xrefTargets) duplicateCounts.set(target.id, (duplicateCounts.get(target.id) ?? 0) + 1);
+    const insertXrefDuplicate = prep(
+      db,
+      "INSERT OR REPLACE INTO xref_target_duplicates (workspace_slug, target_id, source_path, count) VALUES (?, ?, ?, ?)",
+    );
+    for (const [targetId, count] of duplicateCounts) {
+      if (count > 1) insertXrefDuplicate.run(p.workspaceSlug, targetId, p.filePath, count);
+    }
+    for (const target of xrefTargets) {
       insertXrefTarget.run(
         p.workspaceSlug,
         target.id,
@@ -172,6 +184,8 @@ function deletePageRows(db: Database.Database, workspaceSlug: string, cosheafId:
   prep(db, "DELETE FROM page_tags WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
   prep(db, "DELETE FROM xref_targets WHERE workspace_slug = ? AND source_path IN (SELECT forgejo_id FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?)")
     .run(workspaceSlug, workspaceSlug, cosheafId);
+  prep(db, "DELETE FROM xref_target_duplicates WHERE workspace_slug = ? AND source_path IN (SELECT forgejo_id FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?)")
+    .run(workspaceSlug, workspaceSlug, cosheafId);
   prep(db, "DELETE FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
 }
 
@@ -196,6 +210,9 @@ function resolveLinkTarget(
     if (row) return row.cosheaf_id;
     const target = prep(db, "SELECT target_id FROM xref_targets WHERE workspace_slug = ? AND target_id = ? LIMIT 1")
       .get(workspaceSlug, link.ref) as { target_id: string } | undefined;
+    const duplicate = prep(db, "SELECT 1 FROM xref_target_duplicates WHERE workspace_slug = ? AND target_id = ? LIMIT 1")
+      .get(workspaceSlug, link.ref);
+    if (duplicate) return link.ref;
     return target?.target_id ?? link.ref;
   }
   const [linkPath] = link.ref.split("#", 1);

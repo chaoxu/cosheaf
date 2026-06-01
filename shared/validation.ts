@@ -13,7 +13,14 @@ export interface OrphanLabel {
   title: string | null;
 }
 
+export interface DuplicateXref {
+  id: string;
+  paths: string;
+  count: number;
+}
+
 export interface WorkspaceValidation {
   broken_refs: BrokenReference[];
+  duplicate_xrefs: DuplicateXref[];
   orphan_labels: OrphanLabel[];
 }

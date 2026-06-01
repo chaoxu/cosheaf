@@ -354,6 +354,34 @@ files.get("/:slug/refs", (c) => {
         ORDER BY source_path`,
     )
     .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>;
+  const sameFileDuplicates = c
+    .get("db")
+    .prepare(
+      `SELECT target_id AS id, source_path AS path, count
+         FROM xref_target_duplicates
+        WHERE workspace_slug = ? AND target_id IN (${placeholders})
+        ORDER BY source_path`,
+    )
+    .all(ws.slug, ...ids) as Array<{ id: string; path: string; count: number }>;
+  const xrefGroups = new Map<string, typeof xrefRows>();
+  for (const row of xrefRows) xrefGroups.set(row.id, [...(xrefGroups.get(row.id) ?? []), row]);
+  const duplicateIds = new Set(sameFileDuplicates.map((row) => row.id));
+  const unambiguousXrefs = [...xrefGroups.entries()]
+    .filter(([id, rows]) => rows.length === 1 && !duplicateIds.has(id))
+    .flatMap(([, rows]) => rows);
+  const ambiguousRefs = [...xrefGroups.entries()]
+    .filter(([id, rows]) => rows.length > 1 || duplicateIds.has(id))
+    .map(([id, rows]) => ({
+      id,
+      paths: [
+        ...new Set([
+          ...rows
+            .filter((row) => !sameFileDuplicates.some((duplicate) => duplicate.id === id && duplicate.path === row.path))
+            .map((row) => row.path),
+          ...sameFileDuplicates.filter((row) => row.id === id).map((row) => `${row.path} (${row.count} definitions)`),
+        ]),
+      ],
+    }));
   return c.json({
     refs: [
       ...pageRows.map((r) => ({
@@ -362,7 +390,7 @@ files.get("/:slug/refs", (c) => {
         kind: "page",
         label: r.label,
       })),
-      ...xrefRows.map((r) => ({
+      ...unambiguousXrefs.map((r) => ({
         id: r.id,
         path: r.path,
         kind: r.kind,
@@ -371,6 +399,7 @@ files.get("/:slug/refs", (c) => {
         line: r.line,
       })),
     ],
+    ambiguous_refs: ambiguousRefs,
   });
 });
 
@@ -517,7 +546,30 @@ files.get("/:slug/validation", (c) => {
         ORDER BY d.forgejo_id`,
     )
     .all(ws.slug) as WorkspaceValidation["orphan_labels"];
-  return c.json({ broken_refs: brokenRefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
+  const duplicateXrefs = db
+    .prepare(
+      `SELECT id, group_concat(path_note, ', ') AS paths, sum(count) AS count
+         FROM (
+           SELECT target_id AS id, source_path AS path_note, 1 AS count
+             FROM xref_targets
+            WHERE workspace_slug = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM xref_target_duplicates duplicate
+                 WHERE duplicate.workspace_slug = xref_targets.workspace_slug
+                   AND duplicate.target_id = xref_targets.target_id
+                   AND duplicate.source_path = xref_targets.source_path
+              )
+           UNION ALL
+           SELECT target_id AS id, source_path || ' (' || count || ' definitions)' AS path_note, count
+             FROM xref_target_duplicates
+            WHERE workspace_slug = ?
+         )
+        GROUP BY id
+       HAVING sum(count) > 1
+        ORDER BY id`,
+    )
+    .all(ws.slug, ws.slug) as WorkspaceValidation["duplicate_xrefs"];
+  return c.json({ broken_refs: brokenRefs, duplicate_xrefs: duplicateXrefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
 });
 
 files.get("/:slug/events", (c) => {

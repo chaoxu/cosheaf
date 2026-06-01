@@ -40,18 +40,30 @@ export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): s
     return null;
   }
   const [withoutHash, hash = ""] = clean.split("#", 2);
-  const baseDir = payload.path.includes("/") ? payload.path.slice(0, payload.path.lastIndexOf("/")) : "";
-  const normalized = new URL(withoutHash, `https://cosheaf.invalid/${baseDir ? `${baseDir}/` : ""}`).pathname.slice(1);
+  const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
-  return `/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  const sourceView = isLineFragment(hash) ? "?view=source" : "";
+  return `/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${sourceView}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
-  const resolved = resolveRepoLink(payload, href);
-  if (!resolved) return null;
-  const prefix = `/${urlPath(payload.repo)}/src/branch/`;
-  if (!resolved.startsWith(prefix)) return null;
-  return `/${urlPath(payload.repo)}/raw/branch/${resolved.slice(prefix.length)}`;
+  const clean = href.trim();
+  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
+    return null;
+  }
+  const [withoutHash, hash = ""] = clean.split("#", 2);
+  const normalized = normalizeRepoPath(payload, withoutHash);
+  if (!normalized || normalized.split("/").includes("..")) return null;
+  return `/${urlPath(payload.repo)}/raw/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+}
+
+function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {
+  const baseDir = payload.path.includes("/") ? payload.path.slice(0, payload.path.lastIndexOf("/")) : "";
+  return new URL(href, `https://cosheaf.invalid/${baseDir ? `${baseDir}/` : ""}`).pathname.slice(1);
+}
+
+function isLineFragment(hash: string): boolean {
+  return /^L\d+(?:-(?:L)?\d+)?$/.test(hash);
 }
 
 export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatLocalRefs): DocumentContext {

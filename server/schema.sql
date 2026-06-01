@@ -82,6 +82,18 @@ CREATE TABLE IF NOT EXISTS xref_targets (
 CREATE INDEX IF NOT EXISTS idx_xref_targets_id ON xref_targets (workspace_slug, target_id);
 CREATE INDEX IF NOT EXISTS idx_xref_targets_path ON xref_targets (workspace_slug, source_path);
 
+-- Same-file duplicate cross-reference ids cannot be represented by
+-- xref_targets' unique row shape. Keep a rebuildable validation table so
+-- `[@id]` never silently resolves when the source defines it twice.
+CREATE TABLE IF NOT EXISTS xref_target_duplicates (
+  workspace_slug TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  count INTEGER NOT NULL,
+  PRIMARY KEY (workspace_slug, target_id, source_path)
+);
+CREATE INDEX IF NOT EXISTS idx_xref_target_duplicates_id ON xref_target_duplicates (workspace_slug, target_id);
+
 CREATE TABLE IF NOT EXISTS page_tags (
   workspace_slug TEXT NOT NULL,
   cosheaf_id TEXT NOT NULL,

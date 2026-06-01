@@ -13,6 +13,7 @@ const ALLOWED_TABLES = new Set([
   "doc_map",
   "backlinks",
   "xref_targets",
+  "xref_target_duplicates",
   "page_tags",
   "notes_fts",
   // FTS5 virtual table emits configuration rows in sqlite_master:
