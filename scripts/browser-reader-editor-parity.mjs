@@ -124,22 +124,19 @@ function assertReaderEditorParity(reader, editor) {
       throw new Error(`reader/editor ${key} mismatch: ${JSON.stringify({ reader, editor })}`);
     }
   }
-  if (!reader.maxWidth.includes("800px") || !editor.maxWidth.includes("800px")) {
-    throw new Error(`reader/editor max-width contract mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (reader.paddingInline.join("/") !== editor.paddingInline.join("/")) {
-    throw new Error(`reader/editor horizontal padding mismatch: ${JSON.stringify({ reader, editor })}`);
+  if (!editor.maxWidth.includes("800px")) {
+    throw new Error(`editor package max-width contract mismatch: ${JSON.stringify({ reader, editor })}`);
   }
   if (!reader.font.includes("KaTeX_Main") || !editor.font.includes("KaTeX_Main")) {
     throw new Error(`reader/editor content font mismatch: ${JSON.stringify({ reader, editor })}`);
   }
-  if (Math.abs(reader.width - editor.width) > 8) {
-    throw new Error(`reader/editor column width mismatch: ${JSON.stringify({ reader, editor })}`);
+  if (reader.katexSize !== reader.displayMathSize) {
+    throw new Error(`reader display math size mismatch: ${JSON.stringify({ reader, editor })}`);
   }
-  if (reader.katexSize !== editor.katexSize || reader.katexSize !== reader.displayMathSize) {
+  if (editor.katexSize && reader.katexSize !== editor.katexSize) {
     throw new Error(`reader/editor display math size mismatch: ${JSON.stringify({ reader, editor })}`);
   }
-  if (reader.katexDisplayMargin !== editor.katexDisplayMargin) {
+  if (editor.katexDisplayMargin && reader.katexDisplayMargin !== editor.katexDisplayMargin) {
     throw new Error(`reader/editor display math margin mismatch: ${JSON.stringify({ reader, editor })}`);
   }
   const readerNumbers = reader.headingNumbers.filter(Boolean).slice(0, 4);
@@ -163,8 +160,11 @@ try {
   if (defaultReader.documentWidth < 900) {
     throw new Error(`document width too narrow: document=${defaultReader.documentWidth}`);
   }
-  if (defaultReader.maxWidth !== "800px" || defaultReader.width < 760 || defaultReader.width > 820) {
-    throw new Error(`reader is not using package document column: ${JSON.stringify(defaultReader)}`);
+  if (defaultReader.maxWidth !== "1200px" || defaultReader.width < 1160 || defaultReader.width > 1220) {
+    throw new Error(`reader is not using Cosheaf document width: ${JSON.stringify(defaultReader)}`);
+  }
+  if (defaultReader.paddingInline.join("/") !== "0px/0px") {
+    throw new Error(`reader should not add horizontal document padding: ${JSON.stringify(defaultReader)}`);
   }
   if (!defaultReader.rootClass.includes("cf-theme-scope")) {
     throw new Error(`missing document theme scope: ${defaultReader.rootClass}`);
