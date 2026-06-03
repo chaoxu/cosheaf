@@ -67,7 +67,26 @@ try {
   await showcaseView.getByText("Rich table for edit/display parity").waitFor({ state: "visible", timeout: 10000 });
   const readerSurface = await showcaseView.locator(".cf-doc-surface").count();
   if (readerSurface === 0) {
-    throw new Error("coflat showcase issue did not use the full document reader surface");
+    throw new Error("coflat showcase issue did not use a Coflat reader surface");
+  }
+  const showcaseIssueStats = await showcaseView.locator(".cf-reader-compact").first().evaluate((el) => {
+    const paragraph = el.querySelector(".cf-doc-paragraph, p");
+    const styles = getComputedStyle(el);
+    return {
+      width: Math.round(el.getBoundingClientRect().width),
+      maxWidth: styles.maxWidth,
+      paddingInline: [styles.paddingLeft, styles.paddingRight],
+      paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
+    };
+  });
+  if (
+    showcaseIssueStats.maxWidth !== "1200px" ||
+    showcaseIssueStats.width < 1160 ||
+    showcaseIssueStats.width > 1220 ||
+    showcaseIssueStats.paddingInline.join("/") !== "0px/0px" ||
+    showcaseIssueStats.paragraphWhiteSpace !== "normal"
+  ) {
+    throw new Error(`coflat issue reader is not using shared prose layout: ${JSON.stringify(showcaseIssueStats)}`);
   }
 
   await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
