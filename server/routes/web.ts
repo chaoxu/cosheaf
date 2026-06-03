@@ -1775,7 +1775,7 @@ function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, c
   const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
   if (sourceView && content !== null) return sourceFilePreview(content);
   if (kind === "markdown") {
-    return `<article class="document cf-theme-scope" data-testid="file-preview-markdown">
+    return `<article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
       ${markdownSurface(ctx, content ?? "")}
     </article>`;
   }
@@ -2104,9 +2104,9 @@ async function renderPrFileView(
   const head = await renderMarkdownSurface(ctx, nextVersions.head, {
     branch: pull.head.ref,
     documentPath: file.path,
-    surface: "diff",
+    surface: "document",
   });
-  return `<div data-testid="diff-pane-after" class="rich-after cf-theme-scope">${head}</div>`;
+  return `<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
 function markdownSurface(ctx: WebCtx, rendered: string, surface: MarkdownSurface = "document"): string {

@@ -75,8 +75,8 @@ try {
   await page.getByText(PR_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
   const prHeader = page.locator(".thread");
-  await prHeader.getByText("Review focus").waitFor({ state: "visible", timeout: 10000 });
-  await prHeader.getByText("rich diff rendering").waitFor({ state: "visible", timeout: 10000 });
+  await prHeader.getByRole("heading", { name: "Review focus" }).waitFor({ state: "visible", timeout: 10000 });
+  await prHeader.locator(".cf-doc-surface").getByText("rich diff rendering").waitFor({ state: "visible", timeout: 10000 });
 
   await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
@@ -103,6 +103,26 @@ try {
   await page.getByTestId("diff-pane-after").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-mode-rich").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-shape-after").waitFor({ state: "visible", timeout: 10000 });
+  const richAfterStats = await page.getByTestId("diff-pane-after").evaluate((el) => {
+    const reader = el.querySelector(".cf-reader");
+    if (!reader) return null;
+    const styles = getComputedStyle(reader);
+    return {
+      paneWidth: Math.round(el.getBoundingClientRect().width),
+      readerWidth: Math.round(reader.getBoundingClientRect().width),
+      maxWidth: styles.maxWidth,
+      paddingInline: [styles.paddingLeft, styles.paddingRight],
+    };
+  });
+  if (
+    !richAfterStats ||
+    richAfterStats.maxWidth !== "1200px" ||
+    richAfterStats.readerWidth < 1160 ||
+    richAfterStats.readerWidth > 1220 ||
+    richAfterStats.paddingInline.join("/") !== "0px/0px"
+  ) {
+    throw new Error(`rich after reader is not using document layout: ${JSON.stringify(richAfterStats)}`);
+  }
   await page.getByTestId("view-shape-split").click();
   await page.getByTestId("diff-pane-split").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("This is the default development page").waitFor({ state: "visible", timeout: 10000 });
