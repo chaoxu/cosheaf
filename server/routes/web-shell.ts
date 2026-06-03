@@ -21,10 +21,15 @@ export function pageShell(opts: {
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
-        <link rel="stylesheet" href="/cosheaf-web.css">
+        <link rel="stylesheet" href="/cosheaf-web.css${cosheafWebCssVersion()}">
       </head>
       <body data-cosheaf-user="${escapeAttr(opts.user ?? "")}">${opts.body}</body>
     </html>`;
+}
+
+function cosheafWebCssVersion(): string {
+  const version = process.env.COSHEAF_GIT_SHA?.slice(0, 12);
+  return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
 export function globalHeader(user: string): string {
