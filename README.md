@@ -1,7 +1,8 @@
 # Cosheaf
 
-A multi-user knowledge base built on Coflat-format markdown files. Cosheaf is
-a Forgejo-native UI for trustworthy markdown authoring: pages live in Forgejo,
+A multi-user knowledge base built on
+[Coflat](https://github.com/chaoxu/coflat)-format markdown files. Cosheaf is a
+Forgejo-native UI for trustworthy markdown authoring: pages live in Forgejo,
 work happens on branches, review happens in pull requests, and merged markdown
 on `main` is canonical. SQLite is only a rebuildable sidecar index.
 
@@ -15,14 +16,16 @@ Workspaces choose a markdown format. New workspaces default to Forgejo Markdown
 passthrough for plain `.md` files, while Coflat workspaces opt into math-friendly
 rendering, backlinks, and rich review diffs.
 
-The substrate is fully usable by humans alone. Automated agents
-(a `coverify` layer, planned separately) participate as ordinary Forgejo
+The substrate is fully usable by humans alone. Automated agents such as
+[Coverify](https://github.com/chaoxu/coverify) participate as ordinary Forgejo
 collaborators through Cosheaf's HTTP API.
 
 ## What it gives you
 
 - **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
-  math, `[@id]` cross-references and citations — see [`FORMAT.md`](./FORMAT.md)).
+  math, `[@id]` cross-references and citations - see
+  [Coflat `FORMAT.md`](https://github.com/chaoxu/coflat/blob/main/FORMAT.md)
+  and Cosheaf's [format notes](./FORMAT.md)).
 - **Branch workflow** — edits live on ordinary Forgejo branches. Opening a pull
   request submits the branch for review; merging the pull request makes it
   canonical.
@@ -84,8 +87,9 @@ development.
 
 - TypeScript end-to-end. Hono renders the durable web pages; React 19 + Vite
   power page-owned islands such as the rich editor; CodeMirror 6 lives inside
-  `@chaoxu/coflat`. For source builds before the package is published
-  from a public registry, clone `coflat` next to this repo.
+  [`@chaoxu/coflat`](https://github.com/chaoxu/coflat). For source builds
+  before the package is published from a public registry, clone
+  [`coflat`](https://github.com/chaoxu/coflat) next to this repo.
 - SQLite via `better-sqlite3`. WAL mode. Forgejo `main` is the page source of
   truth; the DB is a rebuildable index.
 - Forgejo webhooks reconcile external edits; SSE pushes changes to connected
@@ -97,7 +101,7 @@ development.
 server/        Hono API, Forgejo client, SQLite sidecar index, pull request workflow
 src/cosheaf/   Page islands for the editor/reader plus their small fetch client
 scripts/       dev:all spawner, lefthook checks, Forgejo issue + worker-branch tools
-FORMAT.md      Coflat document format reference
+FORMAT.md      Cosheaf-specific notes and pointer to the Coflat format spec
 API.md         HTTP API contract (v1) — endpoints, error codes, SSE shape
 AGENTS.md      Repository conventions, commands, debug helpers
 DESIGN.md      Product philosophy and trust model
@@ -140,5 +144,6 @@ See [AGENTS.md](./AGENTS.md) for full conventions and debug helpers.
 ## Status
 
 Early. The substrate (auth, branch and pull request workflow, indexing, search,
-reviews, and approvals) is in place and end-to-end smoke-tested. The Coverify layer is not
-yet built — it lives in a separate repo and talks to Cosheaf over the HTTP API.
+reviews, and approvals) is in place and end-to-end smoke-tested. The
+[Coverify](https://github.com/chaoxu/coverify) layer lives in a separate repo
+and talks to Cosheaf over the HTTP API.

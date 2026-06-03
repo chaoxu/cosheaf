@@ -308,7 +308,8 @@ plugins, or move agent/prover logic into this repo as part of this direction.
   in `src/cosheaf/web-*.tsx?`.
 - **Editor**: `@chaoxu/coflat` from a sibling checkout or public
   package; do not vendor it back into this repo.
-- **Document format**: Pandoc-flavored markdown per `FORMAT.md`. YAML
+- **Document format**: Pandoc-flavored markdown per Coflat's canonical
+  `FORMAT.md`; Cosheaf's local `FORMAT.md` is only host-specific notes. YAML
   frontmatter for `id`, `title`, `type`, `status`, `target`.
 - **Package manager**: pnpm.
 
@@ -528,7 +529,8 @@ page index from Forgejo's `main` tree and remove stale sidecar rows.
 
 ## Document format
 
-See `FORMAT.md` for the canonical Pandoc-flavored markdown spec. Cosheaf
+See Coflat's `FORMAT.md` for the canonical Pandoc-flavored markdown spec.
+Cosheaf's local `FORMAT.md` records only host-specific behavior. Cosheaf
 links recognized by the indexer:
 
 - `[@id]` — Pandoc cross-ref / citation

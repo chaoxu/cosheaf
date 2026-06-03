@@ -2,9 +2,10 @@
 
 ## What It Is
 
-Cosheaf is a multi-user knowledge base for Coflat-flavored markdown files.
-Pages are stored in Forgejo repositories; Cosheaf is a human-usable Forgejo UI
-for editing, branches, pull requests, reviews, issues, search, and backlinks.
+Cosheaf is a multi-user knowledge base for
+[Coflat](https://github.com/chaoxu/coflat)-flavored markdown files. Pages are
+stored in Forgejo repositories; Cosheaf is a human-usable Forgejo UI for
+editing, branches, pull requests, reviews, issues, search, and backlinks.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is designed to be comfortable for mathematical writing, with
@@ -110,7 +111,8 @@ index from Forgejo `main` and removes stale page index rows.
 
 ## Coverify Boundary
 
-The Coverify layer is intentionally out of this repo. It will:
+The [Coverify](https://github.com/chaoxu/coverify) layer is intentionally out
+of this repo. It will:
 
 - authenticate with ordinary Forgejo PATs through Cosheaf bearer auth
 - subscribe to SSE events
@@ -126,12 +128,15 @@ that should become an HTTP API feature usable by humans too.
   No password hashing — the Forgejo PAT is the credential, exchanged at
   login and sent as `Authorization: Bearer <pat>` on every request.
 - **Client**: React 19, Vite, Tailwind v4, shadcn-style primitives, and
-  `@chaoxu/coflat`.
-- **Format**: Coflat-flavored Pandoc markdown per `FORMAT.md`.
+  [`@chaoxu/coflat`](https://github.com/chaoxu/coflat).
+- **Format**: Coflat-flavored Pandoc markdown per
+  [Coflat `FORMAT.md`](https://github.com/chaoxu/coflat/blob/main/FORMAT.md);
+  Cosheaf's [`FORMAT.md`](./FORMAT.md) records only host-specific behavior.
 
 ## Out Of Scope
 
-- The editor implementation itself; it lives in `@chaoxu/coflat`.
+- The editor implementation itself; it lives in
+  [`@chaoxu/coflat`](https://github.com/chaoxu/coflat).
 - Agent/prover orchestration.
 - Built-in Pandoc export and desktop-native behavior. These may return later as
   optional Cosheaf operations rather than core requirements; see

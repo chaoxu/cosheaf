@@ -65,8 +65,9 @@ Forgejo-backed workspace.
 5. Authoring documentation
 
    Bring the task-oriented Coflat authoring guide into Cosheaf docs, adjusted
-   for the Forgejo branch and pull request workflow. `FORMAT.md` remains the canonical syntax
-   reference; the authoring guide explains practical workflows.
+   for the Forgejo branch and pull request workflow. Coflat's `FORMAT.md`
+   remains the canonical syntax reference; Cosheaf's local `FORMAT.md` should
+   only record host-specific behavior.
 
 ## Extension-Style Work
 
