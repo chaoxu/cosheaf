@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out Cosheaf
+        uses: actions/checkout@v4
+        with:
+          path: cosheaf
+
+      - name: Check out Coflat
+        uses: actions/checkout@v4
+        with:
+          repository: chaoxu/coflat
+          path: coflat
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install and build Coflat
+        run: |
+          pnpm --dir coflat install --frozen-lockfile
+          pnpm --dir coflat build
+
+      - name: Install Cosheaf
+        env:
+          LEFTHOOK: "0"
+        run: pnpm --dir cosheaf install --frozen-lockfile
+
+      - name: Run static checks
+        run: pnpm --dir cosheaf check:pre-push
+
+      - name: Run unit tests
+        run: pnpm --dir cosheaf test
+
+      - name: Build
+        run: pnpm --dir cosheaf build

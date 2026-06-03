@@ -8,6 +8,8 @@ data/
 .env.prod
 .env.staging
 .env.testing
+.env.local
+.env.*.local
 .npmrc
 *.tsbuildinfo
 .worktrees/

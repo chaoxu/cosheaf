@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Mirror `origin/main` to GitHub.
-# Usage: ./scripts/mirror-github.sh [--scheduled] [--dry-run]
-# Intended for manual runs and cron.
+# Publish a clean Cosheaf tree snapshot to GitHub.
+#
+# This intentionally does not mirror the private Forgejo history. Older local
+# history contains retired lab deployment paths, so the GitHub repository should
+# receive only the current public tree.
+#
+# Usage:
+#   GITHUB_REPO=owner/name ./scripts/mirror-github.sh [--dry-run]
+#   GITHUB_REPO=owner/name ./scripts/mirror-github.sh --scheduled
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-ORIGIN_REMOTE="${ORIGIN_REMOTE:-origin}"
 GITHUB_REMOTE_NAME="${GITHUB_REMOTE_NAME:-github}"
-TARGET_BRANCH="${TARGET_BRANCH:-main}"
 GITHUB_REPO="${GITHUB_REPO:-}"
+SOURCE_REF="${SOURCE_REF:-HEAD}"
+TARGET_BRANCH="${TARGET_BRANCH:-main}"
 DRY_RUN_FLAG=""
 PUSH_ARGS=(--force --no-verify)
 SCHEDULED_MODE=0
@@ -31,8 +37,8 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-# Only the launchd midnight job should run unattended. This makes the old
-# 03:17 cron entry a no-op until the system cron lock is cleared.
+# Only the launchd midnight job should run unattended. This makes old cron
+# invocations no-ops unless they opt into scheduled mode explicitly.
 if [ "$SCHEDULED_MODE" -ne 1 ] && [ ! -t 1 ]; then
   echo "Skipping headless invocation without --scheduled."
   exit 0
@@ -44,28 +50,34 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
     exit 1
   fi
   GITHUB_PUSH_TARGET="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+elif [ -n "$GITHUB_REPO" ]; then
+  GITHUB_PUSH_TARGET="git@github.com:${GITHUB_REPO}.git"
 elif git -C "$REPO_DIR" remote get-url "$GITHUB_REMOTE_NAME" >/dev/null 2>&1; then
-  GITHUB_PUSH_TARGET="$GITHUB_REMOTE_NAME"
+  GITHUB_PUSH_TARGET="$(git -C "$REPO_DIR" remote get-url "$GITHUB_REMOTE_NAME")"
 else
-  echo "Error: configure ${GITHUB_REMOTE_NAME} or set GITHUB_TOKEN." >&2
+  echo "Error: set GITHUB_REPO=owner/name, GITHUB_TOKEN, or configure ${GITHUB_REMOTE_NAME}." >&2
   exit 1
 fi
 
-SOURCE_REF="refs/remotes/${ORIGIN_REMOTE}/${TARGET_BRANCH}"
-DESTINATION_REF="refs/heads/${TARGET_BRANCH}"
+SOURCE_SHA="$(git -C "$REPO_DIR" rev-parse "$SOURCE_REF")"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cosheaf-github-snapshot.XXXXXX")"
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
-cd "$REPO_DIR"
+git -C "$REPO_DIR" archive "$SOURCE_SHA" | tar -x -C "$TMP_DIR"
+git -C "$TMP_DIR" init -b "$TARGET_BRANCH" >/dev/null
+git -C "$TMP_DIR" config user.name "${GIT_AUTHOR_NAME:-Cosheaf Snapshot Publisher}"
+git -C "$TMP_DIR" config user.email "${GIT_AUTHOR_EMAIL:-actions@users.noreply.github.com}"
+git -C "$TMP_DIR" add -A
+git -C "$TMP_DIR" commit -m "Publish Cosheaf snapshot ${SOURCE_SHA:0:12}" >/dev/null
 
-git fetch "$ORIGIN_REMOTE" "+refs/heads/${TARGET_BRANCH}:${SOURCE_REF}" --tags --prune
-
-SOURCE_SHA="$(git rev-parse "$SOURCE_REF")"
-echo "Syncing ${SOURCE_REF} (${SOURCE_SHA}) to GitHub ${DESTINATION_REF}"
-
-git push "${PUSH_ARGS[@]}" "$GITHUB_PUSH_TARGET" "${SOURCE_REF}:${DESTINATION_REF}"
-git push "${PUSH_ARGS[@]}" "$GITHUB_PUSH_TARGET" --tags
+echo "Publishing clean snapshot ${SOURCE_SHA} to GitHub ${TARGET_BRANCH}"
+git -C "$TMP_DIR" push "${PUSH_ARGS[@]}" "$GITHUB_PUSH_TARGET" "HEAD:refs/heads/${TARGET_BRANCH}"
 
 if [ -n "$DRY_RUN_FLAG" ]; then
   echo "Dry run complete."
 else
-  echo "Mirrored ${TARGET_BRANCH} + tags to GitHub."
+  echo "Published clean snapshot to GitHub."
 fi

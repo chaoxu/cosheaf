@@ -1,7 +1,15 @@
 {
   "name": "cosheaf",
   "version": "0.1.0",
-  "description": "Notion-like multi-user knowledge base for mathematical writing",
+  "description": "Forgejo-native knowledge base for Coflat markdown",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chaoxu/cosheaf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/chaoxu/cosheaf/issues"
+  },
+  "homepage": "https://github.com/chaoxu/cosheaf#readme",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
