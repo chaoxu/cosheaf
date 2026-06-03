@@ -25,9 +25,11 @@ formats can be added cleanly later; register formats through the format
 registry rather than reaching into one implementation's internals.
 Don't add another format until one is asked for.
 
-Agents (Coverify and friends) are out of scope here. They will live in a
-separate layer and participate as ordinary Forgejo write-access collaborators
-over the same HTTP API. Keep cosheaf's surface usable without any automation.
+Agent/prover internals (Coverify and friends) are out of scope here. They live
+in a separate layer and participate as ordinary Forgejo write-access
+collaborators over the same HTTP API. Cosheaf may provide a thin issue-backed
+chat surface and optional launcher for that external layer, but keep cosheaf's
+surface usable without any automation.
 
 ## Shared file
 
@@ -298,7 +300,8 @@ Notes for agent retry logic:
   "try again later"; you don't need to retry it from outside.
 
 Do not rewrite the app, build a generic CMS, add arbitrary document-format
-plugins, or move agent/prover logic into this repo as part of this direction.
+plugins, or move gatherer/oracle/prover logic into this repo as part of this
+direction.
 
 ## Stack
 
@@ -347,6 +350,11 @@ data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ## Commands
 
 ```bash
+cd ..
+git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
+git -C coflat checkout e2f28af19b5808c6c5b0cc42ad3e45172c3e5c3a
+cd cosheaf
+pnpm setup:deps              # verify and build pinned sibling ../coflat
 pnpm install
 cp .env.example .env.dev
 pnpm setup:dev              # seed local chao / Flushing Coin / Hello fixture
@@ -375,13 +383,13 @@ pnpm build                # vite build
 ## DevX quick map
 
 Use `docs/DEVX.md` when you need the shortest path to a route owner,
-verification command, browser login-state helper, or Jupiter release command.
+verification command, or browser login-state helper.
 
 Fast gates:
 
-- `pnpm check:local` — static checks, unit tests, and production build.
+- `pnpm check:local` — static checks, unit tests, Vite build, and server build.
 - `pnpm check:web` — server-rendered web end-to-end flow; requires `pnpm dev:all`.
-- `pnpm check:web:settings` — focused account/project settings E2E; requires `pnpm dev:all`.
+- `pnpm check:web:settings` — focused account/repository settings E2E; requires `pnpm dev:all`.
 - `pnpm dev:login-state` — writes `.playwright/cosheaf-chao-state.json` for local manual browser scripts; requires `pnpm dev:all`.
 
 Route owner map:
@@ -403,16 +411,16 @@ Route owner map:
 - Use Commander for CLI argument parsing. Do not add new hand-rolled
   `process.argv` flag scanners; expose parser-normalization functions for unit
   tests when scripts have validation worth testing.
-- Jupiter app workloads should be Docker Compose services. Avoid one-off
-  `docker run` service definitions for prod or branch previews; put ports,
+- Deployment workloads should be Docker Compose services. Avoid one-off
+  `docker run` service definitions for long-running environments; put ports,
   labels, volumes, healthchecks, and environment contracts in Compose files.
-- Keep Jupiter preview slug, port allocation, and cleanup state in
+- Keep preview slug, port allocation, and cleanup state in
   `scripts/preview-state.mjs`. Do not duplicate slug/port JSON handling inside
   shell snippets.
 - Browser smoke checks should run through Playwright's test runner. Tiny
   wrappers may delegate to existing scripts during migration, but package
-  scripts and Jupiter E2E entrypoints should use `playwright test` and the
-  shared `scripts/smoke-manifest.mjs` matrix.
+  scripts and E2E entrypoints should use `playwright test` and the shared
+  `scripts/smoke-manifest.mjs` matrix.
 - Use well-known libraries for standard work: Commander for CLI parsing,
   Docker Compose for container orchestration, Playwright Test for browser
   flows, DOMPurify/DOM APIs for sanitized HTML transforms, and package-exported
@@ -427,9 +435,7 @@ Route owner map:
 
 ## Local Forgejo
 
-Cosheaf's local Forgejo is `http://127.0.0.1:3002` with data/config under
-`/opt/homebrew/var/forgejo`. Do not use the unrelated Gitea instance on
-`http://127.0.0.1:3001` for Cosheaf.
+Cosheaf's local Forgejo is `http://127.0.0.1:3002`.
 
 `pnpm dev` and `pnpm server` are separate; `pnpm dev:all` runs both. Vite
 proxies `/api/*` to the server (see `vite.config.ts`).
@@ -444,7 +450,8 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
 
 There is no `users`, `sessions`, or `workspaces` table (#63, #62). Identity
-comes from a bearer token sent as `Authorization: Bearer <token>`; workspace
+comes from a Forgejo PAT sent as `Authorization: Bearer <token>` by API clients
+or as the `cosheaf_pat` HttpOnly cookie by server-rendered pages; workspace
 identity is the Forgejo repo name; the workspace's markdown format lives
 in a Forgejo repo topic (`cosheaf-format-coflat` or
 `cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write |
@@ -574,6 +581,7 @@ becomes a real bottleneck.
   `__cmDebug`, `pnpm test:browser`, `pnpm chrome`, `scripts/perf-*` apply
   here.
 - It is not a math-native semantic engine or an agent system. No theorem graph,
-  proof dependency model, proving, exploration, or verifier-bot logic belongs
-  in this repo. That goes in a separate layer, talking to cosheaf over the same
-  HTTP API a human uses.
+  proof dependency model, proving, exploration, gatherer/oracle logic, or
+  verifier-bot implementation belongs in this repo. The optional chat launcher
+  only hands an issue-backed thread to a separate layer, which talks to
+  cosheaf over the same HTTP API a human uses.

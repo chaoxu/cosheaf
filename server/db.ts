@@ -33,7 +33,7 @@ export interface Config {
   webhookUrl: string;
   // Coverify chat-reply shell-out. The bot account is distinct from the human
   // user; coverify authenticates to the Cosheaf API with its own token and
-  // posts the reply itself. An empty token soft-disables the chat reply.
+  // posts the reply itself. An empty token disables the chat launcher/reply path.
   coverifyCmd: string;
   coverifyApiUrl: string;
   coverifyBotToken: string;
@@ -46,7 +46,7 @@ function required(name: string): string {
     console.error(
       `missing required env var: ${name}\n` +
         "  Did you copy .env.example to .env.dev and load it?\n" +
-        "  cosheaf reads .env.dev (or whatever NODE_ENV points to) via process.loadEnvFile.",
+        "  cosheaf auto-loads .env.dev from the repo root or current working directory.",
     );
     process.exit(1);
   }

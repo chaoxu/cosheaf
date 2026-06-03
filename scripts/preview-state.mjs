@@ -26,7 +26,7 @@ function writeJson(file, data) {
 
 function main() {
   const program = new Command("preview-state")
-    .description("manage Cosheaf Jupiter preview slug and port state");
+    .description("manage Cosheaf preview slug and port state");
 
   program
     .command("slug <branch>")

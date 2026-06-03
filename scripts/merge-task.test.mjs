@@ -93,7 +93,7 @@ describe("merge-task helper", () => {
   });
 
   it("parses merge metadata from a handoff file and lets CLI flags override it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "coflat-merge-task-"));
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-merge-task-"));
     const file = join(dir, "handoff.json");
     try {
       writeFileSync(file, JSON.stringify({
@@ -126,7 +126,7 @@ describe("merge-task helper", () => {
   });
 
   it("recomputes baseRef when CLI base branch overrides handoff metadata", () => {
-    const dir = mkdtempSync(join(tmpdir(), "coflat-merge-task-"));
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-merge-task-"));
     const file = join(dir, "handoff.json");
     try {
       writeFileSync(file, JSON.stringify({
@@ -153,7 +153,7 @@ describe("merge-task helper", () => {
   });
 
   it("keeps explicit CLI baseRef when overriding handoff base branch", () => {
-    const dir = mkdtempSync(join(tmpdir(), "coflat-merge-task-"));
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-merge-task-"));
     const file = join(dir, "handoff.json");
     try {
       writeFileSync(file, JSON.stringify({

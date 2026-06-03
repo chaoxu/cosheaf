@@ -16,7 +16,7 @@ import {
 } from "../activity-feed.js";
 import { resolveBranchPath } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
-import { runCoverifyChatReply } from "../coverify-cli.js";
+import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js";
 import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
 import { fileLineToWritePosition, positionToFileLine, type Side } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -801,8 +801,8 @@ async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promis
   return created.id;
 }
 
-// chatgpt-style sessions sidebar: a "New chat" entry plus one row per chat,
-// with the active one highlighted. Shared by the list and thread views.
+// Issue-backed chat sidebar: a "New chat" entry plus one row per chat issue,
+// with the active issue highlighted. Shared by the list and thread views.
 function listChats(ctx: WebCtx) {
   return Promise.all([
     ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
@@ -816,9 +816,16 @@ function listChats(ctx: WebCtx) {
   });
 }
 
-function chatSidebar(owner: string, repo: string, chats: ForgejoIssue[], active: number | null, role: string): string {
+function chatSidebar(
+  owner: string,
+  repo: string,
+  chats: ForgejoIssue[],
+  active: number | null,
+  role: string,
+  canStartChat: boolean,
+): string {
   const newChat =
-    role === "read"
+    role === "read" || !canStartChat
       ? ""
       : `<a class="chat-new-link${active === null ? " active" : ""}" href="${repoHref(owner, repo, "/chat")}">+ New chat</a>`;
   const sessions =
@@ -834,9 +841,10 @@ function chatSidebar(owner: string, repo: string, chats: ForgejoIssue[], active:
 web.get("/:owner/:repo/chat", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
+  const canStartChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
   const [chats, branches] = await Promise.all([
     listChats(ctx),
-    ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listBranches(ctx.owner, ctx.repo),
+    canStartChat ? ctx.fj.listBranches(ctx.owner, ctx.repo) : Promise.resolve([]),
   ]);
   return htmlResponse(
     repoPage({
@@ -848,13 +856,15 @@ web.get("/:owner/:repo/chat", async (c) => {
       ws: ctx.ws,
       body: `
         <div class="chat-app">
-          ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role)}
+          ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role, canStartChat)}
           <section class="chat-main">
             <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
             ${
               ctx.ws.role === "read"
                 ? `<div class="chat-blank">Read-only access — you can't start chats here.</div>`
-                : `<div class="chat-blank">Start a new chat with Coverify, or pick a session on the left.</div>
+                : !canStartChat
+                  ? `<div class="chat-blank">Chat is not configured for this Cosheaf instance. Existing chat issues remain readable.</div>`
+                : `<div class="chat-blank">Start a new chat with Coverify, or pick a chat on the left.</div>
                    <form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
                      <label>Branch
                        <select name="branch">${branchOptions(branches, "main")}</select>
@@ -874,6 +884,7 @@ web.post("/:owner/:repo/chat/new", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const form = await c.req.parseBody();
   const message = stringField(form.message);
   if (!message) return redirect(repoHref(ctx.owner, ctx.repo, "/chat"));
@@ -909,6 +920,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
     return notFoundPage(ctx.user, "Chat not found");
   }
   const chatBranch = chatBranchFromBody(issue.body ?? "") ?? "main";
+  const canSendChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
   const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
   const renderedTurns = await Promise.all(
     turns.map(async (turn) => renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" }))),
@@ -924,7 +936,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
       body: `
         <div class="chat-app">
-          ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role)}
+          ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role, canSendChat)}
           <section class="chat-main">
             <div class="chat-main-head">
               <div>
@@ -940,7 +952,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
             </div>
             ${chatReplyPending(turns) ? chatLiveScript(ctx.repo, number) : ""}
             ${
-              ctx.ws.role === "read"
+              !canSendChat
                 ? ""
                 : `<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
                      <textarea name="message" placeholder="Message Coverify" required></textarea>
@@ -958,6 +970,7 @@ web.post("/:owner/:repo/chat/:number/send", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
   if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
@@ -1555,7 +1568,7 @@ web.get("/:owner/:repo/settings", async (c) => {
         <div class="settings-page">
           <div class="page-title compact">
             <div>
-              <p class="eyebrow">Project</p>
+              <p class="eyebrow">Repository</p>
               <h1>Settings</h1>
             </div>
           </div>
@@ -1603,7 +1616,7 @@ web.get("/:owner/:repo/settings", async (c) => {
                       ${accessUpdated ? `<p class="muted" data-testid="settings-access-saved">${escapeHtml(accessUpdated)}</p>` : ""}
                     </div>
                   </form>`
-                : `<p class="muted">Only project admins can grant access.</p>`
+                : `<p class="muted">Only repository admins can grant access.</p>`
             }
           </section>
         </div>
@@ -2640,7 +2653,7 @@ function userPreferencesSection(user: string): string {
   return `<section class="settings-section" data-testid="settings-user-preferences">
     <div class="settings-section-header">
       <h2>User preferences</h2>
-      <p>These settings follow your browser session and apply across projects.</p>
+      <p>These settings follow your browser session and apply across workspaces.</p>
     </div>
     <div class="settings-form">
       <label class="settings-row">
@@ -2962,7 +2975,7 @@ function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): str
               <label class="settings-row"><span>Exclusive</span><input name="exclusive" type="checkbox" value="on"></label>
               <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-label-submit">Create label</button></div>
             </form>`
-          : `<p class="muted">Only project admins can create labels.</p>`
+          : `<p class="muted">Only repository admins can create labels.</p>`
       }
     </div>
   </section>`;
@@ -2987,7 +3000,7 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMiles
               <label class="settings-row"><span>Description</span><input name="description"></label>
               <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-milestone-submit">Create milestone</button></div>
             </form>`
-          : `<p class="muted">Only project admins can create milestones.</p>`
+          : `<p class="muted">Only repository admins can create milestones.</p>`
       }
     </div>
   </section>`;
@@ -3355,7 +3368,7 @@ function urlPath(path: string): string {
 
 function displayLogin(owner: string, login: string | null | undefined): string {
   if (!login) return DELETED_USER_LOGIN;
-  return login === owner ? "project" : login;
+  return login === owner ? "repository" : login;
 }
 
 function jsonScript(value: unknown): string {

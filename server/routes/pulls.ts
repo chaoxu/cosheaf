@@ -679,21 +679,20 @@ pulls.get("/:slug/settings", async (c) => {
   });
 });
 
-// PUT /settings is NOT atomic across Forgejo and SQLite — by design.
-// Forgejo is authoritative for branch protection and a network call away;
-// SQLite is local. We commit Forgejo first (the source of truth), then
-// SQLite. Order within the handler:
+// PUT /settings is NOT atomic across Forgejo and the SQLite sidecar — by
+// design. Forgejo is authoritative for branch protection and workspace format
+// topics; SQLite is local derived index state. Order within the handler:
 //
 //   1. validate payload (cheap, no side effects)
 //   2. update Forgejo branch protection if min_approvals changed
-//   3. reindex from Forgejo if default_md_format changed (this WRITES to
+//   3. update the Forgejo repo format topic if default_md_format changed
+//   4. reindex from Forgejo if default_md_format changed (this WRITES to
 //      doc_map/backlinks/FTS with the new format's rules)
-//   4. UPDATE workspaces.default_md_format — the cosheaf-side commit point
 //
 // If any step throws, the response is a 5xx with the step that failed in
 // the body. The repair path is always: PUT /settings again with the same
 // payload (idempotent), then optionally `pnpm cli workspace reindex <slug>`
-// if the format flag advanced but the indexer crashed mid-walk.
+// if the format topic advanced but the indexer crashed mid-walk.
 pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     min_approvals?: number;

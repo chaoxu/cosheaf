@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Publish a clean Cosheaf tree snapshot to GitHub.
 #
-# This intentionally does not mirror the private Forgejo history. Older local
-# history contains retired lab deployment paths, so the GitHub repository should
-# receive only the current public tree.
+# This intentionally publishes a single clean tree commit instead of mirroring
+# the active development history.
 #
 # Usage:
-#   GITHUB_REPO=owner/name ./scripts/mirror-github.sh [--dry-run]
-#   GITHUB_REPO=owner/name ./scripts/mirror-github.sh --scheduled
+#   GITHUB_REPO=owner/name ./scripts/mirror-github.sh [--dry-run] [--yes]
 
 set -euo pipefail
 
@@ -18,7 +16,7 @@ SOURCE_REF="${SOURCE_REF:-HEAD}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
 DRY_RUN_FLAG=""
 PUSH_ARGS=(--force --no-verify)
-SCHEDULED_MODE=0
+CONFIRM_NONINTERACTIVE=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -26,21 +24,21 @@ while [ "$#" -gt 0 ]; do
       DRY_RUN_FLAG="--dry-run"
       PUSH_ARGS=(--dry-run --force --no-verify)
       ;;
-    --scheduled)
-      SCHEDULED_MODE=1
+    --yes)
+      CONFIRM_NONINTERACTIVE=1
       ;;
     *)
-      echo "Usage: $0 [--scheduled] [--dry-run]" >&2
+      echo "Usage: $0 [--dry-run] [--yes]" >&2
       exit 1
       ;;
   esac
   shift
 done
 
-# Only the launchd midnight job should run unattended. This makes old cron
-# invocations no-ops unless they opt into scheduled mode explicitly.
-if [ "$SCHEDULED_MODE" -ne 1 ] && [ ! -t 1 ]; then
-  echo "Skipping headless invocation without --scheduled."
+# GitHub is a clean public snapshot target, not the active development remote.
+# Refuse unattended execution unless the caller explicitly confirms it.
+if [ "$CONFIRM_NONINTERACTIVE" -ne 1 ] && [ ! -t 1 ]; then
+  echo "Skipping non-interactive invocation without --yes."
   exit 0
 fi
 

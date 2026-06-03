@@ -6,39 +6,100 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  COFLAT_REF: e2f28af19b5808c6c5b0cc42ad3e45172c3e5c3a
+
 jobs:
   static:
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out Cosheaf
+        uses: actions/checkout@v4
+        with:
+          path: cosheaf
+      - name: Check out Coflat
+        uses: actions/checkout@v4
+        with:
+          repository: chaoxu/coflat
+          ref: ${{ env.COFLAT_REF }}
+          path: coflat
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Setup pnpm
         run: |
           pnpm_home="${RUNNER_TEMP:-$PWD/.tmp-ci}/pnpm"
           npm install -g --prefix "$pnpm_home" pnpm@10.33.0
           echo "$pnpm_home/bin" >> "$GITHUB_PATH"
           "$pnpm_home/bin/pnpm" --version
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check:static
+      - name: Install and build Coflat
+        run: |
+          pnpm --dir coflat install --frozen-lockfile
+          pnpm --dir coflat build
+      - run: pnpm --dir cosheaf install --frozen-lockfile
+      - run: pnpm --dir cosheaf check:static
 
   test:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out Cosheaf
+        uses: actions/checkout@v4
+        with:
+          path: cosheaf
+      - name: Check out Coflat
+        uses: actions/checkout@v4
+        with:
+          repository: chaoxu/coflat
+          ref: ${{ env.COFLAT_REF }}
+          path: coflat
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Setup pnpm
         run: |
           pnpm_home="${RUNNER_TEMP:-$PWD/.tmp-ci}/pnpm"
           npm install -g --prefix "$pnpm_home" pnpm@10.33.0
           echo "$pnpm_home/bin" >> "$GITHUB_PATH"
           "$pnpm_home/bin/pnpm" --version
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      - name: Install and build Coflat
+        run: |
+          pnpm --dir coflat install --frozen-lockfile
+          pnpm --dir coflat build
+      - run: pnpm --dir cosheaf install --frozen-lockfile
+      - run: pnpm --dir cosheaf test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out Cosheaf
+        uses: actions/checkout@v4
+        with:
+          path: cosheaf
+      - name: Check out Coflat
+        uses: actions/checkout@v4
+        with:
+          repository: chaoxu/coflat
+          ref: ${{ env.COFLAT_REF }}
+          path: coflat
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Setup pnpm
+        run: |
+          pnpm_home="${RUNNER_TEMP:-$PWD/.tmp-ci}/pnpm"
+          npm install -g --prefix "$pnpm_home" pnpm@10.33.0
+          echo "$pnpm_home/bin" >> "$GITHUB_PATH"
+          "$pnpm_home/bin/pnpm" --version
+      - name: Install and build Coflat
+        run: |
+          pnpm --dir coflat install --frozen-lockfile
+          pnpm --dir coflat build
+      - run: pnpm --dir cosheaf install --frozen-lockfile
+      - run: pnpm --dir cosheaf build
+      - run: pnpm --dir cosheaf build:server

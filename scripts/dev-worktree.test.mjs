@@ -26,7 +26,7 @@ function run(cwd, ...args) {
 }
 
 function initRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "coflat-dev-worktree-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "cosheaf-dev-worktree-"));
   run(repoRoot, "git", "init", "-b", "main");
   run(repoRoot, "git", "config", "user.name", "Test User");
   run(repoRoot, "git", "config", "user.email", "test@example.com");
@@ -38,13 +38,13 @@ function initRepo() {
 }
 
 function initBareOrigin() {
-  const bareRoot = mkdtempSync(join(tmpdir(), "coflat-dev-worktree-origin-"));
+  const bareRoot = mkdtempSync(join(tmpdir(), "cosheaf-dev-worktree-origin-"));
   run(bareRoot, "git", "init", "--bare");
   return bareRoot;
 }
 
 function pushRemoteBranch(originRoot, branch, filename, contents) {
-  const cloneRoot = mkdtempSync(join(tmpdir(), "coflat-dev-worktree-clone-"));
+  const cloneRoot = mkdtempSync(join(tmpdir(), "cosheaf-dev-worktree-clone-"));
   run(tmpdir(), "git", "clone", originRoot, cloneRoot);
   run(cloneRoot, "git", "config", "user.name", "Test User");
   run(cloneRoot, "git", "config", "user.email", "test@example.com");

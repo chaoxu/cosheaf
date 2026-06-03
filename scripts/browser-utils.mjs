@@ -10,7 +10,7 @@ const candidates = [
 export async function loadChromium() {
   const playwrightPath = candidates.find(existsSync);
   if (!playwrightPath) {
-    console.error("playwright not found; install via `pnpm add -g playwright` and `pnpm exec playwright install chromium`");
+    console.error("playwright not found; run `pnpm install` and `pnpm exec playwright install chromium`");
     process.exit(1);
   }
   return (await import(playwrightPath)).default.chromium;

@@ -11,7 +11,7 @@ Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is designed to be comfortable for mathematical writing, with
 math syntax, theorem-style blocks, cross-references, citations, and LaTeX export
 conventions. Cosheaf does not model mathematical objects as a separate graph:
-the durable unit is still the markdown page, and the sidecar index stores only
+the durable unit is still the markdown page, and the document index stores
 page metadata, links, tags, and search text.
 
 Workspaces choose one markdown format. New workspaces default to Forgejo
@@ -19,14 +19,17 @@ Markdown passthrough for plain `.md` files; Coflat workspaces opt into
 math-friendly parsing, `[@id]` backlinks, and rich rendered diffs.
 
 Cosheaf is meant to be useful with only human users. Autonomous agents can
-participate later through the same HTTP API as ordinary Forgejo collaborators.
+participate through the same HTTP API as ordinary Forgejo collaborators, and
+the optional Chat surface is only a Forgejo-issue-backed bridge to that outside
+agent layer.
 
 ## Core Philosophy
 
 - **Forgejo is the source of truth.** Workspace content lives in a Forgejo repo.
-  SQLite is a sidecar for fast reads, search, backlinks, tags, and webhook
-  dedupe. Identity, sessions, workspace registry, and audit logs all live on
-  Forgejo — there is no `users`, `sessions`, or `workspaces` table.
+  SQLite is a sidecar for fast reads, search, backlinks, tags, webhook dedupe,
+  and cached Cosheaf-issued PATs used by browser login. Identity, workspace
+  registry, and audit logs live on Forgejo — there is no `users`, `sessions`,
+  or `workspaces` table.
 - **Use Forgejo terms directly.** Cosheaf should mirror Forgejo's branch, pull
   request, review, issue, merge, and close model instead of inventing parallel
   workflow concepts. A user should be able to perform the same durable
@@ -112,23 +115,29 @@ index from Forgejo `main` and removes stale page index rows.
 ## Coverify Boundary
 
 The [Coverify](https://github.com/chaoxu/coverify) layer is intentionally out
-of this repo. It will:
+of this repo. It:
 
 - authenticate with ordinary Forgejo PATs through Cosheaf bearer auth
-- subscribe to SSE events
 - read pages, search, and walk backlinks
 - push branches, open pull requests, and participate in reviews
+- answer issue-backed chats through Cosheaf's typed API when the optional chat
+  bridge starts it
 
-Cosheaf will not import or call agent code. If an agent needs a capability,
-that should become an HTTP API feature usable by humans too.
+Cosheaf does not implement gatherers, oracles, provers, or agent scheduling.
+The optional chat bridge only starts the external Coverify command and lets it
+read/write through the public Cosheaf API as a bot account. If an agent needs a
+new repository capability, that should become an HTTP API feature usable by
+humans too.
 
 ## Stack
 
 - **Server**: Node, TypeScript, Hono, `better-sqlite3`, Forgejo REST API.
   No password hashing — the Forgejo PAT is the credential, exchanged at
-  login and sent as `Authorization: Bearer <pat>` on every request.
-- **Client**: React 19, Vite, Tailwind v4, shadcn-style primitives, and
-  [`@chaoxu/coflat`](https://github.com/chaoxu/coflat).
+  login for an HttpOnly browser cookie or sent directly by API clients as
+  `Authorization: Bearer <pat>`.
+- **Web**: server-rendered Hono pages, `public/cosheaf-web.css`, and narrow
+  React 19 + Vite islands for the rich editor/reader surfaces.
+- **Editor**: [`@chaoxu/coflat`](https://github.com/chaoxu/coflat).
 - **Format**: Coflat-flavored Pandoc markdown per
   [Coflat `FORMAT.md`](https://github.com/chaoxu/coflat/blob/main/FORMAT.md);
   Cosheaf's [`FORMAT.md`](./FORMAT.md) records only host-specific behavior.
@@ -137,7 +146,7 @@ that should become an HTTP API feature usable by humans too.
 
 - The editor implementation itself; it lives in
   [`@chaoxu/coflat`](https://github.com/chaoxu/coflat).
-- Agent/prover orchestration.
+- Agent/prover orchestration beyond the optional issue-backed chat launcher.
 - Built-in Pandoc export and desktop-native behavior. These may return later as
   optional Cosheaf operations rather than core requirements; see
   [Bring Coflat Operations Into Cosheaf](./docs/epics/coflat-operations.md).

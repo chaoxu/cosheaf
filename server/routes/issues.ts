@@ -103,7 +103,7 @@ issues.use("/:slug/*", requireMembership());
 issues.use("/:slug/*", requireWriteOnMutation);
 
 // Typed because the public API needs an issue-only row shape and "mine"
-// composes two backend filters (created_by OR assigned_by).
+// composes two Forgejo filters (created_by OR assigned_by).
 issues.get("/:slug/issues", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const stateRaw = c.req.query("state");
@@ -118,9 +118,9 @@ issues.get("/:slug/issues", async (c) => {
   const createdBy = trimmedQuery(c.req.query("created_by"));
   const mentionedBy = trimmedQuery(c.req.query("mentioned_by"));
   const sort = parseIssueSort(c.req.query("sort"));
-  // The sidecar used to compute these locally; the backend repo-scoped issues
+  // The sidecar used to compute these locally; Forgejo's repo-scoped issues
   // endpoint already supports the same filters. The caller's token is what the
-  // backend client is bound to, so created_by/assigned_by use their identity.
+  // Forgejo client is bound to, so created_by/assigned_by use their identity.
   if (filter === "mine") {
     // "mine" = authored OR assigned. Forgejo doesn't OR these server-side,
     // so two calls + dedupe. They're cheap and the response is small.
@@ -148,7 +148,7 @@ issues.get("/:slug/issues", async (c) => {
   return c.json({ issues: list.filter((i) => !i.pull_request).map(toIssueRow) });
 });
 
-// Typed because the backend returns raw issues/PRs; the public API wants
+// Typed because Forgejo returns raw issues/PRs; the public API wants
 // issue-only rows.
 // Must come before :number routes.
 issues.get("/:slug/issues/pinned", async (c) => {
@@ -409,7 +409,7 @@ issues.post("/:slug/markdown/render", async (c) => {
   return c.json({ html });
 });
 
-// Typed because the backend dependency mutation body redundantly requires the
+// Typed because Forgejo's dependency mutation body redundantly requires the
 // owner/repo, which clients should not know.
 issues.get("/:slug/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
@@ -454,7 +454,7 @@ issues.delete("/:slug/issues/:number/dependencies", async (c) => {
   return c.json({ issue: toDependencyRow(updated) });
 });
 
-// Typed because backend activities encode references in JSON-ish strings;
+// Typed because Forgejo activities encode references in JSON-ish strings;
 // clients get parsed issue refs and normalized timestamps.
 issues.get("/:slug/activities", async (c) => {
   const rawLimit = Number(c.req.query("limit") ?? 50);
@@ -465,7 +465,7 @@ issues.get("/:slug/activities", async (c) => {
   return c.json({
     activities: safe.map<ActivityRow>((item) => {
       const a = item.activity;
-      // The backend encodes content as a JSON array string for many op_types.
+      // Forgejo encodes content as a JSON array string for many op_types.
       // For comment_*: ["<issue_index>","<body>"]
       // For close_issue, reopen_issue, etc: often just "<issue_index>" or
       // similar — keep raw and let the client parse what it can.
@@ -512,7 +512,7 @@ issues.get("/:slug/issues/:number/timeline", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const events = await fj.listIssueTimeline(owner, repo, number);
-  // The backend returns null instead of [] for some empty issue timelines.
+  // Forgejo returns null instead of [] for some empty issue timelines.
   const safe = events ?? [];
   return c.json({
     events: safe.map<TimelineEvent>((e) => ({

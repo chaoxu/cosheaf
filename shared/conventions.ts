@@ -4,11 +4,10 @@
 // site moves in lockstep.
 
 /**
- * Per-user branch namespace. The cosheaf server enforces this prefix when
- * a write auto-creates a branch (so writes can't conjure arbitrary branch
- * names on the user's behalf); the client builds the same prefix when it
- * generates a fresh branch name for first-save. Returns a trailing slash
- * so `${userBranchPrefix(x)}wip-abc` is well-formed.
+ * Per-user branch namespace used by browser defaults when first-save needs a
+ * fresh branch. Explicit branch names are normal Forgejo branch names; this is
+ * only the stable default prefix for user-owned draft work. Returns a trailing
+ * slash so `${userBranchPrefix(x)}wip-abc` is well-formed.
  */
 export function userBranchPrefix(forgejoUsername: string): string {
   return `user/${forgejoUsername}/`;

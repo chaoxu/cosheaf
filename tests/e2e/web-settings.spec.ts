@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const webBase = "http://localhost:3030";
 const repoBase = `${webBase}/flushing-coin`;
 
-test("account preferences are separate from project settings", async ({ page }) => {
+test("account preferences are separate from repository settings", async ({ page }) => {
   const css = await page.request.get(`${webBase}/cosheaf-web.css`);
   expect(css.ok()).toBe(true);
   const preferencesJs = await page.request.get(`${webBase}/cosheaf-preferences.js`);

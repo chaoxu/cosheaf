@@ -90,6 +90,7 @@ describe("workspace provisioning", () => {
     expect(result.workspace.slug).toBe("notes");
     expect(result.workspace.defaultMdFormat).toBe("coflat");
     expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "chao", "admin");
+    expect(forgejo.addCollaborator).not.toHaveBeenCalledWith("owner", "notes", "coverify", "write");
     expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_slug = ?").get(result.workspace.slug))
       .toEqual({ path: "readme.md" });
     expect(forgejo.createBranchProtection).toHaveBeenCalledOnce();
@@ -99,6 +100,21 @@ describe("workspace provisioning", () => {
       "notes",
       expect.objectContaining({ path: ".gitattributes" }),
     );
+  });
+
+  it("adds the Coverify bot only when chat replies are configured", async () => {
+    const db = freshDb();
+    const forgejo = fakeForgejo();
+    const user = { username: "chao" };
+
+    await provisionWorkspace(db, forgejo, { ...config, coverifyBotToken: "bot-token" }, {
+      slug: "notes",
+      name: "Notes",
+      user,
+      forgejoUsername: "chao",
+    });
+
+    expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "coverify", "write");
   });
 
   it("skips webhook registration for passthrough workspaces (#64)", async () => {

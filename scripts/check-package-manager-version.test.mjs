@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const tempDirs = [];
 
 function makeFakePnpm(version) {
-  const dir = mkdtempSync(join(tmpdir(), "coflat-pnpm-version-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "cosheaf-pnpm-version-test-"));
   tempDirs.push(dir);
   const bin = join(dir, "pnpm");
   writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`);

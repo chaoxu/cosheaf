@@ -295,7 +295,7 @@ export function printIssueHelp(stream = process.stdout) {
   pnpm issue -- label <number> "devx,bug"
   pnpm issue -- triage [tea options]
   pnpm issue -- verify-close <number...> --commit <sha> --verify "pnpm test" \
-    [--browser-artifact /tmp/coflat-foo.png] [--residual-risk "..."] [--dry-run]
+    [--browser-artifact /tmp/cosheaf-foo.png] [--residual-risk "..."] [--dry-run]
 
 All commands default to --repo ${DEFAULT_REPO}.
 `);

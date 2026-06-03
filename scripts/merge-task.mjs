@@ -281,7 +281,7 @@ export function printMergeTaskHelp(stream = process.stdout) {
   stream.write(`Usage:
   pnpm merge-task -- --branch <worker-branch> [--base-branch main] [--base-ref origin/main] [--old-base <ref>]
   pnpm merge-task -- --branch <worker-branch> --issue 1234 --check "rtk pnpm test:focused -- file.test.ts"
-  pnpm merge-task -- --handoff /tmp/coflat-agent-handoff.json
+  pnpm merge-task -- --handoff /tmp/cosheaf-agent-handoff.json
   pnpm merge-task -- --branch <worker-branch> --run
 
 The helper prints rtk-prefixed fetch/duplicate-inspection/rebase/diff/check

@@ -43,7 +43,7 @@ const rules = [
     id: "settings",
     matches: [/settings/i],
     commands: [
-      command("pnpm check:web:settings", "focused account/project settings separation"),
+      command("pnpm check:web:settings", "focused account/repository settings separation"),
       command("pnpm check:web", "settings within the full server-rendered flow"),
     ],
   },
@@ -75,7 +75,7 @@ const rules = [
 ];
 
 const baselineCommands = [
-  command("pnpm check:local", "normal local gate: static checks, unit tests, production build"),
+  command("pnpm check:local", "normal local gate: static checks, unit tests, Vite build, server build"),
 ];
 
 function command(run, reason) {

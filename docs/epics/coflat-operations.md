@@ -2,10 +2,11 @@
 
 ## Summary
 
-Cosheaf should eventually replace the standalone Coflat app shell while keeping
-`@chaoxu/coflat` as the editor package. Cosheaf owns workspaces, users,
-issues, branches, pull requests, Forgejo storage, search, backlinks, assets, and
-optional operations around canonical markdown files.
+Cosheaf's server-rendered shell now owns the knowledge-base app surface while
+`@chaoxu/coflat` remains the editor package. Forgejo owns repository storage,
+identity, memberships, issues, branches, and pull requests. Cosheaf owns the
+knowledge-base UI/API, search, backlinks, assets, and optional operations
+around canonical markdown files.
 
 This epic tracks the important Coflat app operations that should move into
 Cosheaf. Not every operation belongs in core. Some capabilities, especially
@@ -26,8 +27,8 @@ The future split should be:
 
 - `@chaoxu/coflat`: document editing, parsing, rich/source rendering, and
   in-editor Coflat semantics.
-- `cosheaf`: Forgejo-backed canonical storage, branches, pull requests, issues,
-  review gates, search, backlinks, assets, and optional document operations.
+- `cosheaf`: Forgejo-backed knowledge-base UI/API, review gates, search,
+  backlinks, assets, and optional document operations.
 
 ## Required Core Work
 
@@ -151,4 +152,4 @@ deployment.
   generated on demand?
 - Should diagnostics ever become merge gates, or should they remain advisory?
 - How much of Coflat's current browser regression harness should move to
-  Cosheaf once the app shell is replaced?
+  Cosheaf now that Cosheaf owns the app shell?

@@ -1,6 +1,6 @@
-// Cosheaf has no local user state. Usernames are Forgejo usernames; the
-// PAT used for every request is the client's `Authorization: Bearer` header.
-// This type is the per-request user shape stashed in AppEnv.
+// Cosheaf has no local user table. Usernames are Forgejo usernames resolved
+// from the request PAT, whether it arrived as an API bearer token or the
+// server-rendered web cookie.
 export interface User {
   username: string;
 }

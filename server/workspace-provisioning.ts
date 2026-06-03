@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { isCoverifyChatEnabled } from "./coverify-cli.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
@@ -208,7 +209,7 @@ export async function ensureWorkspacePermissions(
     }
   }
 
-  if (config.coverifyBotLogin && config.coverifyBotLogin !== config.forgejoOwner) {
+  if (isCoverifyChatEnabled(config) && config.coverifyBotLogin !== config.forgejoOwner) {
     try {
       // The Coverify chat bot needs write access in every workspace so it can
       // read chat threads and post replies; otherwise chats there sit at

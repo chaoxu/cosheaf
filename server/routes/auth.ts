@@ -1,6 +1,6 @@
-// Login exchanges user credentials for a backend token. Cosheaf doesn't hold
-// passwords or sessions; the returned token supports API clients as JSON and
-// server-rendered pages as an HttpOnly cookie.
+// Login exchanges user credentials for a Cosheaf-issued Forgejo PAT. Cosheaf
+// doesn't hold passwords or sessions; the returned PAT supports API clients as
+// JSON and server-rendered pages as an HttpOnly cookie.
 
 import { Hono } from "hono";
 import type Database from "better-sqlite3";
@@ -156,10 +156,10 @@ async function createForgejoToken(
   if (res.status === 401 || res.status === 403) return { kind: "bad_credentials" };
   if (res.status === 400 || res.status === 422) return { kind: "name_taken" };
   if (res.status >= 500 || res.status === 429) {
-    return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
+    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
   }
   if (!res.ok) {
-    return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
+    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
   }
   const parsed = (await res.json().catch(() => null)) as CreateTokenResponse | null;
   if (!parsed?.sha1) return { kind: "upstream_unavailable", detail: "missing sha1 in response" };
@@ -206,9 +206,9 @@ async function verifyForgejoUser(
   }
   if (res.status === 401 || res.status === 403) return { kind: "bad_credentials" };
   if (res.status >= 500 || res.status === 429) {
-    return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
+    return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
   }
-  if (!res.ok) return { kind: "upstream_unavailable", detail: `backend ${res.status}` };
+  if (!res.ok) return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
 
   const parsed = (await res.json().catch(() => null)) as ForgejoUserResponse | null;
   if (parsed?.login !== username) return { kind: "bad_credentials" };
@@ -234,7 +234,7 @@ auth.post("/login", async (c) => {
   }
   if (outcome.kind === "upstream_unavailable") {
     return c.json(
-      { error: `backend unavailable: ${outcome.detail}`, code: "bad_gateway" },
+      { error: `forgejo unavailable: ${outcome.detail}`, code: "bad_gateway" },
       502,
     );
   }
@@ -248,7 +248,7 @@ auth.post("/login", async (c) => {
 });
 
 // Logout clears the browser cookie. We deliberately do NOT revoke the cached
-// backend token because other API clients may still use it.
+// Forgejo PAT because other API clients may still use it.
 auth.post("/logout", (c) => {
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.json({ ok: true });

@@ -60,9 +60,9 @@ describe("chatTurns", () => {
   });
 
   it("hides machine metadata from the visible turn body", () => {
-    const body = chatIssueBody("Prove the branch lemma.", "agent/math");
+    const body = chatIssueBody("Summarize the branch notes.", "agent/math");
     const turns = chatTurns(issue({ body }), [], BOT);
-    expect(turns.map((t) => t.body)).toEqual(["Prove the branch lemma."]);
+    expect(turns.map((t) => t.body)).toEqual(["Summarize the branch notes."]);
   });
 });
 
@@ -131,7 +131,7 @@ describe("chatLiveScript", () => {
 
 describe("chatTitleFrom", () => {
   it("uses the first non-empty line", () => {
-    expect(chatTitleFrom("\n  Prove the lemma  \nmore")).toBe("Prove the lemma");
+    expect(chatTitleFrom("\n  Summarize the notes  \nmore")).toBe("Summarize the notes");
   });
 
   it("truncates long first lines", () => {

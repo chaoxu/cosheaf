@@ -6,16 +6,16 @@
     "type": "git",
     "url": "git+https://github.com/chaoxu/cosheaf.git"
   },
-  "bugs": {
-    "url": "https://github.com/chaoxu/cosheaf/issues"
-  },
   "homepage": "https://github.com/chaoxu/cosheaf#readme",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
-    "setup:deps": "pnpm --dir ../coflat install --frozen-lockfile && pnpm --dir ../coflat build",
+    "setup:deps": "node scripts/check-coflat-ref.mjs && pnpm --dir ../coflat install --frozen-lockfile && pnpm --dir ../coflat build",
     "dev:worktree": "node scripts/dev-worktree.mjs",
     "dev:login-state": "node scripts/web-login-state.mjs",
     "devx": "node scripts/devx.mjs ready",
@@ -39,7 +39,7 @@
     "dev:fresh": "rm -rf node_modules/.vite node_modules/.vite-temp && pnpm dev:all",
     "lint": "pnpm check:lint",
     "lint:errors": "node scripts/check-bare-catch.mjs",
-    "lint:boundaries": "node scripts/check-plugin-render-boundary.mjs",
+    "lint:boundaries": "node scripts/check-layer-boundaries.mjs",
     "lint:api-contract": "node scripts/check-api-contract.mjs",
     "lint:fix": "biome lint . --write",
     "knip": "knip",
@@ -50,12 +50,11 @@
     "check:unit": "vitest run",
     "check:pnpm-version": "node scripts/check-package-manager-version.mjs",
     "check:static": "pnpm check:lint && pnpm check:types && pnpm check:unused",
-    "check:local": "pnpm check:static && pnpm test && pnpm build",
+    "check:local": "pnpm check:static && pnpm test && pnpm build && pnpm build:server",
     "check:pre-push": "pnpm check:types && pnpm lint:errors && pnpm lint:boundaries",
     "check:merge": "pnpm check:static && pnpm check:unit",
     "issue": "node scripts/issue.mjs",
     "merge-task": "node scripts/merge-task.mjs",
-    "infra:issue": "node scripts/infra-issue.mjs",
     "smoke": "playwright test --config playwright.smoke.config.ts --grep @smoke-basic",
     "smoke:list": "node scripts/smoke-list.mjs",
     "smoke:issues": "playwright test --config playwright.smoke.config.ts --grep @smoke-issues",
@@ -106,7 +105,7 @@
     "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.3.0",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.5.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.3.0",

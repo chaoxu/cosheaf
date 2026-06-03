@@ -4,7 +4,8 @@ A multi-user knowledge base built on
 [Coflat](https://github.com/chaoxu/coflat)-format markdown files. Cosheaf is a
 Forgejo-native UI for trustworthy markdown authoring: pages live in Forgejo,
 work happens on branches, review happens in pull requests, and merged markdown
-on `main` is canonical. SQLite is only a rebuildable sidecar index.
+on `main` is canonical. SQLite is a sidecar for rebuildable indexes plus the
+small Cosheaf-owned credential cache used by browser login.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
 Coflat markdown is intentionally close to mathematical writing: theorem-style
@@ -18,7 +19,9 @@ rendering, backlinks, and rich review diffs.
 
 The substrate is fully usable by humans alone. Automated agents such as
 [Coverify](https://github.com/chaoxu/coverify) participate as ordinary Forgejo
-collaborators through Cosheaf's HTTP API.
+collaborators through Cosheaf's HTTP API. The Chat tab is an issue-backed UI
+that can trigger the external Coverify harness when configured; the agent logic
+itself stays outside this repo.
 
 ## What it gives you
 
@@ -35,10 +38,10 @@ collaborators through Cosheaf's HTTP API.
   body is full-text searchable.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
   stream updates over SSE to open browsers.
-- **Cosheaf API token auth** — every request sends an API token as
+- **Cosheaf PAT auth** — API clients and agents send a PAT as
   `Authorization: Bearer <token>`. Humans sign in through cosheaf's
   server-rendered login form, which exchanges Forgejo credentials for a
-  PAT-backed HttpOnly cookie; agents send their own token.
+  PAT-backed HttpOnly cookie.
 - **Cosheaf-first agent API** — agents use typed Cosheaf workspace routes for
   branches, files, pull requests, reviews, issues, labels, milestones,
   notifications, and markdown rendering. The backing forge is an
@@ -61,7 +64,7 @@ treated as external repo edits and reach the SQLite index through
 webhook/reindex reconciliation. A Markdown write that needs immediate Cosheaf
 document/index behavior should use the typed file route.
 
-Example Cosheaf calls, all with `Authorization: Bearer <token>`:
+Example agent/API calls, all with `Authorization: Bearer <token>`:
 `GET /api/v1/w/flushing-coin/issues?state=open`,
 `GET /api/v1/w/flushing-coin/pulls?state=open`,
 `GET /api/v1/w/flushing-coin/labels`,
@@ -71,9 +74,14 @@ Example Cosheaf calls, all with `Authorization: Bearer <token>`:
 ## Quick start
 
 ```bash
+cd ..
+git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
+git -C coflat checkout e2f28af19b5808c6c5b0cc42ad3e45172c3e5c3a
+cd cosheaf
+pnpm setup:deps  # verifies the pinned Coflat checkout, then builds it
 pnpm install
 cp .env.example .env.dev
-# edit .env.dev with COSHEAF_FORGEJO_TOKEN
+# edit .env.dev with COSHEAF_FORGEJO_TOKEN and COSHEAF_FORGEJO_ADMIN_TOKEN
 pnpm setup:dev
 pnpm dev:all
 # → http://localhost:3030
@@ -90,15 +98,18 @@ development.
   [`@chaoxu/coflat`](https://github.com/chaoxu/coflat). For source builds
   before the package is published from a public registry, clone
   [`coflat`](https://github.com/chaoxu/coflat) next to this repo.
+- Server-rendered CSS lives in `public/cosheaf-web.css`; Vite/Tailwind support
+  the page islands and bundled client assets.
 - SQLite via `better-sqlite3`. WAL mode. Forgejo `main` is the page source of
-  truth; the DB is a rebuildable index.
+  truth; document/index tables are rebuildable, while `login_tokens` caches
+  Cosheaf-issued Forgejo PATs for browser login reuse.
 - Forgejo webhooks reconcile external edits; SSE pushes changes to connected
   clients.
 
 ## Project layout
 
 ```
-server/        Hono API, Forgejo client, SQLite sidecar index, pull request workflow
+server/        Hono API, Forgejo client, SQLite sidecar, pull request workflow
 src/cosheaf/   Page islands for the editor/reader plus their small fetch client
 scripts/       dev:all spawner, lefthook checks, Forgejo issue + worker-branch tools
 FORMAT.md      Cosheaf-specific notes and pointer to the Coflat format spec
@@ -110,7 +121,8 @@ DESIGN.md      Product philosophy and trust model
 ## Commands
 
 ```bash
-pnpm setup:deps      # Build sibling ../coflat for source installs
+pnpm setup:deps      # Verify and build pinned sibling ../coflat
+pnpm install         # Install Cosheaf after ../coflat exists
 pnpm dev:all          # web/API server + Vite page-island dev server
 pnpm setup:dev        # Seed chao / Flushing Coin / Hello for local testing
 pnpm smoke            # Headless browser smoke test against the dev fixture
@@ -144,6 +156,7 @@ See [AGENTS.md](./AGENTS.md) for full conventions and debug helpers.
 ## Status
 
 Early. The substrate (auth, branch and pull request workflow, indexing, search,
-reviews, and approvals) is in place and end-to-end smoke-tested. The
+reviews, approvals, and issue-backed chat) is in place and end-to-end
+smoke-tested. The
 [Coverify](https://github.com/chaoxu/coverify) layer lives in a separate repo
 and talks to Cosheaf over the HTTP API.
