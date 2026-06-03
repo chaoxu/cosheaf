@@ -43,6 +43,7 @@ async function ensureSignedIn() {
 async function readerStats() {
   return page.locator(".cf-reader").first().evaluate((el) => {
     const h = el.querySelector(".cf-doc-heading, h1, h2");
+    const paragraph = el.querySelector(".cf-doc-paragraph, p");
     const ul = el.querySelector(".cf-doc-list--unordered, ul");
     const displayMath = el.querySelector(".cf-doc-display-math");
     const katex = displayMath?.querySelector(".katex");
@@ -65,6 +66,7 @@ async function readerStats() {
       katexSize: katex ? getComputedStyle(katex).fontSize : null,
       katexDisplayMargin: katexDisplay ? getComputedStyle(katexDisplay).margin : null,
       headingSize: h ? getComputedStyle(h).fontSize : null,
+      paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
       headingNumber: h?.getAttribute("data-section-number") ?? null,
       headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
         .slice(0, 8)
@@ -165,6 +167,9 @@ try {
   }
   if (defaultReader.paddingInline.join("/") !== "0px/0px") {
     throw new Error(`reader should not add horizontal document padding: ${JSON.stringify(defaultReader)}`);
+  }
+  if (defaultReader.paragraphWhiteSpace !== "normal") {
+    throw new Error(`reader prose should flow source-wrapped lines normally: ${JSON.stringify(defaultReader)}`);
   }
   if (!defaultReader.rootClass.includes("cf-theme-scope")) {
     throw new Error(`missing document theme scope: ${defaultReader.rootClass}`);

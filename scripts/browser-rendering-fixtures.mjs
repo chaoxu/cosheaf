@@ -106,12 +106,14 @@ try {
   const richAfterStats = await page.getByTestId("diff-pane-after").evaluate((el) => {
     const reader = el.querySelector(".cf-reader");
     if (!reader) return null;
+    const paragraph = reader.querySelector(".cf-doc-paragraph, p");
     const styles = getComputedStyle(reader);
     return {
       paneWidth: Math.round(el.getBoundingClientRect().width),
       readerWidth: Math.round(reader.getBoundingClientRect().width),
       maxWidth: styles.maxWidth,
       paddingInline: [styles.paddingLeft, styles.paddingRight],
+      paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
     };
   });
   if (
@@ -119,7 +121,8 @@ try {
     richAfterStats.maxWidth !== "1200px" ||
     richAfterStats.readerWidth < 1160 ||
     richAfterStats.readerWidth > 1220 ||
-    richAfterStats.paddingInline.join("/") !== "0px/0px"
+    richAfterStats.paddingInline.join("/") !== "0px/0px" ||
+    richAfterStats.paragraphWhiteSpace !== "normal"
   ) {
     throw new Error(`rich after reader is not using document layout: ${JSON.stringify(richAfterStats)}`);
   }
