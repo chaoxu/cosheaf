@@ -113,6 +113,13 @@ app.get("/assets/*", async (c) => {
   return response ?? c.json({ error: "not found" }, 404);
 });
 
+app.get("/fonts/*", async (c) => {
+  const publicPath = resolveStaticPath(publicDir, c.req.path);
+  if (!publicPath) return c.json({ error: "not found" }, 404);
+  const body = await readFile(publicPath);
+  return new Response(body, { headers: staticFileHeaders(publicPath, cacheControlForRequestPath(c.req.path)) });
+});
+
 app.route("/", web);
 
 async function serveDistFile(requestPath: string): Promise<Response | null> {
@@ -162,6 +169,7 @@ function staticFileHeaders(filePath: string, cacheControl: string): Record<strin
 
 function cacheControlForRequestPath(requestPath: string): string {
   if (requestPath.startsWith("/assets/")) return "public, max-age=31536000, immutable";
+  if (requestPath.startsWith("/fonts/")) return "public, max-age=31536000, immutable";
   if (requestPath.startsWith("/vendor/coflat/fonts/")) return "public, max-age=31536000, immutable";
   if (requestPath.startsWith("/vendor/coflat/")) return "public, max-age=86400";
   return "public, max-age=60";
