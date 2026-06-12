@@ -108,6 +108,21 @@ export function testApp(
   return app;
 }
 
+// Declarative fake Forgejo backend for fetch stubbing. Register Hono routes
+// matching Forgejo REST paths, then hand the returned function to
+// `fetchMock.mockImplementation(...)`. Path params, methods, and bodies come
+// from Hono instead of url.includes() substring matching; an unregistered
+// request comes back as a 599 whose body names the method and path, so the
+// resulting ForgejoError points straight at the missing stub.
+export function fakeForgejo(
+  register: (forge: Hono) => void,
+): (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response> {
+  const forge = new Hono();
+  register(forge);
+  forge.notFound((c) => c.text(`no fake forgejo handler for ${c.req.method} ${c.req.path}`, 599 as 200));
+  return async (input, init) => forge.request(input instanceof Request ? input : String(input), init);
+}
+
 // JSON Response builder for fetchMock. Default status is 200; the
 // existing webhook/auth tests pass an explicit 201 etc. when they need
 // it. Headers may carry e.g. content-type overrides for raw-file mocks.

@@ -8,7 +8,7 @@ import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { freshTestDb, responseEmpty, responseOk, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("files");
 
@@ -327,21 +327,17 @@ describe("files mutation gates", () => {
       formatId: COFLAT_FORMAT_ID,
     });
 
-    fetchMock.mockImplementation(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/branches/user%2Falice%2Fwip")) return responseOk({ name: "user/alice/wip" });
-      if (url.includes("/contents/new.md") && (!init?.method || init.method === "GET")) return new Response("not found", { status: 404 });
-      if (url.includes("/contents/old.md") && (!init?.method || init.method === "GET")) return responseOk({ sha: "old-sha" });
-      if (url.includes("/contents/new.md") && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as { message: string };
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
+      forge.get("/api/v1/repos/owner/w/contents/new.md", (c) => c.text("not found", 404));
+      forge.get("/api/v1/repos/owner/w/contents/old.md", (c) => c.json({ sha: "old-sha" }));
+      forge.post("/api/v1/repos/owner/w/contents/new.md", async (c) => {
+        const body = (await c.req.json()) as { message: string };
         expect(body.message).toBe("rename old.md to new.md");
-        return responseOk({ commit: { sha: "new-commit" } });
-      }
-      if (url.includes("/contents/old.md") && init?.method === "DELETE") {
-        return responseEmpty(200);
-      }
-      throw new Error(`unexpected fetch: ${url} ${init?.method ?? "GET"}`);
-    });
+        return c.json({ commit: { sha: "new-commit" } });
+      });
+      forge.delete("/api/v1/repos/owner/w/contents/old.md", (c) => c.body(null, 200));
+    }));
 
     const res = await appFor(db).request("/api/v1/w/w/file?path=new.md&branch=user/alice/wip", {
       method: "PUT",
@@ -363,26 +359,28 @@ describe("files tree cache", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     let branchExists = false;
-    fetchMock.mockImplementation(async (input: Parameters<typeof fetch>[0]) => {
-      const url = String(input);
-      if (url.includes("/git/trees/user%2Fstale")) {
-        if (!branchExists) return new Response("sha not found", { status: 400 });
-        return responseOk({
-          tree: [{ type: "blob", path: "branch.md", size: 2 }],
-          truncated: false,
-        });
-      }
-      if (url.includes("/git/trees/main")) {
-        return responseOk({
-          tree: [
-            { type: "blob", path: "main.md", size: 1 },
-            { type: "blob", path: "notes/plain.txt", size: 2 },
-          ],
-          truncated: false,
-        });
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
+        const ref = c.req.param("ref");
+        if (ref === "user/stale") {
+          if (!branchExists) return c.text("sha not found", 400);
+          return c.json({
+            tree: [{ type: "blob", path: "branch.md", size: 2 }],
+            truncated: false,
+          });
+        }
+        if (ref === "main") {
+          return c.json({
+            tree: [
+              { type: "blob", path: "main.md", size: 1 },
+              { type: "blob", path: "notes/plain.txt", size: 2 },
+            ],
+            truncated: false,
+          });
+        }
+        return c.notFound();
+      });
+    }));
 
     const first = await appFor(db).request("/api/v1/w/w/tree?branch=user/stale", {
       headers: { authorization: `Bearer ${token}` },

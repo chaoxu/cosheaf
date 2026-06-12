@@ -8,7 +8,7 @@ import {
 import { seedAuthUser } from "../test-helpers.js";
 import { workspaces } from "./workspaces.js";
 import { freshTestDb, testApp, testConfig } from "./test-fixtures.js";
-import { responseEmpty, responseOk } from "./test-fixtures.js";
+import { fakeForgejo, responseOk } from "./test-fixtures.js";
 
 const config = testConfig("workspaces");
 
@@ -91,40 +91,30 @@ describe("POST /api/v1/workspaces", () => {
     const token = seedAuthUser(db, config, { username: "chao" });
 
     let topicPutBody: unknown = null;
-    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const method = (init?.method ?? "GET").toUpperCase();
-
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
       // existence pre-check: repo does not yet exist
-      if (url.endsWith("/api/v1/repos/owner/new-ws") && method === "GET") {
-        return new Response("", { status: 404 });
-      }
-      if (url.endsWith("/api/v1/user/repos") && method === "POST") {
-        return responseOk({
+      forge.get("/api/v1/repos/owner/new-ws", (c) => c.text("", 404));
+      forge.post("/api/v1/user/repos", (c) =>
+        c.json({
           id: 99, name: "new-ws", full_name: "owner/new-ws",
           default_branch: "main", description: "New workspace",
           owner: { id: 1, login: "owner" },
-        });
-      }
-      if (url.endsWith("/api/v1/repos/owner/new-ws/topics") && method === "GET") {
-        return responseOk({ topics: [] });
-      }
-      if (url.endsWith("/api/v1/repos/owner/new-ws/topics") && method === "PUT") {
-        topicPutBody = init?.body ? JSON.parse(String(init.body)) : null;
-        return responseEmpty(204);
-      }
+        }),
+      );
+      forge.get("/api/v1/repos/owner/new-ws/topics", (c) => c.json({ topics: [] }));
+      forge.put("/api/v1/repos/owner/new-ws/topics", async (c) => {
+        topicPutBody = await c.req.json();
+        return c.body(null, 204);
+      });
       // permissions / branch protection / hooks / .gitattributes / reindex tree
-      if (url.includes("/collaborators/")) return responseEmpty(204);
-      if (url.includes("/branch_protections")) return responseOk({});
-      if (url.includes("/hooks")) {
-        return method === "GET" ? responseOk([]) : responseOk({ id: 1, type: "forgejo", events: ["push"] });
-      }
-      if (url.includes("/contents/")) {
-        return method === "GET" ? new Response("", { status: 404 }) : responseOk({});
-      }
-      if (url.includes("/git/trees/main")) return responseOk({ tree: [] });
-      return responseOk({});
-    });
+      forge.put("/api/v1/repos/owner/new-ws/collaborators/:username", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/owner/new-ws/hooks", (c) => c.json([]));
+      forge.post("/api/v1/repos/owner/new-ws/hooks", (c) => c.json({ id: 1, type: "forgejo", events: ["push"] }));
+      forge.get("/api/v1/repos/owner/new-ws/contents/*", (c) => c.text("", 404));
+      forge.get("/api/v1/repos/owner/new-ws/git/trees/:ref", (c) => c.json({ tree: [] }));
+      // provisioning sends incidental traffic (branch protection, file writes)
+      forge.all("*", (c) => c.json({}));
+    }));
 
     const res = await app.request("/api/v1/workspaces", {
       method: "POST",
@@ -144,38 +134,28 @@ describe("POST /api/v1/workspaces", () => {
     const token = seedAuthUser(db, config, { username: "chao" });
 
     let topicPutBody: unknown = null;
-    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const method = (init?.method ?? "GET").toUpperCase();
-
-      if (url.endsWith("/api/v1/repos/owner/coflat-ws") && method === "GET") {
-        return new Response("", { status: 404 });
-      }
-      if (url.endsWith("/api/v1/user/repos") && method === "POST") {
-        return responseOk({
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/coflat-ws", (c) => c.text("", 404));
+      forge.post("/api/v1/user/repos", (c) =>
+        c.json({
           id: 100, name: "coflat-ws", full_name: "owner/coflat-ws",
           default_branch: "main", description: "Coflat workspace",
           owner: { id: 1, login: "owner" },
-        });
-      }
-      if (url.endsWith("/api/v1/repos/owner/coflat-ws/topics") && method === "GET") {
-        return responseOk({ topics: [] });
-      }
-      if (url.endsWith("/api/v1/repos/owner/coflat-ws/topics") && method === "PUT") {
-        topicPutBody = init?.body ? JSON.parse(String(init.body)) : null;
-        return responseEmpty(204);
-      }
-      if (url.includes("/collaborators/")) return responseEmpty(204);
-      if (url.includes("/branch_protections")) return responseOk({});
-      if (url.includes("/hooks")) {
-        return method === "GET" ? responseOk([]) : responseOk({ id: 1, type: "forgejo", events: ["push"] });
-      }
-      if (url.includes("/contents/")) {
-        return method === "GET" ? new Response("", { status: 404 }) : responseOk({});
-      }
-      if (url.includes("/git/trees/main")) return responseOk({ tree: [] });
-      return responseOk({});
-    });
+        }),
+      );
+      forge.get("/api/v1/repos/owner/coflat-ws/topics", (c) => c.json({ topics: [] }));
+      forge.put("/api/v1/repos/owner/coflat-ws/topics", async (c) => {
+        topicPutBody = await c.req.json();
+        return c.body(null, 204);
+      });
+      forge.put("/api/v1/repos/owner/coflat-ws/collaborators/:username", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/owner/coflat-ws/hooks", (c) => c.json([]));
+      forge.post("/api/v1/repos/owner/coflat-ws/hooks", (c) => c.json({ id: 1, type: "forgejo", events: ["push"] }));
+      forge.get("/api/v1/repos/owner/coflat-ws/contents/*", (c) => c.text("", 404));
+      forge.get("/api/v1/repos/owner/coflat-ws/git/trees/:ref", (c) => c.json({ tree: [] }));
+      // provisioning sends incidental traffic (branch protection, file writes)
+      forge.all("*", (c) => c.json({}));
+    }));
 
     const res = await app.request("/api/v1/workspaces", {
       method: "POST",
@@ -236,23 +216,16 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
     _seedFormatCacheForTests("w", "coflat");
 
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
-    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const method = (init?.method ?? "GET").toUpperCase();
-      const body = init?.body ? JSON.parse(String(init.body)) : null;
-      calls.push({ url, method, body });
-
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/chao/permission") && method === "GET") {
-        return responseOk({ permission: "admin" });
-      }
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/test-vera") && method === "PUT") {
-        return responseEmpty(204);
-      }
-      if (url.endsWith("/api/v1/repos/owner/w/branch_protections/main") && method === "GET") {
-        return responseOk({ push_whitelist_usernames: ["chao"] });
-      }
-      return responseOk({});
-    });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.use("*", async (c, next) => {
+        const raw = await c.req.text();
+        calls.push({ url: c.req.url, method: c.req.method, body: raw ? JSON.parse(raw) : null });
+        await next();
+      });
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
+      forge.put("/api/v1/repos/owner/w/collaborators/test-vera", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/owner/w/branch_protections/main", (c) => c.json({ push_whitelist_usernames: ["chao"] }));
+    }));
 
     const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
@@ -276,25 +249,15 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
     _seedFormatCacheForTests("w", "coflat");
 
     let whitelistPatch: unknown = null;
-    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const method = (init?.method ?? "GET").toUpperCase();
-
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/chao/permission") && method === "GET") {
-        return responseOk({ permission: "admin" });
-      }
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/test-vera") && method === "PUT") {
-        return responseEmpty(204);
-      }
-      if (url.endsWith("/api/v1/repos/owner/w/branch_protections/main") && method === "GET") {
-        return responseOk({ push_whitelist_usernames: ["chao"] });
-      }
-      if (url.endsWith("/api/v1/repos/owner/w/branch_protections/main") && method === "PATCH") {
-        whitelistPatch = init?.body ? JSON.parse(String(init.body)) : null;
-        return responseOk({});
-      }
-      return responseOk({});
-    });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
+      forge.put("/api/v1/repos/owner/w/collaborators/test-vera", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/owner/w/branch_protections/main", (c) => c.json({ push_whitelist_usernames: ["chao"] }));
+      forge.patch("/api/v1/repos/owner/w/branch_protections/main", async (c) => {
+        whitelistPatch = await c.req.json();
+        return c.json({});
+      });
+    }));
 
     const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
@@ -315,13 +278,9 @@ describe("PUT /api/v1/workspaces/:slug/members/:username", () => {
     const token = seedAuthUser(db, config, { username: "chao", role: "write", repo: "w" });
     _seedFormatCacheForTests("w", "coflat");
 
-    fetchMock.mockImplementation(async (input: string | URL | Request) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      if (url.endsWith("/api/v1/repos/owner/w/collaborators/chao/permission")) {
-        return responseOk({ permission: "write" });
-      }
-      return responseOk({});
-    });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "write" }));
+    }));
 
     const res = await app.request("/api/v1/workspaces/w/members/test-vera", {
       method: "PUT",
