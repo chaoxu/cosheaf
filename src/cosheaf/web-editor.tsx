@@ -1,4 +1,6 @@
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type {
   AssetUploader as EditorAssetUploader,
@@ -393,34 +395,45 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           )}
         </aside>
       </div>
-      <footer className="web-editor-statusbar" data-testid="statusbar">
-        <span className="web-editor-status">{status ?? ""}</span>
-        <span data-testid="active-branch-name" className="web-editor-branch">
-          {branch}
-        </span>
-        {config.formatId === COFLAT_FORMAT_ID ? (
-          <button type="button" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
-            {mode === "rich" ? "Source" : "Rich"}
-          </button>
-        ) : null}
-        <button type="button" onClick={save} disabled={(!dirty && !pathDirty) || busy}>
-          Save
-        </button>
-        {branch && branch !== "main" ? (
-          <>
-            {config.role === "admin" ? (
-              <button type="button" data-testid="merge-branch" onClick={() => void openPullRequest(true)} disabled={busy}>
-                Merge to main
-              </button>
-            ) : null}
-            <button type="button" data-testid="open-pull-request" onClick={() => void openPullRequest(false)} disabled={busy}>
-              Open pull request
+      {renderStatusbar(
+        <footer className="web-editor-statusbar" data-testid="statusbar">
+          <span className="web-editor-status">{status ?? ""}</span>
+          <span data-testid="active-branch-name" className="web-editor-branch">
+            {branch}
+          </span>
+          {config.formatId === COFLAT_FORMAT_ID ? (
+            <button type="button" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
+              {mode === "rich" ? "Source" : "Rich"}
             </button>
-          </>
-        ) : null}
-      </footer>
+          ) : null}
+          <button type="button" onClick={save} disabled={(!dirty && !pathDirty) || busy}>
+            Save
+          </button>
+          {branch && branch !== "main" ? (
+            <>
+              {config.role === "admin" ? (
+                <button type="button" data-testid="merge-branch" onClick={() => void openPullRequest(true)} disabled={busy}>
+                  Merge to main
+                </button>
+              ) : null}
+              <button type="button" data-testid="open-pull-request" onClick={() => void openPullRequest(false)} disabled={busy}>
+                Open pull request
+              </button>
+            </>
+          ) : null}
+        </footer>,
+      )}
     </div>
   );
+}
+
+// Render the editor status controls into the app status bar so the page has a
+// single bottom bar; fall back to in-place rendering if the shell slot is
+// absent (tests, standalone mounts).
+const statusbarSlot = document.querySelector(".app-statusbar .status-editor-slot");
+
+function renderStatusbar(statusbar: ReactNode): ReactNode {
+  return statusbarSlot ? createPortal(statusbar, statusbarSlot) : statusbar;
 }
 
 const { config, content } = readConfig();

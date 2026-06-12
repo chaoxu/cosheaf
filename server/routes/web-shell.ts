@@ -64,7 +64,7 @@ function appStatusbar(user: string | undefined, path: StatusCrumb[] | undefined)
   const session = user
     ? `<form method="post" action="/logout"><a class="account-link" href="/account/settings">${escapeHtml(user)}</a><button type="submit">sign out</button></form>`
     : `<a class="account-link" href="/login">sign in</a>`;
-  return `<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-session">${session}</div></footer>`;
+  return `<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div><div class="status-session">${session}</div></footer>`;
 }
 
 export function webEditorAssets(): string {
