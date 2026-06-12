@@ -1,10 +1,10 @@
 import type Database from "better-sqlite3";
 import type { Context } from "hono";
-import { documentFormatFromTopics, isFormatTopic } from "../../shared/document-format.js";
+import { isFormatTopic } from "../../shared/document-format.js";
 import type { Role } from "../../shared/roles.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
-import { resolveAuth } from "../middleware.js";
+import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat } from "../middleware.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { escapeHtml } from "./html-escape.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
@@ -42,16 +42,15 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
   const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: auth.forgejoToken });
-  const role = await fj.getRepoPermission(owner, repo, auth.user.username);
+  const role = await resolveRepoRole(fj, owner, repo, auth.user.username);
   if (role === "none") {
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
-  const topics = await fj.listRepoTopics(owner, repo);
-  if (!topics.some(isFormatTopic)) {
+  const format = await resolveWorkspaceFormat(fj, owner, repo);
+  if (!format.hasFormatTopic) {
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
-  const defaultMdFormat = documentFormatFromTopics(topics);
-  const ws: WorkspaceContext = { slug: repo, role, defaultMdFormat };
+  const ws: WorkspaceContext = { slug: repo, role, defaultMdFormat: format.format };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
   return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };

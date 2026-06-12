@@ -6,7 +6,7 @@ import type { Role } from "../shared/roles.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
-import { readWorkspaceFormatFromTopics } from "./workspace-provisioning.js";
+import { type DocumentFormatId, documentFormatFromTopics, isFormatTopic } from "../shared/document-format.js";
 
 interface AuthResolution {
   user: User;
@@ -146,7 +146,10 @@ export const requireWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next)
   await next();
 };
 
-async function fetchRole(
+// Cached collaborator-role lookup. Shared by requireMembership and the
+// server-rendered web path (resolveWebRepo) so both surfaces see the same
+// role within the same TTL window.
+export async function resolveRepoRole(
   fj: Forgejo,
   owner: string,
   repo: string,
@@ -166,11 +169,11 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
   const fj = c.get("fjUser");
   const owner = c.get("config").forgejoOwner;
   const fjName = c.get("user").username;
-  const role = await fetchRole(fj, owner, slug, fjName);
+  const role = await resolveRepoRole(fj, owner, slug, fjName);
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  const defaultMdFormat = await fetchWorkspaceFormat(fj, owner, slug);
+  const { format: defaultMdFormat } = await resolveWorkspaceFormat(fj, owner, slug);
   c.set("workspace", { slug, defaultMdFormat, role });
   c.set("repoCtx", { fj, owner, repo: slug });
   await next();
@@ -179,7 +182,16 @@ export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => 
 // Same TTL discipline as the role cache — format changes propagate quickly
 // enough, and a topic flip is a rare admin action.
 const FORMAT_TTL_MS = 30_000;
-const FORMAT_CACHE = new TTLCache<string, string>(FORMAT_TTL_MS);
+
+// Cached per-workspace format info derived from repo topics. `hasFormatTopic`
+// is what makes a repo a workspace for the web UI; `format` falls back to the
+// default for API surfaces that accept untagged repos.
+export interface WorkspaceFormatInfo {
+  hasFormatTopic: boolean;
+  format: DocumentFormatId;
+}
+
+const FORMAT_CACHE = new TTLCache<string, WorkspaceFormatInfo>(FORMAT_TTL_MS);
 
 export function _resetFormatCacheForTests(): void {
   FORMAT_CACHE.clear();
@@ -190,13 +202,22 @@ export function _resetFormatCacheForTests(): void {
 // by fetchWorkspaceFormat below as a fallback after the canonical
 // `owner/slug` lookup misses.
 export function _seedFormatCacheForTests(slug: string, formatId: string): void {
-  FORMAT_CACHE.set(slug, formatId, 60_000);
+  FORMAT_CACHE.set(slug, { hasFormatTopic: true, format: formatId as DocumentFormatId }, 60_000);
 }
 
-async function fetchWorkspaceFormat(fj: Forgejo, owner: string, slug: string): Promise<string> {
+// Cached topics lookup shared with the web path.
+export async function resolveWorkspaceFormat(
+  fj: Forgejo,
+  owner: string,
+  slug: string,
+): Promise<WorkspaceFormatInfo> {
   const cached = FORMAT_CACHE.get(`${owner}/${slug}`) ?? FORMAT_CACHE.get(slug);
   if (cached !== null) return cached;
-  const format = await readWorkspaceFormatFromTopics(fj, owner, slug);
-  FORMAT_CACHE.set(`${owner}/${slug}`, format);
-  return format;
+  const topics = await fj.listRepoTopics(owner, slug);
+  const info: WorkspaceFormatInfo = {
+    hasFormatTopic: topics.some(isFormatTopic),
+    format: documentFormatFromTopics(topics),
+  };
+  FORMAT_CACHE.set(`${owner}/${slug}`, info);
+  return info;
 }
