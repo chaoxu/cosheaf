@@ -4,7 +4,6 @@ import type { ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
 import { invalidateWorkspacePermissionCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { setWorkspaceMember } from "../workspace-members.js";
-import { escapeHtml } from "./html-escape.js";
 import {
   badRequestPage,
   forbiddenPage,
@@ -16,6 +15,7 @@ import {
   textField,
   type WebCtx,
 } from "./web-context.js";
+import { html, type Html } from "./web-html.js";
 import { labelChip, repoPage } from "./web-page.js";
 import { pageShell } from "./web-shell.js";
 
@@ -37,7 +37,7 @@ web.get("/:owner/:repo/settings", async (c) => {
       active: "settings",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: html`
         <div class="settings-page">
           <div class="page-title compact">
             <div>
@@ -57,9 +57,9 @@ web.get("/:owner/:repo/settings", async (c) => {
               </label>
               <div class="settings-row">
                 <span>Document format</span>
-                <strong>${escapeHtml(ctx.ws.defaultMdFormat)}</strong>
+                <strong>${ctx.ws.defaultMdFormat}</strong>
               </div>
-              ${ctx.ws.role === "admin" ? `<div class="settings-actions"><button class="button primary" type="submit">Save settings</button></div>` : ""}
+              ${ctx.ws.role === "admin" ? html`<div class="settings-actions"><button class="button primary" type="submit">Save settings</button></div>` : ""}
             </form>
           </section>
           ${labelSettingsSection(ctx, labels)}
@@ -71,7 +71,7 @@ web.get("/:owner/:repo/settings", async (c) => {
             </div>
             ${
               ctx.ws.role === "admin"
-                ? `<form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
+                ? html`<form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
                     <label class="settings-row">
                       <span>Username</span>
                       <input name="username" data-testid="settings-access-username" required>
@@ -86,10 +86,10 @@ web.get("/:owner/:repo/settings", async (c) => {
                     </label>
                     <div class="settings-actions">
                       <button class="button primary" type="submit" data-testid="settings-access-submit">Grant access</button>
-                      ${accessUpdated ? `<p class="muted" data-testid="settings-access-saved">${escapeHtml(accessUpdated)}</p>` : ""}
+                      ${accessUpdated ? html`<p class="muted" data-testid="settings-access-saved">${accessUpdated}</p>` : ""}
                     </div>
                   </form>`
-                : `<p class="muted">Only repository admins can grant access.</p>`
+                : html`<p class="muted">Only repository admins can grant access.</p>`
             }
           </section>
         </div>
@@ -145,7 +145,7 @@ web.post("/:owner/:repo/settings/access", async (c) => {
   const username = stringField(body.username)?.trim();
   const role = stringField(body.role)?.trim();
   if (!username || !role || !(ROLES as readonly string[]).includes(role)) {
-    return htmlResponse(pageShell({ title: "Bad request", body: `<main class="auth-page"><p>Invalid access update.</p></main>` }), 400);
+    return htmlResponse(pageShell({ title: "Bad request", body: html`<main class="auth-page"><p>Invalid access update.</p></main>` }), 400);
   }
 
   await setWorkspaceMember({
@@ -160,49 +160,49 @@ web.post("/:owner/:repo/settings/access", async (c) => {
 });
 }
 
-function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): string {
-  return `<section class="settings-section" data-testid="settings-labels">
+function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Html {
+  return html`<section class="settings-section" data-testid="settings-labels">
     <div class="settings-section-header">
       <h2>Labels</h2>
       <p>Labels are repository labels from Forgejo.</p>
     </div>
     <div class="settings-form">
-      <div class="label-chips">${labels.map(labelChip).join("") || `<span class="muted">No labels.</span>`}</div>
+      <div class="label-chips">${labels.length === 0 ? html`<span class="muted">No labels.</span>` : labels.map(labelChip)}</div>
       ${
         ctx.ws.role === "admin"
-          ? `<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/labels")}">
+          ? html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/labels")}">
               <label class="settings-row"><span>Name</span><input name="name" required data-testid="settings-label-name"></label>
               <label class="settings-row"><span>Color</span><input name="color" value="71717a" pattern="[0-9a-fA-F]{6}" required data-testid="settings-label-color"></label>
               <label class="settings-row"><span>Description</span><input name="description"></label>
               <label class="settings-row"><span>Exclusive</span><input name="exclusive" type="checkbox" value="on"></label>
               <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-label-submit">Create label</button></div>
             </form>`
-          : `<p class="muted">Only repository admins can create labels.</p>`
+          : html`<p class="muted">Only repository admins can create labels.</p>`
       }
     </div>
   </section>`;
 }
 
-function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMilestone[]): string {
-  return `<section class="settings-section" data-testid="settings-milestones">
+function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMilestone[]): Html {
+  return html`<section class="settings-section" data-testid="settings-milestones">
     <div class="settings-section-header">
       <h2>Milestones</h2>
       <p>Milestones are repository milestones from Forgejo.</p>
     </div>
     <div class="settings-form">
       <div class="list mini-list">
-        ${milestones
-          .map((milestone) => `<div class="list-row"><strong>${escapeHtml(milestone.title)}</strong><span>${escapeHtml(milestone.state)} - ${milestone.open_issues} open, ${milestone.closed_issues} closed</span></div>`)
-          .join("") || `<div class="empty">No milestones.</div>`}
+        ${milestones.length === 0
+          ? html`<div class="empty">No milestones.</div>`
+          : milestones.map((milestone) => html`<div class="list-row"><strong>${milestone.title}</strong><span>${milestone.state} - ${milestone.open_issues} open, ${milestone.closed_issues} closed</span></div>`)}
       </div>
       ${
         ctx.ws.role === "admin"
-          ? `<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/milestones")}">
+          ? html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/milestones")}">
               <label class="settings-row"><span>Title</span><input name="title" required data-testid="settings-milestone-title"></label>
               <label class="settings-row"><span>Description</span><input name="description"></label>
               <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-milestone-submit">Create milestone</button></div>
             </form>`
-          : `<p class="muted">Only repository admins can create milestones.</p>`
+          : html`<p class="muted">Only repository admins can create milestones.</p>`
       }
     </div>
   </section>`;

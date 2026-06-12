@@ -8,7 +8,6 @@ import type {
   ForgejoReview,
   ForgejoTimelineEvent,
 } from "../forgejo-types.js";
-import { escapeAttr, escapeHtml } from "./html-escape.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
 import {
@@ -21,11 +20,12 @@ import {
   stringField,
   type WebCtx,
 } from "./web-context.js";
+import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { labelChip, labelChips } from "./web-page.js";
-import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
+import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
-export function issueEditPage(ctx: WebCtx, issue: ForgejoIssue, allLabels: readonly ForgejoLabel[]): string {
+export function issueEditPage(ctx: WebCtx, issue: ForgejoIssue, allLabels: readonly ForgejoLabel[]): Html {
   return threadEditPage({
     ctx,
     kind: "issue",
@@ -40,11 +40,11 @@ export function issueEditPage(ctx: WebCtx, issue: ForgejoIssue, allLabels: reado
   });
 }
 
-export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): string {
-  if (ctx.ws.role === "read" || pull.merged) return "";
+export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
+  if (ctx.ws.role === "read" || pull.merged) return emptyHtml;
   const nextState = pull.state === "open" ? "closed" : "open";
   const label = pull.state === "open" ? "Close pull request" : "Reopen pull request";
-  return `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
+  return html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
     <input type="hidden" name="state" value="${nextState}">
     <button class="button" type="submit" data-testid="pull-toggle-state">${label}</button>
   </form>`;
@@ -68,8 +68,8 @@ export function issueRelationsPanel(
   issue: ForgejoIssue,
   dependencies: readonly ForgejoIssue[],
   blocks: readonly ForgejoIssue[],
-): string {
-  return `<section class="relation-panel" data-testid="issue-relations">
+): Html {
+  return html`<section class="relation-panel" data-testid="issue-relations">
     <h2>Issue relations</h2>
     <div class="relation-grid">
       ${issueRelationList(ctx, issue, "depends_on", "Depends on", dependencies)}
@@ -84,35 +84,33 @@ function issueRelationList(
   relation: "depends_on" | "blocks",
   title: string,
   issues: readonly ForgejoIssue[],
-): string {
-  const rows = issues
-    .map(
-      (item) => `<div class="relation-row">
-        <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${item.number}`)}">#${item.number} ${escapeHtml(item.title)}</a>
-        <span class="state ${item.state}">${escapeHtml(item.state)}</span>
+): Html {
+  const rows = issues.map(
+    (item) => html`<div class="relation-row">
+        <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${item.number}`)}">#${item.number} ${item.title}</a>
+        <span class="state ${item.state}">${item.state}</span>
         ${
           ctx.ws.role === "read"
             ? ""
-            : `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies/delete`)}">
+            : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies/delete`)}">
                 <input type="hidden" name="relation" value="${relation}">
                 <input type="hidden" name="index" value="${item.number}">
                 <button class="button" type="submit">Remove</button>
               </form>`
         }
       </div>`,
-    )
-    .join("");
+  );
   const form =
     ctx.ws.role === "read"
       ? ""
-      : `<form class="inline-add-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies`)}">
+      : html`<form class="inline-add-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies`)}">
           <input type="hidden" name="relation" value="${relation}">
-          <input name="index" inputmode="numeric" pattern="[0-9]+" placeholder="Issue #" aria-label="${escapeAttr(title)} issue number">
+          <input name="index" inputmode="numeric" pattern="[0-9]+" placeholder="Issue #" aria-label="${title} issue number">
           <button class="button" type="submit">Add</button>
         </form>`;
-  return `<section class="relation-card">
-    <h3>${escapeHtml(title)}</h3>
-    ${rows || `<div class="empty compact-empty">None.</div>`}
+  return html`<section class="relation-card">
+    <h3>${title}</h3>
+    ${rows.length ? rows : html`<div class="empty compact-empty">None.</div>`}
     ${form}
   </section>`;
 }
@@ -120,17 +118,17 @@ function issueRelationList(
 // Shared thread (issue + pull request) building blocks. Both thread kinds
 // must render through these so layout and editing stay uniform.
 
-export function threadLayout(main: string, rail: string): string {
-  return `<div class="thread-layout">
+export function threadLayout(main: Html, rail: Html): Html {
+  return html`<div class="thread-layout">
     <div class="thread-main">${main}</div>
     <aside class="thread-rail">${rail}</aside>
   </div>`;
 }
 
-export function labelsRailPanel(labels: readonly ForgejoLabel[]): string {
-  return `<section class="rail-panel" data-testid="thread-labels">
+export function labelsRailPanel(labels: readonly ForgejoLabel[]): Html {
+  return html`<section class="rail-panel" data-testid="thread-labels">
     <h2>Labels</h2>
-    ${labels.length ? labelChips(labels) : `<span class="muted">None.</span>`}
+    ${labels.length ? labelChips(labels) : html`<span class="muted">None.</span>`}
   </section>`;
 }
 
@@ -145,32 +143,32 @@ function threadEditPage(opts: {
   backHref: string;
   action: string;
   testId: string;
-}): string {
+}): Html {
   const currentIds = new Set(opts.currentLabels.map((label) => label.id));
   const labelRows = opts.allLabels.map((label) => {
     const checked = currentIds.has(label.id) ? " checked" : "";
     const disabled = label.is_archived && !currentIds.has(label.id) ? " disabled" : "";
-    return `<label class="checkbox-row">
+    return html`<label class="checkbox-row">
       <input type="checkbox" name="labels" value="${label.id}"${checked}${disabled}>
       ${labelChip(label)}
     </label>`;
   });
   const labelFieldset = opts.allLabels.length
-    ? `<fieldset class="checkbox-list">
+    ? html`<fieldset class="checkbox-list">
         <legend>Labels</legend>
-        ${labelRows.join("")}
+        ${labelRows}
       </fieldset>
       <input type="hidden" name="labels_present" value="1">`
     : "";
-  return `<section class="edit-page issue-edit-page">
+  return html`<section class="edit-page issue-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><p class="eyebrow">Edit ${opts.kind}</p><h1>#${opts.number}</h1></div>
       <a class="button" href="${opts.backHref}">Cancel</a>
     </div>
     <form class="compose-form" data-testid="${opts.testId}" method="post" action="${opts.action}">
-      <label>Title <input name="title" value="${escapeAttr(opts.title)}" required></label>
+      <label>Title <input name="title" value="${opts.title}" required></label>
       <label>Description
-        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${escapeHtml(opts.body)}</textarea>
+        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${opts.body}</textarea>
       </label>
       ${labelFieldset}
       <div class="form-actions">
@@ -193,7 +191,7 @@ export async function labelSelectionPatch(
   return { ok: true, labels: labelIds };
 }
 
-export function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly ForgejoLabel[]): string {
+export function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly ForgejoLabel[]): Html {
   return threadEditPage({
     ctx,
     kind: "pull request",
@@ -208,45 +206,45 @@ export function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly
   });
 }
 
-export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): string {
+export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): Html {
   const requested = pull.requested_reviewers ?? [];
   const requestedTeams = pull.requested_reviewers_teams ?? [];
   const requestedLogins = new Set(requested.map((reviewer) => reviewer.login));
   const available = availableReviewers.filter((reviewer) => !requestedLogins.has(reviewer.login));
   const requestedHtml =
     requested.length === 0 && requestedTeams.length === 0
-      ? `<div class="empty">No requested reviewers.</div>`
-      : `<div class="label-chips">
-          ${requested.map((reviewer) => reviewerRequestChip(ctx, pull, reviewer.login)).join("")}
-          ${requestedTeams.map((team) => `<span class="meta-pill">${escapeHtml(team.username ?? team.name)}</span>`).join("")}
+      ? html`<div class="empty">No requested reviewers.</div>`
+      : html`<div class="label-chips">
+          ${requested.map((reviewer) => reviewerRequestChip(ctx, pull, reviewer.login))}
+          ${requestedTeams.map((team) => html`<span class="meta-pill">${team.username ?? team.name}</span>`)}
         </div>`;
   const requestForm =
     ctx.ws.role === "read" || pull.state === "closed"
       ? ""
-      : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
+      : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
           <label>Request reviewers
             <select name="reviewers" multiple size="${Math.min(Math.max(available.length, 2), 6)}">
-              ${available.map((reviewer) => `<option value="${escapeAttr(reviewer.login)}">${escapeHtml(displayLogin(ctx.owner, reviewer.login))}</option>`).join("")}
+              ${available.map((reviewer) => html`<option value="${reviewer.login}">${displayLogin(ctx.owner, reviewer.login)}</option>`)}
             </select>
           </label>
           <button class="button" type="submit">Request review</button>
         </form>`;
-  return `<section class="rail-panel" data-testid="pull-review-requests">
+  return html`<section class="rail-panel" data-testid="pull-review-requests">
     <h2>Reviewers</h2>
     ${requestedHtml}
     ${requestForm}
   </section>`;
 }
 
-function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): string {
+function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): Html {
   const remove =
     ctx.ws.role === "read" || pull.state === "closed"
       ? ""
-      : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests/delete`)}">
-          <input type="hidden" name="reviewer" value="${escapeAttr(reviewer)}">
+      : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests/delete`)}">
+          <input type="hidden" name="reviewer" value="${reviewer}">
           <button class="button" type="submit">Remove</button>
         </form>`;
-  return `<span class="meta-pill">${escapeHtml(displayLogin(ctx.owner, reviewer))}${remove}</span>`;
+  return html`<span class="meta-pill">${displayLogin(ctx.owner, reviewer)}${remove}</span>`;
 }
 
 type WebTimelineItem =
@@ -261,20 +259,20 @@ export async function renderIssueTimeline(
   number: number,
   comments: readonly ForgejoIssueComment[],
   timeline: readonly ForgejoTimelineEvent[],
-): Promise<string> {
+): Promise<Html> {
   const referenceEvents = timeline.filter((event) => event.type !== "comment" && isReferenceTimelineEvent(event.type));
   const visibleEvents = timeline.filter((event) => event.type !== "comment" && !isReferenceTimelineEvent(event.type));
   const items: WebTimelineItem[] = [
     ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), number, comment })),
     ...visibleEvents.map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
   ].sort(compareTimelineItems);
-  const visibleHtml = (await Promise.all(items.map((item) => renderTimelineItem(ctx, item)))).join("");
+  const visibleHtml = joinHtml(await Promise.all(items.map((item) => renderTimelineItem(ctx, item))));
   if (referenceEvents.length === 0) return visibleHtml;
   const referenceItems = referenceEvents
     .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event }))
     .sort(compareTimelineItems);
-  const referenceHtml = (await Promise.all(referenceItems.map((item) => renderTimelineItem(ctx, item)))).join("");
-  return `${visibleHtml}<details class="timeline-collapsed"><summary>References (${referenceEvents.length})</summary>${referenceHtml}</details>`;
+  const referenceHtml = joinHtml(await Promise.all(referenceItems.map((item) => renderTimelineItem(ctx, item))));
+  return html`${visibleHtml}<details class="timeline-collapsed"><summary>References (${referenceEvents.length})</summary>${referenceHtml}</details>`;
 }
 
 function isReferenceTimelineEvent(type: string): boolean {
@@ -288,7 +286,7 @@ export async function renderPullTimeline(
   comments: readonly ForgejoPullReviewComment[],
   timeline: readonly ForgejoTimelineEvent[],
   commits: readonly ForgejoCommit[],
-): Promise<string> {
+): Promise<Html> {
   const items: WebTimelineItem[] = [
     ...timeline
       .filter((event) => event.type !== "comment" && event.type !== "pull_push" && event.type !== "review")
@@ -304,15 +302,15 @@ export async function renderPullTimeline(
     })),
     ...commits.map((commit) => ({ kind: "commit" as const, ts: commitDateMs(commit), commit })),
   ].sort(compareTimelineItems);
-  return (await Promise.all(items.map((item) => renderTimelineItem(ctx, item)))).join("");
+  return joinHtml(await Promise.all(items.map((item) => renderTimelineItem(ctx, item))));
 }
 
-function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): string {
-  if (ctx.ws.role === "read") return "";
-  return `<details class="comment-actions" data-testid="issue-comment-actions">
+function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
+  if (ctx.ws.role === "read") return emptyHtml;
+  return html`<details class="comment-actions" data-testid="issue-comment-actions">
     <summary>Comment actions</summary>
     <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/edit`)}">
-      <textarea name="body" required>${escapeHtml(comment.body)}</textarea>
+      <textarea name="body" required>${comment.body}</textarea>
       <button class="button primary" type="submit">Save comment</button>
     </form>
     <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/delete`)}">
@@ -321,12 +319,12 @@ function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueC
   </details>`;
 }
 
-function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): string {
-  if (ctx.ws.role === "read") return "";
-  return `<details class="comment-actions" data-testid="pull-comment-actions">
+function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): Html {
+  if (ctx.ws.role === "read") return emptyHtml;
+  return html`<details class="comment-actions" data-testid="pull-comment-actions">
     <summary>Comment actions</summary>
     <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`)}">
-      <textarea name="body" required>${escapeHtml(comment.body)}</textarea>
+      <textarea name="body" required>${comment.body}</textarea>
       <button class="button primary" type="submit">Save comment</button>
     </form>
     <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/delete`)}">
@@ -336,19 +334,19 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
   </details>`;
 }
 
-async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<string> {
+async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<Html> {
   if (item.kind === "comment") {
     const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
-    return `<div class="comment">
-      <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} - ${formatDate(item.comment.created_at)}</div>
+    return html`<div class="comment">
+      <div class="comment-meta">${displayLogin(ctx.owner, item.comment.user?.login)} - ${formatDate(item.comment.created_at)}</div>
       ${body}
       ${issueCommentActions(ctx, item.number, item.comment)}
     </div>`;
   }
   if (item.kind === "line-comment") {
     const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
-    return `<div class="comment">
-      <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, item.comment.user?.login))} commented on ${escapeHtml(item.comment.path)} - ${formatDate(item.comment.created_at)}</div>
+    return html`<div class="comment">
+      <div class="comment-meta">${displayLogin(ctx.owner, item.comment.user?.login)} commented on ${item.comment.path} - ${formatDate(item.comment.created_at)}</div>
       ${body}
       ${pullCommentActions(ctx, item.number, item.comment)}
     </div>`;
@@ -356,25 +354,25 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<s
   if (item.kind === "review") {
     const label = reviewStateLabel(item.review.state);
     const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
-    return `<div class="timeline-event">
-      <strong>${escapeHtml(displayLogin(ctx.owner, item.review.user?.login))}</strong>
-      <span>${escapeHtml(label)}</span>
+    return html`<div class="timeline-event">
+      <strong>${displayLogin(ctx.owner, item.review.user?.login)}</strong>
+      <span>${label}</span>
       <small>${formatDate(item.review.submitted_at)}</small>
       ${body}
     </div>`;
   }
   if (item.kind === "commit") {
-    return `<div class="timeline-event">
-      <strong>${escapeHtml(displayLogin(ctx.owner, item.commit.author?.login ?? item.commit.commit.author?.name))}</strong>
-      <span>pushed commit <code>${escapeHtml(item.commit.sha.slice(0, 10))}</code></span>
+    return html`<div class="timeline-event">
+      <strong>${displayLogin(ctx.owner, item.commit.author?.login ?? item.commit.commit.author?.name)}</strong>
+      <span>pushed commit <code>${item.commit.sha.slice(0, 10)}</code></span>
       <small>${formatDate(commitDateMs(item.commit))}</small>
-      <p>${escapeHtml(firstCommitLine(item.commit.commit.message))}</p>
+      <p>${firstCommitLine(item.commit.commit.message)}</p>
     </div>`;
   }
+  if (!webTimelineDescriptionText(item.event)) return emptyHtml;
   const description = webTimelineDescriptionHtml(item.event);
-  if (!description) return "";
-  return `<div class="timeline-event">
-    ${item.event.user?.login ? `<strong>${escapeHtml(displayLogin(ctx.owner, item.event.user.login))}</strong>` : ""}
+  return html`<div class="timeline-event">
+    ${item.event.user?.login ? html`<strong>${displayLogin(ctx.owner, item.event.user.login)}</strong>` : ""}
     <span>${description}</span>
     <small>${formatDate(item.event.created_at)}</small>
   </div>`;
@@ -411,11 +409,11 @@ function reviewStateLabel(state: string): string {
   }
 }
 
-export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): string {
-  if (ctx.ws.role === "read" || pull.user?.login === ctx.user || pull.state === "closed") return "";
-  return `
+export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): Html {
+  if (ctx.ws.role === "read" || pull.user?.login === ctx.user || pull.state === "closed") return emptyHtml;
+  return html`
     <form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">
-      ${redirectTo ? `<input type="hidden" name="redirect_to" value="${escapeAttr(redirectTo)}">` : ""}
+      ${redirectTo ? html`<input type="hidden" name="redirect_to" value="${redirectTo}">` : ""}
       <textarea name="body" placeholder="Leave a review comment"></textarea>
       <div class="toolbar-actions">
         <button class="button" name="event" value="COMMENT" type="submit">Comment</button>
@@ -425,7 +423,7 @@ export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string)
     </form>
     ${
       ctx.ws.role === "admin"
-        ? `<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/merge`)}"><button class="button primary" type="submit">Merge pull request</button></form>`
+        ? html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/merge`)}"><button class="button primary" type="submit">Merge pull request</button></form>`
         : ""
     }
   `;

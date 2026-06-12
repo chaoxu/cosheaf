@@ -4,7 +4,6 @@ import { deleteCookie, setCookie } from "hono/cookie";
 import { AUTH_COOKIE } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
-import { escapeHtml } from "./html-escape.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
 import { configReposForUser, htmlResponse, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
@@ -13,6 +12,7 @@ import { registerIssueRoutes } from "./web-issues.js";
 import { userPreferencesSection, userPreferencesScript } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
+import { html } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
 export const web = new Hono<AppEnv>();
@@ -22,7 +22,7 @@ web.get("/login", (_c) =>
   htmlResponse(
     pageShell({
       title: "Sign in",
-      body: `
+      body: html`
         <main class="auth-page">
           <form class="auth-card" method="post" action="/login">
             <h1>Cosheaf</h1>
@@ -72,26 +72,26 @@ web.get("/", async (c) => {
       title: "Repositories",
       user: auth.user.username,
       sidebar: globalSidebar("workspaces"),
-      body: `
+      body: html`
         <main class="page">
           <div class="page-title">
             <div>
               <p class="eyebrow">Repositories</p>
-              <h1>${escapeHtml(config.forgejoOwner)}</h1>
+              <h1>${config.forgejoOwner}</h1>
             </div>
           </div>
           <div class="list">
-            ${repos
-              .map(
-                (repo) => `
+            ${repos.length === 0
+              ? html`<div class="empty">No repositories available.</div>`
+              : repos.map(
+                  (repo) => html`
                   <a class="list-row" href="${repoHref(config.forgejoOwner, repo.name)}">
-                    <strong>${escapeHtml(repo.name)}</strong>
-                    <span>${escapeHtml(repo.description ?? "")}</span>
-                    <small>${escapeHtml(repo.role)}</small>
+                    <strong>${repo.name}</strong>
+                    <span>${repo.description ?? ""}</span>
+                    <small>${repo.role}</small>
                   </a>
                 `,
-              )
-              .join("") || `<div class="empty">No repositories available.</div>`}
+                )}
           </div>
         </main>
       `,
@@ -108,7 +108,7 @@ web.get("/account/settings", async (c) => {
       user: auth.user.username,
       sidebar: globalSidebar("account"),
       statusPath: [{ label: "account" }],
-      body: `
+      body: html`
         <main class="page">
           <div class="settings-page account-settings">
             <div class="page-title compact">

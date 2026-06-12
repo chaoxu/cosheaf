@@ -14,7 +14,7 @@ function event(fields: Partial<ForgejoTimelineEvent>): ForgejoTimelineEvent {
 describe("web timeline descriptions", () => {
   it("escapes Forgejo-provided labels before insertion into server HTML", () => {
     expect(
-      webTimelineDescriptionHtml(event({ type: "label", label: { id: 1, name: '<img src=x onerror="alert(1)">', color: "fff" } })),
+      String(webTimelineDescriptionHtml(event({ type: "label", label: { id: 1, name: '<img src=x onerror="alert(1)">', color: "fff" } }))),
     ).toBe("added the &lt;img src=x onerror=&quot;alert(1)&quot;&gt; label");
   });
 

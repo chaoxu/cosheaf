@@ -10,7 +10,6 @@ import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { safeRel } from "./files.js";
-import { escapeAttr, escapeHtml } from "./html-escape.js";
 import {
   badRequestPage,
   displayLogin,
@@ -29,6 +28,7 @@ import {
   validBranchName,
   type WebCtx,
 } from "./web-context.js";
+import { emptyHtml, html, type Html } from "./web-html.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPage } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
@@ -47,7 +47,7 @@ web.get("/:owner/:repo", async (c) => {
       active: "files",
       user,
       ws,
-      body: `
+      body: html`
         <div class="page-title compact">
           <div><p class="eyebrow">Branch</p><h1>main</h1></div>
           <div class="toolbar-actions">
@@ -55,7 +55,7 @@ web.get("/:owner/:repo", async (c) => {
             ${
               ws.role === "read"
                 ? ""
-                : `<a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}">New file</a>`
+                : html`<a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}`}">New file</a>`
             }
           </div>
         </div>
@@ -81,16 +81,16 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
         active: "files",
         user,
         ws,
-        body: `
+        body: html`
           <div class="page-title compact">
-            <div><p class="eyebrow">Branch</p><h1>${escapeHtml(resolved.branch)}</h1></div>
+            <div><p class="eyebrow">Branch</p><h1>${resolved.branch}</h1></div>
             <div class="toolbar-actions">
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
                   ? ""
-                  : `${resolved.branch === "main" ? "" : `<a class="button primary" href="${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main">Open pull request</a>`}
-                    <a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}">New file</a>`
+                  : html`${resolved.branch === "main" ? "" : html`<a class="button primary" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open pull request</a>`}
+                    <a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}`}">New file</a>`
               }
             </div>
           </div>
@@ -123,46 +123,46 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       user,
       ws,
       readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: `
+      body: html`
         <div class="file-toolbar">
           <div>
-            <p class="eyebrow">${escapeHtml(resolved.branch)}</p>
-            <h1>${escapeHtml(rel)}</h1>
-            <p class="file-meta">${escapeHtml(fileKindLabel(kind))} <span>${formatBytes(meta.size)}</span></p>
+            <p class="eyebrow">${resolved.branch}</p>
+            <h1>${rel}</h1>
+            <p class="file-meta">${fileKindLabel(kind)} <span>${formatBytes(meta.size)}</span></p>
           </div>
           <div class="toolbar-actions">
             <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
-            <a class="button" href="${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">Raw</a>
+            <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">Raw</a>
             ${
               kind === "markdown"
                 ? sourceView
-                  ? `<a class="button" href="${fileHref}">Rendered</a>`
-                  : `<a class="button" href="${fileHref}?view=source">Source</a>`
+                  ? html`<a class="button" href="${fileHref}">Rendered</a>`
+                  : html`<a class="button" href="${`${fileHref}?view=source`}">Source</a>`
                 : ""
             }
             ${
               ws.role === "read" || resolved.branch === "main"
                 ? ""
-                : `<a class="button" href="${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main">Open pull request</a>`
+                : html`<a class="button" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open pull request</a>`
             }
             ${
               ws.role === "read"
                 ? ""
                 : editableFileKind(kind)
-                  ? `<a class="button primary" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
+                  ? html`<a class="button primary" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}`}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
                   : ""
             }
             ${
               ws.role === "read" || resolved.branch === "main"
                 ? ""
-                : `<form class="inline-form" method="post" action="${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">
+                : html`<form class="inline-form" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">
                     <input type="hidden" name="action" value="delete">
                     <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
                   </form>`
             }
           </div>
         </div>
-        ${filePreview(ctx, resolved.branch, rel, kind, rendered ?? content, sourceView)}
+        ${filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView })}
       `,
     }),
   );
@@ -226,7 +226,7 @@ web.get("/:owner/:repo/_edit", async (c) => {
       active: "files",
       user: ctx.user,
       ws: ctx.ws,
-      body: kind === "markdown" ? `
+      body: kind === "markdown" ? html`
         <section class="edit-page">
           <div class="file-toolbar edit-titlebar">
             <div>
@@ -236,33 +236,33 @@ web.get("/:owner/:repo/_edit", async (c) => {
                   id="web-editor-path-input"
                   data-testid="editor-path-input"
                   aria-label="File path"
-                  value="${escapeAttr(rel)}"
+                  value="${rel}"
                 >
                 <span id="web-editor-path-dirty" class="dirty-dot" hidden>*</span>
               </h1>
             </div>
-            <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}">Cancel</a>
+            <a class="button" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Cancel</a>
           </div>
           <div
             id="web-editor-root"
-            data-slug="${escapeAttr(ctx.repo)}"
-            data-owner="${escapeAttr(ctx.owner)}"
-            data-repo="${escapeAttr(ctx.repo)}"
-            data-path="${escapeAttr(rel)}"
-            data-branch="${escapeAttr(branch)}"
+            data-slug="${ctx.repo}"
+            data-owner="${ctx.owner}"
+            data-repo="${ctx.repo}"
+            data-path="${rel}"
+            data-branch="${branch}"
             data-branch-exists="${branchExists ? "1" : "0"}"
-            data-username="${escapeAttr(ctx.user)}"
-            data-role="${escapeAttr(ctx.ws.role)}"
-            data-format-id="${escapeAttr(ctx.ws.defaultMdFormat)}"
+            data-username="${ctx.user}"
+            data-role="${ctx.ws.role}"
+            data-format-id="${ctx.ws.defaultMdFormat}"
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           ${webEditorAssets()}
           <noscript>
             <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
-              <input type="hidden" name="old_path" value="${escapeAttr(rel)}">
-              <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
-              <label>Path <input name="path" value="${escapeAttr(rel)}" required></label>
-              <textarea name="content" spellcheck="false">${escapeHtml(content)}</textarea>
+              <input type="hidden" name="old_path" value="${rel}">
+              <label>Branch <input name="branch" value="${branch}" required></label>
+              <label>Path <input name="path" value="${rel}" required></label>
+              <textarea name="content" spellcheck="false">${content}</textarea>
               <button class="button primary" type="submit">Save</button>
             </form>
           </noscript>
@@ -311,7 +311,7 @@ web.get("/:owner/:repo/branches", async (c) => {
       active: "files",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: html`
         <div class="page-title compact"><h1>Branches</h1></div>
         ${branchCreatePanel(ctx, branches)}
         ${branchList(ctx, branches, openHeads)}
@@ -368,17 +368,17 @@ web.get("/:owner/:repo/commits/:sha", async (c) => {
       active: "activity",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: html`
         <div class="page-title compact">
           <div>
             <p class="eyebrow">Commit</p>
-            <h1>${escapeHtml(commit.sha.slice(0, 10))}</h1>
+            <h1>${commit.sha.slice(0, 10)}</h1>
           </div>
         </div>
         <div class="commit-card">
-          <pre>${escapeHtml(commit.commit.message.trim() || "(no commit message)")}</pre>
-          <p>${escapeHtml(displayLogin(ctx.owner, commit.commit.author?.name ?? commit.author?.login))} - ${formatDate(commit.commit.author?.date)}</p>
-          <code>${escapeHtml(commit.sha)}</code>
+          <pre>${commit.commit.message.trim() || "(no commit message)"}</pre>
+          <p>${displayLogin(ctx.owner, commit.commit.author?.name ?? commit.author?.login)} - ${formatDate(commit.commit.author?.date)}</p>
+          <code>${commit.sha}</code>
         </div>
       `,
     }),
@@ -401,53 +401,57 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
-function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, content: string | null, sourceView = false): string {
+function filePreview(
+  ctx: WebCtx,
+  branch: string,
+  rel: string,
+  kind: FileKind,
+  view: { rendered: Html | null; source: string | null; sourceView: boolean },
+): Html {
   const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
-  if (sourceView && content !== null) return sourceFilePreview(content);
+  if (view.sourceView && view.source !== null) return sourceFilePreview(view.source);
   if (kind === "markdown") {
-    return `<article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
-      ${markdownSurface(ctx, content ?? "")}
+    return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
+      ${markdownSurface(ctx, view.rendered ?? emptyHtml)}
     </article>`;
   }
   if (kind === "text") {
-    return `<article class="file-preview file-preview-embed" data-testid="file-preview-text">
-      <object data-testid="file-preview-text-raw" data="${escapeAttr(rawHref)}" type="text/plain">
-        <p>Text preview is not available in this browser. <a class="inline-link" href="${escapeAttr(rawHref)}">Open the raw file.</a></p>
+    return html`<article class="file-preview file-preview-embed" data-testid="file-preview-text">
+      <object data-testid="file-preview-text-raw" data="${rawHref}" type="text/plain">
+        <p>Text preview is not available in this browser. <a class="inline-link" href="${rawHref}">Open the raw file.</a></p>
       </object>
     </article>`;
   }
   if (kind === "pdf") {
-    return `<article class="file-preview file-preview-embed">
-      <object data-testid="file-preview-pdf" data="${escapeAttr(rawHref)}" type="application/pdf">
-        <p>PDF preview is not available in this browser. <a class="inline-link" href="${escapeAttr(rawHref)}">Open the raw file.</a></p>
+    return html`<article class="file-preview file-preview-embed">
+      <object data-testid="file-preview-pdf" data="${rawHref}" type="application/pdf">
+        <p>PDF preview is not available in this browser. <a class="inline-link" href="${rawHref}">Open the raw file.</a></p>
       </object>
     </article>`;
   }
   if (kind === "image") {
-    return `<article class="file-preview file-preview-image">
-      <img data-testid="file-preview-image" src="${escapeAttr(rawHref)}" alt="${escapeAttr(rel)}">
+    return html`<article class="file-preview file-preview-image">
+      <img data-testid="file-preview-image" src="${rawHref}" alt="${rel}">
     </article>`;
   }
-  return `<article class="file-preview file-preview-fallback" data-testid="file-preview-raw">
+  return html`<article class="file-preview file-preview-fallback" data-testid="file-preview-raw">
     <p>No inline preview is available for this file type.</p>
-    <a class="button" href="${escapeAttr(rawHref)}">Open raw file</a>
+    <a class="button" href="${rawHref}">Open raw file</a>
   </article>`;
 }
 
-function sourceFilePreview(content: string): string {
+function sourceFilePreview(content: string): Html {
   const lines = content.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return `<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">
-    <table class="source-lines"><tbody>${lines
-      .map((line, index) => {
-        const lineNo = index + 1;
-        return `<tr id="L${lineNo}" data-testid="source-line-${lineNo}">
+  return html`<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">
+    <table class="source-lines"><tbody>${lines.map((line, index) => {
+      const lineNo = index + 1;
+      return html`<tr id="L${lineNo}" data-testid="source-line-${lineNo}">
           <td class="line-action"></td>
           <td><a href="#L${lineNo}">${lineNo}</a></td>
-          <td><pre>${escapeHtml(line)}</pre></td>
+          <td><pre>${line}</pre></td>
         </tr>`;
-      })
-      .join("")}</tbody></table>
+    })}</tbody></table>
     <script>
       (() => {
         const match = /^#L(\\d+)(?:-(?:L)?(\\d+))?$/.exec(window.location.hash);
@@ -465,17 +469,17 @@ function sourceFilePreview(content: string): string {
   </article>`;
 }
 
-function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string): string {
-  return `<section class="edit-page text-edit-page">
+function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string): Html {
+  return html`<section class="edit-page text-edit-page">
     <div class="file-toolbar edit-titlebar">
-      <div><p class="eyebrow">Edit text on branch</p><h1>${escapeHtml(rel)}</h1></div>
-      <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}">Cancel</a>
+      <div><p class="eyebrow">Edit text on branch</p><h1>${rel}</h1></div>
+      <a class="button" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Cancel</a>
     </div>
     <form class="compose-form" data-testid="text-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
-      <input type="hidden" name="old_path" value="${escapeAttr(rel)}">
-      <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
-      <label>Path <input name="path" value="${escapeAttr(rel)}" required></label>
-      <textarea class="text-file-editor" name="content" spellcheck="false">${escapeHtml(content)}</textarea>
+      <input type="hidden" name="old_path" value="${rel}">
+      <label>Branch <input name="branch" value="${branch}" required></label>
+      <label>Path <input name="path" value="${rel}" required></label>
+      <textarea class="text-file-editor" name="content" spellcheck="false">${content}</textarea>
       <div class="form-actions">
         <button class="button primary" type="submit">Save</button>
       </div>
@@ -557,11 +561,11 @@ async function writeTextFile(
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }
 
-function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): string {
-  if (ctx.ws.role === "read") return "";
-  return `<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
+function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Html {
+  if (ctx.ws.role === "read") return emptyHtml;
+  return html`<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
     <label>New branch
-      <input name="name" placeholder="user/${escapeAttr(ctx.user)}/work" required data-testid="branch-create-name">
+      <input name="name" placeholder="user/${ctx.user}/work" required data-testid="branch-create-name">
     </label>
     <label>Base
       <select name="base" data-testid="branch-create-base">
@@ -574,24 +578,23 @@ function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): str
   </form>`;
 }
 
-function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: ReadonlySet<string>): string {
-  return `<div class="list">${branches
-    .map((branch) => {
-      const hasOpenPr = openHeads.has(branch.name);
-      return `<div class="list-row branch-row">
-        <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}"><strong>${escapeHtml(branch.name)}</strong></a>
-        <span>${escapeHtml(branch.commit.id.slice(0, 10))}${hasOpenPr ? ` <span class="meta-pill">open PR</span>` : ""}</span>
+function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: ReadonlySet<string>): Html {
+  if (branches.length === 0) return html`<div class="list"><div class="empty">No branches.</div></div>`;
+  return html`<div class="list">${branches.map((branch) => {
+    const hasOpenPr = openHeads.has(branch.name);
+    return html`<div class="list-row branch-row">
+        <a class="inline-link" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}`}"><strong>${branch.name}</strong></a>
+        <span>${branch.commit.id.slice(0, 10)}${hasOpenPr ? html` <span class="meta-pill">open PR</span>` : ""}</span>
         ${
           ctx.ws.role === "read" || branch.name === "main" || hasOpenPr
-            ? "<span></span>"
-            : `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
-                <input type="hidden" name="name" value="${escapeAttr(branch.name)}">
+            ? html`<span></span>`
+            : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
+                <input type="hidden" name="name" value="${branch.name}">
                 <button class="button danger" type="submit" data-testid="branch-delete">Delete</button>
               </form>`
         }
       </div>`;
-    })
-    .join("") || `<div class="empty">No branches.</div>`}</div>`;
+  })}</div>`;
 }
 
 function formatBytes(bytes: number): string {
@@ -600,17 +603,16 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): string {
-  return `<div class="list">${files
-    .map((file) => {
-      const kind = fileKindForPath(file.path);
-      return `<a class="list-row" href="${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}">
-        <strong>${escapeHtml(file.path)}</strong>
-        <span>${escapeHtml(fileKindLabel(kind))}</span>
+function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): Html {
+  if (files.length === 0) return html`<div class="list"><div class="empty">No files.</div></div>`;
+  return html`<div class="list">${files.map((file) => {
+    const kind = fileKindForPath(file.path);
+    return html`<a class="list-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
+        <strong>${file.path}</strong>
+        <span>${fileKindLabel(kind)}</span>
         <small>${formatBytes(file.size ?? 0)}</small>
       </a>`;
-    })
-    .join("") || `<div class="empty">No files.</div>`}</div>`;
+  })}</div>`;
 }
 
 function editBranchFor(username: string, requested: string | null | undefined): string {

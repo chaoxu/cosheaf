@@ -9,7 +9,6 @@ import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { safeRel } from "./files.js";
-import { escapeAttr, escapeHtml } from "./html-escape.js";
 import {
   badRequestPage,
   displayLogin,
@@ -32,6 +31,7 @@ import {
   type WebCtx,
   type WebListState,
 } from "./web-context.js";
+import { html, type Html } from "./web-html.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { branchOptions, labelChips, repoPage, selected, sortField, stateField } from "./web-page.js";
@@ -70,10 +70,10 @@ web.get("/:owner/:repo/pulls", async (c) => {
       active: "pulls",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: html`
         <div class="page-title compact">
           <div><p class="eyebrow">${filters.state}</p><h1>Pull requests</h1></div>
-          ${ctx.ws.role === "read" ? "" : `<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New pull request</a>`}
+          ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New pull request</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
         ${pullList(ctx.owner, ctx.repo, pulls, "No matching pull requests.")}
@@ -185,36 +185,36 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: `
+      body: html`
         <article class="thread">
           <header class="thread-header">
-            <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
+            <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
             <div class="thread-title-row">
-              <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
+              <h1>${pull.title} <span>#${pull.number}</span></h1>
               <div class="toolbar-actions">
                 ${
                   ctx.ws.role === "read" || pull.state === "closed"
                     ? ""
-                    : `<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit pull request</a>`
+                    : html`<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit pull request</a>`
                 }
                 <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>${escapeHtml(pull.head.ref)} into ${escapeHtml(pull.base.ref)} - by ${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</p>
+            <p>${pull.head.ref} into ${pull.base.ref} - by ${displayLogin(ctx.owner, pull.user?.login)}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
           ${threadLayout(
-            `<div class="comment">
-                <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
-                ${body ? body : `<p>No description.</p>`}
+            html`<div class="comment">
+                <div class="comment-meta">${displayLogin(ctx.owner, pull.user?.login)}</div>
+                ${body.length ? body : html`<p>No description.</p>`}
               </div>
               ${timelineHtml}
               ${reviewForms(ctx, pull)}`,
-            `${labelsRailPanel(pull.labels ?? [])}
+            html`${labelsRailPanel(pull.labels ?? [])}
               ${reviewRequestPanel(ctx, pull, availableReviewers)}`,
           )}
         </article>
@@ -415,11 +415,11 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && mode === "rich",
-      body: `
+      body: html`
         <header class="thread-header">
-          <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : escapeHtml(pull.state)}</span>
+          <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
           <div class="thread-title-row">
-            <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
+            <h1>${pull.title} <span>#${pull.number}</span></h1>
             <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
           </div>
           <nav class="subtabs">
@@ -431,23 +431,21 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
         <div class="review-page">
           <main class="review-main">
             <nav class="changed-files" aria-label="Changed files">
-              ${files
-                .map(
-                  (f) => `
+              ${files.map(
+                (f) => html`
                     <a class="${f.path === file?.path ? "active" : ""}" href="${prFilesHref(ctx, pull.number, f.path, mode, shape)}">
-                      <span>${escapeHtml(f.path)}</span>
+                      <span>${f.path}</span>
                     </a>
                   `,
-                )
-                .join("")}
+              )}
             </nav>
             <section class="diff-panel">
               ${
                 file
-                  ? `<div class="diff-title"><strong>${escapeHtml(file.path)}</strong><span>+${file.additions} -${file.deletions}</span></div>
+                  ? html`<div class="diff-title"><strong>${file.path}</strong><span>+${file.additions} -${file.deletions}</span></div>
                     ${diffModeControls(ctx, pull.number, file.path, mode, shape)}
                     ${await renderPrFileView(ctx, pull, file, mode, shape, versions, fileComments)}`
-                  : `<div class="empty">No changed files.</div>`
+                  : html`<div class="empty">No changed files.</div>`
               }
             </section>
           </main>
@@ -540,22 +538,22 @@ async function renderPrFileView(
   shape: DiffShape,
   versions: PrFileVersions | null,
   comments: readonly WebLineComment[],
-): Promise<string> {
+): Promise<Html> {
   if (mode === "source" && shape === "unified") {
-    return `<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
+    return html`<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
   }
   const nextVersions = versions ?? (await prFileVersions(ctx, pull, file.path));
   const changed = changedLines(file.patch);
   const commentable = commentableLines(file.patch);
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
   if (mode === "source" && shape === "split") {
-    return `<div data-testid="diff-pane-split" class="source-split">
+    return html`<div data-testid="diff-pane-split" class="source-split">
       ${sourcePane("Base", nextVersions.base, "base", changed.deleted, commentable.base, comments, commentForm)}
       ${sourcePane("Head", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}
     </div>`;
   }
   if (mode === "source") {
-    return `<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}</div>`;
+    return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}</div>`;
   }
   if (shape === "split") {
     const [base, head] = await Promise.all([
@@ -570,7 +568,7 @@ async function renderPrFileView(
         surface: "diff",
       }),
     ]);
-    return `<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
+    return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
       <section><h3>Head</h3>${head}</section>
     </div>`;
@@ -580,18 +578,18 @@ async function renderPrFileView(
     documentPath: file.path,
     surface: "document",
   });
-  return `<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
+  return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
-function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): string {
+function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): Html {
   const href = (nextMode: DiffMode, nextShape: DiffShape) => prFilesHref(ctx, prNumber, filePath, nextMode, nextShape);
   const modeLink = (id: DiffMode, label: string) =>
-    `<a data-testid="view-mode-${id}" class="${mode === id ? "active" : ""}" href="${href(id, parseDiffShape(shape, id))}">${label}</a>`;
+    html`<a data-testid="view-mode-${id}" class="${mode === id ? "active" : ""}" href="${href(id, parseDiffShape(shape, id))}">${label}</a>`;
   const shapeLink = (id: DiffShape, label: string) => {
-    if (mode === "rich" && id === "unified") return `<span data-testid="view-shape-unified" class="disabled">Unified</span>`;
-    return `<a data-testid="view-shape-${id}" class="${shape === id ? "active" : ""}" href="${href(mode, id)}">${label}</a>`;
+    if (mode === "rich" && id === "unified") return html`<span data-testid="view-shape-unified" class="disabled">Unified</span>`;
+    return html`<a data-testid="view-shape-${id}" class="${shape === id ? "active" : ""}" href="${href(mode, id)}">${label}</a>`;
   };
-  return `<div class="diff-controls">
+  return html`<div class="diff-controls">
     <div><span>View:</span>${modeLink("source", "Source")}${modeLink("rich", "Rich")}</div>
     <div><span>Shape:</span>${shapeLink("unified", "Unified")}${shapeLink("split", "Side-by-side")}${shapeLink("after", "After only")}</div>
   </div>`;
@@ -609,21 +607,19 @@ function sourcePane(
   commentable: ReadonlySet<number>,
   comments: readonly WebLineComment[],
   form: LineCommentFormOptions | null,
-): string {
+): Html {
   const lines = source.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return `<section><h3>${escapeHtml(title)}</h3><table class="source-lines"><tbody>${lines
-    .map((line, index) => {
-      const lineNo = index + 1;
-      const lineComments = comments.filter((comment) => comment.side === side && comment.line === lineNo);
-      const composer = form && commentable.has(lineNo) ? lineCommentComposer(form, side, lineNo) : "";
-      return `<tr class="${marked.has(lineNo) ? "marked" : ""}" data-testid="source-line-${side}-${lineNo}">
+  return html`<section><h3>${title}</h3><table class="source-lines"><tbody>${lines.map((line, index) => {
+    const lineNo = index + 1;
+    const lineComments = comments.filter((comment) => comment.side === side && comment.line === lineNo);
+    const composer = form && commentable.has(lineNo) ? lineCommentComposer(form, side, lineNo) : "";
+    return html`<tr class="${marked.has(lineNo) ? "marked" : ""}" data-testid="source-line-${side}-${lineNo}">
         <td class="line-action">${composer}</td>
         <td>${lineNo}</td>
-        <td><pre>${escapeHtml(line)}</pre></td>
-      </tr>${lineComments.map(renderInlineComment).join("")}`;
-    })
-    .join("")}</tbody></table></section>`;
+        <td><pre>${line}</pre></td>
+      </tr>${lineComments.map(renderInlineComment)}`;
+  })}</tbody></table></section>`;
 }
 
 interface LineCommentFormOptions {
@@ -649,11 +645,11 @@ function commentFormOptions(
   };
 }
 
-function lineCommentComposer(form: LineCommentFormOptions, side: Side, line: number): string {
-  return `<details class="line-composer">
+function lineCommentComposer(form: LineCommentFormOptions, side: Side, line: number): Html {
+  return html`<details class="line-composer">
     <summary aria-label="Comment on line ${line}">+</summary>
     <form method="post" action="${form.action}">
-      <input type="hidden" name="path" value="${escapeAttr(form.path)}">
+      <input type="hidden" name="path" value="${form.path}">
       <input type="hidden" name="side" value="${side}">
       <input type="hidden" name="line" value="${line}">
       <input type="hidden" name="mode" value="${form.mode}">
@@ -664,14 +660,14 @@ function lineCommentComposer(form: LineCommentFormOptions, side: Side, line: num
   </details>`;
 }
 
-function renderInlineComment(comment: WebLineComment): string {
-  return `<tr class="line-comment-row" data-testid="line-comment-${comment.id}">
+function renderInlineComment(comment: WebLineComment): Html {
+  return html`<tr class="line-comment-row" data-testid="line-comment-${comment.id}">
     <td></td>
     <td colspan="2">
       <div class="line-comment ${comment.outdated ? "outdated" : ""}">
-        <strong>${escapeHtml(comment.author)}</strong>
+        <strong>${comment.author}</strong>
         <span>${comment.outdated ? "outdated" : formatDate(comment.createdAt)}</span>
-        <p>${escapeHtml(comment.body)}</p>
+        <p>${comment.body}</p>
       </div>
     </td>
   </tr>`;
@@ -695,28 +691,26 @@ function mapLineComments(ctx: WebCtx, file: PrFileView, comments: readonly Forge
     });
 }
 
-function renderFileCommentSummary(comments: readonly WebLineComment[]): string {
-  if (comments.length === 0) return `<div class="file-comments empty">No line comments.</div>`;
-  return `<div class="file-comments">${comments
-    .map(
-      (comment) => `<div class="file-comment ${comment.outdated ? "outdated" : ""}">
-        <div><strong>${escapeHtml(comment.author)}</strong><span>${comment.side}:${comment.line ?? "outdated"}</span></div>
-        <p>${escapeHtml(comment.body)}</p>
+function renderFileCommentSummary(comments: readonly WebLineComment[]): Html {
+  if (comments.length === 0) return html`<div class="file-comments empty">No line comments.</div>`;
+  return html`<div class="file-comments">${comments.map(
+    (comment) => html`<div class="file-comment ${comment.outdated ? "outdated" : ""}">
+        <div><strong>${comment.author}</strong><span>${comment.side}:${comment.line ?? "outdated"}</span></div>
+        <p>${comment.body}</p>
       </div>`,
-    )
-    .join("")}</div>`;
+  )}</div>`;
 }
 
 function splitDiffByFile(diff: string): Map<string, string> {
   return new Map(splitUnifiedDiff(diff).map((file) => [file.path, file.patch]));
 }
 
-function renderPatch(patch: string): string {
-  if (!patch) return `<pre class="patch empty">No textual diff.</pre>`;
-  const rows = patchRows(patch)
-    .map((row) => `<tr class="${row.kind}"><td class="sign">${escapeHtml(row.sign)}</td><td><pre>${escapeHtml(row.text)}</pre></td></tr>`)
-    .join("");
-  return `<table class="patch"><tbody>${rows}</tbody></table>`;
+function renderPatch(patch: string): Html {
+  if (!patch) return html`<pre class="patch empty">No textual diff.</pre>`;
+  const rows = patchRows(patch).map(
+    (row) => html`<tr class="${row.kind}"><td class="sign">${row.sign}</td><td><pre>${row.text}</pre></td></tr>`,
+  );
+  return html`<table class="patch"><tbody>${rows}</tbody></table>`;
 }
 
 type PullListSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
@@ -760,10 +754,10 @@ function pullCreatePage(
   ctx: WebCtx,
   branches: readonly ForgejoBranch[],
   values: { head?: string | null; base?: string | null; title?: string; body?: string; error?: string } = {},
-): string {
+): Html {
   const base = values.base ?? "main";
   const head = values.head ?? branchAfter(branches, base);
-  return `
+  return html`
     <div class="form-page">
       <div class="page-title compact">
         <div>
@@ -772,7 +766,7 @@ function pullCreatePage(
         </div>
         <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>
       </div>
-      ${values.error ? `<div class="form-error" role="alert">${escapeHtml(values.error)}</div>` : ""}
+      ${values.error ? html`<div class="form-error" role="alert">${values.error}</div>` : ""}
       <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}" data-testid="pull-create-form">
         <div class="branch-compare">
           <label>Base
@@ -787,10 +781,10 @@ function pullCreatePage(
           </label>
         </div>
         <label>Title
-          <input name="title" value="${escapeAttr(values.title ?? "")}" required data-testid="pull-create-title">
+          <input name="title" value="${values.title ?? ""}" required data-testid="pull-create-title">
         </label>
         <label>Description
-          <textarea name="body" data-testid="pull-create-body">${escapeHtml(values.body ?? "")}</textarea>
+          <textarea name="body" data-testid="pull-create-body">${values.body ?? ""}</textarea>
         </label>
         <div class="form-actions">
           <button class="button primary" type="submit" data-testid="pull-create-submit">Create pull request</button>
@@ -810,9 +804,9 @@ function pullFilterForm(
   filters: PullListFilters,
   labels: readonly ForgejoLabel[],
   milestones: readonly ForgejoMilestone[],
-): string {
+): Html {
   const action = repoHref(owner, repo, "/pulls");
-  return `<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters">
+  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters">
     <div class="filter-basic">
       ${stateField(filters.state)}
       ${sortField(filters.sort, PULL_SORT_OPTIONS)}
@@ -827,36 +821,35 @@ function pullFilterForm(
         <label>Label
           <select name="labels" aria-label="Label filter">
             <option value="">Any label</option>
-            ${labels.map((label) => `<option value="${label.id}"${selected(filters.labelValue, String(label.id))}>${escapeHtml(label.name)}</option>`).join("")}
+            ${labels.map((label) => html`<option value="${label.id}"${selected(filters.labelValue, String(label.id))}>${label.name}</option>`)}
           </select>
         </label>
         <label>Milestone
           <select name="milestone" aria-label="Milestone filter">
             <option value="">Any milestone</option>
-            ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
+            ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="author" value="${escapeAttr(filters.author)}" placeholder="username" aria-label="Author filter"></label>
+        <label>Author <input name="author" value="${filters.author}" placeholder="username" aria-label="Author filter"></label>
       </div>
     </details>
   </form>`;
 }
 
-function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests."): string {
-  return `<div class="list">${pulls
-    .map((pull) => {
-      const state = pull.merged ? "merged" : pull.state;
-      return `<a class="list-row pull-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
+function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests."): Html {
+  const rows = pulls.map((pull) => {
+    const state = pull.merged ? "merged" : pull.state;
+    return html`<a class="list-row pull-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
       <span class="list-row-main">
-        <span class="list-row-title"><span class="state ${state}">${escapeHtml(state)}</span><strong>${escapeHtml(pull.title)}</strong><span class="muted">#${pull.number}</span></span>
+        <span class="list-row-title"><span class="state ${state}">${state}</span><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></span>
         <span class="list-meta">
-          ${escapeHtml(pull.head.ref)} -&gt; ${escapeHtml(pull.base.ref)}
-          ${pull.milestone ? `<span class="meta-pill">${escapeHtml(pull.milestone.title)}</span>` : ""}
+          ${pull.head.ref} -&gt; ${pull.base.ref}
+          ${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}
           ${labelChips(pull.labels ?? [])}
         </span>
       </span>
       <small>updated ${formatDate(pull.updated_at)}</small>
     </a>`;
-    })
-    .join("") || `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>`;
+  });
+  return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;
 }

@@ -4,7 +4,6 @@ import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js"
 import { type Forgejo, ForgejoError } from "../forgejo.js";
 import type { ForgejoIssue } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
-import { escapeAttr, escapeHtml } from "./html-escape.js";
 import {
   CHAT_LABEL,
   chatBranchFromBody,
@@ -30,6 +29,7 @@ import {
   validBranchName,
   type WebCtx,
 } from "./web-context.js";
+import { emptyHtml, html, type Html, raw } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { branchOptions, repoPage } from "./web-page.js";
 
@@ -65,19 +65,19 @@ function chatSidebar(
   active: number | null,
   role: string,
   canStartChat: boolean,
-): string {
+): Html {
   const newChat =
     role === "read" || !canStartChat
-      ? ""
-      : `<a class="chat-new-link${active === null ? " active" : ""}" href="${repoHref(owner, repo, "/chat")}">+ New chat</a>`;
+      ? emptyHtml
+      : html`<a class="chat-new-link${active === null ? " active" : ""}" href="${repoHref(owner, repo, "/chat")}">+ New chat</a>`;
   const sessions =
-    chats
-      .map(
-        (chat) =>
-          `<a class="chat-session${chat.number === active ? " active" : ""}" href="${repoHref(owner, repo, `/chat/${chat.number}`)}" title="${escapeAttr(chat.title)}">${escapeHtml(chat.title)}</a>`,
-      )
-      .join("") || `<div class="chat-sessions-empty">No chats yet</div>`;
-  return `<aside class="chat-sidebar">${newChat}<nav class="chat-sessions">${sessions}</nav></aside>`;
+    chats.length === 0
+      ? html`<div class="chat-sessions-empty">No chats yet</div>`
+      : chats.map(
+          (chat) =>
+            html`<a class="chat-session${chat.number === active ? " active" : ""}" href="${repoHref(owner, repo, `/chat/${chat.number}`)}" title="${chat.title}">${chat.title}</a>`,
+        );
+  return html`<aside class="chat-sidebar">${newChat}<nav class="chat-sessions">${sessions}</nav></aside>`;
 }
 
 export function registerChatPageRoutes(web: Hono<AppEnv>): void {
@@ -97,17 +97,17 @@ web.get("/:owner/:repo/chat", async (c) => {
       active: "chat",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: html`
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role, canStartChat)}
           <section class="chat-main">
             <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
             ${
               ctx.ws.role === "read"
-                ? `<div class="chat-blank">Read-only access — you can't start chats here.</div>`
+                ? html`<div class="chat-blank">Read-only access — you can't start chats here.</div>`
                 : !canStartChat
-                  ? `<div class="chat-blank">Chat is not configured for this Cosheaf instance. Existing chat issues remain readable.</div>`
-                : `<div class="chat-blank">Start a new chat with Coverify, or pick a chat on the left.</div>
+                  ? html`<div class="chat-blank">Chat is not configured for this Cosheaf instance. Existing chat issues remain readable.</div>`
+                : html`<div class="chat-blank">Start a new chat with Coverify, or pick a chat on the left.</div>
                    <form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
                      <label>Branch
                        <select name="branch">${branchOptions(branches, "main")}</select>
@@ -164,8 +164,10 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
   const chatBranch = chatBranchFromBody(issue.body ?? "") ?? "main";
   const canSendChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
   const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
+  // web-chat.js is a pure string module (unit-tested on primitive strings), so
+  // its handcrafted markup is re-marked as Html at this boundary.
   const renderedTurns = await Promise.all(
-    turns.map(async (turn) => renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" }))),
+    turns.map(async (turn) => raw(renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" })))),
   );
   return htmlResponse(
     repoPage({
@@ -176,27 +178,27 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: `
+      body: html`
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role, canSendChat)}
           <section class="chat-main">
             <div class="chat-main-head">
               <div>
                 <p class="eyebrow">Issue #${issue.number} · workspace-visible chat</p>
-                <h1>${escapeHtml(issue.title)}</h1>
-                <p class="chat-context">Repository snapshot: ${escapeHtml(chatBranch)}</p>
+                <h1>${issue.title}</h1>
+                <p class="chat-context">Repository snapshot: ${chatBranch}</p>
               </div>
               <div class="toolbar-actions"><button class="button" type="button" onclick="navigator.clipboard?.writeText(location.href)">Copy link</button></div>
             </div>
             <div class="chat-thread">
-              ${renderedTurns.join("")}
-              ${chatReplyPending(turns) ? chatPendingTurn() : ""}
+              ${renderedTurns}
+              ${chatReplyPending(turns) ? raw(chatPendingTurn()) : ""}
             </div>
-            ${chatReplyPending(turns) ? chatLiveScript(ctx.repo, number) : ""}
+            ${chatReplyPending(turns) ? raw(chatLiveScript(ctx.repo, number)) : ""}
             ${
               !canSendChat
                 ? ""
-                : `<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
+                : html`<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
                      <textarea name="message" placeholder="Message Coverify" required></textarea>
                      <button class="button primary" type="submit">Send</button>
                    </form>`

@@ -3,7 +3,6 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { ForgejoError } from "../forgejo.js";
 import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
-import { escapeAttr, escapeHtml } from "./html-escape.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue, stripChatMetadata } from "./web-chat.js";
 import {
@@ -25,6 +24,7 @@ import {
   type WebCtx,
   type WebListState,
 } from "./web-context.js";
+import { emptyHtml, html, type Html } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { labelChip, labelChips, repoPage, selected, sortField, stateField } from "./web-page.js";
 import {
@@ -66,10 +66,10 @@ web.get("/:owner/:repo/issues", async (c) => {
       active: "issues",
       user: ctx.user,
       ws: ctx.ws,
-      body: `
+      body: html`
         <div class="page-title compact">
           <div><p class="eyebrow">${filters.state}</p><h1>Issues</h1></div>
-          ${ctx.ws.role === "read" ? "" : `<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
+          ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
         ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
@@ -170,15 +170,15 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
       user: ctx.user,
       ws: ctx.ws,
       readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: `
+      body: html`
         <article class="thread">
           <header class="thread-header">
-            <span class="state ${issue.state}">${escapeHtml(issue.state)}</span>
+            <span class="state ${issue.state}">${issue.state}</span>
             <div class="thread-title-row">
-              <h1>${escapeHtml(issue.title)} <span>#${issue.number}</span></h1>
+              <h1>${issue.title} <span>#${issue.number}</span></h1>
               ${
                 canEditIssue
-                  ? `<div class="toolbar-actions">
+                  ? html`<div class="toolbar-actions">
                       <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}" data-testid="issue-edit-button">Edit issue</a>
                       <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
                         <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
@@ -192,23 +192,23 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
                   : ""
               }
             </div>
-            <p>${isPinned ? `<span class="meta-pill">pinned</span> ` : ""}by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
+            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${displayLogin(ctx.owner, issue.user?.login)} - ${formatDate(issue.created_at)}</p>
           </header>
-          ${chatBackedIssue ? `<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
+          ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
           ${threadLayout(
-            `<div class="issue-document">
+            html`<div class="issue-document">
                 ${body}
               </div>
               ${timelineHtml}
               ${
                 ctx.ws.role === "read" || chatBackedIssue
                   ? ""
-                  : `<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
+                  : html`<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
                        <textarea name="body" placeholder="Leave a comment" required></textarea>
                        <button class="button primary" type="submit">Comment</button>
                      </form>`
               }`,
-            `${labelsRailPanel(issue.labels)}
+            html`${labelsRailPanel(issue.labels)}
               ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`,
           )}
         </article>
@@ -418,9 +418,9 @@ function issueCreatePage(
   ctx: WebCtx,
   labels: readonly ForgejoLabel[],
   values: { title?: string; body?: string; labelIds?: number[]; error?: string } = {},
-): string {
+): Html {
   const selectedIds = new Set(values.labelIds ?? []);
-  return `
+  return html`
     <div class="form-page">
       <div class="page-title compact">
         <div>
@@ -429,13 +429,13 @@ function issueCreatePage(
         </div>
         <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/issues")}">Cancel</a>
       </div>
-      ${values.error ? `<div class="form-error" role="alert">${escapeHtml(values.error)}</div>` : ""}
+      ${values.error ? html`<div class="form-error" role="alert">${values.error}</div>` : ""}
       <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/issues/new")}" data-testid="issue-create-form">
         <label>Title
-          <input name="title" value="${escapeAttr(values.title ?? "")}" required autofocus data-testid="issue-create-title">
+          <input name="title" value="${values.title ?? ""}" required autofocus data-testid="issue-create-title">
         </label>
         <label>Description
-          <textarea name="body" data-testid="issue-create-body">${escapeHtml(values.body ?? "")}</textarea>
+          <textarea name="body" data-testid="issue-create-body">${values.body ?? ""}</textarea>
         </label>
         ${labelCheckboxes(labels, selectedIds)}
         <div class="form-actions">
@@ -446,18 +446,17 @@ function issueCreatePage(
   `;
 }
 
-function labelCheckboxes(labels: readonly ForgejoLabel[], selectedIds: ReadonlySet<number>): string {
-  if (labels.length === 0) return "";
-  return `<fieldset class="checkbox-list">
+function labelCheckboxes(labels: readonly ForgejoLabel[], selectedIds: ReadonlySet<number>): Html {
+  if (labels.length === 0) return emptyHtml;
+  return html`<fieldset class="checkbox-list">
     <legend>Labels</legend>
     ${labels
       .map(
-        (label) => `<label>
+        (label) => html`<label>
           <input type="checkbox" name="labels" value="${label.id}"${selectedIds.has(label.id) ? " checked" : ""}>
           ${labelChip(label)}
         </label>`,
-      )
-      .join("")}
+      )}
   </fieldset>`;
 }
 
@@ -467,12 +466,12 @@ function issueFilterForm(
   filters: IssueListFilters,
   labels: readonly ForgejoLabel[],
   milestones: readonly ForgejoMilestone[],
-): string {
+): Html {
   const action = repoHref(owner, repo, "/issues");
-  return `<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters">
+  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters">
     <div class="filter-basic">
       ${stateField(filters.state)}
-      <label class="filter-search">Search <input name="q" value="${escapeAttr(filters.q)}" placeholder="title text" aria-label="Search issues"></label>
+      <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search issues"></label>
       ${sortField(filters.sort, ISSUE_SORT_OPTIONS)}
       <div class="filter-actions">
         <button class="button primary" type="submit">Apply</button>
@@ -485,35 +484,37 @@ function issueFilterForm(
         <label>Label
           <select name="labels" aria-label="Label filter">
             <option value="">Any label</option>
-            ${labels.map((label) => `<option value="${escapeAttr(label.name)}"${selected(filters.labels, label.name)}>${escapeHtml(label.name)}</option>`).join("")}
+            ${labels.map((label) => html`<option value="${label.name}"${selected(filters.labels, label.name)}>${label.name}</option>`)}
           </select>
         </label>
         <label>Milestone
           <select name="milestones" aria-label="Milestone filter">
             <option value="">Any milestone</option>
-            ${milestones.map((milestone) => `<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${escapeHtml(milestone.title)}</option>`).join("")}
+            ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="created_by" value="${escapeAttr(filters.createdBy)}" placeholder="username" aria-label="Author filter"></label>
-        <label>Assignee <input name="assigned_by" value="${escapeAttr(filters.assignedBy)}" placeholder="username" aria-label="Assignee filter"></label>
-        <label>Mentioned <input name="mentioned_by" value="${escapeAttr(filters.mentionedBy)}" placeholder="username" aria-label="Mentioned filter"></label>
+        <label>Author <input name="created_by" value="${filters.createdBy}" placeholder="username" aria-label="Author filter"></label>
+        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" placeholder="username" aria-label="Assignee filter"></label>
+        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" placeholder="username" aria-label="Mentioned filter"></label>
       </div>
     </details>
   </form>`;
 }
 
-function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues."): string {
-  return `<div class="list">${issues
-    .map((issue) => `<a class="list-row issue-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}">
+function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues."): Html {
+  return html`<div class="list">${
+    issues.length === 0
+      ? html`<div class="empty">${emptyText}</div>`
+      : issues.map((issue) => html`<a class="list-row issue-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}">
       <span class="list-row-main">
-        <span class="list-row-title"><span class="state ${issue.state}">${escapeHtml(issue.state)}</span><strong>${escapeHtml(issue.title)}</strong><span class="muted">#${issue.number}</span></span>
+        <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></span>
         <span class="list-meta">
-          ${escapeHtml(displayLogin(owner, issue.user?.login))} opened ${formatDate(issue.created_at)}
-          ${issue.milestone ? `<span class="meta-pill">${escapeHtml(issue.milestone.title)}</span>` : ""}
+          ${displayLogin(owner, issue.user?.login)} opened ${formatDate(issue.created_at)}
+          ${issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : ""}
           ${labelChips(issue.labels)}
         </span>
       </span>
       <small>${issue.comments ? `${issue.comments} comments` : "No comments"}</small>
     </a>`)
-    .join("") || `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>`;
+  }</div>`;
 }

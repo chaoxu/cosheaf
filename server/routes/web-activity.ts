@@ -8,7 +8,6 @@ import {
 } from "../activity-feed.js";
 import type { ForgejoActivity, ForgejoNotificationThread } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
-import { escapeHtml } from "./html-escape.js";
 import {
   displayLogin,
   formatDate,
@@ -21,6 +20,7 @@ import {
   urlPath,
   type WebCtx,
 } from "./web-context.js";
+import { emptyHtml, html, type Html } from "./web-html.js";
 import { repoPage } from "./web-page.js";
 
 export function registerNotificationActivityRoutes(web: Hono<AppEnv>): void {
@@ -74,37 +74,37 @@ web.get("/:owner/:repo/activity", async (c) => {
       active: "activity",
       user: ctx.user,
       ws: ctx.ws,
-      body: `<div class="page-title compact"><h1>Activity</h1></div>
+      body: html`<div class="page-title compact"><h1>Activity</h1></div>
         ${activityList(ctx, activities)}`,
     }),
   );
 });
 }
 
-function notificationsPage(ctx: WebCtx, threads: readonly ForgejoNotificationThread[]): string {
-  return `
+function notificationsPage(ctx: WebCtx, threads: readonly ForgejoNotificationThread[]): Html {
+  return html`
     <div class="page-title compact">
       <div><p class="eyebrow">Unread</p><h1>Notifications</h1></div>
       ${
         threads.length === 0
           ? ""
-          : `<form method="post" action="${repoHref(ctx.owner, ctx.repo, "/notifications/read-all")}">
+          : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, "/notifications/read-all")}">
               <button class="button" type="submit" data-testid="notifications-read-all">Mark all read</button>
             </form>`
       }
     </div>
     <div class="list" data-testid="notification-list">
-      ${threads.map((thread) => notificationRow(ctx, thread)).join("") || `<div class="empty">No unread notifications.</div>`}
+      ${threads.length === 0 ? html`<div class="empty">No unread notifications.</div>` : threads.map((thread) => notificationRow(ctx, thread))}
     </div>
   `;
 }
 
-function notificationRow(ctx: WebCtx, thread: ForgejoNotificationThread): string {
+function notificationRow(ctx: WebCtx, thread: ForgejoNotificationThread): Html {
   const href = notificationHref(ctx, thread);
   const kind = thread.subject.type === "Pull" ? "Pull request" : thread.subject.type;
-  return `<div class="list-row">
-    <a class="inline-link" href="${href}"><strong>${escapeHtml(thread.subject.title)}</strong></a>
-    <span>${escapeHtml(kind)} - ${formatDate(thread.updated_at)}</span>
+  return html`<div class="list-row">
+    <a class="inline-link" href="${href}"><strong>${thread.subject.title}</strong></a>
+    <span>${kind} - ${formatDate(thread.updated_at)}</span>
     <form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/notifications/${thread.id}/read`)}">
       <button class="button" type="submit">Mark read</button>
     </form>
@@ -120,81 +120,81 @@ function notificationHref(ctx: WebCtx, thread: ForgejoNotificationThread): strin
     : repoHref(ctx.owner, ctx.repo, `/issues/${number}`);
 }
 
-function activityList(ctx: WebCtx, activities: ForgejoActivity[]): string {
+function activityList(ctx: WebCtx, activities: ForgejoActivity[]): Html {
   const items = collapseNoisyEditBranchCommits(activities);
-  return `<div class="list">${items.map((item) => activityRow(ctx, item)).join("") || `<div class="empty">No activity.</div>`}</div>`;
+  return html`<div class="list">${items.length === 0 ? html`<div class="empty">No activity.</div>` : items.map((item) => activityRow(ctx, item))}</div>`;
 }
 
-function activityRow(ctx: WebCtx, item: ActivityFeedItem): string {
+function activityRow(ctx: WebCtx, item: ActivityFeedItem): Html {
   const rendered = renderActivity(ctx, item);
-  const count = item.repeatCount > 1 ? `<small class="activity-count">${item.repeatCount} commits</small>` : "";
-  return `<div class="list-row activity-row" data-testid="activity-row">
-    <strong>${escapeHtml(displayLogin(ctx.owner, item.activity.act_user?.login))}</strong>
+  const count = item.repeatCount > 1 ? html`<small class="activity-count">${item.repeatCount} commits</small>` : emptyHtml;
+  return html`<div class="list-row activity-row" data-testid="activity-row">
+    <strong>${displayLogin(ctx.owner, item.activity.act_user?.login)}</strong>
     <span>${rendered.summary}${count}</span>
     <small>${formatDate(item.activity.created)}</small>
   </div>`;
 }
 
-function renderActivity(ctx: WebCtx, item: ActivityFeedItem): { summary: string } {
+function renderActivity(ctx: WebCtx, item: ActivityFeedItem): { summary: Html } {
   const activity = item.activity;
   const branch = branchFromRef(activity.ref_name);
   const content = parseActivityContent(activity.content);
   const pr = activityPullRef(content);
   const issue = activityIssueRef(content, activity.comment?.issue_url);
   const commit = item.commit ?? activityCommitRef(content);
-  const branchHtml = branch ? activityBranchHtml(ctx, branch) : "";
-  const commitHtml = commit ? activityCommitHtml(ctx, commit.sha) : "";
+  const branchHtml = branch ? activityBranchHtml(ctx, branch) : null;
+  const commitHtml = commit ? activityCommitHtml(ctx, commit.sha) : null;
   switch (activity.op_type) {
     case "commit_repo": {
-      const message = commit?.message ? `: ${escapeHtml(firstLine(commit.message))}` : "";
-      const target = commitHtml || branchHtml;
+      const message = commit?.message ? html`: ${firstLine(commit.message)}` : emptyHtml;
+      const target = commitHtml ?? branchHtml;
       if (item.repeatCount > 1) {
-        return { summary: `saved edits${message}${target ? ` ${target}` : ""}${branchHtml && commitHtml ? ` on ${branchHtml}` : ""}` };
+        return { summary: html`saved edits${message}${target ? html` ${target}` : ""}${branchHtml && commitHtml ? html` on ${branchHtml}` : ""}` };
       }
-      return { summary: `committed${message}${target ? ` ${target}` : ""}${branchHtml && commitHtml ? ` on ${branchHtml}` : ""}` };
+      return { summary: html`committed${message}${target ? html` ${target}` : ""}${branchHtml && commitHtml ? html` on ${branchHtml}` : ""}` };
     }
     case "create_pull_request":
-      if (pr) return { summary: `opened ${activityPullHtml(ctx, pr.number)}${pr.label ? `: ${escapeHtml(pr.label)}` : ""}` };
-      return { summary: "opened a pull request" };
+      if (pr) return { summary: html`opened ${activityPullHtml(ctx, pr.number)}${pr.label ? html`: ${pr.label}` : ""}` };
+      return { summary: html`opened a pull request` };
     case "merge_pull_request":
-      if (pr) return { summary: `merged ${activityPullHtml(ctx, pr.number)}${pr.label ? ` from ${escapeHtml(pr.label)}` : ""}` };
-      return { summary: "merged a pull request" };
+      if (pr) return { summary: html`merged ${activityPullHtml(ctx, pr.number)}${pr.label ? html` from ${pr.label}` : ""}` };
+      return { summary: html`merged a pull request` };
     case "comment_pull":
-      if (pr) return { summary: `commented on ${activityPullHtml(ctx, pr.number)}` };
-      return { summary: "commented on a pull request" };
+      if (pr) return { summary: html`commented on ${activityPullHtml(ctx, pr.number)}` };
+      return { summary: html`commented on a pull request` };
     case "create_issue":
-      if (issue) return { summary: `opened ${activityIssueHtml(ctx, issue)}` };
-      return { summary: "opened an issue" };
+      if (issue) return { summary: html`opened ${activityIssueHtml(ctx, issue)}` };
+      return { summary: html`opened an issue` };
     case "close_issue":
-      if (issue) return { summary: `closed ${activityIssueHtml(ctx, issue)}` };
-      return { summary: "closed an issue" };
+      if (issue) return { summary: html`closed ${activityIssueHtml(ctx, issue)}` };
+      return { summary: html`closed an issue` };
     case "reopen_issue":
-      if (issue) return { summary: `reopened ${activityIssueHtml(ctx, issue)}` };
-      return { summary: "reopened an issue" };
+      if (issue) return { summary: html`reopened ${activityIssueHtml(ctx, issue)}` };
+      return { summary: html`reopened an issue` };
     case "comment_issue":
-      if (issue) return { summary: `commented on ${activityIssueHtml(ctx, issue)}` };
-      return { summary: "commented on an issue" };
+      if (issue) return { summary: html`commented on ${activityIssueHtml(ctx, issue)}` };
+      return { summary: html`commented on an issue` };
     case "delete_branch":
-      return { summary: `deleted branch ${branch ? escapeHtml(branch) : ""}` };
+      return { summary: html`deleted branch ${branch ?? ""}` };
     default:
-      return { summary: `${escapeHtml(activity.op_type)}${branchHtml ? ` on ${branchHtml}` : ""}` };
+      return { summary: html`${activity.op_type}${branchHtml ? html` on ${branchHtml}` : ""}` };
   }
 }
 
-function activityCommitHtml(ctx: WebCtx, sha: string): string {
-  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/commits/${encodeURIComponent(sha)}`)}">${escapeHtml(sha.slice(0, 10))}</a>`;
+function activityCommitHtml(ctx: WebCtx, sha: string): Html {
+  return html`<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/commits/${encodeURIComponent(sha)}`)}">${sha.slice(0, 10)}</a>`;
 }
 
-function activityPullHtml(ctx: WebCtx, number: number): string {
-  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}`)}">pull request #${number}</a>`;
+function activityPullHtml(ctx: WebCtx, number: number): Html {
+  return html`<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}`)}">pull request #${number}</a>`;
 }
 
-function activityIssueHtml(ctx: WebCtx, number: number): string {
-  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${number}`)}">issue #${number}</a>`;
+function activityIssueHtml(ctx: WebCtx, number: number): Html {
+  return html`<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${number}`)}">issue #${number}</a>`;
 }
 
-function activityBranchHtml(ctx: WebCtx, branch: string): string {
-  return `<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}">${escapeHtml(branch)}</a>`;
+function activityBranchHtml(ctx: WebCtx, branch: string): Html {
+  return html`<a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}">${branch}</a>`;
 }
 
 function firstLine(value: string): string {

@@ -1,42 +1,42 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { escapeAttr, escapeHtml } from "./html-escape.js";
+import { emptyHtml, html, type Html, raw } from "./web-html.js";
 
 export type StatusCrumb = { label: string; href?: string };
 
 export function pageShell(opts: {
   title: string;
   user?: string;
-  body: string;
+  body: Html;
   readerAssets?: boolean;
-  sidebar?: string;
+  sidebar?: Html;
   statusPath?: StatusCrumb[];
 }): string {
-  return `<!doctype html>
+  return String(html`<!doctype html>
     <html lang="en">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>${escapeHtml(opts.title)} - Cosheaf</title>
+        <title>${opts.title} - Cosheaf</title>
         ${
           opts.readerAssets
-            ? `<link rel="stylesheet" href="/vendor/coflat/editor.css">
-        <link rel="stylesheet" href="/vendor/coflat/themes/blueprint-book.css">`
+            ? raw(`<link rel="stylesheet" href="/vendor/coflat/editor.css">
+        <link rel="stylesheet" href="/vendor/coflat/themes/blueprint-book.css">`)
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
-        <link rel="stylesheet" href="/cosheaf-web.css${cosheafWebCssVersion()}">
+        <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
       </head>
-      <body data-cosheaf-user="${escapeAttr(opts.user ?? "")}">
+      <body data-cosheaf-user="${opts.user ?? ""}">
         <div class="app-frame">
           <div class="app-main">
-            ${opts.sidebar ? `<aside class="app-sidebar">${opts.sidebar}</aside>` : ""}
+            ${opts.sidebar ? html`<aside class="app-sidebar">${opts.sidebar}</aside>` : ""}
             <div class="app-content">${opts.body}</div>
           </div>
           ${appStatusbar(opts.user, opts.statusPath)}
         </div>
       </body>
-    </html>`;
+    </html>`);
 }
 
 function cosheafWebCssVersion(): string {
@@ -44,30 +44,31 @@ function cosheafWebCssVersion(): string {
   return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
-export function globalSidebar(active: "workspaces" | "account"): string {
-  return `<a class="brand" href="/">Cosheaf</a>
+export function globalSidebar(active: "workspaces" | "account"): Html {
+  return html`<a class="brand" href="/">Cosheaf</a>
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
       <a class="${active === "account" ? "active" : ""}" href="/account/settings">Account</a>
     </nav>`;
 }
 
-function appStatusbar(user: string | undefined, path: StatusCrumb[] | undefined): string {
+function appStatusbar(user: string | undefined, path: StatusCrumb[] | undefined): Html {
+  const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
-    `<a href="/">cosheaf</a>`,
+    html`<a href="/">cosheaf</a>`,
     ...(path ?? []).map((segment) =>
       segment.href
-        ? `<a href="${escapeAttr(segment.href)}">${escapeHtml(segment.label)}</a>`
-        : `<span>${escapeHtml(segment.label)}</span>`,
+        ? html`<a href="${segment.href}">${segment.label}</a>`
+        : html`<span>${segment.label}</span>`,
     ),
-  ].join(`<span class="status-sep">/</span>`);
+  ].flatMap((crumb, i) => (i === 0 ? [crumb] : [sep, crumb]));
   const session = user
-    ? `<form method="post" action="/logout"><a class="account-link" href="/account/settings">${escapeHtml(user)}</a><button type="submit">sign out</button></form>`
-    : `<a class="account-link" href="/login">sign in</a>`;
-  return `<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div><div class="status-session">${session}</div></footer>`;
+    ? html`<form method="post" action="/logout"><a class="account-link" href="/account/settings">${user}</a><button type="submit">sign out</button></form>`
+    : html`<a class="account-link" href="/login">sign in</a>`;
+  return html`<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div><div class="status-session">${session}</div></footer>`;
 }
 
-export function webEditorAssets(): string {
+export function webEditorAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-editor.tsx");
 }
 
@@ -79,23 +80,23 @@ type ViteManifestChunk = {
 
 let manifestCache: Record<string, ViteManifestChunk> | null | undefined;
 
-function webReaderAssets(): string {
+function webReaderAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-reader.ts");
 }
 
-function viteEntryAssets(entryId: string): string {
+function viteEntryAssets(entryId: string): Html {
   if (process.env.NODE_ENV !== "production") {
     const devOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
-    return `<script type="module" src="${devOrigin}/${entryId}"></script>`;
+    return html`<script type="module" src="${`${devOrigin}/${entryId}`}"></script>`;
   }
   const manifest = readViteManifest();
-  if (!manifest) return "";
+  if (!manifest) return emptyHtml;
   const entry = manifest[entryId];
-  if (!entry) return "";
-  const cssLinks = collectCss(manifest, entry, new Set<string>())
-    .map((href) => `<link rel="stylesheet" href="/${escapeAttr(href)}">`)
-    .join("");
-  return `${cssLinks}<script type="module" src="/${escapeAttr(entry.file)}"></script>`;
+  if (!entry) return emptyHtml;
+  const cssLinks = collectCss(manifest, entry, new Set<string>()).map(
+    (href) => html`<link rel="stylesheet" href="/${href}">`,
+  );
+  return html`${cssLinks}<script type="module" src="/${entry.file}"></script>`;
 }
 
 function readViteManifest(): Record<string, ViteManifestChunk> | null {

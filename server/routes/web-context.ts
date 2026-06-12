@@ -6,7 +6,7 @@ import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat } from "../middleware.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
-import { escapeHtml } from "./html-escape.js";
+import { html, type Html, raw } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
 export interface WebCtx {
@@ -101,20 +101,24 @@ export function redirect(location: string): Response {
   return new Response(null, { status: 303, headers: { location } });
 }
 
+function messagePage(title: string, user: string, message: string, status: number): Response {
+  return htmlResponse(pageShell({ title, user, sidebar: globalSidebar("workspaces"), body: html`<main class="page"><div class="empty">${message}</div></main>` }), status);
+}
+
 export async function notFoundPage(user: string, message: string): Promise<Response> {
-  return htmlResponse(pageShell({ title: "Not found", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 404);
+  return messagePage("Not found", user, message, 404);
 }
 
 export function badRequestPage(user: string, message: string): Response {
-  return htmlResponse(pageShell({ title: "Bad request", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 400);
+  return messagePage("Bad request", user, message, 400);
 }
 
 export function errorPage(user: string, message: string, status: number): Response {
-  return htmlResponse(pageShell({ title: "Error", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), status);
+  return messagePage("Error", user, message, status);
 }
 
 export function forbiddenPage(user: string): Response {
-  return htmlResponse(pageShell({ title: "Forbidden", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">Forbidden</div></main>` }), 403);
+  return messagePage("Forbidden", user, "Forbidden", 403);
 }
 
 export function safeWebRedirect(raw: string | null): string | null {
@@ -171,8 +175,11 @@ export function displayLogin(owner: string, login: string | null | undefined): s
   return login === owner ? "repository" : login;
 }
 
-export function jsonScript(value: unknown): string {
-  return JSON.stringify(value).replaceAll("<", "\\u003c");
+// JSON destined for a <script type="application/json"> body. Entity-escaping
+// would corrupt it, so mark it raw; `<` is JS-escaped instead to keep
+// "</script>" out of the payload.
+export function jsonScript(value: unknown): Html {
+  return raw(JSON.stringify(value).replaceAll("<", "\\u003c"));
 }
 
 export function formatDate(value: string | number | null | undefined): string {

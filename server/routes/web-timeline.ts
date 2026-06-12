@@ -1,5 +1,5 @@
 import type { ForgejoTimelineEvent } from "../forgejo-types.js";
-import { escapeHtml } from "./html-escape.js";
+import { html, type Html } from "./web-html.js";
 
 export interface WebTimelineSortItem {
   kind: "comment" | "event" | "review" | "line-comment" | "commit";
@@ -10,9 +10,8 @@ export interface WebTimelineSortItem {
   commit?: { sha: string };
 }
 
-export function webTimelineDescriptionHtml(event: ForgejoTimelineEvent): string {
-  const description = webTimelineDescriptionText(event);
-  return description ? escapeHtml(description) : "";
+export function webTimelineDescriptionHtml(event: ForgejoTimelineEvent): Html {
+  return html`${webTimelineDescriptionText(event)}`;
 }
 
 export function compareWebTimelineItems(a: WebTimelineSortItem, b: WebTimelineSortItem): number {
