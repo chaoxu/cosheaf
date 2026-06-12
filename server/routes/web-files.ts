@@ -1,0 +1,639 @@
+import type { Context, Hono } from "hono";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { type FileKind, fileKindForPath, fileKindLabel } from "../../shared/file-kind.js";
+import { resolveBranchPath } from "../branch-path.js";
+import { repositoryRawHeadersForPath } from "../content-type.js";
+import { type Forgejo, ForgejoError } from "../forgejo.js";
+import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
+import { deletePage, planIndexPage } from "../indexer.js";
+import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
+import type { AppEnv } from "../types.js";
+import { deleteBranchQuietly } from "../workspace-cleanup.js";
+import { safeRel } from "./files.js";
+import { escapeAttr, escapeHtml } from "./html-escape.js";
+import {
+  badRequestPage,
+  displayLogin,
+  forbiddenPage,
+  formatDate,
+  htmlResponse,
+  jsonScript,
+  notFoundPage,
+  redirect,
+  repoHref,
+  resolveWebRepo,
+  stringField,
+  textField,
+  urlPath,
+  validBranchName,
+  type WebCtx,
+} from "./web-context.js";
+import { markdownSurface, renderMarkdown } from "./web-markdown.js";
+import { branchOptions, repoPage } from "./web-page.js";
+import { webEditorAssets } from "./web-shell.js";
+
+export function registerFileRoutes(web: Hono<AppEnv>): void {
+web.get("/:owner/:repo", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const { owner, repo, fj, ws, user } = ctx;
+  const files = await repoFiles(fj, owner, repo, "main").catch(() => []);
+  return htmlResponse(
+    repoPage({
+      title: `Files - ${repo}`,
+      owner,
+      repo,
+      active: "files",
+      user,
+      ws,
+      body: `
+        <div class="page-title compact">
+          <div><p class="eyebrow">Branch</p><h1>main</h1></div>
+          <div class="toolbar-actions">
+            <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+            ${
+              ws.role === "read"
+                ? ""
+                : `<a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}">New file</a>`
+            }
+          </div>
+        </div>
+        ${fileList(owner, repo, "main", files)}
+      `,
+    }),
+  );
+});
+
+web.get("/:owner/:repo/src/branch/*", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const { owner, repo, fj, ws, user } = ctx;
+  const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
+  if (!resolved) return notFoundPage(user, "Branch not found");
+  const files = await repoFiles(fj, owner, repo, resolved.branch);
+  if (!resolved.path) {
+    return htmlResponse(
+      repoPage({
+        title: `${repo}: ${resolved.branch}`,
+        owner,
+        repo,
+        active: "files",
+        user,
+        ws,
+        body: `
+          <div class="page-title compact">
+            <div><p class="eyebrow">Branch</p><h1>${escapeHtml(resolved.branch)}</h1></div>
+            <div class="toolbar-actions">
+              <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+              ${
+                ws.role === "read"
+                  ? ""
+                  : `${resolved.branch === "main" ? "" : `<a class="button primary" href="${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main">Open pull request</a>`}
+                    <a class="button" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}">New file</a>`
+              }
+            </div>
+          </div>
+          ${fileList(owner, repo, resolved.branch, files)}
+        `,
+      }),
+    );
+  }
+  const rel = safeRel(resolved.path);
+  if (!rel) return notFoundPage(user, "File not found");
+  const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch((err) => {
+    if (err instanceof ForgejoError && err.status === 404) return null;
+    throw err;
+  });
+  if (!meta) return notFoundPage(user, "File not found");
+  const kind = fileKindForPath(rel);
+  const sourceView = c.req.query("view") === "source";
+  const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const rendered =
+    kind === "markdown" && content !== null && !sourceView
+      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
+      : null;
+  const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
+  return htmlResponse(
+    repoPage({
+      title: `${rel} - ${repo}`,
+      owner,
+      repo,
+      active: "files",
+      user,
+      ws,
+      readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+      body: `
+        <div class="file-toolbar">
+          <div>
+            <p class="eyebrow">${escapeHtml(resolved.branch)}</p>
+            <h1>${escapeHtml(rel)}</h1>
+            <p class="file-meta">${escapeHtml(fileKindLabel(kind))} <span>${formatBytes(meta.size)}</span></p>
+          </div>
+          <div class="toolbar-actions">
+            <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+            <a class="button" href="${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">Raw</a>
+            ${
+              kind === "markdown"
+                ? sourceView
+                  ? `<a class="button" href="${fileHref}">Rendered</a>`
+                  : `<a class="button" href="${fileHref}?view=source">Source</a>`
+                : ""
+            }
+            ${
+              ws.role === "read" || resolved.branch === "main"
+                ? ""
+                : `<a class="button" href="${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main">Open pull request</a>`
+            }
+            ${
+              ws.role === "read"
+                ? ""
+                : editableFileKind(kind)
+                  ? `<a class="button primary" href="${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
+                  : ""
+            }
+            ${
+              ws.role === "read" || resolved.branch === "main"
+                ? ""
+                : `<form class="inline-form" method="post" action="${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}">
+                    <input type="hidden" name="action" value="delete">
+                    <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
+                  </form>`
+            }
+          </div>
+        </div>
+        ${filePreview(ctx, resolved.branch, rel, kind, rendered ?? content, sourceView)}
+      `,
+    }),
+  );
+});
+
+web.post("/:owner/:repo/src/branch/*", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  if (stringField(form.action) !== "delete") return badRequestPage(ctx.user, "Unsupported file action.");
+  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/src/branch/"));
+  if (!resolved?.path) return notFoundPage(ctx.user, "File not found");
+  if (resolved.branch === "main") return forbiddenPage(ctx.user);
+  const rel = safeRel(resolved.path);
+  if (!rel) return notFoundPage(ctx.user, "File not found");
+  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel);
+  if (!meta) return notFoundPage(ctx.user, "File not found");
+  await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+    branch: resolved.branch,
+    path: rel,
+    sha: meta.sha,
+    message: `delete ${rel}`,
+  });
+  invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(resolved.branch)}`);
+});
+
+web.get("/:owner/:repo/raw/branch/*", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/raw/branch/"));
+  if (!resolved?.path) return new Response("not found", { status: 404 });
+  const rel = safeRel(resolved.path);
+  if (!rel) return new Response("not found", { status: 404 });
+  const content = await ctx.fj.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
+  return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
+});
+
+web.get("/:owner/:repo/_edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const branch = editBranchFor(ctx.user, c.req.query("branch"));
+  const rel = safeRel(c.req.query("path") || "new.md") ?? "new.md";
+  const kind = fileKindForPath(rel);
+  if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
+  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, rel).catch(async (err) => {
+    if (err instanceof ForgejoError && err.status === 404) {
+      return ctx.fj.getRawFile(ctx.owner, ctx.repo, "main", rel).catch(() => "");
+    }
+    throw err;
+  });
+  const branchExists =
+    branch === "main" ||
+    (await ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []))
+      .some((candidate) => candidate.name === branch);
+  return htmlResponse(
+    repoPage({
+      title: `Edit ${rel}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "files",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: kind === "markdown" ? `
+        <section class="edit-page">
+          <div class="file-toolbar edit-titlebar">
+            <div>
+              <p class="eyebrow">Edit on branch</p>
+              <h1>
+                <input
+                  id="web-editor-path-input"
+                  data-testid="editor-path-input"
+                  aria-label="File path"
+                  value="${escapeAttr(rel)}"
+                >
+                <span id="web-editor-path-dirty" class="dirty-dot" hidden>*</span>
+              </h1>
+            </div>
+            <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}">Cancel</a>
+          </div>
+          <div
+            id="web-editor-root"
+            data-slug="${escapeAttr(ctx.repo)}"
+            data-owner="${escapeAttr(ctx.owner)}"
+            data-repo="${escapeAttr(ctx.repo)}"
+            data-path="${escapeAttr(rel)}"
+            data-branch="${escapeAttr(branch)}"
+            data-branch-exists="${branchExists ? "1" : "0"}"
+            data-username="${escapeAttr(ctx.user)}"
+            data-role="${escapeAttr(ctx.ws.role)}"
+            data-format-id="${escapeAttr(ctx.ws.defaultMdFormat)}"
+          ></div>
+          <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
+          ${webEditorAssets()}
+          <noscript>
+            <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
+              <input type="hidden" name="old_path" value="${escapeAttr(rel)}">
+              <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
+              <label>Path <input name="path" value="${escapeAttr(rel)}" required></label>
+              <textarea name="content" spellcheck="false">${escapeHtml(content)}</textarea>
+              <button class="button primary" type="submit">Save</button>
+            </form>
+          </noscript>
+        </section>
+      ` : textEditPage(ctx, branch, rel, content),
+    }),
+  );
+});
+
+web.post("/:owner/:repo/_edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const branch = editBranchFor(ctx.user, stringField(form.branch));
+  const rel = safeRel(stringField(form.path) ?? undefined);
+  const oldRel = safeRel(stringField(form.old_path) ?? undefined);
+  const content = textField(form.content);
+  if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
+  await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
+  const kind = fileKindForPath(rel);
+  if (kind === "markdown") {
+    await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
+  } else if (kind === "text") {
+    await writeTextFile(ctx, branch, rel, content, oldRel ?? undefined);
+  } else {
+    return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
+  }
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
+});
+}
+
+export function registerBranchRoutes(web: Hono<AppEnv>): void {
+web.get("/:owner/:repo/branches", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const [branches, pulls] = await Promise.all([
+    ctx.fj.listBranches(ctx.owner, ctx.repo),
+    ctx.fj.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
+  ]);
+  const openHeads = new Set(pulls.map((pull) => pull.head.ref));
+  return htmlResponse(
+    repoPage({
+      title: `Branches - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "files",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: `
+        <div class="page-title compact"><h1>Branches</h1></div>
+        ${branchCreatePanel(ctx, branches)}
+        ${branchList(ctx, branches, openHeads)}
+      `,
+    }),
+  );
+});
+
+web.post("/:owner/:repo/branches/new", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const form = await c.req.parseBody();
+  const name = stringField(form.name);
+  const base = stringField(form.base) ?? "main";
+  if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
+  if (!validBranchName(base)) return badRequestPage(ctx.user, "Valid base branch is required.");
+  try {
+    await ctx.fj.createBranch(ctx.owner, ctx.repo, { newBranchName: name, oldBranchName: base });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 409) {
+      return badRequestPage(ctx.user, "Branch already exists.");
+    }
+    throw err;
+  }
+  invalidateRepoTrees(ctx.owner, ctx.repo);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(name)}`);
+});
+
+web.post("/:owner/:repo/branches/delete", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const name = stringField((await c.req.parseBody()).name);
+  if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
+  await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, name);
+  invalidateRepoTrees(ctx.owner, ctx.repo);
+  return redirect(repoHref(ctx.owner, ctx.repo, "/branches"));
+});
+
+web.get("/:owner/:repo/commits/:sha", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const sha = c.req.param("sha");
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
+  const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch((err) => {
+    if (err instanceof ForgejoError && err.status === 404) return null;
+    throw err;
+  });
+  if (!commit) return notFoundPage(ctx.user, "Commit not found");
+  return htmlResponse(
+    repoPage({
+      title: `${commit.sha.slice(0, 10)} - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "activity",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: `
+        <div class="page-title compact">
+          <div>
+            <p class="eyebrow">Commit</p>
+            <h1>${escapeHtml(commit.sha.slice(0, 10))}</h1>
+          </div>
+        </div>
+        <div class="commit-card">
+          <pre>${escapeHtml(commit.commit.message.trim() || "(no commit message)")}</pre>
+          <p>${escapeHtml(displayLogin(ctx.owner, commit.commit.author?.name ?? commit.author?.login))} - ${formatDate(commit.commit.author?.date)}</p>
+          <code>${escapeHtml(commit.sha)}</code>
+        </div>
+      `,
+    }),
+  );
+});
+}
+
+async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
+  const tree = await fj.getTree(owner, repo, ref, true);
+  return tree
+    .filter((entry) => entry.type === "blob")
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function editableFileKind(kind: FileKind): boolean {
+  return kind === "markdown" || kind === "text";
+}
+
+function rawFileHref(owner: string, repo: string, branch: string, rel: string): string {
+  return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
+}
+
+function filePreview(ctx: WebCtx, branch: string, rel: string, kind: FileKind, content: string | null, sourceView = false): string {
+  const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
+  if (sourceView && content !== null) return sourceFilePreview(content);
+  if (kind === "markdown") {
+    return `<article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
+      ${markdownSurface(ctx, content ?? "")}
+    </article>`;
+  }
+  if (kind === "text") {
+    return `<article class="file-preview file-preview-embed" data-testid="file-preview-text">
+      <object data-testid="file-preview-text-raw" data="${escapeAttr(rawHref)}" type="text/plain">
+        <p>Text preview is not available in this browser. <a class="inline-link" href="${escapeAttr(rawHref)}">Open the raw file.</a></p>
+      </object>
+    </article>`;
+  }
+  if (kind === "pdf") {
+    return `<article class="file-preview file-preview-embed">
+      <object data-testid="file-preview-pdf" data="${escapeAttr(rawHref)}" type="application/pdf">
+        <p>PDF preview is not available in this browser. <a class="inline-link" href="${escapeAttr(rawHref)}">Open the raw file.</a></p>
+      </object>
+    </article>`;
+  }
+  if (kind === "image") {
+    return `<article class="file-preview file-preview-image">
+      <img data-testid="file-preview-image" src="${escapeAttr(rawHref)}" alt="${escapeAttr(rel)}">
+    </article>`;
+  }
+  return `<article class="file-preview file-preview-fallback" data-testid="file-preview-raw">
+    <p>No inline preview is available for this file type.</p>
+    <a class="button" href="${escapeAttr(rawHref)}">Open raw file</a>
+  </article>`;
+}
+
+function sourceFilePreview(content: string): string {
+  const lines = content.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return `<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">
+    <table class="source-lines"><tbody>${lines
+      .map((line, index) => {
+        const lineNo = index + 1;
+        return `<tr id="L${lineNo}" data-testid="source-line-${lineNo}">
+          <td class="line-action"></td>
+          <td><a href="#L${lineNo}">${lineNo}</a></td>
+          <td><pre>${escapeHtml(line)}</pre></td>
+        </tr>`;
+      })
+      .join("")}</tbody></table>
+    <script>
+      (() => {
+        const match = /^#L(\\d+)(?:-(?:L)?(\\d+))?$/.exec(window.location.hash);
+        if (!match) return;
+        const first = Number(match[1]);
+        const last = Number(match[2] || match[1]);
+        const start = Math.max(1, Math.min(first, last));
+        const end = Math.max(first, last);
+        for (let line = start; line <= end; line += 1) {
+          document.getElementById("L" + line)?.classList.add("marked");
+        }
+        document.getElementById("L" + start)?.scrollIntoView({ block: "center" });
+      })();
+    </script>
+  </article>`;
+}
+
+function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string): string {
+  return `<section class="edit-page text-edit-page">
+    <div class="file-toolbar edit-titlebar">
+      <div><p class="eyebrow">Edit text on branch</p><h1>${escapeHtml(rel)}</h1></div>
+      <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}">Cancel</a>
+    </div>
+    <form class="compose-form" data-testid="text-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
+      <input type="hidden" name="old_path" value="${escapeAttr(rel)}">
+      <label>Branch <input name="branch" value="${escapeAttr(branch)}" required></label>
+      <label>Path <input name="path" value="${escapeAttr(rel)}" required></label>
+      <textarea class="text-file-editor" name="content" spellcheck="false">${escapeHtml(content)}</textarea>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save</button>
+      </div>
+    </form>
+  </section>`;
+}
+
+async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
+  if (branch === "main") return;
+  const exists = await fj.getBranch(owner, repo, branch);
+  if (!exists) await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
+}
+
+async function writeMarkdownFile(
+  ctx: WebCtx,
+  branch: string,
+  rel: string,
+  content: string,
+  previousRel?: string,
+): Promise<void> {
+  const plan = planIndexPage(ctx.db, {
+    workspaceSlug: ctx.ws.slug,
+    filePath: rel,
+    bodyText: content,
+    formatId: ctx.ws.defaultMdFormat,
+  });
+  const finalContent = plan.rewrittenContent ?? content;
+  const isRename = Boolean(previousRel && previousRel !== rel);
+  const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
+  if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
+  const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
+  await ctx.fj.putFile(ctx.owner, ctx.repo, {
+    branch,
+    path: rel,
+    content: finalContent,
+    sha: existing?.sha,
+    message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
+  });
+  if (isRename && previous) {
+    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+      branch,
+      path: previousRel as string,
+      sha: previous.sha,
+      message: `remove ${previousRel} after rename`,
+    });
+  }
+  plan.commit();
+  if (isRename) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
+  invalidateBranchTree(ctx.owner, ctx.repo, branch);
+}
+
+async function writeTextFile(
+  ctx: WebCtx,
+  branch: string,
+  rel: string,
+  content: string,
+  previousRel?: string,
+): Promise<void> {
+  const isRename = Boolean(previousRel && previousRel !== rel);
+  const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
+  if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
+  const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
+  await ctx.fj.putFile(ctx.owner, ctx.repo, {
+    branch,
+    path: rel,
+    content,
+    sha: existing?.sha,
+    message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
+  });
+  if (isRename && previous) {
+    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+      branch,
+      path: previousRel as string,
+      sha: previous.sha,
+      message: `remove ${previousRel} after rename`,
+    });
+    if ((previousRel as string).endsWith(".md")) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
+  }
+  invalidateBranchTree(ctx.owner, ctx.repo, branch);
+}
+
+function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): string {
+  if (ctx.ws.role === "read") return "";
+  return `<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
+    <label>New branch
+      <input name="name" placeholder="user/${escapeAttr(ctx.user)}/work" required data-testid="branch-create-name">
+    </label>
+    <label>Base
+      <select name="base" data-testid="branch-create-base">
+        ${branchOptions(branches, "main")}
+      </select>
+    </label>
+    <div class="filter-actions">
+      <button class="button primary" type="submit">Create branch</button>
+    </div>
+  </form>`;
+}
+
+function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: ReadonlySet<string>): string {
+  return `<div class="list">${branches
+    .map((branch) => {
+      const hasOpenPr = openHeads.has(branch.name);
+      return `<div class="list-row branch-row">
+        <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}"><strong>${escapeHtml(branch.name)}</strong></a>
+        <span>${escapeHtml(branch.commit.id.slice(0, 10))}${hasOpenPr ? ` <span class="meta-pill">open PR</span>` : ""}</span>
+        ${
+          ctx.ws.role === "read" || branch.name === "main" || hasOpenPr
+            ? "<span></span>"
+            : `<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
+                <input type="hidden" name="name" value="${escapeAttr(branch.name)}">
+                <button class="button danger" type="submit" data-testid="branch-delete">Delete</button>
+              </form>`
+        }
+      </div>`;
+    })
+    .join("") || `<div class="empty">No branches.</div>`}</div>`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): string {
+  return `<div class="list">${files
+    .map((file) => {
+      const kind = fileKindForPath(file.path);
+      return `<a class="list-row" href="${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}">
+        <strong>${escapeHtml(file.path)}</strong>
+        <span>${escapeHtml(fileKindLabel(kind))}</span>
+        <small>${formatBytes(file.size ?? 0)}</small>
+      </a>`;
+    })
+    .join("") || `<div class="empty">No files.</div>`}</div>`;
+}
+
+function editBranchFor(username: string, requested: string | null | undefined): string {
+  const trimmed = requested?.trim();
+  return trimmed && trimmed !== "main" ? trimmed : `user/${username}/web-edit`;
+}
+
+function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {
+  const path = c.req.path;
+  const canonicalPrefix = repoHref(owner, repo, suffix);
+  if (path.startsWith(canonicalPrefix)) return decodePathPart(path.slice(canonicalPrefix.length));
+  const internalPrefix = `/${encodeURIComponent(owner)}${canonicalPrefix}`;
+  return path.startsWith(internalPrefix) ? decodePathPart(path.slice(internalPrefix.length)) : "";
+}
+
+function decodePathPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch (_err) {
+    return "";
+  }
+}

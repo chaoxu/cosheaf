@@ -1,0 +1,231 @@
+import type { Hono } from "hono";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js";
+import { type Forgejo, ForgejoError } from "../forgejo.js";
+import type { ForgejoIssue } from "../forgejo-types.js";
+import type { AppEnv } from "../types.js";
+import { escapeAttr, escapeHtml } from "./html-escape.js";
+import {
+  CHAT_LABEL,
+  chatBranchFromBody,
+  chatIssueBody,
+  chatLiveScript,
+  chatPendingTurn,
+  chatReplyPending,
+  chatTitleFrom,
+  chatTurns,
+  isChatIssue,
+  renderChatTurn,
+} from "./web-chat.js";
+import {
+  badRequestPage,
+  forbiddenPage,
+  htmlResponse,
+  notFoundPage,
+  positiveInt,
+  redirect,
+  repoHref,
+  resolveWebRepo,
+  stringField,
+  validBranchName,
+  type WebCtx,
+} from "./web-context.js";
+import { renderMarkdownSurface } from "./web-markdown.js";
+import { branchOptions, repoPage } from "./web-page.js";
+
+// Find the "chat" label id, creating it once if missing. Chats are issues
+// carrying this label, applied only by the chat "new" route.
+async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promise<number> {
+  const labels = await fj.listLabels(owner, repo);
+  const existing = labels.find((label) => label.name === CHAT_LABEL);
+  if (existing) return existing.id;
+  const created = await fj.createLabel(owner, repo, { name: CHAT_LABEL, color: "8b5cf6", description: "Coverify chat" });
+  return created.id;
+}
+
+// Issue-backed chat sidebar: a "New chat" entry plus one row per chat issue,
+// with the active issue highlighted. Shared by the list and thread views.
+function listChats(ctx: WebCtx) {
+  return Promise.all([
+    ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
+    ctx.fj.listIssues(ctx.owner, ctx.repo, { state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
+  ]).then(([labeled, recent]) => {
+    const byNumber = new Map<number, ForgejoIssue>();
+    for (const issue of [...labeled, ...recent]) {
+      if (isChatIssue(issue)) byNumber.set(issue.number, issue);
+    }
+    return [...byNumber.values()].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  });
+}
+
+function chatSidebar(
+  owner: string,
+  repo: string,
+  chats: ForgejoIssue[],
+  active: number | null,
+  role: string,
+  canStartChat: boolean,
+): string {
+  const newChat =
+    role === "read" || !canStartChat
+      ? ""
+      : `<a class="chat-new-link${active === null ? " active" : ""}" href="${repoHref(owner, repo, "/chat")}">+ New chat</a>`;
+  const sessions =
+    chats
+      .map(
+        (chat) =>
+          `<a class="chat-session${chat.number === active ? " active" : ""}" href="${repoHref(owner, repo, `/chat/${chat.number}`)}" title="${escapeAttr(chat.title)}">${escapeHtml(chat.title)}</a>`,
+      )
+      .join("") || `<div class="chat-sessions-empty">No chats yet</div>`;
+  return `<aside class="chat-sidebar">${newChat}<nav class="chat-sessions">${sessions}</nav></aside>`;
+}
+
+export function registerChatPageRoutes(web: Hono<AppEnv>): void {
+web.get("/:owner/:repo/chat", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const canStartChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
+  const [chats, branches] = await Promise.all([
+    listChats(ctx),
+    canStartChat ? ctx.fj.listBranches(ctx.owner, ctx.repo) : Promise.resolve([]),
+  ]);
+  return htmlResponse(
+    repoPage({
+      title: `Chat - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "chat",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: `
+        <div class="chat-app">
+          ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role, canStartChat)}
+          <section class="chat-main">
+            <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
+            ${
+              ctx.ws.role === "read"
+                ? `<div class="chat-blank">Read-only access — you can't start chats here.</div>`
+                : !canStartChat
+                  ? `<div class="chat-blank">Chat is not configured for this Cosheaf instance. Existing chat issues remain readable.</div>`
+                : `<div class="chat-blank">Start a new chat with Coverify, or pick a chat on the left.</div>
+                   <form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
+                     <label>Branch
+                       <select name="branch">${branchOptions(branches, "main")}</select>
+                     </label>
+                     <textarea name="message" placeholder="Start a chat with Coverify" required></textarea>
+                     <button class="button primary" type="submit">Send</button>
+                   </form>`
+            }
+          </section>
+        </div>
+      `,
+    }),
+  );
+});
+
+web.post("/:owner/:repo/chat/new", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
+  const form = await c.req.parseBody();
+  const message = stringField(form.message);
+  if (!message) return redirect(repoHref(ctx.owner, ctx.repo, "/chat"));
+  const branch = stringField(form.branch) || "main";
+  if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+  const branchExists = await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
+  if (!branchExists) return badRequestPage(ctx.user, "Branch does not exist.");
+  const labelId = await ensureChatLabel(ctx.fj, ctx.owner, ctx.repo);
+  const issue = await ctx.fj.createIssue(ctx.owner, ctx.repo, {
+    title: chatTitleFrom(message),
+    body: chatIssueBody(message, branch),
+    labels: [labelId],
+  });
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
+  runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: issue.number });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${issue.number}`));
+});
+
+web.get("/:owner/:repo/chat/:number", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Chat not found");
+  const [issue, comments, chats] = await Promise.all([
+    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
+      if (err instanceof ForgejoError && err.status === 404) return null;
+      throw err;
+    }),
+    ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
+    listChats(ctx),
+  ]);
+  if (!issue || issue.pull_request || !isChatIssue(issue)) {
+    return notFoundPage(ctx.user, "Chat not found");
+  }
+  const chatBranch = chatBranchFromBody(issue.body ?? "") ?? "main";
+  const canSendChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
+  const turns = chatTurns(issue, comments, c.get("config").coverifyBotLogin);
+  const renderedTurns = await Promise.all(
+    turns.map(async (turn) => renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" }))),
+  );
+  return htmlResponse(
+    repoPage({
+      title: `${issue.title} - Chat`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "chat",
+      user: ctx.user,
+      ws: ctx.ws,
+      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+      body: `
+        <div class="chat-app">
+          ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role, canSendChat)}
+          <section class="chat-main">
+            <div class="chat-main-head">
+              <div>
+                <p class="eyebrow">Issue #${issue.number} · workspace-visible chat</p>
+                <h1>${escapeHtml(issue.title)}</h1>
+                <p class="chat-context">Repository snapshot: ${escapeHtml(chatBranch)}</p>
+              </div>
+              <div class="toolbar-actions"><button class="button" type="button" onclick="navigator.clipboard?.writeText(location.href)">Copy link</button></div>
+            </div>
+            <div class="chat-thread">
+              ${renderedTurns.join("")}
+              ${chatReplyPending(turns) ? chatPendingTurn() : ""}
+            </div>
+            ${chatReplyPending(turns) ? chatLiveScript(ctx.repo, number) : ""}
+            ${
+              !canSendChat
+                ? ""
+                : `<form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/chat/${number}/send`)}">
+                     <textarea name="message" placeholder="Message Coverify" required></textarea>
+                     <button class="button primary" type="submit">Send</button>
+                   </form>`
+            }
+          </section>
+        </div>
+      `,
+    }),
+  );
+});
+
+web.post("/:owner/:repo/chat/:number/send", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Chat not found");
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
+  if (!issue || !isChatIssue(issue)) {
+    return notFoundPage(ctx.user, "Chat not found");
+  }
+  const message = stringField((await c.req.parseBody()).message);
+  if (message) {
+    await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, message);
+    c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "commented" });
+    runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: number });
+  }
+  return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${number}`));
+});
+}
