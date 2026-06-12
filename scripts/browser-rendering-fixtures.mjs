@@ -72,17 +72,19 @@ try {
   const showcaseIssueStats = await showcaseView.locator(".cf-reader-compact").first().evaluate((el) => {
     const paragraph = el.querySelector(".cf-doc-paragraph, p");
     const styles = getComputedStyle(el);
+    const parent = el.parentElement;
     return {
       width: Math.round(el.getBoundingClientRect().width),
+      availableWidth: parent ? Math.round(parent.getBoundingClientRect().width) : 0,
       maxWidth: styles.maxWidth,
       paddingInline: [styles.paddingLeft, styles.paddingRight],
       paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
     };
   });
+  const showcaseExpectedWidth = Math.min(1200, showcaseIssueStats.availableWidth);
   if (
     showcaseIssueStats.maxWidth !== "1200px" ||
-    showcaseIssueStats.width < 1160 ||
-    showcaseIssueStats.width > 1220 ||
+    Math.abs(showcaseIssueStats.width - showcaseExpectedWidth) > 24 ||
     showcaseIssueStats.paddingInline.join("/") !== "0px/0px" ||
     showcaseIssueStats.paragraphWhiteSpace !== "normal"
   ) {
@@ -138,8 +140,7 @@ try {
   if (
     !richAfterStats ||
     richAfterStats.maxWidth !== "1200px" ||
-    richAfterStats.readerWidth < 1160 ||
-    richAfterStats.readerWidth > 1220 ||
+    Math.abs(richAfterStats.readerWidth - Math.min(1200, richAfterStats.paneWidth)) > 32 ||
     richAfterStats.paddingInline.join("/") !== "0px/0px" ||
     richAfterStats.paragraphWhiteSpace !== "normal"
   ) {

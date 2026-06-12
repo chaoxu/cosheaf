@@ -59,7 +59,7 @@ import {
   renderChatTurn,
   stripChatMetadata,
 } from "./web-chat.js";
-import { globalHeader, pageShell, webEditorAssets } from "./web-shell.js";
+import { globalSidebar, pageShell, webEditorAssets } from "./web-shell.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml } from "./web-timeline.js";
 
 export const web = new Hono<AppEnv>();
@@ -118,8 +118,8 @@ web.get("/", async (c) => {
     pageShell({
       title: "Repositories",
       user: auth.user.username,
+      sidebar: globalSidebar("workspaces"),
       body: `
-        ${globalHeader(auth.user.username)}
         <main class="page">
           <div class="page-title">
             <div>
@@ -153,8 +153,9 @@ web.get("/account/settings", async (c) => {
     pageShell({
       title: "Account settings",
       user: auth.user.username,
+      sidebar: globalSidebar("account"),
+      statusPath: [{ label: "account" }],
       body: `
-        ${globalHeader(auth.user.username)}
         <main class="page">
           <div class="settings-page account-settings">
             <div class="page-title compact">
@@ -2602,6 +2603,16 @@ function renderPatch(patch: string): string {
   return `<table class="patch"><tbody>${rows}</tbody></table>`;
 }
 
+const REPO_TABS = [
+  ["files", "Files", ""],
+  ["issues", "Issues", "/issues"],
+  ["pulls", "Pull Requests", "/pulls"],
+  ["chat", "Chat", "/chat"],
+  ["notifications", "Notifications", "/notifications"],
+  ["activity", "Activity", "/activity"],
+  ["settings", "Settings", "/settings"],
+] as const;
+
 function repoPage(opts: {
   title: string;
   owner: string;
@@ -2612,28 +2623,25 @@ function repoPage(opts: {
   body: string;
   readerAssets?: boolean;
 }): string {
+  const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix)).join("\n");
+  const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
   return pageShell({
     title: opts.title,
     user: opts.user,
     readerAssets: opts.readerAssets,
+    sidebar: `
+      <a class="brand" href="/">Cosheaf</a>
+      <div class="sidebar-workspace">
+        <a href="${repoHref(opts.owner, opts.repo)}">${escapeHtml(opts.repo)}</a>
+        <span class="role">${escapeHtml(opts.ws.role)}</span>
+      </div>
+      <nav class="repo-tabs">${nav}</nav>`,
+    statusPath: [
+      { label: opts.repo, href: repoHref(opts.owner, opts.repo) },
+      { label: activeLabel.toLowerCase() },
+    ],
     body: `
-      ${globalHeader(opts.user)}
       <main class="repo-page">
-        <header class="repo-header">
-          <div>
-            <h1><a href="${repoHref(opts.owner, opts.repo)}">${escapeHtml(opts.repo)}</a></h1>
-          </div>
-          <span class="role">${escapeHtml(opts.ws.role)}</span>
-        </header>
-        <nav class="repo-tabs">
-          ${tab(opts, "files", "Files", "")}
-          ${tab(opts, "issues", "Issues", "/issues")}
-          ${tab(opts, "pulls", "Pull Requests", "/pulls")}
-          ${tab(opts, "chat", "Chat", "/chat")}
-          ${tab(opts, "notifications", "Notifications", "/notifications")}
-          ${tab(opts, "activity", "Activity", "/activity")}
-          ${tab(opts, "settings", "Settings", "/settings")}
-        </nav>
         <section class="repo-body">${opts.body}</section>
       </main>
     `,
@@ -3285,15 +3293,15 @@ function redirect(location: string): Response {
 }
 
 async function notFoundPage(user: string, message: string): Promise<Response> {
-  return htmlResponse(pageShell({ title: "Not found", user, body: `${globalHeader(user)}<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 404);
+  return htmlResponse(pageShell({ title: "Not found", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 404);
 }
 
 function badRequestPage(user: string, message: string): Response {
-  return htmlResponse(pageShell({ title: "Bad request", user, body: `${globalHeader(user)}<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 400);
+  return htmlResponse(pageShell({ title: "Bad request", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 400);
 }
 
 function forbiddenPage(user: string): Response {
-  return htmlResponse(pageShell({ title: "Forbidden", user, body: `${globalHeader(user)}<main class="page"><div class="empty">Forbidden</div></main>` }), 403);
+  return htmlResponse(pageShell({ title: "Forbidden", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">Forbidden</div></main>` }), 403);
 }
 
 function safeWebRedirect(raw: string | null): string | null {

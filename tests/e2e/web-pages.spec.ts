@@ -11,8 +11,8 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('input[name="password"]').fill("Cosheaf123!");
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
-  await expect(page.locator(".global-header")).toContainText("chao");
-  await expect(page.locator(".global-header")).toHaveCSS("position", "static");
+  await expect(page.locator(".app-statusbar")).toContainText("chao");
+  await expect(page.locator(".app-sidebar")).toContainText("Workspaces");
 
   await page.getByRole("link", { name: "flushing-coin" }).click();
   await expect(page).toHaveURL(repoBase);
@@ -27,7 +27,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-body")).toContainText("docs/sample.pdf");
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
-  await expect(page.locator(".repo-header")).not.toContainText(owner);
+  await expect(page.locator(".app-sidebar")).not.toContainText(owner);
   await page.getByRole("link", { name: "chao" }).click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
@@ -284,10 +284,10 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Files changed" })).toBeVisible();
 
   await page.goto(`${repoBase}/activity`);
-  const headerTop = await page.locator(".global-header").boundingBox().then((box) => box?.y);
-  await page.evaluate(() => window.scrollTo(0, 200));
-  await expect.poll(async () => page.locator(".global-header").boundingBox().then((box) => box?.y)).toBeLessThan(headerTop ?? 0);
-  await page.evaluate(() => window.scrollTo(0, 0));
+  const statusbarTop = await page.locator(".app-statusbar").boundingBox().then((box) => box?.y);
+  await page.locator(".app-content").evaluate((el) => el.scrollTo(0, 200));
+  await expect.poll(async () => page.locator(".app-statusbar").boundingBox().then((box) => box?.y)).toBe(statusbarTop);
+  await page.locator(".app-content").evaluate((el) => el.scrollTo(0, 0));
   await expect(page.getByTestId("activity-row").filter({ hasText: "reopened" }).first().locator(`a[href$="${issuePath}"]`)).toBeVisible();
   await expect
     .poll(async () => {

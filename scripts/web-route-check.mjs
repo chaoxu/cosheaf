@@ -128,32 +128,26 @@ function check(name, ok, detail) {
 
 async function headerScrollCheck(page) {
   return page.evaluate(async () => {
-    const header = document.querySelector(".global-header");
-    if (!header) return { name: "global header", ok: false, detail: "missing .global-header" };
-    const before = header.getBoundingClientRect();
-    const scrollable = document.documentElement.scrollHeight > window.innerHeight + 80;
-    if (!scrollable) {
-      return {
-        name: "global header scroll",
-        ok: true,
-        detail: { position: getComputedStyle(header).position, scrollable: false },
-      };
+    const frame = document.querySelector(".app-frame");
+    const statusbar = document.querySelector(".app-statusbar");
+    const content = document.querySelector(".app-content");
+    if (!frame || !statusbar || !content) {
+      return { name: "app shell", ok: false, detail: "missing .app-frame/.app-statusbar/.app-content" };
     }
-    window.scrollTo(0, 300);
+    const statusbarBefore = statusbar.getBoundingClientRect().top;
+    content.scrollTo(0, 300);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const after = header.getBoundingClientRect();
-    const scrollY = Math.round(window.scrollY);
-    const position = getComputedStyle(header).position;
-    window.scrollTo(0, 0);
+    const statusbarAfter = statusbar.getBoundingClientRect().top;
+    const windowScrolls = document.documentElement.scrollHeight > window.innerHeight + 1;
+    content.scrollTo(0, 0);
     return {
-      name: "global header scroll",
-      ok: position === "static" && after.top < before.top,
+      name: "app shell scroll",
+      ok: !windowScrolls && Math.round(statusbarAfter) === Math.round(statusbarBefore),
       detail: {
-        position,
-        beforeTop: Math.round(before.top),
-        afterTop: Math.round(after.top),
-        scrollY,
-        scrollHeight: document.documentElement.scrollHeight,
+        windowScrolls,
+        statusbarBefore: Math.round(statusbarBefore),
+        statusbarAfter: Math.round(statusbarAfter),
+        contentScrollHeight: content.scrollHeight,
         viewportHeight: window.innerHeight,
       },
     };

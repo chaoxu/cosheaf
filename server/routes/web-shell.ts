@@ -2,11 +2,15 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { escapeAttr, escapeHtml } from "./html-escape.js";
 
+export type StatusCrumb = { label: string; href?: string };
+
 export function pageShell(opts: {
   title: string;
   user?: string;
   body: string;
   readerAssets?: boolean;
+  sidebar?: string;
+  statusPath?: StatusCrumb[];
 }): string {
   return `<!doctype html>
     <html lang="en">
@@ -23,7 +27,15 @@ export function pageShell(opts: {
         ${opts.readerAssets ? webReaderAssets() : ""}
         <link rel="stylesheet" href="/cosheaf-web.css${cosheafWebCssVersion()}">
       </head>
-      <body data-cosheaf-user="${escapeAttr(opts.user ?? "")}">${opts.body}</body>
+      <body data-cosheaf-user="${escapeAttr(opts.user ?? "")}">
+        <div class="app-frame">
+          <div class="app-main">
+            ${opts.sidebar ? `<aside class="app-sidebar">${opts.sidebar}</aside>` : ""}
+            <div class="app-content">${opts.body}</div>
+          </div>
+          ${appStatusbar(opts.user, opts.statusPath)}
+        </div>
+      </body>
     </html>`;
 }
 
@@ -32,11 +44,27 @@ function cosheafWebCssVersion(): string {
   return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
-export function globalHeader(user: string): string {
-  return `<header class="global-header">
-    <a class="brand" href="/">Cosheaf</a>
-    <form method="post" action="/logout"><a class="account-link" href="/account/settings">${escapeHtml(user)}</a><button type="submit">Sign out</button></form>
-  </header>`;
+export function globalSidebar(active: "workspaces" | "account"): string {
+  return `<a class="brand" href="/">Cosheaf</a>
+    <nav class="repo-tabs">
+      <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
+      <a class="${active === "account" ? "active" : ""}" href="/account/settings">Account</a>
+    </nav>`;
+}
+
+function appStatusbar(user: string | undefined, path: StatusCrumb[] | undefined): string {
+  const crumbs = [
+    `<a href="/">cosheaf</a>`,
+    ...(path ?? []).map((segment) =>
+      segment.href
+        ? `<a href="${escapeAttr(segment.href)}">${escapeHtml(segment.label)}</a>`
+        : `<span>${escapeHtml(segment.label)}</span>`,
+    ),
+  ].join(`<span class="status-sep">/</span>`);
+  const session = user
+    ? `<form method="post" action="/logout"><a class="account-link" href="/account/settings">${escapeHtml(user)}</a><button type="submit">sign out</button></form>`
+    : `<a class="account-link" href="/login">sign in</a>`;
+  return `<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-session">${session}</div></footer>`;
 }
 
 export function webEditorAssets(): string {
