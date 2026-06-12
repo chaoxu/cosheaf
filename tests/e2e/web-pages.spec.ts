@@ -208,9 +208,13 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('.list-row[href*="/pulls/"]', { hasText: "e2e demo PR" }).click();
   const demoPrPath = new URL(page.url()).pathname;
   await expect(page.locator(".subtabs")).toContainText("Files changed");
-  await expect(page.getByTestId("pull-edit-form")).toBeVisible();
-  await expect(page.getByTestId("pull-label-form")).toBeVisible();
+  await expect(page.getByTestId("pull-edit-link")).toBeVisible();
+  await expect(page.getByTestId("pull-labels")).toBeVisible();
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
+  await page.getByTestId("pull-edit-link").click();
+  await expect(page.getByTestId("pull-edit-form")).toBeVisible();
+  await expect(page.getByTestId("pull-edit-form").locator('textarea[name="body"]')).toBeVisible();
+  await page.goto(demoPrPath.startsWith("http") ? demoPrPath : `${webBase}${demoPrPath}`);
   await expect(page.locator(".thread")).toContainText("pushed commit");
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
   await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close pull request");

@@ -1109,12 +1109,11 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
   if (!ctx.ok) return ctx.response;
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  const [reviews, comments, timeline, commits, allLabels, availableReviewers] = await Promise.all([
+  const [reviews, comments, timeline, commits, availableReviewers] = await Promise.all([
     ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number).catch(() => []),
-    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const body = await renderMarkdownSurface(ctx, pull.body ?? "", { surface: "thread" });
@@ -1135,6 +1134,11 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
             <div class="thread-title-row">
               <h1>${escapeHtml(pull.title)} <span>#${pull.number}</span></h1>
               <div class="toolbar-actions">
+                ${
+                  ctx.ws.role === "read" || pull.state === "closed"
+                    ? ""
+                    : `<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit pull request</a>`
+                }
                 <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
                 ${pullStateForm(ctx, pull)}
               </div>
@@ -1145,23 +1149,46 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
-          <div class="comment">
-            <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
-            ${body ? body : `<p>No description.</p>`}
+          <div class="pr-layout">
+            <div class="pr-main">
+              <div class="comment">
+                <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
+                ${body ? body : `<p>No description.</p>`}
+              </div>
+              ${timelineHtml}
+              ${reviewForms(ctx, pull)}
+            </div>
+            <aside class="pr-rail">
+              <section class="rail-panel" data-testid="pull-labels">
+                <h2>Labels</h2>
+                ${(pull.labels ?? []).length ? labelChips(pull.labels ?? []) : `<span class="muted">None.</span>`}
+              </section>
+              ${reviewRequestPanel(ctx, pull, availableReviewers)}
+            </aside>
           </div>
-          ${pullEditForm(ctx, pull)}
-          ${labelEditForm({
-            testId: "pull-label-form",
-            action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`),
-            disabled: ctx.ws.role === "read" || pull.state === "closed",
-            labels: allLabels,
-            currentLabels: pull.labels ?? [],
-          })}
-          ${reviewRequestPanel(ctx, pull, availableReviewers)}
-          ${timelineHtml}
-          ${reviewForms(ctx, pull)}
         </article>
       `,
+    }),
+  );
+});
+
+web.get("/:owner/:repo/pulls/:number/edit", async (c) => {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx.response;
+  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
+  return htmlResponse(
+    repoPage({
+      title: `Edit #${pull.number} - ${ctx.repo}`,
+      owner: ctx.owner,
+      repo: ctx.repo,
+      active: "pulls",
+      user: ctx.user,
+      ws: ctx.ws,
+      body: pullEditPage(ctx, pull, allLabels),
     }),
   );
 });
@@ -1173,11 +1200,19 @@ web.post("/:owner/:repo/pulls/:number/edit", async (c) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
-  const form = await c.req.parseBody();
+  const form = await c.req.parseBody({ all: true });
   const title = stringField(form.title);
   const body = textField(form.body);
   if (!title || body === null) return badRequestPage(ctx.user, "Pull request title and description are required.");
-  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { title, body });
+  const patch: { title: string; body: string; labels?: number[] } = { title, body };
+  if (stringField(form.labels_present)) {
+    const labelIds = positiveIntFields(form.labels);
+    const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
+    const validation = validateLabelSelection(labelIds, allLabels, pull.labels ?? []);
+    if (!validation.ok) return badRequestPage(ctx.user, validation.message);
+    patch.labels = labelIds;
+  }
+  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, patch);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 });
 
@@ -2319,16 +2354,39 @@ function issueRelationList(
   </section>`;
 }
 
-function pullEditForm(ctx: WebCtx, pull: ForgejoPull): string {
-  if (ctx.ws.role === "read" || pull.state === "closed") return "";
-  return `<details class="comment-form" data-testid="pull-edit-form">
-    <summary>Edit pull request title and description</summary>
-    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">
+function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly ForgejoLabel[]): string {
+  const currentIds = new Set((pull.labels ?? []).map((label) => label.id));
+  const labelRows = allLabels.map((label) => {
+    const checked = currentIds.has(label.id) ? " checked" : "";
+    const disabled = label.is_archived && !currentIds.has(label.id) ? " disabled" : "";
+    return `<label class="checkbox-row">
+      <input type="checkbox" name="labels" value="${label.id}"${checked}${disabled}>
+      ${labelChip(label)}
+    </label>`;
+  });
+  const labelFieldset = allLabels.length
+    ? `<fieldset class="checkbox-list">
+        <legend>Labels</legend>
+        ${labelRows.join("")}
+      </fieldset>
+      <input type="hidden" name="labels_present" value="1">`
+    : "";
+  return `<section class="edit-page issue-edit-page">
+    <div class="file-toolbar edit-titlebar">
+      <div><p class="eyebrow">Edit pull request</p><h1>#${pull.number}</h1></div>
+      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Cancel</a>
+    </div>
+    <form class="compose-form" data-testid="pull-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">
       <label>Title <input name="title" value="${escapeAttr(pull.title)}" required></label>
-      <label>Description <textarea name="body">${escapeHtml(pull.body ?? "")}</textarea></label>
-      <button class="button primary" type="submit">Save pull request</button>
+      <label>Description
+        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${escapeHtml(pull.body ?? "")}</textarea>
+      </label>
+      ${labelFieldset}
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save pull request</button>
+      </div>
     </form>
-  </details>`;
+  </section>`;
 }
 
 function labelEditForm(opts: {
@@ -2385,8 +2443,8 @@ function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: 
           </label>
           <button class="button" type="submit">Request review</button>
         </form>`;
-  return `<section class="comment-form" data-testid="pull-review-requests">
-    <h2>Requested reviewers</h2>
+  return `<section class="rail-panel" data-testid="pull-review-requests">
+    <h2>Reviewers</h2>
     ${requestedHtml}
     ${requestForm}
   </section>`;
