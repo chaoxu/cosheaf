@@ -84,7 +84,7 @@ describe("pulls + branches routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "http://forgejo.test/api/v1/repos/owner/w/pulls?state=all&page=1&limit=50&sort=recentupdate",
+      "http://forgejo.test/api/v1/repos/owner/w/pulls?state=all&sort=recentupdate&page=1&limit=50",
     );
     await expect(res.json()).resolves.toMatchObject({
       pulls: [

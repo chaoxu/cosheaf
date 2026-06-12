@@ -132,6 +132,25 @@ export class Forgejo {
     }
   }
 
+  // Fetch every page of a Forgejo list endpoint. Forgejo silently truncates
+  // list responses at its page size, so any list that can outgrow one page
+  // goes through here. The 50-page cap (2500 rows) is a runaway guard, not a
+  // surface anyone should hit.
+  private async pagedList<T>(
+    p: string,
+    query: RequestOpts["query"] = {},
+    limitParam: "limit" | "per_page" = "limit",
+  ): Promise<T[]> {
+    const out: T[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const batch = await this.req<T[]>(p, { query: { ...query, page, [limitParam]: 50 } });
+      if (!batch || batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < 50) break;
+    }
+    return out;
+  }
+
   // Compose a repo-scoped Forgejo URL. All repo-bound methods share this so
   // a rename of Forgejo's path shape (or a future owner-encoding tweak)
   // changes one place.
@@ -228,7 +247,7 @@ export class Forgejo {
   }
 
   async listCollaborators(owner: string, repo: string): Promise<ForgejoUser[]> {
-    return this.req<ForgejoUser[]>(this.repoPath(owner, repo, `collaborators`));
+    return this.pagedList<ForgejoUser>(this.repoPath(owner, repo, `collaborators`));
   }
 
   // Returns "admin"|"write"|"read"|"none". `owner` is collapsed to `admin` so
@@ -239,19 +258,14 @@ export class Forgejo {
     repo: string,
     username: string,
   ): Promise<"admin" | "write" | "read" | "none"> {
-    try {
-      const r = await this.req<{ permission?: string }>(
-        this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}/permission`),
-      );
-      const p = r.permission;
-      if (p === "owner" || p === "admin") return "admin";
-      if (p === "write") return "write";
-      if (p === "read") return "read";
-      return "none";
-    } catch (e) {
-      if (e instanceof ForgejoError && e.status === 404) return "none";
-      throw e;
-    }
+    const r = await this.reqOpt<{ permission?: string }>(
+      this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}/permission`),
+    );
+    const p = r?.permission;
+    if (p === "owner" || p === "admin") return "admin";
+    if (p === "write") return "write";
+    if (p === "read") return "read";
+    return "none";
   }
 
   // ---------------- branch protection ----------------
@@ -437,20 +451,7 @@ export class Forgejo {
   }
 
   async listBranches(owner: string, repo: string): Promise<ForgejoBranch[]> {
-    const out: ForgejoBranch[] = [];
-    let page = 1;
-    while (true) {
-      const batch = await this.req<ForgejoBranch[]>(
-        this.repoPath(owner, repo, `branches`),
-        { query: { page, per_page: 50 } },
-      );
-      if (batch.length === 0) break;
-      out.push(...batch);
-      if (batch.length < 50) break;
-      page++;
-      if (page > 50) break;
-    }
-    return out;
+    return this.pagedList<ForgejoBranch>(this.repoPath(owner, repo, `branches`), {}, "per_page");
   }
 
   async getBranch(owner: string, repo: string, branch: string): Promise<ForgejoBranch | null> {
@@ -494,27 +495,13 @@ export class Forgejo {
     } | "open" | "closed" | "all" = {},
   ): Promise<ForgejoPull[]> {
     const options = typeof opts === "string" ? { state: opts } : opts;
-    const out: ForgejoPull[] = [];
-    let page = 1;
-    while (true) {
-      const r = await this.req<ForgejoPull[]>(this.repoPath(owner, repo, `pulls`), {
-        query: {
-          state: options.state ?? "open",
-          page,
-          limit: 50,
-          sort: options.sort ?? "recentupdate",
-          milestone: options.milestone,
-          poster: options.poster,
-          labels: options.labels,
-        },
-      });
-      if (!r || r.length === 0) break;
-      out.push(...r);
-      if (r.length < 50) break;
-      page++;
-      if (page > 20) break;
-    }
-    return out;
+    return this.pagedList<ForgejoPull>(this.repoPath(owner, repo, `pulls`), {
+      state: options.state ?? "open",
+      sort: options.sort ?? "recentupdate",
+      milestone: options.milestone,
+      poster: options.poster,
+      labels: options.labels,
+    });
   }
 
   async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed"; labels?: number[]; milestone?: number }): Promise<ForgejoPull> {
@@ -566,7 +553,7 @@ export class Forgejo {
   }
 
   async listPullCommits(owner: string, repo: string, index: number): Promise<ForgejoCommit[]> {
-    return this.req<ForgejoCommit[]>(this.repoPath(owner, repo, `pulls/${index}/commits`));
+    return this.pagedList<ForgejoCommit>(this.repoPath(owner, repo, `pulls/${index}/commits`));
   }
 
   async getCommit(owner: string, repo: string, sha: string): Promise<ForgejoCommit> {
@@ -578,18 +565,9 @@ export class Forgejo {
   }
 
   async listReviews(owner: string, repo: string, index: number): Promise<ForgejoReview[]> {
-    // Paginate. Forgejo's default page size is 50 but PRs with long review
-    // histories happen on busy workspaces; capping at the first page means
-    // approvalCounts misses the latest state for those PRs.
-    const all: ForgejoReview[] = [];
-    for (let page = 1; page < 50; page++) {
-      const batch = await this.req<ForgejoReview[]>(
-        this.repoPath(owner, repo, `pulls/${index}/reviews?page=${page}&limit=50`),
-      );
-      all.push(...batch);
-      if (batch.length < 50) break;
-    }
-    return all;
+    // Paginate: PRs with long review histories happen on busy workspaces;
+    // capping at the first page means approvalCounts misses the latest state.
+    return this.pagedList<ForgejoReview>(this.repoPath(owner, repo, `pulls/${index}/reviews`));
   }
 
   async createReview(owner: string, repo: string, index: number, opts: {
@@ -652,7 +630,7 @@ export class Forgejo {
     owner: string, repo: string, index: number,
   ): Promise<ForgejoPullReviewComment[]> {
     try {
-      return await this.req<ForgejoPullReviewComment[]>(
+      return await this.pagedList<ForgejoPullReviewComment>(
         this.repoPath(owner, repo, `pulls/${index}/comments`),
       );
     } catch (err) {
@@ -692,21 +670,25 @@ export class Forgejo {
       q?: string;
     } = {},
   ): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, "issues"), {
-      query: {
-        type: "issues", // exclude PRs; Forgejo's /issues endpoint returns both
-        state: opts.state,
-        page: opts.page,
-        limit: opts.limit,
-        assigned_by: opts.assigned_by,
-        created_by: opts.created_by,
-        mentioned_by: opts.mentioned_by,
-        labels: opts.labels,
-        milestones: opts.milestones,
-        sort: opts.sort,
-        q: opts.q,
-      },
-    });
+    const query = {
+      type: "issues", // exclude PRs; Forgejo's /issues endpoint returns both
+      state: opts.state,
+      assigned_by: opts.assigned_by,
+      created_by: opts.created_by,
+      mentioned_by: opts.mentioned_by,
+      labels: opts.labels,
+      milestones: opts.milestones,
+      sort: opts.sort,
+      q: opts.q,
+    };
+    // An explicit page/limit means the caller controls paging; otherwise
+    // fetch the full list.
+    if (opts.page !== undefined || opts.limit !== undefined) {
+      return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, "issues"), {
+        query: { ...query, page: opts.page, limit: opts.limit },
+      });
+    }
+    return this.pagedList<ForgejoIssue>(this.repoPath(owner, repo, "issues"), query);
   }
 
   async getIssue(owner: string, repo: string, number: number): Promise<ForgejoIssue> {
@@ -744,7 +726,7 @@ export class Forgejo {
   }
 
   async listIssueComments(owner: string, repo: string, number: number): Promise<ForgejoIssueComment[]> {
-    return this.req<ForgejoIssueComment[]>(this.repoPath(owner, repo, `issues/${number}/comments`));
+    return this.pagedList<ForgejoIssueComment>(this.repoPath(owner, repo, `issues/${number}/comments`));
   }
 
   async createIssueComment(
@@ -774,7 +756,7 @@ export class Forgejo {
   }
 
   async listLabels(owner: string, repo: string): Promise<ForgejoLabel[]> {
-    return this.req<ForgejoLabel[]>(this.repoPath(owner, repo, `labels`));
+    return this.pagedList<ForgejoLabel>(this.repoPath(owner, repo, `labels`));
   }
 
   async createLabel(
@@ -800,9 +782,7 @@ export class Forgejo {
     repo: string,
     state: "open" | "closed" | "all",
   ): Promise<ForgejoMilestone[]> {
-    return this.req<ForgejoMilestone[]>(this.repoPath(owner, repo, `milestones`), {
-      query: { state },
-    });
+    return this.pagedList<ForgejoMilestone>(this.repoPath(owner, repo, `milestones`), { state });
   }
 
   async createMilestone(
@@ -825,7 +805,7 @@ export class Forgejo {
   }
 
   async listIssueTimeline(owner: string, repo: string, number: number): Promise<ForgejoTimelineEvent[]> {
-    return this.req<ForgejoTimelineEvent[]>(this.repoPath(owner, repo, `issues/${number}/timeline`));
+    return this.pagedList<ForgejoTimelineEvent>(this.repoPath(owner, repo, `issues/${number}/timeline`));
   }
 
   async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {

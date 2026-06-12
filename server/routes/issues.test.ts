@@ -96,7 +96,7 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "http://forgejo.test/api/v1/repos/owner/w/issues/7/comments",
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7/comments?page=1&limit=50",
     );
     await expect(res.json()).resolves.toMatchObject({
       comments: [
@@ -170,8 +170,8 @@ describe("issues routes", () => {
     expect(labels.status).toBe(200);
     expect(milestones.status).toBe(200);
     expect(markdown.status).toBe(200);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/labels");
-    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/milestones?state=all");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/labels?page=1&limit=50");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/milestones?state=all&page=1&limit=50");
     expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/markdown");
     await expect(markdown.json()).resolves.toEqual({ html: "<p>Hello</p>" });
   });
