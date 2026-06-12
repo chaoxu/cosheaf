@@ -110,6 +110,10 @@ export function badRequestPage(user: string, message: string): Response {
   return htmlResponse(pageShell({ title: "Bad request", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), 400);
 }
 
+export function errorPage(user: string, message: string, status: number): Response {
+  return htmlResponse(pageShell({ title: "Error", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">${escapeHtml(message)}</div></main>` }), status);
+}
+
 export function forbiddenPage(user: string): Response {
   return htmlResponse(pageShell({ title: "Forbidden", user, sidebar: globalSidebar("workspaces"), body: `<main class="page"><div class="empty">Forbidden</div></main>` }), 403);
 }

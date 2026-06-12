@@ -1,0 +1,42 @@
+// App-level error mapping. A ForgejoError that escapes a route handler is
+// translated into the surface the caller expects: the typed JSON envelope on
+// /api/* and a styled error page on server-rendered web routes. Everything
+// else falls through to Hono's default 500.
+
+import type { Context } from "hono";
+import { ForgejoError } from "../forgejo.js";
+import { invalidateBearerCache } from "../middleware.js";
+import type { AppEnv } from "../types.js";
+import { badGateway, forbidden, notFound } from "./responses.js";
+import { errorPage, forbiddenPage, notFoundPage, redirect } from "./web-context.js";
+
+export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Response> {
+  const isApi = c.req.path.startsWith("/api/");
+  if (!(err instanceof ForgejoError)) throw err;
+
+  // A 401 from the backing forge means the caller's token was rejected
+  // (revoked, rotated). Invalidate the cache so the next request re-checks;
+  // API callers get the typed `pat_invalid` signal, web sessions go back to
+  // the login page.
+  if (err.status === 401) {
+    const auth = c.req.header("authorization") ?? "";
+    const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+    if (bearer) invalidateBearerCache(bearer);
+    if (!isApi) return redirect("/login");
+    return c.json(
+      { error: "Backend rejected the credentials; please log in again.", code: "pat_invalid" },
+      401,
+    );
+  }
+
+  const user = c.get("user")?.username ?? "";
+  if (isApi) {
+    if (err.status === 404) return c.json(...notFound());
+    if (err.status === 403) return c.json(...forbidden("backend denied the operation"));
+    return c.json(...badGateway(`backend request failed (${err.status})`));
+  }
+  if (err.status === 404) return notFoundPage(user, "Not found");
+  if (err.status === 403) return forbiddenPage(user);
+  console.error(`unhandled forgejo error on ${c.req.method} ${c.req.path}: ${err.message}`);
+  return errorPage(user, "The backing forge failed to answer. Try again in a moment.", 502);
+}

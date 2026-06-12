@@ -7,10 +7,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppEnv } from "./types.js";
 import { getDb, loadConfig } from "./db.js";
-import { Forgejo, ForgejoError } from "./forgejo.js";
+import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import { auth } from "./routes/auth.js";
-import { invalidateBearerCache } from "./middleware.js";
+import { handleAppError } from "./routes/error-handler.js";
 import { workspaces } from "./routes/workspaces.js";
 import { files } from "./routes/files.js";
 import { branches } from "./routes/branches.js";
@@ -48,21 +48,7 @@ app.get("/api/v1/health", (c) =>
   }),
 );
 
-// If a route handler bubbles a 401 from the backing forge, the caller's token
-// was rejected (revoked, rotated). Surface a typed `pat_invalid` so browser
-// islands redirect to login; agents see the same signal and re-acquire a token.
-app.onError((err, c) => {
-  if (err instanceof ForgejoError && err.status === 401) {
-    const auth = c.req.header("authorization") ?? "";
-    const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
-    if (bearer) invalidateBearerCache(bearer);
-    return c.json(
-      { error: "Backend rejected the credentials; please log in again.", code: "pat_invalid" },
-      401,
-    );
-  }
-  throw err;
-});
+app.onError(handleAppError);
 
 app.route("/api/v1", auth);
 app.route("/api/v1/workspaces", workspaces);
