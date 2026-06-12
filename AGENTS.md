@@ -394,9 +394,26 @@ Fast gates:
 
 Route owner map:
 
-- `server/routes/web.ts` — server-rendered web routes and HTML fragments.
-- `server/routes/web-shell.ts` — shared page shell, global header, and Vite island asset tags.
-- `public/cosheaf-web.css` — server-rendered web CSS.
+- `server/routes/web.ts` — web route assembler: login/logout/home/account plus
+  ordered register calls into the page modules below (registration order is
+  load-bearing for Hono matching; keep it).
+- `server/routes/web-context.ts` — web auth/repo resolution, shared parsers,
+  error pages, href/format helpers.
+- `server/routes/web-page.ts` — repoPage shell + sidebar tabs, label chips,
+  user preferences fragments.
+- `server/routes/web-markdown.ts` — markdown/Coflat rendering surfaces.
+- `server/routes/web-thread.ts` — shared issue+pull thread machinery: layout
+  with metadata rail, edit pages, timelines, review panels.
+- `server/routes/web-files.ts` — tree/src/raw/_edit pages plus branches and
+  commit pages.
+- `server/routes/web-issues.ts` / `web-pulls.ts` / `web-chat-pages.ts` /
+  `web-activity.ts` / `web-settings.ts` — the corresponding page routes
+  (pull diff machinery lives with web-pulls).
+- `server/routes/web-shell.ts` — app shell: full-viewport frame, left sidebar,
+  bottom status bar (with the editor status slot), and Vite island asset tags.
+- `public/cosheaf-web.css` — server-rendered chrome CSS only; Coflat documents
+  own their rendering (see the boundary comment at the top of the file). The
+  app is a fixed-frame layout: the window never scrolls, `.app-content` does.
 - `server/index.ts` — static assets, Vite/dev asset proxy, ownerless repo rewrite, and route mounting.
 - `src/cosheaf/web-editor.tsx` — page editor island.
 - `src/cosheaf/web-reader.ts` — Coflat reader hydration island.
