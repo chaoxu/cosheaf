@@ -355,6 +355,10 @@ web.get("/:owner/:repo/_edit", async (c) => {
     }
     throw err;
   });
+  const branchExists =
+    branch === "main" ||
+    (await ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []))
+      .some((candidate) => candidate.name === branch);
   return htmlResponse(
     repoPage({
       title: `Edit ${rel}`,
@@ -387,6 +391,7 @@ web.get("/:owner/:repo/_edit", async (c) => {
             data-repo="${escapeAttr(ctx.repo)}"
             data-path="${escapeAttr(rel)}"
             data-branch="${escapeAttr(branch)}"
+            data-branch-exists="${branchExists ? "1" : "0"}"
             data-username="${escapeAttr(ctx.user)}"
             data-role="${escapeAttr(ctx.ws.role)}"
             data-format-id="${escapeAttr(ctx.ws.defaultMdFormat)}"

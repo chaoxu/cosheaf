@@ -37,6 +37,7 @@ interface EditorConfig {
   repo: string;
   path: string;
   branch: string;
+  branchExists: boolean;
   username: string;
   role: "admin" | "write" | "read";
   formatId: DocumentFormatId;
@@ -61,6 +62,7 @@ function readConfig(): { config: EditorConfig; content: string } {
       repo: mount.dataset.repo ?? "",
       path: mount.dataset.path ?? "",
       branch: mount.dataset.branch ?? "",
+      branchExists: mount.dataset.branchExists !== "0",
       username: mount.dataset.username ?? "",
       role: (mount.dataset.role ?? "read") as EditorConfig["role"],
       formatId: (mount.dataset.formatId ?? "forgejo-passthrough") as DocumentFormatId,
@@ -129,6 +131,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       owner: config.owner,
       repo: config.repo,
       branch: config.branch,
+      branchExists: config.branchExists,
       path: config.path,
     }).then((refs) => {
       if (cancelled) return;
@@ -140,6 +143,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             owner: config.owner,
             repo: config.repo,
             branch: config.branch,
+            branchExists: config.branchExists,
             path: config.path,
           },
           refs,

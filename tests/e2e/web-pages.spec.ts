@@ -76,13 +76,22 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("editor")).toBeVisible();
   await expect
     .poll(async () =>
+      // CodeMirror virtualizes content, so scan the document instead of relying
+      // on a fixed scroll offset (the showcase layout shifts as it evolves).
       page.evaluate(async () => {
         const scroller = document.querySelector(".cm-scroller");
-        if (scroller) scroller.scrollTop = 2400;
-        await new Promise((resolve) => window.setTimeout(resolve, 300));
+        if (!scroller) return { unresolved: -1, tableText: "" };
+        const step = Math.max(400, Math.floor(scroller.clientHeight / 2));
+        let tableText = "";
+        for (let top = 0; top <= scroller.scrollHeight; top += step) {
+          scroller.scrollTop = top;
+          await new Promise((resolve) => window.setTimeout(resolve, 150));
+          tableText = [...document.querySelectorAll(".cf-table-widget")].map((el) => el.textContent ?? "").join("\n");
+          if (tableText.includes("[1]")) break;
+        }
         return {
           unresolved: document.querySelectorAll(".cm-content .cf-crossref-unresolved, .cm-content .cf-citation-unresolved").length,
-          tableText: [...document.querySelectorAll(".cf-table-widget")].map((el) => el.textContent ?? "").join("\n"),
+          tableText,
         };
       }),
     )

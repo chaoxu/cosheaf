@@ -9,6 +9,9 @@ export interface CoflatDocumentPayload {
   repo: string;
   branch: string;
   path: string;
+  /** False when the branch has not been created yet (e.g. a fresh edit page);
+   * skips raw fetches against the missing branch and goes straight to main. */
+  branchExists?: boolean;
 }
 
 export interface CoflatLocalRefs {
@@ -211,7 +214,7 @@ async function localCitations(payload: CoflatDocumentPayload, frontmatter: Recor
   const bibliography = typeof frontmatter.bibliography === "string" ? frontmatter.bibliography : null;
   if (!bibliography) return new Map();
   const rawUrls = [
-    resolveRawRepoLink(payload, bibliography),
+    payload.branchExists === false ? null : resolveRawRepoLink(payload, bibliography),
     payload.branch === "main" ? null : resolveRawRepoLink({ ...payload, branch: "main" }, bibliography),
   ].filter((value): value is string => Boolean(value));
   try {
