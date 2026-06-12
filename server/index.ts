@@ -114,10 +114,8 @@ app.get("/assets/*", async (c) => {
 });
 
 app.get("/fonts/*", async (c) => {
-  const publicPath = resolveStaticPath(publicDir, c.req.path);
-  if (!publicPath) return c.json({ error: "not found" }, 404);
-  const body = await readFile(publicPath);
-  return new Response(body, { headers: staticFileHeaders(publicPath, cacheControlForRequestPath(c.req.path)) });
+  const response = await servePublicOrDistFile(c.req.path);
+  return response ?? c.json({ error: "not found" }, 404);
 });
 
 app.route("/", web);
