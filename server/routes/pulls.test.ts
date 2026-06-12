@@ -6,9 +6,6 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Config } from "../db.js";
-import { Forgejo } from "../forgejo.js";
-import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests } from "../middleware.js";
@@ -16,22 +13,9 @@ import { seedAuthUser } from "../test-helpers.js";
 import { pulls } from "./pulls.js";
 import { branches } from "./branches.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
-const config: Config = {
-  dataDir: "/tmp/cosheaf-pulls-test",
-  port: 3030,
-  forgejoUrl: "http://forgejo.test",
-  forgejoToken: "admin-token",
-  forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
-  webhookSecret: "secret",
-  webhookUrl: "http://cosheaf.test/webhook",
-  coverifyCmd: "coverify",
-  coverifyApiUrl: "http://cosheaf.test/api/v1",
-  coverifyBotToken: "",
-  coverifyBotLogin: "coverify",
-};
+const config = testConfig("pulls");
 
 function freshDb(): Database.Database {
   return freshTestDb("cosheaf-pulls-");
@@ -46,17 +30,10 @@ function seedWorkspace(db: Database.Database): void {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  const app = new Hono<AppEnv>();
-  app.use("*", async (c, next) => {
-    c.set("db", db);
-    c.set("config", config);
-    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
-    c.set("sse", new SSEHub());
-    await next();
+  return testApp(db, config, (app) => {
+    app.route("/api/v1/w", pulls);
+    app.route("/api/v1/w", branches);
   });
-  app.route("/api/v1/w", pulls);
-  app.route("/api/v1/w", branches);
-  return app;
 }
 
 const fetchMock = vi.fn();
@@ -71,20 +48,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function ok(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-function empty(status = 200): Response {
-  // 204/304 are null-body statuses — fetch's Response constructor refuses
-  // non-null bodies, so emit a true null body for them.
-  if (status === 204 || status === 304) {
-    return new Response(null, { status });
-  }
-  return new Response("", { status });
-}
 function pull(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: 1,

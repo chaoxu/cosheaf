@@ -57,6 +57,15 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };
 }
 
+// resolveWebRepo plus the write gate every mutating web handler needs:
+// read-only members get the Forbidden page instead of the resolved repo.
+export async function resolveWebRepoForWrite(c: Context<AppEnv>): Promise<WebRepoResult> {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx;
+  if (ctx.ws.role === "read") return { ok: false, response: forbiddenPage(ctx.user) };
+  return ctx;
+}
+
 export async function configReposForUser(c: Context<AppEnv>) {
   const config = c.get("config");
   const userFj = c.get("fjUser");
@@ -79,11 +88,7 @@ function roleFromPermissions(p: { admin?: boolean; push?: boolean; pull?: boolea
   return "none";
 }
 
-export type WebListState = "open" | "closed" | "all";
-
-export function parseListState(value: string | undefined): WebListState {
-  return value === "closed" || value === "all" ? value : "open";
-}
+export { parseListState, type ListState as WebListState } from "./query-params.js";
 
 export function queryText(c: Context<AppEnv>, name: string): string {
   return c.req.query(name)?.trim() ?? "";

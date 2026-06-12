@@ -46,6 +46,7 @@ import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { PrMeta, PrFileStatus } from "../../shared/review.js";
 import { toLabel, validateLabelSelection } from "./label-utils.js";
+import { parseListState, parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 
 export const pulls = new Hono<AppEnv>();
 pulls.use("*", requireAuth);
@@ -93,18 +94,6 @@ function prMeta(pull: ForgejoPull): PrMeta {
     requested_reviewers: (pull.requested_reviewers ?? []).map((u) => u.login),
     requested_reviewer_teams: (pull.requested_reviewers_teams ?? []).map((t) => t.username ?? t.name),
   };
-}
-
-function parsePositiveInt(value: string | undefined): number | undefined {
-  if (!value?.trim()) return undefined;
-  const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : undefined;
-}
-
-function parsePositiveIntList(value: string | undefined): number[] | undefined {
-  if (!value?.trim()) return undefined;
-  const ids = value.split(",").map((part) => Number(part.trim())).filter((n) => Number.isInteger(n) && n > 0);
-  return ids.length > 0 ? ids : undefined;
 }
 
 type PullSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
@@ -185,12 +174,9 @@ function forgejoErrToResult(err: unknown): { ok: false; status: number; message:
 
 
 pulls.get("/:slug/pulls", async (c) => {
-  const stateRaw = c.req.query("state");
-  const state: "open" | "closed" | "all" =
-    stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
   const { fj, owner, repo } = c.get("repoCtx");
   const rows = await fj.listPulls(owner, repo, {
-    state,
+    state: parseListState(c.req.query("state")),
     labels: parsePositiveIntList(c.req.query("labels")),
     milestone: parsePositiveInt(c.req.query("milestone")),
     poster: c.req.query("author")?.trim() || undefined,

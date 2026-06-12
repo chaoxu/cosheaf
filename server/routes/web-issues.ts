@@ -9,7 +9,6 @@ import { isChatIssue, stripChatMetadata } from "./web-chat.js";
 import {
   badRequestPage,
   displayLogin,
-  forbiddenPage,
   formatDate,
   htmlResponse,
   notFoundPage,
@@ -20,6 +19,7 @@ import {
   redirect,
   repoHref,
   resolveWebRepo,
+  resolveWebRepoForWrite,
   stringField,
   textField,
   type WebCtx,
@@ -79,9 +79,8 @@ web.get("/:owner/:repo/issues", async (c) => {
 });
 
 web.get("/:owner/:repo/issues/new", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const labels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
   return htmlResponse(
     repoPage({
@@ -97,9 +96,8 @@ web.get("/:owner/:repo/issues/new", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/new", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody({ all: true });
   const title = stringField(form.title);
   const body = textField(form.body) ?? "";
@@ -220,9 +218,8 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
 });
 
 web.get("/:owner/:repo/issues/:number/edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
@@ -246,9 +243,8 @@ web.get("/:owner/:repo/issues/:number/edit", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -276,9 +272,8 @@ web.post("/:owner/:repo/issues/:number/labels", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/comments", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (number) {
     const immutable = await rejectChatIssueMutation(ctx, number);
@@ -290,9 +285,8 @@ web.post("/:owner/:repo/issues/:number/comments", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/comments/:id/edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
@@ -305,9 +299,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/edit", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/comments/:id/delete", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
@@ -318,9 +311,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/delete", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/pin", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -334,9 +326,8 @@ web.post("/:owner/:repo/issues/:number/pin", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -353,9 +344,8 @@ web.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/dependencies/delete", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -372,9 +362,8 @@ web.post("/:owner/:repo/issues/:number/dependencies/delete", async (c) => {
 });
 
 web.post("/:owner/:repo/issues/:number/state", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);

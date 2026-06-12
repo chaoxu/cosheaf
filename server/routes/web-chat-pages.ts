@@ -19,13 +19,13 @@ import {
 } from "./web-chat.js";
 import {
   badRequestPage,
-  forbiddenPage,
   htmlResponse,
   notFoundPage,
   positiveInt,
   redirect,
   repoHref,
   resolveWebRepo,
+  resolveWebRepoForWrite,
   stringField,
   validBranchName,
   type WebCtx,
@@ -124,9 +124,8 @@ web.get("/:owner/:repo/chat", async (c) => {
 });
 
 web.post("/:owner/:repo/chat/new", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const form = await c.req.parseBody();
   const message = stringField(form.message);
@@ -210,9 +209,8 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
 });
 
 web.post("/:owner/:repo/chat/:number/send", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");

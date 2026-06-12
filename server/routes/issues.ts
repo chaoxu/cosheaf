@@ -20,6 +20,7 @@ import type {
 } from "../../shared/issues.js";
 import { toLabel, validateLabelSelection } from "./label-utils.js";
 import { bad, notFound } from "./responses.js";
+import { parseListState } from "./query-params.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
   return {
@@ -106,9 +107,7 @@ issues.use("/:slug/*", requireWriteOnMutation);
 // composes two Forgejo filters (created_by OR assigned_by).
 issues.get("/:slug/issues", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
-  const stateRaw = c.req.query("state");
-  const state: "open" | "closed" | "all" =
-    stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
+  const state = parseListState(c.req.query("state"));
   const filter = c.req.query("filter");
   const q = c.req.query("q") ?? undefined;
   const username = c.get("user").username;
@@ -367,9 +366,7 @@ issues.delete("/:slug/issues/:number/pin", async (c) => {
 });
 
 issues.get("/:slug/milestones", async (c) => {
-  const stateRaw = c.req.query("state");
-  const state: "open" | "closed" | "all" =
-    stateRaw === "closed" || stateRaw === "all" ? stateRaw : "open";
+  const state = parseListState(c.req.query("state"));
   const { fj, owner, repo } = c.get("repoCtx");
   const milestones = await fj.listMilestones(owner, repo, state);
   return c.json({ milestones: milestones.map(toMilestone) });

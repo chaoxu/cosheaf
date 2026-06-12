@@ -1,32 +1,16 @@
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Config } from "../db.js";
-import { Forgejo } from "../forgejo.js";
 import { indexPage } from "../indexer.js";
 import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
-import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { freshTestDb, responseEmpty, responseOk, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseEmpty, responseOk, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
-const config: Config = {
-  dataDir: "/tmp/cosheaf-files-test",
-  port: 3030,
-  forgejoUrl: "http://forgejo.test",
-  forgejoToken: "admin-token",
-  forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
-  webhookSecret: "secret",
-  webhookUrl: "http://cosheaf.test/webhook",
-  coverifyCmd: "coverify",
-  coverifyApiUrl: "http://cosheaf.test/api/v1",
-  coverifyBotToken: "",
-  coverifyBotLogin: "coverify",
-};
+const config = testConfig("files");
 
 function freshDb(): Database.Database {
   const db = freshTestDb("cosheaf-files-");
@@ -35,16 +19,7 @@ function freshDb(): Database.Database {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  const app = new Hono<AppEnv>();
-  app.use("*", async (c, next) => {
-    c.set("db", db);
-    c.set("config", config);
-    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
-    c.set("sse", new SSEHub());
-    await next();
-  });
-  app.route("/api/v1/w", files);
-  return app;
+  return testApp(db, config, (app) => app.route("/api/v1/w", files));
 }
 
 const fetchMock = vi.fn();

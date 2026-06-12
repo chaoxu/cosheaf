@@ -1,29 +1,13 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Config } from "../db.js";
-import { Forgejo } from "../forgejo.js";
 import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
-import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { notifications } from "./notifications.js";
-import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
-const config: Config = {
-  dataDir: "/tmp/cosheaf-notifications-test",
-  port: 3030,
-  forgejoUrl: "http://forgejo.test",
-  forgejoToken: "admin-token",
-  forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
-  webhookSecret: "secret",
-  webhookUrl: "http://cosheaf.test/webhook",
-  coverifyCmd: "coverify",
-  coverifyApiUrl: "http://cosheaf.test/api/v1",
-  coverifyBotToken: "",
-  coverifyBotLogin: "coverify",
-};
+const config = testConfig("notifications");
 
 function freshDb(): Database.Database {
   const db = freshTestDb("cosheaf-notifs-");
@@ -32,16 +16,7 @@ function freshDb(): Database.Database {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  const app = new Hono<AppEnv>();
-  app.use("*", async (c, next) => {
-    c.set("db", db);
-    c.set("config", config);
-    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
-    c.set("sse", new SSEHub());
-    await next();
-  });
-  app.route("/api/v1/w", notifications);
-  return app;
+  return testApp(db, config, (app) => app.route("/api/v1/w", notifications));
 }
 
 

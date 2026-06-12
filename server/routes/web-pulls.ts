@@ -23,6 +23,7 @@ import {
   redirect,
   repoHref,
   resolveWebRepo,
+  resolveWebRepoForWrite,
   safeWebRedirect,
   stringField,
   stringFields,
@@ -31,6 +32,7 @@ import {
   type WebCtx,
   type WebListState,
 } from "./web-context.js";
+import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { branchOptions, labelChips, repoPage, selected, sortField, stateField } from "./web-page.js";
 import {
@@ -81,9 +83,8 @@ web.get("/:owner/:repo/pulls", async (c) => {
 });
 
 web.get("/:owner/:repo/pulls/new", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
   const head = stringField(c.req.query("head"));
   const base = stringField(c.req.query("base")) ?? "main";
@@ -101,9 +102,8 @@ web.get("/:owner/:repo/pulls/new", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/new", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
   const head = stringField(form.head);
@@ -224,9 +224,8 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
 });
 
 web.get("/:owner/:repo/pulls/:number/edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -245,9 +244,8 @@ web.get("/:owner/:repo/pulls/:number/edit", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -271,9 +269,8 @@ web.post("/:owner/:repo/pulls/:number/labels", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/state", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.merged) return forbiddenPage(ctx.user);
@@ -285,9 +282,8 @@ web.post("/:owner/:repo/pulls/:number/state", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/review-requests", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -299,9 +295,8 @@ web.post("/:owner/:repo/pulls/:number/review-requests", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/review-requests/delete", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -312,9 +307,8 @@ web.post("/:owner/:repo/pulls/:number/review-requests/delete", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
@@ -329,9 +323,8 @@ web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/comments/:id/edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
@@ -342,9 +335,8 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/edit", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/comments/:id/delete", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const reviewId = positiveInt(stringField((await c.req.parseBody()).review_id) ?? undefined);
@@ -354,9 +346,8 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.user?.login === ctx.user || pull.state === "closed") return forbiddenPage(ctx.user);
@@ -756,26 +747,13 @@ function parsePullListFilters(c: Context<AppEnv>): PullListFilters {
   const sort = queryText(c, "sort");
   return {
     state: parseListState(c.req.query("state")),
-    labels: parsePositiveIntList(labelValue),
+    labels: parsePositiveIntList(labelValue) ?? [],
     labelValue,
     milestone: parsePositiveInt(milestoneValue),
     milestoneValue,
     author: queryText(c, "author"),
     sort: PULL_SORT_OPTIONS.some((option) => option.value === sort) ? sort as PullListSort : "",
   };
-}
-
-function parsePositiveInt(value: string): number | undefined {
-  if (!value) return undefined;
-  const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : undefined;
-}
-
-function parsePositiveIntList(value: string): number[] {
-  return value
-    .split(",")
-    .map((part) => Number(part.trim()))
-    .filter((n) => Number.isInteger(n) && n > 0);
 }
 
 function pullCreatePage(

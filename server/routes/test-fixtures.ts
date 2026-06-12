@@ -8,9 +8,14 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { Hono } from "hono";
 import { afterEach } from "vitest";
 import { DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
+import type { Config } from "../db.js";
+import { Forgejo } from "../forgejo.js";
 import { _seedFormatCacheForTests } from "../middleware.js";
+import { SSEHub } from "../sse.js";
+import type { AppEnv } from "../types.js";
 
 // Tracks every Database returned by freshTestDb() so a single afterEach
 // closes them and cleans up the tmpdir behind them. Without this each
@@ -61,6 +66,48 @@ export function seedTestWorkspace(
   return { slug };
 }
 
+// Canonical test Config. Every route test used to repeat this object with
+// only dataDir varying; `name` keeps the per-suite tmp path distinct.
+export function testConfig(name: string, overrides: Partial<Config> = {}): Config {
+  return {
+    dataDir: `/tmp/cosheaf-${name}-test`,
+    port: 3030,
+    forgejoUrl: "http://forgejo.test",
+    forgejoToken: "admin-token",
+    forgejoAdminToken: "admin-token",
+    forgejoOwner: "owner",
+    webhookSecret: "secret",
+    webhookUrl: "http://cosheaf.test/webhook",
+    coverifyCmd: "coverify",
+    coverifyApiUrl: "http://cosheaf.test/api/v1",
+    coverifyBotToken: "",
+    coverifyBotLogin: "coverify",
+    ...overrides,
+  };
+}
+
+// Hono app with the standard request context (db/config/fjAdmin/sse) that
+// every route suite used to wire up by hand. `mount` registers the routers
+// under test; `fjAdmin` overrides the default admin client (webhook tests
+// pass their own).
+export function testApp(
+  db: Database.Database,
+  config: Config,
+  mount: (app: Hono<AppEnv>) => void,
+  fjAdmin?: Forgejo,
+): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.use("*", async (c, next) => {
+    c.set("db", db);
+    c.set("config", config);
+    c.set("fjAdmin", fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
+    c.set("sse", new SSEHub());
+    await next();
+  });
+  mount(app);
+  return app;
+}
+
 // JSON Response builder for fetchMock. Default status is 200; the
 // existing webhook/auth tests pass an explicit 201 etc. when they need
 // it. Headers may carry e.g. content-type overrides for raw-file mocks.
@@ -75,10 +122,8 @@ export function responseOk(
   });
 }
 
-// Empty-body Response. 204/205 are no-body statuses that the Response
-// constructor rejects with a non-null body; we substitute 200 there
-// rather than fail at construction.
+// Empty-body Response at the given status. A null body is valid for every
+// status, including the no-body ones (204/304).
 export function responseEmpty(status = 200): Response {
-  const safe = status === 204 || status === 205 ? 200 : status;
-  return new Response(null, { status: safe });
+  return new Response(null, { status });
 }

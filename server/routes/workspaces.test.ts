@@ -1,46 +1,20 @@
-import { Hono } from "hono";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import type { Config } from "../db.js";
-import { Forgejo } from "../forgejo.js";
 import {
   _resetBearerAuthCacheForTests,
   _resetFormatCacheForTests,
   _resetPermCacheForTests,
   _seedFormatCacheForTests,
 } from "../middleware.js";
-import { SSEHub } from "../sse.js";
 import { seedAuthUser } from "../test-helpers.js";
-import type { AppEnv } from "../types.js";
 import { workspaces } from "./workspaces.js";
-import { freshTestDb } from "./test-fixtures.js";
+import { freshTestDb, testApp, testConfig } from "./test-fixtures.js";
 import { responseEmpty, responseOk } from "./test-fixtures.js";
 
-const config: Config = {
-  dataDir: "/tmp/cosheaf-workspaces-test",
-  port: 3030,
-  forgejoUrl: "http://forgejo.test",
-  forgejoToken: "admin-token",
-  forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
-  webhookSecret: "secret",
-  webhookUrl: "http://cosheaf.test/webhook",
-  coverifyCmd: "coverify",
-  coverifyApiUrl: "http://cosheaf.test/api/v1",
-  coverifyBotToken: "",
-  coverifyBotLogin: "coverify",
-};
+const config = testConfig("workspaces");
 
 function appFor() {
   const db = freshTestDb("cosheaf-workspaces-");
-  const app = new Hono<AppEnv>();
-  app.use("*", async (c, next) => {
-    c.set("db", db);
-    c.set("config", config);
-    c.set("fjAdmin", new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
-    c.set("sse", new SSEHub());
-    await next();
-  });
-  app.route("/api/v1/workspaces", workspaces);
+  const app = testApp(db, config, (a) => a.route("/api/v1/workspaces", workspaces));
   return { app, db };
 }
 

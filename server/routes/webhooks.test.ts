@@ -2,27 +2,12 @@ import { createHmac } from "node:crypto";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import type { Config } from "../db.js";
 import type { Forgejo } from "../forgejo.js";
-import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import { webhooks } from "./webhooks.js";
-import { freshTestDb, seedTestWorkspace } from "./test-fixtures.js";
+import { freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
-const config: Config = {
-  dataDir: "/tmp/cosheaf-webhook-test",
-  port: 3030,
-  forgejoUrl: "http://forgejo.test",
-  forgejoToken: "token",
-  forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
-  webhookSecret: "secret",
-  webhookUrl: "http://cosheaf.test/webhook",
-  coverifyCmd: "coverify",
-  coverifyApiUrl: "http://cosheaf.test/api/v1",
-  coverifyBotToken: "",
-  coverifyBotLogin: "coverify",
-};
+const config = testConfig("webhook", { forgejoToken: "token" });
 
 function freshDb(): Database.Database {
   const db = freshTestDb("cosheaf-webhook-");
@@ -45,16 +30,7 @@ function withRepoDefaults(forgejo: Forgejo): Forgejo {
 }
 
 function appFor(db: Database.Database, forgejo: Forgejo): Hono<AppEnv> {
-  const app = new Hono<AppEnv>();
-  app.use("*", async (c, next) => {
-    c.set("db", db);
-    c.set("config", config);
-    c.set("fjAdmin", withRepoDefaults(forgejo));
-    c.set("sse", new SSEHub());
-    await next();
-  });
-  app.route("/api/v1/webhooks", webhooks);
-  return app;
+  return testApp(db, config, (app) => app.route("/api/v1/webhooks", webhooks), withRepoDefaults(forgejo));
 }
 
 function signedForgejo(body: string, event = "push", delivery = "delivery-1"): RequestInit {

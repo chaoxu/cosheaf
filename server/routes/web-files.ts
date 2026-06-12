@@ -22,6 +22,7 @@ import {
   redirect,
   repoHref,
   resolveWebRepo,
+  resolveWebRepoForWrite,
   stringField,
   textField,
   urlPath,
@@ -168,9 +169,8 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
 });
 
 web.post("/:owner/:repo/src/branch/*", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   if (stringField(form.action) !== "delete") return badRequestPage(ctx.user, "Unsupported file action.");
   const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/src/branch/"));
@@ -202,9 +202,8 @@ web.get("/:owner/:repo/raw/branch/*", async (c) => {
 });
 
 web.get("/:owner/:repo/_edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const branch = editBranchFor(ctx.user, c.req.query("branch"));
   const rel = safeRel(c.req.query("path") || "new.md") ?? "new.md";
   const kind = fileKindForPath(rel);
@@ -274,9 +273,8 @@ web.get("/:owner/:repo/_edit", async (c) => {
 });
 
 web.post("/:owner/:repo/_edit", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const branch = editBranchFor(ctx.user, stringField(form.branch));
   const rel = safeRel(stringField(form.path) ?? undefined);
@@ -323,9 +321,8 @@ web.get("/:owner/:repo/branches", async (c) => {
 });
 
 web.post("/:owner/:repo/branches/new", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const name = stringField(form.name);
   const base = stringField(form.base) ?? "main";
@@ -344,9 +341,8 @@ web.post("/:owner/:repo/branches/new", async (c) => {
 });
 
 web.post("/:owner/:repo/branches/delete", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForWrite(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const name = stringField((await c.req.parseBody()).name);
   if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
   await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, name);

@@ -4,42 +4,19 @@
 // server-rendered web pages can authenticate normal GET requests.
 
 import type Database from "better-sqlite3";
-import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Config } from "../db.js";
-import type { AppEnv } from "../types.js";
 import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests } from "../middleware.js";
 import { auth } from "./auth.js";
-import { freshTestDb } from "./test-fixtures.js";
+import { freshTestDb, testApp, testConfig } from "./test-fixtures.js";
 
-const config: Config = {
-  dataDir: "/tmp/cosheaf-auth-test",
-  port: 3030,
-  forgejoUrl: "http://forgejo.test",
-  forgejoToken: "admin-token",
-  forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
-  webhookSecret: "secret",
-  webhookUrl: "http://cosheaf.test/webhook",
-  coverifyCmd: "coverify",
-  coverifyApiUrl: "http://cosheaf.test/api/v1",
-  coverifyBotToken: "",
-  coverifyBotLogin: "coverify",
-};
+const config = testConfig("auth");
 
 function freshDb(): Database.Database {
   return freshTestDb("cosheaf-auth-");
 }
 
 function appFor(db: Database.Database) {
-  const app = new Hono<AppEnv>();
-  app.use("*", async (c, next) => {
-    c.set("db", db);
-    c.set("config", config);
-    await next();
-  });
-  app.route("/api/v1", auth);
-  return app;
+  return testApp(db, config, (app) => app.route("/api/v1", auth));
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
