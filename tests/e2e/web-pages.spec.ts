@@ -161,7 +161,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   await expect(page.getByTestId("issue-edit-form").locator('textarea[name="body"]')).toBeVisible();
   await page.goto(`${webBase}${issuePath}`);
-  await expect(page.getByTestId("issue-label-form")).toBeVisible();
+  await expect(page.getByTestId("thread-labels")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
   await expect(page.getByTestId("issue-toggle-pin")).toHaveText("Pin issue");
   await page.getByTestId("issue-toggle-pin").click();
@@ -209,7 +209,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   const demoPrPath = new URL(page.url()).pathname;
   await expect(page.locator(".subtabs")).toContainText("Files changed");
   await expect(page.getByTestId("pull-edit-link")).toBeVisible();
-  await expect(page.getByTestId("pull-labels")).toBeVisible();
+  await expect(page.getByTestId("thread-labels")).toBeVisible();
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await page.getByTestId("pull-edit-link").click();
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();

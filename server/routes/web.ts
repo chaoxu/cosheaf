@@ -535,14 +535,13 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   if (!ctx.ok) return ctx.response;
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const [issue, comments, timeline, allLabels, dependencies, blocks, pinnedIssues] = await Promise.all([
+  const [issue, comments, timeline, dependencies, blocks, pinnedIssues] = await Promise.all([
     ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
       if (err instanceof ForgejoError && err.status === 404) return null;
       throw err;
     }),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, number).catch(() => []),
-    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listIssueDependencies(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listIssueBlocks(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listPinnedIssues(ctx.owner, ctx.repo).catch(() => []),
@@ -589,30 +588,22 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
             <p>${isPinned ? `<span class="meta-pill">pinned</span> ` : ""}by ${escapeHtml(displayLogin(ctx.owner, issue.user?.login))} - ${formatDate(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? `<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
-          <div class="issue-document">
-            ${body}
-          </div>
-          ${
-            chatBackedIssue
-              ? ""
-              : labelEditForm({
-                  testId: "issue-label-form",
-                  action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`),
-                  disabled: ctx.ws.role === "read",
-                  labels: allLabels,
-                  currentLabels: issue.labels,
-                })
-          }
-          ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}
-          ${timelineHtml}
-          ${
-            ctx.ws.role === "read" || chatBackedIssue
-              ? ""
-              : `<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
-                   <textarea name="body" placeholder="Leave a comment" required></textarea>
-                   <button class="button primary" type="submit">Comment</button>
-                 </form>`
-          }
+          ${threadLayout(
+            `<div class="issue-document">
+                ${body}
+              </div>
+              ${timelineHtml}
+              ${
+                ctx.ws.role === "read" || chatBackedIssue
+                  ? ""
+                  : `<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
+                       <textarea name="body" placeholder="Leave a comment" required></textarea>
+                       <button class="button primary" type="submit">Comment</button>
+                     </form>`
+              }`,
+            `${labelsRailPanel(issue.labels)}
+              ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`,
+          )}
         </article>
       `,
     }),
@@ -631,6 +622,7 @@ web.get("/:owner/:repo/issues/:number/edit", async (c) => {
   });
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
+  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
   return htmlResponse(
     repoPage({
       title: `Edit #${issue.number} - ${ctx.repo}`,
@@ -639,7 +631,7 @@ web.get("/:owner/:repo/issues/:number/edit", async (c) => {
       active: "issues",
       user: ctx.user,
       ws: ctx.ws,
-      body: issueEditPage(ctx, issue),
+      body: issueEditPage(ctx, issue, allLabels),
     }),
   );
 });
@@ -652,33 +644,26 @@ web.post("/:owner/:repo/issues/:number/edit", async (c) => {
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
   if (immutable) return immutable;
-  const form = await c.req.parseBody();
+  const form = await c.req.parseBody({ all: true });
   const title = stringField(form.title);
   const body = textField(form.body);
   if (!title || body === null) return badRequestPage(ctx.user, "Issue title and description are required.");
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number);
+  const labelPatch = await labelSelectionPatch(ctx, form, issue.labels);
+  if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { title, body });
+  if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 });
 
 web.post("/:owner/:repo/issues/:number/labels", async (c) => {
+  // Label editing moved into the issue edit page; keep redirecting old form posts.
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const form = await c.req.parseBody({ all: true });
-  const labelIds = positiveIntFields(form.labels);
-  const [allLabels, issue] = await Promise.all([
-    ctx.fj.listLabels(ctx.owner, ctx.repo),
-    ctx.fj.getIssue(ctx.owner, ctx.repo, number),
-  ]);
-  if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
-  const validation = validateLabelSelection(labelIds, allLabels, issue.labels);
-  if (!validation.ok) return badRequestPage(ctx.user, validation.message);
-  await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelIds);
-  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
-  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}/edit`));
 });
 
 web.post("/:owner/:repo/issues/:number/comments", async (c) => {
@@ -1149,23 +1134,16 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
-          <div class="pr-layout">
-            <div class="pr-main">
-              <div class="comment">
+          ${threadLayout(
+            `<div class="comment">
                 <div class="comment-meta">${escapeHtml(displayLogin(ctx.owner, pull.user?.login))}</div>
                 ${body ? body : `<p>No description.</p>`}
               </div>
               ${timelineHtml}
-              ${reviewForms(ctx, pull)}
-            </div>
-            <aside class="pr-rail">
-              <section class="rail-panel" data-testid="pull-labels">
-                <h2>Labels</h2>
-                ${(pull.labels ?? []).length ? labelChips(pull.labels ?? []) : `<span class="muted">None.</span>`}
-              </section>
-              ${reviewRequestPanel(ctx, pull, availableReviewers)}
-            </aside>
-          </div>
+              ${reviewForms(ctx, pull)}`,
+            `${labelsRailPanel(pull.labels ?? [])}
+              ${reviewRequestPanel(ctx, pull, availableReviewers)}`,
+          )}
         </article>
       `,
     }),
@@ -1204,32 +1182,19 @@ web.post("/:owner/:repo/pulls/:number/edit", async (c) => {
   const title = stringField(form.title);
   const body = textField(form.body);
   if (!title || body === null) return badRequestPage(ctx.user, "Pull request title and description are required.");
-  const patch: { title: string; body: string; labels?: number[] } = { title, body };
-  if (stringField(form.labels_present)) {
-    const labelIds = positiveIntFields(form.labels);
-    const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
-    const validation = validateLabelSelection(labelIds, allLabels, pull.labels ?? []);
-    if (!validation.ok) return badRequestPage(ctx.user, validation.message);
-    patch.labels = labelIds;
-  }
-  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, patch);
+  const labelPatch = await labelSelectionPatch(ctx, form, pull.labels ?? []);
+  if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
+  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { title, body, labels: labelPatch.labels });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 });
 
 web.post("/:owner/:repo/pulls/:number/labels", async (c) => {
+  // Label editing moved into the pull request edit page; keep redirecting old form posts.
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role === "read") return forbiddenPage(ctx.user);
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
-  const form = await c.req.parseBody({ all: true });
-  const labelIds = positiveIntFields(form.labels);
-  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
-  const validation = validateLabelSelection(labelIds, allLabels, pull.labels ?? []);
-  if (!validation.ok) return badRequestPage(ctx.user, validation.message);
-  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { labels: labelIds });
-  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+  const number = positiveInt(c.req.param("number"));
+  if (!number) return notFoundPage(ctx.user, "Pull request not found");
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${number}/edit`));
 });
 
 web.post("/:owner/:repo/pulls/:number/state", async (c) => {
@@ -1889,22 +1854,19 @@ function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string)
   </section>`;
 }
 
-function issueEditPage(ctx: WebCtx, issue: ForgejoIssue): string {
-  return `<section class="edit-page issue-edit-page">
-    <div class="file-toolbar edit-titlebar">
-      <div><p class="eyebrow">Edit issue</p><h1>#${issue.number}</h1></div>
-      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`)}">Cancel</a>
-    </div>
-    <form class="compose-form" data-testid="issue-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}">
-      <label>Title <input name="title" value="${escapeAttr(issue.title)}" required></label>
-      <label>Issue body
-        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${escapeHtml(issue.body ?? "")}</textarea>
-      </label>
-      <div class="form-actions">
-        <button class="button primary" type="submit">Save issue</button>
-      </div>
-    </form>
-  </section>`;
+function issueEditPage(ctx: WebCtx, issue: ForgejoIssue, allLabels: readonly ForgejoLabel[]): string {
+  return threadEditPage({
+    ctx,
+    kind: "issue",
+    number: issue.number,
+    title: issue.title,
+    body: issue.body ?? "",
+    allLabels,
+    currentLabels: issue.labels,
+    backHref: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`),
+    action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`),
+    testId: "issue-edit-form",
+  });
 }
 
 type MarkdownSurface = "document" | "thread" | "diff";
@@ -2354,9 +2316,37 @@ function issueRelationList(
   </section>`;
 }
 
-function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly ForgejoLabel[]): string {
-  const currentIds = new Set((pull.labels ?? []).map((label) => label.id));
-  const labelRows = allLabels.map((label) => {
+// Shared thread (issue + pull request) building blocks. Both thread kinds
+// must render through these so layout and editing stay uniform.
+
+function threadLayout(main: string, rail: string): string {
+  return `<div class="thread-layout">
+    <div class="thread-main">${main}</div>
+    <aside class="thread-rail">${rail}</aside>
+  </div>`;
+}
+
+function labelsRailPanel(labels: readonly ForgejoLabel[]): string {
+  return `<section class="rail-panel" data-testid="thread-labels">
+    <h2>Labels</h2>
+    ${labels.length ? labelChips(labels) : `<span class="muted">None.</span>`}
+  </section>`;
+}
+
+function threadEditPage(opts: {
+  ctx: WebCtx;
+  kind: "issue" | "pull request";
+  number: number;
+  title: string;
+  body: string;
+  allLabels: readonly ForgejoLabel[];
+  currentLabels: readonly ForgejoLabel[];
+  backHref: string;
+  action: string;
+  testId: string;
+}): string {
+  const currentIds = new Set(opts.currentLabels.map((label) => label.id));
+  const labelRows = opts.allLabels.map((label) => {
     const checked = currentIds.has(label.id) ? " checked" : "";
     const disabled = label.is_archived && !currentIds.has(label.id) ? " disabled" : "";
     return `<label class="checkbox-row">
@@ -2364,7 +2354,7 @@ function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly Forgej
       ${labelChip(label)}
     </label>`;
   });
-  const labelFieldset = allLabels.length
+  const labelFieldset = opts.allLabels.length
     ? `<fieldset class="checkbox-list">
         <legend>Labels</legend>
         ${labelRows.join("")}
@@ -2373,52 +2363,50 @@ function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly Forgej
     : "";
   return `<section class="edit-page issue-edit-page">
     <div class="file-toolbar edit-titlebar">
-      <div><p class="eyebrow">Edit pull request</p><h1>#${pull.number}</h1></div>
-      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Cancel</a>
+      <div><p class="eyebrow">Edit ${opts.kind}</p><h1>#${opts.number}</h1></div>
+      <a class="button" href="${opts.backHref}">Cancel</a>
     </div>
-    <form class="compose-form" data-testid="pull-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">
-      <label>Title <input name="title" value="${escapeAttr(pull.title)}" required></label>
+    <form class="compose-form" data-testid="${opts.testId}" method="post" action="${opts.action}">
+      <label>Title <input name="title" value="${escapeAttr(opts.title)}" required></label>
       <label>Description
-        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${escapeHtml(pull.body ?? "")}</textarea>
+        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${escapeHtml(opts.body)}</textarea>
       </label>
       ${labelFieldset}
       <div class="form-actions">
-        <button class="button primary" type="submit">Save pull request</button>
+        <button class="button primary" type="submit">Save ${opts.kind}</button>
       </div>
     </form>
   </section>`;
 }
 
-function labelEditForm(opts: {
-  testId: string;
-  action: string;
-  disabled: boolean;
-  labels: readonly ForgejoLabel[];
-  currentLabels: readonly ForgejoLabel[];
-}): string {
-  if (opts.disabled) return "";
-  const currentIds = new Set(opts.currentLabels.map((label) => label.id));
-  const rows = opts.labels.map((label) => {
-    const checked = currentIds.has(label.id) ? " checked" : "";
-    const disabled = label.is_archived && !currentIds.has(label.id) ? " disabled" : "";
-    const scope = labelScope(label);
-    const flags = [
-      scope ? `scope:${scope}` : "",
-      label.is_archived ? "archived" : "",
-    ].filter(Boolean).join(" ");
-    return `<label class="checkbox-row">
-      <input type="checkbox" name="labels" value="${label.id}"${checked}${disabled}>
-      <span>${escapeHtml(label.name)}${flags ? ` <small>${escapeHtml(flags)}</small>` : ""}</span>
-    </label>`;
-  });
-  return `<details class="comment-form" data-testid="${opts.testId}">
-    <summary>Edit labels</summary>
-    <form method="post" action="${opts.action}">
-      <div class="checkbox-list">${rows.join("") || `<div class="empty">No labels.</div>`}</div>
-      <button class="button primary" type="submit">Save labels</button>
-    </form>
-  </details>`;
+async function labelSelectionPatch(
+  ctx: WebCtx,
+  form: Record<string, unknown>,
+  current: readonly ForgejoLabel[],
+): Promise<{ ok: true; labels?: number[] } | { ok: false; message: string }> {
+  if (!stringField(form.labels_present)) return { ok: true };
+  const labelIds = positiveIntFields(form.labels);
+  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
+  const validation = validateLabelSelection(labelIds, allLabels, [...current]);
+  if (!validation.ok) return { ok: false, message: validation.message };
+  return { ok: true, labels: labelIds };
 }
+
+function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly ForgejoLabel[]): string {
+  return threadEditPage({
+    ctx,
+    kind: "pull request",
+    number: pull.number,
+    title: pull.title,
+    body: pull.body ?? "",
+    allLabels,
+    currentLabels: pull.labels ?? [],
+    backHref: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`),
+    action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`),
+    testId: "pull-edit-form",
+  });
+}
+
 
 function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): string {
   const requested = pull.requested_reviewers ?? [];
@@ -2461,11 +2449,6 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
   return `<span class="meta-pill">${escapeHtml(displayLogin(ctx.owner, reviewer))}${remove}</span>`;
 }
 
-function labelScope(label: ForgejoLabel): string | null {
-  if (!label.exclusive) return null;
-  const slash = label.name.lastIndexOf("/");
-  return slash > 0 ? label.name.slice(0, slash) : null;
-}
 
 type WebTimelineItem =
   | { kind: "comment"; ts: number; number: number; comment: ForgejoIssueComment }
