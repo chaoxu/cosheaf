@@ -45,5 +45,23 @@ services:
     volumes:
       - cosheaf-prod-data:/var/lib/cosheaf
 
+  # Long-lived isolated staging instance (cosheaf-test.lab on jupiter). Its own
+  # image tag, data volume, env file, and (separate) Forgejo backend so spikes
+  # never touch the prod forge or data. Reads /srv/cosheaf/.env.test, which
+  # points COSHEAF_FORGEJO_URL at the test Forgejo (forgejo-cosheaf-test).
+  cosheaf-test:
+    <<: *cosheaf-app
+    image: cosheaf-test:local
+    profiles: ["test"]
+    container_name: cosheaf-test
+    env_file:
+      - path: ${COSHEAF_ENV_DIR:-/srv/cosheaf}/.env.test
+        required: false
+    ports:
+      - "${COSHEAF_TEST_PORT:-3031}:3030"
+    volumes:
+      - cosheaf-test-data:/var/lib/cosheaf
+
 volumes:
   cosheaf-prod-data:
+  cosheaf-test-data:
