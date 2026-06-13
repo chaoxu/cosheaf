@@ -255,15 +255,18 @@ export class Forgejo {
     });
   }
 
-  // Page-walk /repos/search, which wraps results in {data} rather than a bare
-  // array (so it can't go through pagedList). Runs under the caller's PAT, so
-  // private repos respect Forgejo visibility, and each result already carries
-  // `permissions` + `topics` (no per-repo round-trip).
-  private async pagedRepoSearch(query: RequestOpts["query"]): Promise<ForgejoRepo[]> {
+  // Every repo the caller can access, page-walking /repos/search (which wraps
+  // results in {data} rather than a bare array, so it can't use pagedList).
+  // Runs under the caller's PAT, so private repos respect Forgejo visibility,
+  // and each result already carries `permissions` + `topics` (no per-repo
+  // round-trip). Cosheaf is a frontend over the forge: discovery shows every
+  // accessible repo, not only `cosheaf-format-*` tagged ones; untagged repos
+  // default to forgejo-passthrough.
+  async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
     const out: ForgejoRepo[] = [];
     for (let page = 1; page <= 50; page++) {
       const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
-        query: { ...query, page, limit: 50 },
+        query: { page, limit: 50 },
       });
       const batch = res.data ?? [];
       if (batch.length === 0) break;
@@ -271,20 +274,6 @@ export class Forgejo {
       if (batch.length < 50) break;
     }
     return out;
-  }
-
-  // Repos visible to the caller that carry `topic` as an exact repo topic
-  // (Forgejo topic search is exact-match only, no prefix search).
-  async searchReposByTopic(topic: string): Promise<ForgejoRepo[]> {
-    return this.pagedRepoSearch({ q: topic, topic: "true" });
-  }
-
-  // Every repo the caller can access, no topic filter. Cosheaf is a frontend
-  // over the forge: discovery shows all accessible repos, not only ones
-  // carrying a `cosheaf-format-*` topic; untagged repos default to
-  // forgejo-passthrough.
-  async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
-    return this.pagedRepoSearch({});
   }
 
   async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {
