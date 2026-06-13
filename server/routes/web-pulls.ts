@@ -156,6 +156,16 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   ]);
   const body = await renderMarkdownSurface(ctx, pull.body ?? "", { surface: "thread" });
   const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
+  // The participants bar must reflect the conversation the timeline shows —
+  // submitted reviews + inline review comments — not just the line comments, so
+  // its count, "last reply", and chips (incl. reviewers) match what's rendered
+  // below. Same review filter as renderPullTimeline; sorted so "last" is latest.
+  const conversation = [
+    ...reviews
+      .filter((r) => r.state !== "PENDING" && (r.state !== "COMMENT" || Boolean(r.body?.trim())))
+      .map((r) => ({ user: r.user, created_at: r.submitted_at })),
+    ...comments.map((c) => ({ user: c.user, created_at: c.created_at })),
+  ].sort((a, b) => Date.parse(a.created_at ?? "") - Date.parse(b.created_at ?? ""));
   return htmlResponse(
     repoPageShell(
       ctx,
@@ -184,7 +194,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
             </nav>
           </header>
           ${threadLayout(
-            html`${threadParticipantsBar(pull.user?.login, comments)}
+            html`${threadParticipantsBar(pull.user?.login, conversation)}
               <div class="issue-document">${body.length ? body : html`<p>No description.</p>`}</div>
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
