@@ -29,7 +29,9 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const parsed = parseFrontmatterYaml(payload.source);
   const refs = await loadCoflatRefs(payload);
   const ctx = coflatDocumentContext(payload, refs);
-  const rendered = renderToHtml(parsed.body, ctx).html;
+  // On a PR diff surface, attribute blocks to source lines so changed lines can
+  // be highlighted (#113); off elsewhere so renderToHtml stays lean.
+  const rendered = renderToHtml(parsed.body, ctx, payload.markedLines ? { sourceLineAttribution: true } : undefined).html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
   fixLabeledDisplayMath(fragment);
   resolveRenderedCrossrefs(fragment, refs.crossrefs);
@@ -44,11 +46,40 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // Section + block (theorem) collapse toggles (#115). Without this the
   // disclosure controls render but never get behavior.
   hydrateReaderDisclosures(root);
+  if (payload.markedLines?.length) {
+    // The diff's changed-line numbers are raw-file 1-based (they include any
+    // YAML frontmatter), but sourceLineAttribution numbers the rendered body —
+    // which parseFrontmatterYaml stripped of frontmatter. Shift the marked set
+    // by the frontmatter line count so block source-ranges line up (#113).
+    const bodyStart = payload.source.length - parsed.body.length;
+    const frontmatterLines = bodyStart > 0 ? (payload.source.slice(0, bodyStart).match(/\n/g)?.length ?? 0) : 0;
+    markChangedBlocks(root, new Set(payload.markedLines.map((line) => line - frontmatterLines)));
+  }
   buildReaderToc(root);
   // The browser's native fragment jump fired before this island swapped the
   // rendered document in, so it missed; re-apply it now that the heading exists
   // (#114). Scrolls within .app-content, the only scroll container.
   applyHashScroll(root);
+}
+
+// Highlight rendered blocks whose source-line range intersects the changed
+// lines on this side of a PR diff (#113). sourceLineAttribution emits
+// data-source-line (single) or data-source-from/-to (a range) on block
+// elements; rich rendering is block-structured, so a changed line marks its
+// whole containing block.
+function markChangedBlocks(root: HTMLElement, marked: ReadonlySet<number>): void {
+  for (const el of root.querySelectorAll<HTMLElement>("[data-source-line],[data-source-from]")) {
+    const from = Number(el.dataset.sourceFrom ?? el.dataset.sourceLine);
+    if (!Number.isFinite(from)) continue;
+    const to = Number(el.dataset.sourceTo ?? el.dataset.sourceLine ?? el.dataset.sourceFrom);
+    const hi = Number.isFinite(to) ? to : from;
+    for (let line = from; line <= hi; line++) {
+      if (marked.has(line)) {
+        el.classList.add("marked");
+        break;
+      }
+    }
+  }
 }
 
 // Re-scroll to a heading-fragment deep link after the island renders. The

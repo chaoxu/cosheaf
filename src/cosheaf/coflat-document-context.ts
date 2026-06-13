@@ -16,6 +16,9 @@ export interface CoflatDocumentPayload {
   /** False when the branch has not been created yet (e.g. a fresh edit page);
    * skips raw fetches against the missing branch and goes straight to main. */
   branchExists?: boolean;
+  /** PR diff surface only: source line numbers changed on this side. The reader
+   * renders with sourceLineAttribution and marks blocks intersecting them (#113). */
+  markedLines?: readonly number[];
 }
 
 export interface CoflatLocalRefs {

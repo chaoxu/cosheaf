@@ -92,11 +92,13 @@ export async function renderPrFileView(
         branch: pull.base.ref,
         documentPath: file.path,
         surface: "diff",
+        markedLines: [...changed.deleted],
       }),
       renderMarkdownSurface(ctx, nextVersions.head, {
         branch: pull.head.ref,
         documentPath: file.path,
         surface: "diff",
+        markedLines: [...changed.added],
       }),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
