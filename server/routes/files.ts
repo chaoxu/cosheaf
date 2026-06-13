@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
@@ -13,6 +12,7 @@ import {
 import { fileKindForPath } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 import { bad, conflict, notFound } from "./responses.js";
+import { streamHubChannel } from "./sse-helpers.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -546,22 +546,4 @@ files.get("/:owner/:repo/validation", (c) => {
   return c.json({ broken_refs: brokenRefs, duplicate_xrefs: duplicateXrefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
 });
 
-files.get("/:owner/:repo/events", (c) => {
-  const ws = c.get("workspace");
-  const hub = c.get("sse");
-  return streamSSE(c, async (stream) => {
-    const unsub = hub.subscribe(ws.slug, (e: import("../sse.js").SSEEvent) => {
-      void stream.writeSSE({ data: JSON.stringify(e) });
-    });
-    try {
-      await stream.writeSSE({ data: JSON.stringify({ type: "ready" }), event: "ready" });
-      while (!stream.aborted && !stream.closed) {
-        await stream.sleep(30000);
-        if (stream.aborted || stream.closed) break;
-        await stream.writeSSE({ data: "{}", event: "ping" });
-      }
-    } finally {
-      unsub();
-    }
-  });
-});
+files.get("/:owner/:repo/events", (c) => streamHubChannel(c, c.get("sse"), c.get("workspace").slug));

@@ -6,13 +6,26 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
-import { parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
+import { notificationChannel, parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
 import { documentFormatFromTopics } from "../../shared/document-format.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { ForgejoIssue } from "../forgejo.js";
 import { bad, unauthorized } from "./responses.js";
 
 export const webhooks = new Hono<AppEnv>();
+
+// Forgejo event headers that can generate a per-user notification. After
+// reconciling one, the handler fans out an inbox-refetch hint to the repo's
+// collaborators (see #116). Push/repository events don't notify.
+const NOTIFY_EVENTS = new Set([
+  "issues",
+  "issue_comment",
+  "pull_request",
+  "pull_request_approved",
+  "pull_request_rejected",
+  "pull_request_review",
+  "pull_request_comment",
+]);
 
 const workspaceQueues = new Map<string, Promise<void>>();
 
@@ -224,6 +237,17 @@ webhooks.post("/forgejo", async (c) => {
       if (String(payload.action ?? "") === "deleted") {
         deleteSidecarForWorkspace(db, ws.slug);
         sse.publish(ws.slug, { type: "workspace_deleted" });
+      }
+    }
+    // Home inbox liveness (#116): activity Forgejo turns into notifications
+    // should nudge watchers' cross-repo home inboxes to refetch. Forgejo owns
+    // the exact recipient set; we approximate it by the repo's collaborators
+    // and publish a content-free hint to each one's per-user channel — a
+    // spurious refetch is cheap, and the inbox itself stays Forgejo-sourced.
+    if (NOTIFY_EVENTS.has(event)) {
+      const collaborators = await fj.listCollaborators(owner, repoName).catch(() => []);
+      for (const collaborator of collaborators) {
+        sse.publish(notificationChannel(collaborator.login), { type: "notification" });
       }
     }
     } catch (err) {

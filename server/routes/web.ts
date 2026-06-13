@@ -88,7 +88,7 @@ web.get("/", async (c) => {
           <div class="page-title page-title--actions-only">
             <a class="button primary" href="/new" data-testid="new-repo">New repository</a>
           </div>
-          ${inboxSection(inbox)}
+          <div id="home-inbox-slot">${inboxSection(inbox)}</div>
           <div class="list">
             ${repos.length === 0
               ? html`<div class="empty">No repositories available.</div>`
@@ -103,6 +103,7 @@ web.get("/", async (c) => {
                 )}
           </div>
         </main>
+        <script src="/cosheaf-inbox.js" defer></script>
       `,
     }),
   );
@@ -135,6 +136,18 @@ function inboxSection(rows: readonly NotificationRow[]): Html {
     </div>
   </section>`;
 }
+
+// Server-rendered inbox fragment the home page swaps in on a live notification
+// SSE hint (#116), so the inbox HTML is never duplicated in client JS.
+web.get("/account/inbox", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const threads = await c
+    .get("fjUser")
+    .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
+    .catch(() => []);
+  return htmlResponse(String(inboxSection(mapThreads(threads))));
+});
 
 web.post("/account/notifications/:id/read", async (c) => {
   const auth = await resolveWebAuth(c);

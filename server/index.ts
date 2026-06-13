@@ -16,7 +16,7 @@ import { files } from "./routes/files.js";
 import { branches } from "./routes/branches.js";
 import { pulls } from "./routes/pulls.js";
 import { issues } from "./routes/issues.js";
-import { notifications } from "./routes/notifications.js";
+import { globalNotifications, notifications } from "./routes/notifications.js";
 import { webhooks } from "./routes/webhooks.js";
 import { web } from "./routes/web.js";
 import { gitProxy } from "./routes/git-proxy.js";
@@ -56,11 +56,12 @@ app.route("/api/v1/repos", pulls);
 app.route("/api/v1/repos", branches);
 app.route("/api/v1/repos", issues);
 app.route("/api/v1/repos", notifications);
+app.route("/api/v1", globalNotifications);
 app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
 const publicDir = path.resolve(process.cwd(), "public");
-const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-pr-diff-defaults.js", "/cosheaf-confirm.js", "/favicon.svg"]);
+const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-pr-diff-defaults.js", "/cosheaf-confirm.js", "/cosheaf-inbox.js", "/favicon.svg"]);
 const coflatEditorDistDir = path.dirname(
   requireResolve("@chaoxu/coflat/style.css"),
 );

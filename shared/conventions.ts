@@ -43,6 +43,16 @@ export function workspaceSlug(owner: string, repo: string): string {
   return `${owner}/${repo}`;
 }
 
+/**
+ * Per-user SSE channel for cross-repo signals that aren't scoped to one
+ * workspace — currently the home inbox liveness hint (#116). Forgejo logins
+ * can't contain `/`, and workspace slugs always do, so `user:<login>` never
+ * collides with a `workspaceSlug` channel key in the SSE hub.
+ */
+export function notificationChannel(login: string): string {
+  return `user:${login}`;
+}
+
 /** Split an `owner/repo` workspace slug. Returns null unless both halves are valid Forgejo names. */
 export function parseWorkspaceSlug(slug: string): { owner: string; repo: string } | null {
   const idx = slug.indexOf("/");

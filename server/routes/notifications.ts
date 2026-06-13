@@ -1,13 +1,45 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership } from "../middleware.js";
+import { notificationChannel } from "../../shared/conventions.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { bad, notFound } from "./responses.js";
+import { streamHubChannel } from "./sse-helpers.js";
 
 export const notifications = new Hono<AppEnv>();
 notifications.use("*", requireAuth);
 notifications.use("/:owner/:repo/*", requireMembership());
+
+// Global (cross-repo) notification surface, mounted at /api/v1 (not under
+// /repos) so agents get the same per-user queue the web home inbox reads
+// directly via fjUser — typed, not a raw Forgejo passthrough. Thin wrapper
+// over Forgejo's global notifications; nothing is mirrored into SQLite.
+export const globalNotifications = new Hono<AppEnv>();
+globalNotifications.use("*", requireAuth);
+
+// GET /api/v1/notifications — the caller's cross-repo unread Issue/Pull queue.
+globalNotifications.get("/notifications", async (c) => {
+  const threads = await c
+    .get("fjUser")
+    .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
+    .catch(() => []);
+  return c.json({ notifications: mapThreads(threads) });
+});
+
+// POST /api/v1/notifications/read-all — mark the caller's whole queue read.
+globalNotifications.post("/notifications/read-all", async (c) => {
+  await c.get("fjUser").markAllNotificationsRead();
+  return c.json({ ok: true });
+});
+
+// GET /api/v1/notifications/events — SSE stream on the caller's per-user
+// channel. Webhook reconciliation publishes a content-free `notification` hint
+// here (fanned out to a repo's collaborators) so an open home inbox can refetch
+// live instead of only on full page load.
+globalNotifications.get("/notifications/events", (c) =>
+  streamHubChannel(c, c.get("sse"), notificationChannel(c.get("user").username)),
+);
 
 // Parse "/api/v1/repos/owner/repo/issues/42" or ".../pulls/42" → 42.
 function numberFromSubjectUrl(url: string): number | null {
@@ -27,7 +59,7 @@ export function mapThreads(threads: readonly ForgejoNotificationThread[]): Notif
     .sort((a, b) => b.updated_at - a.updated_at);
 }
 
-export function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
+function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
   const subjectType = t.subject.type;
   const kind: "issue" | "pr" | null =
     subjectType === "Issue" ? "issue" : subjectType === "Pull" ? "pr" : null;
