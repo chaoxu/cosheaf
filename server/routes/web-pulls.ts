@@ -11,7 +11,6 @@ import {
   badRequestPage,
   displayLogin,
   forbiddenPage,
-  timeEl,
   htmlResponse,
   notFoundPage,
   parseListState,
@@ -48,6 +47,7 @@ import { branchOptions, labelChips, repoPageShell, selected, sortField, stateTog
 import {
   labelSelectionPatch,
   labelsRailPanel,
+  listRowSide,
   pullEditPage,
   pullStateForm,
   renderPullTimeline,
@@ -187,7 +187,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>${pull.head.ref} into ${pull.base.ref} - by ${displayLogin(pull.user?.login)}</p>
+            <p>by ${displayLogin(pull.user?.login)}${pull.base.ref !== "main" ? html` · into <code>${pull.base.ref}</code>` : ""}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
@@ -574,16 +574,16 @@ function pullFilterForm(
 function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests."): Html {
   const rows = pulls.map((pull) => {
     const state = pull.merged ? "merged" : pull.state;
+    // The head branch name is noise; the base only matters when it isn't main.
+    const basesNonMain = pull.base.ref !== "main";
+    const labels = pull.labels ?? [];
+    const hasMeta = basesNonMain || Boolean(pull.milestone) || labels.length > 0;
     return html`<a class="list-row pull-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
       <span class="list-row-main">
         <span class="list-row-title"><span class="state ${state}">${state}</span><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></span>
-        <span class="list-meta">
-          ${pull.head.ref} -&gt; ${pull.base.ref}
-          ${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}
-          ${labelChips(pull.labels ?? [])}
-        </span>
+        ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill">→${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
       </span>
-      <small>updated ${timeEl(pull.updated_at)}</small>
+      ${listRowSide(pull.user?.login, pull.created_at, pull.comments)}
     </a>`;
   });
   return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;

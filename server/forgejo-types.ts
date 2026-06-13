@@ -194,6 +194,7 @@ export interface ForgejoPull {
   head: { ref: string; sha: string; label: string };
   base: { ref: string; sha: string };
   user: ForgejoUser | null;
+  comments?: number;
   created_at: string;
   updated_at: string;
 }

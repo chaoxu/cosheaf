@@ -369,6 +369,21 @@ function avatarChip(login: string | null | undefined): Html {
   return html`<span class="avatar-chip avatar-chip--${tint(login)}" role="img" aria-label="${displayLogin(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
 }
 
+// The right-hand metadata cluster for an issue/pull list row: author avatar +
+// name, short date, and bare comment count — all on one line. Uses the initials
+// avatar chip (not the Forgejo avatar URL) so the backing forge stays hidden.
+export function listRowSide(
+  login: string | null | undefined,
+  createdAt: string | undefined,
+  comments: number | undefined,
+): Html {
+  return html`<span class="list-row-side">
+    ${avatarChip(login)}<span class="row-who">${displayLogin(login)}</span>
+    <span class="row-sep">·</span>${timeEl(createdAt)}
+    <span class="row-sep">·</span><span class="row-count" title="comments">(${comments ?? 0})</span>
+  </span>`;
+}
+
 // Participants bar at the top of an issue/PR thread: who has taken part, the
 // reply count, last activity, and a jump-to-latest anchor (targets
 // #thread-bottom by the composer). Generic over issue/PR comment shapes so both
