@@ -35,7 +35,7 @@ import {
 } from "../middleware.js";
 import { ForgejoError, mergePullWithRetry, type Forgejo } from "../forgejo.js";
 import type { ForgejoPull, ForgejoReview } from "../forgejo-types.js";
-import { DELETED_USER_LOGIN } from "../forgejo-types.js";
+import { userLogin } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, positionToFileLine } from "../diff-position.js";
@@ -57,13 +57,11 @@ import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict, forbidden, notFound } from "./responses.js";
 
 function parsePr(raw: string | undefined): number | null {
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  return parsePositiveInt(raw) ?? null;
 }
 
 function parseReviewId(raw: string | undefined): number | null {
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  return parsePositiveInt(raw) ?? null;
 }
 
 function normalizeStatus(s: string): PrFileStatus {
@@ -78,7 +76,7 @@ function prMeta(pull: ForgejoPull): PrMeta {
     body: pull.body ?? "",
     state: pull.state === "closed" ? "closed" : "open",
     merged: pull.merged ?? false,
-    author_username: pull.user?.login ?? DELETED_USER_LOGIN,
+    author_username: userLogin(pull.user),
     created_at: Date.parse(pull.created_at) || 0,
     merged_at: pull.merged_at ? Date.parse(pull.merged_at) : null,
     mergeable: pull.mergeable ?? null,
@@ -373,7 +371,7 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
     .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
     .map((r) => ({
       id: r.id,
-      username: r.user?.login ?? DELETED_USER_LOGIN,
+      username: userLogin(r.user),
       decision:
         r.state === "APPROVED"
           ? ("approve" as const)
@@ -516,7 +514,7 @@ pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
       line: mapped?.line ?? null,
       side: mapped?.side ?? (status.get(cm.path) === "deleted" ? "base" : "head"),
       body: cm.body,
-      author_username: cm.user?.login ?? DELETED_USER_LOGIN,
+      author_username: userLogin(cm.user),
       created_at: Date.parse(cm.created_at) || 0,
       updated_at: Date.parse(cm.updated_at) || 0,
       outdated: cm.position === null,

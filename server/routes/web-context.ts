@@ -4,6 +4,7 @@ import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat } from "../middleware.js";
+import type { Role } from "../../shared/roles.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { html, type Html, raw } from "./web-html.js";
@@ -54,28 +55,30 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };
 }
 
-// resolveWebRepo plus the write gate every mutating web handler needs.
-// Read-only members get the same 404 "Repository not found" page as
-// non-members: a distinct 403 would leak that the caller holds read access to
-// a private repo, letting them enumerate repos by status code. (The typed JSON
-// API still returns 403 via requireWriteOnMutation — machine clients are a
-// different threat model.)
-export async function resolveWebRepoForWrite(c: Context<AppEnv>): Promise<WebRepoResult> {
+// resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the
+// SAME 404 "Repository not found" page as a non-member — never a distinct 403,
+// which would let them enumerate private repos they hold some access to by
+// status code. (The typed JSON API still returns 403 via requireWriteOnMutation
+// / requireAdmin — machine clients are a different threat model.)
+async function resolveWithMinRole(
+  c: Context<AppEnv>,
+  allow: (role: Role) => boolean,
+): Promise<WebRepoResult> {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx;
-  if (ctx.ws.role === "read") return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
+  if (!allow(ctx.ws.role)) return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
   return ctx;
 }
 
-// resolveWebRepo plus an admin gate. Any non-admin role (read or write) gets
-// the same 404 as a non-member, for the same anti-enumeration reason as
-// resolveWebRepoForWrite. Use for admin-only web pages/POSTs (settings, repo
-// deletion, PR merge).
-export async function resolveWebRepoForAdmin(c: Context<AppEnv>): Promise<WebRepoResult> {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx;
-  if (ctx.ws.role !== "admin") return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
-  return ctx;
+// The write gate every mutating web handler needs (read-only members get 404).
+export function resolveWebRepoForWrite(c: Context<AppEnv>): Promise<WebRepoResult> {
+  return resolveWithMinRole(c, (role) => role === "write" || role === "admin");
+}
+
+// The admin gate for admin-only web pages/POSTs (settings, repo deletion, PR
+// merge); any non-admin role gets 404.
+export function resolveWebRepoForAdmin(c: Context<AppEnv>): Promise<WebRepoResult> {
+  return resolveWithMinRole(c, (role) => role === "admin");
 }
 
 export async function configReposForUser(c: Context<AppEnv>) {
@@ -171,9 +174,7 @@ export function repoHref(owner: string, repo: string, suffix = ""): string {
   return `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
 }
 
-export function urlPath(path: string): string {
-  return path.split("/").map(encodeURIComponent).join("/");
-}
+export { urlPath } from "../../shared/url.js";
 
 export function displayLogin(login: string | null | undefined): string {
   return login || DELETED_USER_LOGIN;

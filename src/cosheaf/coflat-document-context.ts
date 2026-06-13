@@ -2,6 +2,10 @@ import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { extractReferences } from "@chaoxu/coflat/parse";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
+import { urlPath } from "../../shared/url";
+
+// Re-exported for web-reader, which imports urlPath from this module.
+export { urlPath };
 
 export interface CoflatDocumentPayload {
   source: string;
@@ -31,10 +35,6 @@ interface WorkspaceRef {
   label: string;
   fragment?: string;
   line?: number | null;
-}
-
-export function urlPath(value: string): string {
-  return value.split("/").map(encodeURIComponent).join("/");
 }
 
 export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): string | null {

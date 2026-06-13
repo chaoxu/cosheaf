@@ -12,6 +12,7 @@ import type {
 } from "@chaoxu/coflat";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+import { urlPath } from "../../shared/url";
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
@@ -44,10 +45,6 @@ interface EditorConfig {
 
 function shortId(): string {
   return Math.random().toString(36).slice(2, 10);
-}
-
-function urlPath(value: string): string {
-  return value.split("/").map(encodeURIComponent).join("/");
 }
 
 function readConfig(): { config: EditorConfig; content: string } {

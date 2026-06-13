@@ -4,10 +4,10 @@ import { requireAuth, requireMembership, requireWriteOnMutation } from "../middl
 import { ForgejoError } from "../forgejo.js";
 import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
 import {
-  DELETED_USER_LOGIN,
   type ForgejoIssue,
   type ForgejoIssueComment,
   type ForgejoMilestone,
+  userLogin,
 } from "../forgejo-types.js";
 import type {
   ActivityRow,
@@ -27,7 +27,7 @@ function toIssueRow(i: ForgejoIssue): IssueRow {
     number: i.number,
     title: i.title,
     state: i.state,
-    author_username: i.user?.login ?? DELETED_USER_LOGIN,
+    author_username: userLogin(i.user),
     labels: i.labels.map(toLabel),
     comment_count: i.comments,
     created_at: new Date(i.created_at).getTime(),
@@ -39,7 +39,7 @@ function toIssueComment(cm: ForgejoIssueComment): IssueComment {
   return {
     id: cm.id,
     body: cm.body,
-    author_username: cm.user?.login ?? DELETED_USER_LOGIN,
+    author_username: userLogin(cm.user),
     created_at: Date.parse(cm.created_at) || 0,
     updated_at: Date.parse(cm.updated_at) || 0,
   };
@@ -66,6 +66,9 @@ function toDependencyRow(i: ForgejoIssue): DependencyRow {
   };
 }
 
+// Accept unknown: these parse path params (strings) AND JSON body fields, which
+// may already be numbers — so they can't reuse parsePositiveInt's string-only
+// contract.
 function parseIssueNumber(value: unknown): number | null {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
@@ -161,7 +164,7 @@ issues.get("/:owner/:repo/issues/pinned", async (c) => {
       state: i.state,
       comment_count: i.comments,
       updated_at: new Date(i.updated_at).getTime(),
-      author_username: i.user?.login ?? DELETED_USER_LOGIN,
+      author_username: userLogin(i.user),
     })),
   });
 });
@@ -180,7 +183,7 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
       title: issue.title,
       body: issue.body,
       state: issue.state,
-      author_username: issue.user?.login ?? DELETED_USER_LOGIN,
+      author_username: userLogin(issue.user),
       assignees: (issue.assignees ?? []).map((a) => a.login),
       labels: issue.labels.map(toLabel),
       milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,

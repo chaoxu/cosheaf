@@ -100,6 +100,13 @@ export interface ForgejoUser {
 
 /** Stand-in login when a Forgejo response has `user: null`. */
 export const DELETED_USER_LOGIN = "(deleted)";
+
+// Resolve a Forgejo user's login, substituting the deleted-user sentinel when
+// the user object is null/undefined. Centralizes the `user?.login ?? …`
+// fallback the API routes apply when shaping author fields.
+export function userLogin(user: { login: string } | null | undefined): string {
+  return user?.login ?? DELETED_USER_LOGIN;
+}
 export interface ForgejoRepo {
   id: number;
   name: string;
