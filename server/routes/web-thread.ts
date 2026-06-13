@@ -323,6 +323,126 @@ function isReferenceTimelineEvent(type: string): boolean {
   return type === "commit_ref" || type === "issue_ref" || type === "comment_ref" || type === "pull_ref";
 }
 
+// --- Discussion view (spike) -------------------------------------------------
+// A second, reading-first rendering of the SAME issue data, toggled by
+// ?view=discussion. It drops the tracker rail (labels/relations editing) for a
+// single full-measure reading column — the OP and every reply share one column
+// width so long-form math stays legible — with a Forum-style participants bar.
+// It reuses the existing comment/timeline data, renderMarkdownSurface, and the
+// module-private issueCommentActions, so comment chrome stays identical.
+
+// First 1-2 alphanumerics of the login, for the initials avatar chip.
+export function initials(login: string | null | undefined): string {
+  const stripped = (login ?? "?").replace(/[^A-Za-z0-9]/g, "");
+  return (stripped.slice(0, 2) || "?").toUpperCase();
+}
+
+// Deterministic 0-7 hue bucket for a login, feeding the .disc-chip--N classes.
+// Pure + stable so the same author always gets the same color across renders.
+export function tint(login: string | null | undefined): number {
+  const s = login ?? "?";
+  let sum = 0;
+  for (let i = 0; i < s.length; i++) sum += s.charCodeAt(i);
+  return sum % 8;
+}
+
+function discChip(login: string | null | undefined): Html {
+  return html`<span class="disc-chip disc-chip--${tint(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
+}
+
+export async function renderDiscussionThread(
+  ctx: WebCtx,
+  issue: ForgejoIssue,
+  body: Html,
+  comments: readonly ForgejoIssueComment[],
+  timeline: readonly ForgejoTimelineEvent[],
+  flags: { isPinned: boolean; chatBackedIssue: boolean },
+): Promise<Html> {
+  // Deduped, order-preserving participant list from data already fetched.
+  const seen = new Set<string>();
+  const participants: string[] = [];
+  for (const login of [issue.user?.login, ...comments.map((c) => c.user?.login)]) {
+    if (login && !seen.has(login)) {
+      seen.add(login);
+      participants.push(login);
+    }
+  }
+  const last = comments[comments.length - 1];
+
+  // Comments + non-reference system events, chronologically interleaved, using
+  // the same ordering as the tracker timeline (oldest first).
+  const visibleEvents = timeline.filter((e) => e.type !== "comment" && !isReferenceTimelineEvent(e.type));
+  const items: WebTimelineItem[] = [
+    ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), number: issue.number, comment })),
+    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
+  ].sort(compareTimelineItems);
+  const repliesHtml = joinHtml(await Promise.all(items.map((item) => renderDiscussionItem(ctx, issue.number, item))));
+
+  const closeEvent = issue.state === "closed" ? [...visibleEvents].reverse().find((e) => e.type === "close") : undefined;
+  const composer =
+    ctx.ws.role === "read" || flags.chatBackedIssue
+      ? emptyHtml
+      : html`<form class="comment-form disc-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
+          <textarea name="body" placeholder="Leave a comment" required></textarea>
+          <button class="button primary" type="submit">Comment</button>
+        </form>`;
+
+  return html`<div class="disc-flow">
+    <div class="disc-bar" data-testid="disc-bar">
+      <span class="disc-faces" aria-label="Participants">${participants.map((login) => discChip(login))}</span>
+      <span class="disc-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
+        last ? html` · last ${formatDate(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
+      }</span>
+      ${comments.length ? html`<a class="disc-jump" href="#disc-bottom">Jump to latest ↓</a>` : emptyHtml}
+    </div>
+    <div class="disc-labels">${issue.labels.length ? labelChips(issue.labels) : html`<span class="muted">No labels</span>`}</div>
+    <div class="disc-op" data-testid="disc-op">
+      <p class="disc-byline disc-byline--op">
+        ${discChip(issue.user?.login)}
+        <span class="disc-who">${displayLogin(issue.user?.login)}</span>
+        <time>${formatDate(issue.created_at)}</time>
+        ${flags.isPinned ? html`<span class="meta-pill">pinned</span>` : emptyHtml}
+      </p>
+      <div class="issue-document">${body}</div>
+    </div>
+    <section class="disc-thread" data-testid="disc-thread">${repliesHtml}</section>
+    ${
+      issue.state === "closed"
+        ? html`<p class="disc-resolution" data-testid="disc-resolution">Closed${
+            closeEvent ? html` by ${displayLogin(closeEvent.user?.login)} · ${formatDate(closeEvent.created_at)}` : emptyHtml
+          }</p>`
+        : emptyHtml
+    }
+    ${composer}
+    <span id="disc-bottom"></span>
+  </div>`;
+}
+
+async function renderDiscussionItem(ctx: WebCtx, issueNumber: number, item: WebTimelineItem): Promise<Html> {
+  if (item.kind === "comment") {
+    const comment = item.comment;
+    const login = comment.user?.login;
+    const commentBody = await renderMarkdownSurface(ctx, comment.body, { surface: "thread" });
+    return html`<article class="disc-reply" id="comment-${comment.id}" data-testid="disc-reply">
+      <div class="disc-author">
+        ${discChip(login)}
+        <span class="disc-who">${displayLogin(login)}</span>
+      </div>
+      <div class="disc-body">
+        <p class="disc-reply-byline"><time>${formatDate(comment.created_at)}</time><a class="disc-permalink" href="#comment-${comment.id}">#</a></p>
+        ${commentBody}
+        ${issueCommentActions(ctx, issueNumber, comment)}
+      </div>
+    </article>`;
+  }
+  // System event (close/reopen/label/assign/milestone), demoted to a quiet
+  // centered rule. Skip events the tracker also hides (empty description).
+  if (item.kind !== "event" || !webTimelineDescriptionText(item.event)) return emptyHtml;
+  return html`<p class="disc-event">${
+    item.event.user?.login ? html`${displayLogin(item.event.user.login)} ` : emptyHtml
+  }${webTimelineDescriptionHtml(item.event)} · ${formatDate(item.event.created_at)}</p>`;
+}
+
 export async function renderPullTimeline(
   ctx: WebCtx,
   number: number,

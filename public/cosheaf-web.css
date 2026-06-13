@@ -25,7 +25,7 @@ input,textarea,select{border:1px solid var(--cf-border);border-radius:var(--cf-r
 
 /* page furniture */
 .page,.repo-page{width:100%;max-width:none;margin:0;padding:6px 12px}.auth-page{height:100%;display:grid;place-items:center}.auth-card{width:min(360px,calc(100vw - 32px));display:grid;gap:12px;border:1px solid var(--cf-border);border-radius:var(--cf-radius);box-shadow:var(--cf-shadow-sm);padding:22px;background:var(--cf-bg)}.auth-card h1{margin:0 0 8px}.auth-card label,.edit-page label{display:grid;gap:5px;color:var(--cf-muted)}
-.page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:3px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:20px}.toolbar-actions{display:flex;gap:6px;align-items:center}.page-title h1,.file-toolbar h1,.thread-header h1{letter-spacing:-.015em}
+.page-title,.file-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:3px 0}.page-title h1,.file-toolbar h1{margin:0;font-size:20px}.toolbar-actions{display:flex;gap:6px;align-items:center;white-space:nowrap}.page-title h1,.file-toolbar h1,.thread-header h1{letter-spacing:-.015em}
 .owner,.eyebrow,.muted{color:var(--cf-muted)}.role,.state{text-transform:uppercase;font:600 10.5px/1.7 var(--cf-font-mono);letter-spacing:.05em;color:var(--cf-muted)}.state.open{color:var(--cf-open)}.state.closed{color:var(--cf-muted)}.state.merged{color:var(--cf-merged)}
 .inline-link{color:var(--cf-fg);text-decoration:underline;text-underline-offset:2px}.inline-form{display:inline-flex;align-items:center;gap:6px;margin:0}
 /* mono metadata accents (the gitdot signature) */
@@ -67,6 +67,28 @@ input,textarea,select{border:1px solid var(--cf-border);border-radius:var(--cf-r
 .comment-form,.review-form{display:grid;gap:6px;margin:7px 0}.comment-form textarea,.review-form textarea{min-height:72px}.comment-actions{margin-top:6px}.comment-actions summary{color:var(--cf-muted);cursor:pointer;font-size:12px}.comment-actions form{display:grid;gap:6px;margin-top:6px}.comment-actions textarea{min-height:72px}
 .thread details{margin:4px 0}.thread details>summary{color:var(--cf-muted);font-size:12.5px;cursor:pointer}.thread details>summary:hover{color:var(--cf-fg)}
 .timeline-collapsed{border-top:1px solid var(--cf-border);padding:6px 0}.timeline-collapsed summary{cursor:pointer;color:var(--cf-muted);font-size:13px;font-weight:600}.timeline-collapsed .timeline-event{margin-left:10px}
+/* Discussion view (reading-first second rendering of an issue, ?view=discussion) */
+.disc-switch{display:inline-flex;gap:10px;font:13px var(--cf-font-mono,monospace);color:var(--cf-muted);margin-right:auto;margin-left:14px}.disc-switch a{color:var(--cf-muted)}.disc-switch a:hover{color:var(--cf-fg)}.disc-switch a.active{color:var(--cf-fg);font-weight:600}
+.disc-flow{max-width:72ch;margin-inline:auto}
+.disc .issue-document{border-bottom:0;padding:6px 0 0}
+.disc-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--cf-border);border-bottom:1px solid var(--cf-border);padding:7px 0;margin:8px 0;font:12px var(--cf-font-mono,monospace);color:var(--cf-muted)}
+.disc-faces{display:inline-flex}.disc-faces .disc-chip{margin-left:-6px;box-shadow:0 0 0 2px var(--cf-bg)}.disc-faces .disc-chip:first-child{margin-left:0}
+.disc-stats strong{color:var(--cf-fg)}
+.disc-jump{margin-left:auto;color:var(--cf-muted)}.disc-jump:hover{color:var(--cf-fg);text-decoration:underline;text-underline-offset:3px}
+.disc-labels{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin:0 0 12px}
+.disc-chip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;font:600 10px/1 var(--cf-font-mono,monospace);color:#fff;background:var(--cf-muted);text-transform:uppercase;flex:0 0 auto}
+.disc-chip--0{background:#0f766e}.disc-chip--1{background:#6e56cf}.disc-chip--2{background:#9f1239}.disc-chip--3{background:#0369a1}.disc-chip--4{background:#92400e}.disc-chip--5{background:#3f6212}.disc-chip--6{background:#7c3aed}.disc-chip--7{background:#0e7490}
+.disc-byline{display:flex;align-items:center;gap:8px;color:var(--cf-muted);font-size:12px;margin:2px 0 4px}.disc-byline .disc-who{color:var(--cf-fg);font-weight:600}.disc-byline time{font-family:var(--cf-font-mono,monospace)}.disc-byline--op{font-size:13px}
+.disc-reply{display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;border-top:1px solid var(--cf-border);padding:18px 0}
+.disc-author{display:grid;justify-items:center;gap:4px;width:60px;text-align:center}.disc-author .disc-who{font:11px/1.3 var(--cf-font-mono,monospace);color:var(--cf-muted);word-break:break-word}
+.disc-reply-byline{display:flex;align-items:center;gap:8px;color:var(--cf-muted);font:12px var(--cf-font-mono,monospace);margin:0 0 4px}.disc-permalink{opacity:0;transition:opacity .12s}.disc-reply:hover .disc-permalink{opacity:1}
+.disc-body .cf-reader,.disc-body .markdown-body{--cf-doc-content-padding-inline:0;padding:0;max-width:none;font-size:13.5px}.disc-body :where(p,ul,ol,pre,blockquote){margin-top:3px;margin-bottom:3px}
+.disc-body blockquote{border-left:2px solid var(--cf-border-strong);color:var(--cf-muted);padding-left:10px;margin-left:0}
+.disc-body .comment-actions{margin-top:6px}.disc-body .comment-actions summary{font-size:12px}
+.disc-event{text-align:center;color:var(--cf-muted);font:11px var(--cf-font-mono,monospace);text-transform:uppercase;letter-spacing:.05em;border-top:1px solid var(--cf-border);padding:8px 0;margin:0}
+.disc-resolution{text-align:center;color:var(--cf-muted);font:12px var(--cf-font-mono,monospace);border-top:1px solid var(--cf-border);padding:12px 0;margin:0}
+.disc-composer{margin-top:14px}
+@media(max-width:800px){.disc-flow{max-width:none}.disc-reply{grid-template-columns:1fr}.disc-author{grid-auto-flow:column;justify-content:start;justify-items:start;width:auto}}
 
 /* review + diffs */
 .review-page{display:grid;gap:6px}.review-main{min-width:0}.review-bottom{display:grid;gap:6px;border-top:1px solid var(--cf-border);padding-top:8px}.review-card{border:0;border-radius:0;background:transparent;padding:6px 0}.review-card h2{margin:0 0 6px}
