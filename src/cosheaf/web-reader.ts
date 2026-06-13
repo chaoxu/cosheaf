@@ -1,4 +1,4 @@
-import { renderToHtml, hydrateMath } from "@chaoxu/coflat/reader";
+import { renderToHtml, hydrateMath, hydrateReaderHoverPreviews } from "@chaoxu/coflat/reader";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import {
   REF_BUTTON_CLASS,
@@ -28,7 +28,8 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   applyDocumentTheme(root);
   const parsed = parseFrontmatterYaml(payload.source);
   const refs = await loadCoflatRefs(payload);
-  const rendered = renderToHtml(parsed.body, coflatDocumentContext(payload, refs)).html;
+  const ctx = coflatDocumentContext(payload, refs);
+  const rendered = renderToHtml(parsed.body, ctx).html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
   fixLabeledDisplayMath(fragment);
   resolveRenderedCrossrefs(fragment, refs.crossrefs);
@@ -36,6 +37,10 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   rewriteRenderedRepoUrls(fragment, payload);
   root.replaceChildren(fragment);
   hydrateMath(root);
+  // Coflat's hover previews for cross-references, citations, and labeled blocks
+  // (theorems/equations). Resolved crossref anchors keep their data-ref-key, so
+  // the installer attaches to them; source-based previews use the document source.
+  hydrateReaderHoverPreviews(root, { source: payload.source, context: ctx });
   buildReaderToc(root);
 }
 

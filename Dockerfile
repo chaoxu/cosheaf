@@ -17,8 +17,13 @@ RUN if [ -n "$NPM_CONFIG_REGISTRY" ]; then npm config set registry "$NPM_CONFIG_
 
 FROM base AS build
 
-ARG COFLAT_GIT_REPO=https://github.com/chaoxu/coflat.git
-ARG COFLAT_GIT_REF=e2f28af19b5808c6c5b0cc42ad3e45172c3e5c3a
+# Coflat is sourced from the lab Gitea (where the coflat agents push) so cosheaf
+# tracks the newest coflat. COFLAT_GIT_REF=main + the COSHEAF_GIT_SHA cache-bust
+# below means each cosheaf deploy re-fetches the latest coflat main. gitea.lab
+# uses the lab internal CA, so the fetch skips TLS verification (internal source).
+ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
+ARG COFLAT_GIT_REF=main
+ARG COSHEAF_GIT_SHA=unknown
 
 RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,id=cosheaf-apt-lib,target=/var/lib/apt,sharing=locked \
@@ -27,9 +32,10 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
   && apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git python3 make g++ pkg-config rsync
 
-RUN git init coflat \
+RUN echo "coflat ${COFLAT_GIT_REF} for cosheaf ${COSHEAF_GIT_SHA}" \
+  && git init coflat \
   && git -C coflat remote add origin "$COFLAT_GIT_REPO" \
-  && git -C coflat fetch --depth 1 origin "$COFLAT_GIT_REF" \
+  && git -C coflat -c http.sslVerify=false fetch --depth 1 origin "$COFLAT_GIT_REF" \
   && git -C coflat checkout --detach FETCH_HEAD
 
 COPY . ./cosheaf
