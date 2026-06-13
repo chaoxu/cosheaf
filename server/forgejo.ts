@@ -604,7 +604,10 @@ export class Forgejo {
   }
 
   async listPullFiles(owner: string, repo: string, index: number): Promise<ForgejoPullFile[]> {
-    return this.req<ForgejoPullFile[]>(this.repoPath(owner, repo, `pulls/${index}/files`));
+    // Page-walk: Forgejo caps this list at its page size, so a PR with more
+    // changed files than one page would otherwise silently drop the overflow
+    // from the files view and break review-comment line mapping.
+    return this.pagedList<ForgejoPullFile>(this.repoPath(owner, repo, `pulls/${index}/files`));
   }
 
   async listPullCommits(owner: string, repo: string, index: number): Promise<ForgejoCommit[]> {

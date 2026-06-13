@@ -13,7 +13,7 @@ import { seedAuthUser } from "../test-helpers.js";
 import { classifyMergeFailure, pulls } from "./pulls.js";
 import { branches } from "./branches.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { fakeForgejo, freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("pulls");
 
@@ -528,6 +528,45 @@ describe("pulls + branches routes", () => {
       expect(submit.status).toBe(400);
       expect(comment.status).toBe(400);
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /pulls/:n/comments line/side mapping", () => {
+    const addedFile = ["diff --git a/new.md b/new.md", "new file mode 100644", "--- /dev/null", "+++ b/new.md", "@@ -0,0 +1,2 @@", "+alpha", "+beta"].join("\n");
+    const deletedFile = ["diff --git a/gone.md b/gone.md", "deleted file mode 100644", "--- a/gone.md", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-x", "-y"].join("\n");
+    const comment = (over: Record<string, unknown>) => ({
+      id: 1, pull_request_review_id: 9, path: "new.md", body: "note", position: 1, original_position: 1,
+      commit_id: "c", original_commit_id: "c", diff_hunk: "", user: { id: 2, login: "bob" },
+      created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z", ...over,
+    });
+
+    it("maps position to file line+side and flags outdated / deleted-file fallbacks", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "read");
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", (c) => c.json([
+          comment({ id: 1, path: "new.md", position: 1, original_position: 1 }),            // live head comment
+          comment({ id: 2, path: "new.md", position: null, original_position: 1 }),         // outdated, line via original_position
+          comment({ id: 3, path: "gone.md", position: null, original_position: null }),     // no position resolves -> deleted-file side fallback
+        ]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/files", (c) => c.json([
+          { filename: "new.md", status: "added", additions: 2, deletions: 0, changes: 2 },
+          { filename: "gone.md", status: "deleted", additions: 0, deletions: 2, changes: 2 },
+        ]));
+        forge.get("/api/v1/repos/owner/w/pulls/7.diff", (c) => c.text(`${addedFile}\n${deletedFile}`));
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const { comments } = (await res.json()) as { comments: Array<{ id: number; line: number | null; side: string; outdated: boolean; author_username: string }> };
+      expect(comments.find((c) => c.id === 1)).toMatchObject({ line: 1, side: "head", outdated: false, author_username: "bob" });
+      // outdated comment still resolves a line via original_position
+      expect(comments.find((c) => c.id === 2)).toMatchObject({ line: 1, side: "head", outdated: true });
+      // no position resolves -> line null, side falls back to base for a deleted file
+      expect(comments.find((c) => c.id === 3)).toMatchObject({ line: null, side: "base", outdated: true });
     });
   });
 

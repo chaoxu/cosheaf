@@ -98,6 +98,24 @@ describe("searchAllAccessibleRepos", () => {
   });
 });
 
+describe("listPullFiles", () => {
+  it("page-walks so a PR with more files than one page is not truncated", async () => {
+    const file = (n: number) => ({ filename: `f${n}.md`, status: "modified", additions: 1, deletions: 0, changes: 1 });
+    const pages: Record<string, unknown[]> = {
+      "1": Array.from({ length: 50 }, (_, i) => file(i)),
+      "2": [file(50)],
+    };
+    fetchMock.mockImplementation(
+      fakeForgejo((forge: Hono) => {
+        forge.get("/api/v1/repos/owner/repo/pulls/7/files", (c) => c.json(pages[c.req.query("page") ?? "1"] ?? []));
+      }),
+    );
+    const files = await client().listPullFiles("owner", "repo", 7);
+    expect(files).toHaveLength(51);
+    expect(files[50].filename).toBe("f50.md");
+  });
+});
+
 describe("removeCollaborator", () => {
   it("DELETEs the collaborator and resolves on 204", async () => {
     let seen = "";
