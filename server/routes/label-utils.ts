@@ -7,6 +7,14 @@ function labelScope(label: ForgejoLabel): string | null {
   return slash > 0 ? label.name.slice(0, slash) : null;
 }
 
+// Normalize a label color from user input: trim, drop a leading '#', and
+// validate it's six hex digits. Returns the bare hex color, or null when
+// invalid so callers can return their own error shape (JSON vs error page).
+export function normalizeLabelColor(raw: string): string | null {
+  const color = raw.trim().replace(/^#/, "");
+  return /^[0-9a-fA-F]{6}$/.test(color) ? color : null;
+}
+
 export function toLabel(label: ForgejoLabel): Label {
   return {
     id: label.id,

@@ -23,6 +23,7 @@ import {
 import { is404 } from "../forgejo-errors.js";
 import { html, type Html } from "./web-html.js";
 import { labelChip, repoPageShell } from "./web-page.js";
+import { normalizeLabelColor } from "./label-utils.js";
 import { pageShell } from "./web-shell.js";
 
 export function registerSettingsRoutes(web: Hono<AppEnv>): void {
@@ -84,11 +85,11 @@ web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
 web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();
   const name = stringField(form.name);
-  const color = (stringField(form.color) ?? "").replace(/^#/, "");
+  const color = normalizeLabelColor(stringField(form.color) ?? "");
   const description = textField(form.description) ?? "";
   const exclusive = stringField(form.exclusive) === "on";
   if (!name) return badRequestPage(ctx.user, "Label name is required.");
-  if (!/^[0-9a-fA-F]{6}$/.test(color)) return badRequestPage(ctx.user, "Label color must be six hex digits.");
+  if (color === null) return badRequestPage(ctx.user, "Label color must be six hex digits.");
   await ctx.fj.createLabel(ctx.owner, ctx.repo, { name, color, description, exclusive });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
@@ -107,9 +108,9 @@ web.post("/:owner/:repo/settings/labels/:id/edit", webRouteForAdmin(async (c, ct
   if (!id) return badRequestPage(ctx.user, "Invalid label.");
   const form = await c.req.parseBody();
   const name = stringField(form.name);
-  const color = (stringField(form.color) ?? "").replace(/^#/, "");
+  const color = normalizeLabelColor(stringField(form.color) ?? "");
   if (!name) return badRequestPage(ctx.user, "Label name is required.");
-  if (!/^[0-9a-fA-F]{6}$/.test(color)) return badRequestPage(ctx.user, "Label color must be six hex digits.");
+  if (color === null) return badRequestPage(ctx.user, "Label color must be six hex digits.");
   await ctx.fj.editLabel(ctx.owner, ctx.repo, id, {
     name,
     color,

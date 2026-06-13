@@ -20,7 +20,7 @@ import type {
   Milestone,
   TimelineEvent,
 } from "../../shared/issues.js";
-import { toLabel, validateLabelSelection } from "./label-utils.js";
+import { normalizeLabelColor, toLabel, validateLabelSelection } from "./label-utils.js";
 import { bad, notFound } from "./responses.js";
 import { parseListState } from "./query-params.js";
 
@@ -341,9 +341,9 @@ issues.post("/:owner/:repo/labels", async (c) => {
     exclusive?: unknown;
   } | null;
   const name = typeof body?.name === "string" ? body.name.trim() : "";
-  const color = typeof body?.color === "string" ? body.color.trim().replace(/^#/, "") : "";
+  const color = normalizeLabelColor(typeof body?.color === "string" ? body.color : "");
   if (!name) return c.json(...bad("label name required"));
-  if (!/^[0-9a-fA-F]{6}$/.test(color)) return c.json(...bad("label color must be six hex digits"));
+  if (color === null) return c.json(...bad("label color must be six hex digits"));
   const { fj, owner, repo } = c.get("repoCtx");
   const label = await fj.createLabel(owner, repo, {
     name,
@@ -370,8 +370,8 @@ issues.patch("/:owner/:repo/labels/:id", async (c) => {
     patch.name = name;
   }
   if (typeof body?.color === "string") {
-    const color = body.color.trim().replace(/^#/, "");
-    if (!/^[0-9a-fA-F]{6}$/.test(color)) return c.json(...bad("label color must be six hex digits"));
+    const color = normalizeLabelColor(body.color);
+    if (color === null) return c.json(...bad("label color must be six hex digits"));
     patch.color = color;
   }
   if (typeof body?.description === "string") patch.description = body.description;
