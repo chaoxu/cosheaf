@@ -1,4 +1,4 @@
-import { renderToHtml, hydrateMath, hydrateReaderHoverPreviews } from "@chaoxu/coflat/reader";
+import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews } from "@chaoxu/coflat/reader";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import {
   REF_BUTTON_CLASS,
@@ -41,7 +41,25 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // (theorems/equations). Resolved crossref anchors keep their data-ref-key, so
   // the installer attaches to them; source-based previews use the document source.
   hydrateReaderHoverPreviews(root, { source: payload.source, context: ctx });
+  // Section + block (theorem) collapse toggles (#115). Without this the
+  // disclosure controls render but never get behavior.
+  hydrateReaderDisclosures(root);
   buildReaderToc(root);
+  // The browser's native fragment jump fired before this island swapped the
+  // rendered document in, so it missed; re-apply it now that the heading exists
+  // (#114). Scrolls within .app-content, the only scroll container.
+  applyHashScroll(root);
+}
+
+// Re-scroll to a heading-fragment deep link after the island renders. The
+// document is client-rendered, so on initial load the native hash jump fires
+// against an empty placeholder; once the real (tall) content is in the DOM we
+// land the target ourselves.
+function applyHashScroll(root: HTMLElement): void {
+  const id = decodeURIComponent(location.hash.slice(1));
+  if (!id) return;
+  const target = root.querySelector(`#${CSS.escape(id)}`);
+  if (target instanceof HTMLElement) target.scrollIntoView({ block: "start" });
 }
 
 // Fill the file reader's table-of-contents rail from the rendered document
