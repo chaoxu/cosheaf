@@ -5,7 +5,7 @@ import { AUTH_COOKIE } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { allDocumentFormats } from "../format-registry.js";
-import { DEFAULT_DOCUMENT_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
+import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
@@ -167,7 +167,7 @@ web.get("/new", async (c) => {
                   <span>Document format</span>
                   <select name="default_md_format" data-testid="new-repo-format">
                     ${allDocumentFormats().map(
-                      (f) => html`<option value="${f.id}" ${f.id === DEFAULT_DOCUMENT_FORMAT_ID ? "selected" : ""}>${f.id}</option>`,
+                      (f) => html`<option value="${f.id}" ${f.id === DEFAULT_CREATE_FORMAT_ID ? "selected" : ""}>${f.id}</option>`,
                     )}
                   </select>
                 </label>
@@ -190,7 +190,7 @@ web.post("/new", async (c) => {
   const form = await c.req.parseBody();
   const slug = stringField(form.slug)?.trim();
   const name = stringField(form.name)?.trim();
-  const formatRaw = stringField(form.default_md_format);
+  const formatRaw = stringField(form.default_md_format) ?? undefined;
   if (!slug || !name) return redirect("/new?error=name+and+display+name+required");
   if (!WORKSPACE_SLUG_RE.test(slug)) return redirect("/new?error=invalid+repository+name");
   if (formatRaw !== undefined && !isDocumentFormatId(formatRaw)) {

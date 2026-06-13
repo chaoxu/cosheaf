@@ -7,7 +7,7 @@ import { deletePage, indexPage } from "./indexer.js";
 import type { User } from "./users.js";
 import { workspaceSlug } from "../shared/conventions.js";
 import {
-  DEFAULT_DOCUMENT_FORMAT_ID,
+  DEFAULT_CREATE_FORMAT_ID,
   type DocumentFormatId,
   documentFormatFromTopics,
   isFormatTopic,
@@ -114,7 +114,7 @@ export async function provisionWorkspace(
   let workspace: Workspace;
   try {
     const formatId = normalizeDocumentFormatId(
-      options.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
+      options.defaultMdFormat ?? DEFAULT_CREATE_FORMAT_ID,
     );
     await setWorkspaceFormatTopic(forgejo, owner, repoName, formatId);
     workspace = { owner, repo: repoName, slug: workspaceSlug(owner, repoName), defaultMdFormat: formatId };

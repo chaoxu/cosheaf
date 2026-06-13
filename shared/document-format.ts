@@ -3,7 +3,16 @@ export const FORGEJO_PASSTHROUGH_FORMAT_ID = "forgejo-passthrough";
 
 export type DocumentFormatId = typeof COFLAT_FORMAT_ID | typeof FORGEJO_PASSTHROUGH_FORMAT_ID;
 
+// Fallback format for a repo with no `cosheaf-format-*` topic. Untagged repos
+// are plain Forgejo repos (including ones not created through cosheaf), so they
+// render as Forgejo Markdown, not Coflat.
 export const DEFAULT_DOCUMENT_FORMAT_ID: DocumentFormatId = FORGEJO_PASSTHROUGH_FORMAT_ID;
+
+// Default format when CREATING a workspace through cosheaf (the /new form, the
+// workspace API, and CLI seed). Cosheaf is a Coflat knowledge base, so new
+// workspaces are Coflat unless the creator picks otherwise. This is distinct
+// from DEFAULT_DOCUMENT_FORMAT_ID, which only governs untagged existing repos.
+export const DEFAULT_CREATE_FORMAT_ID: DocumentFormatId = COFLAT_FORMAT_ID;
 
 export function isDocumentFormatId(value: unknown): value is DocumentFormatId {
   return value === COFLAT_FORMAT_ID || value === FORGEJO_PASSTHROUGH_FORMAT_ID;

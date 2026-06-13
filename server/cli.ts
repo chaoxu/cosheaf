@@ -17,7 +17,7 @@ import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
 import { listVisibleWorkspaceRepos } from "./workspace-discovery.js";
 import {
   COFLAT_FORMAT_ID,
-  DEFAULT_DOCUMENT_FORMAT_ID,
+  DEFAULT_CREATE_FORMAT_ID,
   documentFormatFromTopics,
   isDocumentFormatId,
   isFormatTopic,
@@ -132,7 +132,7 @@ function addSeedOptions(command: Command): Command {
     .requiredOption("--password <password>", "Forgejo password for --user")
     .requiredOption("--workspace <owner/repo>", "workspace as <owner>/<repo>")
     .option("--workspace-name <name>", "workspace display name; defaults to the repo name")
-    .option("--default-md-format <id>", "workspace markdown format", DEFAULT_DOCUMENT_FORMAT_ID)
+    .option("--default-md-format <id>", "workspace markdown format", DEFAULT_CREATE_FORMAT_ID)
     .option("--profile <profile>", `seed profile (${SEED_PROFILES.join("|")})`, "all");
 }
 
@@ -156,7 +156,7 @@ export function normalizeSeedOptions(opts: {
   if (!WORKSPACE_SLUG_RE.test(parsed.repo)) {
     throw new InvalidArgumentError(`workspace repo name must match ${WORKSPACE_SLUG_RE}`);
   }
-  const defaultMdFormat = opts.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID;
+  const defaultMdFormat = opts.defaultMdFormat ?? DEFAULT_CREATE_FORMAT_ID;
   if (!isDocumentFormatId(defaultMdFormat)) {
     throw new InvalidArgumentError(`--default-md-format must be a known DocumentFormatId, got: ${defaultMdFormat}`);
   }

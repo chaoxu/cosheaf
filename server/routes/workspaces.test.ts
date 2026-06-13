@@ -134,8 +134,9 @@ describe("POST /api/v1/workspaces", () => {
     expect(body.repo).toBe("new-ws");
     expect(body.full_name).toBe("chao/new-ws");
     expect(body.name).toBe("New workspace");
-    expect(body.default_md_format).toBe("forgejo-passthrough");
-    expect(topicPutBody).toEqual({ topics: ["cosheaf-format-forgejo-passthrough"] });
+    // Workspaces created through cosheaf default to coflat (DEFAULT_CREATE_FORMAT_ID).
+    expect(body.default_md_format).toBe("coflat");
+    expect(topicPutBody).toEqual({ topics: ["cosheaf-format-coflat"] });
   });
 
   it("creates under an explicit owner via the org endpoint", async () => {

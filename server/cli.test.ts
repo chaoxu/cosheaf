@@ -15,7 +15,7 @@ describe("cli seed parsing", () => {
       owner: "chao",
       repo: "notes",
       workspaceName: "notes",
-      defaultMdFormat: "forgejo-passthrough",
+      defaultMdFormat: "coflat",
       profile: "all",
     });
   });
