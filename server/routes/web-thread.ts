@@ -470,17 +470,20 @@ export async function renderPullTimeline(
 // Subtle edit/delete affordance: a small pencil that only appears on comment
 // hover (see .comment-actions CSS) and floats at the comment's top-right.
 // Clicking it opens the inline edit + delete forms.
-function commentActions(opts: { testId: string; editAction: string; deleteAction: string; body: string; deleteHidden?: Html }): Html {
+function commentActions(opts: { testId: string; formId: string; editAction: string; deleteAction: string; body: string; deleteHidden?: Html }): Html {
+  // Save and Delete share one action row even though they POST to different
+  // endpoints: the Delete button lives in the edit form's row but targets the
+  // separate (empty) delete form via the HTML `form=` attribute.
   return html`<details class="comment-actions" data-testid="${opts.testId}">
     <summary title="Edit or delete" aria-label="Edit or delete comment"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></summary>
     <form method="post" action="${opts.editAction}">
       <textarea name="body" required>${opts.body}</textarea>
-      <button class="button small primary" type="submit">Save</button>
+      <div class="comment-action-row">
+        <button class="button small primary" type="submit">Save</button>
+        <button class="button small danger" type="submit" form="${opts.formId}">Delete</button>
+      </div>
     </form>
-    <form method="post" action="${opts.deleteAction}">
-      ${opts.deleteHidden ?? emptyHtml}
-      <button class="button small danger" type="submit">Delete</button>
-    </form>
+    <form id="${opts.formId}" method="post" action="${opts.deleteAction}">${opts.deleteHidden ?? emptyHtml}</form>
   </details>`;
 }
 
@@ -488,6 +491,7 @@ function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueC
   if (ctx.ws.role === "read") return emptyHtml;
   return commentActions({
     testId: "issue-comment-actions",
+    formId: `comment-del-${comment.id}`,
     editAction: repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/edit`),
     deleteAction: repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/delete`),
     body: comment.body,
@@ -498,6 +502,7 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
   if (ctx.ws.role === "read") return emptyHtml;
   return commentActions({
     testId: "pull-comment-actions",
+    formId: `comment-del-${comment.id}`,
     editAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`),
     deleteAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/delete`),
     body: comment.body,

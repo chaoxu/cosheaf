@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { onForgejo404 } from "../forgejo-errors.js";
-import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
+import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone, ForgejoUser } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue, stripChatMetadata } from "./web-chat.js";
@@ -27,7 +27,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
-import { labelChip, labelChips, repoPageShell, selected, sortField, stateToggle } from "./web-page.js";
+import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
 import {
   chatIssueReadOnlyPage,
   issueEditPage,
@@ -44,7 +44,7 @@ import {
 export function registerIssueRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
   const filters = parseIssueListFilters(c);
-  const [issues, labels, milestones] = await Promise.all([
+  const [issues, labels, milestones, collaborators] = await Promise.all([
     ctx.fj.listIssues(ctx.owner, ctx.repo, {
       state: filters.state,
       limit: 50,
@@ -58,6 +58,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
     }),
     ctx.fj.listLabels(ctx.owner, ctx.repo),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
+    ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "issues", `Issues - ${ctx.repo}`, html`
@@ -65,7 +66,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
           <div><p class="eyebrow">${filters.state}</p><h1>Issues</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
-        ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
+        ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
         ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
       `),
   );
@@ -412,9 +413,11 @@ function issueFilterForm(
   filters: IssueListFilters,
   labels: readonly ForgejoLabel[],
   milestones: readonly ForgejoMilestone[],
+  collaborators: readonly ForgejoUser[],
 ): Html {
   const action = repoHref(owner, repo, "/issues");
   return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters">
+    ${usernameDatalist(collaborators)}
     <div class="filter-basic">
       ${stateToggle(filters.state)}
       <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search issues"></label>
@@ -439,9 +442,9 @@ function issueFilterForm(
             ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="created_by" value="${filters.createdBy}" placeholder="username" aria-label="Author filter"></label>
-        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" placeholder="username" aria-label="Assignee filter"></label>
-        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" placeholder="username" aria-label="Mentioned filter"></label>
+        <label>Author <input name="created_by" value="${filters.createdBy}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Author filter"></label>
+        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Assignee filter"></label>
+        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Mentioned filter"></label>
       </div>
     </details>
   </form>`;

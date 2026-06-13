@@ -19,6 +19,14 @@ export function addDisclosure(label: string, form: Html): Html {
   </details>`;
 }
 
+// Shared <datalist> of repo collaborators for the filter-bar username inputs
+// (Author/Assignee/Mentioned). Native datalist gives type-to-filter with no
+// island; the fields stay free-text for usernames not in the collaborator set.
+export const USERNAME_DATALIST_ID = "repo-usernames";
+export function usernameDatalist(collaborators: readonly ForgejoUser[]): Html {
+  return html`<datalist id="${USERNAME_DATALIST_ID}">${collaborators.map((u) => html`<option value="${u.login}"></option>`)}</datalist>`;
+}
+
 const REPO_TABS = [
   ["files", "Files", ""],
   ["issues", "Issues", "/issues"],
@@ -69,6 +77,10 @@ export function repoPage(opts: {
     readerAssets: opts.readerAssets,
     sidebar: html`
       <a class="brand" href="/">Cosheaf</a>
+      <nav class="sidebar-topnav">
+        <a href="/">‹ Workspaces</a>
+        <a href="/account/settings">Account</a>
+      </nav>
       <div class="sidebar-workspace">
         <a href="${repoHref(opts.owner, opts.repo)}">${opts.owner}/${opts.repo}</a>
         <span class="role">${opts.ws.role}</span>

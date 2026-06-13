@@ -85,11 +85,7 @@ web.get("/", async (c) => {
       sidebar: globalSidebar("workspaces"),
       body: html`
         <main class="page">
-          <div class="page-title">
-            <div>
-              <p class="eyebrow">Repositories</p>
-              <h1>${auth.user.username}</h1>
-            </div>
+          <div class="page-title page-title--actions-only">
             <a class="button primary" href="/new" data-testid="new-repo">New repository</a>
           </div>
           ${inboxSection(inbox)}
