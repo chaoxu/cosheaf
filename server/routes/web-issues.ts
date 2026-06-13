@@ -119,7 +119,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
-  const main = html`${threadParticipantsBar(issue, comments)}
+  const main = html`${threadParticipantsBar(issue.user?.login, comments)}
     <div class="issue-document">${body}</div>
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${

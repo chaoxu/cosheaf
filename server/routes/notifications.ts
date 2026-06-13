@@ -17,6 +17,16 @@ function numberFromSubjectUrl(url: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Map a batch of Forgejo notification threads to cosheaf NotificationRows,
+// dropping non-Issue/Pull subjects and sorting newest first. Shared by the
+// typed repo route and the home inbox.
+export function mapThreads(threads: readonly ForgejoNotificationThread[]): NotificationRow[] {
+  return threads
+    .map(mapThread)
+    .filter((row): row is NotificationRow => row !== null)
+    .sort((a, b) => b.updated_at - a.updated_at);
+}
+
 export function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
   const subjectType = t.subject.type;
   const kind: "issue" | "pr" | null =
@@ -43,11 +53,7 @@ notifications.get("/:owner/:repo/notifications", async (c) => {
     statusTypes: ["unread"],
     subjectTypes: ["Issue", "Pull"],
   });
-  const mapped = threads
-    .map(mapThread)
-    .filter((x): x is NonNullable<ReturnType<typeof mapThread>> => x !== null)
-    .sort((a, b) => b.updated_at - a.updated_at);
-  return c.json({ notifications: mapped });
+  return c.json({ notifications: mapThreads(threads) });
 });
 
 // POST /api/v1/repos/:owner/:repo/notifications/:id/read

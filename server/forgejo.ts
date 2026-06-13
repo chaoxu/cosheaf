@@ -104,6 +104,22 @@ function repoBody(opts: CreateRepoOpts) {
   };
 }
 
+export interface NotificationListOpts {
+  all?: boolean;
+  limit?: number;
+  statusTypes?: Array<"unread" | "read" | "pinned">;
+  subjectTypes?: Array<"Issue" | "Pull" | "Commit" | "Repository">;
+}
+
+function notificationQuery(opts: NotificationListOpts): Record<string, string | number | undefined> {
+  return {
+    all: opts.all ? "true" : undefined,
+    "status-types": opts.statusTypes?.join(","),
+    "subject-type": opts.subjectTypes?.join(","),
+    limit: opts.limit ?? 50,
+  };
+}
+
 export class Forgejo {
   constructor(private cfg: ForgejoConfig) {}
 
@@ -974,54 +990,32 @@ export class Forgejo {
   // List notification threads for the user this client is bound to, scoped to
   // a single repository. Filters map directly to Forgejo's repo notification
   // query params.
-  async listRepoNotifications(
-    owner: string,
-    repo: string,
-    opts: {
-      all?: boolean;
-      limit?: number;
-      statusTypes?: Array<"unread" | "read" | "pinned">;
-      subjectTypes?: Array<"Issue" | "Pull" | "Commit" | "Repository">;
-    } = {},
-  ): Promise<ForgejoNotificationThread[]> {
-    return this.req<ForgejoNotificationThread[]>(
-      this.repoPath(owner, repo, `notifications`),
-      {
-        query: {
-          all: opts.all ? "true" : undefined,
-          "status-types": opts.statusTypes?.join(","),
-          "subject-type": opts.subjectTypes?.join(","),
-          limit: opts.limit ?? 50,
-        },
-      },
-    );
+  async listRepoNotifications(owner: string, repo: string, opts: NotificationListOpts = {}): Promise<ForgejoNotificationThread[]> {
+    return this.req<ForgejoNotificationThread[]>(this.repoPath(owner, repo, `notifications`), {
+      query: notificationQuery(opts),
+    });
   }
 
   // Account-level notifications across every repo the user can see. Forgejo's
   // GET /notifications is already global, so this is the cross-repo inbox that
   // the per-repo listRepoNotifications can't give.
-  async listNotifications(
-    opts: {
-      all?: boolean;
-      limit?: number;
-      statusTypes?: Array<"unread" | "read" | "pinned">;
-      subjectTypes?: Array<"Issue" | "Pull" | "Commit" | "Repository">;
-    } = {},
-  ): Promise<ForgejoNotificationThread[]> {
-    return this.req<ForgejoNotificationThread[]>("/api/v1/notifications", {
-      query: {
-        all: opts.all ? "true" : undefined,
-        "status-types": opts.statusTypes?.join(","),
-        "subject-type": opts.subjectTypes?.join(","),
-        limit: opts.limit ?? 50,
-      },
-    });
+  async listNotifications(opts: NotificationListOpts = {}): Promise<ForgejoNotificationThread[]> {
+    return this.req<ForgejoNotificationThread[]>("/api/v1/notifications", { query: notificationQuery(opts) });
   }
 
   async markNotificationRead(id: number): Promise<void> {
     await this.req(`/api/v1/notifications/threads/${id}`, {
       method: "PATCH",
       query: { "to-status": "read" },
+      expectEmpty: true,
+    });
+  }
+
+  // Bulk mark every unread notification (across all repos) read.
+  async markAllNotificationsRead(): Promise<void> {
+    await this.req("/api/v1/notifications", {
+      method: "PUT",
+      query: { "status-types": "unread", "to-status": "read" },
       expectEmpty: true,
     });
   }

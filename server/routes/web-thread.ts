@@ -252,7 +252,12 @@ export async function labelSelectionPatch(
   return { ok: true, labels: labelIds };
 }
 
-export function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly ForgejoLabel[]): Html {
+export function pullEditPage(
+  ctx: WebCtx,
+  pull: ForgejoPull,
+  allLabels: readonly ForgejoLabel[],
+  milestones: readonly ForgejoMilestone[],
+): Html {
   return threadEditPage({
     ctx,
     kind: "pull request",
@@ -261,6 +266,7 @@ export function pullEditPage(ctx: WebCtx, pull: ForgejoPull, allLabels: readonly
     body: pull.body ?? "",
     allLabels,
     currentLabels: pull.labels ?? [],
+    milestones: { all: milestones, current: pull.milestone?.id ?? null },
     backHref: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`),
     action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`),
     testId: "pull-edit-form",
@@ -358,19 +364,22 @@ export function tint(login: string | null | undefined): number {
 }
 
 function avatarChip(login: string | null | undefined): Html {
-  return html`<span class="avatar-chip avatar-chip--${tint(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
+  // role=img + aria-label so each chip announces the participant to a screen
+  // reader (the visible title stays for mouse hover).
+  return html`<span class="avatar-chip avatar-chip--${tint(login)}" role="img" aria-label="${displayLogin(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
 }
 
-// Participants bar at the top of an issue thread: who has taken part, the reply
-// count, last activity, and a jump-to-latest anchor (targets #thread-bottom by
-// the composer). All computed from data already fetched.
+// Participants bar at the top of an issue/PR thread: who has taken part, the
+// reply count, last activity, and a jump-to-latest anchor (targets
+// #thread-bottom by the composer). Generic over issue/PR comment shapes so both
+// thread kinds reuse it; all computed from data already fetched.
 export function threadParticipantsBar(
-  issue: ForgejoIssue,
-  comments: readonly ForgejoIssueComment[],
+  authorLogin: string | null | undefined,
+  comments: readonly { user?: { login?: string } | null; created_at?: string }[],
 ): Html {
   const seen = new Set<string>();
   const participants: string[] = [];
-  for (const login of [issue.user?.login, ...comments.map((c) => c.user?.login)]) {
+  for (const login of [authorLogin, ...comments.map((c) => c.user?.login)]) {
     if (login && !seen.has(login)) {
       seen.add(login);
       participants.push(login);
@@ -380,7 +389,7 @@ export function threadParticipantsBar(
   return html`<div class="thread-bar" data-testid="thread-bar">
     <span class="thread-faces" aria-label="Participants">${participants.map((login) => avatarChip(login))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
-      last ? html` · last ${formatDate(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
+      last?.created_at ? html` · last ${formatDate(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
     }</span>
     ${comments.length ? html`<a class="thread-jump" href="#thread-bottom">Jump to latest ↓</a>` : emptyHtml}
   </div>`;

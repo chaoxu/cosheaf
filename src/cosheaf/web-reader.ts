@@ -48,7 +48,10 @@ function buildReaderToc(root: HTMLElement): void {
   if (!slot) return;
   const headings = [...root.querySelectorAll<HTMLElement>("h1, h2, h3")];
   if (headings.length < 2) return;
+  // Seed with the document's pre-existing heading ids first, so a generated
+  // slug can never collide with a coflat-assigned id that appears later.
   const used = new Set<string>();
+  for (const heading of headings) if (heading.id) used.add(heading.id);
   const items = headings.map((heading) => {
     if (!heading.id) {
       const base =
@@ -57,8 +60,8 @@ function buildReaderToc(root: HTMLElement): void {
       let id = base;
       for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
       heading.id = id;
+      used.add(id);
     }
-    used.add(heading.id);
     return { id: heading.id, text: heading.textContent?.trim() ?? "", level: Number(heading.tagName.slice(1)) };
   });
   const minLevel = Math.min(...items.map((item) => item.level));

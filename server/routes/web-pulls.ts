@@ -54,6 +54,7 @@ import {
   reviewForms,
   reviewRequestPanel,
   threadLayout,
+  threadParticipantsBar,
 } from "./web-thread.js";
 
 export function registerPullRoutes(web: Hono<AppEnv>): void {
@@ -183,12 +184,11 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
             </nav>
           </header>
           ${threadLayout(
-            html`<div class="comment">
-                <div class="comment-meta">${displayLogin(pull.user?.login)}</div>
-                ${body.length ? body : html`<p>No description.</p>`}
-              </div>
+            html`${threadParticipantsBar(pull.user?.login, comments)}
+              <div class="issue-document">${body.length ? body : html`<p>No description.</p>`}</div>
               ${timelineHtml}
-              ${reviewForms(ctx, pull)}`,
+              ${reviewForms(ctx, pull)}
+              <span id="thread-bottom"></span>`,
             html`${labelsRailPanel(pull.labels ?? [])}
               ${reviewRequestPanel(ctx, pull, availableReviewers)}`,
           )}
@@ -202,9 +202,12 @@ web.get("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
-  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
+  const [allLabels, milestones] = await Promise.all([
+    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
+  ]);
   return htmlResponse(
-    repoPageShell(ctx, "pulls", `Edit #${pull.number} - ${ctx.repo}`, pullEditPage(ctx, pull, allLabels)),
+    repoPageShell(ctx, "pulls", `Edit #${pull.number} - ${ctx.repo}`, pullEditPage(ctx, pull, allLabels, milestones)),
   );
 }));
 
@@ -218,7 +221,14 @@ web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => 
   if (!title || body === null) return badRequestPage(ctx.user, "Pull request title and description are required.");
   const labelPatch = await labelSelectionPatch(ctx, form, pull.labels ?? []);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
-  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { title, body, labels: labelPatch.labels });
+  const milestoneRaw = stringField(form.milestone);
+  const milestone = milestoneRaw != null ? (positiveInt(milestoneRaw) ?? 0) : undefined;
+  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, {
+    title,
+    body,
+    labels: labelPatch.labels,
+    ...(milestone !== undefined ? { milestone } : {}),
+  });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 

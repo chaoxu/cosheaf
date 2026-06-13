@@ -139,12 +139,13 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
-  // Rendered markdown gets a sticky table-of-contents rail (filled client-side
-  // by the reader island from the document's headings). Other file kinds and
-  // the source view render without the rail.
+  // Coflat-rendered markdown gets a sticky table-of-contents rail (filled by the
+  // reader island from the document's headings). Only the coflat reader island
+  // runs, so the rail is gated on the coflat format; the nav stays hidden (and
+  // its grid track collapses to 0) for docs with too few headings.
   const preview = filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView });
   const docBody =
-    kind === "markdown" && !sourceView && rendered !== null
+    kind === "markdown" && !sourceView && rendered !== null && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
       ? html`<div class="doc-with-toc">
           <div class="doc-main">${preview}</div>
           <nav class="doc-toc" data-reader-toc aria-label="On this page" hidden></nav>

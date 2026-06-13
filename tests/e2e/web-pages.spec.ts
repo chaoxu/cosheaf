@@ -206,7 +206,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".comment").filter({ hasText: "issue comment before edit" })).toBeVisible();
   await page.getByTestId("issue-comment-actions").last().locator("summary").click();
   await page.getByTestId("issue-comment-actions").last().locator('textarea[name="body"]').fill("issue comment after edit");
-  await page.getByTestId("issue-comment-actions").last().getByRole("button", { name: "Save comment" }).click();
+  await page.getByTestId("issue-comment-actions").last().getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".comment").filter({ hasText: "issue comment after edit" })).toBeVisible();
 
   await page.goto(`${repoBase}/pulls`);

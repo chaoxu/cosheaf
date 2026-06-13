@@ -11,7 +11,7 @@ import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
 import { badRequestPage, configReposForUser, htmlResponse, positiveInt, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
-import { mapThread } from "./notifications.js";
+import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
@@ -77,7 +77,7 @@ web.get("/", async (c) => {
     // "what needs my attention anywhere" inbox the per-repo tab can't give.
     c.get("fjUser").listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] }).catch(() => []),
   ]);
-  const inbox = threads.map(mapThread).filter((row): row is NotificationRow => row !== null);
+  const inbox = mapThreads(threads);
   return htmlResponse(
     pageShell({
       title: "Repositories",
@@ -118,7 +118,11 @@ web.get("/", async (c) => {
 function inboxSection(rows: readonly NotificationRow[]): Html {
   if (rows.length === 0) return emptyHtml;
   return html`<section class="inbox" data-testid="home-inbox">
-    <div class="inbox-head"><h2>Inbox</h2><span class="inbox-count">${rows.length} unread</span></div>
+    <div class="inbox-head">
+      <h2>Inbox</h2>
+      <span class="inbox-count">${rows.length} unread</span>
+      <form method="post" action="/account/notifications/read-all"><button class="button small" type="submit">Mark all read</button></form>
+    </div>
     <div class="list">
       ${rows.map(
         (row) => html`<div class="list-row inbox-row">
@@ -141,6 +145,13 @@ web.post("/account/notifications/:id/read", async (c) => {
   if (!auth) return redirect("/login");
   const id = positiveInt(c.req.param("id"));
   if (id) await c.get("fjUser").markNotificationRead(id).catch(() => {});
+  return redirect("/");
+});
+
+web.post("/account/notifications/read-all", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  await c.get("fjUser").markAllNotificationsRead().catch(() => {});
   return redirect("/");
 });
 
