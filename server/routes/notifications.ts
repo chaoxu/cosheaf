@@ -17,7 +17,7 @@ function numberFromSubjectUrl(url: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
+export function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
   const subjectType = t.subject.type;
   const kind: "issue" | "pr" | null =
     subjectType === "Issue" ? "issue" : subjectType === "Pull" ? "pr" : null;

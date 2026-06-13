@@ -997,6 +997,27 @@ export class Forgejo {
     );
   }
 
+  // Account-level notifications across every repo the user can see. Forgejo's
+  // GET /notifications is already global, so this is the cross-repo inbox that
+  // the per-repo listRepoNotifications can't give.
+  async listNotifications(
+    opts: {
+      all?: boolean;
+      limit?: number;
+      statusTypes?: Array<"unread" | "read" | "pinned">;
+      subjectTypes?: Array<"Issue" | "Pull" | "Commit" | "Repository">;
+    } = {},
+  ): Promise<ForgejoNotificationThread[]> {
+    return this.req<ForgejoNotificationThread[]>("/api/v1/notifications", {
+      query: {
+        all: opts.all ? "true" : undefined,
+        "status-types": opts.statusTypes?.join(","),
+        "subject-type": opts.subjectTypes?.join(","),
+        limit: opts.limit ?? 50,
+      },
+    });
+  }
+
   async markNotificationRead(id: number): Promise<void> {
     await this.req(`/api/v1/notifications/threads/${id}`, {
       method: "PATCH",

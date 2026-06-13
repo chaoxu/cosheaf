@@ -10,13 +10,15 @@ import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, configReposForUser, htmlResponse, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
+import { badRequestPage, configReposForUser, htmlResponse, positiveInt, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
+import { mapThread } from "./notifications.js";
+import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
 import { userPreferencesSection, userPreferencesScript, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
-import { html } from "./web-html.js";
+import { emptyHtml, html, type Html } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
 export const web = new Hono<AppEnv>();
@@ -69,7 +71,13 @@ web.post("/logout", (c) => {
 web.get("/", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
-  const repos = await configReposForUser(c);
+  const [repos, threads] = await Promise.all([
+    configReposForUser(c),
+    // Forgejo's account-level notifications are already cross-repo — the daily
+    // "what needs my attention anywhere" inbox the per-repo tab can't give.
+    c.get("fjUser").listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] }).catch(() => []),
+  ]);
+  const inbox = threads.map(mapThread).filter((row): row is NotificationRow => row !== null);
   return htmlResponse(
     pageShell({
       title: "Repositories",
@@ -84,6 +92,7 @@ web.get("/", async (c) => {
             </div>
             <a class="button primary" href="/new" data-testid="new-repo">New repository</a>
           </div>
+          ${inboxSection(inbox)}
           <div class="list">
             ${repos.length === 0
               ? html`<div class="empty">No repositories available.</div>`
@@ -101,6 +110,38 @@ web.get("/", async (c) => {
       `,
     }),
   );
+});
+
+// Cross-repo unread inbox on the home page. Each row links to the cosheaf
+// issue/PR route and carries a subtle mark-read action. Rendered only when
+// there are unread threads, so home stays clean when caught up.
+function inboxSection(rows: readonly NotificationRow[]): Html {
+  if (rows.length === 0) return emptyHtml;
+  return html`<section class="inbox" data-testid="home-inbox">
+    <div class="inbox-head"><h2>Inbox</h2><span class="inbox-count">${rows.length} unread</span></div>
+    <div class="list">
+      ${rows.map(
+        (row) => html`<div class="list-row inbox-row">
+          <a class="inbox-link" href="/${row.repo}/${row.kind === "pr" ? "pulls" : "issues"}/${row.number}">
+            <span class="inbox-kind ${row.kind}">${row.kind === "pr" ? "PR" : "issue"}</span>
+            <strong>${row.title}</strong>
+            <small>${row.repo} #${row.number}</small>
+          </a>
+          <form method="post" action="/account/notifications/${row.id}/read">
+            <button class="button small" type="submit" title="Mark read">Done</button>
+          </form>
+        </div>`,
+      )}
+    </div>
+  </section>`;
+}
+
+web.post("/account/notifications/:id/read", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const id = positiveInt(c.req.param("id"));
+  if (id) await c.get("fjUser").markNotificationRead(id).catch(() => {});
+  return redirect("/");
 });
 
 web.get("/account/settings", async (c) => {
