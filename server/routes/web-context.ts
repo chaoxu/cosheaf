@@ -1,12 +1,11 @@
 import type Database from "better-sqlite3";
 import type { Context } from "hono";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
-import type { Role } from "../../shared/roles.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat } from "../middleware.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
-import { listVisibleWorkspaceRepos } from "../workspace-discovery.js";
+import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { html, type Html, raw } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
@@ -75,14 +74,6 @@ export async function configReposForUser(c: Context<AppEnv>) {
       role: roleFromPermissions(repo.permissions),
     }))
     .filter((repo) => repo.role !== "none");
-}
-
-function roleFromPermissions(p: { admin?: boolean; push?: boolean; pull?: boolean } | undefined): Role | "none" {
-  if (!p) return "none";
-  if (p.admin) return "admin";
-  if (p.push) return "write";
-  if (p.pull) return "read";
-  return "none";
 }
 
 export { parseListState, type ListState as WebListState } from "./query-params.js";

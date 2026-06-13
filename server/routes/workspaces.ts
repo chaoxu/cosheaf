@@ -5,7 +5,7 @@ import { ROLES } from "../../shared/roles.js";
 import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { ForgejoError } from "../forgejo.js";
 import { invalidateWorkspacePermissionCache, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
-import { listVisibleWorkspaceRepos } from "../workspace-discovery.js";
+import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { setWorkspaceMember } from "../workspace-members.js";
 import {
@@ -17,14 +17,6 @@ import { bad, conflict, notFound } from "./responses.js";
 
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
-
-function roleFromPermissions(p: { admin?: boolean; push?: boolean; pull?: boolean } | undefined): Role | "none" {
-  if (!p) return "none";
-  if (p.admin) return "admin";
-  if (p.push) return "write";
-  if (p.pull) return "read";
-  return "none";
-}
 
 workspaces.get("/", async (c) => {
   // Workspaces are repos with a `cosheaf-format-*` topic, discovered across

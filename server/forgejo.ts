@@ -85,6 +85,25 @@ interface RequestOpts {
   expectEmpty?: boolean;
 }
 
+export interface CreateRepoOpts {
+  name: string;
+  description?: string;
+  private?: boolean;
+  auto_init?: boolean;
+  default_branch?: string;
+}
+
+// Shared request body for the three repo-creation endpoints (user, org, admin).
+function repoBody(opts: CreateRepoOpts) {
+  return {
+    name: opts.name,
+    description: opts.description ?? "",
+    private: opts.private ?? true,
+    auto_init: opts.auto_init ?? true,
+    default_branch: opts.default_branch ?? "main",
+  };
+}
+
 export class Forgejo {
   constructor(private cfg: ForgejoConfig) {}
 
@@ -198,62 +217,23 @@ export class Forgejo {
 
   // Site-admin only: create a repo on behalf of any user. Provisioning paths
   // that run without the owner's PAT (CLI seed) go through here.
-  async createRepoForUser(username: string, opts: {
-    name: string;
-    description?: string;
-    private?: boolean;
-    auto_init?: boolean;
-    default_branch?: string;
-  }): Promise<ForgejoRepo> {
+  async createRepoForUser(username: string, opts: CreateRepoOpts): Promise<ForgejoRepo> {
     return this.req<ForgejoRepo>(`/api/v1/admin/users/${encodeURIComponent(username)}/repos`, {
       method: "POST",
-      body: {
-        name: opts.name,
-        description: opts.description ?? "",
-        private: opts.private ?? true,
-        auto_init: opts.auto_init ?? true,
-        default_branch: opts.default_branch ?? "main",
-      },
+      body: repoBody(opts),
     });
   }
 
   // ---------------- repos ----------------
 
-  async createUserRepo(opts: {
-    name: string;
-    description?: string;
-    private?: boolean;
-    auto_init?: boolean;
-    default_branch?: string;
-  }): Promise<ForgejoRepo> {
-    return this.req<ForgejoRepo>("/api/v1/user/repos", {
-      method: "POST",
-      body: {
-        name: opts.name,
-        description: opts.description ?? "",
-        private: opts.private ?? true,
-        auto_init: opts.auto_init ?? true,
-        default_branch: opts.default_branch ?? "main",
-      },
-    });
+  async createUserRepo(opts: CreateRepoOpts): Promise<ForgejoRepo> {
+    return this.req<ForgejoRepo>("/api/v1/user/repos", { method: "POST", body: repoBody(opts) });
   }
 
-  async createOrgRepo(org: string, opts: {
-    name: string;
-    description?: string;
-    private?: boolean;
-    auto_init?: boolean;
-    default_branch?: string;
-  }): Promise<ForgejoRepo> {
+  async createOrgRepo(org: string, opts: CreateRepoOpts): Promise<ForgejoRepo> {
     return this.req<ForgejoRepo>(`/api/v1/orgs/${encodeURIComponent(org)}/repos`, {
       method: "POST",
-      body: {
-        name: opts.name,
-        description: opts.description ?? "",
-        private: opts.private ?? true,
-        auto_init: opts.auto_init ?? true,
-        default_branch: opts.default_branch ?? "main",
-      },
+      body: repoBody(opts),
     });
   }
 

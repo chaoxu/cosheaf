@@ -192,6 +192,12 @@ function migrateOwnerQualifySlugs(db: Database.Database): void {
   );
   for (const table of tables) {
     if (!existing.has(table)) continue;
+    // Skip the table-wide UPDATE on an already-migrated sidecar (the common
+    // case on every startup) — only rewrite if a legacy bare slug remains.
+    const hasLegacy = db
+      .prepare(`SELECT 1 FROM ${table} WHERE workspace_slug NOT LIKE '%/%' LIMIT 1`)
+      .get();
+    if (!hasLegacy) continue;
     db.prepare(`UPDATE ${table} SET workspace_slug = ? || '/' || workspace_slug WHERE workspace_slug NOT LIKE '%/%'`)
       .run(legacyOwner);
   }
