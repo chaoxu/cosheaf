@@ -77,10 +77,11 @@ export function repoPage(opts: {
 function tab(
   opts: { owner: string; repo: string; active: string },
   id: string,
-  label: string,
+  _label: string,
   suffix: string,
 ): Html {
-  return html`<a class="${opts.active === id ? "active" : ""}" href="${repoHref(opts.owner, opts.repo, suffix)}">${label}</a>`;
+  // Path-styled mono nav (/files, /issues, …) per the typography-first chrome.
+  return html`<a class="${opts.active === id ? "active" : ""}" href="${repoHref(opts.owner, opts.repo, suffix)}">/${id}</a>`;
 }
 
 export function userPreferencesSection(user: string): Html {
@@ -119,14 +120,13 @@ export function userPreferencesScript(): Html {
   return html`<script src="/cosheaf-preferences.js" defer></script>`;
 }
 
-export function stateField(value: WebListState): Html {
-  return html`<label>State
-    <select name="state" aria-label="State filter">
-      <option value="open"${selected(value, "open")}>Open</option>
-      <option value="closed"${selected(value, "closed")}>Closed</option>
-      <option value="all"${selected(value, "all")}>All states</option>
-    </select>
-  </label>`;
+// Inline open · closed · all text toggles. Submit buttons (not links) so the
+// rest of the filter form — search, sort, advanced — rides along automatically
+// and nothing is lost when switching state.
+export function stateToggle(value: WebListState): Html {
+  const opt = (s: WebListState, label: string) =>
+    html`<button type="submit" name="state" value="${s}" class="state-toggle ${value === s ? "active" : ""}">${label}</button>`;
+  return html`<span class="state-toggles" aria-label="State filter">${opt("open", "open")} · ${opt("closed", "closed")} · ${opt("all", "all")}</span>`;
 }
 
 export function sortField<T extends string>(value: T | "", options: Array<{ value: T; label: string }>): Html {

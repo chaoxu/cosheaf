@@ -19,11 +19,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   // Owner-qualified URLs are canonical; the ownerless rewrite is gone.
   const ownerlessRepo = await page.request.get(`${webBase}/${repo}`, { maxRedirects: 0 });
   expect(ownerlessRepo.status()).toBe(404);
-  await expect(page.locator(".repo-tabs")).toContainText("Files");
-  await expect(page.locator(".repo-tabs")).toContainText("Issues");
-  await expect(page.locator(".repo-tabs")).toContainText("Pull Requests");
-  await expect(page.locator(".repo-tabs")).toContainText("Notifications");
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
+  await expect(page.locator(".repo-tabs")).toContainText("/files");
+  await expect(page.locator(".repo-tabs")).toContainText("/issues");
+  await expect(page.locator(".repo-tabs")).toContainText("/pulls");
+  await expect(page.locator(".repo-tabs")).toContainText("/notifications");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("/files");
   await expect(page.locator(".repo-body")).toContainText("hello.md");
   await expect(page.locator(".repo-body")).toContainText("theory/cross-file-theorem.md");
   await expect(page.locator(".repo-body")).toContainText("notes/plain-text.txt");
@@ -41,7 +41,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("settings-diff-mode-select").selectOption("rich");
   await page.getByTestId("settings-diff-shape-select").selectOption("after");
   await page.goto(`${repoBase}/settings`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("Settings");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("/settings");
   await expect(page.getByTestId("settings-user-preferences")).toHaveCount(0);
   await expect(page.locator(".repo-body")).toContainText("Review policy");
   await expect(page.locator(".repo-body")).toContainText("Access");
@@ -147,11 +147,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".branch-row", { hasText: branchToDelete })).toHaveCount(0);
 
   await page.goto(`${repoBase}/notifications`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("Notifications");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("/notifications");
   await expect(page.getByTestId("notification-list")).toBeVisible();
 
   await page.goto(`${repoBase}/issues`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("/issues");
   // Authors render as real Forgejo usernames (no "repository" masking): the
   // seeded fixture issues were opened by the local Forgejo admin account.
   await expect(page.locator(".repo-body")).toContainText("cosheaf-admin opened");
@@ -210,7 +210,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".comment").filter({ hasText: "issue comment after edit" })).toBeVisible();
 
   await page.goto(`${repoBase}/pulls`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("/pulls");
   await expect(page.getByRole("link", { name: "New pull request" })).toHaveAttribute("href", `/${owner}/${repo}/pulls/new`);
   await page.getByRole("link", { name: "New pull request" }).click();
   await expect(page.getByTestId("pull-create-form")).toBeVisible();

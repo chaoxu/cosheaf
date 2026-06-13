@@ -27,7 +27,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
-import { labelChip, labelChips, repoPageShell, selected, sortField, stateField } from "./web-page.js";
+import { labelChip, labelChips, repoPageShell, selected, sortField, stateToggle } from "./web-page.js";
 import {
   chatIssueReadOnlyPage,
   issueEditPage,
@@ -394,12 +394,12 @@ function issueFilterForm(
   const action = repoHref(owner, repo, "/issues");
   return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters">
     <div class="filter-basic">
-      ${stateField(filters.state)}
+      ${stateToggle(filters.state)}
       <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search issues"></label>
       ${sortField(filters.sort, ISSUE_SORT_OPTIONS)}
       <div class="filter-actions">
-        <button class="button primary" type="submit">Apply</button>
-        <a class="button" href="${action}">Reset</a>
+        <button class="link-button" type="submit">apply</button>
+        <a class="link-button" href="${action}">reset</a>
       </div>
     </div>
     <details class="filter-advanced">
