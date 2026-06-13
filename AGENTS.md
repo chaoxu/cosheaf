@@ -579,6 +579,16 @@ to `forgejo-passthrough` (Forgejo Markdown). Development fixtures that
 need Coflat behavior explicitly set the topic via `--default-md-format
 coflat` at seed time.
 
+Discovery is topic-agnostic: cosheaf is a frontend over the forge, so the
+home page and `GET /api/v1/workspaces` list **every** repo the caller's PAT
+can access (`Forgejo.searchAllAccessibleRepos`), not only `cosheaf-format-*`
+tagged repos. An untagged repo opens as a `forgejo-passthrough` workspace.
+The format topic therefore only selects rendering/indexing behavior, never
+visibility. Cosheaf-minted login PATs carry `write:user` and
+`write:organization` (alongside repo/issue/notification scopes) so the user
+can create and delete repos through cosheaf; if you change the scope set,
+existing `login_tokens` rows must be cleared so they re-mint.
+
 - `forgejo-passthrough`: plain `.md` files rendered through Forgejo's
   repo-scoped `/markdown` API. It preserves YAML frontmatter but extracts no
   backlinks; rich rendered diffs are unavailable and the review UI falls back
