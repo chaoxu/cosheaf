@@ -6,6 +6,19 @@ import { pageShell } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
 
+// A small "+ <label>" disclosure that keeps a durable add/create form closed by
+// default behind a native <details>, so a panel/section reads cleanly when
+// you're just looking. The summary is the only always-visible affordance
+// (keyboard-focusable + labelled); opening it reveals the form unchanged. Used
+// for settings create-forms, issue dependencies, PR reviewer requests, and rail
+// label editing.
+export function addDisclosure(label: string, form: Html): Html {
+  return html`<details class="add-disclosure">
+    <summary>+ ${label}</summary>
+    ${form}
+  </details>`;
+}
+
 const REPO_TABS = [
   ["files", "Files", ""],
   ["issues", "Issues", "/issues"],

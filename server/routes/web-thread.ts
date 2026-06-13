@@ -25,7 +25,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
-import { labelChip, labelChips } from "./web-page.js";
+import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
 export function issueEditPage(
@@ -117,12 +117,12 @@ function issueRelationList(
   );
   const form =
     ctx.ws.role === "read"
-      ? ""
-      : html`<form class="inline-add-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies`)}">
+      ? emptyHtml
+      : addDisclosure("add", html`<form class="inline-add-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies`)}">
           <input type="hidden" name="relation" value="${relation}">
           <input name="index" inputmode="numeric" pattern="[0-9]+" placeholder="Issue #" aria-label="${title} issue number">
           <button class="button" type="submit">Add</button>
-        </form>`;
+        </form>`);
   return html`<section class="relation-card">
     <h3>${title}</h3>
     ${rows.length ? rows : html`<div class="empty compact-empty">None.</div>`}
@@ -140,10 +140,41 @@ export function threadLayout(main: Html, rail: Html): Html {
   </div>`;
 }
 
-export function labelsRailPanel(labels: readonly ForgejoLabel[]): Html {
+// The rail Labels panel: chips plus, for write+ roles, an inline "+ edit"
+// disclosure revealing the same checkbox picker the edit page uses. Submitting
+// posts the selected label ids to `action`, which sets them via Forgejo and
+// returns to the thread — no trip to the heavyweight edit page. `allLabels`
+// empty (read role / chat-backed) hides the editor.
+export function labelsRailPanel(opts: {
+  ctx: WebCtx;
+  current: readonly ForgejoLabel[];
+  allLabels: readonly ForgejoLabel[];
+  action: string;
+}): Html {
+  const currentIds = new Set(opts.current.map((label) => label.id));
+  const editor =
+    opts.ctx.ws.role === "read" || opts.allLabels.length === 0
+      ? emptyHtml
+      : addDisclosure(
+          "edit",
+          html`<form method="post" action="${opts.action}">
+            ${checkboxFieldset({
+              legend: "Labels",
+              name: "labels",
+              rows: opts.allLabels.map((label) => ({
+                value: String(label.id),
+                checked: currentIds.has(label.id),
+                disabled: label.is_archived && !currentIds.has(label.id),
+                content: labelChip(label),
+              })),
+            })}
+            <button class="button small primary" type="submit">Save labels</button>
+          </form>`,
+        );
   return html`<section class="rail-panel" data-testid="thread-labels">
     <h2>Labels</h2>
-    ${labels.length ? labelChips(labels) : html`<span class="muted">None.</span>`}
+    ${opts.current.length ? labelChips(opts.current) : html`<span class="muted">None.</span>`}
+    ${editor}
   </section>`;
 }
 
@@ -287,15 +318,15 @@ export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableRevi
         </div>`;
   const requestForm =
     ctx.ws.role === "read" || pull.state === "closed"
-      ? ""
-      : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
+      ? emptyHtml
+      : addDisclosure("request", html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
           <label>Request reviewers
             <select name="reviewers" multiple size="${Math.min(Math.max(available.length, 2), 6)}">
               ${available.map((reviewer) => html`<option value="${reviewer.login}">${displayLogin(reviewer.login)}</option>`)}
             </select>
           </label>
           <button class="button" type="submit">Request review</button>
-        </form>`;
+        </form>`);
   return html`<section class="rail-panel" data-testid="pull-review-requests">
     <h2>Reviewers</h2>
     ${requestedHtml}

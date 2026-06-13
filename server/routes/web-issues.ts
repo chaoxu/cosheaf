@@ -120,6 +120,9 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
+  // Repo labels back the rail's inline editor; only fetched when editing is
+  // possible (read role and chat-backed issues show chips only).
+  const allLabels = canEditIssue ? await ctx.fj.listLabels(ctx.owner, ctx.repo) : [];
   const main = html`${threadParticipantsBar(issue.user?.login, comments)}
     <div class="issue-document">${body}</div>
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
@@ -132,7 +135,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
            </form>`
     }
     <span id="thread-bottom"></span>`;
-  const rail = html`${labelsRailPanel(issue.labels)}
+  const rail = html`${labelsRailPanel({ ctx, current: issue.labels, allLabels, action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`) })}
     ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`;
   return htmlResponse(
     repoPageShell(ctx, "issues", `#${issue.number} ${issue.title}`, html`
@@ -212,11 +215,20 @@ web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) =>
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
-web.post("/:owner/:repo/issues/:number/labels", webRoute(async (c, ctx) => {
-  // Label editing moved into the issue edit page; keep redirecting old form posts.
+web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) => {
+  // Inline label editing from the rail Labels panel (#110): set the selected
+  // label ids via Forgejo and return to the issue thread.
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}/edit`));
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
+  if (!issue) return notFoundPage(ctx.user, "Issue not found");
+  const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody(), issue.labels);
+  if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
+  if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
+  c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
 web.post("/:owner/:repo/issues/:number/comments", webRouteForWrite(async (c, ctx) => {

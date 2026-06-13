@@ -22,7 +22,7 @@ import {
 } from "./web-context.js";
 import { is404 } from "../forgejo-errors.js";
 import { html, type Html } from "./web-html.js";
-import { labelChip, repoPageShell } from "./web-page.js";
+import { addDisclosure, labelChip, repoPageShell } from "./web-page.js";
 import { normalizeLabelColor } from "./label-utils.js";
 import { pageShell } from "./web-shell.js";
 
@@ -258,13 +258,13 @@ function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Htm
       <div class="list mini-list">${labels.length === 0 ? html`<div class="empty">No labels.</div>` : labels.map((label) => labelRow(ctx, label))}</div>
       ${
         ctx.ws.role === "admin"
-          ? html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/labels")}">
+          ? addDisclosure("New label", html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/labels")}">
               <label class="settings-row"><span>Name</span><input name="name" required data-testid="settings-label-name"></label>
               <label class="settings-row"><span>Color</span><input name="color" value="71717a" pattern="[0-9a-fA-F]{6}" required data-testid="settings-label-color"></label>
               <label class="settings-row"><span>Description</span><input name="description"></label>
               <label class="settings-row"><span>Exclusive</span><input name="exclusive" type="checkbox" value="on"></label>
               <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-label-submit">Create label</button></div>
-            </form>`
+            </form>`)
           : html`<p class="muted">Only repository admins can create labels.</p>`
       }
     </div>
@@ -313,11 +313,11 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMiles
       </div>
       ${
         ctx.ws.role === "admin"
-          ? html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/milestones")}">
+          ? addDisclosure("New milestone", html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/milestones")}">
               <label class="settings-row"><span>Title</span><input name="title" required data-testid="settings-milestone-title"></label>
               <label class="settings-row"><span>Description</span><input name="description"></label>
               <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-milestone-submit">Create milestone</button></div>
-            </form>`
+            </form>`)
           : html`<p class="muted">Only repository admins can create milestones.</p>`
       }
     </div>
@@ -397,7 +397,7 @@ function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], acces
               </div>`,
             )}
       </div>
-      <form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
+      ${addDisclosure("Add collaborator", html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
         <label class="settings-row">
           <span>Username</span>
           <input name="username" data-testid="settings-access-username" required>
@@ -414,7 +414,7 @@ function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], acces
           <button class="button primary" type="submit" data-testid="settings-access-submit">Grant access</button>
           ${accessUpdated ? html`<p class="muted" data-testid="settings-access-saved">${accessUpdated}</p>` : ""}
         </div>
-      </form>
+      </form>`)}
     </div>`;
   return html`<section class="settings-section">
     <div class="settings-section-header"><h2>Access</h2><p>Grant repository access to users and agents.</p></div>

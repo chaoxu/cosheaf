@@ -147,12 +147,13 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
 web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  const [reviews, comments, timeline, commits, availableReviewers] = await Promise.all([
+  const [reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
     ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number).catch(() => []),
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
+    ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const body = await renderMarkdownSurface(ctx, pull.body ?? "", { surface: "thread" });
   const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
@@ -199,7 +200,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
               <span id="thread-bottom"></span>`,
-            html`${labelsRailPanel(pull.labels ?? [])}
+            html`${labelsRailPanel({ ctx, current: pull.labels ?? [], allLabels, action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`) })}
               ${reviewRequestPanel(ctx, pull, availableReviewers)}`,
           )}
         </article>
@@ -242,11 +243,16 @@ web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => 
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
-web.post("/:owner/:repo/pulls/:number/labels", webRoute(async (c, ctx) => {
-  // Label editing moved into the pull request edit page; keep redirecting old form posts.
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Pull request not found");
-  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${number}/edit`));
+web.post("/:owner/:repo/pulls/:number/labels", webRouteForWrite(async (c, ctx) => {
+  // Inline label editing from the rail Labels panel (#110): set the selected
+  // label ids via Forgejo and return to the PR thread.
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody(), pull.labels ?? []);
+  if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
+  if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, pull.number, labelPatch.labels);
+  c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "edited" });
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
 web.post("/:owner/:repo/pulls/:number/state", webRouteForWrite(async (c, ctx) => {
