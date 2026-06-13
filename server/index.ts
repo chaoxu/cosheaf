@@ -19,6 +19,7 @@ import { issues } from "./routes/issues.js";
 import { notifications } from "./routes/notifications.js";
 import { webhooks } from "./routes/webhooks.js";
 import { web } from "./routes/web.js";
+import { gitProxy } from "./routes/git-proxy.js";
 import { contentTypeForPath } from "./content-type.js";
 
 const config = loadConfig();
@@ -101,6 +102,10 @@ app.get("/fonts/*", async (c) => {
   const response = await servePublicOrDistFile(c.req.path);
   return response ?? c.json({ error: "not found" }, 404);
 });
+
+// Git Smart-HTTP proxy — mounted before the web routes so `/:owner/:repo.git/*`
+// is handled as git transport, not a page route.
+app.route("/", gitProxy);
 
 app.route("/", web);
 

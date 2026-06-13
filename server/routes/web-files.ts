@@ -22,6 +22,7 @@ import {
   notFoundPage,
   redirect,
   repoHref,
+  requestOrigin,
   stringField,
   textField,
   urlPath,
@@ -36,15 +37,17 @@ import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo", webRoute(async (_c, ctx) => {
+web.get("/:owner/:repo", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
   const files = await repoFiles(fj, owner, repo, "main").catch(() => []);
+  const cloneUrl = `${requestOrigin(c)}/${owner}/${repo}.git`;
   return htmlResponse(
     repoPageShell(ctx, "files", `Files - ${repo}`, html`
         <div class="page-title compact">
           <div><p class="eyebrow">Branch</p><h1>main</h1></div>
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
+            ${cloneBox(cloneUrl)}
             <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
             ${
               ws.role === "read"
@@ -57,6 +60,22 @@ web.get("/:owner/:repo", webRoute(async (_c, ctx) => {
       `),
   );
 }));
+
+// Git clone affordance. The URL points at cosheaf's own origin; the proxy in
+// routes/git-proxy.ts authenticates with the user's cosheaf PAT (used as the
+// git password) and forwards to Forgejo, so the backing forge is never shown.
+function cloneBox(cloneUrl: string): Html {
+  return html`<details class="clone-box">
+    <summary class="button">Clone</summary>
+    <div class="clone-popover">
+      <p class="clone-hint">Clone over HTTPS with your Cosheaf token as the password:</p>
+      <div class="clone-row">
+        <input class="clone-url" readonly value="${cloneUrl}" aria-label="Clone URL" onclick="this.select()">
+        <button class="button" type="button" onclick="navigator.clipboard?.writeText(this.previousElementSibling.value)">Copy</button>
+      </div>
+    </div>
+  </details>`;
+}
 
 // Full-text page search over the workspace's indexed pages (the SQLite FTS
 // sidecar) — the knowledge-base capability a plain forge doesn't have. Reads

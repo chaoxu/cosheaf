@@ -21,6 +21,16 @@ export interface WebCtx {
 
 export type WebRepoResult = { ok: true } & WebCtx | { ok: false; response: Response };
 
+// The browser-facing origin (scheme://host) cosheaf was reached at, honoring a
+// reverse proxy's forwarded headers. Used to build the git clone URL so it
+// points at cosheaf's own domain — the user never sees the backing Forgejo.
+export function requestOrigin(c: Context<AppEnv>): string {
+  const url = new URL(c.req.url);
+  const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.replace(":", "");
+  const host = c.req.header("x-forwarded-host")?.split(",")[0]?.trim() || c.req.header("host") || url.host;
+  return `${proto}://${host}`;
+}
+
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {
   const auth = await resolveAuth(c);
   if (!auth) return null;
