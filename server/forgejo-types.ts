@@ -66,7 +66,15 @@ export interface ForgejoTimelineEvent {
   old_title?: string;
   new_title?: string;
   assignee?: { id: number; login: string };
-  ref_issue?: number;
+  // Forgejo serializes ref_issue as a FULL Issue object on pull_ref/commit_ref/
+  // comment_ref events (carrying number, title, state, and pull_request when the
+  // ref is a PR) — not the bare number the field name suggests.
+  ref_issue?: {
+    number: number;
+    title?: string;
+    state?: string;
+    pull_request?: { merged?: boolean; merged_at?: string | null } | null;
+  } | number | null;
   ref_comment?: { id: number; body: string };
   ref_action?: string;            // "neutral" | "closes" | "reopens"
   ref_commit_sha?: string;

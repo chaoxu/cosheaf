@@ -45,7 +45,7 @@ import { allDocumentFormats } from "../format-registry.js";
 import { reindexWorkspaceFromForgejo, setWorkspaceFormatTopic } from "../workspace-provisioning.js";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
-import type { PrMeta, PrFileStatus } from "../../shared/review.js";
+import type { MergeFailure, MergeFailureReason, PrMeta, PrFileStatus, PrState } from "../../shared/review.js";
 import { toLabel, validateLabelSelection } from "./label-utils.js";
 import { parseListState, parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 
@@ -136,13 +136,15 @@ async function approvalCounts(
 
 // Forgejo can return 405 "try again later" right after an approve lands and
 // before its merge gate sees the new state. Retry with linear backoff.
+type MergeFailureResult = { ok: false; status: number; message: string; transientExhausted: boolean };
+
 async function mergeWithRetry(
   fj: Forgejo,
   owner: string,
   repo: string,
   prNumber: number,
   opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
-): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
+): Promise<{ ok: true } | MergeFailureResult> {
   const Do = opts.Do ?? "squash";
   try {
     await mergePullWithRetry(() => fj.mergePull(owner, repo, prNumber, { Do, force: opts.force }));
@@ -152,23 +154,50 @@ async function mergeWithRetry(
   }
 }
 
-function forgejoErrToResult(err: unknown): { ok: false; status: number; message: string } {
+function forgejoErrToResult(err: unknown): MergeFailureResult {
   if (err instanceof ForgejoError) {
     const message = err.bodyText || "backend rejected request";
+    // A 405 "try again later" that survived all of mergePullWithRetry's retries:
+    // the merge stayed transient, not a hard conflict. Flagged so the handler
+    // can classify the eventual 409 without re-parsing the error.
+    const transientExhausted = err.status === 405 && /try again/i.test(err.bodyText);
     // Pass distinguishable 4xx through so the client can show the right
     // affordance — auth/permission, missing target, validation, rate limit —
     // instead of collapsing every Forgejo precondition failure into 409.
-    if (err.status === 401 || err.status === 403) return { ok: false, status: err.status, message };
-    if (err.status === 404) return { ok: false, status: 404, message };
-    if (err.status === 422) return { ok: false, status: 422, message };
-    if (err.status === 429) return { ok: false, status: 429, message };
+    if (err.status === 401 || err.status === 403) return { ok: false, status: err.status, message, transientExhausted };
+    if (err.status === 404) return { ok: false, status: 404, message, transientExhausted };
+    if (err.status === 422) return { ok: false, status: 422, message, transientExhausted };
+    if (err.status === 429) return { ok: false, status: 429, message, transientExhausted };
     // 405 (conflict: e.g. "Please try again later", "PR has conflicts"), 409,
     // and any other 4xx we don't separate map to 409 — the caller violated a
     // merge precondition. 5xx → backend upstream is sick: 502.
-    if (err.status >= 500) return { ok: false, status: 502, message };
-    return { ok: false, status: 409, message };
+    if (err.status >= 500) return { ok: false, status: 502, message, transientExhausted };
+    return { ok: false, status: 409, message, transientExhausted };
   }
-  return { ok: false, status: 500, message: (err as Error)?.message ?? "merge failed" };
+  return { ok: false, status: 500, message: (err as Error)?.message ?? "merge failed", transientExhausted: false };
+}
+
+// Classify a merge-precondition failure (the 409 bucket) into an agent-actionable
+// reason by re-reading the live PR (#94). `pull` is the re-read PR (null if it's
+// gone), `message` is Forgejo's body text, `transientExhausted` is whether the
+// retried path stayed transient.
+export function classifyMergeFailure(
+  pull: ForgejoPull | null,
+  message: string,
+  transientExhausted: boolean,
+): MergeFailure {
+  const head_sha = pull?.head.sha ?? null;
+  const base_sha = pull?.base.sha ?? null;
+  const state: PrState = pull?.state === "closed" ? "closed" : "open";
+  const merged = pull?.merged ?? false;
+  const mergeable = pull?.mergeable ?? null;
+  let reason: MergeFailureReason;
+  if (pull === null || merged) reason = "stale";
+  else if (mergeable === false) reason = "conflict";
+  else if (/approval|review|protected|whitelist/i.test(message)) reason = "blocked";
+  else if (mergeable === null || transientExhausted) reason = "transient";
+  else reason = "unknown";
+  return { error: `merge failed: ${message}`, code: "conflict", reason, mergeable, head_sha, base_sha, state, merged };
 }
 
 
@@ -282,8 +311,15 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   // passing `force: true`. Callers default to false (normal review flow).
   const result = await mergeWithRetry(fj, owner, repo, n, { Do: body.Do, force: body.force });
   if (!result.ok) {
+    // The 409 bucket (merge-precondition failures) gets re-read + classified so
+    // the agent can tell a real conflict from transient / needs-approval / stale
+    // and pick the right recovery instead of blindly retrying (#94).
+    if (result.status === 409) {
+      const pull = await fj.getPull(owner, repo, n);
+      return c.json(classifyMergeFailure(pull, result.message, result.transientExhausted), 409);
+    }
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
-    return c.json({ error: `merge failed: ${result.message}`, code }, result.status as 409 | 502 | 500);
+    return c.json({ error: `merge failed: ${result.message}`, code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);
   }
   const pull = await fj.getPull(owner, repo, n);
   if (pull) await deleteBranchQuietly(fj, owner, repo, pull.head.ref);

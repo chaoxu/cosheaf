@@ -606,4 +606,55 @@ describe("issues routes", () => {
     expect(delMilestone.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("exposes PR-close causality in the timeline (#93)", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    // pagedList walks: return the events then an empty page.
+    fetchMock
+      .mockResolvedValueOnce(ok([
+        {
+          id: 1, type: "pull_ref", ref_action: "closes",
+          ref_issue: { number: 42, title: "Fix the thing", state: "closed", pull_request: { merged: true, merged_at: "2026-05-20T00:00:00Z" } },
+          user: { id: 2, login: "bob" }, created_at: "2026-05-20T00:00:00Z",
+        },
+        { id: 2, type: "merge_pull", user: { id: 2, login: "bob" }, created_at: "2026-05-20T00:01:00Z" },
+        { id: 3, type: "close", user: { id: 3, login: "carol" }, created_at: "2026-05-20T00:02:00Z" },
+      ]))
+      .mockResolvedValueOnce(ok([]));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/timeline", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    const { events } = (await res.json()) as { events: Array<Record<string, unknown>> };
+    // pull_ref names the closing PR and that it merged.
+    expect(events[0]).toMatchObject({
+      type: "pull_ref",
+      ref_action: "closes",
+      ref_issue: { number: 42, title: "Fix the thing", state: "closed", is_pull: true, pull_merged: true },
+    });
+    // merge_pull is distinguishable from a manual close.
+    expect(events[1].type).toBe("merge_pull");
+    expect(events[2]).toMatchObject({ type: "close", ref_issue: null, ref_action: null });
+  });
+
+  it("leaves ref_issue null for a manual close and a bare-number legacy ref", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock
+      .mockResolvedValueOnce(ok([
+        { id: 1, type: "close", user: { id: 3, login: "carol" }, created_at: "2026-05-20T00:00:00Z" },
+        { id: 2, type: "comment_ref", ref_issue: 99, ref_action: "neutral", user: { id: 2, login: "bob" }, created_at: "2026-05-20T00:01:00Z" },
+      ]))
+      .mockResolvedValueOnce(ok([]));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/timeline", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const { events } = (await res.json()) as { events: Array<Record<string, unknown>> };
+    expect(events[0]).toMatchObject({ type: "close", ref_issue: null });
+    // a legacy bare-number ref_issue is treated as null (no causality object).
+    expect(events[1].ref_issue).toBe(null);
+  });
 });

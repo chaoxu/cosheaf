@@ -51,7 +51,8 @@ export const forbidden = (msg: string) => envelope("forbidden", 403, msg);
 
 export const notFound = (msg = "not found") => envelope("not_found", 404, msg);
 
-export const conflict = (msg: string) => envelope("conflict", 409, msg);
+export const conflict = (msg: string, details?: Record<string, unknown>) =>
+  envelope("conflict", 409, msg, details);
 
 export const badGateway = (msg: string, details?: Record<string, unknown>) =>
   envelope("bad_gateway", 502, msg, details);

@@ -10,7 +10,7 @@ import { deletePage, planIndexPage } from "../indexer.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
-import { safeRel } from "./files.js";
+import { isStaleShaConflict, safeRel } from "./files.js";
 import {
   badRequestPage,
   displayLogin,
@@ -235,12 +235,21 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
   await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
   const kind = fileKindForPath(rel);
-  if (kind === "markdown") {
-    await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
-  } else if (kind === "text") {
-    await writeTextFile(ctx, branch, rel, content, oldRel ?? undefined);
-  } else {
-    return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
+  try {
+    if (kind === "markdown") {
+      await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
+    } else if (kind === "text") {
+      await writeTextFile(ctx, branch, rel, content, oldRel ?? undefined);
+    } else {
+      return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
+    }
+  } catch (err) {
+    // A concurrent save advanced the branch head between our read and write.
+    // Surface a reload-and-retry message instead of a bare gateway error (#92).
+    if (isStaleShaConflict(err)) {
+      return badRequestPage(ctx.user, "This file changed on the branch while you were editing. Reload the page to get the latest version, then reapply your edit.");
+    }
+    throw err;
   }
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
 }));

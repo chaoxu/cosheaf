@@ -76,7 +76,20 @@ export interface TimelineEvent {
   new_title: string | null;
   assignee: string | null;
   removed_assignee: boolean;
-  ref_issue: number | null;
+  // The issue/PR that referenced this one on a ref event (pull_ref/commit_ref/
+  // comment_ref). `is_pull` + `pull_merged` make PR-caused state changes
+  // machine-readable: a `pull_ref` event with `ref_action:"closes"` and
+  // `ref_issue.is_pull:true` names the closing PR; pair it with a terminal
+  // `merge_pull`/`close` event to tell "closed by an accepted PR" from a manual
+  // close. Thin pass-through of Forgejo's timeline — the client correlates the
+  // ref and close events by order (#93).
+  ref_issue: {
+    number: number;
+    title: string | null;
+    state: string | null;
+    is_pull: boolean;
+    pull_merged: boolean | null;
+  } | null;
   ref_action: string | null;
   ref_commit_sha: string | null;
   milestone: string | null;

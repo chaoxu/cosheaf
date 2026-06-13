@@ -52,8 +52,13 @@ export function webTimelineDescriptionText(event: ForgejoTimelineEvent): string 
     case "issue_ref":
     case "comment_ref":
       return refIssueNumber(event) ? `referenced this in #${refIssueNumber(event)}` : "referenced this";
-    case "pull_ref":
-      return refIssueNumber(event) ? `referenced this in pull request #${refIssueNumber(event)}` : "referenced this in a pull request";
+    case "pull_ref": {
+      const pr = refIssueNumber(event);
+      if (event.ref_action === "closes" && pr) return `closed this in pull request #${pr}`;
+      return pr ? `referenced this in pull request #${pr}` : "referenced this in a pull request";
+    }
+    case "merge_pull":
+      return "closed this with a merged pull request";
     case "dependency_added":
       return event.dependent_issue ? `added dependency #${event.dependent_issue.number}` : "added dependency";
     case "dependency_removed":

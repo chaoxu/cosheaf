@@ -10,7 +10,7 @@ import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
-import { pulls } from "./pulls.js";
+import { classifyMergeFailure, pulls } from "./pulls.js";
 import { branches } from "./branches.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
@@ -552,19 +552,58 @@ describe("pulls + branches routes", () => {
       expect(fetchMock).toHaveBeenCalledTimes(5);
     });
 
-    it("POST /pulls/:n/merge returns 409 on non-retryable Forgejo errors", async () => {
+    it("POST /pulls/:n/merge classifies a real conflict (mergeable:false) with SHAs", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "admin");
       fetchMock
         .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
-        .mockResolvedValueOnce(new Response("PR has merge conflicts", { status: 405 }));
+        .mockResolvedValueOnce(new Response("PR has merge conflicts", { status: 405 }))
+        .mockResolvedValueOnce(ok(pull({ mergeable: false }))); // re-read PR
       const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ Do: "squash" }),
       });
       expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: "conflict", reason: "conflict", mergeable: false, head_sha: "h", base_sha: "b", state: "open", merged: false });
+    });
+
+    it("POST /pulls/:n/merge classifies a needs-approval block, not a conflict", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" }))
+        .mockResolvedValueOnce(new Response("not allowed to merge [reason: Does not have enough approvals]", { status: 405 }))
+        .mockResolvedValueOnce(ok(pull({ mergeable: true }))); // PR is mergeable; just lacks approvals
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "squash" }),
+      });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ reason: "blocked", mergeable: true });
+    });
+  });
+
+  describe("classifyMergeFailure (#94)", () => {
+    const p = (o: Record<string, unknown> = {}) => pull(o) as unknown as Parameters<typeof classifyMergeFailure>[0];
+    it("flags a real content conflict", () => {
+      expect(classifyMergeFailure(p({ mergeable: false }), "PR has merge conflicts", false).reason).toBe("conflict");
+    });
+    it("flags an already-merged PR as stale", () => {
+      expect(classifyMergeFailure(p({ merged: true, state: "closed" }), "x", false).reason).toBe("stale");
+    });
+    it("flags a gone PR (null) as stale with null shas", () => {
+      const r = classifyMergeFailure(null, "x", false);
+      expect(r).toMatchObject({ reason: "stale", head_sha: null, base_sha: null, mergeable: null });
+    });
+    it("flags a branch-protection gate as blocked", () => {
+      expect(classifyMergeFailure(p({ mergeable: true }), "3 approvals are required", false).reason).toBe("blocked");
+    });
+    it("flags still-computing mergeability as transient", () => {
+      expect(classifyMergeFailure(p({ mergeable: null }), "Please try again later", true).reason).toBe("transient");
     });
   });
 

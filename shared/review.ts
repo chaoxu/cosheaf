@@ -44,3 +44,24 @@ export interface PrMeta {
   requested_reviewers: string[];
   requested_reviewer_teams: string[];
 }
+
+// Why a merge attempt failed, after Cosheaf has exhausted its transient retries
+// and re-read the PR. Lets an agent choose the right recovery instead of
+// blindly retrying or force-merging a generic 409 (#94):
+//  - conflict  : the branch has real merge conflicts (main moved) — rebase or close as dup
+//  - transient : mergeability still computing / "try again later" survived retries — retry after a delay
+//  - stale     : the PR is already merged or gone — treat as done
+//  - blocked   : a branch-protection gate (e.g. required approvals) — get a review, don't force
+//  - unknown   : unclassified precondition failure
+export type MergeFailureReason = "conflict" | "transient" | "stale" | "blocked" | "unknown";
+
+export interface MergeFailure {
+  error: string;
+  code: "conflict";
+  reason: MergeFailureReason;
+  mergeable: boolean | null;
+  head_sha: string | null;
+  base_sha: string | null;
+  state: PrState;
+  merged: boolean;
+}

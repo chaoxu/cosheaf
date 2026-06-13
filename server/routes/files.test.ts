@@ -354,6 +354,77 @@ describe("files mutation gates", () => {
   });
 });
 
+describe("files concurrent-write conflicts (#92)", () => {
+  function writeReq(db: ReturnType<typeof freshDb>, token: string, body: unknown) {
+    return appFor(db).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("maps a stale-sha 422 from Forgejo to a typed 409 with recovery details", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
+      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ sha: "sha-now" }));
+      // The write loses the head race: Forgejo rejects the stale blob sha.
+      forge.put("/api/v1/repos/owner/w/contents/notes.md", (c) => c.text("sha does not match [given: A, expected: B]", 422));
+    }));
+
+    const res = await writeReq(db, token, { content: "# Notes\n" });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { code: string; details: Record<string, unknown> };
+    expect(body.code).toBe("conflict");
+    expect(body.details).toMatchObject({ path: "notes.md", branch: "user/alice/wip", head_sha: "head-now", current_sha: "sha-now", branch_moved: true });
+  });
+
+  it("compare-and-set: rejects before writing when expected_sha is stale", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    let putCalled = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
+      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ sha: "current" }));
+      forge.put("/api/v1/repos/owner/w/contents/notes.md", (c) => { putCalled = true; return c.json({ commit: { sha: "x" }, content: { sha: "y" } }); });
+    }));
+
+    const res = await writeReq(db, token, { content: "# Notes\n", expected_sha: "based-on-old" });
+    expect(res.status).toBe(409);
+    expect(putCalled).toBe(false);
+    const conflictBody = (await res.json()) as { details: Record<string, unknown> };
+    expect(conflictBody.details).toMatchObject({ expected_sha: "based-on-old", current_sha: "current", branch_moved: true });
+  });
+
+  it("compare-and-set: proceeds and returns the new blob sha when expected_sha matches", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head" } }));
+      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ sha: "current" }));
+      forge.put("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ commit: { sha: "new-commit" }, content: { sha: "new-blob" } }));
+    }));
+
+    const res = await writeReq(db, token, { content: "# Notes\n", expected_sha: "current" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, commit: "new-commit", sha: "new-blob" });
+  });
+
+  it("does not map an unrelated 422 (non-sha) to a conflict", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "h" } }));
+      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ sha: "s" }));
+      forge.put("/api/v1/repos/owner/w/contents/notes.md", (c) => c.text("content is invalid", 422));
+    }));
+
+    const res = await writeReq(db, token, { content: "# Notes\n" });
+    expect(res.status).not.toBe(409);
+  });
+});
+
 describe("files tree cache", () => {
   it("does not cache a missing-branch fallback tree under the missing branch", async () => {
     const db = freshDb();

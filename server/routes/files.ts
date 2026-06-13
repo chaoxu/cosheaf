@@ -43,6 +43,43 @@ function refFromQuery(c: import("hono").Context<AppEnv>): string {
   return b && b.length > 0 ? b : "main";
 }
 
+// A write that lost a branch-head race: Forgejo rejects a stale blob sha as
+// 422 "sha does not match", or a push-level reject as 409. Shared by the typed
+// file route and the web _edit path so both classify concurrent writes the
+// same way.
+export function isStaleShaConflict(err: unknown): boolean {
+  return (
+    err instanceof ForgejoError &&
+    (err.status === 409 || (err.status === 422 && /sha does not match/i.test(err.bodyText)))
+  );
+}
+
+// Build the typed 409 for a concurrent-write conflict: re-read the live branch
+// head + current blob sha so the agent can rebase its edit and retry (#92).
+// Best-effort — if the branch was deleted concurrently the lookups 404, and we
+// still return a useful conflict rather than throwing a fresh error.
+export async function staleShaConflict(
+  fj: import("../forgejo.js").Forgejo,
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+  expectedSha: string | undefined,
+): Promise<readonly [import("./responses.js").ErrorBody, 409]> {
+  const [meta, branchInfo] = await Promise.all([
+    fj.getFileMeta(owner, repo, branch, path).catch(() => null),
+    fj.getBranch(owner, repo, branch).catch(() => null),
+  ]);
+  return conflict("branch head moved; reload and retry", {
+    path,
+    branch,
+    head_sha: branchInfo?.commit?.id ?? null,
+    current_sha: meta?.sha ?? null,
+    ...(expectedSha !== undefined ? { expected_sha: expectedSha } : {}),
+    branch_moved: true,
+  });
+}
+
 // Auto-create the target branch from `main` if it doesn't exist. Any valid
 // branch name is allowed — cosheaf's job is to be a thin shell over Forgejo's
 // branch model, not to enforce a naming convention Forgejo itself doesn't
@@ -178,12 +215,17 @@ files.put("/:owner/:repo/file", async (c) => {
   const branch = refFromQuery(c);
   if (branch === "main")
     return c.json(...bad("branch required (cannot write to main)"));
-  const body = (await c.req.json().catch(() => null)) as { content?: string; previous_path?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    content?: string;
+    previous_path?: string;
+    expected_sha?: string;
+  } | null;
   if (body?.content === undefined)
     return c.json(...bad("content required"));
   const previousRel = safeRel(body.previous_path);
   if (body.previous_path !== undefined && !previousRel)
     return c.json(...bad("invalid previous_path"));
+  const expectedSha = typeof body.expected_sha === "string" ? body.expected_sha : undefined;
 
   await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -206,6 +248,12 @@ files.put("/:owner/:repo/file", async (c) => {
   const existing = await fj.getFileMeta(owner, repo, branch, rel);
   if (isRename && existing)
     return c.json(...conflict("destination already exists"));
+  // Compare-and-set: if the caller declared the blob sha its edit was based on
+  // and the branch has since moved, reject before issuing the write so a
+  // concurrent edit isn't silently clobbered (#92).
+  if (expectedSha !== undefined && (existing?.sha ?? null) !== expectedSha) {
+    return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+  }
   const previous = isRename ? await fj.getFileMeta(owner, repo, branch, previousRel as string) : null;
   let r;
   try {
@@ -225,8 +273,13 @@ files.put("/:owner/:repo/file", async (c) => {
       });
     }
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409)
-      return c.json(...conflict("conflict on push"));
+    // A concurrent writer landed a commit between our getFileMeta read and the
+    // putFile: Forgejo rejects the stale blob sha as 422 "sha does not match"
+    // (a push-level reject is 409). Either way, surface a typed, recoverable
+    // conflict instead of a bare 502 (#92).
+    if (isStaleShaConflict(err)) {
+      return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+    }
     throw err;
   }
   // Commit the sidecar reindex now that the canonical write succeeded.
@@ -243,6 +296,7 @@ files.put("/:owner/:repo/file", async (c) => {
     meta: { id: plan.cosheafId, title: plan.title },
     content: plan.rewrittenContent ?? undefined,
     commit: r.commit?.sha,
+    sha: r.content?.sha,
   });
 });
 

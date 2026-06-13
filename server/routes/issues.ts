@@ -8,6 +8,7 @@ import {
   type ForgejoIssue,
   type ForgejoIssueComment,
   type ForgejoMilestone,
+  type ForgejoTimelineEvent,
   userLogin,
 } from "../forgejo-types.js";
 import type {
@@ -64,6 +65,25 @@ function toDependencyRow(i: ForgejoIssue): DependencyRow {
     title: i.title,
     state: i.state,
     is_pr: !!i.pull_request,
+  };
+}
+
+// Normalize a timeline event's `ref_issue` into the public causality sub-shape.
+// Forgejo serializes it as a full Issue object on ref events (with a
+// `pull_request` field when the ref is a PR) and as a bare number / 0 / absent
+// elsewhere — be defensive about both, mirroring web-timeline's number-or-object
+// read. `is_pull`/`pull_merged` let an agent tell a closing PR from a plain
+// issue reference (#93).
+function toRefIssue(
+  ref: ForgejoTimelineEvent["ref_issue"],
+): TimelineEvent["ref_issue"] {
+  if (!ref || typeof ref !== "object") return null;
+  return {
+    number: ref.number,
+    title: ref.title ?? null,
+    state: ref.state ?? null,
+    is_pull: ref.pull_request != null,
+    pull_merged: ref.pull_request ? ref.pull_request.merged ?? false : null,
   };
 }
 
@@ -602,7 +622,7 @@ issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
       new_title: e.new_title ?? null,
       assignee: e.assignee?.login ?? null,
       removed_assignee: e.removed_assignee ?? false,
-      ref_issue: e.ref_issue ?? null,
+      ref_issue: toRefIssue(e.ref_issue),
       ref_action: e.ref_action ?? null,
       ref_commit_sha: e.ref_commit_sha ?? null,
       milestone: e.milestone?.title ?? null,
