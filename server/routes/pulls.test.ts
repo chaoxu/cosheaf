@@ -569,14 +569,16 @@ describe("pulls + branches routes", () => {
       expect(await res.json()).toMatchObject({ code: "conflict", reason: "conflict", mergeable: false, head_sha: "h", base_sha: "b", state: "open", merged: false });
     });
 
-    it("POST /pulls/:n/merge classifies a needs-approval block, not a conflict", async () => {
+    it("POST /pulls/:n/merge classifies a needs-approval block structurally, not by message text", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "admin");
       fetchMock
-        .mockResolvedValueOnce(ok({ permission: "admin" }))
-        .mockResolvedValueOnce(new Response("not allowed to merge [reason: Does not have enough approvals]", { status: 405 }))
-        .mockResolvedValueOnce(ok(pull({ mergeable: true }))); // PR is mergeable; just lacks approvals
+        .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
+        .mockResolvedValueOnce(new Response("not allowed to merge", { status: 405 })) // body text gives no hint
+        .mockResolvedValueOnce(ok(pull({ mergeable: true }))) // re-read PR: no content conflict
+        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 1 })) // base branch protection
+        .mockResolvedValueOnce(ok([])); // listReviews: zero approvals
       const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -589,21 +591,31 @@ describe("pulls + branches routes", () => {
 
   describe("classifyMergeFailure (#94)", () => {
     const p = (o: Record<string, unknown> = {}) => pull(o) as unknown as Parameters<typeof classifyMergeFailure>[0];
+    const noGate = null;
     it("flags a real content conflict", () => {
-      expect(classifyMergeFailure(p({ mergeable: false }), "PR has merge conflicts", false).reason).toBe("conflict");
+      expect(classifyMergeFailure(p({ mergeable: false }), "PR has merge conflicts", noGate, false).reason).toBe("conflict");
     });
     it("flags an already-merged PR as stale", () => {
-      expect(classifyMergeFailure(p({ merged: true, state: "closed" }), "x", false).reason).toBe("stale");
+      expect(classifyMergeFailure(p({ merged: true, state: "closed" }), "x", noGate, false).reason).toBe("stale");
     });
     it("flags a gone PR (null) as stale with null shas", () => {
-      const r = classifyMergeFailure(null, "x", false);
+      const r = classifyMergeFailure(null, "x", noGate, false);
       expect(r).toMatchObject({ reason: "stale", head_sha: null, base_sha: null, mergeable: null });
     });
-    it("flags a branch-protection gate as blocked", () => {
-      expect(classifyMergeFailure(p({ mergeable: true }), "3 approvals are required", false).reason).toBe("blocked");
+    it("flags an unmet approval gate as blocked", () => {
+      const gate = { requiredApprovals: 2, approvals: 1, rejections: 0 };
+      expect(classifyMergeFailure(p({ mergeable: true }), "x", gate, false).reason).toBe("blocked");
+    });
+    it("flags requested-changes as blocked", () => {
+      const gate = { requiredApprovals: 0, approvals: 0, rejections: 1 };
+      expect(classifyMergeFailure(p({ mergeable: true }), "x", gate, false).reason).toBe("blocked");
+    });
+    it("a satisfied gate is not blocked (falls through to unknown)", () => {
+      const gate = { requiredApprovals: 1, approvals: 1, rejections: 0 };
+      expect(classifyMergeFailure(p({ mergeable: true }), "x", gate, false).reason).toBe("unknown");
     });
     it("flags still-computing mergeability as transient", () => {
-      expect(classifyMergeFailure(p({ mergeable: null }), "Please try again later", true).reason).toBe("transient");
+      expect(classifyMergeFailure(p({ mergeable: null }), "Please try again later", noGate, true).reason).toBe("transient");
     });
   });
 
