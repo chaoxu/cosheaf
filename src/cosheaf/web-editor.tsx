@@ -282,21 +282,26 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   );
 
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
-    () => [
-      {
-        trigger: "[@",
-        suggest: async (prefix, env) => {
-          if (env.signal.aborted) return [];
-          try {
-            const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, limit: 10 });
-            return result.suggestions;
-          } catch (_err) {
-            return [];
-          }
-        },
-      },
-    ],
-    [config.owner, config.repo],
+    () =>
+      // `[@id]` cross-refs only resolve in Coflat workspaces; for
+      // forgejo-passthrough the syntax is plain text, so don't offer it.
+      config.formatId !== COFLAT_FORMAT_ID
+        ? []
+        : [
+            {
+              trigger: "[@",
+              suggest: async (prefix, env) => {
+                if (env.signal.aborted) return [];
+                try {
+                  const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, limit: 10 });
+                  return result.suggestions;
+                } catch (_err) {
+                  return [];
+                }
+              },
+            },
+          ],
+    [config.owner, config.repo, config.formatId],
   );
 
   const save = useCallback(() => {

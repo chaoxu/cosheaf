@@ -7,6 +7,7 @@ import type {
   ForgejoPullReviewComment,
   ForgejoReview,
   ForgejoTimelineEvent,
+  ForgejoUser,
 } from "../forgejo-types.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
@@ -25,7 +26,19 @@ import { renderMarkdownSurface } from "./web-markdown.js";
 import { labelChip, labelChips } from "./web-page.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
-export function issueEditPage(ctx: WebCtx, issue: ForgejoIssue, allLabels: readonly ForgejoLabel[]): Html {
+export function issueEditPage(
+  ctx: WebCtx,
+  issue: ForgejoIssue,
+  allLabels: readonly ForgejoLabel[],
+  collaborators: readonly ForgejoUser[],
+): Html {
+  const current = new Set((issue.assignees ?? []).map((a) => a.login));
+  // Candidate assignees: repo collaborators ∪ anyone currently assigned ∪ the
+  // current user (so a write-access owner who isn't in /collaborators can still
+  // self-assign). Forgejo's PATCH issue replaces the assignee set wholesale.
+  const candidates = [...new Set([...collaborators.map((u) => u.login), ...current, ctx.user])].sort((a, b) =>
+    a.localeCompare(b),
+  );
   return threadEditPage({
     ctx,
     kind: "issue",
@@ -34,6 +47,7 @@ export function issueEditPage(ctx: WebCtx, issue: ForgejoIssue, allLabels: reado
     body: issue.body ?? "",
     allLabels,
     currentLabels: issue.labels,
+    assignees: { candidates, current },
     backHref: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`),
     action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`),
     testId: "issue-edit-form",
@@ -140,6 +154,7 @@ function threadEditPage(opts: {
   body: string;
   allLabels: readonly ForgejoLabel[];
   currentLabels: readonly ForgejoLabel[];
+  assignees?: { candidates: readonly string[]; current: ReadonlySet<string> };
   backHref: string;
   action: string;
   testId: string;
@@ -160,6 +175,19 @@ function threadEditPage(opts: {
       </fieldset>
       <input type="hidden" name="labels_present" value="1">`
     : "";
+  const assignees = opts.assignees;
+  const assigneeFieldset = assignees && assignees.candidates.length
+    ? html`<fieldset class="checkbox-list" data-testid="assignee-list">
+        <legend>Assignees</legend>
+        ${assignees.candidates.map(
+          (login) => html`<label class="checkbox-row">
+            <input type="checkbox" name="assignees" value="${login}"${assignees.current.has(login) ? " checked" : ""}>
+            ${displayLogin(login)}
+          </label>`,
+        )}
+      </fieldset>
+      <input type="hidden" name="assignees_present" value="1">`
+    : "";
   return html`<section class="edit-page issue-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><p class="eyebrow">Edit ${opts.kind}</p><h1>#${opts.number}</h1></div>
@@ -171,6 +199,7 @@ function threadEditPage(opts: {
         <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${opts.body}</textarea>
       </label>
       ${labelFieldset}
+      ${assigneeFieldset}
       <div class="form-actions">
         <button class="button primary" type="submit">Save ${opts.kind}</button>
       </div>

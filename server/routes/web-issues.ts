@@ -20,6 +20,7 @@ import {
   resolveWebRepo,
   resolveWebRepoForWrite,
   stringField,
+  stringFields,
   textField,
   type WebCtx,
   type WebListState,
@@ -228,7 +229,10 @@ web.get("/:owner/:repo/issues/:number/edit", async (c) => {
   });
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
-  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
+  const [allLabels, collaborators] = await Promise.all([
+    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
+  ]);
   return htmlResponse(
     repoPage({
       title: `Edit #${issue.number} - ${ctx.repo}`,
@@ -237,7 +241,7 @@ web.get("/:owner/:repo/issues/:number/edit", async (c) => {
       active: "issues",
       user: ctx.user,
       ws: ctx.ws,
-      body: issueEditPage(ctx, issue, allLabels),
+      body: issueEditPage(ctx, issue, allLabels, collaborators),
     }),
   );
 });
@@ -256,7 +260,10 @@ web.post("/:owner/:repo/issues/:number/edit", async (c) => {
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number);
   const labelPatch = await labelSelectionPatch(ctx, form, issue.labels);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
-  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { title, body });
+  // The assignee fieldset always emits assignees_present for issues; the
+  // checked set replaces the current assignees wholesale (empty = unassign).
+  const assignees = stringField(form.assignees_present) ? stringFields(form.assignees) : undefined;
+  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { title, body, ...(assignees ? { assignees } : {}) });
   if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
