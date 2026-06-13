@@ -363,6 +363,23 @@ async function doctor(): Promise<void> {
     }),
   );
 
+  // Webhook deliveries are logged in one global dedupe table with no workspace
+  // column, so "have we received any webhook recently" is a single global
+  // signal — not a per-workspace one. (A per-workspace `webhook installed`
+  // check below confirms each repo's hook exists via Forgejo.)
+  {
+    const lastDelivery = db
+      .prepare("SELECT delivered_at, event_type FROM webhook_log ORDER BY delivered_at DESC LIMIT 1")
+      .get() as { delivered_at: number; event_type: string } | undefined;
+    results.push({
+      name: "webhook deliveries: recent activity (global)",
+      status: lastDelivery !== undefined ? "ok" : "warn",
+      detail: lastDelivery
+        ? `last ${lastDelivery.event_type} at ${new Date(lastDelivery.delivered_at).toISOString()}`
+        : "no webhook deliveries logged yet",
+    });
+  }
+
   // Per-workspace checks. Workspaces are enumerated from Forgejo (every
   // repo the caller can access, across owners — untagged repos open as
   // forgejo-passthrough), not from SQLite — there's no workspaces table.
@@ -416,19 +433,6 @@ async function doctor(): Promise<void> {
           return `hook id=${ours.id}`;
         }),
       );
-      const lastDelivery = db
-        .prepare(
-          "SELECT delivered_at, event_type FROM webhook_log ORDER BY delivered_at DESC LIMIT 1",
-        )
-        .get() as { delivered_at: number; event_type: string } | undefined;
-      results.push({
-        name: `workspace ${ws.slug}: recent webhook activity`,
-        status: lastDelivery !== undefined ? "ok" : "fail",
-        detail: lastDelivery
-          ? `last ${lastDelivery.event_type} at ${new Date(lastDelivery.delivered_at).toISOString()}`
-          : "no webhook deliveries logged yet",
-      });
-
       results.push(
         await checkWarn(`workspace ${ws.slug}: sidecar in sync with Forgejo tree`, async () => {
           const drift = await getWorkspaceMarkdownDrift(db, forgejo, ws);

@@ -170,13 +170,36 @@ webhooks.post("/forgejo", async (c) => {
         const action = String(payload.action ?? "");
         sse.publish(ws.slug, { type: "pull", number, action });
       }
-    } else if (event === "pull_request_review") {
+    } else if (
+      event === "pull_request_approved" ||
+      event === "pull_request_rejected" ||
+      event === "pull_request_review"
+    ) {
+      // Forgejo delivers review state changes under the granular header names
+      // `pull_request_approved` / `pull_request_rejected` — the high-level
+      // `pull_request_review` header is documented but not actually sent, and
+      // the payload carries `review.type`, not `review.state`. Map all of them
+      // to the pull_reviewed SSE so open PR views can refetch.
       const pr = payload.pull_request as Record<string, unknown> | undefined;
       const review = payload.review as Record<string, unknown> | undefined;
       const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
-      const state = String(review?.state ?? "");
+      const state =
+        event === "pull_request_approved"
+          ? "APPROVED"
+          : event === "pull_request_rejected"
+            ? "REQUEST_CHANGES"
+            : String(review?.state ?? review?.type ?? "");
       if (Number.isFinite(number) && state) {
         sse.publish(ws.slug, { type: "pull_reviewed", number, state });
+      }
+    } else if (event === "pull_request_comment") {
+      // A review/line comment on the PR diff (Forgejo header `pull_request_comment`,
+      // payload review.type `pull_request_review_comment`). Ping open PR views to
+      // refetch the comments.
+      const pr = payload.pull_request as Record<string, unknown> | undefined;
+      const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
+      if (Number.isFinite(number)) {
+        sse.publish(ws.slug, { type: "pull_commented", number });
       }
     } else if (event === "issues") {
       const issue = payload.issue as ForgejoIssue | undefined;

@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import type { Forgejo } from "../forgejo.js";
+import { SSEHub, type SSEEvent } from "../sse.js";
 import type { AppEnv } from "../types.js";
 import { webhooks } from "./webhooks.js";
 import { freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
@@ -135,16 +136,38 @@ describe("forgejo webhooks", () => {
     expect(res.status).toBe(200);
   });
 
-  it("publishes an SSE pull_reviewed event on pull_request_review delivery", async () => {
+  it("publishes pull_reviewed / pull_commented on the granular review events Forgejo actually delivers", async () => {
+    // Forgejo's review webhook headers are pull_request_approved /
+    // pull_request_rejected / pull_request_comment (not pull_request_review),
+    // with the review under `review.type`. Capture the SSE to assert it.
     const db = freshDb();
-    const app = appFor(db, {} as Forgejo);
-    const body = JSON.stringify({
-      repository: { full_name: "owner/w" },
-      pull_request: { number: 13 },
-      review: { state: "APPROVED" },
-    });
-    const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request_review", "rev-1"));
-    expect(res.status).toBe(200);
+    const hub = new SSEHub();
+    const events: SSEEvent[] = [];
+    hub.subscribe("owner/w", (e) => events.push(e));
+    const app = testApp(
+      db,
+      config,
+      (a) => {
+        a.use("*", (c, next) => {
+          c.set("sse", hub);
+          return next();
+        });
+        a.route("/api/v1/webhooks", webhooks);
+      },
+      withRepoDefaults({} as Forgejo),
+    );
+    const fire = (event: string, payload: object, delivery: string) =>
+      app.request("/api/v1/webhooks/forgejo", signedForgejo(JSON.stringify({ repository: { full_name: "owner/w" }, ...payload }), event, delivery));
+
+    expect((await fire("pull_request_approved", { pull_request: { number: 13 }, review: { type: "pull_request_review_approved" } }, "rev-1")).status).toBe(200);
+    expect((await fire("pull_request_rejected", { pull_request: { number: 13 }, review: { type: "pull_request_review_rejected" } }, "rev-2")).status).toBe(200);
+    expect((await fire("pull_request_comment", { pull_request: { number: 13 }, review: { type: "pull_request_review_comment" } }, "rev-3")).status).toBe(200);
+
+    expect(events).toEqual([
+      { type: "pull_reviewed", number: 13, state: "APPROVED" },
+      { type: "pull_reviewed", number: 13, state: "REQUEST_CHANGES" },
+      { type: "pull_commented", number: 13 },
+    ]);
   });
 
   it("reconciles the same repo name under a different owner into that owner's workspace", async () => {
