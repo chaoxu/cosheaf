@@ -59,7 +59,7 @@ app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
 const publicDir = path.resolve(process.cwd(), "public");
-const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-pr-diff-defaults.js", "/favicon.svg"]);
+const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-pr-diff-defaults.js", "/cosheaf-confirm.js", "/favicon.svg"]);
 const coflatEditorDistDir = path.dirname(
   requireResolve("@chaoxu/coflat/style.css"),
 );

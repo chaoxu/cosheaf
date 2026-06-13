@@ -70,6 +70,7 @@ web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
           ${accessSection(ctx, collaborators, accessUpdated)}
           ${dangerZoneSection(ctx)}
         </div>
+        <script src="/cosheaf-confirm.js" defer></script>
       `),
   );
 }));
@@ -241,7 +242,7 @@ function labelRow(ctx: WebCtx, label: ForgejoLabel): Html {
         <div class="settings-actions"><button class="button primary" type="submit">Save</button></div>
       </form>
     </details>
-    <form method="post" action="${base}/delete" onsubmit="return confirm('Delete label ${label.name}?')">
+    <form method="post" action="${base}/delete" data-confirm="Delete label ${label.name}?">
       <button class="button danger" type="submit" data-testid="settings-label-delete">Delete</button>
     </form>
   </div>`;
@@ -292,7 +293,7 @@ function milestoneRow(ctx: WebCtx, milestone: ForgejoMilestone): Html {
       <input type="hidden" name="state" value="${nextState}">
       <button class="button" type="submit" data-testid="settings-milestone-toggle">${milestone.state === "open" ? "Close" : "Reopen"}</button>
     </form>
-    <form method="post" action="${base}/delete" onsubmit="return confirm('Delete milestone ${milestone.title}?')">
+    <form method="post" action="${base}/delete" data-confirm="Delete milestone ${milestone.title}?">
       <button class="button danger" type="submit" data-testid="settings-milestone-delete">Delete</button>
     </form>
   </div>`;
@@ -429,7 +430,7 @@ function dangerZoneSection(ctx: WebCtx): Html {
       <p>Deleting a repository is permanent and removes its files, issues, and pull requests on the forge.</p>
     </div>
     <form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/delete")}"
-      onsubmit="return confirm('Permanently delete ${ctx.ws.slug}? This cannot be undone.')">
+      data-confirm="Permanently delete ${ctx.ws.slug}? This cannot be undone.">
       <label class="settings-row">
         <span>Type <code>${ctx.ws.slug}</code> to confirm</span>
         <input name="confirm" data-testid="settings-delete-confirm" autocomplete="off" required>
