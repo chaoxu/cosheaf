@@ -208,15 +208,12 @@ async function ensureForgejoUser(
   }
 
   const minted = await exchangeForgejoCredsForPat(db, config.forgejoUrl, username, password);
-  if (minted.kind === "ok") {
-    console.log(`api key for ${username}: ${minted.pat}`);
-  } else if (minted.kind === "bad_credentials") {
-    console.error(`could not mint api key for ${username}: forgejo rejected the password`);
-    process.exit(1);
-  } else {
-    console.error(`could not mint api key for ${username}: ${minted.detail}`);
+  if (minted.kind !== "ok") {
+    const reason = minted.kind === "bad_credentials" ? "forgejo rejected the password" : minted.detail;
+    console.error(`could not mint api key for ${username}: ${reason}`);
     process.exit(1);
   }
+  console.log(`api key for ${username}: ${minted.pat}`);
 }
 
 async function userAdd(username: string): Promise<void> {

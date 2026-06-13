@@ -146,6 +146,28 @@ export function labelsRailPanel(labels: readonly ForgejoLabel[]): Html {
   </section>`;
 }
 
+// Shared checkbox-list fieldset for the thread edit form (labels, assignees).
+// Emits a hidden `${name}_present` marker so the POST can tell an empty
+// selection from an absent fieldset. Renders nothing when there are no rows.
+function checkboxFieldset(opts: {
+  legend: string;
+  name: string;
+  testId?: string;
+  rows: readonly { value: string; checked: boolean; disabled?: boolean; content: Html | string }[];
+}): Html {
+  if (!opts.rows.length) return emptyHtml;
+  return html`<fieldset class="checkbox-list"${opts.testId ? html` data-testid="${opts.testId}"` : emptyHtml}>
+      <legend>${opts.legend}</legend>
+      ${opts.rows.map(
+        (r) => html`<label class="checkbox-row">
+          <input type="checkbox" name="${opts.name}" value="${r.value}"${r.checked ? " checked" : ""}${r.disabled ? " disabled" : ""}>
+          ${r.content}
+        </label>`,
+      )}
+    </fieldset>
+    <input type="hidden" name="${opts.name}_present" value="1">`;
+}
+
 function threadEditPage(opts: {
   ctx: WebCtx;
   kind: "issue" | "pull request";
@@ -160,34 +182,29 @@ function threadEditPage(opts: {
   testId: string;
 }): Html {
   const currentIds = new Set(opts.currentLabels.map((label) => label.id));
-  const labelRows = opts.allLabels.map((label) => {
-    const checked = currentIds.has(label.id) ? " checked" : "";
-    const disabled = label.is_archived && !currentIds.has(label.id) ? " disabled" : "";
-    return html`<label class="checkbox-row">
-      <input type="checkbox" name="labels" value="${label.id}"${checked}${disabled}>
-      ${labelChip(label)}
-    </label>`;
+  const labelFieldset = checkboxFieldset({
+    legend: "Labels",
+    name: "labels",
+    rows: opts.allLabels.map((label) => ({
+      value: String(label.id),
+      checked: currentIds.has(label.id),
+      disabled: label.is_archived && !currentIds.has(label.id),
+      content: labelChip(label),
+    })),
   });
-  const labelFieldset = opts.allLabels.length
-    ? html`<fieldset class="checkbox-list">
-        <legend>Labels</legend>
-        ${labelRows}
-      </fieldset>
-      <input type="hidden" name="labels_present" value="1">`
-    : "";
   const assignees = opts.assignees;
-  const assigneeFieldset = assignees && assignees.candidates.length
-    ? html`<fieldset class="checkbox-list" data-testid="assignee-list">
-        <legend>Assignees</legend>
-        ${assignees.candidates.map(
-          (login) => html`<label class="checkbox-row">
-            <input type="checkbox" name="assignees" value="${login}"${assignees.current.has(login) ? " checked" : ""}>
-            ${displayLogin(login)}
-          </label>`,
-        )}
-      </fieldset>
-      <input type="hidden" name="assignees_present" value="1">`
-    : "";
+  const assigneeFieldset = assignees
+    ? checkboxFieldset({
+        legend: "Assignees",
+        name: "assignees",
+        testId: "assignee-list",
+        rows: assignees.candidates.map((login) => ({
+          value: login,
+          checked: assignees.current.has(login),
+          content: displayLogin(login),
+        })),
+      })
+    : emptyHtml;
   return html`<section class="edit-page issue-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><p class="eyebrow">Edit ${opts.kind}</p><h1>#${opts.number}</h1></div>

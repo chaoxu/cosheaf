@@ -47,8 +47,8 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   // valid workspace. Untagged repos open as forgejo-passthrough — the format
   // falls back via documentFormatFromTopics; we no longer gate on a
   // `cosheaf-format-*` topic being present.
-  const format = await resolveWorkspaceFormat(fj, owner, repo);
-  const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat: format.format };
+  const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
+  const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
   return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };

@@ -233,46 +233,33 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMiles
 }
 
 function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null): Html {
-  const isAdmin = ctx.ws.role === "admin";
   const description = repo?.description ?? "";
   const isPrivate = repo?.private ?? true;
-  if (!isAdmin) {
-    return html`<section class="settings-section" data-testid="settings-meta">
-      <div class="settings-section-header"><h2>Repository</h2><p>Description and visibility.</p></div>
-      <div class="settings-form">
+  const inner = ctx.ws.role === "admin"
+    ? html`<form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/meta")}">
+        <label class="settings-row"><span>Description</span><input name="description" value="${description}" data-testid="settings-meta-description"></label>
+        <label class="settings-row"><span>Visibility</span>
+          <select name="visibility" data-testid="settings-meta-visibility">
+            <option value="private" ${isPrivate ? "selected" : ""}>Private</option>
+            <option value="public" ${isPrivate ? "" : "selected"}>Public</option>
+          </select>
+        </label>
+        <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-meta-submit">Save repository</button></div>
+      </form>`
+    : html`<div class="settings-form">
         <div class="settings-row"><span>Description</span><strong>${description || "—"}</strong></div>
         <div class="settings-row"><span>Visibility</span><strong>${isPrivate ? "Private" : "Public"}</strong></div>
-      </div>
-    </section>`;
-  }
+      </div>`;
   return html`<section class="settings-section" data-testid="settings-meta">
     <div class="settings-section-header"><h2>Repository</h2><p>Description and visibility.</p></div>
-    <form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/meta")}">
-      <label class="settings-row"><span>Description</span><input name="description" value="${description}" data-testid="settings-meta-description"></label>
-      <label class="settings-row"><span>Visibility</span>
-        <select name="visibility" data-testid="settings-meta-visibility">
-          <option value="private" ${isPrivate ? "selected" : ""}>Private</option>
-          <option value="public" ${isPrivate ? "" : "selected"}>Public</option>
-        </select>
-      </label>
-      <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-meta-submit">Save repository</button></div>
-    </form>
+    ${inner}
   </section>`;
 }
 
 function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], accessUpdated: string | undefined): Html {
-  if (ctx.ws.role !== "admin") {
-    return html`<section class="settings-section">
-      <div class="settings-section-header"><h2>Access</h2><p>Grant repository access to users and agents.</p></div>
-      <p class="muted">Only repository admins can manage access.</p>
-    </section>`;
-  }
-  return html`<section class="settings-section">
-    <div class="settings-section-header">
-      <h2>Access</h2>
-      <p>Grant repository access to users and agents.</p>
-    </div>
-    <div class="settings-form" data-testid="settings-collaborators">
+  const inner = ctx.ws.role !== "admin"
+    ? html`<p class="muted">Only repository admins can manage access.</p>`
+    : html`<div class="settings-form" data-testid="settings-collaborators">
       <div class="list mini-list">
         ${collaborators.length === 0
           ? html`<div class="empty">No collaborators.</div>`
@@ -304,7 +291,10 @@ function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], acces
           ${accessUpdated ? html`<p class="muted" data-testid="settings-access-saved">${accessUpdated}</p>` : ""}
         </div>
       </form>
-    </div>
+    </div>`;
+  return html`<section class="settings-section">
+    <div class="settings-section-header"><h2>Access</h2><p>Grant repository access to users and agents.</p></div>
+    ${inner}
   </section>`;
 }
 

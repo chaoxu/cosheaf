@@ -255,16 +255,15 @@ export class Forgejo {
     });
   }
 
-  // Repos visible to the calling token that carry `topic` as an exact repo
-  // topic. Forgejo's topic search is exact-match only (no prefix search), so
-  // workspace discovery unions one call per registered format topic.
-  // /repos/search wraps results in {ok, data} rather than a bare array, so it
-  // can't go through pagedList; same page-walk discipline, unwrapped here.
-  async searchReposByTopic(topic: string): Promise<ForgejoRepo[]> {
+  // Page-walk /repos/search, which wraps results in {data} rather than a bare
+  // array (so it can't go through pagedList). Runs under the caller's PAT, so
+  // private repos respect Forgejo visibility, and each result already carries
+  // `permissions` + `topics` (no per-repo round-trip).
+  private async pagedRepoSearch(query: RequestOpts["query"]): Promise<ForgejoRepo[]> {
     const out: ForgejoRepo[] = [];
     for (let page = 1; page <= 50; page++) {
       const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
-        query: { q: topic, topic: "true", page, limit: 50 },
+        query: { ...query, page, limit: 50 },
       });
       const batch = res.data ?? [];
       if (batch.length === 0) break;
@@ -274,25 +273,18 @@ export class Forgejo {
     return out;
   }
 
-  // Every repo the calling token can see, with no topic filter. Cosheaf is a
-  // thin frontend over the forge: discovery shows all repos the caller can
-  // access, not only ones carrying a `cosheaf-format-*` topic. Untagged repos
-  // default to forgejo-passthrough. /repos/search runs under the caller's PAT,
-  // so private repos respect Forgejo visibility, and each result carries
-  // `permissions` + `topics` (no per-repo round-trip). Same {data} unwrap and
-  // page-walk discipline as searchReposByTopic.
+  // Repos visible to the caller that carry `topic` as an exact repo topic
+  // (Forgejo topic search is exact-match only, no prefix search).
+  async searchReposByTopic(topic: string): Promise<ForgejoRepo[]> {
+    return this.pagedRepoSearch({ q: topic, topic: "true" });
+  }
+
+  // Every repo the caller can access, no topic filter. Cosheaf is a frontend
+  // over the forge: discovery shows all accessible repos, not only ones
+  // carrying a `cosheaf-format-*` topic; untagged repos default to
+  // forgejo-passthrough.
   async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
-    const out: ForgejoRepo[] = [];
-    for (let page = 1; page <= 50; page++) {
-      const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
-        query: { page, limit: 50 },
-      });
-      const batch = res.data ?? [];
-      if (batch.length === 0) break;
-      out.push(...batch);
-      if (batch.length < 50) break;
-    }
-    return out;
+    return this.pagedRepoSearch({});
   }
 
   async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {

@@ -7,7 +7,7 @@ import { Forgejo, ForgejoError } from "./forgejo.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
-import { type DocumentFormatId, documentFormatFromTopics, isFormatTopic } from "../shared/document-format.js";
+import { type DocumentFormatId, documentFormatFromTopics } from "../shared/document-format.js";
 
 interface AuthResolution {
   user: User;
@@ -174,7 +174,7 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  const { format: defaultMdFormat } = await resolveWorkspaceFormat(fj, owner, repo);
+  const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
   c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat, role });
   c.set("repoCtx", { fj, owner, repo });
   await next();
@@ -184,22 +184,17 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
 // enough, and a topic flip is a rare admin action.
 const FORMAT_TTL_MS = 30_000;
 
-// Cached per-workspace format info derived from repo topics. `hasFormatTopic`
-// is what makes a repo a workspace for the web UI; `format` falls back to the
-// default for API surfaces that accept untagged repos.
-export interface WorkspaceFormatInfo {
-  hasFormatTopic: boolean;
-  format: DocumentFormatId;
-}
-
-const FORMAT_CACHE = new TTLCache<string, WorkspaceFormatInfo>(FORMAT_TTL_MS);
+// Cached per-workspace markdown format derived from repo topics; untagged
+// repos fall back to the default (forgejo-passthrough). Cosheaf is a frontend
+// over the forge, so visibility is never gated on a format topic being present.
+const FORMAT_CACHE = new TTLCache<string, DocumentFormatId>(FORMAT_TTL_MS);
 
 export function _resetFormatCacheForTests(): void {
   FORMAT_CACHE.clear();
 }
 
 export function _seedFormatCacheForTests(owner: string, repo: string, formatId: string): void {
-  FORMAT_CACHE.set(`${owner}/${repo}`, { hasFormatTopic: true, format: formatId as DocumentFormatId }, 60_000);
+  FORMAT_CACHE.set(`${owner}/${repo}`, formatId as DocumentFormatId, 60_000);
 }
 
 // Cached topics lookup shared with the web path.
@@ -207,14 +202,10 @@ export async function resolveWorkspaceFormat(
   fj: Forgejo,
   owner: string,
   repo: string,
-): Promise<WorkspaceFormatInfo> {
+): Promise<DocumentFormatId> {
   const cached = FORMAT_CACHE.get(`${owner}/${repo}`);
   if (cached !== null) return cached;
-  const topics = await fj.listRepoTopics(owner, repo);
-  const info: WorkspaceFormatInfo = {
-    hasFormatTopic: topics.some(isFormatTopic),
-    format: documentFormatFromTopics(topics),
-  };
-  FORMAT_CACHE.set(`${owner}/${repo}`, info);
-  return info;
+  const format = documentFormatFromTopics(await fj.listRepoTopics(owner, repo));
+  FORMAT_CACHE.set(`${owner}/${repo}`, format);
+  return format;
 }
