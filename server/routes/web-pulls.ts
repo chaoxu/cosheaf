@@ -70,6 +70,10 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
     ctx.fj.listLabels(ctx.owner, ctx.repo),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
+  // Forgejo's /pulls has no title-search param, so filter the fetched page in
+  // memory (a thin pass-through, not a SQLite mirror).
+  const needle = filters.q.toLowerCase();
+  const visible = needle ? pulls.filter((p) => p.title.toLowerCase().includes(needle)) : pulls;
   return htmlResponse(
     repoPageShell(
       ctx,
@@ -81,7 +85,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New pull request</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
-        ${pullList(ctx.owner, ctx.repo, pulls, "No matching pull requests.")}
+        ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.")}
       `,
     ),
   );
@@ -431,6 +435,7 @@ interface PullListFilters {
   milestoneValue: string;
   author: string;
   sort: PullListSort | "";
+  q: string;
 }
 
 const PULL_SORT_OPTIONS: Array<{ value: PullListSort; label: string }> = [
@@ -455,6 +460,7 @@ function parsePullListFilters(c: Context<AppEnv>): PullListFilters {
     milestoneValue,
     author: queryText(c, "author"),
     sort: PULL_SORT_OPTIONS.some((option) => option.value === sort) ? sort as PullListSort : "",
+    q: queryText(c, "q"),
   };
 }
 
@@ -517,6 +523,7 @@ function pullFilterForm(
   return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters">
     <div class="filter-basic">
       ${stateField(filters.state)}
+      <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search pull requests"></label>
       ${sortField(filters.sort, PULL_SORT_OPTIONS)}
       <div class="filter-actions">
         <button class="button primary" type="submit">Apply</button>

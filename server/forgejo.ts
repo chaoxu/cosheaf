@@ -825,6 +825,22 @@ export class Forgejo {
     });
   }
 
+  async editLabel(
+    owner: string,
+    repo: string,
+    id: number,
+    patch: { name?: string; color?: string; description?: string; exclusive?: boolean; is_archived?: boolean },
+  ): Promise<ForgejoLabel> {
+    return this.req<ForgejoLabel>(this.repoPath(owner, repo, `labels/${id}`), {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
+  async deleteLabel(owner: string, repo: string, id: number): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `labels/${id}`), { method: "DELETE", expectEmpty: true });
+  }
+
   async setIssueLabels(owner: string, repo: string, number: number, labels: number[]): Promise<ForgejoLabel[]> {
     return this.req<ForgejoLabel[]>(this.repoPath(owner, repo, `issues/${number}/labels`), {
       method: "PUT",
@@ -849,6 +865,22 @@ export class Forgejo {
       method: "POST",
       body: opts,
     });
+  }
+
+  async editMilestone(
+    owner: string,
+    repo: string,
+    id: number,
+    patch: { title?: string; description?: string; state?: "open" | "closed" },
+  ): Promise<ForgejoMilestone> {
+    return this.req<ForgejoMilestone>(this.repoPath(owner, repo, `milestones/${id}`), {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
+  async deleteMilestone(owner: string, repo: string, id: number): Promise<void> {
+    await this.req(this.repoPath(owner, repo, `milestones/${id}`), { method: "DELETE", expectEmpty: true });
   }
 
   async renderMarkdown(owner: string, repo: string, text: string): Promise<string> {

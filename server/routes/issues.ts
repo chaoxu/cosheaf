@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
+import { is404 } from "../forgejo-errors.js";
 import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
 import {
   type ForgejoIssue,
@@ -333,6 +334,46 @@ issues.post("/:owner/:repo/labels", async (c) => {
   return c.json(toLabel(label), 201);
 });
 
+issues.patch("/:owner/:repo/labels/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad label id"));
+  const body = (await c.req.json().catch(() => null)) as {
+    name?: unknown;
+    color?: unknown;
+    description?: unknown;
+    exclusive?: unknown;
+  } | null;
+  const patch: { name?: string; color?: string; description?: string; exclusive?: boolean } = {};
+  if (typeof body?.name === "string") {
+    const name = body.name.trim();
+    if (!name) return c.json(...bad("label name cannot be empty"));
+    patch.name = name;
+  }
+  if (typeof body?.color === "string") {
+    const color = body.color.trim().replace(/^#/, "");
+    if (!/^[0-9a-fA-F]{6}$/.test(color)) return c.json(...bad("label color must be six hex digits"));
+    patch.color = color;
+  }
+  if (typeof body?.description === "string") patch.description = body.description;
+  if (typeof body?.exclusive === "boolean") patch.exclusive = body.exclusive;
+  const { fj, owner, repo } = c.get("repoCtx");
+  const label = await fj.editLabel(owner, repo, id, patch);
+  return c.json(toLabel(label));
+});
+
+issues.delete("/:owner/:repo/labels/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad label id"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  try {
+    await fj.deleteLabel(owner, repo, id);
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("label not found"));
+    throw err;
+  }
+  return c.json({ ok: true });
+});
+
 issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
@@ -388,6 +429,40 @@ issues.post("/:owner/:repo/milestones", async (c) => {
     description: typeof body?.description === "string" ? body.description : undefined,
   });
   return c.json(toMilestone(milestone), 201);
+});
+
+issues.patch("/:owner/:repo/milestones/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad milestone id"));
+  const body = (await c.req.json().catch(() => null)) as {
+    title?: unknown;
+    description?: unknown;
+    state?: unknown;
+  } | null;
+  const patch: { title?: string; description?: string; state?: "open" | "closed" } = {};
+  if (typeof body?.title === "string") {
+    const title = body.title.trim();
+    if (!title) return c.json(...bad("milestone title cannot be empty"));
+    patch.title = title;
+  }
+  if (typeof body?.description === "string") patch.description = body.description;
+  if (body?.state === "open" || body?.state === "closed") patch.state = body.state;
+  const { fj, owner, repo } = c.get("repoCtx");
+  const milestone = await fj.editMilestone(owner, repo, id, patch);
+  return c.json(toMilestone(milestone));
+});
+
+issues.delete("/:owner/:repo/milestones/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad milestone id"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  try {
+    await fj.deleteMilestone(owner, repo, id);
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("milestone not found"));
+    throw err;
+  }
+  return c.json({ ok: true });
 });
 
 issues.patch("/:owner/:repo/issues/:number/milestone", async (c) => {

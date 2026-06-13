@@ -5,7 +5,7 @@ import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middl
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { issues } from "./issues.js";
-import { freshTestDb, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("issues");
 
@@ -497,6 +497,113 @@ describe("issues routes", () => {
       code: "validation",
     });
     expect(badParam.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("edits a label through a typed PATCH route, forwarding only sent fields", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok({ id: 5, name: "bug", color: "ff0000", description: "" }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/labels/5", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: " bug ", color: "#ff0000" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/labels/5");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ name: "bug", color: "ff0000" });
+    await expect(res.json()).resolves.toMatchObject({ id: 5, name: "bug" });
+  });
+
+  it("rejects an invalid label color on PATCH before reaching Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const res = await appFor(db).request("/api/v1/repos/owner/w/labels/5", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ color: "nothex" }),
+    });
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes a label through a typed DELETE route", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(empty(204));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/labels/5", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/labels/5");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    await expect(res.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("returns 404 when deleting a missing label", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(new Response("not found", { status: 404 }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/labels/999", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("edits and closes a milestone through typed routes", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok({ id: 3, title: "v1", description: "", state: "closed", open_issues: 0, closed_issues: 2, created_at: "2026-05-20T00:00:00Z" }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/milestones/3", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ title: "v1", state: "closed" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/milestones/3");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ title: "v1", state: "closed" });
+    await expect(res.json()).resolves.toMatchObject({ id: 3, state: "closed" });
+  });
+
+  it("deletes a milestone through a typed DELETE route", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(empty(204));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/milestones/3", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    await expect(res.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects label/milestone mutations from a read-only user", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "bob", role: "read" });
+    const patchLabel = await appFor(db).request("/api/v1/repos/owner/w/labels/5", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "x" }),
+    });
+    const delMilestone = await appFor(db).request("/api/v1/repos/owner/w/milestones/3", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(patchLabel.status).toBe(403);
+    expect(delMilestone.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,8 @@
 import type { Hono } from "hono";
 import { ROLES, type Role } from "../../shared/roles.js";
 import { ForgejoError } from "../forgejo.js";
-import type { ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
+import { isFormatTopic } from "../../shared/document-format.js";
 import { invalidateWorkspacePermissionCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { setWorkspaceMember } from "../workspace-members.js";
@@ -10,6 +11,7 @@ import {
   displayLogin,
   htmlResponse,
   notFoundPage,
+  positiveInt,
   redirect,
   repoHref,
   stringField,
@@ -18,6 +20,7 @@ import {
   webRouteForAdmin,
   type WebCtx,
 } from "./web-context.js";
+import { is404 } from "../forgejo-errors.js";
 import { html, type Html } from "./web-html.js";
 import { labelChip, repoPageShell } from "./web-page.js";
 import { pageShell } from "./web-shell.js";
@@ -25,12 +28,13 @@ import { pageShell } from "./web-shell.js";
 export function registerSettingsRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
   const isAdmin = ctx.ws.role === "admin";
-  const [repo, protection, labels, milestones, collaborators] = await Promise.all([
+  const [repo, protection, labels, milestones, collaborators, branches] = await Promise.all([
     ctx.fj.getRepo(ctx.owner, ctx.repo).catch(() => null),
     ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null),
     ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
     isAdmin ? ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
+    isAdmin ? ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
   ]);
   const accessUpdated = c.req.query("access");
   return htmlResponse(
@@ -42,7 +46,7 @@ web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
               <h1>Settings</h1>
             </div>
           </div>
-          ${repoMetaSection(ctx, repo)}
+          ${repoMetaSection(ctx, repo, branches)}
           <section class="settings-section">
             <div class="settings-section-header">
               <h2>Review policy</h2>
@@ -98,6 +102,60 @@ web.post("/:owner/:repo/settings/milestones", webRouteForAdmin(async (c, ctx) =>
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
 
+web.post("/:owner/:repo/settings/labels/:id/edit", webRouteForAdmin(async (c, ctx) => {
+  const id = positiveInt(c.req.param("id"));
+  if (!id) return badRequestPage(ctx.user, "Invalid label.");
+  const form = await c.req.parseBody();
+  const name = stringField(form.name);
+  const color = (stringField(form.color) ?? "").replace(/^#/, "");
+  if (!name) return badRequestPage(ctx.user, "Label name is required.");
+  if (!/^[0-9a-fA-F]{6}$/.test(color)) return badRequestPage(ctx.user, "Label color must be six hex digits.");
+  await ctx.fj.editLabel(ctx.owner, ctx.repo, id, {
+    name,
+    color,
+    description: textField(form.description) ?? "",
+    exclusive: stringField(form.exclusive) === "on",
+  });
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+}));
+
+web.post("/:owner/:repo/settings/labels/:id/delete", webRouteForAdmin(async (c, ctx) => {
+  const id = positiveInt(c.req.param("id"));
+  if (!id) return badRequestPage(ctx.user, "Invalid label.");
+  try {
+    await ctx.fj.deleteLabel(ctx.owner, ctx.repo, id);
+  } catch (err) {
+    if (!is404(err)) throw err;
+  }
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+}));
+
+web.post("/:owner/:repo/settings/milestones/:id/edit", webRouteForAdmin(async (c, ctx) => {
+  const id = positiveInt(c.req.param("id"));
+  if (!id) return badRequestPage(ctx.user, "Invalid milestone.");
+  const form = await c.req.parseBody();
+  const title = stringField(form.title);
+  if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
+  const stateRaw = stringField(form.state);
+  await ctx.fj.editMilestone(ctx.owner, ctx.repo, id, {
+    title,
+    description: textField(form.description) ?? "",
+    state: stateRaw === "open" || stateRaw === "closed" ? stateRaw : undefined,
+  });
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+}));
+
+web.post("/:owner/:repo/settings/milestones/:id/delete", webRouteForAdmin(async (c, ctx) => {
+  const id = positiveInt(c.req.param("id"));
+  if (!id) return badRequestPage(ctx.user, "Invalid milestone.");
+  try {
+    await ctx.fj.deleteMilestone(ctx.owner, ctx.repo, id);
+  } catch (err) {
+    if (!is404(err)) throw err;
+  }
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+}));
+
 web.post("/:owner/:repo/settings/access", webRouteForAdmin(async (c, ctx) => {
   const body = await c.req.parseBody();
   const username = stringField(body.username)?.trim();
@@ -125,10 +183,18 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();
   const description = textField(form.description) ?? "";
   const visibility = stringField(form.visibility);
+  const defaultBranch = stringField(form.default_branch) ?? undefined;
   await ctx.fj.editRepo(ctx.owner, ctx.repo, {
     description,
     private: visibility === "private" ? true : visibility === "public" ? false : undefined,
+    default_branch: defaultBranch,
   });
+  // Topics: the user edits only the free topics; the cosheaf-format-* topic is
+  // managed by the document format and must survive a topics edit.
+  if (form.topics !== undefined) {
+    const existing = await ctx.fj.listRepoTopics(ctx.owner, ctx.repo).catch(() => []);
+    await ctx.fj.replaceRepoTopics(ctx.owner, ctx.repo, mergeRepoTopics(existing, stringField(form.topics) ?? ""));
+  }
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
 
@@ -159,6 +225,27 @@ web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
 }));
 }
 
+function labelRow(ctx: WebCtx, label: ForgejoLabel): Html {
+  if (ctx.ws.role !== "admin") return html`<div class="list-row">${labelChip(label)}</div>`;
+  const base = repoHref(ctx.owner, ctx.repo, `/settings/labels/${label.id}`);
+  return html`<div class="list-row" data-testid="settings-label-row">
+    ${labelChip(label)}
+    <details class="inline-edit">
+      <summary>Edit</summary>
+      <form class="settings-form compact-form" method="post" action="${base}/edit">
+        <label class="settings-row"><span>Name</span><input name="name" value="${label.name}" required></label>
+        <label class="settings-row"><span>Color</span><input name="color" value="${label.color}" pattern="[0-9a-fA-F]{6}" required></label>
+        <label class="settings-row"><span>Description</span><input name="description" value="${label.description ?? ""}"></label>
+        <label class="settings-row"><span>Exclusive</span><input name="exclusive" type="checkbox" value="on" ${label.exclusive ? "checked" : ""}></label>
+        <div class="settings-actions"><button class="button primary" type="submit">Save</button></div>
+      </form>
+    </details>
+    <form method="post" action="${base}/delete" onsubmit="return confirm('Delete label ${label.name}?')">
+      <button class="button danger" type="submit" data-testid="settings-label-delete">Delete</button>
+    </form>
+  </div>`;
+}
+
 function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Html {
   return html`<section class="settings-section" data-testid="settings-labels">
     <div class="settings-section-header">
@@ -166,7 +253,7 @@ function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Htm
       <p>Labels are repository labels from Forgejo.</p>
     </div>
     <div class="settings-form">
-      <div class="label-chips">${labels.length === 0 ? html`<span class="muted">No labels.</span>` : labels.map(labelChip)}</div>
+      <div class="list mini-list">${labels.length === 0 ? html`<div class="empty">No labels.</div>` : labels.map((label) => labelRow(ctx, label))}</div>
       ${
         ctx.ws.role === "admin"
           ? html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/labels")}">
@@ -182,6 +269,34 @@ function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Htm
   </section>`;
 }
 
+function milestoneRow(ctx: WebCtx, milestone: ForgejoMilestone): Html {
+  const meta = html`<strong>${milestone.title}</strong><span>${milestone.state} - ${milestone.open_issues} open, ${milestone.closed_issues} closed</span>`;
+  if (ctx.ws.role !== "admin") return html`<div class="list-row">${meta}</div>`;
+  const base = repoHref(ctx.owner, ctx.repo, `/settings/milestones/${milestone.id}`);
+  const nextState = milestone.state === "open" ? "closed" : "open";
+  return html`<div class="list-row" data-testid="settings-milestone-row">
+    ${meta}
+    <details class="inline-edit">
+      <summary>Edit</summary>
+      <form class="settings-form compact-form" method="post" action="${base}/edit">
+        <label class="settings-row"><span>Title</span><input name="title" value="${milestone.title}" required></label>
+        <label class="settings-row"><span>Description</span><input name="description" value="${milestone.description ?? ""}"></label>
+        <input type="hidden" name="state" value="${milestone.state}">
+        <div class="settings-actions"><button class="button primary" type="submit">Save</button></div>
+      </form>
+    </details>
+    <form method="post" action="${base}/edit">
+      <input type="hidden" name="title" value="${milestone.title}">
+      <input type="hidden" name="description" value="${milestone.description ?? ""}">
+      <input type="hidden" name="state" value="${nextState}">
+      <button class="button" type="submit" data-testid="settings-milestone-toggle">${milestone.state === "open" ? "Close" : "Reopen"}</button>
+    </form>
+    <form method="post" action="${base}/delete" onsubmit="return confirm('Delete milestone ${milestone.title}?')">
+      <button class="button danger" type="submit" data-testid="settings-milestone-delete">Delete</button>
+    </form>
+  </div>`;
+}
+
 function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMilestone[]): Html {
   return html`<section class="settings-section" data-testid="settings-milestones">
     <div class="settings-section-header">
@@ -192,7 +307,7 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMiles
       <div class="list mini-list">
         ${milestones.length === 0
           ? html`<div class="empty">No milestones.</div>`
-          : milestones.map((milestone) => html`<div class="list-row"><strong>${milestone.title}</strong><span>${milestone.state} - ${milestone.open_issues} open, ${milestone.closed_issues} closed</span></div>`)}
+          : milestones.map((milestone) => milestoneRow(ctx, milestone))}
       </div>
       ${
         ctx.ws.role === "admin"
@@ -207,9 +322,33 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMiles
   </section>`;
 }
 
-function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null): Html {
+// The cosheaf-format-* topic is managed via the document format, not the free
+// topics field, so we hide it from the editable list and preserve it on save.
+function editableTopics(topics: readonly string[] | undefined): string {
+  return (topics ?? []).filter((t) => !isFormatTopic(t)).join(" ");
+}
+
+// Merge a free-text topics input back with the existing topics for a save: the
+// format topic(s) are preserved (the user can't edit them away here), the
+// entered topics are normalized (lowercased, validated to Forgejo's topic
+// shape, format topics stripped), and the result is deduped.
+export function mergeRepoTopics(existing: readonly string[], enteredRaw: string): string[] {
+  const preservedFormat = existing.filter(isFormatTopic);
+  const entered = enteredRaw
+    .split(/[\s,]+/)
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => /^[a-z0-9][a-z0-9-]*$/.test(t) && !isFormatTopic(t));
+  return [...new Set([...preservedFormat, ...entered])];
+}
+
+function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null, branches: readonly ForgejoBranch[]): Html {
   const description = repo?.description ?? "";
   const isPrivate = repo?.private ?? true;
+  const defaultBranch = repo?.default_branch ?? "main";
+  const topics = editableTopics(repo?.topics);
+  const branchOpts = branches.length
+    ? branches
+    : [{ name: defaultBranch } as ForgejoBranch];
   const inner = ctx.ws.role === "admin"
     ? html`<form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/meta")}">
         <label class="settings-row"><span>Description</span><input name="description" value="${description}" data-testid="settings-meta-description"></label>
@@ -219,14 +358,22 @@ function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null): Html {
             <option value="public" ${isPrivate ? "" : "selected"}>Public</option>
           </select>
         </label>
+        <label class="settings-row"><span>Default branch</span>
+          <select name="default_branch" data-testid="settings-meta-default-branch">
+            ${branchOpts.map((b) => html`<option value="${b.name}" ${b.name === defaultBranch ? "selected" : ""}>${b.name}</option>`)}
+          </select>
+        </label>
+        <label class="settings-row"><span>Topics</span><input name="topics" value="${topics}" placeholder="space-separated" data-testid="settings-meta-topics"></label>
         <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-meta-submit">Save repository</button></div>
       </form>`
     : html`<div class="settings-form">
         <div class="settings-row"><span>Description</span><strong>${description || "—"}</strong></div>
         <div class="settings-row"><span>Visibility</span><strong>${isPrivate ? "Private" : "Public"}</strong></div>
+        <div class="settings-row"><span>Default branch</span><strong>${defaultBranch}</strong></div>
+        <div class="settings-row"><span>Topics</span><strong>${topics || "—"}</strong></div>
       </div>`;
   return html`<section class="settings-section" data-testid="settings-meta">
-    <div class="settings-section-header"><h2>Repository</h2><p>Description and visibility.</p></div>
+    <div class="settings-section-header"><h2>Repository</h2><p>Description, visibility, default branch, and topics.</p></div>
     ${inner}
   </section>`;
 }

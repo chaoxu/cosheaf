@@ -110,6 +110,7 @@ export async function configReposForUser(c: Context<AppEnv>) {
       name: repo.name,
       full_name: repo.full_name,
       description: repo.description ?? "",
+      private: repo.private ?? false,
       role: roleFromPermissions(repo.permissions),
     }))
     .filter((repo) => repo.role !== "none");

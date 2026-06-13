@@ -92,7 +92,7 @@ web.get("/", async (c) => {
                   <a class="list-row" href="${repoHref(repo.owner, repo.name)}">
                     <strong>${repo.full_name}</strong>
                     <span>${repo.description ?? ""}</span>
-                    <small>${repo.role}</small>
+                    <small>${repo.private ? "private" : "public"} · ${repo.role}</small>
                   </a>
                 `,
                 )}
