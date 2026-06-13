@@ -19,13 +19,19 @@ const TOKEN_NAME_PREFIX = "cosheaf";
 
 // Scopes cosheaf needs. Forgejo's PAT scopes are documented at
 // https://forgejo.org/docs/latest/admin/oauth2-provider/ — we ask for what
-// the routes touch and nothing more.
+// the routes touch and nothing more. Cosheaf acts as a frontend over the
+// forge, so the token must cover what the user can do: repository content +
+// settings (write:repository), issues, notifications, and creating
+// repositories under the user (write:user) or an org (write:organization).
 const TOKEN_SCOPES = [
   "read:repository",
   "write:repository",
   "read:issue",
   "write:issue",
   "read:user",
+  "write:user",
+  "read:organization",
+  "write:organization",
   "read:notification",
   "write:notification",
 ];

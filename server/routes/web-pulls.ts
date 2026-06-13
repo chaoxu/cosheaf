@@ -22,6 +22,7 @@ import {
   redirect,
   repoHref,
   resolveWebRepo,
+  resolveWebRepoForAdmin,
   resolveWebRepoForWrite,
   safeWebRedirect,
   stringField,
@@ -368,7 +369,8 @@ web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
     body: "",
     comments: [{ path, body, ...pos }],
   });
-  const mode = parseDiffMode(stringField(form.mode) ?? undefined);
+  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const mode = parseDiffMode(stringField(form.mode) ?? undefined, richOk);
   const shape = parseDiffShape(stringField(form.shape) ?? undefined, mode);
   return redirect(
     `${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}?file=${encodeURIComponent(path)}&mode=${mode}&shape=${shape}`,
@@ -376,9 +378,8 @@ web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
 });
 
 web.post("/:owner/:repo/pulls/:number/merge", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForAdmin(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   await mergePullWithRetry(() =>
@@ -402,7 +403,8 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
   ]);
   const selected = c.req.query("file") ?? files[0]?.path ?? "";
   const file = files.find((f) => f.path === selected) ?? files[0] ?? null;
-  const mode = parseDiffMode(c.req.query("mode"));
+  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const mode = parseDiffMode(c.req.query("mode"), richOk);
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
   const fileComments = file ? mapLineComments(file, allComments) : [];
@@ -427,7 +429,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
             <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
           </nav>
         </header>
-        <script src="/cosheaf-pr-diff-defaults.js"></script>
+        <script src="/cosheaf-pr-diff-defaults.js" data-rich-diff="${richOk ? "1" : ""}"></script>
         <div class="review-page">
           <main class="review-main">
             <nav class="changed-files" aria-label="Changed files">
@@ -443,7 +445,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
               ${
                 file
                   ? html`<div class="diff-title"><strong>${file.path}</strong><span>+${file.additions} -${file.deletions}</span></div>
-                    ${diffModeControls(ctx, pull.number, file.path, mode, shape)}
+                    ${diffModeControls(ctx, pull.number, file.path, mode, shape, richOk)}
                     ${await renderPrFileView(ctx, pull, file, mode, shape, versions, fileComments)}`
                   : html`<div class="empty">No changed files.</div>`
               }
@@ -511,7 +513,12 @@ interface WebLineComment {
   outdated: boolean;
 }
 
-function parseDiffMode(value: string | undefined): DiffMode {
+// Rich diff renders through the Coflat reader island, which only exists for
+// the coflat format. For forgejo-passthrough there is no rich surface, so we
+// coerce to source regardless of the requested/saved mode — the server is the
+// source of truth here, not the client default.
+function parseDiffMode(value: string | undefined, richOk: boolean): DiffMode {
+  if (!richOk) return "source";
   return value === "source" ? "source" : "rich";
 }
 
@@ -581,10 +588,14 @@ async function renderPrFileView(
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
-function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape): Html {
+function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape, richOk: boolean): Html {
   const href = (nextMode: DiffMode, nextShape: DiffShape) => prFilesHref(ctx, prNumber, filePath, nextMode, nextShape);
-  const modeLink = (id: DiffMode, label: string) =>
-    html`<a data-testid="view-mode-${id}" class="${mode === id ? "active" : ""}" href="${href(id, parseDiffShape(shape, id))}">${label}</a>`;
+  const modeLink = (id: DiffMode, label: string) => {
+    // Passthrough has no rich surface — show Rich as disabled, mirroring the
+    // unified-disabled pattern below, so it is not clickable.
+    if (id === "rich" && !richOk) return html`<span data-testid="view-mode-rich" class="disabled">${label}</span>`;
+    return html`<a data-testid="view-mode-${id}" class="${mode === id ? "active" : ""}" href="${href(id, parseDiffShape(shape, id))}">${label}</a>`;
+  };
   const shapeLink = (id: DiffShape, label: string) => {
     if (mode === "rich" && id === "unified") return html`<span data-testid="view-shape-unified" class="disabled">Unified</span>`;
     return html`<a data-testid="view-shape-${id}" class="${shape === id ? "active" : ""}" href="${href(mode, id)}">${label}</a>`;

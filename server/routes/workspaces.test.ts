@@ -34,44 +34,43 @@ afterEach(() => {
 });
 
 describe("GET /api/v1/workspaces", () => {
-  it("lists topic-tagged repos across all owners and derives role from inline permissions", async () => {
+  it("lists every accessible repo across owners, untagged as passthrough, derives role from inline permissions", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao" });
 
-    // Workspace discovery runs one Forgejo topic search per registered
-    // format. The candidates span two owners: one coflat (admin), one
-    // passthrough under a different owner (write-only), and one
-    // cosheaf-tagged repo with no access.
+    // Discovery is topic-agnostic: one `/repos/search` with no filter returns
+    // every repo the PAT can see. Candidates: a coflat repo (admin), a
+    // passthrough repo under another owner (write), an UNTAGGED repo (read —
+    // must surface as forgejo-passthrough), and one with no access (dropped).
     fetchMock.mockImplementation(fakeForgejo((forge) => {
-      forge.get("/api/v1/repos/search", (c) => {
-        if (c.req.query("q") === "cosheaf-format-coflat") {
-          return c.json({ data: [
-            {
-              id: 1, name: "alpha", full_name: "owner/alpha", default_branch: "main",
-              description: "Alpha workspace", owner: { id: 1, login: "owner" },
-              topics: ["cosheaf-format-coflat"],
-              permissions: { admin: true, push: true, pull: true },
-            },
-            {
-              id: 4, name: "private", full_name: "owner/private", default_branch: "main",
-              owner: { id: 1, login: "owner" },
-              topics: ["cosheaf-format-coflat"],
-              permissions: {},
-            },
-          ] });
-        }
-        if (c.req.query("q") === "cosheaf-format-forgejo-passthrough") {
-          return c.json({ data: [
-            {
-              id: 2, name: "beta", full_name: "other/beta", default_branch: "main",
-              description: "Beta", owner: { id: 2, login: "other" },
-              topics: ["cosheaf-format-forgejo-passthrough"],
-              permissions: { admin: false, push: true, pull: true },
-            },
-          ] });
-        }
-        return c.json({ data: [] });
-      });
+      forge.get("/api/v1/repos/search", (c) =>
+        c.json({ data: [
+          {
+            id: 1, name: "alpha", full_name: "owner/alpha", default_branch: "main",
+            description: "Alpha workspace", owner: { id: 1, login: "owner" },
+            topics: ["cosheaf-format-coflat"],
+            permissions: { admin: true, push: true, pull: true },
+          },
+          {
+            id: 2, name: "beta", full_name: "other/beta", default_branch: "main",
+            description: "Beta", owner: { id: 2, login: "other" },
+            topics: ["cosheaf-format-forgejo-passthrough"],
+            permissions: { admin: false, push: true, pull: true },
+          },
+          {
+            id: 3, name: "plain", full_name: "owner/plain", default_branch: "main",
+            description: "Plain notes", owner: { id: 1, login: "owner" },
+            topics: [],
+            permissions: { admin: false, push: false, pull: true },
+          },
+          {
+            id: 4, name: "private", full_name: "owner/private", default_branch: "main",
+            owner: { id: 1, login: "owner" },
+            topics: ["cosheaf-format-coflat"],
+            permissions: {},
+          },
+        ] }),
+      );
     }));
 
     const res = await app.request("/api/v1/workspaces", {
@@ -82,6 +81,7 @@ describe("GET /api/v1/workspaces", () => {
     expect(body.workspaces).toEqual([
       { owner: "other", repo: "beta", full_name: "other/beta", name: "Beta", role: "write", default_md_format: "forgejo-passthrough" },
       { owner: "owner", repo: "alpha", full_name: "owner/alpha", name: "Alpha workspace", role: "admin", default_md_format: "coflat" },
+      { owner: "owner", repo: "plain", full_name: "owner/plain", name: "Plain notes", role: "read", default_md_format: "forgejo-passthrough" },
     ]);
   });
 

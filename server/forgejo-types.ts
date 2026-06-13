@@ -106,6 +106,7 @@ export interface ForgejoRepo {
   full_name: string;
   default_branch: string;
   description?: string;
+  private?: boolean;
   owner: ForgejoUser;
   // Present when the search/list endpoints include topics; the dedicated
   // /topics endpoint (Forgejo client `listRepoTopics`) is the authoritative

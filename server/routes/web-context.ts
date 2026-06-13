@@ -43,22 +43,38 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   if (role === "none") {
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
+  // Cosheaf is a frontend over the forge: any repo the caller can read is a
+  // valid workspace. Untagged repos open as forgejo-passthrough — the format
+  // falls back via documentFormatFromTopics; we no longer gate on a
+  // `cosheaf-format-*` topic being present.
   const format = await resolveWorkspaceFormat(fj, owner, repo);
-  if (!format.hasFormatTopic) {
-    return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
-  }
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat: format.format };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
   return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };
 }
 
-// resolveWebRepo plus the write gate every mutating web handler needs:
-// read-only members get the Forbidden page instead of the resolved repo.
+// resolveWebRepo plus the write gate every mutating web handler needs.
+// Read-only members get the same 404 "Repository not found" page as
+// non-members: a distinct 403 would leak that the caller holds read access to
+// a private repo, letting them enumerate repos by status code. (The typed JSON
+// API still returns 403 via requireWriteOnMutation — machine clients are a
+// different threat model.)
 export async function resolveWebRepoForWrite(c: Context<AppEnv>): Promise<WebRepoResult> {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx;
-  if (ctx.ws.role === "read") return { ok: false, response: forbiddenPage(ctx.user) };
+  if (ctx.ws.role === "read") return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
+  return ctx;
+}
+
+// resolveWebRepo plus an admin gate. Any non-admin role (read or write) gets
+// the same 404 as a non-member, for the same anti-enumeration reason as
+// resolveWebRepoForWrite. Use for admin-only web pages/POSTs (settings, repo
+// deletion, PR merge).
+export async function resolveWebRepoForAdmin(c: Context<AppEnv>): Promise<WebRepoResult> {
+  const ctx = await resolveWebRepo(c);
+  if (!ctx.ok) return ctx;
+  if (ctx.ws.role !== "admin") return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
   return ctx;
 }
 

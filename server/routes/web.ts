@@ -3,10 +3,14 @@ import { compress } from "hono/compress";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { AUTH_COOKIE } from "../middleware.js";
 import type { AppEnv } from "../types.js";
+import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
+import { allDocumentFormats } from "../format-registry.js";
+import { DEFAULT_DOCUMENT_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
+import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { configReposForUser, htmlResponse, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
+import { badRequestPage, configReposForUser, htmlResponse, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
 import { userPreferencesSection, userPreferencesScript } from "./web-page.js";
@@ -78,6 +82,7 @@ web.get("/", async (c) => {
               <p class="eyebrow">Repositories</p>
               <h1>${auth.user.username}</h1>
             </div>
+            <a class="button primary" href="/new" data-testid="new-repo">New repository</a>
           </div>
           <div class="list">
             ${repos.length === 0
@@ -123,6 +128,94 @@ web.get("/account/settings", async (c) => {
       `,
     }),
   );
+});
+
+web.get("/new", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const error = c.req.query("error");
+  return htmlResponse(
+    pageShell({
+      title: "New repository",
+      user: auth.user.username,
+      sidebar: globalSidebar("workspaces"),
+      statusPath: [{ label: "new repository" }],
+      body: html`
+        <main class="page">
+          <div class="settings-page">
+            <div class="page-title compact">
+              <div>
+                <p class="eyebrow">Repositories</p>
+                <h1>New repository</h1>
+              </div>
+            </div>
+            <section class="settings-section">
+              <div class="settings-section-header">
+                <h2>Create</h2>
+                <p>Creates a Forgejo repository under <strong>${auth.user.username}</strong> and registers it as a Cosheaf workspace.</p>
+              </div>
+              <form class="settings-form" method="post" action="/new" data-testid="new-repo-form">
+                <label class="settings-row">
+                  <span>Repository name</span>
+                  <input name="slug" data-testid="new-repo-slug" pattern="[A-Za-z0-9._-]+" required>
+                </label>
+                <label class="settings-row">
+                  <span>Display name</span>
+                  <input name="name" data-testid="new-repo-name" required>
+                </label>
+                <label class="settings-row">
+                  <span>Document format</span>
+                  <select name="default_md_format" data-testid="new-repo-format">
+                    ${allDocumentFormats().map(
+                      (f) => html`<option value="${f.id}" ${f.id === DEFAULT_DOCUMENT_FORMAT_ID ? "selected" : ""}>${f.id}</option>`,
+                    )}
+                  </select>
+                </label>
+                <div class="settings-actions">
+                  <button class="button primary" type="submit" data-testid="new-repo-submit">Create repository</button>
+                  ${error ? html`<p class="muted" data-testid="new-repo-error">${error}</p>` : ""}
+                </div>
+              </form>
+            </section>
+          </div>
+        </main>
+      `,
+    }),
+  );
+});
+
+web.post("/new", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const form = await c.req.parseBody();
+  const slug = stringField(form.slug)?.trim();
+  const name = stringField(form.name)?.trim();
+  const formatRaw = stringField(form.default_md_format);
+  if (!slug || !name) return redirect("/new?error=name+and+display+name+required");
+  if (!WORKSPACE_SLUG_RE.test(slug)) return redirect("/new?error=invalid+repository+name");
+  if (formatRaw !== undefined && !isDocumentFormatId(formatRaw)) {
+    return redirect("/new?error=invalid+format");
+  }
+  const owner = auth.user.username;
+  const fj = c.get("fjUser");
+  if (await fj.getRepo(owner, slug)) {
+    return redirect(`/new?error=${encodeURIComponent(`${owner}/${slug} already exists`)}`);
+  }
+  try {
+    await provisionWorkspace(c.get("db"), fj, c.get("config"), {
+      owner,
+      repo: slug,
+      name,
+      user: auth.user,
+      forgejoUsername: owner,
+      provisionVia: "user-pat",
+      rollbackCreatedRepoOnLocalFailure: true,
+      defaultMdFormat: formatRaw,
+    });
+  } catch (err) {
+    return badRequestPage(auth.user.username, `Could not create repository: ${(err as Error).message}`);
+  }
+  return redirect(repoHref(owner, slug));
 });
 
 registerFileRoutes(web);

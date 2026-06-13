@@ -30,6 +30,7 @@ import {
   type SeedOptions,
 } from "./seed.js";
 import { setWorkspaceMember } from "./workspace-members.js";
+import { exchangeForgejoCredsForPat } from "./routes/auth.js";
 
 async function readPassword(prompt: string): Promise<string> {
   if (!stdin.isTTY) {
@@ -180,15 +181,19 @@ export function parseSeedOptions(args: string[]): SeedOptions {
   return normalizeSeedOptions(command.opts());
 }
 
-// Create the Forgejo account if absent. Users live entirely on Forgejo;
-// the password set here is the only password the user has — they type it
-// at cosheaf's login form, and cosheaf exchanges it for a PAT-backed
-// HttpOnly cookie.
+// Create the Forgejo account if absent, then mint its Cosheaf API key. Users
+// live entirely on Forgejo; the password set here is the only password the
+// user has — they type it at cosheaf's login form, and cosheaf exchanges it
+// for a PAT-backed HttpOnly cookie. We also mint that PAT here so a freshly
+// created account (especially a service/agent account) has a usable API key
+// immediately, without a first interactive login. The mint reuses the login
+// exchange, so it's idempotent: a cached valid token is reused, a revoked one
+// is reminted.
 async function ensureForgejoUser(
   username: string,
   password: string,
 ): Promise<void> {
-  const { forgejo } = ctx();
+  const { config, db, forgejo } = ctx();
   const fjExisting = await forgejo.getUserByName(username);
   if (!fjExisting) {
     await forgejo.createUser({
@@ -200,6 +205,17 @@ async function ensureForgejoUser(
     console.log(`created forgejo user ${username}`);
   } else {
     console.log(`forgejo user ${username} already exists (password unchanged)`);
+  }
+
+  const minted = await exchangeForgejoCredsForPat(db, config.forgejoUrl, username, password);
+  if (minted.kind === "ok") {
+    console.log(`api key for ${username}: ${minted.pat}`);
+  } else if (minted.kind === "bad_credentials") {
+    console.error(`could not mint api key for ${username}: forgejo rejected the password`);
+    process.exit(1);
+  } else {
+    console.error(`could not mint api key for ${username}: ${minted.detail}`);
+    process.exit(1);
   }
 }
 
@@ -350,9 +366,9 @@ async function doctor(): Promise<void> {
     }),
   );
 
-  // Per-workspace checks. Workspaces are enumerated from Forgejo (any
-  // visible repo with a `cosheaf-format-*` topic, across owners), not from
-  // SQLite — there's no workspaces table anymore.
+  // Per-workspace checks. Workspaces are enumerated from Forgejo (every
+  // repo the caller can access, across owners — untagged repos open as
+  // forgejo-passthrough), not from SQLite — there's no workspaces table.
   const workspaceRepos = await listVisibleWorkspaceRepos(forgejo);
   const workspaces = workspaceRepos.map((r) => ({
     owner: r.owner.login,
@@ -375,7 +391,11 @@ async function doctor(): Promise<void> {
     results.push(
       await check(`workspace ${ws.slug}: format topic well-formed`, async () => {
         const formatTopics = ws.topics.filter(isFormatTopic);
-        if (formatTopics.length === 0) throw new Error("no cosheaf-format-* topic");
+        if (formatTopics.length === 0) {
+          // Untagged repos are valid forgejo-passthrough workspaces under
+          // all-repos discovery; absence of a topic is not an error.
+          return `no format topic → ${ws.defaultMdFormat}`;
+        }
         if (formatTopics.length > 1) {
           throw new Error(`multiple format topics: ${formatTopics.join(", ")}`);
         }
@@ -434,7 +454,7 @@ async function doctor(): Promise<void> {
   }
 
   // Sidecar-orphan check: any workspace_slug in doc_map that no longer
-  // corresponds to a Forgejo repo carrying a cosheaf-format-* topic.
+  // corresponds to an accessible Forgejo repo.
   const sidecarSlugs = (
     db.prepare("SELECT DISTINCT workspace_slug FROM doc_map").all() as Array<{ workspace_slug: string }>
   ).map((r) => r.workspace_slug);
@@ -450,11 +470,9 @@ async function doctor(): Promise<void> {
         if (!repo) {
           throw new Error(`doc_map references ${slug} but Forgejo repo is gone; run \`pnpm cli workspace rm ${slug}\``);
         }
-        const hasFormat = (repo.topics ?? []).some(isFormatTopic);
-        if (!hasFormat) {
-          throw new Error(`repo ${slug} exists but has no cosheaf-format-* topic; add a topic or run \`pnpm cli workspace rm ${slug}\``);
-        }
-        // Defensive: should be unreachable because knownSlugs is built from the same predicate.
+        // Repo exists and is accessible — any markdown format is fine
+        // (untagged = passthrough). knownSlugs is built from the same
+        // all-accessible-repos list, so reaching here means a visibility edge.
         return "ok";
       }),
     );

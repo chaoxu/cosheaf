@@ -1,6 +1,4 @@
 import type { ForgejoRepo } from "./forgejo.js";
-import { allDocumentFormats } from "./format-registry.js";
-import { normalizeDocumentFormatId, topicForDocumentFormat } from "../shared/document-format.js";
 import type { Role } from "../shared/roles.js";
 
 // Map Forgejo's repo `permissions` object (included on list/search results
@@ -16,21 +14,17 @@ export function roleFromPermissions(
   return "none";
 }
 
-// Every repo the calling token can see that carries a `cosheaf-format-*`
-// topic, in any owner's namespace. Forgejo repo search runs under the
-// caller's PAT, so private repos respect Forgejo visibility. Topic search is
-// exact-match only, so we run one search per registered format (the registry
-// is the single source of truth for which formats exist) and union by full
-// name.
+// Every repo the calling token can access, in any owner's namespace. Cosheaf
+// is a thin frontend over the forge, so discovery shows all repos the caller
+// can see — not only ones carrying a `cosheaf-format-*` topic. Untagged repos
+// open as forgejo-passthrough (documentFormatFromTopics defaults them).
+// Forgejo repo search runs under the caller's PAT, so private repos respect
+// Forgejo visibility. Dedupe by full name and sort for a stable list.
 export async function listVisibleWorkspaceRepos(
-  fj: { searchReposByTopic(topic: string): Promise<ForgejoRepo[]> },
+  fj: { searchAllAccessibleRepos(): Promise<ForgejoRepo[]> },
 ): Promise<ForgejoRepo[]> {
-  const results = await Promise.all(
-    allDocumentFormats().map((f) =>
-      fj.searchReposByTopic(topicForDocumentFormat(normalizeDocumentFormatId(f.id))),
-    ),
-  );
+  const repos = await fj.searchAllAccessibleRepos();
   const byFullName = new Map<string, ForgejoRepo>();
-  for (const repo of results.flat()) byFullName.set(repo.full_name, repo);
+  for (const repo of repos) byFullName.set(repo.full_name, repo);
   return [...byFullName.values()].sort((a, b) => a.full_name.localeCompare(b.full_name));
 }

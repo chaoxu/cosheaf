@@ -241,6 +241,20 @@ export class Forgejo {
     await this.req(`/api/v1/repos/${owner}/${repo}`, { method: "DELETE", expectEmpty: true });
   }
 
+  // Patch repo metadata (description, visibility, default branch). Forgejo's
+  // PATCH /repos/{owner}/{repo} accepts a partial body; we forward only the
+  // fields the caller set. Repo-admin rights on the caller's own PAT cover it.
+  async editRepo(
+    owner: string,
+    repo: string,
+    patch: { description?: string; private?: boolean; default_branch?: string },
+  ): Promise<ForgejoRepo> {
+    return this.req<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`, {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
   // Repos visible to the calling token that carry `topic` as an exact repo
   // topic. Forgejo's topic search is exact-match only (no prefix search), so
   // workspace discovery unions one call per registered format topic.
@@ -251,6 +265,27 @@ export class Forgejo {
     for (let page = 1; page <= 50; page++) {
       const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
         query: { q: topic, topic: "true", page, limit: 50 },
+      });
+      const batch = res.data ?? [];
+      if (batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < 50) break;
+    }
+    return out;
+  }
+
+  // Every repo the calling token can see, with no topic filter. Cosheaf is a
+  // thin frontend over the forge: discovery shows all repos the caller can
+  // access, not only ones carrying a `cosheaf-format-*` topic. Untagged repos
+  // default to forgejo-passthrough. /repos/search runs under the caller's PAT,
+  // so private repos respect Forgejo visibility, and each result carries
+  // `permissions` + `topics` (no per-repo round-trip). Same {data} unwrap and
+  // page-walk discipline as searchReposByTopic.
+  async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
+    const out: ForgejoRepo[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
+        query: { page, limit: 50 },
       });
       const batch = res.data ?? [];
       if (batch.length === 0) break;

@@ -1,16 +1,19 @@
 import type { Hono } from "hono";
 import { ROLES, type Role } from "../../shared/roles.js";
-import type { ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
+import { ForgejoError } from "../forgejo.js";
+import type { ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { invalidateWorkspacePermissionCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { setWorkspaceMember } from "../workspace-members.js";
 import {
   badRequestPage,
-  forbiddenPage,
+  displayLogin,
   htmlResponse,
+  notFoundPage,
   redirect,
   repoHref,
   resolveWebRepo,
+  resolveWebRepoForAdmin,
   stringField,
   textField,
   type WebCtx,
@@ -23,10 +26,13 @@ export function registerSettingsRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/settings", async (c) => {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx.response;
-  const [protection, labels, milestones] = await Promise.all([
+  const isAdmin = ctx.ws.role === "admin";
+  const [repo, protection, labels, milestones, collaborators] = await Promise.all([
+    ctx.fj.getRepo(ctx.owner, ctx.repo).catch(() => null),
     ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null),
     ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
+    isAdmin ? ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
   ]);
   const accessUpdated = c.req.query("access");
   return htmlResponse(
@@ -45,6 +51,7 @@ web.get("/:owner/:repo/settings", async (c) => {
               <h1>Settings</h1>
             </div>
           </div>
+          ${repoMetaSection(ctx, repo)}
           <section class="settings-section">
             <div class="settings-section-header">
               <h2>Review policy</h2>
@@ -53,45 +60,19 @@ web.get("/:owner/:repo/settings", async (c) => {
             <form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings")}">
               <label class="settings-row">
                 <span>Required approvals</span>
-                <input name="required_approvals" type="number" min="0" value="${protection?.required_approvals ?? 1}" ${ctx.ws.role === "admin" ? "" : "disabled"}>
+                <input name="required_approvals" type="number" min="0" value="${protection?.required_approvals ?? 1}" ${isAdmin ? "" : "disabled"}>
               </label>
               <div class="settings-row">
                 <span>Document format</span>
                 <strong>${ctx.ws.defaultMdFormat}</strong>
               </div>
-              ${ctx.ws.role === "admin" ? html`<div class="settings-actions"><button class="button primary" type="submit">Save settings</button></div>` : ""}
+              ${isAdmin ? html`<div class="settings-actions"><button class="button primary" type="submit">Save settings</button></div>` : ""}
             </form>
           </section>
           ${labelSettingsSection(ctx, labels)}
           ${milestoneSettingsSection(ctx, milestones)}
-          <section class="settings-section">
-            <div class="settings-section-header">
-              <h2>Access</h2>
-              <p>Grant repository access to users and agents.</p>
-            </div>
-            ${
-              ctx.ws.role === "admin"
-                ? html`<form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
-                    <label class="settings-row">
-                      <span>Username</span>
-                      <input name="username" data-testid="settings-access-username" required>
-                    </label>
-                    <label class="settings-row">
-                      <span>Role</span>
-                      <select name="role" data-testid="settings-access-role">
-                        <option value="write">Write</option>
-                        <option value="read">Read</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </label>
-                    <div class="settings-actions">
-                      <button class="button primary" type="submit" data-testid="settings-access-submit">Grant access</button>
-                      ${accessUpdated ? html`<p class="muted" data-testid="settings-access-saved">${accessUpdated}</p>` : ""}
-                    </div>
-                  </form>`
-                : html`<p class="muted">Only repository admins can grant access.</p>`
-            }
-          </section>
+          ${accessSection(ctx, collaborators, accessUpdated)}
+          ${dangerZoneSection(ctx)}
         </div>
       `,
     }),
@@ -99,9 +80,8 @@ web.get("/:owner/:repo/settings", async (c) => {
 });
 
 web.post("/:owner/:repo/settings", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForAdmin(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
   const approvals = Number(stringField((await c.req.parseBody()).required_approvals) ?? "1");
   const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
   if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
@@ -110,9 +90,8 @@ web.post("/:owner/:repo/settings", async (c) => {
 });
 
 web.post("/:owner/:repo/settings/labels", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForAdmin(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const name = stringField(form.name);
   const color = (stringField(form.color) ?? "").replace(/^#/, "");
@@ -125,9 +104,8 @@ web.post("/:owner/:repo/settings/labels", async (c) => {
 });
 
 web.post("/:owner/:repo/settings/milestones", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForAdmin(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const title = stringField(form.title);
   const description = textField(form.description) ?? "";
@@ -137,9 +115,8 @@ web.post("/:owner/:repo/settings/milestones", async (c) => {
 });
 
 web.post("/:owner/:repo/settings/access", async (c) => {
-  const ctx = await resolveWebRepo(c);
+  const ctx = await resolveWebRepoForAdmin(c);
   if (!ctx.ok) return ctx.response;
-  if (ctx.ws.role !== "admin") return forbiddenPage(ctx.user);
 
   const body = await c.req.parseBody();
   const username = stringField(body.username)?.trim();
@@ -159,6 +136,51 @@ web.post("/:owner/:repo/settings/access", async (c) => {
   });
   invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`${username} · ${role}`)}`);
+});
+
+// Repository metadata: description + visibility (private/public). Forgejo
+// PATCH /repos accepts a partial body; we send only the changed fields.
+web.post("/:owner/:repo/settings/meta", async (c) => {
+  const ctx = await resolveWebRepoForAdmin(c);
+  if (!ctx.ok) return ctx.response;
+  const form = await c.req.parseBody();
+  const description = textField(form.description) ?? "";
+  const visibility = stringField(form.visibility);
+  await ctx.fj.editRepo(ctx.owner, ctx.repo, {
+    description,
+    private: visibility === "private" ? true : visibility === "public" ? false : undefined,
+  });
+  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+});
+
+web.post("/:owner/:repo/settings/access/remove", async (c) => {
+  const ctx = await resolveWebRepoForAdmin(c);
+  if (!ctx.ok) return ctx.response;
+  const username = stringField((await c.req.parseBody()).username)?.trim();
+  if (!username) return badRequestPage(ctx.user, "Username is required.");
+  try {
+    await ctx.fj.removeCollaborator(ctx.owner, ctx.repo, username);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
+  }
+  invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`removed ${username}`)}`);
+});
+
+// Repository deletion. Destructive and irreversible, so we re-check admin
+// against Forgejo (bypassing the role cache, mirroring requireAdminFresh) and
+// require the caller to re-type the full owner/repo name as confirmation.
+web.post("/:owner/:repo/settings/delete", async (c) => {
+  const ctx = await resolveWebRepoForAdmin(c);
+  if (!ctx.ok) return ctx.response;
+  const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
+  const confirm = stringField((await c.req.parseBody()).confirm)?.trim();
+  if (confirm !== ctx.ws.slug) {
+    return badRequestPage(ctx.user, `Type ${ctx.ws.slug} to confirm deletion.`);
+  }
+  await ctx.fj.deleteRepo(ctx.owner, ctx.repo);
+  return redirect("/");
 });
 }
 
@@ -207,5 +229,101 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMiles
           : html`<p class="muted">Only repository admins can create milestones.</p>`
       }
     </div>
+  </section>`;
+}
+
+function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null): Html {
+  const isAdmin = ctx.ws.role === "admin";
+  const description = repo?.description ?? "";
+  const isPrivate = repo?.private ?? true;
+  if (!isAdmin) {
+    return html`<section class="settings-section" data-testid="settings-meta">
+      <div class="settings-section-header"><h2>Repository</h2><p>Description and visibility.</p></div>
+      <div class="settings-form">
+        <div class="settings-row"><span>Description</span><strong>${description || "—"}</strong></div>
+        <div class="settings-row"><span>Visibility</span><strong>${isPrivate ? "Private" : "Public"}</strong></div>
+      </div>
+    </section>`;
+  }
+  return html`<section class="settings-section" data-testid="settings-meta">
+    <div class="settings-section-header"><h2>Repository</h2><p>Description and visibility.</p></div>
+    <form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/meta")}">
+      <label class="settings-row"><span>Description</span><input name="description" value="${description}" data-testid="settings-meta-description"></label>
+      <label class="settings-row"><span>Visibility</span>
+        <select name="visibility" data-testid="settings-meta-visibility">
+          <option value="private" ${isPrivate ? "selected" : ""}>Private</option>
+          <option value="public" ${isPrivate ? "" : "selected"}>Public</option>
+        </select>
+      </label>
+      <div class="settings-actions"><button class="button primary" type="submit" data-testid="settings-meta-submit">Save repository</button></div>
+    </form>
+  </section>`;
+}
+
+function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], accessUpdated: string | undefined): Html {
+  if (ctx.ws.role !== "admin") {
+    return html`<section class="settings-section">
+      <div class="settings-section-header"><h2>Access</h2><p>Grant repository access to users and agents.</p></div>
+      <p class="muted">Only repository admins can manage access.</p>
+    </section>`;
+  }
+  return html`<section class="settings-section">
+    <div class="settings-section-header">
+      <h2>Access</h2>
+      <p>Grant repository access to users and agents.</p>
+    </div>
+    <div class="settings-form" data-testid="settings-collaborators">
+      <div class="list mini-list">
+        ${collaborators.length === 0
+          ? html`<div class="empty">No collaborators.</div>`
+          : collaborators.map(
+              (member) => html`<div class="list-row">
+                <strong>${displayLogin(member.login)}</strong>
+                <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access/remove")}">
+                  <input type="hidden" name="username" value="${member.login}">
+                  <button class="button" type="submit" data-testid="settings-collaborator-remove">Remove</button>
+                </form>
+              </div>`,
+            )}
+      </div>
+      <form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
+        <label class="settings-row">
+          <span>Username</span>
+          <input name="username" data-testid="settings-access-username" required>
+        </label>
+        <label class="settings-row">
+          <span>Role</span>
+          <select name="role" data-testid="settings-access-role">
+            <option value="write">Write</option>
+            <option value="read">Read</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <div class="settings-actions">
+          <button class="button primary" type="submit" data-testid="settings-access-submit">Grant access</button>
+          ${accessUpdated ? html`<p class="muted" data-testid="settings-access-saved">${accessUpdated}</p>` : ""}
+        </div>
+      </form>
+    </div>
+  </section>`;
+}
+
+function dangerZoneSection(ctx: WebCtx): Html {
+  if (ctx.ws.role !== "admin") return html``;
+  return html`<section class="settings-section danger-zone" data-testid="settings-danger">
+    <div class="settings-section-header">
+      <h2>Danger zone</h2>
+      <p>Deleting a repository is permanent and removes its files, issues, and pull requests on the forge.</p>
+    </div>
+    <form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/delete")}"
+      onsubmit="return confirm('Permanently delete ${ctx.ws.slug}? This cannot be undone.')">
+      <label class="settings-row">
+        <span>Type <code>${ctx.ws.slug}</code> to confirm</span>
+        <input name="confirm" data-testid="settings-delete-confirm" autocomplete="off" required>
+      </label>
+      <div class="settings-actions">
+        <button class="button danger" type="submit" data-testid="settings-delete-submit">Delete repository</button>
+      </div>
+    </form>
   </section>`;
 }
