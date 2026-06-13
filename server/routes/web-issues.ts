@@ -35,9 +35,9 @@ import {
   labelSelectionPatch,
   labelsRailPanel,
   rejectChatIssueMutation,
-  renderDiscussionThread,
   renderIssueTimeline,
   threadLayout,
+  threadParticipantsBar,
 } from "./web-thread.js";
 
 export function registerIssueRoutes(web: Hono<AppEnv>): void {
@@ -115,46 +115,31 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   const chatBackedIssue = isChatIssue(issue);
   const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
-  // ?view=discussion is a reading-first second rendering of the same issue;
-  // any other value (including absent) keeps the tracker view, so existing
-  // links and E2E walks are unaffected.
-  const discussion = c.req.query("view") === "discussion";
   const body = await renderMarkdownSurface(ctx, chatBackedIssue ? stripChatMetadata(issue.body ?? "") : issue.body ?? "", { surface: "thread" });
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
-  // The discussion renderer reuses the same comment/timeline data; the tracker
-  // timeline (which re-renders every comment's markdown) is only built for the
-  // tracker branch so the discussion view doesn't double-render comment bodies.
-  const bodySection = discussion
-    ? await renderDiscussionThread(ctx, issue, body, comments, timeline ?? [], { isPinned, chatBackedIssue })
-    : threadLayout(
-        html`<div class="issue-document">
-            ${body}
-          </div>
-          ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
-          ${
-            ctx.ws.role === "read" || chatBackedIssue
-              ? ""
-              : html`<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
-                   <textarea name="body" placeholder="Leave a comment" required></textarea>
-                   <button class="button primary" type="submit">Comment</button>
-                 </form>`
-          }`,
-        html`${labelsRailPanel(issue.labels)}
-          ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`,
-      );
+  const main = html`${threadParticipantsBar(issue, comments)}
+    <div class="issue-document">${body}</div>
+    ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
+    ${
+      ctx.ws.role === "read" || chatBackedIssue
+        ? ""
+        : html`<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
+             <textarea name="body" placeholder="Leave a comment" required></textarea>
+             <div class="form-actions"><button class="button small primary" type="submit">Comment</button></div>
+           </form>`
+    }
+    <span id="thread-bottom"></span>`;
+  const rail = html`${labelsRailPanel(issue.labels)}
+    ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`;
   return htmlResponse(
     repoPageShell(ctx, "issues", `#${issue.number} ${issue.title}`, html`
-        <article class="thread${discussion ? " disc" : ""}">
+        <article class="thread">
           <header class="thread-header">
             <span class="state ${issue.state}">${issue.state}</span>
             <div class="thread-title-row">
               <h1>${issue.title} <span>#${issue.number}</span></h1>
-              <nav class="disc-switch" data-testid="disc-view-switch" aria-label="Issue view">
-                <a href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`)}"${discussion ? "" : html` class="active" aria-current="page"`}>Thread</a>
-                <a href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}?view=discussion`)}"${discussion ? html` class="active" aria-current="page"` : ""}>Discussion</a>
-              </nav>
               ${
                 canEditIssue
                   ? html`<div class="toolbar-actions">
@@ -174,7 +159,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
             <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${displayLogin(issue.user?.login)} - ${formatDate(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
-          ${bodySection}
+          ${threadLayout(main, rail)}
         </article>
       `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
   );

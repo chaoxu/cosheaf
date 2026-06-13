@@ -323,13 +323,7 @@ function isReferenceTimelineEvent(type: string): boolean {
   return type === "commit_ref" || type === "issue_ref" || type === "comment_ref" || type === "pull_ref";
 }
 
-// --- Discussion view (spike) -------------------------------------------------
-// A second, reading-first rendering of the SAME issue data, toggled by
-// ?view=discussion. It drops the tracker rail (labels/relations editing) for a
-// single full-measure reading column — the OP and every reply share one column
-// width so long-form math stays legible — with a Forum-style participants bar.
-// It reuses the existing comment/timeline data, renderMarkdownSurface, and the
-// module-private issueCommentActions, so comment chrome stays identical.
+// --- Avatar + participant helpers (shared by issue/PR thread rendering) ------
 
 // First 1-2 alphanumerics of the login, for the initials avatar chip.
 export function initials(login: string | null | undefined): string {
@@ -337,7 +331,7 @@ export function initials(login: string | null | undefined): string {
   return (stripped.slice(0, 2) || "?").toUpperCase();
 }
 
-// Deterministic 0-7 hue bucket for a login, feeding the .disc-chip--N classes.
+// Deterministic 0-7 hue bucket for a login, feeding the .avatar-chip--N classes.
 // Pure + stable so the same author always gets the same color across renders.
 export function tint(login: string | null | undefined): number {
   const s = login ?? "?";
@@ -346,19 +340,17 @@ export function tint(login: string | null | undefined): number {
   return sum % 8;
 }
 
-function discChip(login: string | null | undefined): Html {
-  return html`<span class="disc-chip disc-chip--${tint(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
+function avatarChip(login: string | null | undefined): Html {
+  return html`<span class="avatar-chip avatar-chip--${tint(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
 }
 
-export async function renderDiscussionThread(
-  ctx: WebCtx,
+// Participants bar at the top of an issue thread: who has taken part, the reply
+// count, last activity, and a jump-to-latest anchor (targets #thread-bottom by
+// the composer). All computed from data already fetched.
+export function threadParticipantsBar(
   issue: ForgejoIssue,
-  body: Html,
   comments: readonly ForgejoIssueComment[],
-  timeline: readonly ForgejoTimelineEvent[],
-  flags: { isPinned: boolean; chatBackedIssue: boolean },
-): Promise<Html> {
-  // Deduped, order-preserving participant list from data already fetched.
+): Html {
   const seen = new Set<string>();
   const participants: string[] = [];
   for (const login of [issue.user?.login, ...comments.map((c) => c.user?.login)]) {
@@ -368,79 +360,13 @@ export async function renderDiscussionThread(
     }
   }
   const last = comments[comments.length - 1];
-
-  // Comments + non-reference system events, chronologically interleaved, using
-  // the same ordering as the tracker timeline (oldest first).
-  const visibleEvents = timeline.filter((e) => e.type !== "comment" && !isReferenceTimelineEvent(e.type));
-  const items: WebTimelineItem[] = [
-    ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), number: issue.number, comment })),
-    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
-  ].sort(compareTimelineItems);
-  const repliesHtml = joinHtml(await Promise.all(items.map((item) => renderDiscussionItem(ctx, issue.number, item))));
-
-  const closeEvent = issue.state === "closed" ? [...visibleEvents].reverse().find((e) => e.type === "close") : undefined;
-  const composer =
-    ctx.ws.role === "read" || flags.chatBackedIssue
-      ? emptyHtml
-      : html`<form class="comment-form disc-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
-          <textarea name="body" placeholder="Leave a comment" required></textarea>
-          <button class="button primary" type="submit">Comment</button>
-        </form>`;
-
-  return html`<div class="disc-flow">
-    <div class="disc-bar" data-testid="disc-bar">
-      <span class="disc-faces" aria-label="Participants">${participants.map((login) => discChip(login))}</span>
-      <span class="disc-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
-        last ? html` · last ${formatDate(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
-      }</span>
-      ${comments.length ? html`<a class="disc-jump" href="#disc-bottom">Jump to latest ↓</a>` : emptyHtml}
-    </div>
-    <div class="disc-labels">${issue.labels.length ? labelChips(issue.labels) : html`<span class="muted">No labels</span>`}</div>
-    <div class="disc-op" data-testid="disc-op">
-      <p class="disc-byline disc-byline--op">
-        ${discChip(issue.user?.login)}
-        <span class="disc-who">${displayLogin(issue.user?.login)}</span>
-        <time>${formatDate(issue.created_at)}</time>
-        ${flags.isPinned ? html`<span class="meta-pill">pinned</span>` : emptyHtml}
-      </p>
-      <div class="issue-document">${body}</div>
-    </div>
-    <section class="disc-thread" data-testid="disc-thread">${repliesHtml}</section>
-    ${
-      issue.state === "closed"
-        ? html`<p class="disc-resolution" data-testid="disc-resolution">Closed${
-            closeEvent ? html` by ${displayLogin(closeEvent.user?.login)} · ${formatDate(closeEvent.created_at)}` : emptyHtml
-          }</p>`
-        : emptyHtml
-    }
-    ${composer}
-    <span id="disc-bottom"></span>
+  return html`<div class="thread-bar" data-testid="thread-bar">
+    <span class="thread-faces" aria-label="Participants">${participants.map((login) => avatarChip(login))}</span>
+    <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
+      last ? html` · last ${formatDate(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
+    }</span>
+    ${comments.length ? html`<a class="thread-jump" href="#thread-bottom">Jump to latest ↓</a>` : emptyHtml}
   </div>`;
-}
-
-async function renderDiscussionItem(ctx: WebCtx, issueNumber: number, item: WebTimelineItem): Promise<Html> {
-  if (item.kind === "comment") {
-    const comment = item.comment;
-    const login = comment.user?.login;
-    const commentBody = await renderMarkdownSurface(ctx, comment.body, { surface: "thread" });
-    return html`<article class="disc-reply" id="comment-${comment.id}" data-testid="disc-reply">
-      <div class="disc-author">
-        ${discChip(login)}
-        <span class="disc-who">${displayLogin(login)}</span>
-      </div>
-      <div class="disc-body">
-        <p class="disc-reply-byline"><time>${formatDate(comment.created_at)}</time><a class="disc-permalink" href="#comment-${comment.id}">#</a></p>
-        ${commentBody}
-        ${issueCommentActions(ctx, issueNumber, comment)}
-      </div>
-    </article>`;
-  }
-  // System event (close/reopen/label/assign/milestone), demoted to a quiet
-  // centered rule. Skip events the tracker also hides (empty description).
-  if (item.kind !== "event" || !webTimelineDescriptionText(item.event)) return emptyHtml;
-  return html`<p class="disc-event">${
-    item.event.user?.login ? html`${displayLogin(item.event.user.login)} ` : emptyHtml
-  }${webTimelineDescriptionHtml(item.event)} · ${formatDate(item.event.created_at)}</p>`;
 }
 
 export async function renderPullTimeline(
@@ -469,51 +395,75 @@ export async function renderPullTimeline(
   return joinHtml(await Promise.all(items.map((item) => renderTimelineItem(ctx, item))));
 }
 
-function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
-  if (ctx.ws.role === "read") return emptyHtml;
-  return html`<details class="comment-actions" data-testid="issue-comment-actions">
-    <summary>Comment actions</summary>
-    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/edit`)}">
-      <textarea name="body" required>${comment.body}</textarea>
-      <button class="button primary" type="submit">Save comment</button>
+// Subtle edit/delete affordance: a small pencil that only appears on comment
+// hover (see .comment-actions CSS) and floats at the comment's top-right.
+// Clicking it opens the inline edit + delete forms.
+function commentActions(opts: { testId: string; editAction: string; deleteAction: string; body: string; deleteHidden?: Html }): Html {
+  return html`<details class="comment-actions" data-testid="${opts.testId}">
+    <summary title="Edit or delete" aria-label="Edit or delete comment"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></summary>
+    <form method="post" action="${opts.editAction}">
+      <textarea name="body" required>${opts.body}</textarea>
+      <button class="button small primary" type="submit">Save</button>
     </form>
-    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/delete`)}">
-      <button class="button danger" type="submit">Delete comment</button>
+    <form method="post" action="${opts.deleteAction}">
+      ${opts.deleteHidden ?? emptyHtml}
+      <button class="button small danger" type="submit">Delete</button>
     </form>
   </details>`;
+}
+
+function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
+  if (ctx.ws.role === "read") return emptyHtml;
+  return commentActions({
+    testId: "issue-comment-actions",
+    editAction: repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/edit`),
+    deleteAction: repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/delete`),
+    body: comment.body,
+  });
 }
 
 function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): Html {
   if (ctx.ws.role === "read") return emptyHtml;
-  return html`<details class="comment-actions" data-testid="pull-comment-actions">
-    <summary>Comment actions</summary>
-    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`)}">
-      <textarea name="body" required>${comment.body}</textarea>
-      <button class="button primary" type="submit">Save comment</button>
-    </form>
-    <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/delete`)}">
-      <input type="hidden" name="review_id" value="${comment.pull_request_review_id}">
-      <button class="button danger" type="submit">Delete comment</button>
-    </form>
-  </details>`;
+  return commentActions({
+    testId: "pull-comment-actions",
+    editAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`),
+    deleteAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/delete`),
+    body: comment.body,
+    deleteHidden: html`<input type="hidden" name="review_id" value="${comment.pull_request_review_id}">`,
+  });
+}
+
+// Compact comment: avatar gutter + a single (author · time) byline + body, with
+// the hover edit affordance floated top-right.
+function commentEntry(opts: { login: string | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html }): Html {
+  return html`<article class="comment" id="${opts.anchorId}">
+    <span class="comment-avatar">${avatarChip(opts.login)}</span>
+    <div class="comment-body">
+      <div class="comment-byline"><span class="comment-who">${displayLogin(opts.login)}</span> ${opts.whenHtml}</div>
+      <div class="comment-text">${opts.body}</div>
+      ${opts.actions}
+    </div>
+  </article>`;
 }
 
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<Html> {
   if (item.kind === "comment") {
-    const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
-    return html`<div class="comment">
-      <div class="comment-meta">${displayLogin(item.comment.user?.login)} - ${formatDate(item.comment.created_at)}</div>
-      ${body}
-      ${issueCommentActions(ctx, item.number, item.comment)}
-    </div>`;
+    return commentEntry({
+      login: item.comment.user?.login,
+      anchorId: `comment-${item.comment.id}`,
+      whenHtml: html`<time>${formatDate(item.comment.created_at)}</time>`,
+      body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
+      actions: issueCommentActions(ctx, item.number, item.comment),
+    });
   }
   if (item.kind === "line-comment") {
-    const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
-    return html`<div class="comment">
-      <div class="comment-meta">${displayLogin(item.comment.user?.login)} commented on ${item.comment.path} - ${formatDate(item.comment.created_at)}</div>
-      ${body}
-      ${pullCommentActions(ctx, item.number, item.comment)}
-    </div>`;
+    return commentEntry({
+      login: item.comment.user?.login,
+      anchorId: `comment-${item.comment.id}`,
+      whenHtml: html`<span class="comment-on">on ${item.comment.path}</span> · <time>${formatDate(item.comment.created_at)}</time>`,
+      body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
+      actions: pullCommentActions(ctx, item.number, item.comment),
+    });
   }
   if (item.kind === "review") {
     const label = reviewStateLabel(item.review.state);
@@ -533,13 +483,13 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
       <p>${firstCommitLine(item.commit.commit.message)}</p>
     </div>`;
   }
+  // System events (close/reopen/label/assign/milestone) are demoted to a quiet
+  // centered note so the thread reads cleanly; reference events are already
+  // collapsed by renderIssueTimeline.
   if (!webTimelineDescriptionText(item.event)) return emptyHtml;
-  const description = webTimelineDescriptionHtml(item.event);
-  return html`<div class="timeline-event">
-    ${item.event.user?.login ? html`<strong>${displayLogin(item.event.user.login)}</strong>` : ""}
-    <span>${description}</span>
-    <small>${formatDate(item.event.created_at)}</small>
-  </div>`;
+  return html`<p class="timeline-note">${
+    item.event.user?.login ? html`${displayLogin(item.event.user.login)} ` : emptyHtml
+  }${webTimelineDescriptionHtml(item.event)} · ${formatDate(item.event.created_at)}</p>`;
 }
 
 function compareTimelineItems(a: WebTimelineItem, b: WebTimelineItem): number {
