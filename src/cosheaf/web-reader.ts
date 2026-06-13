@@ -36,6 +36,45 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   rewriteRenderedRepoUrls(fragment, payload);
   root.replaceChildren(fragment);
   hydrateMath(root);
+  buildReaderToc(root);
+}
+
+// Fill the file reader's table-of-contents rail from the rendered document
+// headings. Only the file-reader page provides a [data-reader-toc] slot, so
+// this is a no-op for issue/comment/PR readers. Headings get generated ids so
+// the TOC links can anchor to them.
+function buildReaderToc(root: HTMLElement): void {
+  const slot = root.closest(".doc-with-toc")?.querySelector<HTMLElement>("[data-reader-toc]");
+  if (!slot) return;
+  const headings = [...root.querySelectorAll<HTMLElement>("h1, h2, h3")];
+  if (headings.length < 2) return;
+  const used = new Set<string>();
+  const items = headings.map((heading) => {
+    if (!heading.id) {
+      const base =
+        (heading.textContent ?? "section").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
+        "section";
+      let id = base;
+      for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
+      heading.id = id;
+    }
+    used.add(heading.id);
+    return { id: heading.id, text: heading.textContent?.trim() ?? "", level: Number(heading.tagName.slice(1)) };
+  });
+  const minLevel = Math.min(...items.map((item) => item.level));
+  slot.replaceChildren();
+  const title = document.createElement("p");
+  title.className = "doc-toc-title";
+  title.textContent = "On this page";
+  slot.appendChild(title);
+  for (const item of items) {
+    const link = document.createElement("a");
+    link.href = `#${item.id}`;
+    link.textContent = item.text;
+    link.className = `doc-toc-link lvl-${item.level - minLevel}`;
+    slot.appendChild(link);
+  }
+  slot.hidden = false;
 }
 
 function applyDocumentTheme(root: HTMLElement): void {

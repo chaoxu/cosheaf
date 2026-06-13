@@ -139,6 +139,17 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
+  // Rendered markdown gets a sticky table-of-contents rail (filled client-side
+  // by the reader island from the document's headings). Other file kinds and
+  // the source view render without the rail.
+  const preview = filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView });
+  const docBody =
+    kind === "markdown" && !sourceView && rendered !== null
+      ? html`<div class="doc-with-toc">
+          <div class="doc-main">${preview}</div>
+          <nav class="doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
+        </div>`
+      : preview;
   return htmlResponse(
     repoPageShell(ctx, "files", `${rel} - ${repo}`, html`
         <div class="file-toolbar">
@@ -179,7 +190,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             }
           </div>
         </div>
-        ${filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView })}
+        ${docBody}
       `, { readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
   );
 }));
