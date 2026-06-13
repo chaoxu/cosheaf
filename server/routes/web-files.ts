@@ -7,6 +7,7 @@ import { type Forgejo, ForgejoError } from "../forgejo.js";
 import { is404, onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { deletePage, planIndexPage } from "../indexer.js";
+import { type PageSearchResult, type SnippetPart, searchWorkspacePages } from "../page-search.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -43,6 +44,7 @@ web.get("/:owner/:repo", webRoute(async (_c, ctx) => {
         <div class="page-title compact">
           <div><p class="eyebrow">Branch</p><h1>main</h1></div>
           <div class="toolbar-actions">
+            ${pageSearchForm(owner, repo)}
             <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
             ${
               ws.role === "read"
@@ -52,6 +54,32 @@ web.get("/:owner/:repo", webRoute(async (_c, ctx) => {
           </div>
         </div>
         ${fileList(owner, repo, "main", files)}
+      `),
+  );
+}));
+
+// Full-text page search over the workspace's indexed pages (the SQLite FTS
+// sidecar) — the knowledge-base capability a plain forge doesn't have. Reads
+// the sidecar directly; only indexed pages on `main` are searchable.
+web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
+  const q = (c.req.query("q") ?? "").trim();
+  const results = q ? searchWorkspacePages(ctx.db, ctx.ws.slug, q) : [];
+  return htmlResponse(
+    repoPageShell(ctx, "files", `Search - ${ctx.repo}`, html`
+        <div class="page-title compact">
+          <div><p class="eyebrow">Pages</p><h1>Search</h1></div>
+        </div>
+        <form class="page-search page-search--full" method="get" action="${repoHref(ctx.owner, ctx.repo, "/search")}">
+          <input name="q" value="${q}" placeholder="Search page titles and text" aria-label="Search pages" data-testid="page-search-input" autofocus>
+          <button class="button primary" type="submit">Search</button>
+        </form>
+        ${
+          q === ""
+            ? html`<div class="empty">Enter a query to search this workspace's pages.</div>`
+            : results.length === 0
+              ? html`<div class="empty" data-testid="page-search-empty">No pages match "${q}".</div>`
+              : html`<div class="list" data-testid="page-search-results">${results.map((r) => searchResultRow(ctx, r))}</div>`
+        }
       `),
   );
 }));
@@ -535,6 +563,24 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} bytes`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function pageSearchForm(owner: string, repo: string): Html {
+  return html`<form class="page-search" method="get" action="${repoHref(owner, repo, "/search")}">
+    <input name="q" placeholder="Search pages" aria-label="Search pages" data-testid="page-search-box">
+  </form>`;
+}
+
+function renderSnippet(parts: readonly SnippetPart[]): Html {
+  return html`${parts.map((p) => (p.match ? html`<mark>${p.text}</mark>` : p.text))}`;
+}
+
+function searchResultRow(ctx: WebCtx, r: PageSearchResult): Html {
+  const href = `${repoHref(ctx.owner, ctx.repo, "/src/branch/main/")}${urlPath(r.path)}`;
+  return html`<a class="list-row search-result" href="${href}">
+    <span class="search-result-head"><strong>${r.title || r.path}</strong> <small class="muted">${r.path}</small></span>
+    <span class="search-snippet">${renderSnippet(r.snippet)}</span>
+  </a>`;
 }
 
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): Html {

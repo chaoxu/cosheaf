@@ -4,6 +4,7 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { deletePage, planIndexPage } from "../indexer.js";
+import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import {
   MAX_ASSET_BYTES,
@@ -93,46 +94,6 @@ async function ensureBranch(
   const exists = await fj.getBranch(owner, repo, branch);
   if (exists) return;
   await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
-}
-
-function likeEscape(s: string): string {
-  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
-}
-
-function searchTerms(q: string): string[] {
-  return q
-    .split(/\s+/)
-    .map((t) => t.replace(/[^\p{L}\p{N}_]+/gu, " ").trim())
-    .flatMap((t) => t.split(/\s+/))
-    .filter((t) => t.length > 0);
-}
-
-export function buildFtsQuery(q: string): string {
-  return searchTerms(q)
-    .map((t) => `"${t.replace(/"/g, '""')}"`)
-    .join(" OR ");
-}
-
-type SnippetPart = { text: string; match: boolean };
-
-function plainSnippet(row: { title: string | null; body: string }, terms: string[]): SnippetPart[] {
-  const source = row.body || row.title || "";
-  const lower = source.toLocaleLowerCase();
-  const term = terms.find((t) => lower.includes(t.toLocaleLowerCase())) ?? terms[0] ?? "";
-  if (!term) return [{ text: source.slice(0, 160), match: false }];
-  const idx = lower.indexOf(term.toLocaleLowerCase());
-  if (idx < 0) return [{ text: source.slice(0, 160), match: false }];
-  const start = Math.max(0, idx - 64);
-  const end = Math.min(source.length, idx + term.length + 96);
-  const parts: SnippetPart[] = [];
-  if (start > 0) parts.push({ text: "...", match: false });
-  const before = source.slice(start, idx);
-  if (before) parts.push({ text: before, match: false });
-  parts.push({ text: source.slice(idx, idx + term.length), match: true });
-  const after = source.slice(idx + term.length, end);
-  if (after) parts.push({ text: after, match: false });
-  if (end < source.length) parts.push({ text: "...", match: false });
-  return parts;
 }
 
 files.get("/:owner/:repo/tree", async (c) => {
@@ -482,53 +443,12 @@ files.get("/:owner/:repo/search", (c) => {
   const q = c.req.query("q")?.trim();
   if (!q) return c.json({ results: [] });
   const rawLimit = Number(c.req.query("limit") ?? 25);
-  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 25;
-  const ws = c.get("workspace");
-  const terms = searchTerms(q);
-  const ftsQuery = buildFtsQuery(q);
-  if (!ftsQuery) return c.json({ results: [] });
-  let rows: Array<{ doc_id: string; path: string; title: string | null; body: string; rank: number }>;
+  const limit = Number.isFinite(rawLimit) ? rawLimit : 25;
   try {
-    rows = c
-      .get("db")
-      .prepare(
-        `SELECT cosheaf_id AS doc_id, path, title, body, bm25(notes_fts) AS rank
-           FROM notes_fts
-          WHERE workspace_slug = ? AND notes_fts MATCH ?
-          ORDER BY rank LIMIT ?`,
-      )
-      .all(ws.slug, ftsQuery, limit) as typeof rows;
+    return c.json({ results: searchWorkspacePages(c.get("db"), c.get("workspace").slug, q, limit) });
   } catch (err) {
     return c.json(...bad(`search failed: ${(err as Error).message}`));
   }
-  if (rows.length === 0) {
-    const patterns = terms.map((t) => `%${likeEscape(t)}%`);
-    if (patterns.length > 0) {
-      const where = patterns
-        .map(() => "(path LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')")
-        .join(" OR ");
-      const args = patterns.flatMap((p) => [p, p, p]);
-      const fallbackRows = c
-        .get("db")
-        .prepare(
-          `SELECT cosheaf_id AS doc_id, path, title, body
-             FROM notes_fts
-            WHERE workspace_slug = ? AND (${where})
-            ORDER BY path LIMIT ?`,
-        )
-        .all(ws.slug, ...args, limit) as Array<{ doc_id: string; path: string; title: string | null; body: string }>;
-      rows = fallbackRows.map((r) => ({ ...r, rank: 0 }));
-    }
-  }
-  return c.json({
-    results: rows.map((r) => ({
-      doc_id: r.doc_id,
-      path: r.path,
-      title: r.title,
-      snippet: plainSnippet(r, terms),
-      rank: r.rank,
-    })),
-  });
 });
 
 files.get("/:owner/:repo/backlinks", (c) => {
