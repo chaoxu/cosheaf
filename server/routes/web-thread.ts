@@ -464,7 +464,24 @@ export async function renderPullTimeline(
     })),
     ...commits.map((commit) => ({ kind: "commit" as const, ts: commitDateMs(commit), commit })),
   ].sort(compareTimelineItems);
-  return joinHtml(await Promise.all(items.map((item) => renderTimelineItem(ctx, item))));
+  // Group consecutive commits (a comment/review/event between two breaks the
+  // run, preserving chronology). A run of one renders as a single compact line;
+  // a run of many collapses behind a GitHub-style expandable group (#111).
+  const rendered: Array<Html | Promise<Html>> = [];
+  for (let i = 0; i < items.length; ) {
+    if (items[i].kind === "commit") {
+      const run: ForgejoCommit[] = [];
+      while (i < items.length && items[i].kind === "commit") {
+        run.push((items[i] as Extract<WebTimelineItem, { kind: "commit" }>).commit);
+        i++;
+      }
+      rendered.push(run.length === 1 ? compactCommitRow(run[0]) : commitGroup(run));
+    } else {
+      rendered.push(renderTimelineItem(ctx, items[i]));
+      i++;
+    }
+  }
+  return joinHtml(await Promise.all(rendered));
 }
 
 // Subtle edit/delete affordance: a small pencil that only appears on comment
@@ -523,6 +540,26 @@ function commentEntry(opts: { login: string | null | undefined; anchorId: string
   </article>`;
 }
 
+// One muted line per commit: short sha + first message line. Used for lone
+// commits and inside a collapsed commit group (#111).
+function compactCommitRow(commit: ForgejoCommit): Html {
+  return html`<div class="commit-row"><code>${commit.sha.slice(0, 7)}</code> <span class="commit-msg">${firstCommitLine(commit.commit.message)}</span></div>`;
+}
+
+// A run of adjacent commits collapses behind one expandable summary so a PR
+// built from many editor autosaves doesn't bury the conversation (#111).
+function commitGroup(commits: readonly ForgejoCommit[]): Html {
+  const authors = new Set(commits.map((c) => c.author?.login ?? c.commit.author?.name ?? null));
+  const label =
+    authors.size === 1
+      ? html`${displayLogin([...authors][0])} pushed ${commits.length} commits`
+      : html`${commits.length} commits`;
+  return html`<details class="commit-group">
+    <summary><span>${label}</span> ${timeEl(commitDateMs(commits[commits.length - 1]))}</summary>
+    <div class="commit-list">${commits.map(compactCommitRow)}</div>
+  </details>`;
+}
+
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<Html> {
   if (item.kind === "comment") {
     return commentEntry({
@@ -553,12 +590,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     </div>`;
   }
   if (item.kind === "commit") {
-    return html`<div class="timeline-event">
-      <strong>${displayLogin(item.commit.author?.login ?? item.commit.commit.author?.name)}</strong>
-      <span>pushed commit <code>${item.commit.sha.slice(0, 10)}</code></span>
-      <small>${timeEl(commitDateMs(item.commit))}</small>
-      <p>${firstCommitLine(item.commit.commit.message)}</p>
-    </div>`;
+    return compactCommitRow(item.commit);
   }
   // System events (close/reopen/label/assign/milestone) are demoted to a quiet
   // centered note so the thread reads cleanly; reference events are already
