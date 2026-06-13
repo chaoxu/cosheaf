@@ -8,6 +8,7 @@
 //   GET    /pulls/:n                        — PR metadata
 //   POST   /pulls/:n/merge                  — merge a PR (admin only)
 //   POST   /pulls/:n/close                  — close a PR (no merge)
+//   POST   /pulls/:n/reopen                 — reopen a closed PR
 //   GET    /pulls/:n/files                  — per-file diff structured
 //   GET    /pulls/:n/file?path=&side=       — raw file at base or head SHA
 //   GET    /pulls/:n/reviews                — flat list of reviews
@@ -301,6 +302,16 @@ pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.editPull(owner, repo, n, { state: "closed" });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
+  return c.json({ ok: true });
+});
+
+pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
+  const n = parsePr(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const ws = c.get("workspace");
+  const { fj, owner, repo } = c.get("repoCtx");
+  await fj.editPull(owner, repo, n, { state: "open" });
+  c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reopened" });
   return c.json({ ok: true });
 });
 

@@ -160,8 +160,8 @@ web.get("/new", async (c) => {
                   <input name="slug" data-testid="new-repo-slug" pattern="[A-Za-z0-9._-]+" required>
                 </label>
                 <label class="settings-row">
-                  <span>Display name</span>
-                  <input name="name" data-testid="new-repo-name" required>
+                  <span>Description</span>
+                  <input name="description" data-testid="new-repo-description" placeholder="Optional">
                 </label>
                 <label class="settings-row">
                   <span>Document format</span>
@@ -189,9 +189,12 @@ web.post("/new", async (c) => {
   if (!auth) return redirect("/login");
   const form = await c.req.parseBody();
   const slug = stringField(form.slug)?.trim();
-  const name = stringField(form.name)?.trim();
+  // Description is optional and writes to the Forgejo repo description (the
+  // same field the settings page edits); an empty one falls back to the repo
+  // name on the workspace list.
+  const description = stringField(form.description)?.trim() ?? "";
   const formatRaw = stringField(form.default_md_format) ?? undefined;
-  if (!slug || !name) return redirect("/new?error=name+and+display+name+required");
+  if (!slug) return redirect("/new?error=repository+name+required");
   if (!WORKSPACE_SLUG_RE.test(slug)) return redirect("/new?error=invalid+repository+name");
   if (formatRaw !== undefined && !isDocumentFormatId(formatRaw)) {
     return redirect("/new?error=invalid+format");
@@ -205,7 +208,7 @@ web.post("/new", async (c) => {
     await provisionWorkspace(c.get("db"), fj, c.get("config"), {
       owner,
       repo: slug,
-      name,
+      name: description,
       user: auth.user,
       forgejoUsername: owner,
       provisionVia: "user-pat",

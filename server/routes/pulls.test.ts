@@ -356,6 +356,35 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(403);
     });
 
+    it("POST /pulls/:n/reopen sets the Forgejo PR state to open", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock.mockResolvedValueOnce(ok(pull({ number: 7, state: "open" })));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reopen", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls/7");
+      expect(fetchMock.mock.calls[0][1]?.method).toBe("PATCH");
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ state: "open" });
+      await expect(res.json()).resolves.toEqual({ ok: true });
+    });
+
+    it("POST /pulls/:n/reopen rejects a read user with 403", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "test-bob", "read");
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reopen", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(403);
+    });
+
     it("POST /pulls/:n/comments rejects a read user with 403", async () => {
       const db = freshDb();
       seedWorkspace(db);
