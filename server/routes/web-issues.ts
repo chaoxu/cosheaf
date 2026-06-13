@@ -171,12 +171,13 @@ web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => 
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
-  const [allLabels, collaborators] = await Promise.all([
+  const [allLabels, collaborators, milestones] = await Promise.all([
     ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
+    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
   ]);
   return htmlResponse(
-    repoPageShell(ctx, "issues", `Edit #${issue.number} - ${ctx.repo}`, issueEditPage(ctx, issue, allLabels, collaborators)),
+    repoPageShell(ctx, "issues", `Edit #${issue.number} - ${ctx.repo}`, issueEditPage(ctx, issue, allLabels, collaborators, milestones)),
   );
 }));
 
@@ -195,7 +196,16 @@ web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) =>
   // The assignee fieldset always emits assignees_present for issues; the
   // checked set replaces the current assignees wholesale (empty = unassign).
   const assignees = stringField(form.assignees_present) ? stringFields(form.assignees) : undefined;
-  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { title, body, ...(assignees ? { assignees } : {}) });
+  // Milestone select submits 0 for "no milestone", which Forgejo treats as
+  // clear; only include it in the patch when the field was actually present.
+  const milestoneRaw = stringField(form.milestone);
+  const milestone = milestoneRaw != null ? (positiveInt(milestoneRaw) ?? 0) : undefined;
+  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, {
+    title,
+    body,
+    ...(assignees ? { assignees } : {}),
+    ...(milestone !== undefined ? { milestone } : {}),
+  });
   if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));

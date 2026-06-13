@@ -5,6 +5,7 @@ import type {
   ForgejoIssue,
   ForgejoIssueComment,
   ForgejoLabel,
+  ForgejoMilestone,
   ForgejoPullReviewComment,
   ForgejoReview,
   ForgejoTimelineEvent,
@@ -32,6 +33,7 @@ export function issueEditPage(
   issue: ForgejoIssue,
   allLabels: readonly ForgejoLabel[],
   collaborators: readonly ForgejoUser[],
+  milestones: readonly ForgejoMilestone[],
 ): Html {
   const current = new Set((issue.assignees ?? []).map((a) => a.login));
   // Candidate assignees: repo collaborators ∪ anyone currently assigned ∪ the
@@ -49,6 +51,7 @@ export function issueEditPage(
     allLabels,
     currentLabels: issue.labels,
     assignees: { candidates, current },
+    milestones: { all: milestones, current: issue.milestone?.id ?? null },
     backHref: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`),
     action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`),
     testId: "issue-edit-form",
@@ -175,6 +178,7 @@ function threadEditPage(opts: {
   allLabels: readonly ForgejoLabel[];
   currentLabels: readonly ForgejoLabel[];
   assignees?: { candidates: readonly string[]; current: ReadonlySet<string> };
+  milestones?: { all: readonly ForgejoMilestone[]; current: number | null };
   backHref: string;
   action: string;
   testId: string;
@@ -203,6 +207,18 @@ function threadEditPage(opts: {
         })),
       })
     : emptyHtml;
+  // Milestone is a single <select> (value 0 = no milestone, which Forgejo
+  // treats as "clear"). Only rendered when the caller passes milestones.
+  const milestoneField = opts.milestones
+    ? html`<label>Milestone
+        <select name="milestone" data-testid="issue-milestone-select">
+          <option value="0"${opts.milestones.current ? "" : " selected"}>No milestone</option>
+          ${opts.milestones.all.map(
+            (m) => html`<option value="${m.id}"${opts.milestones?.current === m.id ? " selected" : ""}>${m.title}</option>`,
+          )}
+        </select>
+      </label>`
+    : emptyHtml;
   return html`<section class="edit-page issue-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><p class="eyebrow">Edit ${opts.kind}</p><h1>#${opts.number}</h1></div>
@@ -214,6 +230,7 @@ function threadEditPage(opts: {
         <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${opts.body}</textarea>
       </label>
       ${labelFieldset}
+      ${milestoneField}
       ${assigneeFieldset}
       <div class="form-actions">
         <button class="button primary" type="submit">Save ${opts.kind}</button>
