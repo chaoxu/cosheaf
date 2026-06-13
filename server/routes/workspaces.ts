@@ -2,15 +2,15 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { ROLES } from "../../shared/roles.js";
-import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
+import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { ForgejoError } from "../forgejo.js";
 import { invalidateWorkspacePermissionCache, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
+import { listVisibleWorkspaceRepos } from "../workspace-discovery.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { setWorkspaceMember } from "../workspace-members.js";
 import {
   documentFormatFromTopics,
   isDocumentFormatId,
-  isFormatTopic,
   normalizeDocumentFormatId,
 } from "../../shared/document-format.js";
 import { bad, conflict, notFound } from "./responses.js";
@@ -27,24 +27,23 @@ function roleFromPermissions(p: { admin?: boolean; push?: boolean; pull?: boolea
 }
 
 workspaces.get("/", async (c) => {
-  // Cosheaf workspaces are now identified by the presence of a
-  // `cosheaf-format-*` topic on a repo under config.forgejoOwner. We list
-  // those repos via Forgejo (the source of truth) and filter by the topic
-  // marker. Permission resolution and display name come from the same
-  // repo objects.
+  // Workspaces are repos with a `cosheaf-format-*` topic, discovered across
+  // ALL owners the caller can see (Forgejo repo search runs under the
+  // caller's PAT, so private repos respect Forgejo visibility). Permission
+  // resolution and display name come from the same repo objects.
   const fj = c.get("fjUser");
-  const owner = c.get("config").forgejoOwner;
 
-  const repos = await fj.listUserRepos(owner, { limit: 50 });
-  // Forgejo's user-repos response includes a `permissions` object on each
-  // repo when called with a PAT — derive the role from that instead of a
+  const repos = await listVisibleWorkspaceRepos(fj);
+  // Forgejo's search response includes a `permissions` object on each repo
+  // when called with a PAT — derive the role from that instead of a
   // per-repo getRepoPermission round-trip.
   const workspaces = repos
-    .filter((r) => (r.topics ?? []).some(isFormatTopic))
     .map((r) => ({ repo: r, role: roleFromPermissions(r.permissions) }))
     .filter((x) => x.role !== "none")
     .map(({ repo: r, role }) => ({
-      slug: r.name,
+      owner: r.owner.login,
+      repo: r.name,
+      full_name: r.full_name,
       name: r.description?.trim() || r.name,
       role: role as Role,
       default_md_format: documentFormatFromTopics(r.topics ?? []),
@@ -54,6 +53,7 @@ workspaces.get("/", async (c) => {
 
 workspaces.post("/", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
+    owner?: string;
     slug?: string;
     name?: string;
     default_md_format?: string;
@@ -62,32 +62,39 @@ workspaces.post("/", async (c) => {
     return c.json(...bad("slug and name required"));
   if (!WORKSPACE_SLUG_RE.test(body.slug))
     return c.json(...bad("invalid slug"));
+  if (body.owner !== undefined && !FORGEJO_NAME_RE.test(body.owner))
+    return c.json(...bad("invalid owner"));
   if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format))
     return c.json(...bad("invalid default_md_format"));
 
   const db = c.get("db");
   const config = c.get("config");
-  // Provisioning creates a repo and installs branch protection + webhooks —
-  // operations that need admin privileges. Use the admin-bound client; this
-  // is one of the few places that's allowed to.
-  const fj = c.get("fjAdmin");
+  // Creation runs under the caller's own PAT: repos land in the caller's
+  // namespace (or an org they can create in), and the creator's repo-admin
+  // rights cover webhook + branch-protection setup. No admin token involved.
+  const fj = c.get("fjUser");
   const user = c.get("user");
+  const owner = body.owner ?? user.username;
 
-  const existing = await fj.getRepo(config.forgejoOwner, body.slug);
+  const existing = await fj.getRepo(owner, body.slug);
   if (existing) return c.json(...conflict("slug already taken"));
 
   try {
     const { workspace } = await provisionWorkspace(db, fj, config, {
-      slug: body.slug,
+      owner,
+      repo: body.slug,
       name: body.name,
       user,
       forgejoUsername: user.username,
+      provisionVia: "user-pat",
       rollbackCreatedRepoOnLocalFailure: true,
       defaultMdFormat: body.default_md_format,
     });
     return c.json(
       {
-        slug: workspace.slug,
+        owner: workspace.owner,
+        repo: workspace.repo,
+        full_name: workspace.slug,
         name: body.name,
         role: "admin",
         default_md_format: normalizeDocumentFormatId(workspace.defaultMdFormat),
@@ -105,7 +112,11 @@ workspaces.post("/", async (c) => {
   }
 });
 
-workspaces.put("/:slug/members/:username", requireMembership(), requireAdminFresh, async (c) => {
+// Mounted under /api/v1/repos alongside the other typed workspace routes.
+export const members = new Hono<AppEnv>();
+members.use("*", requireAuth);
+
+members.put("/:owner/:repo/members/:username", requireMembership(), requireAdminFresh, async (c) => {
   const username = c.req.param("username")?.trim();
   if (!username) return c.json(...bad("username required"));
 
@@ -114,15 +125,16 @@ workspaces.put("/:slug/members/:username", requireMembership(), requireAdminFres
     return c.json(...bad(`role must be ${ROLES.join("|")}`));
 
   const role = body.role as Role;
-  const config = c.get("config");
   const ws = c.get("workspace");
-  const fj = c.get("fjAdmin");
+  // The caller passed requireAdminFresh — their own PAT carries repo-admin
+  // rights, which is exactly what collaborator management needs.
+  const fj = c.get("fjUser");
 
   try {
     await setWorkspaceMember({
       forgejo: fj,
-      owner: config.forgejoOwner,
-      repo: ws.slug,
+      owner: ws.owner,
+      repo: ws.repo,
       username,
       role,
     });
@@ -133,6 +145,6 @@ workspaces.put("/:slug/members/:username", requireMembership(), requireAdminFres
     throw err;
   }
 
-  invalidateWorkspacePermissionCache(config.forgejoOwner, ws.slug, username);
+  invalidateWorkspacePermissionCache(ws.owner, ws.repo, username);
   return c.json({ ok: true, username, role });
 });

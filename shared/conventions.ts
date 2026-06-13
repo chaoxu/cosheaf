@@ -18,7 +18,37 @@ export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 export const MAX_ASSET_DISPLAY = "25 MiB";
 
 /**
- * Workspace slug shape. Lowercase, dashes, must start alphanumeric.
- * Validated by both the seed CLI parser and the `POST /workspaces` route.
+ * Repo-name shape for repos cosheaf itself creates. Lowercase, dashes, must
+ * start alphanumeric. Validated by both the seed CLI parser and the
+ * `POST /workspaces` route. Forgejo accepts a broader class (see
+ * FORGEJO_NAME_RE); cosheaf-created repos stay opinionated.
  */
 export const WORKSPACE_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Forgejo owner (user/org) and repo names as Forgejo itself accepts them:
+ * alphanumeric plus `-`, `_`, `.`, starting alphanumeric or `_`. Used when
+ * routing to EXISTING repos — cosheaf must reach any repo Forgejo can host,
+ * not only ones matching WORKSPACE_SLUG_RE.
+ */
+export const FORGEJO_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+
+/**
+ * Canonical workspace slug: the Forgejo `owner/repo` full name. This is the
+ * key for sidecar tables (workspace_slug column), SSE channels, and webhook
+ * serialization queues. Forgejo names cannot contain `/`, so the join is
+ * unambiguous.
+ */
+export function workspaceSlug(owner: string, repo: string): string {
+  return `${owner}/${repo}`;
+}
+
+/** Split an `owner/repo` workspace slug. Returns null unless both halves are valid Forgejo names. */
+export function parseWorkspaceSlug(slug: string): { owner: string; repo: string } | null {
+  const idx = slug.indexOf("/");
+  if (idx < 0) return null;
+  const owner = slug.slice(0, idx);
+  const repo = slug.slice(idx + 1);
+  if (!FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo)) return null;
+  return { owner, repo };
+}

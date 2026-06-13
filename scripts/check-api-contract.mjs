@@ -48,28 +48,32 @@ for (const snippet of requiredDocSnippets) {
 const staleDocPatterns = [
   /\bBearer cs_/,
   /\bcs_\.\.\./,
-  /\/api\/v1\/w\/:slug\/forgejo\/\*/,
-  /\{METHOD\}\s+\/w\/:slug\/forgejo\/:tail/,
   /Backend Escape Hatch/,
   /internal\/compatibility escape\s+hatch/,
   /Allowed repo-scoped passthrough prefixes/,
   /Sudo/,
   /\/api\/v1\/forgejo\/\.\.\./,
-  /\/w\/:slug\/changes/,
-  /\/w\/:slug\/change\b/,
-  /\/w\/:slug\/publish/,
-  /api\/v1\/w\/flushing-coin\/forgejo/,
-  /api\/v1\/w\/\$SLUG\/forgejo/,
+  // Retired single-tenant API shape: workspaces are addressed as
+  // /repos/:owner/:repo, never by a bare slug.
+  /\/api\/v1\/w\//,
+  /\/w\/:slug\//,
+  // Bare-slug CLI examples: workspace subcommands take <owner>/<repo>.
+  /workspace (?:reindex|member|rm|inspect|drift-check) (?!\S+\/)/,
   /Forgejo passthrough should/,
   /Forgejo passthrough first/,
   /branchId/,
   /\bBranchState\b/,
 ];
+// Note: the two broad retired-shape bans above subsume the older spelled-out
+// bans (forgejo/changes/publish paths under the retired bare-slug prefix).
 for (const pattern of staleDocPatterns) {
   if (pattern.test(docs)) fail(`stale API documentation pattern found: ${pattern}`);
 }
 const staleSourcePatterns = [
   /\/api\/v1\/w\/[^"'`\s]*\/forgejo/,
+  // The retired bare-slug typed-route prefix; the only typed workspace API
+  // surface is /api/v1/repos/:owner/:repo.
+  /\/api\/v1\/w\//,
 ];
 for (const pattern of staleSourcePatterns) {
   if (pattern.test(sourceText)) fail(`stale backend passthrough source pattern found: ${pattern}`);

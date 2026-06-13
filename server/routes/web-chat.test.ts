@@ -121,8 +121,8 @@ describe("isChatIssue", () => {
 
 describe("chatLiveScript", () => {
   it("subscribes to the workspace events stream and reloads on this issue's event", () => {
-    const s = chatLiveScript("flushing-coin", 7);
-    expect(s).toContain('new EventSource("/api/v1/w/flushing-coin/events")');
+    const s = chatLiveScript("chao", "flushing-coin", 7);
+    expect(s).toContain('new EventSource("/api/v1/repos/chao/flushing-coin/events")');
     expect(s).toContain('d.type==="issue"&&d.number===7');
     expect(s).toContain('querySelector(".chat-thread")');
     expect(s).not.toContain("location.reload");

@@ -10,6 +10,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach } from "vitest";
+import { workspaceSlug } from "../../shared/conventions.js";
 import { DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
 import type { Config } from "../db.js";
 import { Forgejo } from "../forgejo.js";
@@ -45,25 +46,29 @@ export function freshTestDb(prefix = "cosheaf-test-"): Database.Database {
 }
 
 interface WorkspaceSeed {
-  slug?: string;
+  owner?: string;
+  repo?: string;
   default_md_format?: string;
 }
 
 // Register a test workspace with the middleware. The `workspaces` table is
 // gone (#62); the only thing that needs setup now is the in-process format
 // cache so requireMembership can resolve `defaultMdFormat` without an actual
-// Forgejo round-trip.
+// Forgejo round-trip. The default identity is owner "owner" / repo "w" so
+// route tests hit /api/v1/repos/owner/w/... and the fake Forgejo upstream
+// paths stay http://forgejo.test/api/v1/repos/owner/w/....
 export function seedTestWorkspace(
   db: Database.Database,
   init: WorkspaceSeed = {},
-): { slug: string } {
-  const slug = init.slug ?? "w";
+): { owner: string; repo: string; slug: string } {
+  const owner = init.owner ?? "owner";
+  const repo = init.repo ?? "w";
   const formatId = init.default_md_format ?? DEFAULT_DOCUMENT_FORMAT_ID;
-  _seedFormatCacheForTests(slug, formatId);
+  _seedFormatCacheForTests(owner, repo, formatId);
   // `db` is intentionally unused: there is no SQLite row to seed anymore.
   // Kept in the signature so test callers don't need to change.
   void db;
-  return { slug };
+  return { owner, repo, slug: workspaceSlug(owner, repo) };
 }
 
 // Canonical test Config. Every route test used to repeat this object with
@@ -75,7 +80,6 @@ export function testConfig(name: string, overrides: Partial<Config> = {}): Confi
     forgejoUrl: "http://forgejo.test",
     forgejoToken: "admin-token",
     forgejoAdminToken: "admin-token",
-    forgejoOwner: "owner",
     webhookSecret: "secret",
     webhookUrl: "http://cosheaf.test/webhook",
     coverifyCmd: "coverify",

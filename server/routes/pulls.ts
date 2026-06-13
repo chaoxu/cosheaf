@@ -2,7 +2,7 @@
 // only translates cosheaf paths to Forgejo REST calls and shapes responses
 // for the client.
 //
-// Endpoints under /:slug/* :
+// Endpoints under /:owner/:repo/* :
 //   POST   /pulls                           — open a PR
 //   GET    /pulls?state=                    — list PR metadata
 //   GET    /pulls/:n                        — PR metadata
@@ -50,8 +50,8 @@ import { parseListState, parsePositiveInt, parsePositiveIntList } from "./query-
 
 export const pulls = new Hono<AppEnv>();
 pulls.use("*", requireAuth);
-pulls.use("/:slug/*", requireMembership());
-pulls.use("/:slug/*", requireWriteOnMutation);
+pulls.use("/:owner/:repo/*", requireMembership());
+pulls.use("/:owner/:repo/*", requireWriteOnMutation);
 
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict, forbidden, notFound } from "./responses.js";
@@ -173,7 +173,7 @@ function forgejoErrToResult(err: unknown): { ok: false; status: number; message:
 }
 
 
-pulls.get("/:slug/pulls", async (c) => {
+pulls.get("/:owner/:repo/pulls", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const rows = await fj.listPulls(owner, repo, {
     state: parseListState(c.req.query("state")),
@@ -185,7 +185,7 @@ pulls.get("/:slug/pulls", async (c) => {
   return c.json({ pulls: rows.map(prMeta) });
 });
 
-pulls.get("/:slug/pulls/:n", async (c) => {
+pulls.get("/:owner/:repo/pulls/:n", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -194,7 +194,7 @@ pulls.get("/:slug/pulls/:n", async (c) => {
   return c.json({ pull: prMeta(pull) });
 });
 
-pulls.post("/:slug/pulls", async (c) => {
+pulls.post("/:owner/:repo/pulls", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     head?: string;
     base?: string;
@@ -226,7 +226,7 @@ pulls.post("/:slug/pulls", async (c) => {
   }
 });
 
-pulls.patch("/:slug/pulls/:n", async (c) => {
+pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = (await c.req.json().catch(() => null)) as {
@@ -249,7 +249,7 @@ pulls.patch("/:slug/pulls/:n", async (c) => {
   return c.json({ pull: prMeta(pull) });
 });
 
-pulls.put("/:slug/pulls/:n/labels", async (c) => {
+pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = (await c.req.json().catch(() => null)) as { labels?: unknown } | null;
@@ -271,7 +271,7 @@ pulls.put("/:slug/pulls/:n/labels", async (c) => {
 });
 
 
-pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -296,7 +296,7 @@ pulls.post("/:slug/pulls/:n/merge", requireAdminFresh, async (c) => {
   return c.json({ ok: true });
 });
 
-pulls.post("/:slug/pulls/:n/close", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
@@ -308,7 +308,7 @@ pulls.post("/:slug/pulls/:n/close", async (c) => {
 
 // ---------- diff + raw file at a side ----------
 
-pulls.get("/:slug/pulls/:n/files", async (c) => {
+pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -332,7 +332,7 @@ pulls.get("/:slug/pulls/:n/files", async (c) => {
   return c.json({ files });
 });
 
-pulls.get("/:slug/pulls/:n/file", async (c) => {
+pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   // Apply the same repo-path safety check the file route uses (rejects
@@ -364,7 +364,7 @@ const EVENT_MAP = {
   COMMENT: "COMMENT",
 } as const;
 
-pulls.get("/:slug/pulls/:n/reviews", async (c) => {
+pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -387,7 +387,7 @@ pulls.get("/:slug/pulls/:n/reviews", async (c) => {
   return c.json({ reviews: out, approvals: counts.approvals, rejections: counts.rejections });
 });
 
-pulls.post("/:slug/pulls/:n/reviews", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
@@ -418,7 +418,7 @@ function parseReviewers(raw: unknown): string[] | null {
   return reviewers.length > 0 ? [...new Set(reviewers)] : null;
 }
 
-pulls.get("/:slug/pulls/:n/review-requests", async (c) => {
+pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -434,7 +434,7 @@ pulls.get("/:slug/pulls/:n/review-requests", async (c) => {
   });
 });
 
-pulls.post("/:slug/pulls/:n/review-requests", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = (await c.req.json().catch(() => null)) as { reviewers?: unknown } | null;
@@ -448,7 +448,7 @@ pulls.post("/:slug/pulls/:n/review-requests", async (c) => {
   return c.json({ pull: prMeta(pull) }, 201);
 });
 
-pulls.delete("/:slug/pulls/:n/review-requests", async (c) => {
+pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = (await c.req.json().catch(() => null)) as { reviewers?: unknown } | null;
@@ -494,7 +494,7 @@ async function resolveLinePosition(
   return pos;
 }
 
-pulls.get("/:slug/pulls/:n/comments", async (c) => {
+pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -525,7 +525,7 @@ pulls.get("/:slug/pulls/:n/comments", async (c) => {
   return c.json({ comments: out });
 });
 
-pulls.post("/:slug/pulls/:n/comments", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   // Validate the body BEFORE touching Forgejo so malformed requests don't
@@ -557,7 +557,7 @@ pulls.post("/:slug/pulls/:n/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-pulls.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
+pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   const n = parsePr(c.req.param("n"));
   const cid = parseReviewId(c.req.param("cid"));
   if (n === null) return c.json(...bad("bad pull number"));
@@ -571,7 +571,7 @@ pulls.patch("/:slug/pulls/:n/comments/:cid", async (c) => {
   return c.json({ ok: true });
 });
 
-pulls.delete("/:slug/pulls/:n/comments/:cid", async (c) => {
+pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   const n = parsePr(c.req.param("n"));
   const cid = parseReviewId(c.req.param("cid"));
   const rid = parseReviewId(c.req.query("review_id"));
@@ -603,7 +603,7 @@ async function findOrCreatePendingReview(
   return created.id;
 }
 
-pulls.post("/:slug/pulls/:n/pending-review", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
   const n = parsePr(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -615,7 +615,7 @@ pulls.post("/:slug/pulls/:n/pending-review", async (c) => {
   return c.json({ review_id });
 });
 
-pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = parseReviewId(c.req.param("rid"));
   if (n === null || rid === null) return c.json(...bad("bad ids"));
@@ -634,7 +634,7 @@ pulls.post("/:slug/pulls/:n/pending-review/:rid/comments", async (c) => {
   return c.json({ ok: true });
 });
 
-pulls.post("/:slug/pulls/:n/pending-review/:rid/submit", async (c) => {
+pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   const n = parsePr(c.req.param("n"));
   const rid = parseReviewId(c.req.param("rid"));
   if (n === null || rid === null) return c.json(...bad("bad ids"));
@@ -655,7 +655,7 @@ pulls.post("/:slug/pulls/:n/pending-review/:rid/submit", async (c) => {
 
 // ---------- settings (min_approvals on main) ----------
 
-pulls.get("/:slug/settings", async (c) => {
+pulls.get("/:owner/:repo/settings", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const bp = await fj.getBranchProtection(owner, repo, "main");
   return c.json({
@@ -679,7 +679,7 @@ pulls.get("/:slug/settings", async (c) => {
 // the body. The repair path is always: PUT /settings again with the same
 // payload (idempotent), then optionally `pnpm cli workspace reindex <slug>`
 // if the format topic advanced but the indexer crashed mid-walk.
-pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
+pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     min_approvals?: number;
     default_md_format?: string;
@@ -723,8 +723,10 @@ pulls.put("/:slug/settings", requireAdminFresh, async (c) => {
       // Format storage is a Forgejo repo topic. Update the topic before
       // re-indexing so the reindex picks up the new format.
       await setWorkspaceFormatTopic(fj, owner, repo, defaultMdFormat);
-      await reindexWorkspaceFromForgejo(c.get("db"), fj, c.get("config"), {
-        slug: repo,
+      await reindexWorkspaceFromForgejo(c.get("db"), fj, {
+        owner,
+        repo,
+        slug: c.get("workspace").slug,
         defaultMdFormat,
       });
     } catch (err) {

@@ -4,7 +4,7 @@ import path from "node:path";
 import repl from "node:repl";
 import { stdin, stdout } from "node:process";
 import { Command, InvalidArgumentError } from "commander";
-import { WORKSPACE_SLUG_RE } from "../shared/conventions.js";
+import { WORKSPACE_SLUG_RE, parseWorkspaceSlug, workspaceSlug } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
@@ -14,6 +14,7 @@ import {
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
 import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
+import { listVisibleWorkspaceRepos } from "./workspace-discovery.js";
 import {
   COFLAT_FORMAT_ID,
   DEFAULT_DOCUMENT_FORMAT_ID,
@@ -82,15 +83,17 @@ function ctx() {
 }
 
 interface CliWorkspaceRow {
+  owner: string;
+  repo: string;
   slug: string;
   defaultMdFormat: DocumentFormatId;
 }
 
-// Resolve a workspace by slug and hand the caller everything it needs.
-// Exits 1 with a uniform "workspace 'x' not found" message on miss so callers
-// don't repeat the same five lines.
+// Resolve a workspace from an `owner/repo` argument and hand the caller
+// everything it needs. Exits 1 with a uniform usage/not-found message on miss
+// so callers don't repeat the same five lines.
 async function withWorkspace<T>(
-  slug: string,
+  workspaceArg: string,
   fn: (args: {
     config: ReturnType<typeof loadConfig>;
     db: ReturnType<typeof getDb>;
@@ -99,17 +102,25 @@ async function withWorkspace<T>(
   }) => Promise<T> | T,
 ): Promise<T> {
   const { config, db, forgejo } = ctx();
+  const parsed = parseWorkspaceSlug(workspaceArg);
+  if (!parsed) {
+    console.error(`workspace must be <owner>/<repo>, got '${workspaceArg}'`);
+    process.exit(1);
+  }
+  const { owner, repo: repoName } = parsed;
   // Workspaces are identified solely by their Forgejo repo. The CLI
   // verifies existence against Forgejo and reads the markdown format from
   // the repo's topics.
-  const repo = await forgejo.getRepo(config.forgejoOwner, slug);
+  const repo = await forgejo.getRepo(owner, repoName);
   if (!repo) {
-    console.error(`workspace '${slug}' not found`);
+    console.error(`workspace '${owner}/${repoName}' not found`);
     process.exit(1);
   }
   const ws: CliWorkspaceRow = {
-    slug,
-    defaultMdFormat: await readWorkspaceFormatFromTopics(forgejo, config.forgejoOwner, slug),
+    owner,
+    repo: repoName,
+    slug: workspaceSlug(owner, repoName),
+    defaultMdFormat: await readWorkspaceFormatFromTopics(forgejo, owner, repoName),
   };
   return fn({ config, db, forgejo, workspace: ws });
 }
@@ -118,8 +129,8 @@ function addSeedOptions(command: Command): Command {
   return command
     .requiredOption("--user <user>", "Forgejo username to create or seed as")
     .requiredOption("--password <password>", "Forgejo password for --user")
-    .requiredOption("--workspace <slug>", "workspace repo slug")
-    .option("--workspace-name <name>", "workspace display name; defaults to --workspace")
+    .requiredOption("--workspace <owner/repo>", "workspace as <owner>/<repo>")
+    .option("--workspace-name <name>", "workspace display name; defaults to the repo name")
     .option("--default-md-format <id>", "workspace markdown format", DEFAULT_DOCUMENT_FORMAT_ID)
     .option("--profile <profile>", `seed profile (${SEED_PROFILES.join("|")})`, "all");
 }
@@ -135,9 +146,14 @@ export function normalizeSeedOptions(opts: {
   const { user, password, workspace } = opts;
   if (!user) throw new InvalidArgumentError("seed requires --user");
   if (!password) throw new InvalidArgumentError("seed requires --password");
-  if (!workspace) throw new InvalidArgumentError("seed requires --workspace");
-  if (!WORKSPACE_SLUG_RE.test(workspace)) {
-    throw new InvalidArgumentError(`workspace must match ${WORKSPACE_SLUG_RE}`);
+  if (!workspace) throw new InvalidArgumentError("seed requires --workspace <owner>/<repo>");
+  const parsed = parseWorkspaceSlug(workspace);
+  if (!parsed) {
+    throw new InvalidArgumentError(`--workspace must be <owner>/<repo> with valid Forgejo names, got '${workspace}'`);
+  }
+  // The seed creates the repo, so the repo half stays cosheaf-opinionated.
+  if (!WORKSPACE_SLUG_RE.test(parsed.repo)) {
+    throw new InvalidArgumentError(`workspace repo name must match ${WORKSPACE_SLUG_RE}`);
   }
   const defaultMdFormat = opts.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID;
   if (!isDocumentFormatId(defaultMdFormat)) {
@@ -150,8 +166,9 @@ export function normalizeSeedOptions(opts: {
   return {
     user,
     password,
-    workspace,
-    workspaceName: opts.workspaceName ?? workspace,
+    owner: parsed.owner,
+    repo: parsed.repo,
+    workspaceName: opts.workspaceName ?? parsed.repo,
     defaultMdFormat,
     profile,
   };
@@ -202,10 +219,10 @@ async function seed(options: SeedOptions): Promise<void> {
   await seedWorkspace({ options, db, forgejo, config });
 }
 
-async function workspaceRm(slug: string): Promise<void> {
-  await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
+async function workspaceRm(workspaceArg: string): Promise<void> {
+  await withWorkspace(workspaceArg, async ({ db, forgejo, workspace: ws }) => {
     try {
-      await forgejo.deleteRepo(config.forgejoOwner, ws.slug);
+      await forgejo.deleteRepo(ws.owner, ws.repo);
     } catch (err) {
       if (!(err instanceof ForgejoError && err.status === 404)) {
         console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
@@ -213,27 +230,27 @@ async function workspaceRm(slug: string): Promise<void> {
       }
     }
     deleteSidecarForWorkspace(db, ws.slug);
-    console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
+    console.log(`deleted workspace ${ws.slug} (forgejo repo + sidecar)`);
   });
 }
 
-async function workspaceReindex(slug: string): Promise<void> {
-  await withWorkspace(slug, async ({ db, forgejo, config, workspace: ws }) => {
-    const count = await reindexWorkspaceFromForgejo(db, forgejo, config, ws);
-    console.log(`reindexed ${count} markdown file${count === 1 ? "" : "s"} in workspace ${slug}`);
+async function workspaceReindex(workspaceArg: string): Promise<void> {
+  await withWorkspace(workspaceArg, async ({ db, forgejo, workspace: ws }) => {
+    const count = await reindexWorkspaceFromForgejo(db, forgejo, ws);
+    console.log(`reindexed ${count} markdown file${count === 1 ? "" : "s"} in workspace ${ws.slug}`);
   });
 }
 
-async function workspaceMember(slug: string, username: string, role: Role): Promise<void> {
-  await withWorkspace(slug, async ({ forgejo, config, workspace: ws }) => {
+async function workspaceMember(workspaceArg: string, username: string, role: Role): Promise<void> {
+  await withWorkspace(workspaceArg, async ({ forgejo, workspace: ws }) => {
     await setWorkspaceMember({
       forgejo,
-      owner: config.forgejoOwner,
-      repo: ws.slug,
+      owner: ws.owner,
+      repo: ws.repo,
       username,
       role,
     });
-    console.log(`set ${username} as ${role} in workspace ${slug}`);
+    console.log(`set ${username} as ${role} in workspace ${ws.slug}`);
   });
 }
 
@@ -301,14 +318,6 @@ async function doctor(): Promise<void> {
   );
 
   results.push(
-    await check("admin user exists in forgejo", async () => {
-      const u = await forgejo.getUserByName(config.forgejoOwner);
-      if (!u) throw new Error(`COSHEAF_FORGEJO_OWNER=${config.forgejoOwner} not found`);
-      return u.login;
-    }),
-  );
-
-  results.push(
     await check("data dir writable", async () => {
       const probe = path.join(config.dataDir, ".doctor-probe");
       const fs = await import("node:fs/promises");
@@ -341,13 +350,14 @@ async function doctor(): Promise<void> {
     }),
   );
 
-  // Per-workspace checks. Workspaces are enumerated from Forgejo (repos
-  // under config.forgejoOwner with a `cosheaf-format-*` topic), not from
+  // Per-workspace checks. Workspaces are enumerated from Forgejo (any
+  // visible repo with a `cosheaf-format-*` topic, across owners), not from
   // SQLite — there's no workspaces table anymore.
-  const repos = await forgejo.listUserRepos(config.forgejoOwner, { limit: 50 });
-  const workspaceRepos = repos.filter((r) => (r.topics ?? []).some(isFormatTopic));
+  const workspaceRepos = await listVisibleWorkspaceRepos(forgejo);
   const workspaces = workspaceRepos.map((r) => ({
-    slug: r.name,
+    owner: r.owner.login,
+    repo: r.name,
+    slug: r.full_name,
     topics: r.topics ?? [],
     defaultMdFormat: documentFormatFromTopics(r.topics ?? []),
   }));
@@ -356,8 +366,8 @@ async function doctor(): Promise<void> {
   for (const ws of workspaces) {
     results.push(
       await check(`workspace ${ws.slug}: forgejo repo exists`, async () => {
-        const r = await forgejo.getRepo(config.forgejoOwner, ws.slug);
-        if (!r) throw new Error(`repo ${config.forgejoOwner}/${ws.slug} missing`);
+        const r = await forgejo.getRepo(ws.owner, ws.repo);
+        if (!r) throw new Error(`repo ${ws.slug} missing`);
         return r.full_name;
       }),
     );
@@ -383,7 +393,7 @@ async function doctor(): Promise<void> {
     if (ws.defaultMdFormat === COFLAT_FORMAT_ID) {
       results.push(
         await check(`workspace ${ws.slug}: webhook installed`, async () => {
-          const hooks = await forgejo.listRepoHooks(config.forgejoOwner, ws.slug);
+          const hooks = await forgejo.listRepoHooks(ws.owner, ws.repo);
           const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
           if (!ours) throw new Error("no push webhook on repo");
           return `hook id=${ours.id}`;
@@ -404,7 +414,7 @@ async function doctor(): Promise<void> {
 
       results.push(
         await checkWarn(`workspace ${ws.slug}: sidecar in sync with Forgejo tree`, async () => {
-          const drift = await getWorkspaceMarkdownDrift(db, forgejo, config, ws);
+          const drift = await getWorkspaceMarkdownDrift(db, forgejo, ws);
           if (drift.onlySidecar.length === 0 && drift.onlyForgejo.length === 0) {
             return { status: "ok", detail: `${drift.inSync} pages` };
           }
@@ -432,13 +442,17 @@ async function doctor(): Promise<void> {
     if (knownSlugs.has(slug)) continue;
     results.push(
       await check(`sidecar orphan: workspace ${slug}`, async () => {
-        const repo = await forgejo.getRepo(config.forgejoOwner, slug);
+        const parsed = parseWorkspaceSlug(slug);
+        if (!parsed) {
+          throw new Error(`doc_map slug '${slug}' is not <owner>/<repo>; rebuild the sidecar (rm db.sqlite + reseed)`);
+        }
+        const repo = await forgejo.getRepo(parsed.owner, parsed.repo);
         if (!repo) {
           throw new Error(`doc_map references ${slug} but Forgejo repo is gone; run \`pnpm cli workspace rm ${slug}\``);
         }
         const hasFormat = (repo.topics ?? []).some(isFormatTopic);
         if (!hasFormat) {
-          throw new Error(`repo ${config.forgejoOwner}/${slug} exists but has no cosheaf-format-* topic; add a topic or run \`pnpm cli workspace rm ${slug}\``);
+          throw new Error(`repo ${slug} exists but has no cosheaf-format-* topic; add a topic or run \`pnpm cli workspace rm ${slug}\``);
         }
         // Defensive: should be unreachable because knownSlugs is built from the same predicate.
         return "ok";
@@ -464,17 +478,17 @@ async function doctor(): Promise<void> {
 
 // ---------------------------- inspect workspace ----------------------------
 
-async function inspectWorkspace(slug: string): Promise<void> {
-  await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
-  const repo = await forgejo.getRepo(config.forgejoOwner, ws.slug).catch(() => null);
-  const display = repo?.description?.trim() || ws.slug;
+async function inspectWorkspace(workspaceArg: string): Promise<void> {
+  await withWorkspace(workspaceArg, async ({ db, forgejo, workspace: ws }) => {
+  const repo = await forgejo.getRepo(ws.owner, ws.repo).catch(() => null);
+  const display = repo?.description?.trim() || ws.repo;
   console.log(
-    `workspace ${ws.slug} (${display}) — forgejo repo ${config.forgejoOwner}/${ws.slug}, format ${ws.defaultMdFormat}\n`,
+    `workspace ${ws.slug} (${display}) — forgejo repo ${ws.slug}, format ${ws.defaultMdFormat}\n`,
   );
 
   let drift;
   try {
-    drift = await getWorkspaceMarkdownDrift(db, forgejo, config, ws);
+    drift = await getWorkspaceMarkdownDrift(db, forgejo, ws);
   } catch (err) {
     console.error(`getTree failed: ${(err as Error).message}`);
     process.exit(1);
@@ -500,14 +514,14 @@ async function inspectWorkspace(slug: string): Promise<void> {
   }
 
   console.log();
-  const pulls = await forgejo.listPulls(config.forgejoOwner, ws.slug, "open");
+  const pulls = await forgejo.listPulls(ws.owner, ws.repo, "open");
   console.log(`open PRs (${pulls.length}):`);
   for (const p of pulls) {
     console.log(`  #${p.number} ${p.title.slice(0, 60)}  by ${p.user?.login ?? "(deleted)"}  head=${p.head.ref}`);
   }
 
   console.log();
-  const branches = await forgejo.listBranches(config.forgejoOwner, ws.slug);
+  const branches = await forgejo.listBranches(ws.owner, ws.repo);
   const userBranches = branches.filter((b) => b.name.startsWith("user/"));
   console.log(`user/* branches (${userBranches.length}):`);
   for (const b of userBranches.slice(0, 20)) {
@@ -522,25 +536,25 @@ async function inspectWorkspace(slug: string): Promise<void> {
 // Diagnostic-only: compares `doc_map` against Forgejo's `main` tree for the
 // given workspace. No auto-repair. Exit 1 if drift detected so the command
 // is scriptable (e.g. periodic check, CI sanity).
-async function workspaceDriftCheck(slug: string): Promise<void> {
-  await withWorkspace(slug, async ({ config, db, forgejo, workspace: ws }) => {
+async function workspaceDriftCheck(workspaceArg: string): Promise<void> {
+  await withWorkspace(workspaceArg, async ({ db, forgejo, workspace: ws }) => {
   let drift;
   try {
-    drift = await getWorkspaceMarkdownDrift(db, forgejo, config, ws);
+    drift = await getWorkspaceMarkdownDrift(db, forgejo, ws);
   } catch (err) {
     console.error(`drift-check: getTree failed: ${(err as Error).message}`);
     process.exit(2);
   }
 
   if (drift.onlySidecar.length === 0 && drift.onlyForgejo.length === 0) {
-    console.log(`drift-check ${slug}: clean (${drift.inSync} pages in sync)`);
+    console.log(`drift-check ${ws.slug}: clean (${drift.inSync} pages in sync)`);
     return;
   }
 
-  console.log(`drift-check ${slug}: DRIFT (${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only)`);
+  console.log(`drift-check ${ws.slug}: DRIFT (${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only)`);
   for (const p of drift.onlySidecar) console.log(`  sidecar-only: ${p}`);
   for (const p of drift.onlyForgejo) console.log(`  forgejo-only: ${p}`);
-  console.log(`\nrun \`pnpm cli workspace reindex ${slug}\` to rebuild from Forgejo`);
+  console.log(`\nrun \`pnpm cli workspace reindex ${ws.slug}\` to rebuild from Forgejo`);
   process.exit(1);
   });
 }
@@ -552,7 +566,7 @@ function startRepl(): void {
   console.log(
     "cosheaf repl — bindings: db (better-sqlite3), forgejo (admin Forgejo client), config\n" +
       "  e.g.  db.prepare('SELECT * FROM doc_map').all()\n" +
-      "        await forgejo.getRepo(config.forgejoOwner, 'notes')\n",
+      "        await forgejo.getRepo('alice', 'notes')\n",
   );
   const r = repl.start({ prompt: "cosheaf> ", useGlobal: true, breakEvalOnSigint: true });
   r.context.db = db;
@@ -565,15 +579,12 @@ function startRepl(): void {
 async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<void> {
   const { config, db, forgejo } = ctx();
   // Workspaces are enumerated from Forgejo, not SQLite.
-  const allRepos = await forgejo.listUserRepos(config.forgejoOwner, { limit: 50 });
-  const repos = allRepos
-    .filter((r) => (r.topics ?? []).some(isFormatTopic))
-    .map((r) => `${config.forgejoOwner}/${r.name}`);
+  const workspaceRepos = await listVisibleWorkspaceRepos(forgejo);
 
   console.error("This will:");
   console.error(`  - delete ${path.join(config.dataDir, "db.sqlite")} (+ -shm/-wal)`);
   if (!opts.keepForgejo) {
-    for (const r of repos) console.error(`  - delete forgejo repo ${r}`);
+    for (const r of workspaceRepos) console.error(`  - delete forgejo repo ${r.full_name}`);
   } else {
     console.error("  - keep all forgejo repos (--keep-forgejo)");
   }
@@ -589,13 +600,13 @@ async function resetDev(opts: { keepForgejo: boolean; yes: boolean }): Promise<v
   }
 
   if (!opts.keepForgejo) {
-    for (const r of allRepos.filter((rr) => (rr.topics ?? []).some(isFormatTopic))) {
+    for (const r of workspaceRepos) {
       try {
-        await forgejo.deleteRepo(config.forgejoOwner, r.name);
-        console.error(`deleted forgejo repo ${r.name}`);
+        await forgejo.deleteRepo(r.owner.login, r.name);
+        console.error(`deleted forgejo repo ${r.full_name}`);
       } catch (err) {
         if (!(err instanceof ForgejoError && err.status === 404)) {
-          console.error(`warning: deleteRepo ${r.name} failed: ${(err as Error).message}`);
+          console.error(`warning: deleteRepo ${r.full_name} failed: ${(err as Error).message}`);
         }
       }
     }
@@ -632,26 +643,26 @@ function buildProgram(): Command {
     .description("non-interactive create (dev/CI use)")
     .action(ensureForgejoUser);
 
-  const workspace = program.command("workspace").description("workspace management");
+  const workspace = program.command("workspace").description("workspace management; workspaces are addressed as <owner>/<repo>");
   workspace
-    .command("member <slug> <username> <role>")
-    .description("set a collaborator's Forgejo role (admin|write|read)")
-    .action((slug, username, roleArg) => workspaceMember(slug, username, parseRole(roleArg)));
+    .command("member <workspace> <username> <role>")
+    .description("set a collaborator's Forgejo role (admin|write|read) on <owner>/<repo>")
+    .action((workspaceArg, username, roleArg) => workspaceMember(workspaceArg, username, parseRole(roleArg)));
   workspace
-    .command("reindex <slug>")
-    .description("rebuild the SQLite sidecar from Forgejo main")
+    .command("reindex <workspace>")
+    .description("rebuild the SQLite sidecar from Forgejo main for <owner>/<repo>")
     .action(workspaceReindex);
   workspace
-    .command("rm <slug>")
-    .description("delete the Forgejo repo and the SQLite sidecar")
+    .command("rm <workspace>")
+    .description("delete the Forgejo repo and the SQLite sidecar for <owner>/<repo>")
     .action(workspaceRm);
   workspace
-    .command("inspect <slug>")
-    .description("show sidecar vs forgejo drift, recent webhook deliveries, open PRs, user branches")
+    .command("inspect <workspace>")
+    .description("show sidecar vs forgejo drift, recent webhook deliveries, open PRs, user branches for <owner>/<repo>")
     .action(inspectWorkspace);
   workspace
-    .command("drift-check <slug>")
-    .description("diagnostic: report differences between doc_map and Forgejo's main tree (exit 1 on drift)")
+    .command("drift-check <workspace>")
+    .description("diagnostic: report differences between doc_map and Forgejo's main tree for <owner>/<repo> (exit 1 on drift)")
     .action(workspaceDriftCheck);
 
   program

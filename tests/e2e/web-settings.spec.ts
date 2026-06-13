@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const webBase = "http://localhost:3030";
-const repoBase = `${webBase}/flushing-coin`;
+const repoBase = `${webBase}/chao/flushing-coin`;
 
 test("account preferences are separate from repository settings", async ({ page }) => {
   const css = await page.request.get(`${webBase}/cosheaf-web.css`);
@@ -19,7 +19,7 @@ test("account preferences are separate from repository settings", async ({ page 
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
 
-  await page.getByRole("link", { name: "chao" }).click();
+  await page.getByRole("link", { name: "chao", exact: true }).click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
   await expect(page.getByTestId("settings-document-theme-select")).toBeVisible();

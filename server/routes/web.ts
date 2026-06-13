@@ -65,7 +65,6 @@ web.post("/logout", (c) => {
 web.get("/", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
-  const config = c.get("config");
   const repos = await configReposForUser(c);
   return htmlResponse(
     pageShell({
@@ -77,7 +76,7 @@ web.get("/", async (c) => {
           <div class="page-title">
             <div>
               <p class="eyebrow">Repositories</p>
-              <h1>${config.forgejoOwner}</h1>
+              <h1>${auth.user.username}</h1>
             </div>
           </div>
           <div class="list">
@@ -85,8 +84,8 @@ web.get("/", async (c) => {
               ? html`<div class="empty">No repositories available.</div>`
               : repos.map(
                   (repo) => html`
-                  <a class="list-row" href="${repoHref(config.forgejoOwner, repo.name)}">
-                    <strong>${repo.name}</strong>
+                  <a class="list-row" href="${repoHref(repo.owner, repo.name)}">
+                    <strong>${repo.full_name}</strong>
                     <span>${repo.description ?? ""}</span>
                     <small>${repo.role}</small>
                   </a>

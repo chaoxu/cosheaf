@@ -6,14 +6,14 @@
 const BASE = process.env.URL ?? "http://localhost:3030";
 
 const routes = [
-  ["/flushing-coin", "Coflat repo home"],
-  ["/flushing-coin/issues", "issue filters and list"],
-  ["/flushing-coin/pulls", "PR filters and list"],
-  ["/flushing-coin/activity", "activity feed and scroll behavior"],
-  ["/flushing-coin/src/branch/main/hello.md", "Coflat reader"],
-  ["/flushing-coin/_edit?branch=user/chao/manual-seed&path=manual-seed.md", "editor island"],
-  ["/passthrough-demo/issues", "passthrough issue rendering"],
-  ["/passthrough-demo/pulls", "passthrough PR rendering"],
+  ["/chao/flushing-coin", "Coflat repo home"],
+  ["/chao/flushing-coin/issues", "issue filters and list"],
+  ["/chao/flushing-coin/pulls", "PR filters and list"],
+  ["/chao/flushing-coin/activity", "activity feed and scroll behavior"],
+  ["/chao/flushing-coin/src/branch/main/hello.md", "Coflat reader"],
+  ["/chao/flushing-coin/_edit?branch=user/chao/manual-seed&path=manual-seed.md", "editor island"],
+  ["/chao/passthrough-demo/issues", "passthrough issue rendering"],
+  ["/chao/passthrough-demo/pulls", "passthrough PR rendering"],
 ];
 
 if (process.argv.includes("--json")) {
@@ -23,14 +23,14 @@ if (process.argv.includes("--json")) {
         baseUrl: BASE,
         forgejoUrl: "http://127.0.0.1:3002",
         users: [
-          { username: "chao", password: "Cosheaf123!", role: "admin", workspaces: ["flushing-coin", "passthrough-demo"] },
-          { username: "test-vera", password: "Cosheaf123!", role: "write", workspaces: ["flushing-coin", "passthrough-demo"] },
-          { username: "test-meri", password: "Cosheaf123!", role: "write", workspaces: ["flushing-coin", "passthrough-demo"] },
-          { username: "test-bob", password: "Cosheaf123!", role: "read", workspaces: ["flushing-coin", "passthrough-demo"] },
+          { username: "chao", password: "Cosheaf123!", role: "admin", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
+          { username: "test-vera", password: "Cosheaf123!", role: "write", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
+          { username: "test-meri", password: "Cosheaf123!", role: "write", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
+          { username: "test-bob", password: "Cosheaf123!", role: "read", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
         ],
         workspaces: [
-          { slug: "flushing-coin", format: "coflat" },
-          { slug: "passthrough-demo", format: "forgejo-passthrough" },
+          { slug: "chao/flushing-coin", format: "coflat" },
+          { slug: "chao/passthrough-demo", format: "forgejo-passthrough" },
         ],
         routes: routes.map(([route, covers]) => ({ url: new URL(route, BASE).toString(), covers })),
         commands: ["pnpm dev:all", "pnpm dev:login-state", "pnpm devx:verify-route", "pnpm smoke:list"],
@@ -59,11 +59,11 @@ console.log(`
 
   Workspaces:
 
-    flushing-coin       (format: coflat)
+    chao/flushing-coin       (format: coflat)
        The math-flavored default; exercises backlinks, citations,
        and the rich diff renderer.
 
-    passthrough-demo    (format: forgejo-passthrough)
+    chao/passthrough-demo    (format: forgejo-passthrough)
        The thin-shell flavor; backlinks panel stays empty, rich
        diff falls back to source diff, Forgejo's /markdown handles
        rendering.

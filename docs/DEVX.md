@@ -36,8 +36,8 @@ pnpm dev:login-state
 - Server-rendered web pages: `server/routes/web.ts`
   - Verify with `pnpm check:web` and `pnpm devx:verify-route`.
 - Server-rendered web CSS: `public/cosheaf-web.css`
-  - Verify with `pnpm check:web` and `pnpm devx:verify-route -- --route /flushing-coin/activity`.
-- Static asset serving and ownerless route rewrite: `server/index.ts`
+  - Verify with `pnpm check:web` and `pnpm devx:verify-route -- --route /chao/flushing-coin/activity`.
+- Static asset serving and route mounting: `server/index.ts`
   - Verify with `pnpm build`, `pnpm check:web`, and `pnpm devx:verify-route`.
 - Page editor island: `src/cosheaf/web-editor.tsx`
   - Verify with `pnpm smoke:edit`, `pnpm build`, and `pnpm check:web`.
@@ -52,7 +52,7 @@ pnpm dev:login-state
 - Typed issues, labels, milestones, timeline, and activity API: `server/routes/issues.ts`
   - Verify with `pnpm exec vitest run server/routes/issues.test.ts`, `pnpm check:web`, and `pnpm smoke:issues`.
 - Activity feed normalization/collapse helpers: `server/activity-feed.ts`
-  - Verify with `pnpm exec vitest run server/routes/issues.test.ts`, `pnpm check:web`, and `pnpm devx:verify-route -- --route /flushing-coin/activity`.
+  - Verify with `pnpm exec vitest run server/routes/issues.test.ts`, `pnpm check:web`, and `pnpm devx:verify-route -- --route /chao/flushing-coin/activity`.
 - Forgejo client: `server/forgejo.ts`
   - Verify with the affected route unit tests plus `pnpm smoke:api`.
 - Shared issue/activity DTOs: `shared/issues.ts`

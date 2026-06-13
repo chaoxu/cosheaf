@@ -1,11 +1,12 @@
 import type Database from "better-sqlite3";
 import type { Context } from "hono";
-import { isFormatTopic } from "../../shared/document-format.js";
+import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import type { Role } from "../../shared/roles.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat } from "../middleware.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
+import { listVisibleWorkspaceRepos } from "../workspace-discovery.js";
 import { html, type Html, raw } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
@@ -35,10 +36,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
   const config = c.get("config");
-  if (!owner || !repo) {
-    return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
-  }
-  if (owner !== config.forgejoOwner) {
+  if (!owner || !repo || !FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo)) {
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
   const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: auth.forgejoToken });
@@ -50,7 +48,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   if (!format.hasFormatTopic) {
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
-  const ws: WorkspaceContext = { slug: repo, role, defaultMdFormat: format.format };
+  const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat: format.format };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
   return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };
@@ -66,13 +64,13 @@ export async function resolveWebRepoForWrite(c: Context<AppEnv>): Promise<WebRep
 }
 
 export async function configReposForUser(c: Context<AppEnv>) {
-  const config = c.get("config");
   const userFj = c.get("fjUser");
-  const repos = await userFj.listUserRepos(config.forgejoOwner, { limit: 100 });
+  const repos = await listVisibleWorkspaceRepos(userFj);
   return repos
-    .filter((repo) => (repo.topics ?? []).some(isFormatTopic))
     .map((repo) => ({
+      owner: repo.owner.login,
       name: repo.name,
+      full_name: repo.full_name,
       description: repo.description ?? "",
       role: roleFromPermissions(repo.permissions),
     }))
@@ -162,17 +160,16 @@ export function validBranchName(value: string | null | undefined): value is stri
   );
 }
 
-export function repoHref(_owner: string, repo: string, suffix = ""): string {
-  return `/${encodeURIComponent(repo)}${suffix}`;
+export function repoHref(owner: string, repo: string, suffix = ""): string {
+  return `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
 }
 
 export function urlPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
-export function displayLogin(owner: string, login: string | null | undefined): string {
-  if (!login) return DELETED_USER_LOGIN;
-  return login === owner ? "repository" : login;
+export function displayLogin(login: string | null | undefined): string {
+  return login || DELETED_USER_LOGIN;
 }
 
 // JSON destined for a <script type="application/json"> body. Entity-escaping

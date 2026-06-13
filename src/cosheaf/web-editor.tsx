@@ -32,7 +32,6 @@ import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
 
 interface EditorConfig {
-  slug: string;
   owner: string;
   repo: string;
   path: string;
@@ -57,7 +56,6 @@ function readConfig(): { config: EditorConfig; content: string } {
   if (!mount || !payload) throw new Error("missing web editor mount payload");
   return {
     config: {
-      slug: mount.dataset.slug ?? "",
       owner: mount.dataset.owner ?? "",
       repo: mount.dataset.repo ?? "",
       path: mount.dataset.path ?? "",
@@ -214,7 +212,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       if (!nextPath.endsWith(".md")) return { ok: false, error: "path must end with .md" };
       try {
         const result = await api.putFile(
-          config.slug,
+          config.owner,
+          config.repo,
           nextPath,
           source,
           writeBranch,
@@ -230,7 +229,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.slug],
+    [branchForWrite, config.owner, config.repo],
   );
 
   const saveHandler = useMemo<EditorSaveHandler>(
@@ -271,7 +270,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       upload: async (file) => {
         const writeBranch = branchForWrite();
         try {
-          const result = await api.uploadAsset(config.slug, writeBranch, file);
+          const result = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
           setBranch(writeBranch);
           return { path: result.path };
         } catch (err) {
@@ -279,7 +278,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         }
       },
     }),
-    [branchForWrite, config.slug],
+    [branchForWrite, config.owner, config.repo],
   );
 
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
@@ -289,7 +288,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         suggest: async (prefix, env) => {
           if (env.signal.aborted) return [];
           try {
-            const result = await api.suggest(config.slug, { trigger: "[@", prefix, limit: 10 });
+            const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, limit: 10 });
             return result.suggestions;
           } catch (_err) {
             return [];
@@ -297,7 +296,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         },
       },
     ],
-    [config.slug],
+    [config.owner, config.repo],
   );
 
   const save = useCallback(() => {
@@ -324,13 +323,13 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       setBusy(true);
       setStatus(null);
       try {
-        const pr = await api.openPull(config.slug, {
+        const pr = await api.openPull(config.owner, config.repo, {
           head: branch,
           title: branch,
           body: `Update ${currentPath}`,
         });
         if (directMerge) {
-          await api.mergePull(config.slug, pr.number, { Do: "squash", force: true });
+          await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash", force: true });
           setStatus("merged to main");
           window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(currentPath)}`;
           return;
@@ -342,7 +341,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         setBusy(false);
       }
     },
-    [branch, config.owner, config.repo, config.slug, currentPath],
+    [branch, config.owner, config.repo, currentPath],
   );
 
   const readerClass =

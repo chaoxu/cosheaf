@@ -100,12 +100,12 @@ function parseIssueSort(value: string | undefined): IssueSort | undefined {
 
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
-issues.use("/:slug/*", requireMembership());
-issues.use("/:slug/*", requireWriteOnMutation);
+issues.use("/:owner/:repo/*", requireMembership());
+issues.use("/:owner/:repo/*", requireWriteOnMutation);
 
 // Typed because the public API needs an issue-only row shape and "mine"
 // composes two Forgejo filters (created_by OR assigned_by).
-issues.get("/:slug/issues", async (c) => {
+issues.get("/:owner/:repo/issues", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const state = parseListState(c.req.query("state"));
   const filter = c.req.query("filter");
@@ -150,7 +150,7 @@ issues.get("/:slug/issues", async (c) => {
 // Typed because Forgejo returns raw issues/PRs; the public API wants
 // issue-only rows.
 // Must come before :number routes.
-issues.get("/:slug/issues/pinned", async (c) => {
+issues.get("/:owner/:repo/issues/pinned", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listPinnedIssues(owner, repo);
   const issuesOnly = list.filter((i) => !i.pull_request);
@@ -168,7 +168,7 @@ issues.get("/:slug/issues/pinned", async (c) => {
 
 // Typed because public API clients consume a stable IssueDetail DTO with
 // deleted-user fallback and normalized timestamps.
-issues.get("/:slug/issues/:number", async (c) => {
+issues.get("/:owner/:repo/issues/:number", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
@@ -200,7 +200,7 @@ issues.get("/:slug/issues/:number", async (c) => {
 
 // Typed because issue creation emits workspace SSE and returns the compact row
 // shape used by clients.
-issues.post("/:slug/issues", async (c) => {
+issues.post("/:owner/:repo/issues", async (c) => {
   const ws = c.get("workspace");
   const body = (await c.req.json().catch(() => null)) as {
     title?: string;
@@ -219,7 +219,7 @@ issues.post("/:slug/issues", async (c) => {
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
 });
 
-issues.patch("/:slug/issues/:number/state", async (c) => {
+issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
   const ws = c.get("workspace");
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
@@ -231,7 +231,7 @@ issues.patch("/:slug/issues/:number/state", async (c) => {
   return c.json({ ok: true, state: issue.state });
 });
 
-issues.patch("/:slug/issues/:number", async (c) => {
+issues.patch("/:owner/:repo/issues/:number", async (c) => {
   const ws = c.get("workspace");
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
@@ -260,7 +260,7 @@ issues.patch("/:slug/issues/:number", async (c) => {
   });
 });
 
-issues.get("/:slug/issues/:number/comments", async (c) => {
+issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -268,7 +268,7 @@ issues.get("/:slug/issues/:number/comments", async (c) => {
   return c.json({ comments: comments.map(toIssueComment) });
 });
 
-issues.post("/:slug/issues/:number/comments", async (c) => {
+issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
@@ -280,7 +280,7 @@ issues.post("/:slug/issues/:number/comments", async (c) => {
   return c.json(toIssueComment(comment), 201);
 });
 
-issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
+issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   const id = parseId(c.req.param("id"));
   if (number === null) return c.json(...bad("bad number"));
@@ -293,7 +293,7 @@ issues.patch("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json(toIssueComment(comment));
 });
 
-issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
+issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   const id = parseId(c.req.param("id"));
   if (number === null) return c.json(...bad("bad number"));
@@ -303,13 +303,13 @@ issues.delete("/:slug/issues/:number/comments/:id", async (c) => {
   return c.json({ ok: true });
 });
 
-issues.get("/:slug/labels", async (c) => {
+issues.get("/:owner/:repo/labels", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const labels = await fj.listLabels(owner, repo);
   return c.json({ labels: labels.map(toLabel) });
 });
 
-issues.post("/:slug/labels", async (c) => {
+issues.post("/:owner/:repo/labels", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     name?: unknown;
     color?: unknown;
@@ -330,7 +330,7 @@ issues.post("/:slug/labels", async (c) => {
   return c.json(toLabel(label), 201);
 });
 
-issues.put("/:slug/issues/:number/labels", async (c) => {
+issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { labels?: unknown } | null;
@@ -349,7 +349,7 @@ issues.put("/:slug/issues/:number/labels", async (c) => {
   return c.json({ labels: labels.map(toLabel) });
 });
 
-issues.post("/:slug/issues/:number/pin", async (c) => {
+issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -357,7 +357,7 @@ issues.post("/:slug/issues/:number/pin", async (c) => {
   return c.json({ ok: true });
 });
 
-issues.delete("/:slug/issues/:number/pin", async (c) => {
+issues.delete("/:owner/:repo/issues/:number/pin", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -365,14 +365,14 @@ issues.delete("/:slug/issues/:number/pin", async (c) => {
   return c.json({ ok: true });
 });
 
-issues.get("/:slug/milestones", async (c) => {
+issues.get("/:owner/:repo/milestones", async (c) => {
   const state = parseListState(c.req.query("state"));
   const { fj, owner, repo } = c.get("repoCtx");
   const milestones = await fj.listMilestones(owner, repo, state);
   return c.json({ milestones: milestones.map(toMilestone) });
 });
 
-issues.post("/:slug/milestones", async (c) => {
+issues.post("/:owner/:repo/milestones", async (c) => {
   const body = (await c.req.json().catch(() => null)) as {
     title?: unknown;
     description?: unknown;
@@ -387,7 +387,7 @@ issues.post("/:slug/milestones", async (c) => {
   return c.json(toMilestone(milestone), 201);
 });
 
-issues.patch("/:slug/issues/:number/milestone", async (c) => {
+issues.patch("/:owner/:repo/issues/:number/milestone", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { id?: unknown } | null;
@@ -398,7 +398,7 @@ issues.patch("/:slug/issues/:number/milestone", async (c) => {
   return c.json({ ok: true });
 });
 
-issues.post("/:slug/markdown/render", async (c) => {
+issues.post("/:owner/:repo/markdown/render", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { text?: unknown } | null;
   const text = typeof body?.text === "string" ? body.text : "";
   const { fj, owner, repo } = c.get("repoCtx");
@@ -408,7 +408,7 @@ issues.post("/:slug/markdown/render", async (c) => {
 
 // Typed because Forgejo's dependency mutation body redundantly requires the
 // owner/repo, which clients should not know.
-issues.get("/:slug/issues/:number/dependencies", async (c) => {
+issues.get("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -416,7 +416,7 @@ issues.get("/:slug/issues/:number/dependencies", async (c) => {
   return c.json({ issues: list.map(toDependencyRow) });
 });
 
-issues.get("/:slug/issues/:number/blocks", async (c) => {
+issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -424,7 +424,7 @@ issues.get("/:slug/issues/:number/blocks", async (c) => {
   return c.json({ issues: list.map(toDependencyRow) });
 });
 
-issues.post("/:slug/issues/:number/dependencies", async (c) => {
+issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
@@ -438,7 +438,7 @@ issues.post("/:slug/issues/:number/dependencies", async (c) => {
   return c.json({ issue: toDependencyRow(updated) }, 201);
 });
 
-issues.delete("/:slug/issues/:number/dependencies", async (c) => {
+issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
@@ -453,7 +453,7 @@ issues.delete("/:slug/issues/:number/dependencies", async (c) => {
 
 // Typed because Forgejo activities encode references in JSON-ish strings;
 // clients get parsed issue refs and normalized timestamps.
-issues.get("/:slug/activities", async (c) => {
+issues.get("/:owner/:repo/activities", async (c) => {
   const rawLimit = Number(c.req.query("limit") ?? 50);
   const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 50;
   const { fj, owner, repo } = c.get("repoCtx");
@@ -504,7 +504,7 @@ issues.get("/:slug/activities", async (c) => {
 
 // Typed because public API clients use a narrowed event DTO with normalized
 // label/milestone/dependency references.
-issues.get("/:slug/issues/:number/timeline", async (c) => {
+issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
   const number = parseIssueNumber(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");

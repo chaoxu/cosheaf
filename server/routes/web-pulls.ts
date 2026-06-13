@@ -201,7 +201,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>${pull.head.ref} into ${pull.base.ref} - by ${displayLogin(ctx.owner, pull.user?.login)}</p>
+            <p>${pull.head.ref} into ${pull.base.ref} - by ${displayLogin(pull.user?.login)}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
@@ -209,7 +209,7 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
           </header>
           ${threadLayout(
             html`<div class="comment">
-                <div class="comment-meta">${displayLogin(ctx.owner, pull.user?.login)}</div>
+                <div class="comment-meta">${displayLogin(pull.user?.login)}</div>
                 ${body.length ? body : html`<p>No description.</p>`}
               </div>
               ${timelineHtml}
@@ -405,7 +405,7 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
   const mode = parseDiffMode(c.req.query("mode"));
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
-  const fileComments = file ? mapLineComments(ctx, file, allComments) : [];
+  const fileComments = file ? mapLineComments(file, allComments) : [];
   return htmlResponse(
     repoPage({
       title: `Files #${pull.number} - ${ctx.repo}`,
@@ -673,7 +673,7 @@ function renderInlineComment(comment: WebLineComment): Html {
   </tr>`;
 }
 
-function mapLineComments(ctx: WebCtx, file: PrFileView, comments: readonly ForgejoPullReviewComment[]): WebLineComment[] {
+function mapLineComments(file: PrFileView, comments: readonly ForgejoPullReviewComment[]): WebLineComment[] {
   return comments
     .filter((comment) => comment.path === file.path)
     .map((comment) => {
@@ -684,7 +684,7 @@ function mapLineComments(ctx: WebCtx, file: PrFileView, comments: readonly Forge
         line: mapped?.line ?? null,
         side: mapped?.side ?? (file.status === "deleted" ? "base" : "head"),
         body: comment.body,
-        author: displayLogin(ctx.owner, comment.user?.login),
+        author: displayLogin(comment.user?.login),
         createdAt: Date.parse(comment.created_at) || 0,
         outdated: comment.position === null,
       };

@@ -10,7 +10,7 @@ import { _seedBearerAuthCacheForTests, _seedPermCacheForTests } from "./middlewa
 // compatibility with the previous helper signature and are otherwise unused.
 export function seedAuthUser(
   _db: Database.Database,
-  config: Config,
+  _config: Config,
   opts: {
     id?: number;
     username: string;
@@ -23,9 +23,9 @@ export function seedAuthUser(
   _seedBearerAuthCacheForTests(token, opts.username);
   if (opts.role) {
     _seedPermCacheForTests(
-      opts.owner ?? config.forgejoOwner,
-      // seedTestWorkspace's default slug is "w"; slug ≡ repo name (#60),
-      // so the perm-cache key uses the same value.
+      // Defaults match seedTestWorkspace's fixture identity (owner "owner",
+      // repo "w") so both seams agree on the (owner, repo) perm-cache key.
+      opts.owner ?? "owner",
       opts.repo ?? "w",
       opts.username,
       opts.role,

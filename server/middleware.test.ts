@@ -21,7 +21,6 @@ const config: Config = {
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "admin-token",
   forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
   coverifyCmd: "coverify",
@@ -52,10 +51,10 @@ function appFor(db: Database.Database): Hono<AppEnv> {
     c.set("sse", new SSEHub());
     await next();
   });
-  app.use("/w/*", requireAuth);
-  app.use("/w/:slug/*", requireMembership());
-  app.get("/w/:slug/probe", (c) => c.json({ ok: true, role: c.get("workspace").role }));
-  app.post("/w/:slug/admin-only", requireAdminFresh, (c) => c.json({ ok: true }));
+  app.use("/repos/*", requireAuth);
+  app.use("/repos/:owner/:repo/*", requireMembership());
+  app.get("/repos/:owner/:repo/probe", (c) => c.json({ ok: true, role: c.get("workspace").role }));
+  app.post("/repos/:owner/:repo/admin-only", requireAdminFresh, (c) => c.json({ ok: true }));
   return app;
 }
 
@@ -87,12 +86,12 @@ function notFound(): Response {
 describe("requireMembership", () => {
   it("accepts a Forgejo PAT bearer by resolving /api/v1/user", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     fetchMock
       .mockResolvedValueOnce(ok({ login: "alice" }))
       .mockResolvedValueOnce(ok({ permission: "write" }));
 
-    const res = await appFor(db).request("/w/w/probe", {
+    const res = await appFor(db).request("/repos/owner/w/probe", {
       headers: { authorization: "Bearer forgejo-pat-alice" },
     });
     expect(res.status).toBe(200);
@@ -105,11 +104,11 @@ describe("requireMembership", () => {
 
   it("resolves Forgejo collaborator permission and sets ws.role", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
 
-    const res = await appFor(db).request("/w/w/probe", {
+    const res = await appFor(db).request("/repos/owner/w/probe", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
@@ -118,13 +117,13 @@ describe("requireMembership", () => {
 
   it("returns 404 (not 403) when Forgejo says the user has no collaborator access", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     // Forgejo returns 404 from the permission endpoint for an unknown
     // collaborator → translated to role 'none' → middleware hides the workspace.
     fetchMock.mockResolvedValueOnce(notFound());
 
-    const res = await appFor(db).request("/w/w/probe", {
+    const res = await appFor(db).request("/repos/owner/w/probe", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(404);
@@ -132,11 +131,11 @@ describe("requireMembership", () => {
 
   it("treats Forgejo's owner permission as admin", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "owner" }));
 
-    const res = await appFor(db).request("/w/w/probe", {
+    const res = await appFor(db).request("/repos/owner/w/probe", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
@@ -145,43 +144,59 @@ describe("requireMembership", () => {
 
   it("caches by (owner, repo, user) — back-to-back requests hit Forgejo once", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValue(ok({ permission: "write" }));
 
     const app = appFor(db);
-    await app.request("/w/w/probe", { headers: { authorization: `Bearer ${token}` } });
-    await app.request("/w/w/probe", { headers: { authorization: `Bearer ${token}` } });
+    await app.request("/repos/owner/w/probe", { headers: { authorization: `Bearer ${token}` } });
+    await app.request("/repos/owner/w/probe", { headers: { authorization: `Bearer ${token}` } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not collide across workspaces with the same user", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w1", "forgejo-passthrough");
-    _seedFormatCacheForTests("w2", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w1", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w2", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "write" })) // w1
       .mockResolvedValueOnce(ok({ permission: "read" })); // w2
 
     const app = appFor(db);
-    const r1 = await app.request("/w/w1/probe", { headers: { authorization: `Bearer ${token}` } });
-    const r2 = await app.request("/w/w2/probe", { headers: { authorization: `Bearer ${token}` } });
+    const r1 = await app.request("/repos/owner/w1/probe", { headers: { authorization: `Bearer ${token}` } });
+    const r2 = await app.request("/repos/owner/w2/probe", { headers: { authorization: `Bearer ${token}` } });
     expect(await r1.json()).toEqual({ ok: true, role: "write" });
     expect(await r2.json()).toEqual({ ok: true, role: "read" });
+  });
+
+  it("does not collide across owners with the same repo name", async () => {
+    const db = freshDb();
+    _seedFormatCacheForTests("alice-org", "w1", "forgejo-passthrough");
+    _seedFormatCacheForTests("bob-org", "w1", "forgejo-passthrough");
+    const token = seedUser(db, "alice");
+    fetchMock
+      .mockResolvedValueOnce(ok({ permission: "admin" })) // alice-org/w1
+      .mockResolvedValueOnce(notFound()); // bob-org/w1 — no access
+
+    const app = appFor(db);
+    const r1 = await app.request("/repos/alice-org/w1/probe", { headers: { authorization: `Bearer ${token}` } });
+    const r2 = await app.request("/repos/bob-org/w1/probe", { headers: { authorization: `Bearer ${token}` } });
+    expect(await r1.json()).toEqual({ ok: true, role: "admin" });
+    expect(r2.status).toBe(404);
   });
 });
 
 describe("requireAdminFresh", () => {
   it("re-fetches Forgejo permission, ignoring the cached role", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" })) // requireMembership caches admin
       .mockResolvedValueOnce(ok({ permission: "write" })); // requireAdminFresh sees the demotion
 
-    const res = await appFor(db).request("/w/w/admin-only", {
+    const res = await appFor(db).request("/repos/owner/w/admin-only", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
@@ -190,13 +205,13 @@ describe("requireAdminFresh", () => {
 
   it("allows the request when Forgejo still reports admin", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" }))
       .mockResolvedValueOnce(ok({ permission: "admin" }));
 
-    const res = await appFor(db).request("/w/w/admin-only", {
+    const res = await appFor(db).request("/repos/owner/w/admin-only", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });

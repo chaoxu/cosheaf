@@ -6,8 +6,9 @@ export function isCoverifyChatEnabled(config: Config): boolean {
 }
 
 // Build the argv for `coverify chat-reply`. The repo/owner is identified by the
-// workspace slug (the client targets /w/{workspace}/...), not a separate flag.
-// Auth (api-url + bot token) is passed through the environment, not argv.
+// full workspace slug "owner/repo" (the client targets /repos/{owner}/{repo}/...),
+// not a separate flag. Auth (api-url + bot token) is passed through the
+// environment, not argv.
 export function chatReplyArgs(workspace: string, issue: number, botLogin: string): string[] {
   return [
     "chat-reply",

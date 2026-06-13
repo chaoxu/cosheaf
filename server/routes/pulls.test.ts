@@ -31,8 +31,8 @@ function seedWorkspace(db: Database.Database): void {
 
 function appFor(db: Database.Database): Hono<AppEnv> {
   return testApp(db, config, (app) => {
-    app.route("/api/v1/w", pulls);
-    app.route("/api/v1/w", branches);
+    app.route("/api/v1/repos", pulls);
+    app.route("/api/v1/repos", branches);
   });
 }
 
@@ -78,7 +78,7 @@ describe("pulls + branches routes", () => {
       pull({ number: 8, title: "Update docs", head: { ref: "agent/wip", sha: "h8" } }),
     ]));
 
-    const res = await appFor(db).request("/api/v1/w/w/pulls?state=all", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls?state=all", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -106,7 +106,7 @@ describe("pulls + branches routes", () => {
     fetchMock.mockResolvedValueOnce(ok([]));
 
     const res = await appFor(db).request(
-      "/api/v1/w/w/pulls?state=all&labels=4&milestone=2&author=test-meri&sort=oldest",
+      "/api/v1/repos/owner/w/pulls?state=all&labels=4&milestone=2&author=test-meri&sort=oldest",
       { headers: { authorization: `Bearer ${token}` } },
     );
 
@@ -125,7 +125,7 @@ describe("pulls + branches routes", () => {
     const token = seedUser(db, 1, "alice", "write");
     fetchMock.mockResolvedValueOnce(ok(pull({ number: 7, title: "Review me" })));
 
-    const res = await appFor(db).request("/api/v1/w/w/pulls/7", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -147,7 +147,7 @@ describe("pulls + branches routes", () => {
     const token = seedUser(db, 1, "alice", "write");
     fetchMock.mockResolvedValueOnce(ok(pull({ number: 7, title: "Retitled", body: "Updated body" })));
 
-    const res = await appFor(db).request("/api/v1/w/w/pulls/7", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7", {
       method: "PATCH",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ title: " Retitled ", body: "Updated body" }),
@@ -173,7 +173,7 @@ describe("pulls + branches routes", () => {
       ]))
       .mockResolvedValueOnce(ok(pull({ labels: [] })));
 
-    const res = await appFor(db).request("/api/v1/w/w/pulls/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [1, 2] }),
@@ -193,7 +193,7 @@ describe("pulls + branches routes", () => {
       .mockResolvedValueOnce(ok(pull({ labels: [] })))
       .mockResolvedValueOnce(ok(pull({ labels: [label] })));
 
-    const res = await appFor(db).request("/api/v1/w/w/pulls/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [1] }),
@@ -219,7 +219,7 @@ describe("pulls + branches routes", () => {
       .mockResolvedValueOnce(ok(pull({ labels: [] })))
       .mockResolvedValueOnce(ok(pull({ labels })));
 
-    const res = await appFor(db).request("/api/v1/w/w/pulls/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [1, 2] }),
@@ -243,7 +243,7 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       // Fresh permission lookup says write.
       fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/merge", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ Do: "squash" }),
@@ -259,7 +259,7 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "admin");
       fetchMock
         .mockResolvedValueOnce(ok({ permission: "read" })); // requireAdminFresh
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/merge", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ Do: "squash" }),
@@ -272,7 +272,7 @@ describe("pulls + branches routes", () => {
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
       fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
-      const res = await appFor(db).request("/api/v1/w/w/settings", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/settings", {
         method: "PUT",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ min_approvals: 2 }),
@@ -285,7 +285,7 @@ describe("pulls + branches routes", () => {
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "admin");
       fetchMock.mockResolvedValueOnce(ok({ permission: "admin" }));
-      const res = await appFor(db).request("/api/v1/w/w/settings", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/settings", {
         method: "PUT",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ default_md_format: "unknown" }),
@@ -308,7 +308,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(empty(204))
         .mockResolvedValueOnce(ok({ message: "tree failed" }, 500));
 
-      const res = await appFor(db).request("/api/v1/w/w/settings", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/settings", {
         method: "PUT",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
@@ -337,7 +337,7 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "test-bob", "read");
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ event: "APPROVE" }),
@@ -349,7 +349,7 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "test-bob", "read");
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/close", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/close", {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
       });
@@ -360,7 +360,7 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "test-bob", "read");
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ path: "x.md", line: 1, side: "head", body: "hi" }),
@@ -373,7 +373,7 @@ describe("pulls + branches routes", () => {
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
       const post = (body: unknown) =>
-        appFor(db).request("/api/v1/w/w/pulls/42/comments", {
+        appFor(db).request("/api/v1/repos/owner/w/pulls/42/comments", {
           method: "POST",
           headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
           body: JSON.stringify(body),
@@ -406,7 +406,7 @@ describe("pulls + branches routes", () => {
         })))
         .mockResolvedValueOnce(ok([{ login: "alice" }, { login: "test-vera" }, { login: "test-meri" }]));
 
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/review-requests", {
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -426,7 +426,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(ok([]))
         .mockResolvedValueOnce(ok(pull({ requested_reviewers: [{ login: "test-vera" }] })));
 
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/review-requests", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ reviewers: ["test-vera", "test-vera", "  "] }),
@@ -448,7 +448,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(empty(204))
         .mockResolvedValueOnce(ok(pull({ requested_reviewers: [] })));
 
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/review-requests", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/review-requests", {
         method: "DELETE",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ reviewers: ["test-vera"] }),
@@ -467,7 +467,7 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       // GET /pulls/7 → returns a PR authored by alice (the caller).
       fetchMock.mockResolvedValueOnce(ok(pull({ user: { login: "alice" } })));
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ event: "APPROVE" }),
@@ -485,12 +485,12 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 
-      const submit = await appFor(db).request("/api/v1/w/w/pulls/7/pending-review/1.5/submit", {
+      const submit = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review/1.5/submit", {
         method: "POST",
         headers,
         body: JSON.stringify({ event: "approve" }),
       });
-      const comment = await appFor(db).request("/api/v1/w/w/pulls/7/pending-review/1.5/comments", {
+      const comment = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review/1.5/comments", {
         method: "POST",
         headers,
         body: JSON.stringify({ path: "x.md", line: 1, side: "head", body: "hi" }),
@@ -513,7 +513,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(empty(200)) // merge succeeds
         .mockResolvedValueOnce(ok(pull({ head: { ref: "user/alice/wip", sha: "h" } }))) // GET pull
         .mockResolvedValueOnce(empty(204)); // delete branch
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/merge", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ Do: "squash" }),
@@ -530,7 +530,7 @@ describe("pulls + branches routes", () => {
       fetchMock
         .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
         .mockResolvedValueOnce(new Response("PR has merge conflicts", { status: 405 }));
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/merge", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ Do: "squash" }),
@@ -563,7 +563,7 @@ describe("pulls + branches routes", () => {
         )
         // listPulls "open"
         .mockResolvedValueOnce(ok([pull({ head: { ref: "user/alice/wip-1", sha: "h" } })]));
-      const res = await appFor(db).request("/api/v1/w/w/branches/mine", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branches/mine", {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
@@ -580,7 +580,7 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
-      const res = await appFor(db).request("/api/v1/w/w/branches", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branches", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ name: "../etc/passwd" }),
@@ -593,7 +593,7 @@ describe("pulls + branches routes", () => {
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
       fetchMock.mockResolvedValueOnce(empty(204));
-      const res = await appFor(db).request("/api/v1/w/w/branches/user/alice/wip-2", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branches/user/alice/wip-2", {
         method: "DELETE",
         headers: { authorization: `Bearer ${token}` },
       });
@@ -615,7 +615,7 @@ describe("pulls + branches routes", () => {
       // we don't separately assert on them.
       for (const bad of ["main", "a%20b", "user/foo..bar"]) {
         const res = await appFor(db).request(
-          `/api/v1/w/w/branches/${bad}`,
+          `/api/v1/repos/owner/w/branches/${bad}`,
           { method: "DELETE", headers: { authorization: `Bearer ${token}` } },
         );
         expect(res.status, `expected 400 for ${bad}`).toBe(400);
@@ -650,7 +650,7 @@ describe("pulls + branches routes", () => {
             { id: 4, state: "COMMENT", body: "q", user: { login: "test-bob" }, submitted_at: "2026-05-16T00:03:00Z" },
           ]),
         );
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
@@ -676,7 +676,7 @@ describe("pulls + branches routes", () => {
       fetchMock
         .mockResolvedValueOnce(ok(reviews))
         .mockResolvedValueOnce(ok(reviews));
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/reviews", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
         headers: { authorization: `Bearer ${token}` },
       });
       expect(res.status).toBe(200);
@@ -696,7 +696,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(ok([]))
         .mockResolvedValueOnce(new Response("", { status: 200 }));
 
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments", {
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -715,7 +715,7 @@ describe("pulls + branches routes", () => {
         .mockResolvedValueOnce(ok([{ id: 11, state: "COMMENT", body: "", user: { login: "test-bob" } }])) // reviews
         .mockResolvedValueOnce(new Response("forgejo down", { status: 503 })); // per-review comments
 
-      const res = await appFor(db).request("/api/v1/w/w/pulls/7/comments", {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments", {
         headers: { authorization: `Bearer ${token}` },
       });
 

@@ -4,7 +4,11 @@ import { Command } from "commander";
 const program = new Command("api-smoke")
   .description("exercise the Cosheaf API flow used by agents")
   .option("--api <url>", "Cosheaf API base URL", process.env.COSHEAF_API_URL ?? "http://localhost:3030/api/v1")
-  .option("--workspace <slug>", "workspace slug", process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin")
+  .option(
+    "--workspace <owner/repo>",
+    "workspace as <owner>/<repo>",
+    `${process.env.COSHEAF_SMOKE_OWNER ?? "chao"}/${process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin"}`,
+  )
   .option("--admin-user <name>", "admin username", process.env.COSHEAF_SMOKE_USER ?? "chao")
   .option("--admin-password <password>", "admin password", process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!")
   .option("--reviewer-user <name>", "reviewer username", process.env.COSHEAF_REVIEWER_USER ?? "test-vera")
@@ -15,6 +19,10 @@ const program = new Command("api-smoke")
 const opts = program.opts();
 const apiBase = String(opts.api).replace(/\/$/, "");
 const workspace = opts.workspace;
+if (!/^[^/\s]+\/[^/\s]+$/.test(workspace)) {
+  console.error(`--workspace must be <owner>/<repo>, got '${workspace}'`);
+  process.exit(1);
+}
 const stamp = Date.now();
 const branch = `agent/api-smoke-${stamp}`;
 const path = `agent-api-smoke-${stamp}.md`;
@@ -61,7 +69,7 @@ async function main() {
   const adminPat = await login(opts.adminUser, opts.adminPassword);
   const reviewerPat = await login(opts.reviewerUser, opts.reviewerPassword);
 
-  await request(`/w/${workspace}/branches`, {
+  await request(`/repos/${workspace}/branches`, {
     token: adminPat,
     method: "POST",
     body: { name: branch },
@@ -77,19 +85,19 @@ async function main() {
     "- typed merge should enforce Cosheaf's merge boundary",
     "",
   ].join("\n");
-  const writeResult = await request(`/w/${workspace}/file?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`, {
+  const writeResult = await request(`/repos/${workspace}/file?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`, {
     token: adminPat,
     method: "PUT",
     body: { content },
   });
 
-  const search = await request(`/w/${workspace}/search?q=${encodeURIComponent(title)}`, {
+  const search = await request(`/repos/${workspace}/search?q=${encodeURIComponent(title)}`, {
     token: adminPat,
   });
   const indexed = search?.results?.some((row) => row.path === path);
   if (!indexed) throw new Error(`typed write did not show up in search index for ${path}`);
 
-  const pull = await request(`/w/${workspace}/pulls`, {
+  const pull = await request(`/repos/${workspace}/pulls`, {
     token: adminPat,
     method: "POST",
     body: {
@@ -106,19 +114,19 @@ async function main() {
   const prNumber = pull?.number;
   if (!Number.isInteger(prNumber)) throw new Error("open PR response did not include a pull number");
 
-  await request(`/w/${workspace}/pulls/${prNumber}/reviews`, {
+  await request(`/repos/${workspace}/pulls/${prNumber}/reviews`, {
     token: reviewerPat,
     method: "POST",
     body: { event: "APPROVE", body: "API smoke approval" },
   });
 
   if (!opts.keepOpen) {
-    await request(`/w/${workspace}/pulls/${prNumber}/merge`, {
+    await request(`/repos/${workspace}/pulls/${prNumber}/merge`, {
       token: adminPat,
       method: "POST",
       body: { Do: "squash" },
     });
-    const merged = await request(`/w/${workspace}/file?path=${encodeURIComponent(path)}&branch=main`, {
+    const merged = await request(`/repos/${workspace}/file?path=${encodeURIComponent(path)}&branch=main`, {
       token: adminPat,
     });
     if (!merged?.content?.includes(title)) throw new Error(`merged file ${path} was not readable on main`);

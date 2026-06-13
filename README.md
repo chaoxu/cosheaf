@@ -64,12 +64,13 @@ treated as external repo edits and reach the SQLite index through
 webhook/reindex reconciliation. A Markdown write that needs immediate Cosheaf
 document/index behavior should use the typed file route.
 
-Example agent/API calls, all with `Authorization: Bearer <token>`:
-`GET /api/v1/w/flushing-coin/issues?state=open`,
-`GET /api/v1/w/flushing-coin/pulls?state=open`,
-`GET /api/v1/w/flushing-coin/labels`,
-`GET /api/v1/w/flushing-coin/milestones?state=open`, and
-`GET /api/v1/w/flushing-coin/file?path=hello.md&branch=main`.
+Workspaces are addressed by their Forgejo `(owner, repo)` pair. Example
+agent/API calls, all with `Authorization: Bearer <token>`:
+`GET /api/v1/repos/chao/flushing-coin/issues?state=open`,
+`GET /api/v1/repos/chao/flushing-coin/pulls?state=open`,
+`GET /api/v1/repos/chao/flushing-coin/labels`,
+`GET /api/v1/repos/chao/flushing-coin/milestones?state=open`, and
+`GET /api/v1/repos/chao/flushing-coin/file?path=hello.md&branch=main`.
 
 ## Quick start
 

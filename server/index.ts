@@ -11,7 +11,7 @@ import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import { auth } from "./routes/auth.js";
 import { handleAppError } from "./routes/error-handler.js";
-import { workspaces } from "./routes/workspaces.js";
+import { members, workspaces } from "./routes/workspaces.js";
 import { files } from "./routes/files.js";
 import { branches } from "./routes/branches.js";
 import { pulls } from "./routes/pulls.js";
@@ -35,9 +35,6 @@ app.use("*", async (c, next) => {
   c.set("config", config);
   c.set("fjAdmin", fjAdmin);
   c.set("sse", sse);
-  const rewrite = ownerlessRepoRewrite(c.req.raw);
-  if (rewrite.kind === "redirect") return c.redirect(rewrite.location, rewrite.status);
-  if (rewrite.kind === "forward") return app.fetch(rewrite.request);
   await next();
 });
 
@@ -52,11 +49,12 @@ app.onError(handleAppError);
 
 app.route("/api/v1", auth);
 app.route("/api/v1/workspaces", workspaces);
-app.route("/api/v1/w", files);
-app.route("/api/v1/w", pulls);
-app.route("/api/v1/w", branches);
-app.route("/api/v1/w", issues);
-app.route("/api/v1/w", notifications);
+app.route("/api/v1/repos", members);
+app.route("/api/v1/repos", files);
+app.route("/api/v1/repos", pulls);
+app.route("/api/v1/repos", branches);
+app.route("/api/v1/repos", issues);
+app.route("/api/v1/repos", notifications);
 app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
@@ -205,53 +203,8 @@ function requireResolve(id: string): string {
   return fileURLToPath(import.meta.resolve(id));
 }
 
-function ownerlessRepoRewrite(request: Request):
-  | { kind: "none" }
-  | { kind: "redirect"; location: string; status: 307 | 308 }
-  | { kind: "forward"; request: Request } {
-  const url = new URL(request.url);
-  const parts = url.pathname.split("/").filter(Boolean);
-  const [first, second] = parts;
-  if (!first || first === "login" || first === "logout" || first === "account" || first === "assets" || first === "api" || first === "favicon.ico" || publicAssetPaths.has(url.pathname)) return { kind: "none" };
-
-  const internalRewrite = request.headers.get("x-cosheaf-internal-owner-rewrite");
-  if (first === config.forgejoOwner && second && !internalRewrite) {
-    return {
-      kind: "redirect",
-      location: `/${parts.slice(1).map(encodeURIComponent).join("/")}${url.search}`,
-      status: request.method === "GET" ? 308 : 307,
-    };
-  }
-
-  if (first !== config.forgejoOwner && !internalRewrite && isOwnerlessRepoPath(parts)) {
-    const internalUrl = new URL(request.url);
-    internalUrl.pathname = `/${encodeURIComponent(config.forgejoOwner)}${url.pathname}`;
-    const headers = new Headers(request.headers);
-    headers.set("x-cosheaf-internal-owner-rewrite", "1");
-    return { kind: "forward", request: cloneForUrl(request, internalUrl, headers) };
-  }
-
-  return { kind: "none" };
-}
-
-function isOwnerlessRepoPath(parts: readonly string[]): boolean {
-  if (parts.length === 1) return true;
-  return ["_edit", "activity", "branches", "chat", "commits", "issues", "notifications", "pulls", "raw", "settings", "src"].includes(parts[1] ?? "");
-}
-
-function cloneForUrl(request: Request, url: URL, headers: Headers): Request {
-  if (request.method === "GET" || request.method === "HEAD") {
-    return new Request(url, { headers, method: request.method });
-  }
-  return new Request(url, {
-    body: request.body,
-    headers,
-    method: request.method,
-  });
-}
-
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`cosheaf server listening on http://localhost:${info.port}`);
-  console.log(`forgejo: ${config.forgejoUrl} (owner=${config.forgejoOwner})`);
+  console.log(`forgejo: ${config.forgejoUrl}`);
   console.log(`data dir: ${config.dataDir}`);
 });

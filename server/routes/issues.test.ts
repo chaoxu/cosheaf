@@ -16,7 +16,7 @@ function freshDb(): Database.Database {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  return testApp(db, config, (app) => app.route("/api/v1/w", issues));
+  return testApp(db, config, (app) => app.route("/api/v1/repos", issues));
 }
 
 
@@ -90,7 +90,7 @@ describe("issues routes", () => {
       },
     ]));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/comments", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/comments", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -114,7 +114,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem", { state: "closed" }), labels: [], comments: 0 }));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/state", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/state", {
       method: "PATCH",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ state: "closed" }),
@@ -131,7 +131,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Retitled"), body: "Updated" }));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7", {
       method: "PATCH",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ title: " Retitled ", body: "Updated" }),
@@ -155,13 +155,13 @@ describe("issues routes", () => {
       .mockResolvedValueOnce(new Response("<p>Hello</p>", { status: 200, headers: { "content-type": "text/html" } }));
 
     const app = appFor(db);
-    const labels = await app.request("/api/v1/w/w/labels", {
+    const labels = await app.request("/api/v1/repos/owner/w/labels", {
       headers: { authorization: `Bearer ${token}` },
     });
-    const milestones = await app.request("/api/v1/w/w/milestones?state=all", {
+    const milestones = await app.request("/api/v1/repos/owner/w/milestones?state=all", {
       headers: { authorization: `Bearer ${token}` },
     });
-    const markdown = await app.request("/api/v1/w/w/markdown/render", {
+    const markdown = await app.request("/api/v1/repos/owner/w/markdown/render", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ text: "Hello" }),
@@ -181,7 +181,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockImplementation(async () => ok([]));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues?filter=mine&state=all&q=lemma", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues?filter=mine&state=all&q=lemma", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -196,7 +196,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockImplementation(async () => ok([]));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues?filter=assigned", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues?filter=assigned", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -211,7 +211,7 @@ describe("issues routes", () => {
     fetchMock.mockImplementation(async () => ok([]));
 
     const res = await appFor(db).request(
-      "/api/v1/w/w/issues?state=all&labels=bug&milestones=2&created_by=test-meri&assigned_by=test-vera&q=refactor&sort=oldest",
+      "/api/v1/repos/owner/w/issues?state=all&labels=bug&milestones=2&created_by=test-meri&assigned_by=test-vera&q=refactor&sort=oldest",
       { headers: { authorization: `Bearer ${token}` } },
     );
 
@@ -231,7 +231,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(new Response("forgejo down", { status: 503 }));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -244,7 +244,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 9 }),
@@ -269,7 +269,7 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "DELETE",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 9 }),
@@ -297,10 +297,10 @@ describe("issues routes", () => {
       .mockResolvedValueOnce(ok([forgejoIssue(9, "Lemma"), forgejoIssue(11, "PR", { isPr: true })]))
       .mockResolvedValueOnce(ok([forgejoIssue(12, "Blocked theorem", { state: "closed" })]));
 
-    const deps = await appFor(db).request("/api/v1/w/w/issues/7/dependencies", {
+    const deps = await appFor(db).request("/api/v1/repos/owner/w/issues/7/dependencies", {
       headers: { authorization: `Bearer ${token}` },
     });
-    const blocks = await appFor(db).request("/api/v1/w/w/issues/7/blocks", {
+    const blocks = await appFor(db).request("/api/v1/repos/owner/w/issues/7/blocks", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -324,7 +324,7 @@ describe("issues routes", () => {
       .mockResolvedValueOnce(ok([{ id: 3, name: "old", color: "888888", is_archived: true }]))
       .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [3] }),
@@ -344,7 +344,7 @@ describe("issues routes", () => {
       ]))
       .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [1, 2] }),
@@ -368,7 +368,7 @@ describe("issues routes", () => {
       .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
       .mockResolvedValueOnce(ok(labels));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [1, 2] }),
@@ -392,7 +392,7 @@ describe("issues routes", () => {
       .mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem"), labels: [archived] }))
       .mockResolvedValueOnce(ok([archived]));
 
-    const res = await appFor(db).request("/api/v1/w/w/issues/7/labels", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ labels: [3] }),
@@ -413,13 +413,13 @@ describe("issues routes", () => {
     fetchMock.mockResolvedValue(ok([]));
     const app = appFor(db);
 
-    await app.request("/api/v1/w/w/activities?limit=-5", {
+    await app.request("/api/v1/repos/owner/w/activities?limit=-5", {
       headers: { authorization: `Bearer ${token}` },
     });
-    await app.request("/api/v1/w/w/activities?limit=abc", {
+    await app.request("/api/v1/repos/owner/w/activities?limit=abc", {
       headers: { authorization: `Bearer ${token}` },
     });
-    await app.request("/api/v1/w/w/activities?limit=999", {
+    await app.request("/api/v1/repos/owner/w/activities?limit=999", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -440,7 +440,7 @@ describe("issues routes", () => {
       forgejoActivity(4, "alice", "refs/heads/main", "merge pull request", "dddd"),
     ]));
 
-    const res = await appFor(db).request("/api/v1/w/w/activities", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/activities", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -470,17 +470,17 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     const app = appFor(db);
 
-    const badBody = await app.request("/api/v1/w/w/issues/7/dependencies", {
+    const badBody = await app.request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 9.5 }),
     });
-    const self = await app.request("/api/v1/w/w/issues/7/dependencies", {
+    const self = await app.request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 7 }),
     });
-    const badParam = await app.request("/api/v1/w/w/issues/7.5/dependencies", {
+    const badParam = await app.request("/api/v1/repos/owner/w/issues/7.5/dependencies", {
       method: "DELETE",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 9 }),

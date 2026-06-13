@@ -141,7 +141,7 @@ web.post("/:owner/:repo/chat/new", async (c) => {
     labels: [labelId],
   });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
-  runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: issue.number });
+  runCoverifyChatReply(c.get("config"), { workspace: ctx.ws.slug, issue: issue.number });
   return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${issue.number}`));
 });
 
@@ -194,7 +194,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
               ${renderedTurns}
               ${chatReplyPending(turns) ? raw(chatPendingTurn()) : ""}
             </div>
-            ${chatReplyPending(turns) ? raw(chatLiveScript(ctx.repo, number)) : ""}
+            ${chatReplyPending(turns) ? raw(chatLiveScript(ctx.owner, ctx.repo, number)) : ""}
             ${
               !canSendChat
                 ? ""
@@ -224,7 +224,7 @@ web.post("/:owner/:repo/chat/:number/send", async (c) => {
   if (message) {
     await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, message);
     c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "commented" });
-    runCoverifyChatReply(c.get("config"), { workspace: ctx.repo, issue: number });
+    runCoverifyChatReply(c.get("config"), { workspace: ctx.ws.slug, issue: number });
   }
   return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${number}`));
 });

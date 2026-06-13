@@ -26,7 +26,8 @@ export type SeedProfile = (typeof SEED_PROFILES)[number];
 export interface SeedOptions {
   user: string;
   password: string;
-  workspace: string;
+  owner: string;
+  repo: string;
   workspaceName: string;
   defaultMdFormat: DocumentFormatId;
   profile: SeedProfile;
@@ -247,29 +248,31 @@ export async function seedWorkspace(args: {
   const { options, db, forgejo, config } = args;
   const user: User = { username: options.user };
   const { workspace, createdRepo } = await provisionWorkspace(db, forgejo, config, {
-    slug: options.workspace,
+    owner: options.owner,
+    repo: options.repo,
     name: options.workspaceName,
     user,
     forgejoUsername: options.user,
+    provisionVia: "admin",
     allowExistingLocal: true,
     defaultMdFormat: options.defaultMdFormat,
   });
-  console.log(`${createdRepo ? "created" : "ensured"} workspace ${options.workspace}`);
+  console.log(`${createdRepo ? "created" : "ensured"} workspace ${workspace.slug}`);
 
   const files = seedFiles(options);
   for (const file of files) {
-    const created = await ensureWorkspaceFile(forgejo, config, workspace.slug, file);
+    const created = await ensureWorkspaceFile(forgejo, workspace.owner, workspace.repo, file);
     if (created) console.log(`created ${file.path}`);
   }
-  await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
+  await reindexWorkspaceFromForgejo(db, forgejo, workspace);
   if (profileIncludes(options.profile, "large-doc")) {
-    await ensureCoflatShowcaseIssue(forgejo, config, workspace.slug, options.workspaceName);
+    await ensureCoflatShowcaseIssue(forgejo, workspace.owner, workspace.repo, options.workspaceName);
   }
   if (profileIncludes(options.profile, "rendering")) {
-    await ensureRenderingFixtures(forgejo, config, workspace.slug, options.workspaceName, options.profile);
+    await ensureRenderingFixtures(forgejo, workspace.owner, workspace.repo, options.workspaceName, options.profile);
   }
 
-  console.log(`seeded dev workspace: user=${options.user} workspace=${options.workspace} profile=${options.profile}`);
+  console.log(`seeded dev workspace: user=${options.user} workspace=${workspace.slug} profile=${options.profile}`);
 }
 
 function seedFiles(options: SeedOptions): SeedFile[] {
@@ -351,25 +354,25 @@ function seedFiles(options: SeedOptions): SeedFile[] {
 
 async function ensureCoflatShowcaseIssue(
   forgejo: Forgejo,
-  config: Config,
+  owner: string,
   repo: string,
   workspaceName: string,
 ): Promise<void> {
-  await ensureIssue(forgejo, config, repo, COFLAT_SHOWCASE_ISSUE_TITLE, coflatFeatureShowcase(workspaceName));
+  await ensureIssue(forgejo, owner, repo, COFLAT_SHOWCASE_ISSUE_TITLE, coflatFeatureShowcase(workspaceName));
 }
 
 async function ensureRenderingFixtures(
   forgejo: Forgejo,
-  config: Config,
+  owner: string,
   repo: string,
   workspaceName: string,
   profile: SeedProfile,
 ): Promise<void> {
-  await ensureIssue(forgejo, config, repo, RENDERING_FIXTURE_ISSUE_TITLE, renderingFixtureIssueBody(workspaceName));
+  await ensureIssue(forgejo, owner, repo, RENDERING_FIXTURE_ISSUE_TITLE, renderingFixtureIssueBody(workspaceName));
   if (!profileIncludes(profile, "review-flow")) return;
 
-  const pulls = await forgejo.listPulls(config.forgejoOwner, repo, "all");
-  await ensureFixturePull(forgejo, config, repo, pulls, {
+  const pulls = await forgejo.listPulls(owner, repo, "all");
+  await ensureFixturePull(forgejo, owner, repo, pulls, {
     branch: RENDERING_FIXTURE_BRANCH,
     path: RENDERING_FIXTURE_PATH,
     content: renderingFixturePage({ workspaceName }),
@@ -377,7 +380,7 @@ async function ensureRenderingFixtures(
     body: renderingFixturePrBody(),
     createMessage: "docs: add rendering fixture",
   });
-  await ensureFixturePull(forgejo, config, repo, pulls, {
+  await ensureFixturePull(forgejo, owner, repo, pulls, {
     branch: SIDE_BY_SIDE_FIXTURE_BRANCH,
     path: SIDE_BY_SIDE_FIXTURE_PATH,
     content: sideBySideFixturePage(workspaceName),
@@ -387,7 +390,7 @@ async function ensureRenderingFixtures(
     updateMessage: "docs: update side-by-side rendering fixture",
     updateExisting: true,
   });
-  await ensureFixturePull(forgejo, config, repo, pulls, {
+  await ensureFixturePull(forgejo, owner, repo, pulls, {
     branch: MERGED_FIXTURE_BRANCH,
     path: MERGED_FIXTURE_PATH,
     content: renderingFixturePage({
@@ -404,12 +407,12 @@ async function ensureRenderingFixtures(
 
 async function ensureIssue(
   forgejo: Forgejo,
-  config: Config,
+  owner: string,
   repo: string,
   title: string,
   body: string,
 ): Promise<void> {
-  const issues = await forgejo.listIssues(config.forgejoOwner, repo, {
+  const issues = await forgejo.listIssues(owner, repo, {
     state: "all",
     limit: 50,
     q: title,
@@ -418,13 +421,13 @@ async function ensureIssue(
     console.log(`${title} already exists`);
     return;
   }
-  await forgejo.createIssue(config.forgejoOwner, repo, { title, body });
+  await forgejo.createIssue(owner, repo, { title, body });
   console.log(`created ${title}`);
 }
 
 async function ensureFixturePull(
   forgejo: Forgejo,
-  config: Config,
+  owner: string,
   repo: string,
   pulls: readonly ForgejoPull[],
   fixture: {
@@ -439,21 +442,21 @@ async function ensureFixturePull(
     merge?: boolean;
   },
 ): Promise<void> {
-  const branch = await forgejo.getBranch(config.forgejoOwner, repo, fixture.branch);
+  const branch = await forgejo.getBranch(owner, repo, fixture.branch);
   if (!branch) {
-    await forgejo.createBranch(config.forgejoOwner, repo, {
+    await forgejo.createBranch(owner, repo, {
       newBranchName: fixture.branch,
       oldBranchName: "main",
     });
     console.log(`created branch ${fixture.branch}`);
   }
-  const meta = await forgejo.getFileMeta(config.forgejoOwner, repo, fixture.branch, fixture.path);
+  const meta = await forgejo.getFileMeta(owner, repo, fixture.branch, fixture.path);
   const current =
     meta && fixture.updateExisting
-      ? await forgejo.getRawFile(config.forgejoOwner, repo, fixture.branch, fixture.path)
+      ? await forgejo.getRawFile(owner, repo, fixture.branch, fixture.path)
       : null;
   if (!meta || (fixture.updateExisting && current !== fixture.content)) {
-    await forgejo.putFile(config.forgejoOwner, repo, {
+    await forgejo.putFile(owner, repo, {
       branch: fixture.branch,
       path: fixture.path,
       content: fixture.content,
@@ -465,7 +468,7 @@ async function ensureFixturePull(
 
   let pr = pulls.find((pull) => pull.title === fixture.title || pull.head.ref === fixture.branch);
   if (!pr) {
-    pr = await forgejo.createPull(config.forgejoOwner, repo, {
+    pr = await forgejo.createPull(owner, repo, {
       head: fixture.branch,
       base: "main",
       title: fixture.title,
@@ -477,7 +480,7 @@ async function ensureFixturePull(
   }
   if (fixture.merge && !pr.merged) {
     await mergePullWithRetry(
-      () => forgejo.mergePull(config.forgejoOwner, repo, pr.number, {
+      () => forgejo.mergePull(owner, repo, pr.number, {
         Do: "squash",
         message: "docs: merge rendering fixture",
         force: true,

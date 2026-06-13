@@ -245,7 +245,6 @@ web.get("/:owner/:repo/_edit", async (c) => {
           </div>
           <div
             id="web-editor-root"
-            data-slug="${ctx.repo}"
             data-owner="${ctx.owner}"
             data-repo="${ctx.repo}"
             data-path="${rel}"
@@ -377,7 +376,7 @@ web.get("/:owner/:repo/commits/:sha", async (c) => {
         </div>
         <div class="commit-card">
           <pre>${commit.commit.message.trim() || "(no commit message)"}</pre>
-          <p>${displayLogin(ctx.owner, commit.commit.author?.name ?? commit.author?.login)} - ${formatDate(commit.commit.author?.date)}</p>
+          <p>${displayLogin(commit.commit.author?.name ?? commit.author?.login)} - ${formatDate(commit.commit.author?.date)}</p>
           <code>${commit.sha}</code>
         </div>
       `,
@@ -622,10 +621,8 @@ function editBranchFor(username: string, requested: string | null | undefined): 
 
 function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {
   const path = c.req.path;
-  const canonicalPrefix = repoHref(owner, repo, suffix);
-  if (path.startsWith(canonicalPrefix)) return decodePathPart(path.slice(canonicalPrefix.length));
-  const internalPrefix = `/${encodeURIComponent(owner)}${canonicalPrefix}`;
-  return path.startsWith(internalPrefix) ? decodePathPart(path.slice(internalPrefix.length)) : "";
+  const prefix = repoHref(owner, repo, suffix);
+  return path.startsWith(prefix) ? decodePathPart(path.slice(prefix.length)) : "";
 }
 
 function decodePathPart(value: string): string {

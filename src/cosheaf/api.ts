@@ -17,8 +17,8 @@ export class ApiError extends Error {
   }
 }
 
-function workspaceApiPath(slug: string): string {
-  return `/api/v1/w/${encodeURIComponent(slug)}`;
+function workspaceApiPath(owner: string, repo: string): string {
+  return `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 }
 
 function queryString(params: Record<string, string | undefined>): string {
@@ -56,16 +56,16 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  putFile: (slug: string, path: string, content: string, branch: string, previousPath?: string) =>
-    jsonFetch<PutFileResult>(`${workspaceApiPath(slug)}/file${queryString({ path, branch })}`, {
+  putFile: (owner: string, repo: string, path: string, content: string, branch: string, previousPath?: string) =>
+    jsonFetch<PutFileResult>(`${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`, {
       method: "PUT",
       body: JSON.stringify({ content, previous_path: previousPath }),
     }),
 
-  uploadAsset: async (slug: string, branch: string, file: File): Promise<{ path: string }> => {
+  uploadAsset: async (owner: string, repo: string, branch: string, file: File): Promise<{ path: string }> => {
     const form = new FormData();
     form.set("file", file);
-    const res = await fetch(`${workspaceApiPath(slug)}/assets${queryString({ branch })}`, {
+    const res = await fetch(`${workspaceApiPath(owner, repo)}/assets${queryString({ branch })}`, {
       method: "POST",
       body: form,
       credentials: "same-origin",
@@ -83,27 +83,28 @@ export const api = {
     return (await res.json()) as { path: string };
   },
 
-  suggest: (slug: string, params: { trigger: string; prefix: string; limit?: number }) =>
+  suggest: (owner: string, repo: string, params: { trigger: string; prefix: string; limit?: number }) =>
     jsonFetch<{ suggestions: Array<{ id: string; insert: string; display: string }> }>(
-      `${workspaceApiPath(slug)}/suggest${queryString({
+      `${workspaceApiPath(owner, repo)}/suggest${queryString({
         trigger: params.trigger,
         prefix: params.prefix,
         limit: params.limit?.toString(),
       })}`,
     ),
 
-  openPull: (slug: string, payload: { head: string; base?: string; title?: string; body?: string }) =>
-    jsonFetch<OpenPullResult>(`${workspaceApiPath(slug)}/pulls`, {
+  openPull: (owner: string, repo: string, payload: { head: string; base?: string; title?: string; body?: string }) =>
+    jsonFetch<OpenPullResult>(`${workspaceApiPath(owner, repo)}/pulls`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
   mergePull: (
-    slug: string,
+    owner: string,
+    repo: string,
     prNumber: number,
     opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
   ) =>
-    jsonFetch<{ ok: true }>(`${workspaceApiPath(slug)}/pulls/${prNumber}/merge`, {
+    jsonFetch<{ ok: true }>(`${workspaceApiPath(owner, repo)}/pulls/${prNumber}/merge`, {
       method: "POST",
       body: JSON.stringify({ Do: opts.Do ?? "squash", force: opts.force ?? false }),
     }),

@@ -109,8 +109,8 @@ Forgejo webhooks notify Cosheaf about pushes, pull requests, reviews, comments,
 and issues. Webhook handlers reindex markdown files from Forgejo raw content,
 invalidate derived views, and publish SSE events to open browsers.
 
-If webhooks are missed, `pnpm cli workspace reindex <slug>` rebuilds the page
-index from Forgejo `main` and removes stale page index rows.
+If webhooks are missed, `pnpm cli workspace reindex <owner>/<repo>` rebuilds
+the page index from Forgejo `main` and removes stale page index rows.
 
 ## Coverify Boundary
 

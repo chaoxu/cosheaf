@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 const webBase = "http://localhost:3030";
-const owner = "cosheaf-admin";
+const owner = "chao";
 const repo = "flushing-coin";
-const repoBase = `${webBase}/${repo}`;
+const repoBase = `${webBase}/${owner}/${repo}`;
 
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.goto(`${webBase}/login`);
@@ -14,8 +14,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".app-statusbar")).toContainText("chao");
   await expect(page.locator(".app-sidebar")).toContainText("Workspaces");
 
-  await page.getByRole("link", { name: "flushing-coin" }).click();
+  await page.getByRole("link", { name: `${owner}/${repo}` }).click();
   await expect(page).toHaveURL(repoBase);
+  // Owner-qualified URLs are canonical; the ownerless rewrite is gone.
+  const ownerlessRepo = await page.request.get(`${webBase}/${repo}`, { maxRedirects: 0 });
+  expect(ownerlessRepo.status()).toBe(404);
   await expect(page.locator(".repo-tabs")).toContainText("Files");
   await expect(page.locator(".repo-tabs")).toContainText("Issues");
   await expect(page.locator(".repo-tabs")).toContainText("Pull Requests");
@@ -27,8 +30,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-body")).toContainText("docs/sample.pdf");
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
-  await expect(page.locator(".app-sidebar")).not.toContainText(owner);
-  await page.getByRole("link", { name: "chao" }).click();
+  // The repo sidebar names the workspace by its full owner/repo identity,
+  // and the status bar path includes an owner crumb.
+  await expect(page.locator(".app-sidebar")).toContainText(`${owner}/${repo}`);
+  await expect(page.locator(".app-statusbar .status-path")).toContainText(owner);
+  await page.getByRole("link", { name: "chao", exact: true }).click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
   await page.getByTestId("settings-document-theme-select").selectOption("blueprint-book");
@@ -52,7 +58,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("settings-milestone-submit").click();
   await expect(page.getByTestId("settings-milestones")).toContainText(milestoneName);
 
-  await page.goto(`${webBase}/${owner}/${repo}/src/branch/main/hello.md`);
+  await page.goto(`${repoBase}/src/branch/main/hello.md`);
   await expect(page).toHaveURL(`${repoBase}/src/branch/main/hello.md`);
   await expect(page.locator(".file-toolbar")).toContainText("hello.md");
   await expect(page.locator(".cf-reader")).toContainText("Hello");
@@ -60,7 +66,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(crossFileTheorem).toBeVisible();
   await expect(crossFileTheorem).toHaveAttribute(
     "href",
-    "/flushing-coin/src/branch/main/theory/cross-file-theorem.md#thm%3Acoin-conservation",
+    `/${owner}/${repo}/src/branch/main/theory/cross-file-theorem.md#thm%3Acoin-conservation`,
   );
   await expect(page.getByRole("link", { name: "Branches" })).toBeVisible();
 
@@ -70,7 +76,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(editorCrossFileTheorem).toContainText("Theorem 1");
   await expect(editorCrossFileTheorem.locator("a").first()).toHaveAttribute(
     "href",
-    "/flushing-coin/src/branch/user/chao/web-edit/theory/cross-file-theorem.md#thm%3Acoin-conservation",
+    `/${owner}/${repo}/src/branch/user/chao/web-edit/theory/cross-file-theorem.md#thm%3Acoin-conservation`,
   );
   await page.goto(`${repoBase}/_edit?branch=main&path=coflat-feature-showcase.md`);
   await expect(page.getByTestId("editor")).toBeVisible();
@@ -98,7 +104,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     .toEqual(expect.objectContaining({ unresolved: 0, tableText: expect.stringContaining("[1]") }));
 
   await page.goto(`${repoBase}/src/branch/main/notes/plain-text.txt`);
-  const plainTextRawPath = "/flushing-coin/raw/branch/main/notes/plain-text.txt";
+  const plainTextRawPath = `/${owner}/${repo}/raw/branch/main/notes/plain-text.txt`;
   const plainTextRawHref = `${webBase}${plainTextRawPath}`;
   await expect(page.getByTestId("file-preview-text-raw")).toHaveAttribute("data", plainTextRawPath);
   const plainTextRaw = await page.request.get(plainTextRawHref);
@@ -119,7 +125,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("text-edit-form").locator('textarea[name="content"]').fill("Updated plain text fixture.\n");
   await page.getByTestId("text-edit-form").getByRole("button", { name: "Save" }).click();
   await expect(page).toHaveURL(`${repoBase}/src/branch/${textBranch}/notes/plain-text.txt`);
-  const updatedTextRawPath = `/flushing-coin/raw/branch/${textBranch}/notes/plain-text.txt`;
+  const updatedTextRawPath = `/${owner}/${repo}/raw/branch/${textBranch}/notes/plain-text.txt`;
   const updatedTextRawHref = `${webBase}${updatedTextRawPath}`;
   await expect(page.getByTestId("file-preview-text-raw")).toHaveAttribute("data", updatedTextRawPath);
   const updatedTextRaw = await page.request.get(updatedTextRawHref);
@@ -146,7 +152,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/issues`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
-  await expect(page.locator(".repo-body")).not.toContainText(owner);
+  // Authors render as real Forgejo usernames (no "repository" masking): the
+  // seeded fixture issues were opened by the local Forgejo admin account.
+  await expect(page.locator(".repo-body")).toContainText("cosheaf-admin opened");
   await expect(page.getByTestId("issue-filters")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("State filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Search issues")).toBeVisible();
@@ -164,6 +172,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   const issuePath = new URL(page.url()).pathname;
   await expect(page.locator(".thread-header")).toContainText(issueTitle);
   await expect(page.locator(".thread-header")).toContainText("#");
+  await expect(page.locator(".thread-header")).toContainText(`by ${owner}`);
   await expect(page.getByTestId("issue-edit-button")).toBeVisible();
   await page.getByTestId("issue-edit-button").click();
   await expect(page).toHaveURL(/\/issues\/\d+\/edit$/);
@@ -202,7 +211,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/pulls`);
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Pull Requests");
-  await expect(page.getByRole("link", { name: "New pull request" })).toHaveAttribute("href", "/flushing-coin/pulls/new");
+  await expect(page.getByRole("link", { name: "New pull request" })).toHaveAttribute("href", `/${owner}/${repo}/pulls/new`);
   await page.getByRole("link", { name: "New pull request" }).click();
   await expect(page.getByTestId("pull-create-form")).toBeVisible();
   await expect(page.getByTestId("pull-create-base")).toBeVisible();

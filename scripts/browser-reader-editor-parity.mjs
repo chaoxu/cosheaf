@@ -9,7 +9,7 @@ const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-reader-editor-parity.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
+const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
 
@@ -37,7 +37,7 @@ async function ensureSignedIn() {
     await inputs.nth(1).fill(PASSWORD);
     await signIn.click();
   }
-  await page.getByRole("link", { name: new RegExp(`^${WORKSPACE_SLUG}\\b`) }).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByRole("link", { name: new RegExp(`^${OWNER}/${WORKSPACE_SLUG}\\b`) }).waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function readerStats() {

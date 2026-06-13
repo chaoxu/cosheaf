@@ -6,6 +6,7 @@ import type { Role } from "../shared/roles.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
+import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
 import { type DocumentFormatId, documentFormatFromTopics, isFormatTopic } from "../shared/document-format.js";
 
 interface AuthResolution {
@@ -112,12 +113,11 @@ export function invalidateWorkspacePermissionCache(owner: string, repo: string, 
 export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   const ws = c.get("workspace");
   const fj = c.get("fjUser");
-  const owner = c.get("config").forgejoOwner;
   const fjName = c.get("user").username;
-  const fresh = await fj.getRepoPermission(owner, ws.slug, fjName);
+  const fresh = await fj.getRepoPermission(ws.owner, ws.repo, fjName);
   if (fresh !== "admin")
     return c.json({ error: "admin required", code: "forbidden" }, 403);
-  PERM_CACHE.set(`${owner}/${ws.slug}/${fjName}`, fresh);
+  PERM_CACHE.set(`${ws.owner}/${ws.repo}/${fjName}`, fresh);
   await next();
 };
 
@@ -163,19 +163,20 @@ export async function resolveRepoRole(
   return p;
 }
 
-export const requireMembership = (param = "slug"): MiddlewareHandler<AppEnv> => async (c, next) => {
-  const slug = c.req.param(param);
-  if (!slug) return c.json({ error: "workspace required", code: "validation" }, 400);
+export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  if (!owner || !repo || !FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo))
+    return c.json({ error: "workspace required", code: "validation" }, 400);
   const fj = c.get("fjUser");
-  const owner = c.get("config").forgejoOwner;
   const fjName = c.get("user").username;
-  const role = await resolveRepoRole(fj, owner, slug, fjName);
+  const role = await resolveRepoRole(fj, owner, repo, fjName);
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  const { format: defaultMdFormat } = await resolveWorkspaceFormat(fj, owner, slug);
-  c.set("workspace", { slug, defaultMdFormat, role });
-  c.set("repoCtx", { fj, owner, repo: slug });
+  const { format: defaultMdFormat } = await resolveWorkspaceFormat(fj, owner, repo);
+  c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat, role });
+  c.set("repoCtx", { fj, owner, repo });
   await next();
 };
 
@@ -197,27 +198,23 @@ export function _resetFormatCacheForTests(): void {
   FORMAT_CACHE.clear();
 }
 
-// Test helper: tests don't know the owner at fixture-seed time (it lives
-// on Config). The seed accepts only the slug; the bare key is also checked
-// by fetchWorkspaceFormat below as a fallback after the canonical
-// `owner/slug` lookup misses.
-export function _seedFormatCacheForTests(slug: string, formatId: string): void {
-  FORMAT_CACHE.set(slug, { hasFormatTopic: true, format: formatId as DocumentFormatId }, 60_000);
+export function _seedFormatCacheForTests(owner: string, repo: string, formatId: string): void {
+  FORMAT_CACHE.set(`${owner}/${repo}`, { hasFormatTopic: true, format: formatId as DocumentFormatId }, 60_000);
 }
 
 // Cached topics lookup shared with the web path.
 export async function resolveWorkspaceFormat(
   fj: Forgejo,
   owner: string,
-  slug: string,
+  repo: string,
 ): Promise<WorkspaceFormatInfo> {
-  const cached = FORMAT_CACHE.get(`${owner}/${slug}`) ?? FORMAT_CACHE.get(slug);
+  const cached = FORMAT_CACHE.get(`${owner}/${repo}`);
   if (cached !== null) return cached;
-  const topics = await fj.listRepoTopics(owner, slug);
+  const topics = await fj.listRepoTopics(owner, repo);
   const info: WorkspaceFormatInfo = {
     hasFormatTopic: topics.some(isFormatTopic),
     format: documentFormatFromTopics(topics),
   };
-  FORMAT_CACHE.set(`${owner}/${slug}`, info);
+  FORMAT_CACHE.set(`${owner}/${repo}`, info);
   return info;
 }

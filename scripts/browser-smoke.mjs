@@ -15,7 +15,7 @@ const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const WORKSPACE = process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "cosheaf-admin";
+const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
 const PAGE = process.env.COSHEAF_SMOKE_PAGE ?? "Hello";
 const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md";
 

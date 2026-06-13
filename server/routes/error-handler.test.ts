@@ -11,7 +11,7 @@ function appThrowing(status: number): Hono<AppEnv> {
     c.set("user", { username: "chao" });
     await next();
   });
-  app.get("/api/v1/w/w/issues", () => {
+  app.get("/api/v1/repos/owner/w/issues", () => {
     throw new ForgejoError(status, "boom", "GET", "/x");
   });
   app.get("/owner/repo/issues", () => {
@@ -22,25 +22,25 @@ function appThrowing(status: number): Hono<AppEnv> {
 
 describe("handleAppError", () => {
   it("maps Forgejo 404 to the typed envelope on /api", async () => {
-    const res = await appThrowing(404).request("/api/v1/w/w/issues");
+    const res = await appThrowing(404).request("/api/v1/repos/owner/w/issues");
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toMatchObject({ code: "not_found" });
   });
 
   it("maps Forgejo 403 to forbidden on /api", async () => {
-    const res = await appThrowing(403).request("/api/v1/w/w/issues");
+    const res = await appThrowing(403).request("/api/v1/repos/owner/w/issues");
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({ code: "forbidden" });
   });
 
   it("maps other Forgejo failures to bad_gateway on /api", async () => {
-    const res = await appThrowing(500).request("/api/v1/w/w/issues");
+    const res = await appThrowing(500).request("/api/v1/repos/owner/w/issues");
     expect(res.status).toBe(502);
     await expect(res.json()).resolves.toMatchObject({ code: "bad_gateway" });
   });
 
   it("keeps the pat_invalid contract for Forgejo 401 on /api", async () => {
-    const res = await appThrowing(401).request("/api/v1/w/w/issues");
+    const res = await appThrowing(401).request("/api/v1/repos/owner/w/issues");
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toMatchObject({ code: "pat_invalid" });
   });

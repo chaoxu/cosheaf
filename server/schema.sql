@@ -19,13 +19,13 @@ CREATE TABLE IF NOT EXISTS login_tokens (
   updated_at INTEGER NOT NULL
 );
 
--- No workspaces table. The workspace slug IS the Forgejo repository name,
--- the display name comes from the Forgejo repo description, and the
+-- No workspaces table. The workspace slug IS the Forgejo `owner/repo` full
+-- name, the display name comes from the Forgejo repo description, and the
 -- workspace's default markdown format lives in a Forgejo repo topic
 -- (`cosheaf-format-coflat` present → coflat, otherwise → forgejo-passthrough).
--- Sidecar tables key off the slug directly (`workspace_slug TEXT`); legacy
--- `workspace_id INTEGER` columns are migrated in db.ts before this schema
--- runs.
+-- Sidecar tables key off the slug directly (`workspace_slug TEXT` holding
+-- `owner/repo`); legacy `workspace_id INTEGER` columns and bare-repo-name
+-- slugs are migrated in db.ts around this schema run.
 
 -- Memberships: removed. Role and access are sourced from Forgejo's
 -- collaborator-permission API; middleware queries Forgejo and caches.

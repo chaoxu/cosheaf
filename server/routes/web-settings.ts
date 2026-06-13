@@ -148,8 +148,10 @@ web.post("/:owner/:repo/settings/access", async (c) => {
     return htmlResponse(pageShell({ title: "Bad request", body: html`<main class="auth-page"><p>Invalid access update.</p></main>` }), 400);
   }
 
+  // The caller is repo admin (gated above) — their own PAT carries the
+  // collaborator-management rights; no admin token needed.
   await setWorkspaceMember({
-    forgejo: c.get("fjAdmin"),
+    forgejo: ctx.fj,
     owner: ctx.owner,
     repo: ctx.repo,
     username,

@@ -5,6 +5,7 @@ import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
 import { deletePage, indexPage } from "./indexer.js";
 import type { User } from "./users.js";
+import { workspaceSlug } from "../shared/conventions.js";
 import {
   DEFAULT_DOCUMENT_FORMAT_ID,
   type DocumentFormatId,
@@ -26,11 +27,14 @@ const WEBHOOK_EVENTS = [
   "issue_comment",
 ];
 
-// A workspace is now identified only by its slug. The slug equals the
-// Forgejo repo name; the display name lives in the Forgejo repo description;
-// the markdown format lives in a Forgejo repo topic. There is no SQLite
-// `workspaces` row — sidecar tables key off the slug directly.
+// A workspace is identified by (owner, repo) — any Forgejo user or org can
+// own workspaces. The slug is the `owner/repo` full name; the display name
+// lives in the Forgejo repo description; the markdown format lives in a
+// Forgejo repo topic. There is no SQLite `workspaces` row — sidecar tables
+// key off the slug directly.
 export interface Workspace {
+  owner: string;
+  repo: string;
   slug: string;
   defaultMdFormat: DocumentFormatId;
 }
@@ -44,10 +48,16 @@ export interface WorkspaceMarkdownDrift {
 }
 
 export interface ProvisionWorkspaceOptions {
-  slug: string;
+  owner: string;
+  repo: string;
   name: string;
   user: User;
   forgejoUsername: string;
+  // How to create a missing repo. "user-pat" (routes): the supplied client is
+  // the creator's PAT — create under their account, or via the org endpoint
+  // when owner differs from the creator. "admin" (CLI/seed): the supplied
+  // client is site-admin — create on behalf of `owner` via the admin API.
+  provisionVia: "user-pat" | "admin";
   allowExistingLocal?: boolean;
   rollbackCreatedRepoOnLocalFailure?: boolean;
   defaultMdFormat?: string;
@@ -65,8 +75,7 @@ export async function provisionWorkspace(
   config: Config,
   options: ProvisionWorkspaceOptions,
 ): Promise<ProvisionWorkspaceResult> {
-  const owner = config.forgejoOwner;
-  const repoName = options.slug;
+  const { owner, repo: repoName } = options;
   let repoExisted = false;
   let createdRepo = false;
 
@@ -74,13 +83,20 @@ export async function provisionWorkspace(
   if (existingRepo) {
     repoExisted = true;
   } else {
-    await forgejo.createUserRepo({
+    const repoOpts = {
       name: repoName,
       description: options.name,
       private: true,
       auto_init: true,
       default_branch: "main",
-    });
+    };
+    if (options.provisionVia === "admin") {
+      await forgejo.createRepoForUser(owner, repoOpts);
+    } else if (owner === options.forgejoUsername) {
+      await forgejo.createUserRepo(repoOpts);
+    } else {
+      await forgejo.createOrgRepo(owner, repoOpts);
+    }
     createdRepo = true;
   }
 
@@ -101,23 +117,33 @@ export async function provisionWorkspace(
       options.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
     );
     await setWorkspaceFormatTopic(forgejo, owner, repoName, formatId);
-    workspace = { slug: repoName, defaultMdFormat: formatId };
+    workspace = { owner, repo: repoName, slug: workspaceSlug(owner, repoName), defaultMdFormat: formatId };
   } catch (err) {
     return rollback(err);
   }
 
   try {
-    await ensureWorkspacePermissions(forgejo, config, repoName, options.forgejoUsername);
+    // The seed/initial-file commits below run as whoever the `forgejo` client
+    // authenticates as — the creator's PAT for "user-pat", the site-admin
+    // identity for "admin". That committer must be on the push whitelist or
+    // branch protection rejects the initial commit to main. For "user-pat"
+    // the committer is the creator (their PAT); only the "admin" path needs a
+    // lookup to discover the site-admin identity.
+    const committer =
+      options.provisionVia === "admin"
+        ? (await forgejo.getCurrentUser()).login
+        : options.forgejoUsername;
+    await ensureWorkspacePermissions(forgejo, config, owner, repoName, options.forgejoUsername, committer);
     // Webhook registration is needed only for workspaces whose sidecar we
     // reconcile from Forgejo events. Passthrough workspaces don't index
     // into the sidecar (no doc_map / FTS / backlinks usage), so there's
     // nothing to reconcile and no SSE event worth firing. Skip the hook
     // for them; coflat workspaces still get one and roll back on failure.
     if (workspace.defaultMdFormat !== "forgejo-passthrough") {
-      await ensureWorkspaceWebhookOrThrow(forgejo, config, repoName);
+      await ensureWorkspaceWebhookOrThrow(forgejo, config, owner, repoName);
     }
     if (!repoExisted) {
-      await ensureWorkspaceFile(forgejo, config, repoName, {
+      await ensureWorkspaceFile(forgejo, owner, repoName, {
         path: ".gitattributes",
         content: "*.md text eol=lf -text\n",
         message: "chore: lock byte-exactness for .md",
@@ -128,7 +154,7 @@ export async function provisionWorkspace(
   }
 
   try {
-    await reindexWorkspaceFromForgejo(db, forgejo, config, workspace);
+    await reindexWorkspaceFromForgejo(db, forgejo, workspace);
   } catch (err) {
     console.warn(`workspace reindex failed: ${(err as Error).message}`);
   }
@@ -162,8 +188,7 @@ export async function readWorkspaceFormatFromTopics(
 export async function getWorkspaceMarkdownDrift(
   db: Database.Database,
   forgejo: Forgejo,
-  config: Config,
-  workspace: Pick<Workspace, "slug">,
+  workspace: Pick<Workspace, "owner" | "repo" | "slug">,
 ): Promise<WorkspaceMarkdownDrift> {
   const sidecarPaths = (
     db
@@ -172,7 +197,7 @@ export async function getWorkspaceMarkdownDrift(
   )
     .map((r) => r.path)
     .sort();
-  const tree = await forgejo.getTree(config.forgejoOwner, workspace.slug, "main", true);
+  const tree = await forgejo.getTree(workspace.owner, workspace.repo, "main", true);
   const forgejoPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
     .map((e) => e.path)
@@ -194,14 +219,16 @@ export async function getWorkspaceMarkdownDrift(
 export async function ensureWorkspacePermissions(
   forgejo: Forgejo,
   config: Config,
+  owner: string,
   repoName: string,
   forgejoUsername: string,
+  committer: string = forgejoUsername,
 ): Promise<void> {
-  if (forgejoUsername !== config.forgejoOwner) {
+  if (forgejoUsername !== owner) {
     try {
       // The creator becomes the workspace owner — Forgejo "admin" so they can
       // change settings (e.g. branch protection) and direct-merge.
-      await forgejo.addCollaborator(config.forgejoOwner, repoName, forgejoUsername, "admin");
+      await forgejo.addCollaborator(owner, repoName, forgejoUsername, "admin");
     } catch (err) {
       if (!(err instanceof ForgejoError && err.status === 409)) {
         console.warn(`addCollaborator failed: ${(err as Error).message}`);
@@ -209,12 +236,12 @@ export async function ensureWorkspacePermissions(
     }
   }
 
-  if (isCoverifyChatEnabled(config) && config.coverifyBotLogin !== config.forgejoOwner) {
+  if (isCoverifyChatEnabled(config) && config.coverifyBotLogin !== owner) {
     try {
       // The Coverify chat bot needs write access in every workspace so it can
       // read chat threads and post replies; otherwise chats there sit at
       // "thinking…" forever (the reply worker can't see workspaces it isn't on).
-      await forgejo.addCollaborator(config.forgejoOwner, repoName, config.coverifyBotLogin, "write");
+      await forgejo.addCollaborator(owner, repoName, config.coverifyBotLogin, "write");
     } catch (err) {
       if (!(err instanceof ForgejoError && err.status === 409)) {
         console.warn(`coverify bot addCollaborator failed: ${(err as Error).message}`);
@@ -223,20 +250,20 @@ export async function ensureWorkspacePermissions(
   }
 
   try {
-    // The whitelist needs both the workspace owner (direct-push from the UI)
-    // and `config.forgejoOwner` (the admin identity used by provisioning and
-    // the webhook handler — without it, ensureWorkspaceFile below can't seed
-    // the initial .gitattributes / hello.md to main).
-    const whitelist = Array.from(new Set([forgejoUsername, config.forgejoOwner]));
-    const existing = await forgejo.getBranchProtection(config.forgejoOwner, repoName, "main");
+    // The whitelist needs the repo owner (direct-push from the UI), the
+    // creator when they differ (org-owned repos created by a member), and the
+    // identity committing the initial seed files (the site-admin in CLI/seed
+    // provisioning) so branch protection doesn't reject that first commit.
+    const whitelist = Array.from(new Set([owner, forgejoUsername, committer]));
+    const existing = await forgejo.getBranchProtection(owner, repoName, "main");
     if (!existing) {
-      await forgejo.createBranchProtection(config.forgejoOwner, repoName, {
+      await forgejo.createBranchProtection(owner, repoName, {
         branch_name: "main",
         required_approvals: 1,
         push_whitelist_usernames: whitelist,
       });
     } else {
-      await forgejo.patchBranchProtectionPushWhitelist(config.forgejoOwner, repoName, "main", whitelist);
+      await forgejo.patchBranchProtectionPushWhitelist(owner, repoName, "main", whitelist);
     }
   } catch (err) {
     console.warn(`branch protection setup failed: ${(err as Error).message}`);
@@ -246,13 +273,14 @@ export async function ensureWorkspacePermissions(
 async function ensureWorkspaceWebhookOrThrow(
   forgejo: Forgejo,
   config: Config,
+  owner: string,
   repoName: string,
 ): Promise<void> {
-  const hooks = await forgejo.listRepoHooks(config.forgejoOwner, repoName);
+  const hooks = await forgejo.listRepoHooks(owner, repoName);
   const hasOurHook = hooks.some((h) => Array.isArray(h.events) && h.events.includes("push"));
   if (!hasOurHook) {
     await forgejo.createRepoHook(
-      config.forgejoOwner,
+      owner,
       repoName,
       config.webhookUrl,
       config.webhookSecret,
@@ -263,14 +291,14 @@ async function ensureWorkspaceWebhookOrThrow(
 
 export async function ensureWorkspaceFile(
   forgejo: Forgejo,
-  config: Config,
+  owner: string,
   repoName: string,
   file: { path: string; content: string | Buffer; message: string },
 ): Promise<boolean> {
-  const meta = await forgejo.getFileMeta(config.forgejoOwner, repoName, "main", file.path);
+  const meta = await forgejo.getFileMeta(owner, repoName, "main", file.path);
   if (meta) return false;
   if (Buffer.isBuffer(file.content)) {
-    await forgejo.putFileBytes(config.forgejoOwner, repoName, {
+    await forgejo.putFileBytes(owner, repoName, {
       branch: "main",
       path: file.path,
       content: file.content,
@@ -278,7 +306,7 @@ export async function ensureWorkspaceFile(
     });
     return true;
   }
-  await forgejo.putFile(config.forgejoOwner, repoName, {
+  await forgejo.putFile(owner, repoName, {
     branch: "main",
     path: file.path,
     content: file.content,
@@ -290,11 +318,10 @@ export async function ensureWorkspaceFile(
 export async function reindexWorkspaceFromForgejo(
   db: Database.Database,
   forgejo: Forgejo,
-  config: Config,
-  workspace: { slug: string; defaultMdFormat?: DocumentFormatId },
+  workspace: { owner: string; repo: string; slug: string; defaultMdFormat?: DocumentFormatId },
 ): Promise<number> {
   const seen = new Set<string>();
-  const tree = await forgejo.getTree(config.forgejoOwner, workspace.slug, "main", true);
+  const tree = await forgejo.getTree(workspace.owner, workspace.repo, "main", true);
   const mdPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
     .map((e) => e.path);
@@ -303,7 +330,7 @@ export async function reindexWorkspaceFromForgejo(
   const bodies = await Promise.all(
     mdPaths.map((path) =>
       forgejo
-        .getRawFile(config.forgejoOwner, workspace.slug, "main", path)
+        .getRawFile(workspace.owner, workspace.repo, "main", path)
         .then((body) => ({ path, body })),
     ),
   );

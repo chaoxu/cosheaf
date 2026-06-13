@@ -196,6 +196,27 @@ export class Forgejo {
     });
   }
 
+  // Site-admin only: create a repo on behalf of any user. Provisioning paths
+  // that run without the owner's PAT (CLI seed) go through here.
+  async createRepoForUser(username: string, opts: {
+    name: string;
+    description?: string;
+    private?: boolean;
+    auto_init?: boolean;
+    default_branch?: string;
+  }): Promise<ForgejoRepo> {
+    return this.req<ForgejoRepo>(`/api/v1/admin/users/${encodeURIComponent(username)}/repos`, {
+      method: "POST",
+      body: {
+        name: opts.name,
+        description: opts.description ?? "",
+        private: opts.private ?? true,
+        auto_init: opts.auto_init ?? true,
+        default_branch: opts.default_branch ?? "main",
+      },
+    });
+  }
+
   // ---------------- repos ----------------
 
   async createUserRepo(opts: {
@@ -217,8 +238,46 @@ export class Forgejo {
     });
   }
 
+  async createOrgRepo(org: string, opts: {
+    name: string;
+    description?: string;
+    private?: boolean;
+    auto_init?: boolean;
+    default_branch?: string;
+  }): Promise<ForgejoRepo> {
+    return this.req<ForgejoRepo>(`/api/v1/orgs/${encodeURIComponent(org)}/repos`, {
+      method: "POST",
+      body: {
+        name: opts.name,
+        description: opts.description ?? "",
+        private: opts.private ?? true,
+        auto_init: opts.auto_init ?? true,
+        default_branch: opts.default_branch ?? "main",
+      },
+    });
+  }
+
   async deleteRepo(owner: string, repo: string): Promise<void> {
     await this.req(`/api/v1/repos/${owner}/${repo}`, { method: "DELETE", expectEmpty: true });
+  }
+
+  // Repos visible to the calling token that carry `topic` as an exact repo
+  // topic. Forgejo's topic search is exact-match only (no prefix search), so
+  // workspace discovery unions one call per registered format topic.
+  // /repos/search wraps results in {ok, data} rather than a bare array, so it
+  // can't go through pagedList; same page-walk discipline, unwrapped here.
+  async searchReposByTopic(topic: string): Promise<ForgejoRepo[]> {
+    const out: ForgejoRepo[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
+        query: { q: topic, topic: "true", page, limit: 50 },
+      });
+      const batch = res.data ?? [];
+      if (batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < 50) break;
+    }
+    return out;
   }
 
   async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {

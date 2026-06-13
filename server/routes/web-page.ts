@@ -33,11 +33,12 @@ export function repoPage(opts: {
     sidebar: html`
       <a class="brand" href="/">Cosheaf</a>
       <div class="sidebar-workspace">
-        <a href="${repoHref(opts.owner, opts.repo)}">${opts.repo}</a>
+        <a href="${repoHref(opts.owner, opts.repo)}">${opts.owner}/${opts.repo}</a>
         <span class="role">${opts.ws.role}</span>
       </div>
       <nav class="repo-tabs">${nav}</nav>`,
     statusPath: [
+      { label: opts.owner },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo) },
       { label: activeLabel.toLowerCase() },
     ],

@@ -16,7 +16,7 @@ function freshDb(): Database.Database {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  return testApp(db, config, (app) => app.route("/api/v1/w", notifications));
+  return testApp(db, config, (app) => app.route("/api/v1/repos", notifications));
 }
 
 
@@ -37,7 +37,7 @@ describe("notifications route", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(ok([]));
 
-    const res = await appFor(db).request("/api/v1/w/w/notifications", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/notifications", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -84,7 +84,7 @@ describe("notifications route", () => {
         },
       ]),
     );
-    const res = await appFor(db).request("/api/v1/w/w/notifications", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/notifications", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
@@ -115,7 +115,7 @@ describe("notifications route", () => {
         repository: { full_name: "owner/w", name: "w" },
       }))
       .mockResolvedValueOnce(empty(204));
-    const res = await appFor(db).request("/api/v1/w/w/notifications/101/read", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/notifications/101/read", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
@@ -129,35 +129,45 @@ describe("notifications route", () => {
   it("does not mark a notification thread from another repo as read", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(ok({
-      id: 101,
-      unread: true,
-      pinned: false,
-      updated_at: "2026-05-17T10:00:00Z",
-      url: "http://forgejo.test/api/v1/notifications/threads/101",
-      subject: {
-        type: "Issue",
-        title: "Bug A",
-        url: "http://forgejo.test/api/v1/repos/owner/other/issues/42",
-        latest_comment_url: "",
-      },
-      repository: { full_name: "owner/other", name: "other" },
-    }));
+    // Two foreign threads: a different repo under the same owner, and the
+    // SAME repo name under a different owner. Workspace identity is the
+    // full (owner, repo) pair, so both must 404.
+    const foreign = [
+      { fullName: "owner/other", name: "other" },
+      { fullName: "intruder/w", name: "w" },
+    ];
+    for (const { fullName, name } of foreign) {
+      fetchMock.mockResolvedValueOnce(ok({
+        id: 101,
+        unread: true,
+        pinned: false,
+        updated_at: "2026-05-17T10:00:00Z",
+        url: "http://forgejo.test/api/v1/notifications/threads/101",
+        subject: {
+          type: "Issue",
+          title: "Bug A",
+          url: `http://forgejo.test/api/v1/repos/${fullName}/issues/42`,
+          latest_comment_url: "",
+        },
+        repository: { full_name: fullName, name },
+      }));
 
-    const res = await appFor(db).request("/api/v1/w/w/notifications/101/read", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` },
-    });
+      const res = await appFor(db).request("/api/v1/repos/owner/w/notifications/101/read", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
 
-    expect(res.status).toBe(404);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(res.status, `expected 404 for thread from ${fullName}`).toBe(404);
+    }
+    // One GET per attempt, never the PATCH that would mark it read.
+    expect(fetchMock).toHaveBeenCalledTimes(foreign.length);
   });
 
   it("rejects non-integer notification ids before calling Forgejo", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
 
-    const res = await appFor(db).request("/api/v1/w/w/notifications/1.5/read", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/notifications/1.5/read", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
@@ -171,7 +181,7 @@ describe("notifications route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(empty(204));
-    const res = await appFor(db).request("/api/v1/w/w/notifications/read-all", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/notifications/read-all", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
@@ -185,7 +195,7 @@ describe("notifications route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock.mockResolvedValueOnce(ok([]));
-    await appFor(db).request("/api/v1/w/w/notifications", {
+    await appFor(db).request("/api/v1/repos/owner/w/notifications", {
       headers: { authorization: `Bearer ${token}` },
     });
     // Sanity: there is no `notifications` table in the schema. If a future

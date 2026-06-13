@@ -9,7 +9,7 @@ function run(label: string, cmd: string, args: string[]): void {
 }
 
 export default async function globalSetup(): Promise<void> {
-  run("workspace rm", "pnpm", ["cli", "workspace", "rm", "flushing-coin"]);
+  run("workspace rm", "pnpm", ["cli", "workspace", "rm", "chao/flushing-coin"]);
   run("setup:dev:review", "pnpm", ["setup:dev:review"]);
   await seedReviewablePr();
 }
@@ -35,7 +35,7 @@ async function seedReviewablePr(): Promise<void> {
     { path: "demo2.md", content: "# Companion\n\nA second file on the same branch.\n" },
   ]) {
     const put = await fetch(
-      `http://localhost:3030/api/v1/w/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
+      `http://localhost:3030/api/v1/repos/chao/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
       {
         method: "PUT",
         headers: { "content-type": "application/json", authorization: `Bearer ${meriPat}` },
@@ -45,7 +45,7 @@ async function seedReviewablePr(): Promise<void> {
     if (!put.ok) throw new Error(`seedReviewablePr putFile ${file.path}: ${put.status}`);
   }
 
-  const opened = await fetch("http://localhost:3030/api/v1/w/flushing-coin/pulls", {
+  const opened = await fetch("http://localhost:3030/api/v1/repos/chao/flushing-coin/pulls", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${meriPat}` },
     body: JSON.stringify({ head: branch, title: "e2e demo PR" }),
@@ -59,7 +59,7 @@ async function seedReviewablePr(): Promise<void> {
     { path: "demo2.md", line: 3, body: "This companion note needs a source." },
   ]) {
     const cmt = await fetch(
-      `http://localhost:3030/api/v1/w/flushing-coin/pulls/${prNumber}/comments`,
+      `http://localhost:3030/api/v1/repos/chao/flushing-coin/pulls/${prNumber}/comments`,
       {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${veraPat}` },

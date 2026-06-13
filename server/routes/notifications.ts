@@ -7,7 +7,7 @@ import { bad, notFound } from "./responses.js";
 
 export const notifications = new Hono<AppEnv>();
 notifications.use("*", requireAuth);
-notifications.use("/:slug/*", requireMembership());
+notifications.use("/:owner/:repo/*", requireMembership());
 
 // Parse "/api/v1/repos/owner/repo/issues/42" or ".../pulls/42" → 42.
 function numberFromSubjectUrl(url: string): number | null {
@@ -35,9 +35,9 @@ function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
   };
 }
 
-// GET /api/v1/w/:slug/notifications — unread notifications for the calling
-// user in this workspace's Forgejo repo.
-notifications.get("/:slug/notifications", async (c) => {
+// GET /api/v1/repos/:owner/:repo/notifications — unread notifications for the
+// calling user in this workspace's Forgejo repo.
+notifications.get("/:owner/:repo/notifications", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const threads = await fj.listRepoNotifications(owner, repo, {
     statusTypes: ["unread"],
@@ -50,19 +50,19 @@ notifications.get("/:slug/notifications", async (c) => {
   return c.json({ notifications: mapped });
 });
 
-// POST /api/v1/w/:slug/notifications/:id/read
-notifications.post("/:slug/notifications/:id/read", async (c) => {
+// POST /api/v1/repos/:owner/:repo/notifications/:id/read
+notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) return c.json(...bad("bad id"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj } = c.get("repoCtx");
   const thread = await fj.getNotificationThread(id);
-  if (thread.repository.full_name !== `${owner}/${repo}`) return c.json(...notFound());
+  if (thread.repository.full_name !== c.get("workspace").slug) return c.json(...notFound());
   await fj.markNotificationRead(id);
   return c.json({ ok: true });
 });
 
-// POST /api/v1/w/:slug/notifications/read-all
-notifications.post("/:slug/notifications/read-all", async (c) => {
+// POST /api/v1/repos/:owner/:repo/notifications/read-all
+notifications.post("/:owner/:repo/notifications/read-all", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.markRepoNotificationsRead(owner, repo);
   return c.json({ ok: true });

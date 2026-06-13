@@ -5,7 +5,7 @@ import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 
 export interface CoflatDocumentPayload {
   source: string;
-  owner?: string;
+  owner: string;
   repo: string;
   branch: string;
   path: string;
@@ -46,7 +46,7 @@ export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): s
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
   const sourceView = isLineFragment(hash) ? "?view=source" : "";
-  return `/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${sourceView}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${sourceView}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
@@ -57,7 +57,7 @@ export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string)
   const [withoutHash, hash = ""] = clean.split("#", 2);
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
-  return `/${urlPath(payload.repo)}/raw/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/raw/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {
@@ -159,7 +159,7 @@ async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string
   const keys = referencedKeys(source);
   if (keys.length === 0) return new Map();
   try {
-    const response = await fetch(`/api/v1/w/${encodeURIComponent(payload.repo)}/refs?ids=${encodeURIComponent(keys.join(","))}`, {
+    const response = await fetch(`/api/v1/repos/${encodeURIComponent(payload.owner)}/${encodeURIComponent(payload.repo)}/refs?ids=${encodeURIComponent(keys.join(","))}`, {
       credentials: "same-origin",
     });
     if (!response.ok) return new Map();
@@ -190,7 +190,7 @@ function referencedKeys(source: string): string[] {
 
 function refHref(payload: CoflatDocumentPayload, ref: WorkspaceRef): string {
   const fragment = ref.fragment ? `#${encodeURIComponent(ref.fragment)}` : "";
-  return `/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(ref.path)}${fragment}`;
+  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(ref.path)}${fragment}`;
 }
 
 function escapeHtml(value: string): string {

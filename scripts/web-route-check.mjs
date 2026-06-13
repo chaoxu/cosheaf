@@ -5,7 +5,7 @@ import path from "node:path";
 import { Command } from "commander";
 import { chromium } from "@playwright/test";
 
-const defaultRoutes = ["/flushing-coin/activity", "/flushing-coin/issues", "/flushing-coin/pulls"];
+const defaultRoutes = ["/chao/flushing-coin/activity", "/chao/flushing-coin/issues", "/chao/flushing-coin/pulls"];
 
 function collect(value, previous) {
   previous.push(value);

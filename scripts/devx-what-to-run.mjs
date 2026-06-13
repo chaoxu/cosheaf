@@ -9,7 +9,7 @@ const rules = [
     matches: [/^public\/cosheaf-web\.css$/, /^server\/routes\/web(?:-shell)?\.ts$/, /^server\/index\.ts$/],
     commands: [
       command("pnpm check:web", "server-rendered route flow, browser behavior, assets"),
-      command("pnpm devx:verify-route -- --route /flushing-coin/activity", "real browser scroll/header check"),
+      command("pnpm devx:verify-route -- --route /chao/flushing-coin/activity", "real browser scroll/header check"),
     ],
   },
   {
@@ -69,7 +69,7 @@ const rules = [
     commands: [
       command("pnpm exec vitest run scripts/devx-what-to-run.test.mjs", "route-to-gate suggestion coverage"),
       command("pnpm devx:what-to-run", "changed-file gate suggestions"),
-      command("pnpm devx:verify-route -- --route /flushing-coin/activity", "browser route checker sanity"),
+      command("pnpm devx:verify-route -- --route /chao/flushing-coin/activity", "browser route checker sanity"),
     ],
   },
 ];

@@ -19,7 +19,7 @@ function freshDb(): Database.Database {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  return testApp(db, config, (app) => app.route("/api/v1/w", files));
+  return testApp(db, config, (app) => app.route("/api/v1/repos", files));
 }
 
 const fetchMock = vi.fn();
@@ -81,25 +81,25 @@ describe("files validation route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "source.md",
       bodyText: "---\nid: source\n---\n# Source\n\nSee [@target], [@thm:target], [@missing], and [Gone](gone.md).\n",
       formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "target.md",
       bodyText: "---\nid: target\n---\n# Target\n\n::: {#thm:target .theorem}\nTarget theorem.\n:::\n",
       formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "orphan.md",
       bodyText: "---\nid: orphan\n---\n# Orphan\n",
       formatId: COFLAT_FORMAT_ID,
     });
 
-    const res = await appFor(db).request("/api/v1/w/w/validation", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -135,19 +135,19 @@ describe("files validation route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n",
       formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "b.md",
       bodyText: "---\nid: b\n---\n# B\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
       formatId: COFLAT_FORMAT_ID,
     });
 
-    const res = await appFor(db).request("/api/v1/w/w/validation", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -160,7 +160,7 @@ describe("files validation route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: [
         "---",
@@ -180,7 +180,7 @@ describe("files validation route", () => {
       formatId: COFLAT_FORMAT_ID,
     });
 
-    const res = await appFor(db).request("/api/v1/w/w/validation", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -195,13 +195,13 @@ describe("files refs route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "target.md",
       bodyText: "---\nid: target\n---\n# Target\n\n::: {#thm:target .theorem}\nTarget theorem.\n:::\n",
       formatId: COFLAT_FORMAT_ID,
     });
 
-    const res = await appFor(db).request("/api/v1/w/w/refs?ids=target,thm:target,missing", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=target,thm:target,missing", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -220,14 +220,14 @@ describe("files refs route", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     for (const filePath of ["a.md", "b.md"]) {
       indexPage(db, {
-        workspaceSlug: "w",
+        workspaceSlug: "owner/w",
         filePath,
         bodyText: `---\nid: ${filePath[0]}\n---\n# ${filePath[0].toUpperCase()}\n\n::: {#thm:dup .theorem}\nDuplicate.\n:::\n`,
         formatId: COFLAT_FORMAT_ID,
       });
     }
 
-    const res = await appFor(db).request("/api/v1/w/w/refs?ids=thm:dup", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=thm:dup", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -242,13 +242,13 @@ describe("files refs route", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
       formatId: COFLAT_FORMAT_ID,
     });
 
-    const res = await appFor(db).request("/api/v1/w/w/refs?ids=thm:dup", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=thm:dup", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -266,14 +266,14 @@ describe("files suggest route", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     for (let i = 0; i < 12; i += 1) {
       indexPage(db, {
-        workspaceSlug: "w",
+        workspaceSlug: "owner/w",
         filePath: `note-${i}.md`,
         bodyText: `---\nid: alpha-${i}\n---\n# Alpha ${i}\n`,
         formatId: COFLAT_FORMAT_ID,
       });
     }
 
-    const res = await appFor(db).request("/api/v1/w/w/suggest?prefix=alpha&limit=abc", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=alpha&limit=abc", {
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -289,7 +289,7 @@ describe("files mutation gates", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
 
-    const res = await appFor(db).request("/api/v1/w/w/file?path=notes.md&branch=user/alice/wip", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/wip", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ content: "# Notes\n" }),
@@ -304,7 +304,7 @@ describe("files mutation gates", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
 
-    const res = await appFor(db).request("/api/v1/w/w/assets?branch=main", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/assets?branch=main", {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
     });
@@ -321,7 +321,7 @@ describe("files mutation gates", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     indexPage(db, {
-      workspaceSlug: "w",
+      workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
       formatId: COFLAT_FORMAT_ID,
@@ -339,7 +339,7 @@ describe("files mutation gates", () => {
       forge.delete("/api/v1/repos/owner/w/contents/old.md", (c) => c.body(null, 200));
     }));
 
-    const res = await appFor(db).request("/api/v1/w/w/file?path=new.md&branch=user/alice/wip", {
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
       method: "PUT",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ previous_path: "old.md", content: "---\nid: new\n---\n# New\n" }),
@@ -349,7 +349,7 @@ describe("files mutation gates", () => {
     expect(await res.json()).toMatchObject({ ok: true, branch: "user/alice/wip", commit: "new-commit" });
     const rows = db
       .prepare("SELECT cosheaf_id, forgejo_id FROM doc_map WHERE workspace_slug = ? ORDER BY forgejo_id")
-      .all("w");
+      .all("owner/w");
     expect(rows).toEqual([{ cosheaf_id: "new", forgejo_id: "new.md" }]);
   });
 });
@@ -382,7 +382,7 @@ describe("files tree cache", () => {
       });
     }));
 
-    const first = await appFor(db).request("/api/v1/w/w/tree?branch=user/stale", {
+    const first = await appFor(db).request("/api/v1/repos/owner/w/tree?branch=user/stale", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(first.status).toBe(200);
@@ -394,7 +394,7 @@ describe("files tree cache", () => {
     });
 
     branchExists = true;
-    const second = await appFor(db).request("/api/v1/w/w/tree?branch=user/stale", {
+    const second = await appFor(db).request("/api/v1/repos/owner/w/tree?branch=user/stale", {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(second.status).toBe(200);

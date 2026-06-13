@@ -8,7 +8,6 @@ const config: Config = {
   forgejoUrl: "http://forgejo.test",
   forgejoToken: "token",
   forgejoAdminToken: "admin-token",
-  forgejoOwner: "owner",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
   coverifyCmd: "coverify",
@@ -18,11 +17,11 @@ const config: Config = {
 };
 
 describe("chatReplyArgs", () => {
-  it("targets the workspace + issue and preserves Coverify's backend flag", () => {
-    expect(chatReplyArgs("flushing-coin", 42, "coverify")).toEqual([
+  it("targets the workspace by its full owner/repo slug and preserves Coverify's backend flag", () => {
+    expect(chatReplyArgs("chao/flushing-coin", 42, "coverify")).toEqual([
       "chat-reply",
       "--workspace",
-      "flushing-coin",
+      "chao/flushing-coin",
       "--issue",
       "42",
       "--bot-user",

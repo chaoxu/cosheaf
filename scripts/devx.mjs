@@ -52,13 +52,13 @@ async function ready(opts) {
 
   console.log("\nAgent-ready routes:");
   for (const route of [
-    "/flushing-coin/activity",
-    "/flushing-coin/issues",
-    "/flushing-coin/pulls",
-    "/flushing-coin/src/branch/main/hello.md",
-    "/flushing-coin/_edit?branch=user/chao/devx-ready&path=devx-ready.md",
-    "/passthrough-demo/issues",
-    "/passthrough-demo/pulls",
+    "/chao/flushing-coin/activity",
+    "/chao/flushing-coin/issues",
+    "/chao/flushing-coin/pulls",
+    "/chao/flushing-coin/src/branch/main/hello.md",
+    "/chao/flushing-coin/_edit?branch=user/chao/devx-ready&path=devx-ready.md",
+    "/chao/passthrough-demo/issues",
+    "/chao/passthrough-demo/pulls",
   ]) {
     console.log(`  ${new URL(route, opts.url).toString()}`);
   }

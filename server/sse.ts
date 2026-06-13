@@ -1,4 +1,6 @@
-// Tiny SSE pub/sub keyed by workspace slug. Webhooks publish; SSE handlers subscribe.
+// Tiny SSE pub/sub keyed by workspace slug — the Forgejo `owner/repo` full
+// name. Webhooks publish; SSE handlers subscribe. Event payloads carry no
+// repo identity; the channel key is the only identity.
 
 export interface SSEEvent {
   type: string;

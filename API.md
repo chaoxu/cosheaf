@@ -22,7 +22,9 @@ interface User {
 }
 
 interface Workspace {
-  slug: string;
+  owner: string;
+  repo: string;
+  full_name: string;   // "owner/repo" — the canonical workspace slug
   name: string;
   role: Role;
   default_md_format: "forgejo-passthrough" | "coflat";
@@ -98,21 +100,27 @@ backing forge.
 
 ## Workspaces
 
+A workspace is a Forgejo `(owner, repo)` pair; the canonical workspace slug is
+the full `owner/repo` string. All typed workspace routes live under
+`/repos/:owner/:repo/*`.
+
 ```http
 GET /workspaces
-→ { "workspaces": Workspace[] }
+→ { "workspaces": Workspace[] }     # all owners the caller can see
 
 POST /workspaces
-{ "slug": string, "name": string, "default_md_format"?: "forgejo-passthrough" | "coflat" }
+{ "owner"?: string, "slug": string, "name": string, "default_md_format"?: "forgejo-passthrough" | "coflat" }
 → 201 Workspace
+# owner defaults to the caller; slug is the repo name under that owner
 
-PUT /workspaces/:slug/members/:username
+PUT /repos/:owner/:repo/members/:username
 { "role": "admin" | "write" | "read" }
 → { "ok": true, "username": string, "role": "admin" | "write" | "read" }
 ```
 
-Creating a workspace provisions a Forgejo repository, branch protection,
-webhook, `.gitattributes`, and the initial sidecar index.
+Creating a workspace runs on the caller's own PAT and provisions a Forgejo
+repository, branch protection, webhook, `.gitattributes`, and the initial
+sidecar index.
 Setting workspace members requires workspace admin access. Cosheaf applies the
 role to the underlying repository and keeps the main-branch direct-push
 whitelist in sync for admin users.
@@ -125,40 +133,41 @@ frontmatter/id handling, branch naming, synchronous reindexing, backlinks/FTS,
 and SSE updates.
 
 ```http
-GET /w/:slug/tree?branch=<branch>
+GET /repos/:owner/:repo/tree?branch=<branch>
 → { "files": FileEntry[] }
 
-GET /w/:slug/file?path=<path>&branch=<branch>
+GET /repos/:owner/:repo/file?path=<path>&branch=<branch>
 → { "content": string }
 
-PUT /w/:slug/file?path=<path>&branch=<branch>
+PUT /repos/:owner/:repo/file?path=<path>&branch=<branch>
 { "content": string }
 → { "ok": true, "branch": string, "meta": DocumentMeta, "content"?: string, "commit"?: string }
 
-DELETE /w/:slug/file?path=<path>&branch=<branch>
+DELETE /repos/:owner/:repo/file?path=<path>&branch=<branch>
 → { "ok": true, "branch": string }
 ```
 
 A Markdown write made outside Cosheaf is treated as an external repository
-edit. It reaches SQLite through webhook or `pnpm cli workspace reindex <slug>`
-reconciliation, not through immediate typed file-route indexing.
+edit. It reaches SQLite through webhook or `pnpm cli workspace reindex
+<owner>/<repo>` reconciliation, not through immediate typed file-route
+indexing.
 
 ## Search, Backlinks, Suggestions
 
 ```http
-GET /w/:slug/search?q=<query>
+GET /repos/:owner/:repo/search?q=<query>
 → { "results": SearchResult[] }
 
-GET /w/:slug/backlinks?id=<doc_id>
+GET /repos/:owner/:repo/backlinks?id=<doc_id>
 → { "backlinks": Backlink[] }
 
-GET /w/:slug/suggest?trigger=<trigger>&prefix=<prefix>&limit=<n>
+GET /repos/:owner/:repo/suggest?trigger=<trigger>&prefix=<prefix>&limit=<n>
 → { "suggestions": Array<{ id: string, insert: string, display: string }> }
 
-GET /w/:slug/validation
+GET /repos/:owner/:repo/validation
 → WorkspaceValidation     # broken-reference report consumed by the linter tab
 
-GET /w/:slug/activities?limit=<n>
+GET /repos/:owner/:repo/activities?limit=<n>
 → { "activities": ActivityRow[] }   # normalized over the backend activity feed
                                     # JSON (which encodes refs in opaque strings)
 ```
@@ -170,14 +179,14 @@ HTML. Indexed links are `[@id]` and `[text](relative.md[#fragment])`.
 ## Branches
 
 ```http
-GET /w/:slug/branches/mine
+GET /repos/:owner/:repo/branches/mine
 → { "branches": Branch[] }
 
-POST /w/:slug/branches
+POST /repos/:owner/:repo/branches
 { "name": string }
 → { "name": string }
 
-DELETE /w/:slug/branches/:name
+DELETE /repos/:owner/:repo/branches/:name
 → { "ok": true }
 ```
 
@@ -188,29 +197,29 @@ SQLite does not mirror them.
 ## Pull Requests
 
 ```http
-POST /w/:slug/pulls
+POST /repos/:owner/:repo/pulls
 { "head": string, "base"?: string, "title"?: string, "body"?: string }
 → PrMeta
 
-GET /w/:slug/pulls?state=open|closed|all&labels=<id>&milestone=<id>&author=<username>&sort=<sort>
+GET /repos/:owner/:repo/pulls?state=open|closed|all&labels=<id>&milestone=<id>&author=<username>&sort=<sort>
 → { "pulls": PrMeta[] }
 
-GET /w/:slug/pulls/:n
+GET /repos/:owner/:repo/pulls/:n
 → { "pull": PrMeta }
 
-PATCH /w/:slug/pulls/:n
+PATCH /repos/:owner/:repo/pulls/:n
 { "title"?: string, "body"?: string }
 → { "pull": PrMeta }
 
-PUT /w/:slug/pulls/:n/labels
+PUT /repos/:owner/:repo/pulls/:n/labels
 { "labels": number[] }
 → { "pull": PrMeta }
 
-POST /w/:slug/pulls/:n/merge
+POST /repos/:owner/:repo/pulls/:n/merge
 { "Do"?: "squash" | "merge" | "rebase", "force"?: boolean }
 → { "ok": true }
 
-POST /w/:slug/pulls/:n/close
+POST /repos/:owner/:repo/pulls/:n/close
 → { "ok": true }
 ```
 
@@ -221,42 +230,42 @@ labels, milestone, and requested reviewers.
 ## Pull Request Reviews And Comments
 
 ```http
-GET /w/:slug/pulls/:n/files
+GET /repos/:owner/:repo/pulls/:n/files
 → { "files": PullFile[] }
 
-GET /w/:slug/pulls/:n/file?path=<path>&side=base|head
+GET /repos/:owner/:repo/pulls/:n/file?path=<path>&side=base|head
 → { "content": string }
 
-POST /w/:slug/pulls/:n/reviews
+POST /repos/:owner/:repo/pulls/:n/reviews
 { "event": "APPROVE" | "REQUEST_CHANGES" | "COMMENT", "body"?: string | null }
 → { "ok": true, "approvals": number, "rejections": number }
 
-GET /w/:slug/pulls/:n/reviews
+GET /repos/:owner/:repo/pulls/:n/reviews
 → { "reviews": ApprovalRecord[], "approvals": number, "rejections": number }
 
-GET /w/:slug/pulls/:n/review-requests
+GET /repos/:owner/:repo/pulls/:n/review-requests
 → { "requested_reviewers": string[], "requested_reviewer_teams": string[], "available_reviewers": string[] }
 
-POST /w/:slug/pulls/:n/review-requests
+POST /repos/:owner/:repo/pulls/:n/review-requests
 { "reviewers": string[] }
 → { "pull": PrMeta }
 
-DELETE /w/:slug/pulls/:n/review-requests
+DELETE /repos/:owner/:repo/pulls/:n/review-requests
 { "reviewers": string[] }
 → { "pull": PrMeta | null }
 
-GET /w/:slug/pulls/:n/comments
+GET /repos/:owner/:repo/pulls/:n/comments
 → { "comments": LineComment[] }
 
-POST /w/:slug/pulls/:n/comments
+POST /repos/:owner/:repo/pulls/:n/comments
 { "path": string, "line": number, "side": "base" | "head", "body": string }
 → { "ok": true }
 
-PATCH /w/:slug/pulls/:n/comments/:commentId
+PATCH /repos/:owner/:repo/pulls/:n/comments/:commentId
 { "body": string }
 → { "ok": true }
 
-DELETE /w/:slug/pulls/:n/comments/:commentId?review_id=<reviewId>
+DELETE /repos/:owner/:repo/pulls/:n/comments/:commentId?review_id=<reviewId>
 → { "ok": true }
 ```
 
@@ -264,14 +273,14 @@ Pending review helpers exist because the backend represents pending reviews
 separately:
 
 ```http
-POST /w/:slug/pulls/:n/pending-review
+POST /repos/:owner/:repo/pulls/:n/pending-review
 → { "review_id": number }
 
-POST /w/:slug/pulls/:n/pending-review/:reviewId/comments
+POST /repos/:owner/:repo/pulls/:n/pending-review/:reviewId/comments
 { "path": string, "line": number, "side": "base" | "head", "body": string }
 → { "ok": true }
 
-POST /w/:slug/pulls/:n/pending-review/:reviewId/submit
+POST /repos/:owner/:repo/pulls/:n/pending-review/:reviewId/submit
 { "event": "approve" | "request_changes" | "comment", "body"?: string }
 → { "ok": true }
 ```
@@ -282,89 +291,89 @@ Issue routes return normalized Cosheaf DTOs and are the public surface for
 issue automation.
 
 ```http
-GET /w/:slug/issues?state=open|closed|all&filter=mine|assigned|all&q=<query>&labels=<name>&milestones=<id-or-name>&created_by=<username>&assigned_by=<username>&sort=<sort>
+GET /repos/:owner/:repo/issues?state=open|closed|all&filter=mine|assigned|all&q=<query>&labels=<name>&milestones=<id-or-name>&created_by=<username>&assigned_by=<username>&sort=<sort>
 → { "issues": IssueRow[] }
 
-GET /w/:slug/issues/pinned
+GET /repos/:owner/:repo/issues/pinned
 → { "issues": IssueRow[] }
 
-GET /w/:slug/issues/:n
+GET /repos/:owner/:repo/issues/:n
 → IssueDetail
 
-PATCH /w/:slug/issues/:n
+PATCH /repos/:owner/:repo/issues/:n
 { "title"?: string, "body"?: string }
 → { "number": number, "title": string, "body": string, "state": "open" | "closed" }
 
-POST /w/:slug/issues
+POST /repos/:owner/:repo/issues
 { "title": string, "body": string }
 → { "number": number, "title": string, "state": "open" | "closed" }
 
-PATCH /w/:slug/issues/:n/state
+PATCH /repos/:owner/:repo/issues/:n/state
 { "state": "open" | "closed" }
 → { "ok": true, "state": "open" | "closed" }
 
-GET /w/:slug/issues/:n/comments
+GET /repos/:owner/:repo/issues/:n/comments
 → { "comments": IssueComment[] }
 
-POST /w/:slug/issues/:n/comments
+POST /repos/:owner/:repo/issues/:n/comments
 { "body": string }
 → IssueComment
 
-PATCH /w/:slug/issues/:n/comments/:commentId
+PATCH /repos/:owner/:repo/issues/:n/comments/:commentId
 { "body": string }
 → IssueComment
 
-DELETE /w/:slug/issues/:n/comments/:commentId
+DELETE /repos/:owner/:repo/issues/:n/comments/:commentId
 → { "ok": true }
 
-GET /w/:slug/issues/:n/timeline
+GET /repos/:owner/:repo/issues/:n/timeline
 → { "events": TimelineEvent[] }
 
-GET /w/:slug/issues/:n/dependencies
+GET /repos/:owner/:repo/issues/:n/dependencies
 → { "issues": DependencyRow[] }
 
-POST /w/:slug/issues/:n/dependencies
+POST /repos/:owner/:repo/issues/:n/dependencies
 { "index": number }
 → { "issue": DependencyRow }
 
-DELETE /w/:slug/issues/:n/dependencies
+DELETE /repos/:owner/:repo/issues/:n/dependencies
 { "index": number }
 → { "issue": DependencyRow }
 
-GET /w/:slug/issues/:n/blocks
+GET /repos/:owner/:repo/issues/:n/blocks
 → { "issues": DependencyRow[] }
 ```
 
 ```http
-GET /w/:slug/labels
+GET /repos/:owner/:repo/labels
 → { "labels": Label[] }
 
-POST /w/:slug/labels
+POST /repos/:owner/:repo/labels
 { "name": string, "color": string, "description"?: string, "exclusive"?: boolean }
 → Label
 
-PUT /w/:slug/issues/:n/labels
+PUT /repos/:owner/:repo/issues/:n/labels
 { "labels": number[] }
 → { "labels": Label[] }
 
-POST /w/:slug/issues/:n/pin
+POST /repos/:owner/:repo/issues/:n/pin
 → { "ok": true }
 
-DELETE /w/:slug/issues/:n/pin
+DELETE /repos/:owner/:repo/issues/:n/pin
 → { "ok": true }
 
-GET /w/:slug/milestones?state=open|closed|all
+GET /repos/:owner/:repo/milestones?state=open|closed|all
 → { "milestones": Milestone[] }
 
-POST /w/:slug/milestones
+POST /repos/:owner/:repo/milestones
 { "title": string, "description"?: string }
 → Milestone
 
-PATCH /w/:slug/issues/:n/milestone
+PATCH /repos/:owner/:repo/issues/:n/milestone
 { "id": number | null }
 → { "ok": true }
 
-POST /w/:slug/markdown/render
+POST /repos/:owner/:repo/markdown/render
 { "text": string }
 → { "html": string }
 ```
@@ -372,23 +381,23 @@ POST /w/:slug/markdown/render
 ## Notifications
 
 ```http
-GET /w/:slug/notifications
+GET /repos/:owner/:repo/notifications
 → { "notifications": NotificationRow[] }
 
-POST /w/:slug/notifications/:id/read
+POST /repos/:owner/:repo/notifications/:id/read
 → { "ok": true }
 
-POST /w/:slug/notifications/read-all
+POST /repos/:owner/:repo/notifications/read-all
 → { "ok": true }
 ```
 
 ## Settings
 
 ```http
-GET /w/:slug/settings
+GET /repos/:owner/:repo/settings
 → { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
 
-PUT /w/:slug/settings
+PUT /repos/:owner/:repo/settings
 { "min_approvals"?: number, "default_md_format"?: "forgejo-passthrough" | "coflat" }
 → { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
 ```
@@ -400,7 +409,7 @@ settings requires admin permission.
 ## Events
 
 ```http
-GET /w/:slug/events
+GET /repos/:owner/:repo/events
 ```
 
 Server-sent events stream JSON messages for file changes/removals, pull

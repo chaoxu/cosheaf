@@ -105,7 +105,7 @@ export function chatPendingTurn(): string {
 // swap just the .chat-thread contents in place — no full-page reload. Event-
 // driven, not a timer; stops once the reply has landed. Rendered only while a
 // reply is pending.
-export function chatLiveScript(slug: string, issue: number): string {
-  const url = `/api/v1/w/${encodeURIComponent(slug)}/events`;
+export function chatLiveScript(owner: string, repo: string, issue: number): string {
+  const url = `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/events`;
   return `<script>(function(){try{var es=new EventSource(${JSON.stringify(url)});es.onmessage=function(ev){try{var d=JSON.parse(ev.data);if(!(d&&d.type==="issue"&&d.number===${issue}))return;fetch(location.href,{credentials:"same-origin"}).then(function(r){return r.text();}).then(function(html){var next=new DOMParser().parseFromString(html,"text/html").querySelector(".chat-thread");var cur=document.querySelector(".chat-thread");if(next&&cur){cur.innerHTML=next.innerHTML;cur.scrollIntoView(false);if(!cur.querySelector(".chat-pending"))es.close();}}).catch(function(){});}catch(e){}};window.addEventListener("pagehide",function(){es.close();});}catch(e){}})();</script>`;
 }

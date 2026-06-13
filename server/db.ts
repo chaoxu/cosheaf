@@ -28,7 +28,6 @@ export interface Config {
   // Site-admin/provisioning token. Keep its usage limited to explicit
   // provisioning, webhook reconciliation, and operator CLI paths.
   forgejoAdminToken: string;
-  forgejoOwner: string;
   webhookSecret: string;
   webhookUrl: string;
   // Coverify chat-reply shell-out. The bot account is distinct from the human
@@ -66,7 +65,6 @@ export function loadConfig(): Config {
     forgejoUrl: withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002"),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
-    forgejoOwner: withDefault("COSHEAF_FORGEJO_OWNER", "cosheaf-admin"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),
     webhookUrl: withDefault("COSHEAF_WEBHOOK_URL", "http://127.0.0.1:3030/api/v1/webhooks/forgejo"),
     coverifyCmd: withDefault("COSHEAF_COVERIFY_CMD", "coverify"),
@@ -179,6 +177,26 @@ function migrateDropWorkspacesTable(db: Database.Database): void {
   }
 }
 
+// Workspace identity moved from the bare Forgejo repo name to the
+// `owner/repo` full name. Legacy rows carry bare slugs (no '/'); prefix them
+// with the pre-multi-tenant owner. COSHEAF_FORGEJO_OWNER is read here ONLY —
+// it is no longer part of Config, and exists solely so a pre-migration
+// sidecar lands under the right owner. Sidecar is rebuildable either way
+// (`pnpm cli workspace reindex <owner>/<repo>` or rm db.sqlite + setup:dev).
+function migrateOwnerQualifySlugs(db: Database.Database): void {
+  const legacyOwner = process.env.COSHEAF_FORGEJO_OWNER ?? "cosheaf-admin";
+  const tables = ["doc_map", "backlinks", "xref_targets", "xref_target_duplicates", "page_tags", "notes_fts"];
+  const existing = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as Array<{ name: string }>)
+      .map((t) => t.name),
+  );
+  for (const table of tables) {
+    if (!existing.has(table)) continue;
+    db.prepare(`UPDATE ${table} SET workspace_slug = ? || '/' || workspace_slug WHERE workspace_slug NOT LIKE '%/%'`)
+      .run(legacyOwner);
+  }
+}
+
 export function getDb(config: Config): Database.Database {
   if (dbInstance) return dbInstance;
   const dbPath = path.join(config.dataDir, "db.sqlite");
@@ -191,6 +209,7 @@ export function getDb(config: Config): Database.Database {
   migrateDropWorkspacesTable(db);
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  migrateOwnerQualifySlugs(db);
   dbInstance = db;
   return db;
 }

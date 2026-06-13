@@ -6,6 +6,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
+import { parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
 import { documentFormatFromTopics } from "../../shared/document-format.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { ForgejoIssue } from "../forgejo.js";
@@ -27,19 +28,6 @@ async function serializeWorkspace<T>(slug: string, work: () => Promise<T>): Prom
   }
 }
 
-// Match the webhook's repo identity against owner + name, not name alone.
-// Cosheaf binds every workspace to a repo under `config.forgejoOwner`; a
-// webhook payload whose repo lives under a different owner is unrelated
-// (could be a misconfigured webhook target on another instance) and must
-// not match.
-function slugForRepoFullName(repoFullName: string, expectedOwner: string): string | null {
-  const slashIdx = repoFullName.indexOf("/");
-  if (slashIdx < 0) return null;
-  const owner = repoFullName.slice(0, slashIdx);
-  const name = repoFullName.slice(slashIdx + 1);
-  if (owner !== expectedOwner) return null;
-  return name;
-}
 
 webhooks.post("/forgejo", async (c) => {
   const config = c.get("config");
@@ -71,27 +59,29 @@ webhooks.post("/forgejo", async (c) => {
   } catch (_err) {
     return c.json(...bad("bad json"));
   }
+  // Webhook identity is the Forgejo `owner/repo` full name — the same string
+  // the sidecar and SSE channels key off. Any owner is a valid tenant.
   const repoFullName = (payload.repository as { full_name?: string } | undefined)?.full_name ?? "";
-  const slug = slugForRepoFullName(repoFullName, config.forgejoOwner);
-  if (!slug) {
+  const parsed = parseWorkspaceSlug(repoFullName);
+  if (!parsed) {
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
       deliveryId, Date.now(), event,
     );
     return c.json({ ok: true, ignored: "unknown_repo" });
   }
+  const { owner, repo: repoName } = parsed;
 
   const fj = c.get("fjAdmin");
-  const owner = config.forgejoOwner;
   const sse = c.get("sse");
 
-  // The repo must exist under our owner; otherwise it's a webhook from a
+  // The repo must exist on our Forgejo; otherwise it's a webhook from a
   // foreign target. Topics are only needed for push (to drive indexer
   // format selection); fetch them in parallel with the existence check
   // when we'll use them, otherwise skip the round-trip.
   const needsFormat = event === "push";
   const [repo, formatId] = await Promise.all([
-    fj.getRepo(owner, slug),
-    needsFormat ? fj.listRepoTopics(owner, slug).then(documentFormatFromTopics) : Promise.resolve(undefined),
+    fj.getRepo(owner, repoName),
+    needsFormat ? fj.listRepoTopics(owner, repoName).then(documentFormatFromTopics) : Promise.resolve(undefined),
   ]);
   if (!repo) {
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
@@ -99,7 +89,7 @@ webhooks.post("/forgejo", async (c) => {
     );
     return c.json({ ok: true, ignored: "unknown_repo" });
   }
-  const ws = { slug, defaultMdFormat: formatId };
+  const ws = { slug: workspaceSlug(owner, repoName), defaultMdFormat: formatId };
 
   let deduped = false;
   await serializeWorkspace(ws.slug, async () => {
@@ -125,7 +115,7 @@ webhooks.post("/forgejo", async (c) => {
       const ref = payload.ref as string | undefined;
       // Any push moves at least one ref — drop the repo's cached trees so the
       // next /tree fetch re-pulls from Forgejo. Cheaper than diffing refs.
-      invalidateRepoTrees(owner, ws.slug);
+      invalidateRepoTrees(owner, repoName);
       if (ref === "refs/heads/main") {
         const commits = (payload.commits ?? []) as Array<{ added?: string[]; modified?: string[]; removed?: string[] }>;
         const touched = new Set<string>();
@@ -144,7 +134,7 @@ webhooks.post("/forgejo", async (c) => {
         // push touched many notes.
         const results = await Promise.all(
           mdPaths.map((path) =>
-            fj.getRawFile(owner, ws.slug, "main", path).then(
+            fj.getRawFile(owner, repoName, "main", path).then(
               (body) => ({ path, body, error: null as string | null }),
               (err: unknown) => ({ path, body: "", error: (err as Error).message }),
             ),

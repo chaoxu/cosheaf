@@ -15,8 +15,8 @@ import { bad, conflict, notFound } from "./responses.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
-files.use("/:slug/*", requireMembership());
-files.use("/:slug/*", requireWriteOnMutation);
+files.use("/:owner/:repo/*", requireMembership());
+files.use("/:owner/:repo/*", requireWriteOnMutation);
 
 // Repository-relative path validator. Rejects absolute paths, traversal
 // segments (`..`), empty segments, backslashes (Forgejo treats `/` as the
@@ -98,7 +98,7 @@ function plainSnippet(row: { title: string | null; body: string }, terms: string
   return parts;
 }
 
-files.get("/:slug/tree", async (c) => {
+files.get("/:owner/:repo/tree", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
@@ -144,7 +144,7 @@ files.get("/:slug/tree", async (c) => {
   return c.json({ files: merged });
 });
 
-files.get("/:slug/file", async (c) => {
+files.get("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel) return c.json(...bad("path required"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -171,7 +171,7 @@ files.get("/:slug/file", async (c) => {
   }
 });
 
-files.put("/:slug/file", async (c) => {
+files.put("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))
     return c.json(...bad("invalid path"));
@@ -246,7 +246,7 @@ files.put("/:slug/file", async (c) => {
   });
 });
 
-files.post("/:slug/assets", async (c) => {
+files.post("/:owner/:repo/assets", async (c) => {
   const branch = c.req.query("branch")?.trim();
   if (!branch)
     return c.json(...bad("branch required"));
@@ -277,7 +277,7 @@ files.post("/:slug/assets", async (c) => {
   return c.json({ path: assetPath });
 });
 
-files.get("/:slug/suggest", (c) => {
+files.get("/:owner/:repo/suggest", (c) => {
   const prefix = c.req.query("prefix")?.trim() ?? "";
   const trigger = c.req.query("trigger") ?? "[@";
   const rawLimit = Number(c.req.query("limit") ?? 10);
@@ -324,7 +324,7 @@ files.get("/:slug/suggest", (c) => {
   });
 });
 
-files.get("/:slug/refs", (c) => {
+files.get("/:owner/:repo/refs", (c) => {
   const ids = [
     ...new Set(
       (c.req.query("ids") ?? "")
@@ -403,7 +403,7 @@ files.get("/:slug/refs", (c) => {
   });
 });
 
-files.delete("/:slug/file", async (c) => {
+files.delete("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel || !rel.endsWith(".md"))
     return c.json(...bad("invalid path"));
@@ -424,7 +424,7 @@ files.delete("/:slug/file", async (c) => {
   return c.json({ ok: true, branch });
 });
 
-files.get("/:slug/search", (c) => {
+files.get("/:owner/:repo/search", (c) => {
   const q = c.req.query("q")?.trim();
   if (!q) return c.json({ results: [] });
   const rawLimit = Number(c.req.query("limit") ?? 25);
@@ -477,7 +477,7 @@ files.get("/:slug/search", (c) => {
   });
 });
 
-files.get("/:slug/backlinks", (c) => {
+files.get("/:owner/:repo/backlinks", (c) => {
   const id = c.req.query("id");
   if (!id) return c.json(...bad("id required"));
   const ws = c.get("workspace");
@@ -497,7 +497,7 @@ files.get("/:slug/backlinks", (c) => {
   return c.json({ backlinks: rows });
 });
 
-files.get("/:slug/validation", (c) => {
+files.get("/:owner/:repo/validation", (c) => {
   const ws = c.get("workspace");
   const db = c.get("db");
   const brokenRefs = db
@@ -572,7 +572,7 @@ files.get("/:slug/validation", (c) => {
   return c.json({ broken_refs: brokenRefs, duplicate_xrefs: duplicateXrefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
 });
 
-files.get("/:slug/events", (c) => {
+files.get("/:owner/:repo/events", (c) => {
   const ws = c.get("workspace");
   const hub = c.get("sse");
   return streamSSE(c, async (stream) => {

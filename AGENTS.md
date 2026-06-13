@@ -52,13 +52,13 @@ surface usable without any automation.
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
   links, FTS index, webhook dedupe, and cached Cosheaf-issued Forgejo PATs —
-  keyed by Forgejo repo slug or username. There is no users, sessions, or
-  workspaces table; identity, workspace registry, memberships, branches, pull
-  requests, issues, labels, milestones, and notifications all live on Forgejo
-  and are read on demand (the workspace format lives in a `cosheaf-format-*`
-  repo topic). Passthrough calls are not audited locally — Forgejo's access log
-  is the trail. The page index is rebuildable from Forgejo via
-  `pnpm cli workspace reindex <slug>`.
+  keyed by the Forgejo `owner/repo` full name or username. There is no users,
+  sessions, or workspaces table; identity, workspace registry, memberships,
+  branches, pull requests, issues, labels, milestones, and notifications all
+  live on Forgejo and are read on demand (the workspace format lives in a
+  `cosheaf-format-*` repo topic). Passthrough calls are not audited locally —
+  Forgejo's access log is the trail. The page index is rebuildable from Forgejo
+  via `pnpm cli workspace reindex <owner>/<repo>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
@@ -96,8 +96,9 @@ If a screen has a durable identity, give it a server route first.
 The pre-migration SPA shell is deprecated and removed. The archival tag is
 `spa-shell-2026-05-24`; do not restore `index.html`, `src/cosheaf/main.tsx`,
 `src/cosheaf/app.tsx`, browser UI under `/app` or `/w`, localStorage PAT auth,
-or catch-all app-shell fallback routes. Typed `/api/v1/w/*` routes remain the
-public API for agents and page islands; they are not browser UI routes.
+or catch-all app-shell fallback routes. Typed `/api/v1/repos/:owner/:repo/*`
+routes remain the public API for agents and page islands; they are not browser
+UI routes.
 
 Server-rendered pages must preserve the old app's useful feature depth. The
 intended pattern is a server-rendered shell with narrowly scoped React islands,
@@ -192,24 +193,25 @@ Typed routes are the public contract for Cosheaf document/index behavior:
 
 File-write boundary: a Markdown write made outside Cosheaf is an external
 repository write from Cosheaf's point of view. Webhooks and `pnpm cli workspace
-reindex <slug>` reconcile those writes into SQLite. A Markdown write that needs
-immediate Cosheaf frontmatter/index/SSE behavior should go through the typed
-file route.
+reindex <owner>/<repo>` reconcile those writes into SQLite. A Markdown write
+that needs immediate Cosheaf frontmatter/index/SSE behavior should go through
+the typed file route.
 
 Cosheaf does not synchronously run the indexer or emit SSE on external backend
 writes. Reconciliation is webhook-only. Callers (including agents) that need
 read-after-write consistency through cosheaf's typed routes must use the typed
 file route in the first place.
 
-Examples for agents using a Cosheaf API token:
+Examples for agents using a Cosheaf API token (the workspace is the
+`chao/flushing-coin` repo):
 
-- `GET /api/v1/w/flushing-coin/issues?state=open`
-- `PATCH /api/v1/w/flushing-coin/issues/42/state` with `{ "state": "closed" }`
-- `GET /api/v1/w/flushing-coin/pulls?state=open`
-- `GET /api/v1/w/flushing-coin/labels`
-- `GET /api/v1/w/flushing-coin/milestones?state=open`
-- `GET /api/v1/w/flushing-coin/file?path=hello.md&branch=main`
-- `GET /api/v1/w/flushing-coin/notifications`
+- `GET /api/v1/repos/chao/flushing-coin/issues?state=open`
+- `PATCH /api/v1/repos/chao/flushing-coin/issues/42/state` with `{ "state": "closed" }`
+- `GET /api/v1/repos/chao/flushing-coin/pulls?state=open`
+- `GET /api/v1/repos/chao/flushing-coin/labels`
+- `GET /api/v1/repos/chao/flushing-coin/milestones?state=open`
+- `GET /api/v1/repos/chao/flushing-coin/file?path=hello.md&branch=main`
+- `GET /api/v1/repos/chao/flushing-coin/notifications`
 
 Use `Authorization: Bearer <token>` on these Cosheaf requests; Cosheaf
 validates workspace membership and translates to the backend credential
@@ -226,14 +228,14 @@ Rules of thumb:
 ### Agent flows
 
 Three common flows. Each works with `curl` against a running cosheaf
-(`pnpm dev:all`) using a Cosheaf API token as the Bearer token. Replace `$SLUG`,
-`$PAT`, etc.
+(`pnpm dev:all`) using a Cosheaf API token as the Bearer token. Replace
+`$OWNER`, `$REPO`, `$PAT`, etc. (the dev fixture is `chao`/`flushing-coin`).
 
 **1. Add a page to main.** Use the typed file route so frontmatter is
 applied and the sidecar updates synchronously:
 
 ```sh
-curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=main" \
+curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=main" \
   -H "Authorization: Bearer $PAT" \
   -H "content-type: application/json" \
   -d '{"content": "# New page\n\nbody."}'
@@ -243,27 +245,27 @@ curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=
 
 ```sh
 # Create branch
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/branches" \
+curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/branches" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"name": "agent/wip-1"}'
 
 # Edit a file on the branch (typed route runs the indexer)
-curl -X PUT "http://localhost:3030/api/v1/w/$SLUG/file?path=notes/new.md&branch=agent/wip-1" \
+curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=agent/wip-1" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"content": "# Updated\n\nbody."}'
 
 # Open PR
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls" \
+curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/pulls" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"head": "agent/wip-1", "base": "main", "title": "Update notes/new.md"}'
 
 # Submit a review
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/reviews" \
+curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/pulls/42/reviews" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"event": "APPROVE", "body": "looks good"}'
 
 # Merge (typed route — runs requireAdminFresh)
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/merge" \
+curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/pulls/42/merge" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"Do": "squash"}'
 ```
@@ -272,16 +274,16 @@ curl -X POST "http://localhost:3030/api/v1/w/$SLUG/pulls/42/merge" \
 
 ```sh
 # List my open issues
-curl "http://localhost:3030/api/v1/w/$SLUG/issues?state=open&filter=assigned" \
+curl "http://localhost:3030/api/v1/repos/$OWNER/$REPO/issues?state=open&filter=assigned" \
   -H "Authorization: Bearer $PAT"
 
 # Comment on one
-curl -X POST "http://localhost:3030/api/v1/w/$SLUG/issues/17/comments" \
+curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/issues/17/comments" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"body": "investigating"}'
 
 # Close it
-curl -X PATCH "http://localhost:3030/api/v1/w/$SLUG/issues/17/state" \
+curl -X PATCH "http://localhost:3030/api/v1/repos/$OWNER/$REPO/issues/17/state" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"state": "closed"}'
 ```
@@ -324,7 +326,7 @@ server/
   db.ts           # config + better-sqlite3 instance
   schema.sql      # full DB schema (executed on every startup; CREATE IF NOT EXISTS)
   users.ts        # minimal `User` type ({username}); identity comes from Forgejo
-  middleware.ts   # requireAuth (Bearer PAT), requireMembership(slug)
+  middleware.ts   # requireAuth (Bearer PAT), requireMembership() on /:owner/:repo routes
   frontmatter.ts  # parse/serialize YAML frontmatter
   indexer.ts      # indexPage(): parse → upsert doc_map → reindex backlinks/tags/FTS
   forgejo.ts      # minimal Forgejo REST client
@@ -332,7 +334,7 @@ server/
   cli.ts          # `pnpm cli` user/workspace/seed/reindex commands
   routes/
     auth.ts        # login/logout/me
-    workspaces.ts  # list/create workspaces
+    workspaces.ts  # list/create workspaces + repo member management
     files.ts       # tree/file get/put/delete, search, backlinks, validation
     pulls.ts       # pull request + review API (merge, reviews, comments, pending reviews, settings)
     branches.ts    # branch list/create/delete
@@ -366,9 +368,9 @@ pnpm dev:worktree -- <name> [--base origin/main --fetch]
 pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
 pnpm issue -- mine
 pnpm cli user add <name>  # create a user (interactive password prompt)
-pnpm cli seed --user <name> --password <pw> --workspace <slug> --workspace-name <name>
-pnpm cli workspace member <slug> <user> <admin|write|read>
-pnpm cli workspace reindex <slug>   # rebuild page index from Forgejo main
+pnpm cli seed --user <name> --password <pw> --workspace <owner>/<repo> --workspace-name <name>
+pnpm cli workspace member <owner>/<repo> <user> <admin|write|read>
+pnpm cli workspace reindex <owner>/<repo>   # rebuild page index from Forgejo main
 pnpm typecheck            # tsc --noEmit (root)
 pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
 pnpm check:types          # both
@@ -414,7 +416,7 @@ Route owner map:
 - `public/cosheaf-web.css` — server-rendered chrome CSS only; Coflat documents
   own their rendering (see the boundary comment at the top of the file). The
   app is a fixed-frame layout: the window never scrolls, `.app-content` does.
-- `server/index.ts` — static assets, Vite/dev asset proxy, ownerless repo rewrite, and route mounting.
+- `server/index.ts` — static assets, Vite/dev asset proxy, and route mounting.
 - `src/cosheaf/web-editor.tsx` — page editor island.
 - `src/cosheaf/web-reader.ts` — Coflat reader hydration island.
 - `server/routes/files.ts` — typed file/tree/search/backlink API.
@@ -466,17 +468,22 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `page_tags(workspace_slug, cosheaf_id, tag)`
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
 
+`workspace_slug` column values are the Forgejo `owner/repo` full name
+(`workspaceSlug(owner, repo)` in `shared/conventions.ts` builds it;
+`parseWorkspaceSlug` splits it).
+
 There is no `users`, `sessions`, or `workspaces` table (#63, #62). Identity
 comes from a Forgejo PAT sent as `Authorization: Bearer <token>` by API clients
 or as the `cosheaf_pat` HttpOnly cookie by server-rendered pages; workspace
-identity is the Forgejo repo name; the workspace's markdown format lives
-in a Forgejo repo topic (`cosheaf-format-coflat` or
+identity is the Forgejo `(owner, repo)` pair — the same repo name under
+different owners is a different workspace; the workspace's markdown format
+lives in a Forgejo repo topic (`cosheaf-format-coflat` or
 `cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write |
 read`) is resolved from Forgejo's collaborator-permission API on each
-request, cached in-process for 30s; the bearer→username and slug→format
-mappings are cached on the same TTL. There is no `memberships` table and
-no sidecar `branches` table — branches and pull requests live entirely
-on Forgejo and are queried on demand.
+request, cached in-process for 30s; the bearer→username and
+(owner, repo)→format mappings are cached on the same TTL. There is no
+`memberships` table and no sidecar `branches` table — branches and pull
+requests live entirely on Forgejo and are queried on demand.
 
 ## Branch and pull request lifecycle
 
@@ -547,9 +554,10 @@ Add a test under `server/*.test.ts` (or `tests/`) for any new transition.
 ## Reindexing and external edits
 
 Forgejo `main` is authoritative. Push/webhook events re-index changed markdown
-files and notify clients via `/api/v1/w/:slug/events`. After webhook downtime
-or bulk repo changes, run `pnpm cli workspace reindex <slug>` to rebuild the
-page index from Forgejo's `main` tree and remove stale sidecar rows.
+files and notify clients via `/api/v1/repos/:owner/:repo/events`. After webhook
+downtime or bulk repo changes, run `pnpm cli workspace reindex <owner>/<repo>`
+to rebuild the page index from Forgejo's `main` tree and remove stale sidecar
+rows.
 
 ## Document format
 

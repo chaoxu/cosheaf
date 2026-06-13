@@ -120,12 +120,11 @@ function installRefNavigation(): void {
 }
 
 function currentRepoPrefix(): string | null {
+  // Repo URLs are always /:owner/:repo/... — the first two path segments are
+  // the workspace identity.
   const parts = window.location.pathname.split("/").filter(Boolean);
-  if (parts.length === 0) return null;
-  const repoRoute = new Set(["src", "raw", "_edit", "issues", "pulls", "branches", "activity", "settings", "notifications"]);
-  if (parts[1] && repoRoute.has(parts[1])) return `/${urlPath(parts[0])}`;
-  if (parts.length >= 2) return `/${urlPath(parts[0])}/${urlPath(parts[1])}`;
-  return `/${urlPath(parts[0])}`;
+  if (parts.length < 2) return null;
+  return `/${urlPath(parts[0])}/${urlPath(parts[1])}`;
 }
 
 function hydrateIslandsIn(scope: ParentNode): void {

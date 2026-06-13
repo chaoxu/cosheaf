@@ -6,7 +6,7 @@ describe("devx check suggestions", () => {
     const result = suggestChecks(["public/cosheaf-web.css"]);
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:web");
     expect(result.suggestions.map((item) => item.run)).toContain(
-      "pnpm devx:verify-route -- --route /flushing-coin/activity",
+      "pnpm devx:verify-route -- --route /chao/flushing-coin/activity",
     );
   });
 

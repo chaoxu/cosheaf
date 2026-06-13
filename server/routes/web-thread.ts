@@ -224,7 +224,7 @@ export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableRevi
       : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
           <label>Request reviewers
             <select name="reviewers" multiple size="${Math.min(Math.max(available.length, 2), 6)}">
-              ${available.map((reviewer) => html`<option value="${reviewer.login}">${displayLogin(ctx.owner, reviewer.login)}</option>`)}
+              ${available.map((reviewer) => html`<option value="${reviewer.login}">${displayLogin(reviewer.login)}</option>`)}
             </select>
           </label>
           <button class="button" type="submit">Request review</button>
@@ -244,7 +244,7 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
           <input type="hidden" name="reviewer" value="${reviewer}">
           <button class="button" type="submit">Remove</button>
         </form>`;
-  return html`<span class="meta-pill">${displayLogin(ctx.owner, reviewer)}${remove}</span>`;
+  return html`<span class="meta-pill">${displayLogin(reviewer)}${remove}</span>`;
 }
 
 type WebTimelineItem =
@@ -338,7 +338,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   if (item.kind === "comment") {
     const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
     return html`<div class="comment">
-      <div class="comment-meta">${displayLogin(ctx.owner, item.comment.user?.login)} - ${formatDate(item.comment.created_at)}</div>
+      <div class="comment-meta">${displayLogin(item.comment.user?.login)} - ${formatDate(item.comment.created_at)}</div>
       ${body}
       ${issueCommentActions(ctx, item.number, item.comment)}
     </div>`;
@@ -346,7 +346,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   if (item.kind === "line-comment") {
     const body = await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" });
     return html`<div class="comment">
-      <div class="comment-meta">${displayLogin(ctx.owner, item.comment.user?.login)} commented on ${item.comment.path} - ${formatDate(item.comment.created_at)}</div>
+      <div class="comment-meta">${displayLogin(item.comment.user?.login)} commented on ${item.comment.path} - ${formatDate(item.comment.created_at)}</div>
       ${body}
       ${pullCommentActions(ctx, item.number, item.comment)}
     </div>`;
@@ -355,7 +355,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     const label = reviewStateLabel(item.review.state);
     const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
     return html`<div class="timeline-event">
-      <strong>${displayLogin(ctx.owner, item.review.user?.login)}</strong>
+      <strong>${displayLogin(item.review.user?.login)}</strong>
       <span>${label}</span>
       <small>${formatDate(item.review.submitted_at)}</small>
       ${body}
@@ -363,7 +363,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   }
   if (item.kind === "commit") {
     return html`<div class="timeline-event">
-      <strong>${displayLogin(ctx.owner, item.commit.author?.login ?? item.commit.commit.author?.name)}</strong>
+      <strong>${displayLogin(item.commit.author?.login ?? item.commit.commit.author?.name)}</strong>
       <span>pushed commit <code>${item.commit.sha.slice(0, 10)}</code></span>
       <small>${formatDate(commitDateMs(item.commit))}</small>
       <p>${firstCommitLine(item.commit.commit.message)}</p>
@@ -372,7 +372,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   if (!webTimelineDescriptionText(item.event)) return emptyHtml;
   const description = webTimelineDescriptionHtml(item.event);
   return html`<div class="timeline-event">
-    ${item.event.user?.login ? html`<strong>${displayLogin(ctx.owner, item.event.user.login)}</strong>` : ""}
+    ${item.event.user?.login ? html`<strong>${displayLogin(item.event.user.login)}</strong>` : ""}
     <span>${description}</span>
     <small>${formatDate(item.event.created_at)}</small>
   </div>`;

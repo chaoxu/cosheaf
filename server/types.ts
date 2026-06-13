@@ -6,8 +6,12 @@ import type { SSEHub } from "./sse.js";
 import type { Role } from "../shared/roles.js";
 
 export interface WorkspaceContext {
-  // Slug is the canonical workspace identifier. It equals the Forgejo
-  // repo name and is what sidecar tables key off (workspace_slug column).
+  // Forgejo repo owner (user or org) and repo name — the workspace identity.
+  owner: string;
+  repo: string;
+  // Slug is the canonical workspace identifier: the Forgejo `owner/repo`
+  // full name. It is what sidecar tables key off (workspace_slug column)
+  // and what SSE channels are named after.
   slug: string;
   defaultMdFormat: string;
   role: Role;

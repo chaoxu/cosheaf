@@ -26,7 +26,7 @@ should not duplicate Coflat's parser or syntax contract.
   - `[text](relative/path.md[#fragment])` Markdown links to pages.
 - Markdown writes made through Cosheaf's typed file route update the sidecar
   index synchronously. External Forgejo edits are reconciled by webhooks or
-  `pnpm cli workspace reindex <slug>`.
+  `pnpm cli workspace reindex <owner>/<repo>`.
 
 ## Related Repositories
 

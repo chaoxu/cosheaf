@@ -2,7 +2,7 @@
 // cosheaf paths to Forgejo REST and shapes "branches/mine" so the sidebar
 // can list a user's in-progress work without their open PRs duplicating in.
 //
-// Endpoints under /:slug/* :
+// Endpoints under /:owner/:repo/* :
 //   GET    /branches/mine         — your branches with no open PR
 //   POST   /branches              — create a branch from main
 //   DELETE /branches/:name        — delete a branch
@@ -19,13 +19,13 @@ import { invalidateRepoTrees } from "../tree-cache.js";
 
 export const branches = new Hono<AppEnv>();
 branches.use("*", requireAuth);
-branches.use("/:slug/*", requireMembership());
-branches.use("/:slug/*", requireWriteOnMutation);
+branches.use("/:owner/:repo/*", requireMembership());
+branches.use("/:owner/:repo/*", requireWriteOnMutation);
 
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict } from "./responses.js";
 
-branches.get("/:slug/branches/mine", async (c) => {
+branches.get("/:owner/:repo/branches/mine", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const [list, pulls] = await Promise.all([
     fj.listBranches(owner, repo),
@@ -48,7 +48,7 @@ branches.get("/:slug/branches/mine", async (c) => {
   return c.json({ branches: mine });
 });
 
-branches.post("/:slug/branches", async (c) => {
+branches.post("/:owner/:repo/branches", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { name?: string } | null;
   if (
     !body?.name ||
@@ -75,7 +75,7 @@ branches.post("/:slug/branches", async (c) => {
 // or not the caller URL-encodes the slashes. Same validation shape as the
 // POST handler — never allow `main`, traversal, or punctuation outside the
 // allowlist.
-branches.delete("/:slug/branches/:name{.+}", async (c) => {
+branches.delete("/:owner/:repo/branches/:name{.+}", async (c) => {
   const name = c.req.param("name");
   if (
     !name ||
