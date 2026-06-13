@@ -107,3 +107,41 @@ describe("POST /account/settings (profile)", () => {
     expect(body).toContain('value="a@x.test"');
   });
 });
+
+describe("POST /account/notifications/:id/read (inbox mark-read)", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    _resetPermCacheForTests();
+    _resetBearerAuthCacheForTests();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("marks the thread read and redirects home", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    let markedStatus: string | null = null;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.patch("/api/v1/notifications/threads/:id", (c) => {
+          markedStatus = c.req.query("to-status") ?? null;
+          return c.body(null, 205 as 200);
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/account/notifications/7/read", form({}, token));
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/");
+    expect(markedStatus).toBe("read");
+  });
+
+  it("redirects to login when unauthenticated", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const res = await appFor(db).request("/account/notifications/7/read", form({}));
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+});
