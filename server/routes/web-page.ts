@@ -112,12 +112,15 @@ export function userPreferencesSection(user: string): Html {
           </select>
         </span>
       </label>
+      <label class="settings-row">
+        <span>Date format</span>
+        <select data-testid="settings-time-format-select" data-cosheaf-time-user="${user}">
+          <option value="relative">Relative</option>
+          <option value="absolute">Absolute</option>
+        </select>
+      </label>
     </div>
   </section>`;
-}
-
-export function userPreferencesScript(): Html {
-  return html`<script src="/cosheaf-preferences.js" defer></script>`;
 }
 
 // Profile editor backed by Forgejo's /user/settings. Username and email are

@@ -16,7 +16,7 @@ import {
   badRequestPage,
   displayLogin,
   forbiddenPage,
-  formatDate,
+  timeEl,
   htmlResponse,
   jsonScript,
   notFoundPage,
@@ -372,7 +372,7 @@ web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
         </div>
         <div class="commit-card">
           <pre>${commit.commit.message.trim() || "(no commit message)"}</pre>
-          <p>${displayLogin(commit.commit.author?.name ?? commit.author?.login)} - ${formatDate(commit.commit.author?.date)}</p>
+          <p>${displayLogin(commit.commit.author?.name ?? commit.author?.login)} - ${timeEl(commit.commit.author?.date)}</p>
           <code>${commit.sha}</code>
         </div>
       `),

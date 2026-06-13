@@ -16,7 +16,7 @@ import { isChatIssue } from "./web-chat.js";
 import {
   badRequestPage,
   displayLogin,
-  formatDate,
+  timeEl,
   notFoundPage,
   positiveIntFields,
   repoHref,
@@ -389,7 +389,7 @@ export function threadParticipantsBar(
   return html`<div class="thread-bar" data-testid="thread-bar">
     <span class="thread-faces" aria-label="Participants">${participants.map((login) => avatarChip(login))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
-      last?.created_at ? html` · last ${formatDate(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
+      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
     }</span>
     ${comments.length ? html`<a class="thread-jump" href="#thread-bottom">Jump to latest ↓</a>` : emptyHtml}
   </div>`;
@@ -477,7 +477,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     return commentEntry({
       login: item.comment.user?.login,
       anchorId: `comment-${item.comment.id}`,
-      whenHtml: html`<time>${formatDate(item.comment.created_at)}</time>`,
+      whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
       actions: issueCommentActions(ctx, item.number, item.comment),
     });
@@ -486,7 +486,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     return commentEntry({
       login: item.comment.user?.login,
       anchorId: `comment-${item.comment.id}`,
-      whenHtml: html`<span class="comment-on">on ${item.comment.path}</span> · <time>${formatDate(item.comment.created_at)}</time>`,
+      whenHtml: html`<span class="comment-on">on ${item.comment.path}</span> · ${timeEl(item.comment.created_at)}`,
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
       actions: pullCommentActions(ctx, item.number, item.comment),
     });
@@ -497,7 +497,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     return html`<div class="timeline-event">
       <strong>${displayLogin(item.review.user?.login)}</strong>
       <span>${label}</span>
-      <small>${formatDate(item.review.submitted_at)}</small>
+      <small>${timeEl(item.review.submitted_at)}</small>
       ${body}
     </div>`;
   }
@@ -505,7 +505,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     return html`<div class="timeline-event">
       <strong>${displayLogin(item.commit.author?.login ?? item.commit.commit.author?.name)}</strong>
       <span>pushed commit <code>${item.commit.sha.slice(0, 10)}</code></span>
-      <small>${formatDate(commitDateMs(item.commit))}</small>
+      <small>${timeEl(commitDateMs(item.commit))}</small>
       <p>${firstCommitLine(item.commit.commit.message)}</p>
     </div>`;
   }
@@ -515,7 +515,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   if (!webTimelineDescriptionText(item.event)) return emptyHtml;
   return html`<p class="timeline-note">${
     item.event.user?.login ? html`${displayLogin(item.event.user.login)} ` : emptyHtml
-  }${webTimelineDescriptionHtml(item.event)} · ${formatDate(item.event.created_at)}</p>`;
+  }${webTimelineDescriptionHtml(item.event)} · ${timeEl(item.event.created_at)}</p>`;
 }
 
 function compareTimelineItems(a: WebTimelineItem, b: WebTimelineItem): number {

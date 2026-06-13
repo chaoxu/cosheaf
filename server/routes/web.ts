@@ -15,7 +15,7 @@ import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
-import { userPreferencesSection, userPreferencesScript, userProfileSection } from "./web-page.js";
+import { userPreferencesSection, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
@@ -180,7 +180,6 @@ web.get("/account/settings", async (c) => {
             ${userPreferencesSection(auth.user.username)}
           </div>
         </main>
-        ${userPreferencesScript()}
       `,
     }),
   );

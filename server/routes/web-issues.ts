@@ -8,7 +8,7 @@ import { isChatIssue, stripChatMetadata } from "./web-chat.js";
 import {
   badRequestPage,
   displayLogin,
-  formatDate,
+  timeEl,
   htmlResponse,
   notFoundPage,
   parseListState,
@@ -156,7 +156,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
                   : ""
               }
             </div>
-            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${displayLogin(issue.user?.login)} - ${formatDate(issue.created_at)}</p>
+            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${displayLogin(issue.user?.login)} - ${timeEl(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
           ${threadLayout(main, rail)}
@@ -442,7 +442,7 @@ function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyTex
       <span class="list-row-main">
         <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></span>
         <span class="list-meta">
-          ${displayLogin(issue.user?.login)} opened ${formatDate(issue.created_at)}
+          ${displayLogin(issue.user?.login)} opened ${timeEl(issue.created_at)}
           ${issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : ""}
           ${labelChips(issue.labels)}
         </span>

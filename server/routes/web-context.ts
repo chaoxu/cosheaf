@@ -218,8 +218,19 @@ export function jsonScript(value: unknown): Html {
   return raw(JSON.stringify(value).replaceAll("<", "\\u003c"));
 }
 
-export function formatDate(value: string | number | null | undefined): string {
-  if (!value) return "";
-  const date = typeof value === "number" ? new Date(value) : new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+// A machine-readable <time> that the client reformatter (cosheaf-preferences.js)
+// rewrites to the user's chosen format — Relative ("3d") by default or Absolute
+// short ("6/13/26") — in their local timezone, also fixing the server-timezone
+// bug of a pre-baked string. The server-rendered text is the Absolute-short
+// fallback; `datetime` carries the ISO source and `title` the full absolute
+// timestamp for hover. Use this everywhere a date is shown (list rows, bylines,
+// timelines) so the date preference applies consistently.
+export function timeEl(value: string | number | null | undefined): Html {
+  if (!value) return raw("");
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return raw("");
+  const iso = date.toISOString();
+  const short = date.toLocaleDateString("en-US", { year: "2-digit", month: "numeric", day: "numeric" });
+  const full = date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  return html`<time data-cosheaf-time datetime="${iso}" title="${full}">${short}</time>`;
 }

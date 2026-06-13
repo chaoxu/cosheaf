@@ -11,7 +11,7 @@ import {
   badRequestPage,
   displayLogin,
   forbiddenPage,
-  formatDate,
+  timeEl,
   htmlResponse,
   notFoundPage,
   parseListState,
@@ -583,7 +583,7 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
           ${labelChips(pull.labels ?? [])}
         </span>
       </span>
-      <small>updated ${formatDate(pull.updated_at)}</small>
+      <small>updated ${timeEl(pull.updated_at)}</small>
     </a>`;
   });
   return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;

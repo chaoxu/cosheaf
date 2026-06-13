@@ -10,7 +10,7 @@ import type { ForgejoActivity, ForgejoNotificationThread } from "../forgejo-type
 import type { AppEnv } from "../types.js";
 import {
   displayLogin,
-  formatDate,
+  timeEl,
   htmlResponse,
   notFoundPage,
   positiveInt,
@@ -80,7 +80,7 @@ function notificationRow(ctx: WebCtx, thread: ForgejoNotificationThread): Html {
   const kind = thread.subject.type === "Pull" ? "Pull request" : thread.subject.type;
   return html`<div class="list-row">
     <a class="inline-link" href="${href}"><strong>${thread.subject.title}</strong></a>
-    <span>${kind} - ${formatDate(thread.updated_at)}</span>
+    <span>${kind} - ${timeEl(thread.updated_at)}</span>
     <form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/notifications/${thread.id}/read`)}">
       <button class="button" type="submit">Mark read</button>
     </form>
@@ -107,7 +107,7 @@ function activityRow(ctx: WebCtx, item: ActivityFeedItem): Html {
   return html`<div class="list-row activity-row" data-testid="activity-row">
     <strong>${displayLogin(item.activity.act_user?.login)}</strong>
     <span>${rendered.summary}${count}</span>
-    <small>${formatDate(item.activity.created)}</small>
+    <small>${timeEl(item.activity.created)}</small>
   </div>`;
 }
 

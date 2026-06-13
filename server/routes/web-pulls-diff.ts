@@ -9,7 +9,7 @@ import { splitUnifiedDiff } from "../diff-splitter.js";
 import type { ForgejoPull } from "../forgejo.js";
 import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
-import { displayLogin, formatDate, repoHref, type WebCtx } from "./web-context.js";
+import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
 import { html, type Html } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 
@@ -201,7 +201,7 @@ function renderInlineComment(comment: WebLineComment): Html {
     <td colspan="2">
       <div class="line-comment ${comment.outdated ? "outdated" : ""}">
         <strong>${comment.author}</strong>
-        <span>${comment.outdated ? "outdated" : formatDate(comment.createdAt)}</span>
+        <span>${comment.outdated ? "outdated" : timeEl(comment.createdAt)}</span>
         <p>${comment.body}</p>
       </div>
     </td>
