@@ -81,6 +81,26 @@ export function resolveWebRepoForAdmin(c: Context<AppEnv>): Promise<WebRepoResul
   return resolveWithMinRole(c, (role) => role === "admin");
 }
 
+// Higher-order wrappers that fold the resolve-then-check-ok preamble every web
+// handler shares. Register as `web.get(path, webRoute(async (c, ctx) => …))`:
+// the wrapper resolves the repo (404s a caller without the required role) and
+// then invokes the handler with the ready WebCtx, so handlers never repeat the
+// `if (!ctx.ok) return ctx.response` guard.
+type WebHandler = (c: Context<AppEnv>, ctx: WebCtx) => Response | Promise<Response>;
+
+function makeWebRoute(resolve: (c: Context<AppEnv>) => Promise<WebRepoResult>) {
+  return (handler: WebHandler) =>
+    async (c: Context<AppEnv>): Promise<Response> => {
+      const ctx = await resolve(c);
+      if (!ctx.ok) return ctx.response;
+      return handler(c, ctx);
+    };
+}
+
+export const webRoute = makeWebRoute(resolveWebRepo);
+export const webRouteForWrite = makeWebRoute(resolveWebRepoForWrite);
+export const webRouteForAdmin = makeWebRoute(resolveWebRepoForAdmin);
+
 export async function configReposForUser(c: Context<AppEnv>) {
   const userFj = c.get("fjUser");
   const repos = await listVisibleWorkspaceRepos(userFj);

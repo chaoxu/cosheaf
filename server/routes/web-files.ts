@@ -20,34 +20,25 @@ import {
   notFoundPage,
   redirect,
   repoHref,
-  resolveWebRepo,
-  resolveWebRepoForWrite,
   stringField,
   textField,
   urlPath,
   validBranchName,
+  webRoute,
+  webRouteForWrite,
   type WebCtx,
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
-import { branchOptions, repoPage } from "./web-page.js";
+import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo", webRoute(async (_c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
   const files = await repoFiles(fj, owner, repo, "main").catch(() => []);
   return htmlResponse(
-    repoPage({
-      title: `Files - ${repo}`,
-      owner,
-      repo,
-      active: "files",
-      user,
-      ws,
-      body: html`
+    repoPageShell(ctx, "files", `Files - ${repo}`, html`
         <div class="page-title compact">
           <div><p class="eyebrow">Branch</p><h1>main</h1></div>
           <div class="toolbar-actions">
@@ -60,28 +51,18 @@ web.get("/:owner/:repo", async (c) => {
           </div>
         </div>
         ${fileList(owner, repo, "main", files)}
-      `,
-    }),
+      `),
   );
-});
+}));
 
-web.get("/:owner/:repo/src/branch/*", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
   const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
   const files = await repoFiles(fj, owner, repo, resolved.branch);
   if (!resolved.path) {
     return htmlResponse(
-      repoPage({
-        title: `${repo}: ${resolved.branch}`,
-        owner,
-        repo,
-        active: "files",
-        user,
-        ws,
-        body: html`
+      repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
           <div class="page-title compact">
             <div><p class="eyebrow">Branch</p><h1>${resolved.branch}</h1></div>
             <div class="toolbar-actions">
@@ -95,8 +76,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
             </div>
           </div>
           ${fileList(owner, repo, resolved.branch, files)}
-        `,
-      }),
+        `),
     );
   }
   const rel = safeRel(resolved.path);
@@ -115,15 +95,7 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   return htmlResponse(
-    repoPage({
-      title: `${rel} - ${repo}`,
-      owner,
-      repo,
-      active: "files",
-      user,
-      ws,
-      readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: html`
+    repoPageShell(ctx, "files", `${rel} - ${repo}`, html`
         <div class="file-toolbar">
           <div>
             <p class="eyebrow">${resolved.branch}</p>
@@ -163,14 +135,11 @@ web.get("/:owner/:repo/src/branch/*", async (c) => {
           </div>
         </div>
         ${filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView })}
-      `,
-    }),
+      `, { readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
   );
-});
+}));
 
-web.post("/:owner/:repo/src/branch/*", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
   if (stringField(form.action) !== "delete") return badRequestPage(ctx.user, "Unsupported file action.");
   const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/src/branch/"));
@@ -188,22 +157,18 @@ web.post("/:owner/:repo/src/branch/*", async (c) => {
   });
   invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(resolved.branch)}`);
-});
+}));
 
-web.get("/:owner/:repo/raw/branch/*", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
   const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/raw/branch/"));
   if (!resolved?.path) return new Response("not found", { status: 404 });
   const rel = safeRel(resolved.path);
   if (!rel) return new Response("not found", { status: 404 });
   const content = await ctx.fj.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
   return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
-});
+}));
 
-web.get("/:owner/:repo/_edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const branch = editBranchFor(ctx.user, c.req.query("branch"));
   const rel = safeRel(c.req.query("path") || "new.md") ?? "new.md";
   const kind = fileKindForPath(rel);
@@ -219,14 +184,7 @@ web.get("/:owner/:repo/_edit", async (c) => {
     (await ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []))
       .some((candidate) => candidate.name === branch);
   return htmlResponse(
-    repoPage({
-      title: `Edit ${rel}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "files",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: kind === "markdown" ? html`
+    repoPageShell(ctx, "files", `Edit ${rel}`, kind === "markdown" ? html`
         <section class="edit-page">
           <div class="file-toolbar edit-titlebar">
             <div>
@@ -266,14 +224,11 @@ web.get("/:owner/:repo/_edit", async (c) => {
             </form>
           </noscript>
         </section>
-      ` : textEditPage(ctx, branch, rel, content),
-    }),
+      ` : textEditPage(ctx, branch, rel, content)),
   );
-});
+}));
 
-web.post("/:owner/:repo/_edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
   const branch = editBranchFor(ctx.user, stringField(form.branch));
   const rel = safeRel(stringField(form.path) ?? undefined);
@@ -290,38 +245,26 @@ web.post("/:owner/:repo/_edit", async (c) => {
     return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
   }
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
-});
+}));
 }
 
 export function registerBranchRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo/branches", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/branches", webRoute(async (_c, ctx) => {
   const [branches, pulls] = await Promise.all([
     ctx.fj.listBranches(ctx.owner, ctx.repo),
     ctx.fj.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
   ]);
   const openHeads = new Set(pulls.map((pull) => pull.head.ref));
   return htmlResponse(
-    repoPage({
-      title: `Branches - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "files",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: html`
+    repoPageShell(ctx, "files", `Branches - ${ctx.repo}`, html`
         <div class="page-title compact"><h1>Branches</h1></div>
         ${branchCreatePanel(ctx, branches)}
         ${branchList(ctx, branches, openHeads)}
-      `,
-    }),
+      `),
   );
-});
+}));
 
-web.post("/:owner/:repo/branches/new", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/branches/new", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
   const name = stringField(form.name);
   const base = stringField(form.base) ?? "main";
@@ -337,37 +280,26 @@ web.post("/:owner/:repo/branches/new", async (c) => {
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(name)}`);
-});
+}));
 
-web.post("/:owner/:repo/branches/delete", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/branches/delete", webRouteForWrite(async (c, ctx) => {
   const name = stringField((await c.req.parseBody()).name);
   if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
   await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, name);
   invalidateRepoTrees(ctx.owner, ctx.repo);
   return redirect(repoHref(ctx.owner, ctx.repo, "/branches"));
-});
+}));
 
-web.get("/:owner/:repo/commits/:sha", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
   const sha = c.req.param("sha");
-  if (!/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
+  if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
   const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch((err) => {
     if (err instanceof ForgejoError && err.status === 404) return null;
     throw err;
   });
   if (!commit) return notFoundPage(ctx.user, "Commit not found");
   return htmlResponse(
-    repoPage({
-      title: `${commit.sha.slice(0, 10)} - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "activity",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: html`
+    repoPageShell(ctx, "activity", `${commit.sha.slice(0, 10)} - ${ctx.repo}`, html`
         <div class="page-title compact">
           <div>
             <p class="eyebrow">Commit</p>
@@ -379,10 +311,9 @@ web.get("/:owner/:repo/commits/:sha", async (c) => {
           <p>${displayLogin(commit.commit.author?.name ?? commit.author?.login)} - ${formatDate(commit.commit.author?.date)}</p>
           <code>${commit.sha}</code>
         </div>
-      `,
-    }),
+      `),
   );
-});
+}));
 }
 
 async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {

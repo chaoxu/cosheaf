@@ -17,17 +17,17 @@ import {
   queryText,
   redirect,
   repoHref,
-  resolveWebRepo,
-  resolveWebRepoForWrite,
   stringField,
   stringFields,
   textField,
+  webRoute,
+  webRouteForWrite,
   type WebCtx,
   type WebListState,
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
-import { labelChip, labelChips, repoPage, selected, sortField, stateField } from "./web-page.js";
+import { labelChip, labelChips, repoPageShell, selected, sortField, stateField } from "./web-page.js";
 import {
   chatIssueReadOnlyPage,
   issueEditPage,
@@ -40,9 +40,7 @@ import {
 } from "./web-thread.js";
 
 export function registerIssueRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo/issues", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
   const filters = parseIssueListFilters(c);
   const [issues, labels, milestones] = await Promise.all([
     ctx.fj.listIssues(ctx.owner, ctx.repo, {
@@ -60,45 +58,25 @@ web.get("/:owner/:repo/issues", async (c) => {
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
   return htmlResponse(
-    repoPage({
-      title: `Issues - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "issues",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: html`
+    repoPageShell(ctx, "issues", `Issues - ${ctx.repo}`, html`
         <div class="page-title compact">
           <div><p class="eyebrow">${filters.state}</p><h1>Issues</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
         ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
-      `,
-    }),
+      `),
   );
-});
+}));
 
-web.get("/:owner/:repo/issues/new", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/issues/new", webRouteForWrite(async (_c, ctx) => {
   const labels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
   return htmlResponse(
-    repoPage({
-      title: `New issue - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "issues",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: issueCreatePage(ctx, labels),
-    }),
+    repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels)),
   );
-});
+}));
 
-web.post("/:owner/:repo/issues/new", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/new", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody({ all: true });
   const title = stringField(form.title);
   const body = textField(form.body) ?? "";
@@ -106,41 +84,23 @@ web.post("/:owner/:repo/issues/new", async (c) => {
   const labels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
   if (!title) {
     return htmlResponse(
-      repoPage({
-        title: `New issue - ${ctx.repo}`,
-        owner: ctx.owner,
-        repo: ctx.repo,
-        active: "issues",
-        user: ctx.user,
-        ws: ctx.ws,
-        body: issueCreatePage(ctx, labels, { title: "", body, labelIds, error: "Issue title is required." }),
-      }),
+      repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels, { title: "", body, labelIds, error: "Issue title is required." })),
       400,
     );
   }
   const validation = validateLabelSelection(labelIds, labels, []);
   if (!validation.ok) {
     return htmlResponse(
-      repoPage({
-        title: `New issue - ${ctx.repo}`,
-        owner: ctx.owner,
-        repo: ctx.repo,
-        active: "issues",
-        user: ctx.user,
-        ws: ctx.ws,
-        body: issueCreatePage(ctx, labels, { title, body, labelIds, error: validation.message }),
-      }),
+      repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels, { title, body, labelIds, error: validation.message })),
       400,
     );
   }
   const issue = await ctx.fj.createIssue(ctx.owner, ctx.repo, { title, body, labels: labelIds });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`));
-});
+}));
 
-web.get("/:owner/:repo/issues/:number", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const [issue, comments, timeline, dependencies, blocks, pinnedIssues] = await Promise.all([
@@ -163,15 +123,7 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
   return htmlResponse(
-    repoPage({
-      title: `#${issue.number} ${issue.title}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "issues",
-      user: ctx.user,
-      ws: ctx.ws,
-      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: html`
+    repoPageShell(ctx, "issues", `#${issue.number} ${issue.title}`, html`
         <article class="thread">
           <header class="thread-header">
             <span class="state ${issue.state}">${issue.state}</span>
@@ -213,14 +165,11 @@ web.get("/:owner/:repo/issues/:number", async (c) => {
               ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`,
           )}
         </article>
-      `,
-    }),
+      `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
   );
-});
+}));
 
-web.get("/:owner/:repo/issues/:number/edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
@@ -234,21 +183,11 @@ web.get("/:owner/:repo/issues/:number/edit", async (c) => {
     ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
   ]);
   return htmlResponse(
-    repoPage({
-      title: `Edit #${issue.number} - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "issues",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: issueEditPage(ctx, issue, allLabels, collaborators),
-    }),
+    repoPageShell(ctx, "issues", `Edit #${issue.number} - ${ctx.repo}`, issueEditPage(ctx, issue, allLabels, collaborators)),
   );
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -267,20 +206,16 @@ web.post("/:owner/:repo/issues/:number/edit", async (c) => {
   if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/labels", async (c) => {
+web.post("/:owner/:repo/issues/:number/labels", webRoute(async (c, ctx) => {
   // Label editing moved into the issue edit page; keep redirecting old form posts.
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}/edit`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/comments", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/comments", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (number) {
     const immutable = await rejectChatIssueMutation(ctx, number);
@@ -289,11 +224,9 @@ web.post("/:owner/:repo/issues/:number/comments", async (c) => {
   const body = stringField((await c.req.parseBody()).body);
   if (number && body) await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number ?? ""}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/comments/:id/edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
@@ -303,11 +236,9 @@ web.post("/:owner/:repo/issues/:number/comments/:id/edit", async (c) => {
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/comments/:id/delete", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/comments/:id/delete", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
@@ -315,11 +246,9 @@ web.post("/:owner/:repo/issues/:number/comments/:id/delete", async (c) => {
   if (immutable) return immutable;
   await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/pin", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/pin", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -330,11 +259,9 @@ web.post("/:owner/:repo/issues/:number/pin", async (c) => {
   else return badRequestPage(ctx.user, "Pinned state is required.");
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/dependencies", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -348,11 +275,9 @@ web.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
   else return badRequestPage(ctx.user, "Relation is required.");
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/dependencies/delete", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/dependencies/delete", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -366,11 +291,9 @@ web.post("/:owner/:repo/issues/:number/dependencies/delete", async (c) => {
   else return badRequestPage(ctx.user, "Relation is required.");
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 
-web.post("/:owner/:repo/issues/:number/state", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/issues/:number/state", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -380,7 +303,7 @@ web.post("/:owner/:repo/issues/:number/state", async (c) => {
   await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { state });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: state === "closed" ? "closed" : "reopened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
-});
+}));
 }
 
 type IssueListSort = "relevance" | "latest" | "oldest" | "recentupdate" | "leastupdate" | "mostcomment" | "leastcomment" | "nearduedate" | "farduedate";

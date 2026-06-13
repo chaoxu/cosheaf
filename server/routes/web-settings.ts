@@ -12,20 +12,18 @@ import {
   notFoundPage,
   redirect,
   repoHref,
-  resolveWebRepo,
-  resolveWebRepoForAdmin,
   stringField,
   textField,
+  webRoute,
+  webRouteForAdmin,
   type WebCtx,
 } from "./web-context.js";
 import { html, type Html } from "./web-html.js";
-import { labelChip, repoPage } from "./web-page.js";
+import { labelChip, repoPageShell } from "./web-page.js";
 import { pageShell } from "./web-shell.js";
 
 export function registerSettingsRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo/settings", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
   const isAdmin = ctx.ws.role === "admin";
   const [repo, protection, labels, milestones, collaborators] = await Promise.all([
     ctx.fj.getRepo(ctx.owner, ctx.repo).catch(() => null),
@@ -36,14 +34,7 @@ web.get("/:owner/:repo/settings", async (c) => {
   ]);
   const accessUpdated = c.req.query("access");
   return htmlResponse(
-    repoPage({
-      title: `Settings - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "settings",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: html`
+    repoPageShell(ctx, "settings", `Settings - ${ctx.repo}`, html`
         <div class="settings-page">
           <div class="page-title compact">
             <div>
@@ -74,24 +65,19 @@ web.get("/:owner/:repo/settings", async (c) => {
           ${accessSection(ctx, collaborators, accessUpdated)}
           ${dangerZoneSection(ctx)}
         </div>
-      `,
-    }),
+      `),
   );
-});
+}));
 
-web.post("/:owner/:repo/settings", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
   const approvals = Number(stringField((await c.req.parseBody()).required_approvals) ?? "1");
   const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
   if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
   else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
-});
+}));
 
-web.post("/:owner/:repo/settings/labels", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();
   const name = stringField(form.name);
   const color = (stringField(form.color) ?? "").replace(/^#/, "");
@@ -101,23 +87,18 @@ web.post("/:owner/:repo/settings/labels", async (c) => {
   if (!/^[0-9a-fA-F]{6}$/.test(color)) return badRequestPage(ctx.user, "Label color must be six hex digits.");
   await ctx.fj.createLabel(ctx.owner, ctx.repo, { name, color, description, exclusive });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
-});
+}));
 
-web.post("/:owner/:repo/settings/milestones", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/settings/milestones", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();
   const title = stringField(form.title);
   const description = textField(form.description) ?? "";
   if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
   await ctx.fj.createMilestone(ctx.owner, ctx.repo, { title, description });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
-});
+}));
 
-web.post("/:owner/:repo/settings/access", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
-
+web.post("/:owner/:repo/settings/access", webRouteForAdmin(async (c, ctx) => {
   const body = await c.req.parseBody();
   const username = stringField(body.username)?.trim();
   const role = stringField(body.role)?.trim();
@@ -136,13 +117,11 @@ web.post("/:owner/:repo/settings/access", async (c) => {
   });
   invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`${username} · ${role}`)}`);
-});
+}));
 
 // Repository metadata: description + visibility (private/public). Forgejo
 // PATCH /repos accepts a partial body; we send only the changed fields.
-web.post("/:owner/:repo/settings/meta", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();
   const description = textField(form.description) ?? "";
   const visibility = stringField(form.visibility);
@@ -151,11 +130,9 @@ web.post("/:owner/:repo/settings/meta", async (c) => {
     private: visibility === "private" ? true : visibility === "public" ? false : undefined,
   });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
-});
+}));
 
-web.post("/:owner/:repo/settings/access/remove", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/settings/access/remove", webRouteForAdmin(async (c, ctx) => {
   const username = stringField((await c.req.parseBody()).username)?.trim();
   if (!username) return badRequestPage(ctx.user, "Username is required.");
   try {
@@ -165,14 +142,12 @@ web.post("/:owner/:repo/settings/access/remove", async (c) => {
   }
   invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`removed ${username}`)}`);
-});
+}));
 
 // Repository deletion. Destructive and irreversible, so we re-check admin
 // against Forgejo (bypassing the role cache, mirroring requireAdminFresh) and
 // require the caller to re-type the full owner/repo name as confirmation.
-web.post("/:owner/:repo/settings/delete", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
   const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   const confirm = stringField((await c.req.parseBody()).confirm)?.trim();
@@ -181,7 +156,7 @@ web.post("/:owner/:repo/settings/delete", async (c) => {
   }
   await ctx.fj.deleteRepo(ctx.owner, ctx.repo);
   return redirect("/");
-});
+}));
 }
 
 function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Html {

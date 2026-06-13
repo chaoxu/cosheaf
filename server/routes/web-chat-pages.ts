@@ -23,15 +23,15 @@ import {
   positiveInt,
   redirect,
   repoHref,
-  resolveWebRepo,
-  resolveWebRepoForWrite,
   stringField,
   validBranchName,
+  webRoute,
+  webRouteForWrite,
   type WebCtx,
 } from "./web-context.js";
 import { emptyHtml, html, type Html, raw } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
-import { branchOptions, repoPage } from "./web-page.js";
+import { branchOptions, repoPageShell } from "./web-page.js";
 
 // Find the "chat" label id, creating it once if missing. Chats are issues
 // carrying this label, applied only by the chat "new" route.
@@ -81,23 +81,14 @@ function chatSidebar(
 }
 
 export function registerChatPageRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo/chat", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/chat", webRoute(async (c, ctx) => {
   const canStartChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
   const [chats, branches] = await Promise.all([
     listChats(ctx),
     canStartChat ? ctx.fj.listBranches(ctx.owner, ctx.repo) : Promise.resolve([]),
   ]);
   return htmlResponse(
-    repoPage({
-      title: `Chat - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "chat",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: html`
+    repoPageShell(ctx, "chat", `Chat - ${ctx.repo}`, html`
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role, canStartChat)}
           <section class="chat-main">
@@ -118,14 +109,11 @@ web.get("/:owner/:repo/chat", async (c) => {
             }
           </section>
         </div>
-      `,
-    }),
+      `),
   );
-});
+}));
 
-web.post("/:owner/:repo/chat/new", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/chat/new", webRouteForWrite(async (c, ctx) => {
   if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const form = await c.req.parseBody();
   const message = stringField(form.message);
@@ -143,11 +131,9 @@ web.post("/:owner/:repo/chat/new", async (c) => {
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
   runCoverifyChatReply(c.get("config"), { workspace: ctx.ws.slug, issue: issue.number });
   return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${issue.number}`));
-});
+}));
 
-web.get("/:owner/:repo/chat/:number", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/chat/:number", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
   const [issue, comments, chats] = await Promise.all([
@@ -170,15 +156,7 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
     turns.map(async (turn) => raw(renderChatTurn(turn, await renderMarkdownSurface(ctx, turn.body, { surface: "thread" })))),
   );
   return htmlResponse(
-    repoPage({
-      title: `${issue.title} - Chat`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "chat",
-      user: ctx.user,
-      ws: ctx.ws,
-      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: html`
+    repoPageShell(ctx, "chat", `${issue.title} - Chat`, html`
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, number, ctx.ws.role, canSendChat)}
           <section class="chat-main">
@@ -205,14 +183,11 @@ web.get("/:owner/:repo/chat/:number", async (c) => {
             }
           </section>
         </div>
-      `,
-    }),
+      `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
   );
-});
+}));
 
-web.post("/:owner/:repo/chat/:number/send", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/chat/:number/send", webRouteForWrite(async (c, ctx) => {
   if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
@@ -227,5 +202,5 @@ web.post("/:owner/:repo/chat/:number/send", async (c) => {
     runCoverifyChatReply(c.get("config"), { workspace: ctx.ws.slug, issue: number });
   }
   return redirect(repoHref(ctx.owner, ctx.repo, `/chat/${number}`));
-});
+}));
 }

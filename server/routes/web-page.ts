@@ -1,8 +1,10 @@
 import type { ForgejoBranch, ForgejoLabel } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
-import { repoHref, type WebListState } from "./web-context.js";
+import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { pageShell } from "./web-shell.js";
+
+export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
 
 const REPO_TABS = [
   ["files", "Files", ""],
@@ -14,11 +16,33 @@ const REPO_TABS = [
   ["settings", "Settings", "/settings"],
 ] as const;
 
+// Prefill repoPage's owner/repo/user/ws from a resolved WebCtx; handlers pass
+// only what actually varies (active tab, title, body, and optional reader
+// assets) instead of repeating the ctx spread at every call site.
+export function repoPageShell(
+  ctx: WebCtx,
+  active: RepoTab,
+  title: string,
+  body: Html,
+  opts: { readerAssets?: boolean } = {},
+): string {
+  return repoPage({
+    title,
+    body,
+    active,
+    owner: ctx.owner,
+    repo: ctx.repo,
+    user: ctx.user,
+    ws: ctx.ws,
+    readerAssets: opts.readerAssets,
+  });
+}
+
 export function repoPage(opts: {
   title: string;
   owner: string;
   repo: string;
-  active: "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
+  active: RepoTab;
   user: string;
   ws: WorkspaceContext;
   body: Html;

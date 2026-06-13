@@ -21,21 +21,21 @@ import {
   queryText,
   redirect,
   repoHref,
-  resolveWebRepo,
-  resolveWebRepoForAdmin,
-  resolveWebRepoForWrite,
   safeWebRedirect,
   stringField,
   stringFields,
   textField,
   urlPath,
+  webRoute,
+  webRouteForAdmin,
+  webRouteForWrite,
   type WebCtx,
   type WebListState,
 } from "./web-context.js";
 import { html, type Html } from "./web-html.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
-import { branchOptions, labelChips, repoPage, selected, sortField, stateField } from "./web-page.js";
+import { branchOptions, labelChips, repoPageShell, selected, sortField, stateField } from "./web-page.js";
 import {
   labelSelectionPatch,
   labelsRailPanel,
@@ -48,9 +48,7 @@ import {
 } from "./web-thread.js";
 
 export function registerPullRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo/pulls", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
   const filters = parsePullListFilters(c);
   const [pulls, labels, milestones] = await Promise.all([
     ctx.fj.listPulls(ctx.owner, ctx.repo, {
@@ -64,14 +62,11 @@ web.get("/:owner/:repo/pulls", async (c) => {
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
   return htmlResponse(
-    repoPage({
-      title: `Pull requests - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "pulls",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: html`
+    repoPageShell(
+      ctx,
+      "pulls",
+      `Pull requests - ${ctx.repo}`,
+      html`
         <div class="page-title compact">
           <div><p class="eyebrow">${filters.state}</p><h1>Pull requests</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New pull request</a>`}
@@ -79,32 +74,20 @@ web.get("/:owner/:repo/pulls", async (c) => {
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
         ${pullList(ctx.owner, ctx.repo, pulls, "No matching pull requests.")}
       `,
-    }),
+    ),
   );
-});
+}));
 
-web.get("/:owner/:repo/pulls/new", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
   const head = stringField(c.req.query("head"));
   const base = stringField(c.req.query("base")) ?? "main";
   return htmlResponse(
-    repoPage({
-      title: `New pull request - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "pulls",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: pullCreatePage(ctx, branches, { head, base }),
-    }),
+    repoPageShell(ctx, "pulls", `New pull request - ${ctx.repo}`, pullCreatePage(ctx, branches, { head, base })),
   );
-});
+}));
 
-web.post("/:owner/:repo/pulls/new", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
   const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
   const head = stringField(form.head);
@@ -127,15 +110,7 @@ web.post("/:owner/:repo/pulls/new", async (c) => {
               : null;
   if (error) {
     return htmlResponse(
-      repoPage({
-        title: `New pull request - ${ctx.repo}`,
-        owner: ctx.owner,
-        repo: ctx.repo,
-        active: "pulls",
-        user: ctx.user,
-        ws: ctx.ws,
-        body: pullCreatePage(ctx, branches, { ...values, error }),
-      }),
+      repoPageShell(ctx, "pulls", `New pull request - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error })),
       400,
     );
   }
@@ -147,25 +122,15 @@ web.post("/:owner/:repo/pulls/new", async (c) => {
   } catch (err) {
     if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
       return htmlResponse(
-        repoPage({
-          title: `New pull request - ${ctx.repo}`,
-          owner: ctx.owner,
-          repo: ctx.repo,
-          active: "pulls",
-          user: ctx.user,
-          ws: ctx.ws,
-          body: pullCreatePage(ctx, branches, { ...values, error: err.message }),
-        }),
+        repoPageShell(ctx, "pulls", `New pull request - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error: err.message })),
         err.status,
       );
     }
     throw err;
   }
-});
+}));
 
-web.get("/:owner/:repo/pulls/:number", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const [reviews, comments, timeline, commits, availableReviewers] = await Promise.all([
@@ -178,15 +143,11 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
   const body = await renderMarkdownSurface(ctx, pull.body ?? "", { surface: "thread" });
   const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
   return htmlResponse(
-    repoPage({
-      title: `#${pull.number} ${pull.title}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "pulls",
-      user: ctx.user,
-      ws: ctx.ws,
-      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-      body: html`
+    repoPageShell(
+      ctx,
+      "pulls",
+      `#${pull.number} ${pull.title}`,
+      html`
         <article class="thread">
           <header class="thread-header">
             <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
@@ -220,33 +181,21 @@ web.get("/:owner/:repo/pulls/:number", async (c) => {
           )}
         </article>
       `,
-    }),
+    ),
   );
-});
+}));
 
-web.get("/:owner/:repo/pulls/:number/edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
   const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
   return htmlResponse(
-    repoPage({
-      title: `Edit #${pull.number} - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "pulls",
-      user: ctx.user,
-      ws: ctx.ws,
-      body: pullEditPage(ctx, pull, allLabels),
-    }),
+    repoPageShell(ctx, "pulls", `Edit #${pull.number} - ${ctx.repo}`, pullEditPage(ctx, pull, allLabels)),
   );
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -258,20 +207,16 @@ web.post("/:owner/:repo/pulls/:number/edit", async (c) => {
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { title, body, labels: labelPatch.labels });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/labels", async (c) => {
+web.post("/:owner/:repo/pulls/:number/labels", webRoute(async (c, ctx) => {
   // Label editing moved into the pull request edit page; keep redirecting old form posts.
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Pull request not found");
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${number}/edit`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/state", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/state", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.merged) return forbiddenPage(ctx.user);
@@ -280,11 +225,9 @@ web.post("/:owner/:repo/pulls/:number/state", async (c) => {
   await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { state });
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: state === "closed" ? "closed" : "reopened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/review-requests", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/review-requests", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -293,11 +236,9 @@ web.post("/:owner/:repo/pulls/:number/review-requests", async (c) => {
   if (reviewers.length === 0) return badRequestPage(ctx.user, "At least one reviewer is required.");
   await ctx.fj.createPullReviewRequests(ctx.owner, ctx.repo, pull.number, reviewers);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/review-requests/delete", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/review-requests/delete", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
@@ -305,11 +246,9 @@ web.post("/:owner/:repo/pulls/:number/review-requests/delete", async (c) => {
   if (!reviewer) return badRequestPage(ctx.user, "Reviewer is required.");
   await ctx.fj.deletePullReviewRequests(ctx.owner, ctx.repo, pull.number, [reviewer]);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/reviews", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
@@ -321,11 +260,9 @@ web.post("/:owner/:repo/pulls/:number/reviews", async (c) => {
   }
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/comments/:id/edit", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
@@ -333,22 +270,18 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/edit", async (c) => {
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/comments/:id/delete", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const reviewId = positiveInt(stringField((await c.req.parseBody()).review_id) ?? undefined);
   if (!pull || !id || !reviewId) return notFoundPage(ctx.user, "Comment not found");
   await ctx.fj.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
-  const ctx = await resolveWebRepoForWrite(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/comments", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.user?.login === ctx.user || pull.state === "closed") return forbiddenPage(ctx.user);
@@ -375,11 +308,9 @@ web.post("/:owner/:repo/pulls/:number/comments", async (c) => {
   return redirect(
     `${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}?file=${encodeURIComponent(path)}&mode=${mode}&shape=${shape}`,
   );
-});
+}));
 
-web.post("/:owner/:repo/pulls/:number/merge", async (c) => {
-  const ctx = await resolveWebRepoForAdmin(c);
-  if (!ctx.ok) return ctx.response;
+web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   await mergePullWithRetry(() =>
@@ -390,11 +321,9 @@ web.post("/:owner/:repo/pulls/:number/merge", async (c) => {
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
-});
+}));
 
-web.get("/:owner/:repo/pulls/:number/files", async (c) => {
-  const ctx = await resolveWebRepo(c);
-  if (!ctx.ok) return ctx.response;
+web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const [files, allComments] = await Promise.all([
@@ -409,15 +338,11 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
   const fileComments = file ? mapLineComments(file, allComments) : [];
   return htmlResponse(
-    repoPage({
-      title: `Files #${pull.number} - ${ctx.repo}`,
-      owner: ctx.owner,
-      repo: ctx.repo,
-      active: "pulls",
-      user: ctx.user,
-      ws: ctx.ws,
-      readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && mode === "rich",
-      body: html`
+    repoPageShell(
+      ctx,
+      "pulls",
+      `Files #${pull.number} - ${ctx.repo}`,
+      html`
         <header class="thread-header">
           <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
           <div class="thread-title-row">
@@ -460,9 +385,10 @@ web.get("/:owner/:repo/pulls/:number/files", async (c) => {
           </section>
         </div>
       `,
-    }),
+      { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && mode === "rich" },
+    ),
   );
-});
+}));
 }
 
 async function pullForParam(ctx: WebCtx, raw: string | undefined): Promise<ForgejoPull | null> {
