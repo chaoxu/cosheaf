@@ -13,7 +13,7 @@ import { registerChatPageRoutes } from "./web-chat-pages.js";
 import { badRequestPage, configReposForUser, htmlResponse, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
-import { userPreferencesSection, userPreferencesScript } from "./web-page.js";
+import { userPreferencesSection, userPreferencesScript, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
 import { html } from "./web-html.js";
@@ -106,6 +106,9 @@ web.get("/", async (c) => {
 web.get("/account/settings", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
+  const me = await c.get("fjUser").getCurrentUser();
+  const saved = c.req.query("saved") === "1";
+  const error = c.req.query("error") ?? undefined;
   return htmlResponse(
     pageShell({
       title: "Account settings",
@@ -121,6 +124,7 @@ web.get("/account/settings", async (c) => {
                 <h1>Settings</h1>
               </div>
             </div>
+            ${userProfileSection(me, { saved, error })}
             ${userPreferencesSection(auth.user.username)}
           </div>
         </main>
@@ -128,6 +132,27 @@ web.get("/account/settings", async (c) => {
       `,
     }),
   );
+});
+
+web.post("/account/settings", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const form = await c.req.parseBody();
+  // Forgejo treats omitted keys as "leave unchanged" and empty strings as
+  // "clear", which is exactly the form's semantics: every field is always
+  // submitted, blank means cleared.
+  const patch = {
+    full_name: (stringField(form.full_name) ?? "").trim(),
+    description: (stringField(form.description) ?? "").trim(),
+    website: (stringField(form.website) ?? "").trim(),
+    location: (stringField(form.location) ?? "").trim(),
+  };
+  try {
+    await c.get("fjUser").editUserSettings(patch);
+  } catch (err) {
+    return redirect(`/account/settings?error=${encodeURIComponent(`Could not save profile: ${(err as Error).message}`)}`);
+  }
+  return redirect("/account/settings?saved=1");
 });
 
 web.get("/new", async (c) => {

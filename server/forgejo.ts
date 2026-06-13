@@ -183,6 +183,17 @@ export class Forgejo {
     return this.req<ForgejoUser>("/api/v1/user");
   }
 
+  // Edit the authenticated user's own profile (the cosheaf PAT carries
+  // write:user). Empty strings clear a field; only provided keys are sent.
+  async editUserSettings(
+    patch: { full_name?: string; description?: string; website?: string; location?: string },
+  ): Promise<ForgejoUser> {
+    return this.req<ForgejoUser>("/api/v1/user/settings", {
+      method: "PATCH",
+      body: patch,
+    });
+  }
+
   async getUserByName(username: string): Promise<ForgejoUser | null> {
     return this.reqOpt<ForgejoUser>(`/api/v1/users/${encodeURIComponent(username)}`);
   }

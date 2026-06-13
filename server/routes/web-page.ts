@@ -1,4 +1,4 @@
-import type { ForgejoBranch, ForgejoLabel } from "../forgejo-types.js";
+import type { ForgejoBranch, ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
@@ -118,6 +118,50 @@ export function userPreferencesSection(user: string): Html {
 
 export function userPreferencesScript(): Html {
   return html`<script src="/cosheaf-preferences.js" defer></script>`;
+}
+
+// Profile editor backed by Forgejo's /user/settings. Username and email are
+// shown read-only (identity is owned by the forge); the editable fields are
+// the same ones Forgejo exposes on a user profile. `saved` toggles the
+// post-submit confirmation; `error` surfaces a failed save.
+export function userProfileSection(me: ForgejoUser, opts: { saved?: boolean; error?: string } = {}): Html {
+  return html`<section class="settings-section" data-testid="settings-user-profile">
+    <div class="settings-section-header">
+      <h2>Profile</h2>
+      <p>Your public profile on Cosheaf. Stored on the forge under your account.</p>
+    </div>
+    <form class="settings-form" method="post" action="/account/settings" data-testid="profile-form">
+      <label class="settings-row">
+        <span>Username</span>
+        <input value="${me.login}" readonly disabled>
+      </label>
+      <label class="settings-row">
+        <span>Email</span>
+        <input value="${me.email ?? ""}" readonly disabled>
+      </label>
+      <label class="settings-row">
+        <span>Display name</span>
+        <input name="full_name" value="${me.full_name ?? ""}" data-testid="profile-full-name" placeholder="Optional">
+      </label>
+      <label class="settings-row">
+        <span>Bio</span>
+        <textarea name="description" data-testid="profile-description" rows="3" placeholder="Optional">${me.description ?? ""}</textarea>
+      </label>
+      <label class="settings-row">
+        <span>Website</span>
+        <input name="website" value="${me.website ?? ""}" data-testid="profile-website" placeholder="https://">
+      </label>
+      <label class="settings-row">
+        <span>Location</span>
+        <input name="location" value="${me.location ?? ""}" data-testid="profile-location" placeholder="Optional">
+      </label>
+      <div class="settings-actions">
+        <button class="button primary" type="submit" data-testid="profile-submit">Save profile</button>
+        ${opts.saved ? html`<p class="muted" data-testid="profile-saved">Saved.</p>` : emptyHtml}
+        ${opts.error ? html`<p class="muted" data-testid="profile-error">${opts.error}</p>` : emptyHtml}
+      </div>
+    </form>
+  </section>`;
 }
 
 // Inline open · closed · all text toggles. Submit buttons (not links) so the

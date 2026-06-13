@@ -102,6 +102,9 @@ export interface ForgejoUser {
   login: string;
   full_name?: string;
   email?: string;
+  description?: string;
+  website?: string;
+  location?: string;
   active?: boolean;
   is_admin?: boolean;
 }
