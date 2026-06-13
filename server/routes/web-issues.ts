@@ -1,6 +1,6 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { ForgejoError } from "../forgejo.js";
+import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import { validateLabelSelection } from "./label-utils.js";
@@ -104,10 +104,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const [issue, comments, timeline, dependencies, blocks, pinnedIssues] = await Promise.all([
-    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
-      if (err instanceof ForgejoError && err.status === 404) return null;
-      throw err;
-    }),
+    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null)),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.fj.listIssueDependencies(ctx.owner, ctx.repo, number).catch(() => []),
@@ -172,10 +169,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
 web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
-    if (err instanceof ForgejoError && err.status === 404) return null;
-    throw err;
-  });
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
   const [allLabels, collaborators] = await Promise.all([

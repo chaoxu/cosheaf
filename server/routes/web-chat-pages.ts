@@ -1,7 +1,8 @@
 import type { Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js";
-import { type Forgejo, ForgejoError } from "../forgejo.js";
+import type { Forgejo } from "../forgejo.js";
+import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoIssue } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import {
@@ -137,10 +138,7 @@ web.get("/:owner/:repo/chat/:number", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
   const [issue, comments, chats] = await Promise.all([
-    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
-      if (err instanceof ForgejoError && err.status === 404) return null;
-      throw err;
-    }),
+    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null)),
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
     listChats(ctx),
   ]);

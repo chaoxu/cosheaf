@@ -1,4 +1,5 @@
-import { ForgejoError, type ForgejoPull } from "../forgejo.js";
+import type { ForgejoPull } from "../forgejo.js";
+import { onForgejo404 } from "../forgejo-errors.js";
 import type {
   ForgejoCommit,
   ForgejoIssue,
@@ -65,10 +66,7 @@ export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
 }
 
 export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<Response | null> {
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch((err) => {
-    if (err instanceof ForgejoError && err.status === 404) return null;
-    throw err;
-  });
+  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : null;
 }

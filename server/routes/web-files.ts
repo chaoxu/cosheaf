@@ -4,6 +4,7 @@ import { type FileKind, fileKindForPath, fileKindLabel } from "../../shared/file
 import { resolveBranchPath } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
+import { is404, onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { deletePage, planIndexPage } from "../indexer.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
@@ -81,10 +82,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   }
   const rel = safeRel(resolved.path);
   if (!rel) return notFoundPage(user, "File not found");
-  const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch((err) => {
-    if (err instanceof ForgejoError && err.status === 404) return null;
-    throw err;
-  });
+  const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch(onForgejo404(null));
   if (!meta) return notFoundPage(user, "File not found");
   const kind = fileKindForPath(rel);
   const sourceView = c.req.query("view") === "source";
@@ -174,7 +172,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const kind = fileKindForPath(rel);
   if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
   const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, rel).catch(async (err) => {
-    if (err instanceof ForgejoError && err.status === 404) {
+    if (is404(err)) {
       return ctx.fj.getRawFile(ctx.owner, ctx.repo, "main", rel).catch(() => "");
     }
     throw err;
@@ -293,10 +291,7 @@ web.post("/:owner/:repo/branches/delete", webRouteForWrite(async (c, ctx) => {
 web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
   const sha = c.req.param("sha");
   if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
-  const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch((err) => {
-    if (err instanceof ForgejoError && err.status === 404) return null;
-    throw err;
-  });
+  const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch(onForgejo404(null));
   if (!commit) return notFoundPage(ctx.user, "Commit not found");
   return htmlResponse(
     repoPageShell(ctx, "activity", `${commit.sha.slice(0, 10)} - ${ctx.repo}`, html`
