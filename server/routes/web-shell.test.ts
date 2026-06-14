@@ -1,0 +1,49 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+// Narrow source cross-check (allowed per AGENTS.md: regex over source text in a
+// test). A page island only mounts in production if THREE things agree:
+//   1. web-shell.ts references its entry id via viteEntryAssets("src/cosheaf/…")
+//   2. vite.config.ts lists that id in rollupOptions.input
+//   3. the built manifest marks it isEntry:true
+// Drift between (1) and (2) yields a silent emptyHtml island in prod with no
+// 4xx to catch it — exactly the failure this test exists to make loud.
+
+const repoRoot = path.join(__dirname, "..", "..");
+const read = (rel: string): string => readFileSync(path.join(repoRoot, rel), "utf8");
+
+function webShellEntryIds(): string[] {
+  const src = read("server/routes/web-shell.ts");
+  return [...src.matchAll(/viteEntryAssets\("(src\/cosheaf\/[^"]+)"\)/g)].map((m) => m[1]).sort();
+}
+
+function viteInputEntryIds(): string[] {
+  const src = read("vite.config.ts");
+  const inputBlock = src.match(/input:\s*\{([\s\S]*?)\n\s*\},/)?.[1] ?? "";
+  return [...inputBlock.matchAll(/"(src\/cosheaf\/[^"]+)"/g)].map((m) => m[1]).sort();
+}
+
+describe("vite island wiring stays in lockstep", () => {
+  it("finds the known island entry ids in web-shell.ts", () => {
+    // Guards the regex itself against silently matching nothing.
+    expect(webShellEntryIds()).toEqual([
+      "src/cosheaf/web-comment-editor.tsx",
+      "src/cosheaf/web-editor.tsx",
+      "src/cosheaf/web-reader.ts",
+    ]);
+  });
+
+  it("every web-shell entry id is declared as a vite rollup input", () => {
+    expect(webShellEntryIds()).toEqual(viteInputEntryIds());
+  });
+
+  it("the built manifest, when present, marks each entry id isEntry:true", () => {
+    const manifestPath = path.join(repoRoot, "dist/.vite/manifest.json");
+    if (!existsSync(manifestPath)) return; // no build yet — the source cross-check above is the guard
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, { isEntry?: boolean }>;
+    for (const id of webShellEntryIds()) {
+      expect(manifest[id]?.isEntry, `manifest must mark ${id} as an entry`).toBe(true);
+    }
+  });
+});

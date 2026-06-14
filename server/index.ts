@@ -21,6 +21,7 @@ import { webhooks } from "./routes/webhooks.js";
 import { web } from "./routes/web.js";
 import { gitProxy } from "./routes/git-proxy.js";
 import { contentTypeForPath } from "./content-type.js";
+import { listPublicAssetPaths } from "./static-assets.js";
 
 const config = loadConfig();
 const db = getDb(config);
@@ -61,7 +62,7 @@ app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
 const publicDir = path.resolve(process.cwd(), "public");
-const publicAssetPaths = new Set(["/cosheaf-web.css", "/cosheaf-preferences.js", "/cosheaf-select.js", "/cosheaf-pr-diff-defaults.js", "/cosheaf-confirm.js", "/cosheaf-inbox.js", "/cosheaf-notifications.js", "/cosheaf-mode.js", "/cosheaf-avatar.js", "/favicon.svg"]);
+const publicAssetPaths = new Set(listPublicAssetPaths(publicDir));
 const coflatEditorDistDir = path.dirname(
   requireResolve("@chaoxu/coflat/style.css"),
 );
