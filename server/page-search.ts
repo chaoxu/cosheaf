@@ -17,14 +17,15 @@ export interface PageSearchResult {
 
 // path → page title for the workspace's indexed `.md` pages (frontmatter title
 // or body-extracted), so the file list can show titles instead of bare
-// filenames (#132). Sourced from the same `notes_fts` sidecar as search; only
-// `main`-indexed pages have entries, so callers fall back to the filename.
+// filenames (#132). Read from the indexed `doc_map` pages table (forgejo_id is
+// the path); the sidecar mirrors `main` only, so callers pass it for the main
+// view and fall back to the filename elsewhere.
 export function workspacePageTitles(
   db: Database.Database,
   workspaceSlug: string,
 ): Map<string, string> {
   const rows = db
-    .prepare("SELECT path, title FROM notes_fts WHERE workspace_slug = ?")
+    .prepare("SELECT forgejo_id AS path, title FROM doc_map WHERE workspace_slug = ?")
     .all(workspaceSlug) as Array<{ path: string; title: string | null }>;
   const titles = new Map<string, string>();
   for (const row of rows) {

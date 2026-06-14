@@ -124,7 +124,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               }
             </div>
           </div>
-          ${fileList(owner, repo, resolved.branch, files, workspacePageTitles(ctx.db, ws.slug))}
+          ${fileList(owner, repo, resolved.branch, files, resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined)}
         `, { sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null)] }),
     );
   }
@@ -696,7 +696,7 @@ function fileList(owner: string, repo: string, branch: string, files: ForgejoTre
     const title = kind === "markdown" ? titles?.get(file.path) : undefined;
     if (title) {
       return html`<a class="list-row page-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
-          <span class="list-row-main"><strong>${title}</strong><small class="muted">${file.path}</small></span>
+          <span class="list-row-main"><strong>${title}</strong><small>${file.path}</small></span>
         </a>`;
     }
     return html`<a class="list-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
