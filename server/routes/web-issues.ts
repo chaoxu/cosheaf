@@ -31,10 +31,10 @@ import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, s
 import { webCommentEditorAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
+  dependenciesPanel,
   issueEditPage,
-  issueRelationsPanel,
   labelSelectionPatch,
-  labelsRailPanel,
+  labelsPanel,
   listRowSide,
   rejectChatIssueMutation,
   renderIssueTimeline,
@@ -138,8 +138,10 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
     }
     <span id="thread-bottom"></span>
     ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}`;
-  const rail = html`${labelsRailPanel({ ctx, current: issue.labels, allLabels, action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`) })}
-    ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`;
+  const railPanels = [
+    labelsPanel({ ctx, current: issue.labels, allLabels, action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`) }),
+    ...(chatBackedIssue ? [] : [dependenciesPanel(ctx, issue, dependencies, blocks)]),
+  ];
   return htmlResponse(
     repoPageShell(ctx, "issues", `#${issue.number} ${issue.title}`, html`
         <article class="thread">
@@ -166,7 +168,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
             <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${displayLogin(issue.user?.login)} - ${timeEl(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
-          ${threadLayout(main, rail)}
+          ${threadLayout(main, railPanels)}
         </article>
       `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
   );

@@ -47,13 +47,13 @@ import {
 import { USERNAME_DATALIST_ID, branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
 import {
   labelSelectionPatch,
-  labelsRailPanel,
+  labelsPanel,
   listRowSide,
   pullEditPage,
   pullStateForm,
   renderPullTimeline,
   reviewForms,
-  reviewRequestPanel,
+  reviewersPanel,
   threadLayout,
   threadParticipantsBar,
 } from "./web-thread.js";
@@ -203,8 +203,10 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
               ${reviewForms(ctx, pull)}
               <span id="thread-bottom"></span>
               ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}`,
-            html`${labelsRailPanel({ ctx, current: pull.labels ?? [], allLabels, action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`) })}
-              ${reviewRequestPanel(ctx, pull, availableReviewers)}`,
+            [
+              labelsPanel({ ctx, current: pull.labels ?? [], allLabels, action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`) }),
+              reviewersPanel(ctx, pull, availableReviewers),
+            ],
           )}
         </article>
       `,

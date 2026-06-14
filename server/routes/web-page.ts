@@ -2,6 +2,7 @@ import type { ForgejoBranch, ForgejoLabel, ForgejoUser } from "../forgejo-types.
 import type { WorkspaceContext } from "../types.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
+import { type Panel, renderRegion } from "./web-panels.js";
 import { pageShell } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
@@ -45,7 +46,7 @@ export function repoPageShell(
   active: RepoTab,
   title: string,
   body: Html,
-  opts: { readerAssets?: boolean; sidebarExtra?: Html } = {},
+  opts: { readerAssets?: boolean; sidebarPanels?: readonly Panel[] } = {},
 ): string {
   return repoPage({
     title,
@@ -56,7 +57,7 @@ export function repoPageShell(
     user: ctx.user,
     ws: ctx.ws,
     readerAssets: opts.readerAssets,
-    sidebarExtra: opts.sidebarExtra,
+    sidebarPanels: opts.sidebarPanels,
   });
 }
 
@@ -69,9 +70,9 @@ export function repoPage(opts: {
   ws: WorkspaceContext;
   body: Html;
   readerAssets?: boolean;
-  // Optional content rendered under the repo tabs in the left sidebar — used by
-  // the files routes for the branch file tree (#119); other tabs leave it unset.
-  sidebarExtra?: Html;
+  // Portable panels rendered into the left-sidebar region under the repo tabs
+  // (#119 file tree via the #120 panel seam); other tabs leave it unset.
+  sidebarPanels?: readonly Panel[];
 }): string {
   const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix));
   const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
@@ -90,7 +91,7 @@ export function repoPage(opts: {
         <span class="role">${opts.ws.role}</span>
       </div>
       <nav class="repo-tabs">${nav}</nav>
-      ${opts.sidebarExtra ?? emptyHtml}`,
+      ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
       { label: opts.owner },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo) },

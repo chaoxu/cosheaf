@@ -32,6 +32,7 @@ import {
   type WebCtx,
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
+import { type Panel, panel } from "./web-panels.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
@@ -57,7 +58,7 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
           </div>
         </div>
         ${fileList(owner, repo, "main", files)}
-      `, { sidebarExtra: fileTreeSidebar(owner, repo, "main", files, null) }),
+      `, { sidebarPanels: [fileTreePanel(owner, repo, "main", files, null)] }),
   );
 }));
 
@@ -124,7 +125,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             </div>
           </div>
           ${fileList(owner, repo, resolved.branch, files)}
-        `, { sidebarExtra: fileTreeSidebar(owner, repo, resolved.branch, files, null) }),
+        `, { sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null)] }),
     );
   }
   const rel = safeRel(resolved.path);
@@ -195,7 +196,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
         ${docBody}
       `, {
         readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarExtra: fileTreeSidebar(owner, repo, resolved.branch, files, rel),
+        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel)],
       }),
   );
 }));
@@ -677,6 +678,13 @@ function fileTreeSidebar(owner: string, repo: string, branch: string, files: rea
     <div class="file-tree-head">Files</div>
     ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel)}
   </nav>`;
+}
+
+// Portable Panel unit (#120) for the branch file tree. The panel owns only its
+// own <nav class="file-tree">; the host page places it into a region (the left
+// sidebar today), so it could move to another region unchanged.
+export function fileTreePanel(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null): Panel {
+  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel));
 }
 
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): Html {
