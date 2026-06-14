@@ -94,9 +94,11 @@ web.get("/", async (c) => {
               ? html`<div class="empty">No repositories available.</div>`
               : repos.map(
                   (repo) => html`
-                  <a class="list-row" href="${repoHref(repo.owner, repo.name)}">
-                    <strong>${repo.full_name}</strong>
-                    <span>${repo.description ?? ""}</span>
+                  <a class="list-row repo-row" href="${repoHref(repo.owner, repo.name)}">
+                    <span class="repo-row-main">
+                      <strong class="ws-slug">${repo.full_name}</strong>
+                      ${repo.description ? html`<span class="ws-title">${repo.description}</span>` : emptyHtml}
+                    </span>
                     <small>${repo.private ? "private" : "public"} · ${repo.role}</small>
                   </a>
                 `,

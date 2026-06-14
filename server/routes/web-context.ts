@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
-import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat } from "../middleware.js";
+import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { Role } from "../../shared/roles.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
@@ -17,6 +17,10 @@ export interface WebCtx {
   fj: Forgejo;
   ws: WorkspaceContext;
   db: Database.Database;
+  // The workspace's display title (Forgejo repo description), or "" when none.
+  // Drives the Read-mode workspace identity in the chrome (#147); the chrome
+  // falls back to the owner/repo slug when empty.
+  wsTitle: string;
 }
 
 export type WebRepoResult = { ok: true } & WebCtx | { ok: false; response: Response };
@@ -62,7 +66,8 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
-  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db") };
+  const wsTitle = await resolveWorkspaceTitle(fj, owner, repo);
+  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db"), wsTitle };
 }
 
 // resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the

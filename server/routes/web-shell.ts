@@ -3,7 +3,10 @@ import path from "node:path";
 import { avatarChip } from "./avatar.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
-export type StatusCrumb = { label: string; href?: string };
+// A breadcrumb segment. `wsTitle` carries the workspace's Read-mode title
+// alongside the slug `label`; `cls` marks the owner segment so Read mode can
+// hide it and surface the title instead (#147). Both are unset for plain crumbs.
+export type StatusCrumb = { label: string; href?: string; cls?: string; wsTitle?: string };
 
 export function pageShell(opts: {
   title: string;
@@ -92,13 +95,21 @@ function appStatusbar(path: StatusCrumb[] | undefined): Html {
   const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
     html`<a class="status-home" href="/" aria-label="Home" title="Home">⌂</a>`,
-    ...(path ?? []).map((segment) =>
-      segment.href
-        ? html`<a href="${segment.href}">${segment.label}</a>`
-        : html`<span>${segment.label}</span>`,
-    ),
+    ...(path ?? []).map(renderCrumb),
   ].flatMap((crumb, i) => (i === 0 ? [crumb] : [sep, crumb]));
   return html`<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div></footer>`;
+}
+
+function renderCrumb(segment: StatusCrumb): Html {
+  // A workspace crumb carries both the slug label and the Read-mode title; CSS
+  // swaps which is shown by mode. Plain crumbs render just their label.
+  const inner = segment.wsTitle
+    ? html`<span class="status-slug">${segment.label}</span><span class="status-title">${segment.wsTitle}</span>`
+    : segment.label;
+  const cls = segment.cls ? html` class="${segment.cls}"` : emptyHtml;
+  return segment.href
+    ? html`<a${cls} href="${segment.href}">${inner}</a>`
+    : html`<span${cls}>${inner}</span>`;
 }
 
 export function webEditorAssets(): Html {

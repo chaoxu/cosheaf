@@ -56,6 +56,7 @@ export function repoPageShell(
     repo: ctx.repo,
     user: ctx.user,
     ws: ctx.ws,
+    wsTitle: ctx.wsTitle,
     readerAssets: opts.readerAssets,
     sidebarPanels: opts.sidebarPanels,
     statusExtra: opts.statusExtra,
@@ -69,6 +70,9 @@ export function repoPage(opts: {
   active: RepoTab;
   user: string;
   ws: WorkspaceContext;
+  // Workspace title (Forgejo repo description) for the Read-mode identity (#147);
+  // "" falls back to the owner/repo slug in both the sidebar chip and breadcrumb.
+  wsTitle: string;
   body: Html;
   readerAssets?: boolean;
   // Portable panels rendered into the left-sidebar region under the repo tabs
@@ -93,14 +97,16 @@ export function repoPage(opts: {
         ${notificationsNavLink(false)}
       </nav>
       <div class="sidebar-workspace">
-        <a href="${repoHref(opts.owner, opts.repo)}">${opts.owner}/${opts.repo}</a>
+        <a href="${repoHref(opts.owner, opts.repo)}">${workspaceChipIdent(opts.owner, opts.repo, opts.wsTitle)}</a>
         <span class="role">${opts.ws.role}</span>
       </div>
       <nav class="repo-tabs">${nav}</nav>
       ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
-      { label: opts.owner },
-      { label: opts.repo, href: repoHref(opts.owner, opts.repo) },
+      // In Read mode the owner crumb hides and the repo crumb surfaces the
+      // workspace title (#147); with no title these stay plain owner/repo.
+      { label: opts.owner, cls: opts.wsTitle ? "status-owner" : undefined },
+      { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
       { label: activeLabel.toLowerCase() },
       ...(opts.statusExtra ?? []),
     ],
@@ -110,6 +116,16 @@ export function repoPage(opts: {
       </main>
     `,
   });
+}
+
+// Sidebar workspace identity (#147). With a title we render both the title and
+// the owner/repo slug; CSS shows the slug in Build mode and the title (slug
+// demoted to a muted subtitle) in Read mode. With no title the slug alone shows
+// in both modes (marked --only so Read mode doesn't demote it to nothing).
+function workspaceChipIdent(owner: string, repo: string, title: string): Html {
+  const slug = `${owner}/${repo}`;
+  if (!title) return html`<span class="ws-slug ws-slug--only">${slug}</span>`;
+  return html`<span class="ws-title">${title}</span><span class="ws-slug">${slug}</span>`;
 }
 
 function tab(

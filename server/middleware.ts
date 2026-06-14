@@ -209,3 +209,31 @@ export async function resolveWorkspaceFormat(
   FORMAT_CACHE.set(`${owner}/${repo}`, format);
   return format;
 }
+
+// Cached workspace title (the Forgejo repo description) for the web chrome's
+// Read-mode workspace identity (#147). Empty string when the repo has no
+// description, so the chrome falls back to the owner/repo slug. Web-only — the
+// typed API never needs it — and same 30s TTL as role/format. `getRepo` returns
+// null on a 404, which caches as "" (→ slug fallback).
+const TITLE_CACHE = new TTLCache<string, string>(FORMAT_TTL_MS);
+
+export function _resetTitleCacheForTests(): void {
+  TITLE_CACHE.clear();
+}
+
+export async function resolveWorkspaceTitle(fj: Forgejo, owner: string, repo: string): Promise<string> {
+  const key = `${owner}/${repo}`;
+  const cached = TITLE_CACHE.get(key);
+  if (cached !== null) return cached;
+  let title = "";
+  try {
+    const repoMeta = await fj.getRepo(owner, repo);
+    title = (repoMeta?.description ?? "").trim();
+  } catch (_err) {
+    // The title is a cosmetic Read-mode label; a forge hiccup must never break
+    // page rendering. Fall back to the slug (empty title) and move on.
+    title = "";
+  }
+  TITLE_CACHE.set(key, title);
+  return title;
+}
