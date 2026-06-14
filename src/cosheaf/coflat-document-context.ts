@@ -112,6 +112,12 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
         return null;
       },
     },
+    // The reader resolves citations natively from these (inline label, hover,
+    // and the References list); the refResolver branch above is the fallback
+    // path the editor surface still uses. Crossrefs are resolved by the reader's
+    // own catalog (renderToHtml resolveReferences), with refResolver as the
+    // fallback for cross-file workspace targets.
+    ...(citations ? { citationFormatter: citations.formatter, citationKeys: citations.keys } : {}),
   };
 }
 
