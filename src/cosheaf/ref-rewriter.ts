@@ -48,7 +48,10 @@ function rewriteRefsInFragment(root: DocumentFragment): void {
 
 function shouldSkipTextNode(node: Text): boolean {
   const parent = node.parentElement;
-  return parent?.closest("code, pre, a, .cf-math, .cosheaf-ref-page") != null;
+  // .cf-bibliography is citeproc-owned prose (Coflat's reader-emitted References
+  // list); a "#42"/"foo.md"/"[@key]" inside a title or note there is not a
+  // cosheaf workspace ref and must not become a nav button.
+  return parent?.closest("code, pre, a, .cf-math, .cosheaf-ref-page, .cf-bibliography") != null;
 }
 
 function rewriteRefTextNode(node: Text): DocumentFragment | null {

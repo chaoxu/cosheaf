@@ -31,13 +31,13 @@ export interface CoflatLocalRefs {
 // Coflat's own citeproc (single source of truth for BibTeX parsing + CSL
 // formatting). `formatter` produces the inline label (IEEE numeric, e.g. [1])
 // and the bibliography entries; `keys` is every entry id in the .bib (used to
-// tell a citation [@cormen2009] from a workspace crossref [@eq:gaussian]);
-// `cited` is the in-document, first-appearance order of cited keys (the order
-// the formatter is registered in and the order the References list renders).
+// tell a citation [@cormen2009] from a workspace crossref [@eq:gaussian]).
+// Both are handed to Coflat's reader on the DocumentContext; the reader emits
+// the References list itself, so the cited-key order lives only locally as the
+// formatter's registration order.
 export interface CoflatCitations {
   formatter: CitationFormatter;
   keys: Set<string>;
-  cited: string[];
 }
 
 export interface RenderedCrossref {
@@ -275,7 +275,7 @@ async function loadCitations(
     // Register cited keys in document order so the IEEE numeric style assigns
     // [1], [2], … in appearance order (matching the rendered References list).
     formatter.registerCitations(cited.map((id) => ({ ids: [id] })));
-    return { formatter, keys, cited };
+    return { formatter, keys };
   } catch (_error) {
     // A citeproc/bibliography failure must never break the rest of the render.
     return null;
