@@ -77,6 +77,25 @@
   location.replace(url.toString());
 })();
 
+// Default landing mode (#156): Read · Build · Last used. "read"/"build" force
+// the chrome lens on every page load; "last" (default) follows the sticky
+// last-toggled mode (cosheaf:mode, written by the sidebar toggle). The pre-paint
+// head script reads cosheaf:landing-mode before the toggle hydrates so there's
+// no flash; this just wires the settings select.
+(() => {
+  const select = document.querySelector("[data-landing-mode-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:landing-mode";
+  const user = select.dataset.landingModeUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "read" || value === "build" ? value : "last");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+  });
+})();
+
 // Default editor compose mode (#155): the page + comment editors seed their
 // initial Rich/Source mode from this; the in-editor toggle still overrides
 // per-session. Stored under the same per-user + legacy key pair the editor

@@ -29,7 +29,7 @@ export function pageShell(opts: {
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
-        ${opts.user ? html`<script>(function(){try{var u=${jsonScript(opts.user)};var m=localStorage.getItem("cosheaf:mode:"+u);document.documentElement.setAttribute("data-cosheaf-mode",m==="read"?"read":"build");}catch(e){}})();</script>` : ""}
+        ${opts.user ? html`<script>(function(){try{var u=${jsonScript(opts.user)};var L=localStorage.getItem("cosheaf:landing-mode:"+u);var m=(L==="read"||L==="build")?L:(localStorage.getItem("cosheaf:mode:"+u)==="read"?"read":"build");document.documentElement.setAttribute("data-cosheaf-mode",m);}catch(e){}})();</script>` : ""}
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
