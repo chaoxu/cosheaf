@@ -26,8 +26,9 @@ import {
   type WebListState,
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
-import { renderMarkdownSurface } from "./web-markdown.js";
+import { composeField, renderMarkdownSurface } from "./web-markdown.js";
 import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
+import { webCommentEditorAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
   issueEditPage,
@@ -131,11 +132,12 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
       ctx.ws.role === "read" || chatBackedIssue
         ? ""
         : html`<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
-             <textarea name="body" placeholder="Leave a comment" required></textarea>
+             ${composeField(ctx, { placeholder: "Leave a comment", required: true })}
              <div class="form-actions"><button class="button small primary" type="submit">Comment</button></div>
            </form>`
     }
-    <span id="thread-bottom"></span>`;
+    <span id="thread-bottom"></span>
+    ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}`;
   const rail = html`${labelsRailPanel({ ctx, current: issue.labels, allLabels, action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`) })}
     ${chatBackedIssue ? "" : issueRelationsPanel(ctx, issue, dependencies, blocks)}`;
   return htmlResponse(
@@ -382,13 +384,14 @@ function issueCreatePage(
           <input name="title" value="${values.title ?? ""}" required autofocus data-testid="issue-create-title">
         </label>
         <label>Description
-          <textarea name="body" data-testid="issue-create-body">${values.body ?? ""}</textarea>
+          ${composeField(ctx, { value: values.body ?? "", testId: "issue-create-body" })}
         </label>
         ${labelCheckboxes(labels, selectedIds)}
         <div class="form-actions">
           <button class="button primary" type="submit" data-testid="issue-create-submit">Create issue</button>
         </div>
       </form>
+      ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
     </div>
   `;
 }

@@ -29,9 +29,10 @@ import {
   type WebCtx,
   type WebListState,
 } from "./web-context.js";
-import { html, type Html } from "./web-html.js";
+import { emptyHtml, html, type Html } from "./web-html.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
-import { renderMarkdownSurface } from "./web-markdown.js";
+import { composeField, renderMarkdownSurface } from "./web-markdown.js";
+import { webCommentEditorAssets } from "./web-shell.js";
 import {
   diffModeControls,
   mapLineComments,
@@ -200,7 +201,8 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
               <div class="issue-document">${body.length ? body : html`<p>No description.</p>`}</div>
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
-              <span id="thread-bottom"></span>`,
+              <span id="thread-bottom"></span>
+              ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}`,
             html`${labelsRailPanel({ ctx, current: pull.labels ?? [], allLabels, action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`) })}
               ${reviewRequestPanel(ctx, pull, availableReviewers)}`,
           )}
@@ -423,6 +425,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
               ${reviewForms(ctx, pull, repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`))}
             </section>
           </section>
+          ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
         </div>
       `,
       { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && mode === "rich" },
@@ -525,12 +528,13 @@ function pullCreatePage(
           <input name="title" value="${values.title ?? ""}" required data-testid="pull-create-title">
         </label>
         <label>Description
-          <textarea name="body" data-testid="pull-create-body">${values.body ?? ""}</textarea>
+          ${composeField(ctx, { value: values.body ?? "", testId: "pull-create-body" })}
         </label>
         <div class="form-actions">
           <button class="button primary" type="submit" data-testid="pull-create-submit">Create pull request</button>
         </div>
       </form>
+      ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
     </div>
   `;
 }

@@ -73,6 +73,10 @@ export function webEditorAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-editor.tsx");
 }
 
+export function webCommentEditorAssets(): Html {
+  return viteEntryAssets("src/cosheaf/web-comment-editor.tsx");
+}
+
 type ViteManifestChunk = {
   file: string;
   css?: string[];

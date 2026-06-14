@@ -1,9 +1,27 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 
 const webBase = "http://localhost:3030";
 const owner = "chao";
 const repo = "flushing-coin";
 const repoBase = `${webBase}/${owner}/${repo}`;
+
+// On coflat workspaces (the fixture format) a compose textarea is enhanced by
+// the web-comment-editor island: the textarea is hidden and a CodeMirror editor
+// mirrors its value back. Type into the rich editor when it mounted, else fall
+// back to the plain textarea (forgejo-passthrough / island not yet mounted).
+async function fillCompose(scope: Locator, text: string): Promise<void> {
+  const compose = scope.locator("[data-coflat-compose]").first();
+  if (await compose.count()) {
+    const content = compose.locator(".cm-content");
+    await content.waitFor({ state: "visible" });
+    await content.click();
+    await content.fill(text);
+    // Wait for the island to mirror the value into the hidden form field.
+    await expect(compose.locator("textarea")).toHaveValue(text);
+    return;
+  }
+  await scope.locator('textarea[name="body"]').fill(text);
+}
 
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.goto(`${webBase}/login`);
@@ -167,7 +185,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-create-form")).toBeVisible();
   const issueTitle = `Web issue ${Date.now()}`;
   await page.getByTestId("issue-create-title").fill(issueTitle);
-  await page.getByTestId("issue-create-body").fill("Created from the server-rendered new issue form.");
+  await fillCompose(page.getByTestId("issue-create-form"), "Created from the server-rendered new issue form.");
   await page.getByTestId("issue-create-submit").click();
   const issuePath = new URL(page.url()).pathname;
   await expect(page.locator(".thread-header")).toContainText(issueTitle);
@@ -177,7 +195,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("issue-edit-button").click();
   await expect(page).toHaveURL(/\/issues\/\d+\/edit$/);
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
-  await expect(page.getByTestId("issue-edit-form").locator('textarea[name="body"]')).toBeVisible();
+  // The body field is enhanced by the coflat editor island on coflat workspaces;
+  // the rich editor is the visible compose surface (textarea is hidden behind it).
+  await expect(page.getByTestId("issue-edit-form").locator(".cm-editor, textarea[name=\"body\"]").first()).toBeVisible();
   await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("thread-labels")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
@@ -201,11 +221,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.locator('form[action$="/dependencies"]').filter({ hasText: "Add" }).first().getByRole("button", { name: "Add" }).click();
   await expect(page.getByTestId("issue-relations")).toContainText("#1");
   await expect(page.locator('form.comment-form[action$="/comments"]')).toBeVisible();
-  await page.locator('form.comment-form[action$="/comments"] textarea[name="body"]').fill("issue comment before edit");
+  await fillCompose(page.locator('form.comment-form[action$="/comments"]'), "issue comment before edit");
   await page.locator('form.comment-form[action$="/comments"]').getByRole("button", { name: "Comment" }).click();
   await expect(page.locator(".comment").filter({ hasText: "issue comment before edit" })).toBeVisible();
   await page.getByTestId("issue-comment-actions").last().locator("summary").click();
-  await page.getByTestId("issue-comment-actions").last().locator('textarea[name="body"]').fill("issue comment after edit");
+  await fillCompose(page.getByTestId("issue-comment-actions").last(), "issue comment after edit");
   await page.getByTestId("issue-comment-actions").last().getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator(".comment").filter({ hasText: "issue comment after edit" })).toBeVisible();
 
@@ -231,7 +251,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await page.getByTestId("pull-edit-link").click();
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();
-  await expect(page.getByTestId("pull-edit-form").locator('textarea[name="body"]')).toBeVisible();
+  await expect(page.getByTestId("pull-edit-form").locator(".cm-editor, textarea[name=\"body\"]").first()).toBeVisible();
   await page.goto(demoPrPath.startsWith("http") ? demoPrPath : `${webBase}${demoPrPath}`);
   await expect(page.locator(".thread")).toContainText("pushed commit");
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
@@ -299,7 +319,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-create-head")).toHaveValue(branch);
   const prTitle = `Web PR ${Date.now()}`;
   await page.getByTestId("pull-create-title").fill(prTitle);
-  await page.getByTestId("pull-create-body").fill("Opened from the server-rendered new pull request form.");
+  await fillCompose(page.getByTestId("pull-create-form"), "Opened from the server-rendered new pull request form.");
   await page.getByTestId("pull-create-submit").click();
   await expect(page).toHaveURL(/\/pulls\/\d+$/);
   await expect(page.locator(".thread-header")).toContainText(prTitle);

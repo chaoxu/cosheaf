@@ -1,7 +1,7 @@
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { jsonScript, type WebCtx } from "./web-context.js";
-import { html, type Html, raw } from "./web-html.js";
+import { emptyHtml, html, type Html, raw } from "./web-html.js";
 
 export type MarkdownSurface = "document" | "thread" | "diff";
 
@@ -49,6 +49,33 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts): Htm
     .filter(Boolean)
     .join(" ");
   return html`<div class="${className}" data-reader-branch="${payload.branch}"><script type="application/json">${jsonScript(payload)}</script></div>`;
+}
+
+// A markdown compose/edit field. On coflat workspaces it renders a textarea
+// (the real, submitted form field) wrapped in a `[data-coflat-compose]`
+// container that the web-comment-editor island enhances with the rich coflat
+// editor; on forgejo-passthrough it renders just the plain textarea, unchanged.
+// The textarea value is escaped by the template — never interpolated raw.
+export function composeField(
+  ctx: WebCtx,
+  opts: {
+    name?: string;
+    value?: string;
+    placeholder?: string;
+    required?: boolean;
+    testId?: string;
+    className?: string;
+    branch?: string;
+  } = {},
+): Html {
+  const name = opts.name ?? "body";
+  const value = opts.value ?? "";
+  const attrs = html`name="${name}"${opts.placeholder ? html` placeholder="${opts.placeholder}"` : emptyHtml}${
+    opts.required ? raw(" required") : emptyHtml
+  }${opts.testId ? html` data-testid="${opts.testId}"` : emptyHtml}${opts.className ? html` class="${opts.className}"` : emptyHtml}`;
+  const textarea = html`<textarea ${attrs}>${value}</textarea>`;
+  if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) return textarea;
+  return html`<div class="coflat-compose" data-coflat-compose data-owner="${ctx.owner}" data-repo="${ctx.repo}" data-branch="${opts.branch ?? "main"}">${textarea}<div class="coflat-compose-mount"></div></div>`;
 }
 
 export function markdownSurface(ctx: WebCtx, rendered: Html, surface: MarkdownSurface = "document"): Html {

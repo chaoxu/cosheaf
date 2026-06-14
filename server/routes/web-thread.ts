@@ -23,8 +23,10 @@ import {
   stringField,
   type WebCtx,
 } from "./web-context.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
-import { renderMarkdownSurface } from "./web-markdown.js";
+import { composeField, renderMarkdownSurface } from "./web-markdown.js";
+import { webCommentEditorAssets } from "./web-shell.js";
 import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
@@ -258,7 +260,7 @@ function threadEditPage(opts: {
     <form class="compose-form" data-testid="${opts.testId}" method="post" action="${opts.action}">
       <label>Title <input name="title" value="${opts.title}" required></label>
       <label>Description
-        <textarea class="text-file-editor issue-body-editor" name="body" spellcheck="true">${opts.body}</textarea>
+        ${composeField(opts.ctx, { value: opts.body, className: "text-file-editor issue-body-editor" })}
       </label>
       ${labelFieldset}
       ${milestoneField}
@@ -267,6 +269,7 @@ function threadEditPage(opts: {
         <button class="button primary" type="submit">Save ${opts.kind}</button>
       </div>
     </form>
+    ${opts.ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
   </section>`;
 }
 
@@ -487,14 +490,14 @@ export async function renderPullTimeline(
 // Subtle edit/delete affordance: a small pencil that only appears on comment
 // hover (see .comment-actions CSS) and floats at the comment's top-right.
 // Clicking it opens the inline edit + delete forms.
-function commentActions(opts: { testId: string; formId: string; editAction: string; deleteAction: string; body: string; deleteHidden?: Html }): Html {
+function commentActions(opts: { ctx: WebCtx; testId: string; formId: string; editAction: string; deleteAction: string; body: string; deleteHidden?: Html }): Html {
   // Save and Delete share one action row even though they POST to different
   // endpoints: the Delete button lives in the edit form's row but targets the
   // separate (empty) delete form via the HTML `form=` attribute.
   return html`<details class="comment-actions" data-testid="${opts.testId}">
     <summary title="Edit or delete" aria-label="Edit or delete comment"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></summary>
     <form method="post" action="${opts.editAction}">
-      <textarea name="body" required>${opts.body}</textarea>
+      ${composeField(opts.ctx, { value: opts.body, required: true })}
       <div class="comment-action-row">
         <button class="button small primary" type="submit">Save</button>
         <button class="button small danger" type="submit" form="${opts.formId}">Delete</button>
@@ -507,6 +510,7 @@ function commentActions(opts: { testId: string; formId: string; editAction: stri
 function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
   if (ctx.ws.role === "read") return emptyHtml;
   return commentActions({
+    ctx,
     testId: "issue-comment-actions",
     formId: `comment-del-${comment.id}`,
     editAction: repoHref(ctx.owner, ctx.repo, `/issues/${number}/comments/${comment.id}/edit`),
@@ -518,6 +522,7 @@ function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueC
 function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): Html {
   if (ctx.ws.role === "read") return emptyHtml;
   return commentActions({
+    ctx,
     testId: "pull-comment-actions",
     formId: `comment-del-${comment.id}`,
     editAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`),
@@ -637,7 +642,7 @@ export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string)
   return html`
     <form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">
       ${redirectTo ? html`<input type="hidden" name="redirect_to" value="${redirectTo}">` : ""}
-      <textarea name="body" placeholder="Leave a review comment"></textarea>
+      ${composeField(ctx, { placeholder: "Leave a review comment" })}
       <div class="toolbar-actions">
         <button class="button" name="event" value="COMMENT" type="submit">Comment</button>
         <button class="button" name="event" value="REQUEST_CHANGES" type="submit">Request changes</button>
