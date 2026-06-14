@@ -3,7 +3,7 @@ import type { WorkspaceContext } from "../types.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { type Panel, renderRegion } from "./web-panels.js";
-import { notificationsNavLink, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
+import { modeToggle, notificationsNavLink, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
 
@@ -87,6 +87,7 @@ export function repoPage(opts: {
     sidebar: html`
       <a class="brand" href="/">Cosheaf</a>
       ${sidebarIdentity(opts.user)}
+      ${modeToggle()}
       <nav class="sidebar-topnav">
         <a href="/">‹ Workspaces</a>
         ${notificationsNavLink(false)}
@@ -119,7 +120,10 @@ function tab(
   suffix: string,
 ): Html {
   // Path-styled mono nav (/files, /issues, …) per the typography-first chrome.
-  return html`<a class="${opts.active === id ? "active" : ""}" href="${repoHref(opts.owner, opts.repo, suffix)}">/${id}</a>`;
+  // Every tab except Files is a contribute/forge surface — marked build-only so
+  // Read mode (#131) can hide it and foreground the knowledge base.
+  const buildOnly = id === "files" ? emptyHtml : html` data-build-only`;
+  return html`<a class="${opts.active === id ? "active" : ""}"${buildOnly} href="${repoHref(opts.owner, opts.repo, suffix)}">/${id}</a>`;
 }
 
 export function userPreferencesSection(user: string): Html {

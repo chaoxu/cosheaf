@@ -391,7 +391,7 @@ function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], acces
                 <strong>${displayLogin(member.login)}</strong>
                 <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access/remove")}">
                   <input type="hidden" name="username" value="${member.login}">
-                  <button class="button" type="submit" data-testid="settings-collaborator-remove">Remove</button>
+                  <button class="button danger" type="submit" data-testid="settings-collaborator-remove">Remove</button>
                 </form>
               </div>`,
             )}

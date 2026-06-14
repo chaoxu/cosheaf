@@ -18,7 +18,6 @@ import {
   forbiddenPage,
   timeEl,
   htmlResponse,
-  jsonScript,
   notFoundPage,
   redirect,
   repoHref,
@@ -31,7 +30,7 @@ import {
   webRouteForWrite,
   type WebCtx,
 } from "./web-context.js";
-import { emptyHtml, html, type Html } from "./web-html.js";
+import { emptyHtml, html, type Html, jsonScript } from "./web-html.js";
 import { type Panel, panel } from "./web-panels.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
@@ -48,13 +47,15 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
           <div><p class="eyebrow">Branch</p><h1>main</h1></div>
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
-            ${cloneBox(cloneUrl)}
-            <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
-            ${
-              ws.role === "read"
-                ? ""
-                : html`<a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}`}">New file</a>`
-            }
+            <span class="build-only toolbar-actions">
+              ${cloneBox(cloneUrl)}
+              <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+              ${
+                ws.role === "read"
+                  ? ""
+                  : html`<a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}`}">New file</a>`
+              }
+            </span>
           </div>
         </div>
         ${fileList(owner, repo, "main", files, workspacePageTitles(ctx.db, ws.slug))}
@@ -114,7 +115,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
           <div class="page-title compact">
             <div><p class="eyebrow">Branch</p><h1>${resolved.branch}</h1></div>
-            <div class="toolbar-actions">
+            <div class="toolbar-actions build-only">
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
@@ -162,7 +163,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             <p class="file-meta">${fileKindLabel(kind)} <span>${formatBytes(meta.size)}</span></p>
           </div>
           <div class="toolbar-actions">
-            <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+            <a class="button build-only" href="${repoHref(owner, repo, "/branches")}">Branches</a>
             <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">Raw</a>
             ${
               kind === "markdown"
@@ -174,19 +175,19 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             ${
               ws.role === "read" || resolved.branch === "main"
                 ? ""
-                : html`<a class="button" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open pull request</a>`
+                : html`<a class="button build-only" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open pull request</a>`
             }
             ${
               ws.role === "read"
                 ? ""
                 : editableFileKind(kind)
-                  ? html`<a class="button primary" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}`}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
+                  ? html`<a class="button primary build-only" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}`}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
                   : ""
             }
             ${
               ws.role === "read" || resolved.branch === "main"
                 ? ""
-                : html`<form class="inline-form" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">
+                : html`<form class="inline-form build-only" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">
                     <input type="hidden" name="action" value="delete">
                     <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
                   </form>`
@@ -470,7 +471,7 @@ function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string,
   return html`<section class="edit-page text-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><h1>${rel}</h1></div>
-      <a class="button" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(cancelBranch)}/${urlPath(rel)}`}">Cancel</a>
+      <a class="button subtle" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(cancelBranch)}/${urlPath(rel)}`}">Cancel</a>
     </div>
     <form class="compose-form" data-testid="text-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
       <input type="hidden" name="old_path" value="${rel}">

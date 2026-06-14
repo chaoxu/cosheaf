@@ -118,7 +118,9 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   const chatBackedIssue = isChatIssue(issue);
   const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
-  const body = await renderMarkdownSurface(ctx, chatBackedIssue ? stripChatMetadata(issue.body ?? "") : issue.body ?? "", { surface: "thread" });
+  const bodyText = chatBackedIssue ? stripChatMetadata(issue.body ?? "") : issue.body ?? "";
+  // Skip an empty body so an empty reader island doesn't render as a tall band (#135).
+  const body = bodyText.trim().length > 0 ? await renderMarkdownSurface(ctx, bodyText, { surface: "thread" }) : null;
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
@@ -126,7 +128,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   // possible (read role and chat-backed issues show chips only).
   const allLabels = canEditIssue ? await ctx.fj.listLabels(ctx.owner, ctx.repo) : [];
   const main = html`${threadParticipantsBar(issue.user?.login, comments)}
-    <div class="issue-document">${body}</div>
+    <div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
       ctx.ws.role === "read" || chatBackedIssue
@@ -377,7 +379,7 @@ function issueCreatePage(
         <div>
           <h1>New issue</h1>
         </div>
-        <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/issues")}">Cancel</a>
+        <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/issues")}">Cancel</a>
       </div>
       ${values.error ? html`<div class="form-error" role="alert">${values.error}</div>` : ""}
       <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/issues/new")}" data-testid="issue-create-form">

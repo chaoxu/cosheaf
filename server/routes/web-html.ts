@@ -27,3 +27,10 @@ export const emptyHtml: Html = raw("");
 export function joinHtml(fragments: readonly Html[], separator: Html = emptyHtml): Html {
   return fragments.length === 0 ? emptyHtml : fragments.reduce((acc, f) => html`${acc}${separator}${f}`);
 }
+
+// JSON destined for an inline <script> body (a <script type="application/json">
+// payload or a bootstrap script). Entity-escaping would corrupt it, so mark it
+// raw; `<` is JS-escaped instead to keep "</script>" out of the payload.
+export function jsonScript(value: unknown): Html {
+  return raw(JSON.stringify(value).replaceAll("<", "\\u003c"));
+}

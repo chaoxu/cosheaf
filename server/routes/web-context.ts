@@ -211,13 +211,6 @@ export function displayLogin(login: string | null | undefined): string {
   return login || DELETED_USER_LOGIN;
 }
 
-// JSON destined for a <script type="application/json"> body. Entity-escaping
-// would corrupt it, so mark it raw; `<` is JS-escaped instead to keep
-// "</script>" out of the payload.
-export function jsonScript(value: unknown): Html {
-  return raw(JSON.stringify(value).replaceAll("<", "\\u003c"));
-}
-
 // A machine-readable <time> that the client reformatter (cosheaf-preferences.js)
 // rewrites to the user's chosen format — Relative ("3d") by default or Absolute
 // short ("6/13/26") — in their local timezone, also fixing the server-timezone

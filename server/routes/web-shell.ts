@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { avatarChip } from "./avatar.js";
-import { emptyHtml, html, type Html, raw } from "./web-html.js";
+import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
 export type StatusCrumb = { label: string; href?: string };
 
@@ -26,10 +26,11 @@ export function pageShell(opts: {
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
+        ${opts.user ? html`<script>(function(){try{var u=${jsonScript(opts.user)};var m=localStorage.getItem("cosheaf:mode:"+u);document.documentElement.setAttribute("data-cosheaf-mode",m==="read"?"read":"build");}catch(e){}})();</script>` : ""}
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
-        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script>`) : ""}
+        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script><script src="/cosheaf-mode.js" defer></script>`) : ""}
       </head>
       <body data-cosheaf-user="${opts.user ?? ""}">
         <div class="app-frame">
@@ -51,11 +52,25 @@ function cosheafWebCssVersion(): string {
 export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string): Html {
   return html`<a class="brand" href="/">Cosheaf</a>
     ${sidebarIdentity(user)}
+    ${user ? modeToggle() : ""}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
       ${notificationsNavLink(active === "notifications")}
       <a class="${active === "account" ? "active" : ""}" href="/account/settings">Account</a>
     </nav>`;
+}
+
+// Per-user Read | Build chrome lens (#131). Read demotes the forge/contribute
+// surface (issues, pulls, chat, activity, settings) to foreground the knowledge
+// base (title-first files, reader, search); Build is the full forge surface and
+// the default. The choice persists per user in localStorage and is applied as
+// `html[data-cosheaf-mode]` before paint (see pageShell) so there's no flash;
+// cosheaf-mode.js wires the toggle. Pure presentation — no routes change.
+export function modeToggle(): Html {
+  return html`<div class="mode-toggle" role="group" aria-label="View mode" data-mode-toggle>
+    <button type="button" class="mode-opt" data-mode="read">Read</button>
+    <button type="button" class="mode-opt" data-mode="build">Build</button>
+  </div>`;
 }
 
 // Signed-in identity directly under the brand (#127): an initials avatar + the

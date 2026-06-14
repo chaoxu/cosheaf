@@ -1,7 +1,7 @@
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
-import { jsonScript, type WebCtx } from "./web-context.js";
-import { emptyHtml, html, type Html, raw } from "./web-html.js";
+import type { WebCtx } from "./web-context.js";
+import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
 export type MarkdownSurface = "document" | "thread" | "diff";
 

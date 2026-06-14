@@ -157,7 +157,10 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
     ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
-  const body = await renderMarkdownSurface(ctx, pull.body ?? "", { surface: "thread" });
+  // Only render the description surface when there is one — an empty body would
+  // otherwise render an empty reader island as a tall bordered band (#135).
+  const bodyText = pull.body ?? "";
+  const body = bodyText.trim().length > 0 ? await renderMarkdownSurface(ctx, bodyText, { surface: "thread" }) : null;
   const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
   // The participants bar must reflect the conversation the timeline shows —
   // submitted reviews + inline review comments — not just the line comments, so
@@ -198,7 +201,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
           </header>
           ${threadLayout(
             html`${threadParticipantsBar(pull.user?.login, conversation)}
-              <div class="issue-document">${body.length ? body : html`<p>No description.</p>`}</div>
+              <div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
               <span id="thread-bottom"></span>
@@ -509,7 +512,7 @@ function pullCreatePage(
         <div>
           <h1>New pull request</h1>
         </div>
-        <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>
+        <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>
       </div>
       ${values.error ? html`<div class="form-error" role="alert">${values.error}</div>` : ""}
       <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}" data-testid="pull-create-form">

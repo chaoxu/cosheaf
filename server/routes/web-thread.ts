@@ -280,7 +280,7 @@ function threadEditPage(opts: {
   return html`<section class="edit-page issue-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><p class="eyebrow">Edit ${opts.kind}</p><h1>#${opts.number}</h1></div>
-      <a class="button" href="${opts.backHref}">Cancel</a>
+      <a class="button subtle" href="${opts.backHref}">Cancel</a>
     </div>
     <form class="compose-form" data-testid="${opts.testId}" method="post" action="${opts.action}">
       <label>Title <input name="title" value="${opts.title}" required></label>
