@@ -26,6 +26,10 @@ const ALLOWED_TABLES = new Set([
   "webhook_log",
   // Cosheaf-issued Forgejo PAT cache; login validates credentials before reuse
   "login_tokens",
+  // Optional live-work leases (#95): ephemeral coordination state, no Forgejo
+  // source. Disposable like webhook_log — rows expire; NOT durable knowledge,
+  // and issues/PRs stay the only durable state on Forgejo.
+  "issue_claims",
 ]);
 
 describe("sqlite schema allowlist (#36 — no Forgejo state mirror)", () => {

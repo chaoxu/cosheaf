@@ -467,6 +467,7 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `notes_fts` — FTS5 virtual table over title + body, keyed by `workspace_slug`.
 - `page_tags(workspace_slug, cosheaf_id, tag)`
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
+- `issue_claims(id, workspace_slug, issue_number, runner_name, purpose, holder_username, created_at, heartbeat_at, expires_at)` — optional live-work leases (#95). Ephemeral coordination state with no Forgejo source; rows expire and are disposable (like `webhook_log`). NOT durable knowledge — issues/PRs stay the only durable state on Forgejo.
 
 `workspace_slug` column values are the Forgejo `owner/repo` full name
 (`workspaceSlug(owner, repo)` in `shared/conventions.ts` builds it;
