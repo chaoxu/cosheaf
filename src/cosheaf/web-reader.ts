@@ -1,4 +1,4 @@
-import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews } from "@chaoxu/coflat/reader";
+import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews, type ReaderOutlineEntry } from "@chaoxu/coflat/reader";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import {
   REF_BUTTON_CLASS,
@@ -29,9 +29,15 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const parsed = parseFrontmatterYaml(payload.source);
   const refs = await loadCoflatRefs(payload);
   const ctx = coflatDocumentContext(payload, refs);
-  // On a PR diff surface, attribute blocks to source lines so changed lines can
-  // be highlighted (#113); off elsewhere so renderToHtml stays lean.
-  const rendered = renderToHtml(parsed.body, ctx, payload.markedLines ? { sourceLineAttribution: true } : undefined).html;
+  // outline:true makes coflat emit stable, collision-free heading ids on the
+  // rendered HTML (so deep-link anchors and #114's hash-scroll work without any
+  // client-side slugging) and return the outline for the TOC rail (#117).
+  // sourceLineAttribution stays opt-in for the PR diff surface (#113).
+  const result = renderToHtml(parsed.body, ctx, {
+    outline: true,
+    ...(payload.markedLines ? { sourceLineAttribution: true } : {}),
+  });
+  const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
   fixLabeledDisplayMath(fragment);
   resolveRenderedCrossrefs(fragment, refs.crossrefs);
@@ -55,7 +61,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     const frontmatterLines = bodyStart > 0 ? (payload.source.slice(0, bodyStart).match(/\n/g)?.length ?? 0) : 0;
     markChangedBlocks(root, new Set(payload.markedLines.map((line) => line - frontmatterLines)));
   }
-  buildReaderToc(root);
+  buildReaderToc(root, result.outline ?? []);
   // The browser's native fragment jump fired before this island swapped the
   // rendered document in, so it missed; re-apply it now that the heading exists
   // (#114). Scrolls within .app-content, the only scroll container.
@@ -93,31 +99,16 @@ function applyHashScroll(root: HTMLElement): void {
   if (target instanceof HTMLElement) target.scrollIntoView({ block: "start" });
 }
 
-// Fill the file reader's table-of-contents rail from the rendered document
-// headings. Only the file-reader page provides a [data-reader-toc] slot, so
-// this is a no-op for issue/comment/PR readers. Headings get generated ids so
-// the TOC links can anchor to them.
-function buildReaderToc(root: HTMLElement): void {
+// Fill the file reader's table-of-contents rail from Coflat's outline (#117).
+// renderToHtml({outline:true}) emits stable, deduplicated heading ids on the
+// rendered HTML and returns these entries, so there is no client-side heading
+// scan or slug regex. Only the file-reader page provides a [data-reader-toc]
+// slot, so this is a no-op for issue/comment/PR readers.
+function buildReaderToc(root: HTMLElement, outline: readonly ReaderOutlineEntry[]): void {
   const slot = root.closest(".doc-with-toc")?.querySelector<HTMLElement>("[data-reader-toc]");
   if (!slot) return;
-  const headings = [...root.querySelectorAll<HTMLElement>("h1, h2, h3")];
-  if (headings.length < 2) return;
-  // Seed with the document's pre-existing heading ids first, so a generated
-  // slug can never collide with a coflat-assigned id that appears later.
-  const used = new Set<string>();
-  for (const heading of headings) if (heading.id) used.add(heading.id);
-  const items = headings.map((heading) => {
-    if (!heading.id) {
-      const base =
-        (heading.textContent ?? "section").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
-        "section";
-      let id = base;
-      for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
-      heading.id = id;
-      used.add(id);
-    }
-    return { id: heading.id, text: heading.textContent?.trim() ?? "", level: Number(heading.tagName.slice(1)) };
-  });
+  const items = outline.filter((entry) => entry.level <= 3);
+  if (items.length < 2) return;
   const minLevel = Math.min(...items.map((item) => item.level));
   slot.replaceChildren();
   const title = document.createElement("p");
