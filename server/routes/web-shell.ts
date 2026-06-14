@@ -50,13 +50,12 @@ function cosheafWebCssVersion(): string {
 }
 
 export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string): Html {
-  return html`<a class="brand" href="/">Cosheaf</a>
+  return html`<span class="brand">Cosheaf</span>
     ${sidebarIdentity(user)}
     ${user ? modeToggle() : ""}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
       ${notificationsNavLink(active === "notifications")}
-      <a class="${active === "account" ? "active" : ""}" href="/account/settings">Account</a>
     </nav>`;
 }
 
@@ -92,7 +91,7 @@ export function notificationsNavLink(active: boolean): Html {
 function appStatusbar(path: StatusCrumb[] | undefined): Html {
   const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
-    html`<a href="/">cosheaf</a>`,
+    html`<a class="status-home" href="/" aria-label="Home" title="Home">⌂</a>`,
     ...(path ?? []).map((segment) =>
       segment.href
         ? html`<a href="${segment.href}">${segment.label}</a>`

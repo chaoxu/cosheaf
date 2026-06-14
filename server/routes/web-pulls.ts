@@ -81,11 +81,11 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
     repoPageShell(
       ctx,
       "pulls",
-      `Pull requests - ${ctx.repo}`,
+      `PRs - ${ctx.repo}`,
       html`
         <div class="page-title compact">
-          <div><h1>Pull requests</h1></div>
-          ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New pull request</a>`}
+          <div><h1>PRs</h1></div>
+          ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New PR</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
         ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.")}
@@ -99,7 +99,7 @@ web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   const head = stringField(c.req.query("head"));
   const base = stringField(c.req.query("base")) ?? "main";
   return htmlResponse(
-    repoPageShell(ctx, "pulls", `New pull request - ${ctx.repo}`, pullCreatePage(ctx, branches, { head, base })),
+    repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, { head, base })),
   );
 }));
 
@@ -126,7 +126,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
               : null;
   if (error) {
     return htmlResponse(
-      repoPageShell(ctx, "pulls", `New pull request - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error })),
+      repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error })),
       400,
     );
   }
@@ -138,7 +138,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   } catch (err) {
     if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
       return htmlResponse(
-        repoPageShell(ctx, "pulls", `New pull request - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error: err.message })),
+        repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error: err.message })),
         err.status,
       );
     }
@@ -187,7 +187,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${
                   ctx.ws.role === "read" || pull.state === "closed"
                     ? ""
-                    : html`<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit pull request</a>`
+                    : html`<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit PR</a>`
                 }
                 <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
                 ${pullStateForm(ctx, pull)}
@@ -510,7 +510,7 @@ function pullCreatePage(
     <div class="form-page">
       <div class="page-title compact">
         <div>
-          <h1>New pull request</h1>
+          <h1>New PR</h1>
         </div>
         <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>
       </div>
@@ -535,7 +535,7 @@ function pullCreatePage(
           ${composeField(ctx, { value: values.body ?? "", testId: "pull-create-body" })}
         </label>
         <div class="form-actions">
-          <button class="button primary" type="submit" data-testid="pull-create-submit">Create pull request</button>
+          <button class="button primary" type="submit" data-testid="pull-create-submit">Create PR</button>
         </div>
       </form>
       ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}

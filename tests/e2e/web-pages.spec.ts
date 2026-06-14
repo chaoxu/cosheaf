@@ -37,11 +37,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   // Owner-qualified URLs are canonical; the ownerless rewrite is gone.
   const ownerlessRepo = await page.request.get(`${webBase}/${repo}`, { maxRedirects: 0 });
   expect(ownerlessRepo.status()).toBe(404);
-  await expect(page.locator(".repo-tabs")).toContainText("/files");
-  await expect(page.locator(".repo-tabs")).toContainText("/issues");
-  await expect(page.locator(".repo-tabs")).toContainText("/pulls");
-  await expect(page.locator(".repo-tabs")).toContainText("/notifications");
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("/files");
+  await expect(page.locator(".repo-tabs")).toContainText("Files");
+  await expect(page.locator(".repo-tabs")).toContainText("Issues");
+  await expect(page.locator(".repo-tabs")).toContainText("PRs");
+  await expect(page.locator(".repo-tabs")).toContainText("Notifications");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
   await expect(page.locator(".repo-body")).toContainText("hello.md");
   await expect(page.locator(".repo-body")).toContainText("theory/cross-file-theorem.md");
   await expect(page.locator(".repo-body")).toContainText("notes/plain-text.txt");
@@ -149,7 +149,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   const updatedTextRaw = await page.request.get(updatedTextRawHref);
   expect(updatedTextRaw.ok()).toBe(true);
   expect(await updatedTextRaw.text()).toContain("Updated plain text fixture.");
-  await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();
 
   const branchToDelete = `user/chao/delete-me-${Date.now()}`;
   await page.goto(`${repoBase}/branches`);
@@ -157,7 +157,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("branch-create-name").fill(branchToDelete);
   await page.getByRole("button", { name: "Create branch" }).click();
   await expect(page).toHaveURL(`${repoBase}/src/branch/${branchToDelete}`);
-  await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();
   await page.goto(`${repoBase}/branches`);
   const createdBranchRow = page.locator(".branch-row", { hasText: branchToDelete });
   await expect(createdBranchRow).toBeVisible();
@@ -165,11 +165,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".branch-row", { hasText: branchToDelete })).toHaveCount(0);
 
   await page.goto(`${repoBase}/notifications`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("/notifications");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Notifications");
   await expect(page.getByTestId("notification-list")).toBeVisible();
 
   await page.goto(`${repoBase}/issues`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("/issues");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
   // Authors render as real Forgejo usernames (no "repository" masking): the
   // seeded fixture issues were opened by the local Forgejo admin account.
   await expect(page.locator(".repo-body")).toContainText("cosheaf-admin opened");
@@ -230,9 +230,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".comment").filter({ hasText: "issue comment after edit" })).toBeVisible();
 
   await page.goto(`${repoBase}/pulls`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("/pulls");
-  await expect(page.getByRole("link", { name: "New pull request" })).toHaveAttribute("href", `/${owner}/${repo}/pulls/new`);
-  await page.getByRole("link", { name: "New pull request" }).click();
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("PRs");
+  await expect(page.getByRole("link", { name: "New PR" })).toHaveAttribute("href", `/${owner}/${repo}/pulls/new`);
+  await page.getByRole("link", { name: "New PR" }).click();
   await expect(page.getByTestId("pull-create-form")).toBeVisible();
   await expect(page.getByTestId("pull-create-base")).toBeVisible();
   await expect(page.getByTestId("pull-create-head")).toBeVisible();
@@ -255,19 +255,19 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.goto(demoPrPath.startsWith("http") ? demoPrPath : `${webBase}${demoPrPath}`);
   await expect(page.locator(".thread")).toContainText("pushed commit");
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
-  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close pull request");
+  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close PR");
   await Promise.all([
     page.waitForResponse((res) => res.url().endsWith(`${demoPrPath}/state`) && res.request().method() === "POST"),
     page.getByTestId("pull-toggle-state").click(),
   ]);
   await page.goto(`${webBase}${demoPrPath}`);
-  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Reopen pull request");
+  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Reopen PR");
   await Promise.all([
     page.waitForResponse((res) => res.url().endsWith(`${demoPrPath}/state`) && res.request().method() === "POST"),
     page.getByTestId("pull-toggle-state").click(),
   ]);
   await page.goto(`${webBase}${demoPrPath}`);
-  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close pull request");
+  await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close PR");
   await page.locator('.subtabs a[href$="/files"]').click();
   await expect(page.locator(".changed-files")).toBeVisible();
   await expect(page.locator(".diff-panel")).toBeVisible();
@@ -313,8 +313,8 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("statusbar")).toContainText("saved");
   await page.goto(`${repoBase}/src/branch/${branch}/${path}`);
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
-  await expect(page.getByRole("link", { name: "Open pull request" })).toBeVisible();
-  await page.getByRole("link", { name: "Open pull request" }).click();
+  await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();
+  await page.getByRole("link", { name: "Open PR" }).click();
   await expect(page.getByTestId("pull-create-form")).toBeVisible();
   await expect(page.getByTestId("pull-create-head")).toHaveValue(branch);
   const prTitle = `Web PR ${Date.now()}`;

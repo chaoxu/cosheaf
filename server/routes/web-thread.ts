@@ -65,7 +65,7 @@ export function issueEditPage(
 export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
   if (ctx.ws.role === "read" || pull.merged) return emptyHtml;
   const nextState = pull.state === "open" ? "closed" : "open";
-  const label = pull.state === "open" ? "Close pull request" : "Reopen pull request";
+  const label = pull.state === "open" ? "Close PR" : "Reopen PR";
   return html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
     <input type="hidden" name="state" value="${nextState}">
     <button class="button" type="submit" data-testid="pull-toggle-state">${label}</button>
@@ -229,7 +229,7 @@ function checkboxFieldset(opts: {
 
 function threadEditPage(opts: {
   ctx: WebCtx;
-  kind: "issue" | "pull request";
+  kind: "issue" | "PR";
   number: number;
   title: string;
   body: string;
@@ -319,7 +319,7 @@ export function pullEditPage(
 ): Html {
   return threadEditPage({
     ctx,
-    kind: "pull request",
+    kind: "PR",
     number: pull.number,
     title: pull.title,
     body: pull.body ?? "",
@@ -662,7 +662,7 @@ export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string)
     </form>
     ${
       ctx.ws.role === "admin"
-        ? html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/merge`)}"><button class="button primary" type="submit">Merge pull request</button></form>`
+        ? html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/merge`)}"><button class="button primary" type="submit">Merge PR</button></form>`
         : ""
     }
   `;

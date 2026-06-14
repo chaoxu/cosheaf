@@ -31,7 +31,7 @@ export function usernameDatalist(collaborators: readonly ForgejoUser[]): Html {
 const REPO_TABS = [
   ["files", "Files", ""],
   ["issues", "Issues", "/issues"],
-  ["pulls", "Pull Requests", "/pulls"],
+  ["pulls", "PRs", "/pulls"],
   ["chat", "Chat", "/chat"],
   ["notifications", "Notifications", "/notifications"],
   ["activity", "Activity", "/activity"],
@@ -85,13 +85,12 @@ export function repoPage(opts: {
     user: opts.user,
     readerAssets: opts.readerAssets,
     sidebar: html`
-      <a class="brand" href="/">Cosheaf</a>
+      <span class="brand">Cosheaf</span>
       ${sidebarIdentity(opts.user)}
       ${modeToggle()}
       <nav class="sidebar-topnav">
         <a href="/">‹ Workspaces</a>
         ${notificationsNavLink(false)}
-        <a href="/account/settings">Account</a>
       </nav>
       <div class="sidebar-workspace">
         <a href="${repoHref(opts.owner, opts.repo)}">${opts.owner}/${opts.repo}</a>
@@ -116,14 +115,14 @@ export function repoPage(opts: {
 function tab(
   opts: { owner: string; repo: string; active: string },
   id: string,
-  _label: string,
+  label: string,
   suffix: string,
 ): Html {
-  // Path-styled mono nav (/files, /issues, …) per the typography-first chrome.
+  // Plain-label nav (Files, Issues, …) in the typography-first mono chrome (#149).
   // Every tab except Files is a contribute/forge surface — marked build-only so
   // Read mode (#131) can hide it and foreground the knowledge base.
   const buildOnly = id === "files" ? emptyHtml : html` data-build-only`;
-  return html`<a class="${opts.active === id ? "active" : ""}"${buildOnly} href="${repoHref(opts.owner, opts.repo, suffix)}">/${id}</a>`;
+  return html`<a class="${opts.active === id ? "active" : ""}"${buildOnly} href="${repoHref(opts.owner, opts.repo, suffix)}">${label}</a>`;
 }
 
 export function userPreferencesSection(user: string): Html {

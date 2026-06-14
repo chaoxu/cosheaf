@@ -428,7 +428,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
                 </button>
               ) : null}
               <button type="button" data-testid="open-pull-request" onClick={() => void openPullRequest(false)} disabled={busy}>
-                Open pull request
+                Open PR
               </button>
             </>
           ) : null}

@@ -120,7 +120,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               ${
                 ws.role === "read"
                   ? ""
-                  : html`${resolved.branch === "main" ? "" : html`<a class="button primary" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open pull request</a>`}
+                  : html`${resolved.branch === "main" ? "" : html`<a class="button primary" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open PR</a>`}
                     <a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}`}">New file</a>`
               }
             </div>
@@ -175,7 +175,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             ${
               ws.role === "read" || resolved.branch === "main"
                 ? ""
-                : html`<a class="button build-only" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open pull request</a>`
+                : html`<a class="button build-only" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open PR</a>`
             }
             ${
               ws.role === "read"
