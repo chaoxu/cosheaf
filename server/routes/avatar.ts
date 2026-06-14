@@ -3,8 +3,27 @@
 // backing forge stays hidden. Kept in its own low-level module so the chrome
 // (web-shell/web-page) and the higher-level thread code can both import it
 // without an import cycle.
-import { DELETED_USER_LOGIN } from "../forgejo-types.js";
+import { createHash } from "node:crypto";
+import { DELETED_USER_LOGIN, type ForgejoUser } from "../forgejo-types.js";
 import { html, type Html } from "./web-html.js";
+
+// Whether the user has uploaded a custom avatar, vs Forgejo's generated
+// identicon (whose avatar_url hash is md5(lowercase(email))). Cosheaf renders
+// initials by default and shows only a real upload, served through the
+// /account/avatar proxy so the backing forge stays hidden (#150).
+export function hasCustomAvatar(user: Pick<ForgejoUser, "avatar_url" | "email">): boolean {
+  if (!user.avatar_url || !user.email) return false;
+  const hash = user.avatar_url.split("?")[0].replace(/\/+$/, "").split("/").pop() ?? "";
+  const identicon = createHash("md5").update(user.email.trim().toLowerCase()).digest("hex");
+  return hash.length > 0 && hash !== identicon;
+}
+
+// A real (uploaded) avatar image styled to match the initials chip. `src` is a
+// cosheaf proxy URL, never the Forgejo avatar URL.
+export function avatarImg(login: string | null | undefined, src: string): Html {
+  const name = login || DELETED_USER_LOGIN;
+  return html`<img class="avatar-chip avatar-chip-img" src="${src}" alt="${name}" title="${name}">`;
+}
 
 // First 1-2 alphanumerics of the login, for the initials avatar chip.
 export function initials(login: string | null | undefined): string {

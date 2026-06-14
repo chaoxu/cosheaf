@@ -107,6 +107,9 @@ export interface ForgejoUser {
   location?: string;
   active?: boolean;
   is_admin?: boolean;
+  // Always present: a custom upload, else a generated identicon whose hash is
+  // md5(lowercase(email)) — see hasCustomAvatar in routes/avatar.ts (#150).
+  avatar_url?: string;
 }
 
 /** Stand-in login when a Forgejo response has `user: null`. */

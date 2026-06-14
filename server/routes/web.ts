@@ -3,6 +3,7 @@ import { compress } from "hono/compress";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { AUTH_COOKIE } from "../middleware.js";
 import type { AppEnv } from "../types.js";
+import type { ForgejoUser } from "../forgejo-types.js";
 import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { allDocumentFormats } from "../format-registry.js";
 import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
@@ -15,6 +16,7 @@ import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
+import { avatarChip, avatarImg, hasCustomAvatar } from "./avatar.js";
 import { userPreferencesSection, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
@@ -249,6 +251,7 @@ web.get("/account/settings", async (c) => {
               </div>
             </div>
             ${userProfileSection(me, { saved, error })}
+            ${avatarSection(me)}
             ${userPreferencesSection(auth.user.username)}
             ${accountSignOutSection()}
           </div>
@@ -273,6 +276,88 @@ function accountSignOutSection(): Html {
     </form>
   </section>`;
 }
+
+// Profile-picture section (#150): initials by default, opt-in uploaded avatar.
+// The preview and the chrome both render the upload through the /account/avatar
+// proxy, never the Forgejo avatar URL — the backing forge stays hidden.
+function avatarSection(me: ForgejoUser): Html {
+  const custom = hasCustomAvatar(me);
+  return html`<section class="settings-section" data-testid="settings-avatar">
+    <div class="settings-section-header">
+      <h2>Profile picture</h2>
+      <p>Cosheaf shows your initials by default. Upload a picture to use it instead.</p>
+    </div>
+    <div class="settings-form">
+      <div class="avatar-edit">
+        <span class="avatar-preview" data-testid="avatar-preview">
+          ${custom ? avatarImg(me.login, "/account/avatar") : avatarChip(me.login)}
+        </span>
+        <div class="avatar-controls">
+          <form method="post" action="/account/avatar" enctype="multipart/form-data" class="avatar-upload-form" data-testid="avatar-upload-form">
+            <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" required data-testid="avatar-file">
+            <button class="button primary" type="submit" data-testid="avatar-upload">Upload</button>
+          </form>
+          ${custom ? html`<form method="post" action="/account/avatar/remove" data-testid="avatar-remove-form"><button class="button" type="submit" data-testid="avatar-remove">Remove</button></form>` : emptyHtml}
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
+// Avatar image proxy (#150): streams the current user's uploaded avatar from the
+// forge so the browser never sees the Forgejo URL. 404 when the user has only
+// the default identicon (the chrome then keeps the initials chip).
+web.get("/account/avatar", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return c.body(null, 401);
+  const me = await c.get("fjUser").getCurrentUser();
+  if (!hasCustomAvatar(me) || !me.avatar_url) return c.body(null, 404);
+  let res: Response;
+  try {
+    // Fetch via the reachable forge URL + the avatar path, not the (possibly
+    // public/unreachable) host Forgejo baked into avatar_url.
+    res = await fetch(`${c.get("config").forgejoUrl}${new URL(me.avatar_url).pathname}`);
+  } catch (_err) {
+    return c.body(null, 502);
+  }
+  if (!res.ok) return c.body(null, 404);
+  const bytes = await res.arrayBuffer();
+  return c.body(bytes, 200, {
+    "content-type": res.headers.get("content-type") ?? "image/png",
+    // A profile picture is mutable (upload/remove), so don't let the browser
+    // serve a stale image after a change — revalidate each load.
+    "cache-control": "private, no-cache",
+  });
+});
+
+const settingsError = (msg: string): Response => redirect(`/account/settings?error=${encodeURIComponent(msg)}`);
+
+web.post("/account/avatar", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const file = (await c.req.parseBody()).avatar;
+  if (!(file instanceof File) || file.size === 0) return settingsError("Choose an image to upload.");
+  if (!file.type.startsWith("image/")) return settingsError("Profile picture must be an image.");
+  if (file.size > 1_000_000) return settingsError("Profile picture must be under 1 MB.");
+  const image = Buffer.from(await file.arrayBuffer()).toString("base64");
+  try {
+    await c.get("fjUser").setUserAvatar(image);
+  } catch (err) {
+    return settingsError(`Could not set profile picture: ${(err as Error).message}`);
+  }
+  return redirect("/account/settings?saved=1");
+});
+
+web.post("/account/avatar/remove", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  try {
+    await c.get("fjUser").deleteUserAvatar();
+  } catch (err) {
+    return settingsError(`Could not remove profile picture: ${(err as Error).message}`);
+  }
+  return redirect("/account/settings?saved=1");
+});
 
 web.post("/account/settings", async (c) => {
   const auth = await resolveWebAuth(c);

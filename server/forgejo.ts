@@ -214,6 +214,16 @@ export class Forgejo {
     return this.reqOpt<ForgejoUser>(`/api/v1/users/${encodeURIComponent(username)}`);
   }
 
+  // Set the authenticated user's avatar (#150). `image` is the base64 of the
+  // raw image bytes (no data: prefix); the cosheaf PAT carries write:user.
+  async setUserAvatar(image: string): Promise<void> {
+    await this.req("/api/v1/user/avatar", { method: "POST", body: { image }, expectEmpty: true });
+  }
+
+  async deleteUserAvatar(): Promise<void> {
+    await this.req("/api/v1/user/avatar", { method: "DELETE", expectEmpty: true });
+  }
+
   async createUser(opts: {
     username: string;
     email: string;
