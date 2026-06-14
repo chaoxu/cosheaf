@@ -176,6 +176,13 @@ export function userPreferencesSection(user: string): Html {
           <option value="absolute">Absolute</option>
         </select>
       </label>
+      <label class="settings-row">
+        <span>Default editor mode</span>
+        <select data-testid="settings-editor-mode-select" data-editor-mode-user="${user}">
+          <option value="rich">Rich</option>
+          <option value="source">Source</option>
+        </select>
+      </label>
     </div>
   </section>`;
 }

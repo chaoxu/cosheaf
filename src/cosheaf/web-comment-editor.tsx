@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { MarkdownEditor } from "./editor";
+import { readEditorMode } from "./document-theme";
 import { resolveRepoLink } from "./coflat-document-context";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
@@ -40,7 +41,7 @@ function composeContext(config: ComposeConfig): DocumentContext {
 
 function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; config: ComposeConfig }): ReactElement {
   const [value, setValue] = useState(textarea.value);
-  const [mode, setMode] = useState<"rich" | "source">("rich");
+  const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(document.body.dataset.cosheafUser));
   const documentContext = useMemo(() => composeContext(config), [config]);
   return (
     <div className="coflat-compose-editor cf-theme-scope">

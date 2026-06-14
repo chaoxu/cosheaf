@@ -45,6 +45,24 @@
   shapeSelect.addEventListener("change", sync);
 })();
 
+// Default editor compose mode (#155): the page + comment editors seed their
+// initial Rich/Source mode from this; the in-editor toggle still overrides
+// per-session. Stored under the same per-user + legacy key pair the editor
+// islands read via readEditorMode(). Default: Rich.
+(() => {
+  const select = document.querySelector("[data-editor-mode-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:editor-mode";
+  const user = select.dataset.editorModeUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "source" ? "source" : "rich");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+  });
+})();
+
 // Date/time rendering. The server emits <time data-cosheaf-time datetime="ISO">
 // with an Absolute-short fallback; this rewrites every such element to the
 // user's chosen format in their local timezone (fixing the server-tz bug), and

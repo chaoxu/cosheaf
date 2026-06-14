@@ -7,6 +7,7 @@ export type ViewShape = "unified" | "split" | "after";
 const LEGACY_DOCUMENT_THEME_KEY = "cosheaf:document-theme";
 const LEGACY_DIFF_MODE_KEY = "cosheaf:diff-mode";
 const LEGACY_DIFF_SHAPE_KEY = "cosheaf:diff-shape";
+const LEGACY_EDITOR_MODE_KEY = "cosheaf:editor-mode";
 
 export interface DiffViewPreference {
   mode: ViewMode;
@@ -95,4 +96,26 @@ export function writeDiffViewPreference(preference: DiffViewPreference, username
   localStorage.setItem(diffShapeStorageKey(username), shape);
   localStorage.setItem(LEGACY_DIFF_MODE_KEY, mode);
   localStorage.setItem(LEGACY_DIFF_SHAPE_KEY, shape);
+}
+
+// Preferred compose mode the page + comment editors open in (#155). Shares the
+// ViewMode "rich"/"source" shape and normalizer with the diff preference; an
+// in-editor toggle still overrides per-session. Default: rich.
+export function editorModeStorageKey(username: string | null | undefined): string {
+  const clean = username?.trim();
+  return clean ? `${LEGACY_EDITOR_MODE_KEY}:${clean}` : LEGACY_EDITOR_MODE_KEY;
+}
+
+export function readEditorMode(username?: string | null): ViewMode {
+  if (typeof localStorage === "undefined") return "rich";
+  return normalizeDiffMode(
+    localStorage.getItem(editorModeStorageKey(username)) ?? localStorage.getItem(LEGACY_EDITOR_MODE_KEY),
+  );
+}
+
+export function writeEditorMode(mode: ViewMode, username?: string | null): void {
+  if (typeof localStorage === "undefined") return;
+  const normalized = normalizeDiffMode(mode);
+  localStorage.setItem(editorModeStorageKey(username), normalized);
+  localStorage.setItem(LEGACY_EDITOR_MODE_KEY, normalized);
 }

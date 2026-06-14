@@ -19,7 +19,7 @@ import {
   userBranchPrefix,
 } from "../../shared/conventions";
 import { ApiError, api } from "./api";
-import { readDocumentTheme } from "./document-theme";
+import { readDocumentTheme, readEditorMode } from "./document-theme";
 import type { DocumentThemeId } from "./document-theme";
 import { getClientDocumentFormat } from "./format-registry";
 import {
@@ -83,7 +83,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [dirty, setDirty] = useState(false);
   const [pathDirty, setPathDirty] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"rich" | "source">("rich");
+  const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(config.username));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
@@ -413,7 +413,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             {branch}
           </span>
           {config.formatId === COFLAT_FORMAT_ID ? (
-            <button type="button" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
+            <button type="button" data-testid="editor-mode-toggle" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
               {mode === "rich" ? "Source" : "Rich"}
             </button>
           ) : null}
