@@ -27,6 +27,7 @@ export function pageShell(opts: {
         ${opts.readerAssets ? webReaderAssets() : ""}
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
+        <script src="/cosheaf-select.js" defer></script>
       </head>
       <body data-cosheaf-user="${opts.user ?? ""}">
         <div class="app-frame">
