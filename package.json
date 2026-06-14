@@ -62,6 +62,7 @@
     "smoke:reader-parity": "playwright test --config playwright.smoke.config.ts --grep @smoke-reader-parity",
     "smoke:edit": "playwright test --config playwright.smoke.config.ts --grep @smoke-edit",
     "smoke:api": "node scripts/api-smoke.mjs",
+    "jupiter:e2e": "node scripts/jupiter-e2e.mjs",
     "test:e2e": "node scripts/playwright-devx.mjs",
     "check:e2e": "node scripts/playwright-devx.mjs",
     "check:web": "node scripts/playwright-devx.mjs tests/e2e/web-pages.spec.ts",
