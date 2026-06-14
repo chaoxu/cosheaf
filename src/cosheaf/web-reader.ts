@@ -1,4 +1,5 @@
 import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews, type ReaderOutlineEntry } from "@chaoxu/coflat/reader";
+import DOMPurify from "dompurify";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import {
   REF_BUTTON_CLASS,
@@ -11,6 +12,7 @@ import {
   resolveRepoLink,
   resolveRawRepoLink,
   resolveUnresolvedCoflatReferences,
+  type CoflatCitations,
   type CoflatDocumentPayload,
   type RenderedCrossref,
   urlPath,
@@ -44,11 +46,23 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   resolveUnresolvedCoflatReferences(fragment, refs);
   rewriteRenderedRepoUrls(fragment, payload);
   root.replaceChildren(fragment);
+  // Append the bibliography (#124): Coflat's reader renders inline citations but
+  // not the References list, so the host emits it from the same citeproc
+  // formatter. Entries reuse Coflat's .cf-bibliography-entry markup so the
+  // vendored editor.css lays out the [N] numbers.
+  const references = refs.citations ? renderReferences(refs.citations) : null;
+  if (references) root.append(references);
   hydrateMath(root);
   // Coflat's hover previews for cross-references, citations, and labeled blocks
   // (theorems/equations). Resolved crossref anchors keep their data-ref-key, so
-  // the installer attaches to them; source-based previews use the document source.
-  hydrateReaderHoverPreviews(root, { source: payload.source, context: ctx });
+  // the installer attaches to them; source-based previews use the document
+  // source. previewForReference supplies the bibliographic entry for paper
+  // citations (otherwise the reader would show "Unresolved: <key>") (#124).
+  hydrateReaderHoverPreviews(root, {
+    source: payload.source,
+    context: ctx,
+    previewForReference: (key) => citationHoverPreview(refs.citations, key),
+  });
   // Section + block (theorem) collapse toggles (#115). Without this the
   // disclosure controls render but never get behavior.
   hydrateReaderDisclosures(root);
@@ -111,7 +125,10 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[]): void {
   const slot = document.querySelector<HTMLElement>("[data-reader-toc]");
   if (!slot) return;
   const items = outline.filter((entry) => entry.level <= 3);
-  if (items.length < 2) return;
+  // Render the rail whenever the document has at least one h1–h3 heading.
+  // The previous >=2 threshold hid the outline for simple/few-heading docs
+  // (#125); a single-heading doc still gets a usable "On this page" entry.
+  if (items.length < 1) return;
   const minLevel = Math.min(...items.map((item) => item.level));
   slot.replaceChildren();
   const title = document.createElement("p");
@@ -126,6 +143,47 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[]): void {
     slot.appendChild(link);
   }
   slot.hidden = false;
+}
+
+// Render the document's reference list from the cited entries, in the order
+// they were registered (IEEE numeric, so [1], [2], …). Coflat's bibliography
+// HTML is sanitized to a fragment before insertion (host DOMPurify boundary).
+function renderReferences(citations: CoflatCitations): HTMLElement | null {
+  const entries = citations.formatter.bibliographyEntries(citations.cited);
+  if (entries.length === 0) return null;
+  const section = document.createElement("section");
+  section.className = "cosheaf-references";
+  section.setAttribute("aria-label", "References");
+  const heading = document.createElement("h2");
+  heading.textContent = "References";
+  section.appendChild(heading);
+  const list = document.createElement("div");
+  list.className = "cf-bibliography";
+  for (const entry of entries) {
+    const wrap = document.createElement("div");
+    wrap.className = "cf-bibliography-entry";
+    wrap.id = `cite-${entry.id}`;
+    wrap.append(DOMPurify.sanitize(entry.html, { RETURN_DOM_FRAGMENT: true }));
+    list.appendChild(wrap);
+  }
+  section.appendChild(list);
+  return section;
+}
+
+// Hover-preview content for a paper citation: the formatted bibliography entry.
+// Returns null for non-citation keys so crossref/equation/block hovers fall
+// through to Coflat's source-based preview path.
+function citationHoverPreview(citations: CoflatCitations | null, key: string): HTMLElement | null {
+  if (!citations?.keys.has(key)) return null;
+  // bibliographyEntries returns the full bibliography (citeproc ignores the id
+  // filter), so pick the entry by id rather than position — otherwise every
+  // citation but the first would preview the wrong reference.
+  const entry = citations.formatter.bibliographyEntries([key]).find((e) => e.id === key);
+  if (!entry) return null;
+  const el = document.createElement("div");
+  el.className = "cosheaf-citation-preview cf-bibliography-entry";
+  el.append(DOMPurify.sanitize(entry.html, { RETURN_DOM_FRAGMENT: true }));
+  return el;
 }
 
 function applyDocumentTheme(root: HTMLElement): void {

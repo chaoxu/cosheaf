@@ -59,6 +59,12 @@ export default defineConfig({
       "react-diff-view",
       // hydrateMath dynamic-imports katex; pre-bundle so it's ready on first paint.
       "katex",
+      // citation-js is CommonJS; pre-bundle so the reader's dynamic
+      // `@chaoxu/coflat/citeproc` import gets working ESM named exports in dev
+      // (otherwise: "does not provide an export named 'parse'").
+      "@citation-js/core",
+      "@citation-js/plugin-bibtex",
+      "@citation-js/plugin-csl",
     ],
     // `@chaoxu/coflat` is a `file:` link. pnpm's content-addressed
     // folder name (`.pnpm/@chaoxu+coflat@file+..+coflat_<hash>/`)
@@ -70,6 +76,7 @@ export default defineConfig({
       "@chaoxu/coflat",
       "@chaoxu/coflat/reader",
       "@chaoxu/coflat/parse",
+      "@chaoxu/coflat/citeproc",
     ],
   },
   server: {

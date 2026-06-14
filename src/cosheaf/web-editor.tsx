@@ -75,6 +75,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [currentPath, setCurrentPath] = useState(config.path);
   const [savedPath, setSavedPath] = useState(config.path);
   const [branch, setBranch] = useState(config.branch);
+  // Tracks whether the edit branch exists on the forge yet. Starts from the
+  // server's check and flips true once a save creates the branch — drives the
+  // Cancel target so it never links to a not-yet-created branch (#121).
+  const [branchExists, setBranchExists] = useState(config.branchExists);
   const [status, setStatus] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [pathDirty, setPathDirty] = useState(false);
@@ -173,28 +177,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     };
   }, [coflatRefs]);
 
-  useEffect(() => {
-    const input = document.getElementById("web-editor-path-input");
-    if (!(input instanceof HTMLInputElement)) return;
-    const onInput = () => {
-      setCurrentPath(input.value);
-      setPathDirty(input.value.trim() !== savedPathRef.current);
-      setStatus(null);
-    };
-    input.addEventListener("input", onInput);
-    return () => input.removeEventListener("input", onInput);
-  }, []);
-
-  useEffect(() => {
-    const input = document.getElementById("web-editor-path-input");
-    if (input instanceof HTMLInputElement) {
-      if (input.value !== currentPath) input.value = currentPath;
-      input.disabled = busy;
-    }
-    const dirtyMark = document.getElementById("web-editor-path-dirty");
-    if (dirtyMark instanceof HTMLElement) dirtyMark.hidden = !dirty && !pathDirty;
-  }, [busy, currentPath, dirty, pathDirty]);
-
   const branchForWrite = useCallback(() => {
     const current = branchRef.current;
     if (current && current !== "main") return current;
@@ -218,6 +200,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         );
         if (result.content !== undefined) setContent(result.content);
         setBranch(result.branch);
+        setBranchExists(true);
         setSavedPath(nextPath);
         setCurrentPath(nextPath);
         setPathDirty(false);
@@ -351,6 +334,13 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       ? "web-editor-shell cf-theme-scope cf-theme-blueprint-book"
       : "web-editor-shell cf-theme-scope";
 
+  // Cancel returns to the file as it's actually viewable: the edit branch only
+  // once it exists, otherwise main (the branch the edit derives from). Never a
+  // not-yet-created branch (#121). Uses the last-saved path so discarded
+  // in-progress renames don't point at a path that was never written.
+  const cancelBranch = branchExists && branch !== "main" ? branch : "main";
+  const cancelHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(cancelBranch)}/${urlPath(savedPath)}`;
+
   return (
     <div className={readerClass}>
       <div className="web-editor-main">
@@ -402,6 +392,22 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       </div>
       {renderStatusbar(
         <footer className="web-editor-statusbar" data-testid="statusbar">
+          <input
+            className="web-editor-path"
+            data-testid="editor-path-input"
+            aria-label="File path"
+            spellCheck={false}
+            value={currentPath}
+            disabled={busy}
+            onChange={(e) => {
+              setCurrentPath(e.target.value);
+              setPathDirty(e.target.value.trim() !== savedPath);
+              setStatus(null);
+            }}
+          />
+          <span className="dirty-dot" hidden={!dirty && !pathDirty}>
+            *
+          </span>
           <span className="web-editor-status">{status ?? ""}</span>
           <span data-testid="active-branch-name" className="web-editor-branch">
             {branch}
@@ -426,6 +432,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               </button>
             </>
           ) : null}
+          <a className="web-editor-cancel" data-testid="editor-cancel" href={cancelHref}>
+            Cancel
+          </a>
         </footer>,
       )}
     </div>

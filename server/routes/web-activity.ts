@@ -60,7 +60,7 @@ web.get("/:owner/:repo/activity", webRoute(async (_c, ctx) => {
 function notificationsPage(ctx: WebCtx, threads: readonly ForgejoNotificationThread[]): Html {
   return html`
     <div class="page-title compact">
-      <div><p class="eyebrow">Unread</p><h1>Notifications</h1></div>
+      <div><h1>Notifications</h1></div>
       ${
         threads.length === 0
           ? ""

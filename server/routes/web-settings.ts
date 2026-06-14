@@ -43,7 +43,6 @@ web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
         <div class="settings-page">
           <div class="page-title compact">
             <div>
-              <p class="eyebrow">Repository</p>
               <h1>Settings</h1>
             </div>
           </div>

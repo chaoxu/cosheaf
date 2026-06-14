@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { avatarChip } from "./avatar.js";
 import { emptyHtml, html, type Html, raw } from "./web-html.js";
 
 export type StatusCrumb = { label: string; href?: string };
@@ -28,6 +29,7 @@ export function pageShell(opts: {
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
+        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script>`) : ""}
       </head>
       <body data-cosheaf-user="${opts.user ?? ""}">
         <div class="app-frame">
@@ -35,7 +37,7 @@ export function pageShell(opts: {
             ${opts.sidebar ? html`<aside class="app-sidebar">${opts.sidebar}</aside>` : ""}
             <div class="app-content">${opts.body}</div>
           </div>
-          ${appStatusbar(opts.user, opts.statusPath)}
+          ${appStatusbar(opts.statusPath)}
         </div>
       </body>
     </html>`);
@@ -46,15 +48,33 @@ function cosheafWebCssVersion(): string {
   return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
-export function globalSidebar(active: "workspaces" | "account"): Html {
+export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string): Html {
   return html`<a class="brand" href="/">Cosheaf</a>
+    ${sidebarIdentity(user)}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
+      ${notificationsNavLink(active === "notifications")}
       <a class="${active === "account" ? "active" : ""}" href="/account/settings">Account</a>
     </nav>`;
 }
 
-function appStatusbar(user: string | undefined, path: StatusCrumb[] | undefined): Html {
+// Signed-in identity directly under the brand (#127): an initials avatar + the
+// username, linking to Account. The same block renders in the global and repo
+// sidebars so identity is always visible at the top. Logged-out chrome (only the
+// pre-auth message pages) shows a sign-in link instead.
+export function sidebarIdentity(user: string | undefined): Html {
+  if (!user) return html`<a class="sidebar-identity" href="/login">Sign in</a>`;
+  return html`<a class="sidebar-identity" href="/account/settings" title="Account">${avatarChip(user)}<span class="sidebar-identity-name">${user}</span></a>`;
+}
+
+// Persistent global-notifications entry point (#129) shared by both sidebars.
+// The unread count badge is filled client-side by cosheaf-notifications.js (and
+// kept live over the per-user SSE channel), so server renders stay cheap.
+export function notificationsNavLink(active: boolean): Html {
+  return html`<a class="${active ? "active" : ""}" href="/account/notifications">Notifications<span class="notif-badge" data-notif-badge hidden></span></a>`;
+}
+
+function appStatusbar(path: StatusCrumb[] | undefined): Html {
   const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
     html`<a href="/">cosheaf</a>`,
@@ -64,10 +84,7 @@ function appStatusbar(user: string | undefined, path: StatusCrumb[] | undefined)
         : html`<span>${segment.label}</span>`,
     ),
   ].flatMap((crumb, i) => (i === 0 ? [crumb] : [sep, crumb]));
-  const session = user
-    ? html`<form method="post" action="/logout"><a class="account-link" href="/account/settings">${user}</a><button type="submit">sign out</button></form>`
-    : html`<a class="account-link" href="/login">sign in</a>`;
-  return html`<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div><div class="status-session">${session}</div></footer>`;
+  return html`<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div></footer>`;
 }
 
 export function webEditorAssets(): Html {

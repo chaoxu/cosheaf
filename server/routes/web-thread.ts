@@ -11,6 +11,7 @@ import type {
   ForgejoTimelineEvent,
   ForgejoUser,
 } from "../forgejo-types.js";
+import { avatarChip } from "./avatar.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
 import {
@@ -408,28 +409,10 @@ function isReferenceTimelineEvent(type: string): boolean {
   return type === "commit_ref" || type === "issue_ref" || type === "comment_ref" || type === "pull_ref";
 }
 
-// --- Avatar + participant helpers (shared by issue/PR thread rendering) ------
-
-// First 1-2 alphanumerics of the login, for the initials avatar chip.
-export function initials(login: string | null | undefined): string {
-  const stripped = (login ?? "?").replace(/[^A-Za-z0-9]/g, "");
-  return (stripped.slice(0, 2) || "?").toUpperCase();
-}
-
-// Deterministic 0-7 hue bucket for a login, feeding the .avatar-chip--N classes.
-// Pure + stable so the same author always gets the same color across renders.
-export function tint(login: string | null | undefined): number {
-  const s = login ?? "?";
-  let sum = 0;
-  for (let i = 0; i < s.length; i++) sum += s.charCodeAt(i);
-  return sum % 8;
-}
-
-function avatarChip(login: string | null | undefined): Html {
-  // role=img + aria-label so each chip announces the participant to a screen
-  // reader (the visible title stays for mouse hover).
-  return html`<span class="avatar-chip avatar-chip--${tint(login)}" role="img" aria-label="${displayLogin(login)}" title="${displayLogin(login)}">${initials(login)}</span>`;
-}
+// --- Participant helpers (shared by issue/PR thread rendering) ---------------
+// The initials avatar chip lives in ./avatar.js (also used by the sidebar
+// identity block); re-exported here for the thread test + existing importers.
+export { initials, tint } from "./avatar.js";
 
 // The right-hand metadata cluster for an issue/pull list row: author avatar +
 // name, short date, and bare comment count — all on one line. Uses the initials
