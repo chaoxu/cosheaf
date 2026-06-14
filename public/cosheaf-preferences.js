@@ -45,6 +45,26 @@
   shapeSelect.addEventListener("change", sync);
 })();
 
+// Color scheme (#153): Light · Dark · System. The pre-paint head script sets
+// html[data-cosheaf-color-scheme] before paint (no flash); this wires the
+// settings select and applies the choice live on change. System defers to the
+// OS via the CSS @media (prefers-color-scheme) rule, so no JS is needed to
+// track OS changes. Default: Light.
+(() => {
+  const select = document.querySelector("[data-color-scheme-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:color-scheme";
+  const user = select.dataset.colorSchemeUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "dark" || value === "system" ? value : "light");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+    document.documentElement.setAttribute("data-cosheaf-color-scheme", select.value);
+  });
+})();
+
 // Persist + restore the issues/pulls list sort + state filter (#157). The list
 // filter form carries data-list-prefs="issues|pulls"; we remember the user's
 // last chosen state/sort (per user, per list kind) and re-apply it when they

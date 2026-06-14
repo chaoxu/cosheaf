@@ -149,6 +149,14 @@ export function userPreferencesSection(user: string): Html {
     </div>
     <div class="settings-form">
       <label class="settings-row">
+        <span>Color scheme</span>
+        <select data-testid="settings-color-scheme-select" data-color-scheme-user="${user}">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="system">System</option>
+        </select>
+      </label>
+      <label class="settings-row">
         <span>Document theme</span>
         <select data-testid="settings-document-theme-select" data-document-theme-user="${user}">
           <option value="default">Default</option>
