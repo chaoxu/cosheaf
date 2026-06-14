@@ -310,7 +310,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByRole("button", { name: "Source" }).click();
   await page.locator(".cm-content").fill(`# Web Page E2E\n\nThis was saved through a server-rendered editor.\n`);
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByTestId("statusbar")).toContainText("saved");
+  await expect(page.getByTestId("statusbar")).toContainText("committed");
   await page.goto(`${repoBase}/src/branch/${branch}/${path}`);
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
   await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();

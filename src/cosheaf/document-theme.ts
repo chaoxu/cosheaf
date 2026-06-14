@@ -8,6 +8,7 @@ const LEGACY_DOCUMENT_THEME_KEY = "cosheaf:document-theme";
 const LEGACY_DIFF_MODE_KEY = "cosheaf:diff-mode";
 const LEGACY_DIFF_SHAPE_KEY = "cosheaf:diff-shape";
 const LEGACY_EDITOR_MODE_KEY = "cosheaf:editor-mode";
+const LEGACY_AUTOSAVE_KEY = "cosheaf:autosave";
 
 export interface DiffViewPreference {
   mode: ViewMode;
@@ -118,4 +119,33 @@ export function writeEditorMode(mode: ViewMode, username?: string | null): void 
   const normalized = normalizeDiffMode(mode);
   localStorage.setItem(editorModeStorageKey(username), normalized);
   localStorage.setItem(LEGACY_EDITOR_MODE_KEY, normalized);
+}
+
+// Autosave preference (#158): the editor autosaves the in-progress source to a
+// local draft (#162) on this interval; "off" disables drafting (manual save
+// only). Stored as "off" or one of the allowed interval strings.
+export interface AutosavePreference {
+  enabled: boolean;
+  intervalMs: number;
+}
+export const AUTOSAVE_INTERVALS = [1000, 1500, 3000, 5000] as const;
+const DEFAULT_AUTOSAVE_MS = 1500;
+
+export function autosaveStorageKey(username: string | null | undefined): string {
+  const clean = username?.trim();
+  return clean ? `${LEGACY_AUTOSAVE_KEY}:${clean}` : LEGACY_AUTOSAVE_KEY;
+}
+
+export function normalizeAutosave(value: string | null | undefined): string {
+  if (value === "off") return "off";
+  const n = Number(value);
+  return (AUTOSAVE_INTERVALS as readonly number[]).includes(n) ? String(n) : String(DEFAULT_AUTOSAVE_MS);
+}
+
+export function readAutosave(username?: string | null): AutosavePreference {
+  if (typeof localStorage === "undefined") return { enabled: true, intervalMs: DEFAULT_AUTOSAVE_MS };
+  const value = normalizeAutosave(
+    localStorage.getItem(autosaveStorageKey(username)) ?? localStorage.getItem(LEGACY_AUTOSAVE_KEY),
+  );
+  return value === "off" ? { enabled: false, intervalMs: DEFAULT_AUTOSAVE_MS } : { enabled: true, intervalMs: Number(value) };
 }

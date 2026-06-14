@@ -154,6 +154,25 @@
   });
 })();
 
+// Autosave preference (#158): Off, or a debounce interval. With #162 autosave
+// writes a local draft (not a commit); "off" disables drafting (manual save
+// only). The editor reads this on mount via readAutosave(); this wires the
+// settings select. Default: Every 1.5s.
+(() => {
+  const select = document.querySelector("[data-autosave-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:autosave";
+  const user = select.dataset.autosaveUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const allowed = ["off", "1000", "1500", "3000", "5000"];
+  const normalize = (value) => (allowed.includes(value) ? value : "1500");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+  });
+})();
+
 // Default editor compose mode (#155): the page + comment editors seed their
 // initial Rich/Source mode from this; the in-editor toggle still overrides
 // per-session. Stored under the same per-user + legacy key pair the editor

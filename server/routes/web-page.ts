@@ -216,6 +216,16 @@ export function userPreferencesSection(user: string): Html {
           <option value="source">Source</option>
         </select>
       </label>
+      <label class="settings-row">
+        <span>Autosave</span>
+        <select data-testid="settings-autosave-select" data-autosave-user="${user}">
+          <option value="off">Off</option>
+          <option value="1000">Every 1s</option>
+          <option value="1500">Every 1.5s</option>
+          <option value="3000">Every 3s</option>
+          <option value="5000">Every 5s</option>
+        </select>
+      </label>
     </div>
   </section>`;
 }

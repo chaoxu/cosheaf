@@ -149,6 +149,8 @@ html[data-cosheaf-reading="wide"] :is(.coflat-reader-island,.cosheaf-document-re
 .app-content:has(.edit-page){display:flex;flex-direction:column;overflow:hidden}.app-content:has(.edit-page) .repo-page{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 12px}.app-content:has(.edit-page) .repo-body{flex:1;min-height:0;display:flex;flex-direction:column;padding-bottom:0}
 .text-edit-page .compose-form{flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid var(--cf-border)}.text-edit-page .text-file-editor{flex:1;min-height:200px}.text-edit-page .form-actions{padding:8px 0}.text-file-editor{min-height:64vh;font:13px/1.45 var(--cf-font-mono)}
 #web-editor-root{flex:1;min-height:320px;border:0;border-top:1px solid var(--cf-border);border-radius:0;margin:0 -12px;overflow:clip}
+/* unsaved local-draft restore prompt (#162) */
+.editor-draft-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--cf-border);background:var(--cf-surface);color:var(--cf-fg);padding:6px 12px;font-size:13px}.editor-draft-banner span{margin-right:auto}
 /* Match the editor document measure to the reader's 1200px (#122). Scoped to
    the shell with id specificity so it beats the blueprint-book theme's
    --cf-content-max-width:75ch, which is declared on this same element. */

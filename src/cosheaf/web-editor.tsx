@@ -19,8 +19,9 @@ import {
   userBranchPrefix,
 } from "../../shared/conventions";
 import { ApiError, api } from "./api";
-import { readDocumentTheme, readEditorMode } from "./document-theme";
+import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
 import type { DocumentThemeId } from "./document-theme";
+import { clearDraft, type EditorDraft, readDraft, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import {
   type CoflatLocalRefs,
@@ -45,6 +46,10 @@ interface EditorConfig {
 
 function shortId(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+function nowTime(): string {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function readConfig(): { config: EditorConfig; content: string } {
@@ -80,9 +85,18 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // Cancel target so it never links to a not-yet-created branch (#121).
   const [branchExists, setBranchExists] = useState(config.branchExists);
   const [status, setStatus] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  // Uncommitted-to-Forgejo changes (#162). Distinct from a local draft being
+  // saved: autosave persists a draft without committing, so the editor stays
+  // "uncommitted" until an explicit Save/Cmd-S. Drives the dirty dot, the Save
+  // gate, and the unload guard.
+  const [uncommitted, setUncommitted] = useState(false);
   const [pathDirty, setPathDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [autosave] = useState(() => readAutosave(config.username));
+  // A local draft found on mount that differs from the loaded file — offered for
+  // restore (don't silently override the committed file).
+  const [pendingDraft, setPendingDraft] = useState<EditorDraft | null>(null);
+  const lastReasonRef = useRef<"manual" | "command" | "autosave">("manual");
   const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(config.username));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
@@ -100,13 +114,22 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
-      if (!dirty && !pathDirty) return;
+      if (!uncommitted && !pathDirty) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty, pathDirty]);
+  }, [uncommitted, pathDirty]);
+
+  // Offer a local draft from a previous session if it differs from the loaded
+  // file (#162). Runs once on mount; the banner lets the user restore or discard
+  // so the committed file is never silently overwritten.
+  useEffect(() => {
+    const draft = readDraft(config.owner, config.repo, config.branch, config.path);
+    if (draft && draft.source !== initialContent) setPendingDraft(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(
     () => () => {
@@ -183,7 +206,21 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     return `${userBranchPrefix(config.username)}wip-${shortId()}`;
   }, [config.username]);
 
-  const saveSource = useCallback(
+  // Autosave (#162): persist the in-progress source to a local draft. No
+  // network, no commit, no branch creation — so it can never clobber the
+  // selection (#161) or produce commit noise. Synchronous, so it returns ok.
+  const saveDraft = useCallback(
+    (source: string): { ok: true } => {
+      writeDraft(config.owner, config.repo, config.branch, config.path, { source, baseSha: null, savedAt: Date.now() });
+      return { ok: true };
+    },
+    [config.owner, config.repo, config.branch, config.path],
+  );
+
+  // Explicit commit (Save / Cmd-S): the real Forgejo write. Creates the edit
+  // branch lazily on this first commit, reconciles the server-injected
+  // frontmatter id into the editor, and clears the local draft on success.
+  const commitSource = useCallback(
     async (source: string): Promise<{ ok: true } | { ok: false; error: string }> => {
       const writeBranch = branchForWrite();
       const nextPath = currentPathRef.current.trim();
@@ -198,27 +235,39 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           writeBranch,
           previousPath !== nextPath ? previousPath : undefined,
         );
+        // Reconcile the server's frontmatter id into the controlled editor. This
+        // now happens only on an explicit commit (rare), never every autosave
+        // tick — so it no longer resets the doc and clobbers the selection (#161).
         if (result.content !== undefined) setContent(result.content);
         setBranch(result.branch);
         setBranchExists(true);
         setSavedPath(nextPath);
         setCurrentPath(nextPath);
         setPathDirty(false);
+        setUncommitted(false);
+        clearDraft(config.owner, config.repo, config.branch, config.path);
         return { ok: true };
       } catch (err) {
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path],
   );
 
+  // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
+  // disabled, #158); manual/command (Save button, Cmd-S) → real commit.
   const saveHandler = useMemo<EditorSaveHandler>(
     () => ({
-      autosaveDebounceMs: 1500,
+      autosaveDebounceMs: autosave.intervalMs,
       isBusy: () => busy,
-      save: (payload) => saveSource(payload.source),
+      save: (payload) => {
+        lastReasonRef.current = payload.reason;
+        if (payload.reason !== "autosave") return commitSource(payload.source);
+        if (!autosave.enabled) return Promise.resolve({ ok: true as const });
+        return Promise.resolve(saveDraft(payload.source));
+      },
     }),
-    [busy, saveSource],
+    [autosave.intervalMs, autosave.enabled, busy, saveDraft, commitSource],
   );
 
   const statusEvents = useMemo<EditorStatusEvents>(
@@ -229,18 +278,20 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       },
       onSaveSucceeded: () => {
         setBusy(false);
-        setStatus("saved");
+        if (lastReasonRef.current !== "autosave") setStatus(`committed · ${nowTime()}`);
+        // Autosave off still fires a Coflat tick that the handler no-ops; don't
+        // claim a "draft saved" when nothing was persisted (#158).
+        else if (autosave.enabled) setStatus(`draft saved · ${nowTime()}`);
       },
       onSaveFailed: (event) => {
         setBusy(false);
         setStatus(`save failed: ${event.error}`);
       },
-      onDirtyChange: setDirty,
       onAssetUploading: (event) => setStatus(`uploading ${event.file.name}...`),
       onAssetUploadSucceeded: (event) => setStatus(`uploaded ${event.path}`),
       onAssetUploadFailed: (event) => setStatus(`upload failed: ${event.error}`),
     }),
-    [],
+    [autosave.enabled],
   );
 
   const assetUploader = useMemo<EditorAssetUploader>(
@@ -285,19 +336,37 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   );
 
   const save = useCallback(() => {
-    if (dirty) {
+    if (busy) return;
+    // Content changed: route through Coflat so it flushes pending edits, fires
+    // the status events, and commits via the manual-reason handler.
+    if (uncommitted) {
       void editorRef.current?.triggerSave("manual");
       return;
     }
-    if (!pathDirty || busy) return;
+    // Path-only rename: content is unchanged so Coflat won't fire a save — commit
+    // the current content directly to carry the rename through.
+    if (!pathDirty) return;
     setBusy(true);
     setStatus(null);
-    void saveSource(content).then((result) => {
+    lastReasonRef.current = "manual";
+    void commitSource(content).then((result) => {
       setBusy(false);
-      if (result.ok) setStatus("saved");
-      else setStatus(`save failed: ${result.error}`);
+      setStatus(result.ok ? `committed · ${nowTime()}` : `save failed: ${result.error}`);
     });
-  }, [busy, content, dirty, pathDirty, saveSource]);
+  }, [busy, content, uncommitted, pathDirty, commitSource]);
+
+  const restoreDraft = useCallback(() => {
+    if (!pendingDraft) return;
+    setContent(pendingDraft.source);
+    setUncommitted(true);
+    setStatus(`restored local draft · ${nowTime()}`);
+    setPendingDraft(null);
+  }, [pendingDraft]);
+
+  const discardDraft = useCallback(() => {
+    clearDraft(config.owner, config.repo, config.branch, config.path);
+    setPendingDraft(null);
+  }, [config.owner, config.repo, config.branch, config.path]);
 
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {
@@ -343,6 +412,17 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 
   return (
     <div className={readerClass}>
+      {pendingDraft ? (
+        <div className="editor-draft-banner" data-testid="editor-draft-banner" role="status">
+          <span>Unsaved local draft from {new Date(pendingDraft.savedAt).toLocaleString()}.</span>
+          <button type="button" className="button small" data-testid="editor-draft-restore" onClick={restoreDraft}>
+            Restore
+          </button>
+          <button type="button" className="button small subtle" data-testid="editor-draft-discard" onClick={discardDraft}>
+            Discard
+          </button>
+        </div>
+      ) : null}
       <div className="web-editor-main">
         <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
           {documentContextReady ? (
@@ -361,6 +441,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               }}
               onChange={(next) => {
                 setContent(next);
+                setUncommitted(true);
                 setStatus(null);
               }}
               saveHandler={saveHandler}
@@ -405,7 +486,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               setStatus(null);
             }}
           />
-          <span className="dirty-dot" hidden={!dirty && !pathDirty}>
+          <span className="dirty-dot" hidden={!uncommitted && !pathDirty}>
             *
           </span>
           <span className="web-editor-status">{status ?? ""}</span>
@@ -417,7 +498,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               {mode === "rich" ? "Source" : "Rich"}
             </button>
           ) : null}
-          <button type="button" onClick={save} disabled={(!dirty && !pathDirty) || busy}>
+          <button type="button" onClick={save} disabled={(!uncommitted && !pathDirty) || busy}>
             Save
           </button>
           {branch && branch !== "main" ? (
