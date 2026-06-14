@@ -1,4 +1,5 @@
 import type { DocumentContext } from "@chaoxu/coflat/reader";
+import type { CitationFormatter } from "@chaoxu/coflat/citeproc";
 import { extractReferences } from "@chaoxu/coflat/parse";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
@@ -23,7 +24,20 @@ export interface CoflatDocumentPayload {
 
 export interface CoflatLocalRefs {
   crossrefs: Map<string, RenderedCrossref>;
-  citations: Map<string, string>;
+  citations: CoflatCitations | null;
+}
+
+// Paper-citation state, built from the document's `bibliography` .bib via
+// Coflat's own citeproc (single source of truth for BibTeX parsing + CSL
+// formatting). `formatter` produces the inline label (IEEE numeric, e.g. [1])
+// and the bibliography entries; `keys` is every entry id in the .bib (used to
+// tell a citation [@cormen2009] from a workspace crossref [@eq:gaussian]);
+// `cited` is the in-document, first-appearance order of cited keys (the order
+// the formatter is registered in and the order the References list renders).
+export interface CoflatCitations {
+  formatter: CitationFormatter;
+  keys: Set<string>;
+  cited: string[];
 }
 
 export interface RenderedCrossref {
@@ -73,6 +87,7 @@ function isLineFragment(hash: string): boolean {
 }
 
 export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatLocalRefs): DocumentContext {
+  const citations = refs.citations;
   return {
     linkResolver: {
       resolve: (href) => {
@@ -81,7 +96,7 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
       },
     },
     refResolver: {
-      resolve: (key) => {
+      resolve: (key, _mode, env) => {
         const crossref = refs.crossrefs.get(key);
         if (crossref) {
           return {
@@ -90,8 +105,10 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
             className: "cf-crossref",
           };
         }
-        const citation = refs.citations.get(key);
-        if (citation) return { content: citation, className: "cf-citation" };
+        if (citations?.keys.has(key)) {
+          const locator = env?.locator;
+          return { content: citations.formatter.cite([key], [locator]), className: "cf-citation" };
+        }
         return null;
       },
     },
@@ -107,8 +124,9 @@ export function resolveUnresolvedCoflatReferences(root: ParentNode, refs: Coflat
       rewriteReferenceElement(el, key, crossref.label, "cf-crossref", crossref.href);
       continue;
     }
-    const citation = refs.citations.get(key);
-    if (citation) rewriteReferenceElement(el, key, citation, "cf-citation");
+    if (refs.citations?.keys.has(key)) {
+      rewriteReferenceElement(el, key, refs.citations.formatter.cite([key], [undefined]), "cf-citation");
+    }
   }
 }
 
@@ -120,7 +138,7 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
   }
   return {
     crossrefs,
-    citations: await localCitations(payload, parsed.frontmatter),
+    citations: await loadCitations(payload, parsed.frontmatter, parsed.body),
   };
 }
 
@@ -191,6 +209,19 @@ function referencedKeys(source: string): string[] {
   ];
 }
 
+// Citation keys written as bracketed [@key] (not bare narrative @key), in
+// first-appearance order — the form the reader resolves to an inline [N], and
+// thus the set the References list and citeproc numbering register from.
+function bracketedCitationKeys(source: string): string[] {
+  return [
+    ...new Set(
+      extractReferences(source)
+        .filter((ref) => ref.kind === "crossref" && ref.key && ref.bracketed === true)
+        .map((ref) => ref.key as string),
+    ),
+  ];
+}
+
 function refHref(payload: CoflatDocumentPayload, ref: WorkspaceRef): string {
   const fragment = ref.fragment ? `#${encodeURIComponent(ref.fragment)}` : "";
   return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(ref.path)}${fragment}`;
@@ -213,9 +244,41 @@ function escapeHtml(value: string): string {
   });
 }
 
-async function localCitations(payload: CoflatDocumentPayload, frontmatter: Record<string, unknown>): Promise<Map<string, string>> {
+async function loadCitations(
+  payload: CoflatDocumentPayload,
+  frontmatter: Record<string, unknown>,
+  body: string,
+): Promise<CoflatCitations | null> {
   const bibliography = typeof frontmatter.bibliography === "string" ? frontmatter.bibliography : null;
-  if (!bibliography) return new Map();
+  if (!bibliography) return null;
+  const bibText = await fetchBibliography(payload, bibliography);
+  if (bibText === null) return null;
+  try {
+    // Coflat owns BibTeX parsing + CSL formatting (single source of truth); its
+    // citeproc bundle (citation-js) loads only for documents with a bibliography.
+    const { parseBibTeX, CslProcessor, createCslCitationFormatter } = await import("@chaoxu/coflat/citeproc");
+    const items = parseBibTeX(bibText);
+    if (items.length === 0) return null;
+    const keys = new Set(items.map((item) => item.id));
+    // Only bracketed [@key] citations get an inline [N] from the reader, so the
+    // References list is built from those — a narrative-only @key would render
+    // no inline marker and must not leave a dangling bibliography entry.
+    const cited = bracketedCitationKeys(body).filter((key) => keys.has(key));
+    if (cited.length === 0) return null;
+    const formatter = createCslCitationFormatter(await CslProcessor.create(items));
+    // Register cited keys in document order so the IEEE numeric style assigns
+    // [1], [2], … in appearance order (matching the rendered References list).
+    formatter.registerCitations(cited.map((id) => ({ ids: [id] })));
+    return { formatter, keys, cited };
+  } catch (_error) {
+    // A citeproc/bibliography failure must never break the rest of the render.
+    return null;
+  }
+}
+
+// Fetch the raw .bib text, trying the document's branch then falling back to
+// main (the bib may only exist on main for a fresh edit branch).
+async function fetchBibliography(payload: CoflatDocumentPayload, bibliography: string): Promise<string | null> {
   const rawUrls = [
     payload.branchExists === false ? null : resolveRawRepoLink(payload, bibliography),
     payload.branch === "main" ? null : resolveRawRepoLink({ ...payload, branch: "main" }, bibliography),
@@ -223,16 +286,10 @@ async function localCitations(payload: CoflatDocumentPayload, frontmatter: Recor
   try {
     for (const url of rawUrls) {
       const response = await fetch(url, { credentials: "same-origin" });
-      if (!response.ok) continue;
-      const keys = bibtexCitationKeys(await response.text());
-      return new Map(keys.map((key, index) => [key, `[${index + 1}]`]));
+      if (response.ok) return await response.text();
     }
   } catch (_error) {
-    return new Map();
+    return null;
   }
-  return new Map();
-}
-
-function bibtexCitationKeys(source: string): string[] {
-  return [...source.matchAll(/@\w+\s*\{\s*([^,\s]+)\s*,/g)].map((match) => match[1]);
+  return null;
 }

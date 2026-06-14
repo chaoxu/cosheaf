@@ -76,6 +76,11 @@ input,textarea,select{border:1px solid var(--cf-border);border-radius:var(--cf-r
 .document{border-top:1px solid var(--cf-border);padding:10px 0}.coflat-reader-island{--cf-content-max-width:1200px;--cf-doc-content-padding-inline:0px}.cf-reader.coflat-reader-island :where(.cf-doc-paragraph,.cf-doc-list-item){white-space:normal!important;overflow-wrap:break-word}.markdown-body h1{font-size:30px;line-height:1.15}.markdown-body p{max-width:none}.cf-reader-compact{margin-inline:0;padding:0}.cf-reader-compact .cf-doc-heading:not(.cf-doc-heading--unnumbered)::before,.cf-reader-compact [data-section-number]::before{content:none;counter-increment:none;counter-reset:none;margin-right:0}
 .cf-reader .cf-doc-display-math .katex-display{font-size:inherit;margin:0}.cf-reader .cf-doc-display-math .katex-display>.katex{font-size:inherit}
 .app-content .cf-doc-display-math{overflow-x:auto;overflow-y:hidden}
+/* host-rendered reference list (#124); entries use Coflat's .cf-bibliography-entry, styled by the vendored editor.css */
+.cosheaf-references{border-top:1px solid var(--cf-border);margin-top:26px;padding-top:14px}
+.cosheaf-references h2{font-size:18px;margin:0 0 10px}
+.cosheaf-references .cf-bibliography{display:grid;gap:7px}
+.cosheaf-citation-preview{max-width:min(440px,70vw)}
 
 /* threads (issues + pull requests) */
 .thread{max-width:none}.thread-header{border-bottom:1px solid var(--cf-border);padding:6px 0}.thread-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.thread-header h1{font-size:21px;margin:3px 0;line-height:1.2}.thread-header h1 span{color:var(--cf-muted);font-weight:400;font-family:var(--cf-font-mono);font-size:16px}.issue-document{border-bottom:1px solid var(--cf-border);padding:8px 0}
