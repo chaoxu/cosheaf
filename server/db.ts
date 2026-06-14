@@ -203,6 +203,18 @@ function migrateOwnerQualifySlugs(db: Database.Database): void {
   }
 }
 
+// #148: login_tokens gained a `scopes` column recording the scope set a cached
+// PAT was minted with. schema.sql's CREATE IF NOT EXISTS won't add the column
+// to an existing table, so add it here. Pre-existing rows get NULL, which never
+// matches the current scope signature — so the auth flow re-mints them on the
+// next login, self-healing a scope-set change rather than serving a stale token
+// that lacks a newly-added scope.
+function migrateAddLoginTokenScopes(db: Database.Database): void {
+  const hasScopes = (db.prepare("PRAGMA table_info(login_tokens)").all() as Array<{ name: string }>)
+    .some((col) => col.name === "scopes");
+  if (!hasScopes) db.exec("ALTER TABLE login_tokens ADD COLUMN scopes TEXT");
+}
+
 export function getDb(config: Config): Database.Database {
   if (dbInstance) return dbInstance;
   const dbPath = path.join(config.dataDir, "db.sqlite");
@@ -216,6 +228,7 @@ export function getDb(config: Config): Database.Database {
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
   migrateOwnerQualifySlugs(db);
+  migrateAddLoginTokenScopes(db);
   dbInstance = db;
   return db;
 }

@@ -163,6 +163,29 @@ describe("POST /api/v1/login", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("http://forgejo.test/api/v1/users/ivy/tokens");
   });
 
+  it("re-mints a cached PAT when the stored scope set no longer matches (#148)", async () => {
+    const db = freshDb();
+    // A token cached before the scope set changed — stale signature.
+    db.prepare(`
+      INSERT INTO login_tokens (username, pat, token_name, scopes, created_at, updated_at)
+      VALUES ('jon', 'pat-old', 'cosheaf-stale', 'read:repository', 1, 1)
+    `).run();
+    fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-new" }));
+
+    const res = await login(db, "jon", "secret");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ username: "jon", pat: "pat-new" });
+    // One mint call — the stale PAT is not revalidated/served, it's replaced.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/users/jon/tokens");
+    // The row now records the current full scope signature.
+    const row = db.prepare("SELECT pat, scopes FROM login_tokens WHERE username = 'jon'")
+      .get() as { pat: string; scopes: string };
+    expect(row.pat).toBe("pat-new");
+    expect(row.scopes).toContain("write:user");
+  });
+
   it("400 when username or password missing", async () => {
     const db = freshDb();
     const res = await appFor(db).request("/api/v1/login", {

@@ -36,11 +36,18 @@ const TOKEN_SCOPES = [
   "write:notification",
 ];
 
+// Stable signature of the scope set a cached PAT was minted with (#148). Sorted
+// so reordering TOKEN_SCOPES doesn't force a spurious re-mint; it changes only
+// when a scope is added or removed. Stored on each login_tokens row; a cached
+// row whose stored signature no longer matches is re-minted on next login.
+const TOKEN_SCOPES_SIGNATURE = [...TOKEN_SCOPES].sort().join(",");
+
 interface CreateTokenResponse { sha1: string }
 interface ForgejoUserResponse { login?: string }
 interface CachedLoginToken {
   pat: string;
   token_name: string;
+  scopes: string | null;
 }
 
 export type LoginOutcome =
@@ -92,9 +99,17 @@ async function exchangeForgejoCredsForPatRaw(
   password: string,
 ): Promise<LoginOutcome> {
   const cached = db
-    .prepare("SELECT pat, token_name FROM login_tokens WHERE username = ?")
+    .prepare("SELECT pat, token_name, scopes FROM login_tokens WHERE username = ?")
     .get(username) as CachedLoginToken | undefined;
   if (cached) {
+    // The scope set changed since this token was minted (or the row predates
+    // scope-versioning, scopes === null). Serving it would 403 on routes that
+    // need the new scope, so re-mint with the current scopes (#148).
+    // storeLoginToken upserts on username, so this replaces the stale row in
+    // place — and on a transient mint failure it simply re-mints next login.
+    if (cached.scopes !== TOKEN_SCOPES_SIGNATURE) {
+      return mintAndStoreLoginToken(db, baseUrl, username, password);
+    }
     const credentialCheck = await createForgejoToken(baseUrl, username, password, cached.token_name);
     if (credentialCheck.kind === "bad_credentials" || credentialCheck.kind === "upstream_unavailable") {
       return credentialCheck;
@@ -180,13 +195,14 @@ function storeLoginToken(
 ): void {
   const now = Date.now();
   db.prepare(`
-    INSERT INTO login_tokens (username, pat, token_name, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO login_tokens (username, pat, token_name, scopes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(username) DO UPDATE SET
       pat = excluded.pat,
       token_name = excluded.token_name,
+      scopes = excluded.scopes,
       updated_at = excluded.updated_at
-  `).run(username, pat, tokenName, now, now);
+  `).run(username, pat, tokenName, TOKEN_SCOPES_SIGNATURE, now, now);
 }
 
 async function verifyStoredPat(

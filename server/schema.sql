@@ -16,7 +16,12 @@ CREATE TABLE IF NOT EXISTS login_tokens (
   pat TEXT NOT NULL,
   token_name TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  -- Scope set the cached PAT was minted with (sorted, comma-joined). When the
+  -- scope set changes, a cached token whose `scopes` no longer matches is
+  -- re-minted on next login instead of being served missing a new scope (#148).
+  -- Existing rows are migrated to NULL in db.ts and re-mint on next login.
+  scopes TEXT
 );
 
 -- No workspaces table. The workspace slug IS the Forgejo `owner/repo` full
