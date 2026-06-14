@@ -4,7 +4,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
-import { readDocumentTheme } from "./document-theme";
+import { readDocumentTheme, readSectionNumbering } from "./document-theme";
 import {
   coflatDocumentContext,
   loadCoflatRefs,
@@ -39,6 +39,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const result = renderToHtml(parsed.body, ctx, {
     outline: true,
     resolveReferences: true,
+    sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
     ...(payload.markedLines ? { sourceLineAttribution: true } : {}),
   });
   const rendered = result.html;

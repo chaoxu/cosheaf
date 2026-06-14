@@ -65,6 +65,24 @@
   });
 })();
 
+// Reader section numbering (#159): On · Off. The reader island reads this on
+// hydration via readSectionNumbering() and passes sectionNumbering:false to
+// Coflat (coflat#47) to hide heading numbers across reader/thread/diff; crossref
+// numbers are unaffected. Applies on the next reader render. Default: On.
+(() => {
+  const select = document.querySelector("[data-section-numbering-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:section-numbering";
+  const user = select.dataset.sectionNumberingUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "off" ? "off" : "on");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+  });
+})();
+
 // Reading width (#151): Narrow · Normal · Wide. The pre-paint head script sets
 // html[data-cosheaf-reading] before paint; this wires the settings select and
 // applies the choice live (the CSS rule reflows the reader without reload).

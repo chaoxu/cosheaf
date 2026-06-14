@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-export const DEFAULT_COFLAT_REF = "5ddc22686e211239a72f90acffdb4b7b6c6fe869";
+export const DEFAULT_COFLAT_REF = "15d1ee4147da05600778aa7a800bbf2ce2056419";
 
 export function checkCoflatRef({
   coflatDir = resolve(process.cwd(), "..", "coflat"),

@@ -179,6 +179,13 @@ export function userPreferencesSection(user: string): Html {
         </select>
       </label>
       <label class="settings-row">
+        <span>Section numbering</span>
+        <select data-testid="settings-section-numbering-select" data-section-numbering-user="${user}">
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label class="settings-row">
         <span>Document theme</span>
         <select data-testid="settings-document-theme-select" data-document-theme-user="${user}">
           <option value="default">Default</option>

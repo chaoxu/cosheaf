@@ -9,6 +9,7 @@ const LEGACY_DIFF_MODE_KEY = "cosheaf:diff-mode";
 const LEGACY_DIFF_SHAPE_KEY = "cosheaf:diff-shape";
 const LEGACY_EDITOR_MODE_KEY = "cosheaf:editor-mode";
 const LEGACY_AUTOSAVE_KEY = "cosheaf:autosave";
+const LEGACY_SECTION_NUMBERING_KEY = "cosheaf:section-numbering";
 
 export interface DiffViewPreference {
   mode: ViewMode;
@@ -148,4 +149,18 @@ export function readAutosave(username?: string | null): AutosavePreference {
     localStorage.getItem(autosaveStorageKey(username)) ?? localStorage.getItem(LEGACY_AUTOSAVE_KEY),
   );
   return value === "off" ? { enabled: false, intervalMs: DEFAULT_AUTOSAVE_MS } : { enabled: true, intervalMs: Number(value) };
+}
+
+// Reader section-numbering preference (#159). When off, the reader passes
+// sectionNumbering:false to Coflat (coflat#47), hiding heading numbers across
+// the reader, thread bodies, and rich diff. Default: on.
+export function sectionNumberingStorageKey(username: string | null | undefined): string {
+  const clean = username?.trim();
+  return clean ? `${LEGACY_SECTION_NUMBERING_KEY}:${clean}` : LEGACY_SECTION_NUMBERING_KEY;
+}
+
+export function readSectionNumbering(username?: string | null): boolean {
+  if (typeof localStorage === "undefined") return true;
+  const value = localStorage.getItem(sectionNumberingStorageKey(username)) ?? localStorage.getItem(LEGACY_SECTION_NUMBERING_KEY);
+  return value !== "off";
 }
