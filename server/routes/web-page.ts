@@ -45,7 +45,7 @@ export function repoPageShell(
   active: RepoTab,
   title: string,
   body: Html,
-  opts: { readerAssets?: boolean } = {},
+  opts: { readerAssets?: boolean; sidebarExtra?: Html } = {},
 ): string {
   return repoPage({
     title,
@@ -56,6 +56,7 @@ export function repoPageShell(
     user: ctx.user,
     ws: ctx.ws,
     readerAssets: opts.readerAssets,
+    sidebarExtra: opts.sidebarExtra,
   });
 }
 
@@ -68,6 +69,9 @@ export function repoPage(opts: {
   ws: WorkspaceContext;
   body: Html;
   readerAssets?: boolean;
+  // Optional content rendered under the repo tabs in the left sidebar — used by
+  // the files routes for the branch file tree (#119); other tabs leave it unset.
+  sidebarExtra?: Html;
 }): string {
   const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix));
   const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
@@ -85,7 +89,8 @@ export function repoPage(opts: {
         <a href="${repoHref(opts.owner, opts.repo)}">${opts.owner}/${opts.repo}</a>
         <span class="role">${opts.ws.role}</span>
       </div>
-      <nav class="repo-tabs">${nav}</nav>`,
+      <nav class="repo-tabs">${nav}</nav>
+      ${opts.sidebarExtra ?? emptyHtml}`,
     statusPath: [
       { label: opts.owner },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo) },

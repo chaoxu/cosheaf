@@ -57,7 +57,7 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
           </div>
         </div>
         ${fileList(owner, repo, "main", files)}
-      `),
+      `, { sidebarExtra: fileTreeSidebar(owner, repo, "main", files, null) }),
   );
 }));
 
@@ -124,7 +124,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             </div>
           </div>
           ${fileList(owner, repo, resolved.branch, files)}
-        `),
+        `, { sidebarExtra: fileTreeSidebar(owner, repo, resolved.branch, files, null) }),
     );
   }
   const rel = safeRel(resolved.path);
@@ -193,7 +193,10 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
           </div>
         </div>
         ${docBody}
-      `, { readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
+      `, {
+        readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+        sidebarExtra: fileTreeSidebar(owner, repo, resolved.branch, files, rel),
+      }),
   );
 }));
 
@@ -613,6 +616,67 @@ function searchResultRow(ctx: WebCtx, r: PageSearchResult): Html {
     <span class="search-result-head"><strong>${r.title || r.path}</strong> <small class="muted">${r.path}</small></span>
     <span class="search-snippet">${renderSnippet(r.snippet)}</span>
   </a>`;
+}
+
+// Nested, collapsible branch file tree for the left sidebar on /files pages
+// (#119). Built from the flat blob list already fetched for the page — no extra
+// round-trip. Directories are native <details> (collapsible like any file
+// explorer); the active file is highlighted and its ancestor folders auto-open.
+interface FileTreeNode {
+  dirs: Map<string, FileTreeNode>;
+  files: Array<{ name: string; path: string }>;
+}
+
+function buildFileTree(files: readonly ForgejoTreeEntry[]): FileTreeNode {
+  const root: FileTreeNode = { dirs: new Map(), files: [] };
+  for (const file of files) {
+    const parts = file.path.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const seg = parts[i];
+      let child = node.dirs.get(seg);
+      if (!child) {
+        child = { dirs: new Map(), files: [] };
+        node.dirs.set(seg, child);
+      }
+      node = child;
+    }
+    node.files.push({ name: parts[parts.length - 1], path: file.path });
+  }
+  return root;
+}
+
+function renderFileTreeLevel(
+  node: FileTreeNode,
+  prefix: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  activeRel: string | null,
+): Html {
+  const dirs = [...node.dirs.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, child]) => {
+      const dirPath = prefix ? `${prefix}/${name}` : name;
+      const open = activeRel === dirPath || (activeRel?.startsWith(`${dirPath}/`) ?? false);
+      return html`<details class="ftree-dir"${open ? " open" : ""}>
+        <summary>${name}</summary>
+        <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel)}</div>
+      </details>`;
+    });
+  const fileRows = node.files.map((file) => {
+    const href = `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`;
+    return html`<a class="ftree-file${file.path === activeRel ? " active" : ""}" href="${href}">${file.name}</a>`;
+  });
+  return html`${dirs}${fileRows}`;
+}
+
+function fileTreeSidebar(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null): Html {
+  if (files.length === 0) return emptyHtml;
+  return html`<nav class="file-tree" aria-label="Files">
+    <div class="file-tree-head">Files</div>
+    ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel)}
+  </nav>`;
 }
 
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): Html {
