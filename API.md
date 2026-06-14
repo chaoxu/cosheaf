@@ -378,6 +378,39 @@ POST /repos/:owner/:repo/markdown/render
 → { "html": string }
 ```
 
+### Issue claims (optional live-work leases)
+
+An optional exclusive lease so concurrent runners don't duplicate live work on
+the same issue. Pure ephemeral coordination state (it expires; no Forgejo
+source) — issues/PRs remain the only durable state. Active non-expired claims
+also appear as `claims?: IssueClaim[]` on the issue detail and list responses.
+Requires write access.
+
+```http
+POST /repos/:owner/:repo/issues/:n/claim
+{ "runner_name": string, "purpose"?: string, "ttl_seconds"?: number, "expires_at"?: number }
+→ 201 { "claim": IssueClaim }
+→ 409 { "code": "conflict", "details": { "claim": IssueClaim } }   # held by another runner
+
+PATCH /repos/:owner/:repo/issues/:n/claim/:id/heartbeat
+{ "ttl_seconds"?: number, "expires_at"?: number }
+→ { "claim": IssueClaim }   # 404 if missing/expired
+
+DELETE /repos/:owner/:repo/issues/:n/claim/:id
+→ { "ok": boolean }
+```
+
+`ttl_seconds` wins over an absolute `expires_at` (ms); the default is 5 minutes
+and the lease is clamped to 1 hour. Re-claiming as the same `runner_name`
+refreshes the lease in place.
+
+```ts
+interface IssueClaim {
+  id: string; issue_number: number; runner_name: string; purpose: string;
+  holder_username: string; created_at: number; heartbeat_at: number; expires_at: number;
+}
+```
+
 ## Notifications
 
 ```http
@@ -389,6 +422,22 @@ POST /repos/:owner/:repo/notifications/:id/read
 
 POST /repos/:owner/:repo/notifications/read-all
 → { "ok": true }
+```
+
+Global, cross-repo notifications (the caller's whole unread Issue/Pull queue,
+not scoped to one workspace) — a thin typed wrapper over Forgejo's per-user
+queue, nothing mirrored into SQLite:
+
+```http
+GET /notifications
+→ { "notifications": NotificationRow[] }
+
+POST /notifications/read-all
+→ { "ok": true }
+
+GET /notifications/events
+→ Server-Sent Events; a `{ "type": "notification" }` hint signals the inbox
+  should refetch GET /notifications. See Events for the SSE shape.
 ```
 
 ## Settings
