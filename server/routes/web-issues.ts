@@ -64,7 +64,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
   return htmlResponse(
     repoPageShell(ctx, "issues", `Issues - ${ctx.repo}`, html`
         <div class="page-title compact">
-          <div><p class="eyebrow">${filters.state}</p><h1>Issues</h1></div>
+          <div><h1>Issues</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
@@ -375,7 +375,6 @@ function issueCreatePage(
     <div class="form-page">
       <div class="page-title compact">
         <div>
-          <p class="eyebrow">Issues</p>
           <h1>New issue</h1>
         </div>
         <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/issues")}">Cancel</a>

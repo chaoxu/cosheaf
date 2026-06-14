@@ -3,7 +3,7 @@ import type { WorkspaceContext } from "../types.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { type Panel, renderRegion } from "./web-panels.js";
-import { pageShell } from "./web-shell.js";
+import { notificationsNavLink, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
 
@@ -46,7 +46,7 @@ export function repoPageShell(
   active: RepoTab,
   title: string,
   body: Html,
-  opts: { readerAssets?: boolean; sidebarPanels?: readonly Panel[] } = {},
+  opts: { readerAssets?: boolean; sidebarPanels?: readonly Panel[]; statusExtra?: readonly StatusCrumb[] } = {},
 ): string {
   return repoPage({
     title,
@@ -58,6 +58,7 @@ export function repoPageShell(
     ws: ctx.ws,
     readerAssets: opts.readerAssets,
     sidebarPanels: opts.sidebarPanels,
+    statusExtra: opts.statusExtra,
   });
 }
 
@@ -73,6 +74,9 @@ export function repoPage(opts: {
   // Portable panels rendered into the left-sidebar region under the repo tabs
   // (#119 file tree via the #120 panel seam); other tabs leave it unset.
   sidebarPanels?: readonly Panel[];
+  // Extra status-bar breadcrumb segments appended after owner/repo/tab — the
+  // edit page uses this to show the branch + file path being edited (#126).
+  statusExtra?: readonly StatusCrumb[];
 }): string {
   const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix));
   const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
@@ -82,8 +86,10 @@ export function repoPage(opts: {
     readerAssets: opts.readerAssets,
     sidebar: html`
       <a class="brand" href="/">Cosheaf</a>
+      ${sidebarIdentity(opts.user)}
       <nav class="sidebar-topnav">
         <a href="/">‹ Workspaces</a>
+        ${notificationsNavLink(false)}
         <a href="/account/settings">Account</a>
       </nav>
       <div class="sidebar-workspace">
@@ -96,6 +102,7 @@ export function repoPage(opts: {
       { label: opts.owner },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo) },
       { label: activeLabel.toLowerCase() },
+      ...(opts.statusExtra ?? []),
     ],
     body: html`
       <main class="repo-page">

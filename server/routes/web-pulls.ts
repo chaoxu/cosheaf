@@ -84,7 +84,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
       `Pull requests - ${ctx.repo}`,
       html`
         <div class="page-title compact">
-          <div><p class="eyebrow">${filters.state}</p><h1>Pull requests</h1></div>
+          <div><h1>Pull requests</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New pull request</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
@@ -507,7 +507,6 @@ function pullCreatePage(
     <div class="form-page">
       <div class="page-title compact">
         <div>
-          <p class="eyebrow">Pull requests</p>
           <h1>New pull request</h1>
         </div>
         <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>

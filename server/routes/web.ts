@@ -10,7 +10,7 @@ import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, configReposForUser, htmlResponse, positiveInt, redirect, repoHref, resolveWebAuth, stringField } from "./web-context.js";
+import { badRequestPage, configReposForUser, htmlResponse, positiveInt, redirect, repoHref, resolveWebAuth, safeWebRedirect, stringField } from "./web-context.js";
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
@@ -82,7 +82,7 @@ web.get("/", async (c) => {
     pageShell({
       title: "Repositories",
       user: auth.user.username,
-      sidebar: globalSidebar("workspaces"),
+      sidebar: globalSidebar("workspaces", auth.user.username),
       body: html`
         <main class="page">
           <div class="page-title page-title--actions-only">
@@ -121,20 +121,54 @@ function inboxSection(rows: readonly NotificationRow[]): Html {
       <form method="post" action="/account/notifications/read-all"><button class="button small" type="submit">Mark all read</button></form>
     </div>
     <div class="list">
-      ${rows.map(
-        (row) => html`<div class="list-row inbox-row">
-          <a class="inbox-link" href="/${row.repo}/${row.kind === "pr" ? "pulls" : "issues"}/${row.number}">
-            <span class="inbox-kind ${row.kind}">${row.kind === "pr" ? "PR" : "issue"}</span>
-            <strong>${row.title}</strong>
-            <small>${row.repo} #${row.number}</small>
-          </a>
-          <form method="post" action="/account/notifications/${row.id}/read">
-            <button class="button small" type="submit" title="Mark read">Done</button>
-          </form>
-        </div>`,
-      )}
+      ${rows.map((row) => notificationRow(row))}
     </div>
   </section>`;
+}
+
+// One cross-repo notification row, shared by the home inbox and the dedicated
+// account notifications page. `next` (when given) rides the mark-read POST so
+// the handler returns to the page the row was acted on from.
+function notificationRow(row: NotificationRow, next?: string): Html {
+  return html`<div class="list-row inbox-row">
+    <a class="inbox-link" href="/${row.repo}/${row.kind === "pr" ? "pulls" : "issues"}/${row.number}">
+      <span class="inbox-kind ${row.kind}">${row.kind === "pr" ? "PR" : "issue"}</span>
+      <strong>${row.title}</strong>
+      <small>${row.repo} #${row.number}</small>
+    </a>
+    <form method="post" action="/account/notifications/${row.id}/read">
+      ${next ? html`<input type="hidden" name="next" value="${next}">` : ""}
+      <button class="button small" type="submit" title="Mark read">Done</button>
+    </form>
+  </div>`;
+}
+
+// The dedicated /account/notifications feed (#129). Unlike the home inbox it
+// always renders — including a calm empty state — so the affordance is
+// discoverable rather than appearing only when something is unread. Mark-read
+// forms carry `next` so the POST handlers return here instead of home.
+function notificationsAccountPage(rows: readonly NotificationRow[], all: boolean): Html {
+  const NEXT = "/account/notifications";
+  const toggle = html`<span class="state-toggles" aria-label="Filter">
+    <a class="state-toggle ${all ? "" : "active"}" href="/account/notifications">unread</a> ·
+    <a class="state-toggle ${all ? "active" : ""}" href="/account/notifications?state=all">all</a>
+  </span>`;
+  return html`<main class="page">
+    <div class="page-title">
+      <h1>Notifications</h1>
+      <div class="toolbar-actions">
+        ${toggle}
+        ${rows.length === 0 ? "" : html`<form method="post" action="/account/notifications/read-all"><input type="hidden" name="next" value="${NEXT}"><button class="button small" type="submit">Mark all read</button></form>`}
+      </div>
+    </div>
+    ${
+      rows.length === 0
+        ? html`<div class="empty" data-testid="notifications-empty">${all ? "No notifications." : "You're all caught up."}</div>`
+        : html`<div class="list" data-testid="notifications-list">
+            ${rows.map((row) => notificationRow(row, NEXT))}
+          </div>`
+    }
+  </main>`;
 }
 
 // Server-rendered inbox fragment the home page swaps in on a live notification
@@ -154,14 +188,42 @@ web.post("/account/notifications/:id/read", async (c) => {
   if (!auth) return redirect("/login");
   const id = positiveInt(c.req.param("id"));
   if (id) await c.get("fjUser").markNotificationRead(id).catch(() => {});
-  return redirect("/");
+  // Home inbox forms omit `next` and fall back to "/"; the account
+  // notifications page passes its own path so it returns there.
+  return redirect(safeWebRedirect(stringField((await c.req.parseBody()).next)) ?? "/");
 });
 
 web.post("/account/notifications/read-all", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
   await c.get("fjUser").markAllNotificationsRead().catch(() => {});
-  return redirect("/");
+  return redirect(safeWebRedirect(stringField((await c.req.parseBody()).next)) ?? "/");
+});
+
+// Dedicated cross-repo notifications page (#129): the persistent global feed
+// reachable from the sidebar on every page, including when empty. Unread by
+// default; `?state=all` includes already-read threads. Mark-read reuses the
+// POST handlers above (passing `next` so they return here).
+web.get("/account/notifications", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return redirect("/login");
+  const all = c.req.query("state") === "all";
+  const threads = await c
+    .get("fjUser")
+    .listNotifications({
+      statusTypes: all ? ["unread", "read", "pinned"] : ["unread"],
+      subjectTypes: ["Issue", "Pull"],
+    })
+    .catch(() => []);
+  return htmlResponse(
+    pageShell({
+      title: "Notifications",
+      user: auth.user.username,
+      sidebar: globalSidebar("notifications", auth.user.username),
+      statusPath: [{ label: "notifications" }],
+      body: notificationsAccountPage(mapThreads(threads), all),
+    }),
+  );
 });
 
 web.get("/account/settings", async (c) => {
@@ -174,25 +236,41 @@ web.get("/account/settings", async (c) => {
     pageShell({
       title: "Account settings",
       user: auth.user.username,
-      sidebar: globalSidebar("account"),
+      sidebar: globalSidebar("account", auth.user.username),
       statusPath: [{ label: "account" }],
       body: html`
         <main class="page">
           <div class="settings-page account-settings">
             <div class="page-title compact">
               <div>
-                <p class="eyebrow">Account</p>
                 <h1>Settings</h1>
               </div>
             </div>
             ${userProfileSection(me, { saved, error })}
             ${userPreferencesSection(auth.user.username)}
+            ${accountSignOutSection()}
           </div>
         </main>
       `,
     }),
   );
 });
+
+// Sign-out lives on the Account page (#127) instead of an always-present
+// status-bar button. A plain POST form to /logout — no island needed.
+function accountSignOutSection(): Html {
+  return html`<section class="settings-section" data-testid="account-signout">
+    <div class="settings-section-header">
+      <h2>Session</h2>
+      <p>Sign out of Cosheaf on this device.</p>
+    </div>
+    <form class="settings-form" method="post" action="/logout">
+      <div class="settings-actions">
+        <button class="button" type="submit" data-testid="signout">Sign out</button>
+      </div>
+    </form>
+  </section>`;
+}
 
 web.post("/account/settings", async (c) => {
   const auth = await resolveWebAuth(c);
@@ -223,14 +301,13 @@ web.get("/new", async (c) => {
     pageShell({
       title: "New repository",
       user: auth.user.username,
-      sidebar: globalSidebar("workspaces"),
+      sidebar: globalSidebar("workspaces", auth.user.username),
       statusPath: [{ label: "new repository" }],
       body: html`
         <main class="page">
           <div class="settings-page">
             <div class="page-title compact">
               <div>
-                <p class="eyebrow">Repositories</p>
                 <h1>New repository</h1>
               </div>
             </div>

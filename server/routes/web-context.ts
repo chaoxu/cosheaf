@@ -141,7 +141,7 @@ export function redirect(location: string): Response {
 }
 
 function messagePage(title: string, user: string, message: string, status: number): Response {
-  return htmlResponse(pageShell({ title, user, sidebar: globalSidebar("workspaces"), body: html`<main class="page"><div class="empty">${message}</div></main>` }), status);
+  return htmlResponse(pageShell({ title, user, sidebar: globalSidebar("workspaces", user), body: html`<main class="page"><div class="empty">${message}</div></main>` }), status);
 }
 
 export async function notFoundPage(user: string, message: string): Promise<Response> {

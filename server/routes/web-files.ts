@@ -87,7 +87,7 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
   return htmlResponse(
     repoPageShell(ctx, "files", `Search - ${ctx.repo}`, html`
         <div class="page-title compact">
-          <div><p class="eyebrow">Pages</p><h1>Search</h1></div>
+          <div><h1>Search</h1></div>
         </div>
         <form class="page-search page-search--full" method="get" action="${repoHref(ctx.owner, ctx.repo, "/search")}">
           <input name="q" value="${q}" placeholder="Search page titles and text" aria-label="Search pages" data-testid="page-search-input" autofocus>
@@ -245,24 +245,17 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
     branch === "main" ||
     (await ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []))
       .some((candidate) => candidate.name === branch);
+  // The edit branch is created lazily on first save, so for a brand-new edit
+  // branch the tree (file list) and Cancel target come from main instead.
+  const treeBranch = branchExists ? branch : "main";
+  const files = await repoFiles(ctx.fj, ctx.owner, ctx.repo, treeBranch).catch(() => []);
+  const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(treeBranch)}/${urlPath(rel)}`;
+  // The titlebar is gone (#126): the file path + branch live in the status-bar
+  // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The
+  // file tree mirrors the read page's sidebar so edit/read chrome match (#123).
   return htmlResponse(
     repoPageShell(ctx, "files", `Edit ${rel}`, kind === "markdown" ? html`
         <section class="edit-page">
-          <div class="file-toolbar edit-titlebar">
-            <div>
-              <p class="eyebrow">Edit on branch</p>
-              <h1>
-                <input
-                  id="web-editor-path-input"
-                  data-testid="editor-path-input"
-                  aria-label="File path"
-                  value="${rel}"
-                >
-                <span id="web-editor-path-dirty" class="dirty-dot" hidden>*</span>
-              </h1>
-            </div>
-            <a class="button" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Cancel</a>
-          </div>
           <div
             id="web-editor-root"
             data-owner="${ctx.owner}"
@@ -282,11 +275,17 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
               <label>Branch <input name="branch" value="${branch}" required></label>
               <label>Path <input name="path" value="${rel}" required></label>
               <textarea name="content" spellcheck="false">${content}</textarea>
-              <button class="button primary" type="submit">Save</button>
+              <div class="form-actions">
+                <button class="button primary" type="submit">Save</button>
+                <a class="button" href="${cancelHref}">Cancel</a>
+              </div>
             </form>
           </noscript>
         </section>
-      ` : textEditPage(ctx, branch, rel, content)),
+      ` : textEditPage(ctx, branch, rel, content, treeBranch), {
+        statusExtra: [{ label: branch }, { label: rel }],
+        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel)],
+      }),
   );
 }));
 
@@ -467,11 +466,11 @@ function sourceFilePreview(content: string): Html {
   </article>`;
 }
 
-function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string): Html {
+function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string, cancelBranch: string): Html {
   return html`<section class="edit-page text-edit-page">
     <div class="file-toolbar edit-titlebar">
-      <div><p class="eyebrow">Edit text on branch</p><h1>${rel}</h1></div>
-      <a class="button" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Cancel</a>
+      <div><h1>${rel}</h1></div>
+      <a class="button" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(cancelBranch)}/${urlPath(rel)}`}">Cancel</a>
     </div>
     <form class="compose-form" data-testid="text-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
       <input type="hidden" name="old_path" value="${rel}">

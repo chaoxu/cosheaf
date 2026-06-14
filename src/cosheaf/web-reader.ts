@@ -111,7 +111,10 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[]): void {
   const slot = document.querySelector<HTMLElement>("[data-reader-toc]");
   if (!slot) return;
   const items = outline.filter((entry) => entry.level <= 3);
-  if (items.length < 2) return;
+  // Render the rail whenever the document has at least one h1–h3 heading.
+  // The previous >=2 threshold hid the outline for simple/few-heading docs
+  // (#125); a single-heading doc still gets a usable "On this page" entry.
+  if (items.length < 1) return;
   const minLevel = Math.min(...items.map((item) => item.level));
   slot.replaceChildren();
   const title = document.createElement("p");
