@@ -45,6 +45,38 @@
   shapeSelect.addEventListener("change", sync);
 })();
 
+// Persist + restore the issues/pulls list sort + state filter (#157). The list
+// filter form carries data-list-prefs="issues|pulls"; we remember the user's
+// last chosen state/sort (per user, per list kind) and re-apply it when they
+// land on the list with no explicit param. Explicit URL params always win and
+// update the saved choice; the defaults (state "open", empty sort) are cleared
+// so the common default view never triggers a redundant redirect.
+(() => {
+  const form = document.querySelector("form[data-list-prefs]");
+  if (!form) return;
+  const kind = form.dataset.listPrefs;
+  const user = document.body.dataset.cosheafUser || "";
+  const key = (field) => `cosheaf:list:${kind}:${field}` + (user ? `:${user}` : "");
+  const url = new URL(location.href);
+  const hasState = url.searchParams.has("state");
+  const hasSort = url.searchParams.has("sort");
+  const remember = (field, value, def) => {
+    if (value === null || value === def) localStorage.removeItem(key(field));
+    else localStorage.setItem(key(field), value);
+  };
+  if (hasState || hasSort) {
+    if (hasState) remember("state", url.searchParams.get("state"), "open");
+    if (hasSort) remember("sort", url.searchParams.get("sort"), "");
+    return;
+  }
+  const savedState = localStorage.getItem(key("state"));
+  const savedSort = localStorage.getItem(key("sort"));
+  if (!savedState && !savedSort) return;
+  if (savedState) url.searchParams.set("state", savedState);
+  if (savedSort) url.searchParams.set("sort", savedSort);
+  location.replace(url.toString());
+})();
+
 // Default editor compose mode (#155): the page + comment editors seed their
 // initial Rich/Source mode from this; the in-editor toggle still overrides
 // per-session. Stored under the same per-user + legacy key pair the editor

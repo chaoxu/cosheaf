@@ -556,7 +556,7 @@ function pullFilterForm(
   collaborators: readonly ForgejoUser[],
 ): Html {
   const action = repoHref(owner, repo, "/pulls");
-  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters">
+  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters" data-list-prefs="pulls">
     ${usernameDatalist(collaborators)}
     <div class="filter-basic">
       ${stateToggle(filters.state)}

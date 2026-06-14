@@ -422,7 +422,7 @@ function issueFilterForm(
   collaborators: readonly ForgejoUser[],
 ): Html {
   const action = repoHref(owner, repo, "/issues");
-  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters">
+  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters" data-list-prefs="issues">
     ${usernameDatalist(collaborators)}
     <div class="filter-basic">
       ${stateToggle(filters.state)}
