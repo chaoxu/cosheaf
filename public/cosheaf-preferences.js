@@ -65,6 +65,25 @@
   });
 })();
 
+// UI density / display size (#154): Compact · Normal · Comfortable · Large.
+// The pre-paint head script sets html[data-cosheaf-density] before paint (no
+// reflow); this wires the settings select and applies the choice live. A single
+// root zoom (var --cf-ui-zoom) scales the whole chrome. Default: Normal.
+(() => {
+  const select = document.querySelector("[data-density-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:density";
+  const user = select.dataset.densityUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "compact" || value === "comfortable" || value === "large" ? value : "normal");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+    document.documentElement.setAttribute("data-cosheaf-density", select.value);
+  });
+})();
+
 // Persist + restore the issues/pulls list sort + state filter (#157). The list
 // filter form carries data-list-prefs="issues|pulls"; we remember the user's
 // last chosen state/sort (per user, per list kind) and re-apply it when they

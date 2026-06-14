@@ -221,22 +221,26 @@
       // Fixed positioning against the viewport (the popover is in the top
       // layer, so it ignores ancestor overflow/transform). Flip above when the
       // list would overflow the bottom of the viewport.
+      // getBoundingClientRect()/innerHeight are visual (post-zoom) coords, but
+      // CSS lengths we set are re-multiplied by the root zoom (#154 density), so
+      // every length written below is divided by `zoom` to land where intended.
+      const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
       const r = trigger.getBoundingClientRect();
-      listbox.style.minWidth = `${r.width}px`;
-      listbox.style.left = `${Math.round(r.left)}px`;
+      listbox.style.minWidth = `${r.width / zoom}px`;
+      listbox.style.left = `${Math.round(r.left / zoom)}px`;
       listbox.style.top = "0px";
       listbox.style.maxHeight = "";
-      // Measure after width is set.
-      const lh = listbox.offsetHeight;
+      // Measure after width is set; rect height stays in visual space like r.
+      const lh = listbox.getBoundingClientRect().height;
       const below = window.innerHeight - r.bottom;
       const above = r.top;
       const margin = 6;
       if (below >= lh + margin || below >= above) {
-        listbox.style.top = `${Math.round(r.bottom + 4)}px`;
-        listbox.style.maxHeight = `${Math.max(80, below - margin - 4)}px`;
+        listbox.style.top = `${Math.round((r.bottom + 4) / zoom)}px`;
+        listbox.style.maxHeight = `${Math.max(80, below - margin - 4) / zoom}px`;
       } else {
-        listbox.style.top = `${Math.round(Math.max(margin, r.top - lh - 4))}px`;
-        listbox.style.maxHeight = `${Math.max(80, above - margin - 4)}px`;
+        listbox.style.top = `${Math.round(Math.max(margin, r.top - lh - 4) / zoom)}px`;
+        listbox.style.maxHeight = `${Math.max(80, above - margin - 4) / zoom}px`;
       }
     }
 

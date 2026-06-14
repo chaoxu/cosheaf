@@ -157,6 +157,15 @@ export function userPreferencesSection(user: string): Html {
         </select>
       </label>
       <label class="settings-row">
+        <span>Display density</span>
+        <select data-testid="settings-density-select" data-density-user="${user}">
+          <option value="compact">Compact</option>
+          <option value="normal">Normal</option>
+          <option value="comfortable">Comfortable</option>
+          <option value="large">Large</option>
+        </select>
+      </label>
+      <label class="settings-row">
         <span>Document theme</span>
         <select data-testid="settings-document-theme-select" data-document-theme-user="${user}">
           <option value="default">Default</option>
