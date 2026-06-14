@@ -7,7 +7,7 @@ import { type Forgejo, ForgejoError } from "../forgejo.js";
 import { is404, onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { deletePage, planIndexPage } from "../indexer.js";
-import { type PageSearchResult, type SnippetPart, searchWorkspacePages } from "../page-search.js";
+import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -57,7 +57,7 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
             }
           </div>
         </div>
-        ${fileList(owner, repo, "main", files)}
+        ${fileList(owner, repo, "main", files, workspacePageTitles(ctx.db, ws.slug))}
       `, { sidebarPanels: [fileTreePanel(owner, repo, "main", files, null)] }),
   );
 }));
@@ -124,7 +124,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               }
             </div>
           </div>
-          ${fileList(owner, repo, resolved.branch, files)}
+          ${fileList(owner, repo, resolved.branch, files, resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined)}
         `, { sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null)] }),
     );
   }
@@ -686,10 +686,19 @@ export function fileTreePanel(owner: string, repo: string, branch: string, files
   return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel));
 }
 
-function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[]): Html {
-  if (files.length === 0) return html`<div class="list"><div class="empty">No files.</div></div>`;
+function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[], titles?: Map<string, string>): Html {
+  if (files.length === 0) return html`<div class="list"><div class="empty">No files yet.</div></div>`;
   return html`<div class="list">${files.map((file) => {
     const kind = fileKindForPath(file.path);
+    // Title-first for indexed pages (#132): the knowledge, not the storage.
+    // The path drops to a muted subtitle and the byte size is omitted for
+    // pages; non-page files keep their path + kind + size.
+    const title = kind === "markdown" ? titles?.get(file.path) : undefined;
+    if (title) {
+      return html`<a class="list-row page-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
+          <span class="list-row-main"><strong>${title}</strong><small>${file.path}</small></span>
+        </a>`;
+    }
     return html`<a class="list-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
         <strong>${file.path}</strong>
         <span>${fileKindLabel(kind)}</span>

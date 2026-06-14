@@ -657,7 +657,7 @@ export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string)
       <div class="toolbar-actions">
         <button class="button" name="event" value="COMMENT" type="submit">Comment</button>
         <button class="button" name="event" value="REQUEST_CHANGES" type="submit">Request changes</button>
-        <button class="button primary" name="event" value="APPROVED" type="submit">Approve</button>
+        <button class="button" name="event" value="APPROVED" type="submit">Approve</button>
       </div>
     </form>
     ${

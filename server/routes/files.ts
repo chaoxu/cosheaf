@@ -246,6 +246,8 @@ files.put("/:owner/:repo/file", async (c) => {
   // Commit the sidecar reindex now that the canonical write succeeded.
   // Without this, doc_map / FTS / backlinks would lag until the webhook
   // fires and typed read-after-write (search, suggest, /backlinks) breaks.
+  // The sidecar tracks the latest write across branches (no branch dimension);
+  // title display is therefore scoped to the main file view (#132).
   plan.commit();
   if (isRename) deletePage(db, ws.slug, previousRel as string);
   invalidateBranchTree(owner, repo, branch);
