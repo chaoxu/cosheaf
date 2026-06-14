@@ -1,8 +1,17 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { is404 } from "../forgejo-errors.js";
+import {
+  activeClaims,
+  activeClaimsByIssue,
+  claimIssue,
+  claimTtlMs,
+  heartbeatClaim,
+  releaseClaim,
+} from "../issue-claims.js";
 import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
 import {
   type ForgejoIssue,
@@ -21,7 +30,7 @@ import type {
   TimelineEvent,
 } from "../../shared/issues.js";
 import { normalizeLabelColor, toLabel, validateLabelSelection } from "./label-utils.js";
-import { bad, notFound } from "./responses.js";
+import { bad, conflict, notFound } from "./responses.js";
 import { parseListState } from "./query-params.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
@@ -156,7 +165,7 @@ issues.get("/:owner/:repo/issues", async (c) => {
       if (!i.pull_request) byNum.set(i.number, toIssueRow(i));
     }
     const merged = Array.from(byNum.values()).sort((a, b) => b.updated_at - a.updated_at);
-    return c.json({ issues: merged });
+    return c.json({ issues: attachClaims(c, merged) });
   }
   const list = await fj.listIssues(owner, repo, {
     state,
@@ -168,8 +177,19 @@ issues.get("/:owner/:repo/issues", async (c) => {
     ...(filter === "assigned" ? { assigned_by: username } : assignedBy ? { assigned_by: assignedBy } : {}),
     ...(createdBy ? { created_by: createdBy } : {}),
   });
-  return c.json({ issues: list.filter((i) => !i.pull_request).map(toIssueRow) });
+  return c.json({ issues: attachClaims(c, list.filter((i) => !i.pull_request).map(toIssueRow)) });
 });
+
+// Decorate issue rows with their active live-work leases (#95) in one batched
+// query; rows with no claim are left untouched (the field is optional).
+function attachClaims(c: Context<AppEnv>, rows: IssueRow[]): IssueRow[] {
+  const claimsByNum = activeClaimsByIssue(c.get("db"), c.get("workspace").slug, rows.map((r) => r.number), Date.now());
+  for (const row of rows) {
+    const claims = claimsByNum.get(row.number);
+    if (claims?.length) row.claims = claims;
+  }
+  return rows;
+}
 
 // Typed because Forgejo returns raw issues/PRs; the public API wants
 // issue-only rows.
@@ -213,6 +233,8 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
       updated_at: new Date(issue.updated_at).getTime(),
       closed_at: issue.closed_at ? new Date(issue.closed_at).getTime() : null,
     };
+    const claims = activeClaims(c.get("db"), c.get("workspace").slug, number, Date.now());
+    if (claims.length) detail.claims = claims;
     return c.json(detail);
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404) {
@@ -220,6 +242,57 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
     }
     throw err;
   }
+});
+
+// Optional live-work lease so concurrent runners don't duplicate work (#95).
+// Exclusive per (workspace, issue): a second runner gets 409 with the active
+// claim. Ephemeral local coordination state — not durable knowledge.
+issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json(...bad("bad number"));
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const runnerName = typeof body.runner_name === "string" ? body.runner_name.trim() : "";
+  if (!runnerName) return c.json(...bad("runner_name required"));
+  const purpose = typeof body.purpose === "string" ? body.purpose.slice(0, 500) : "";
+  const now = Date.now();
+  const result = claimIssue(c.get("db"), {
+    slug: c.get("workspace").slug,
+    issueNumber: number,
+    runnerName,
+    purpose,
+    holder: c.get("user").username,
+    ttlMs: claimTtlMs(body, now),
+    now,
+  });
+  if (!result.ok) return c.json(...conflict("issue already claimed", { claim: result.conflict }));
+  return c.json({ claim: result.claim }, 201);
+});
+
+issues.patch("/:owner/:repo/issues/:number/claim/:id/heartbeat", async (c) => {
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json(...bad("bad number"));
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const now = Date.now();
+  const claim = heartbeatClaim(c.get("db"), {
+    slug: c.get("workspace").slug,
+    issueNumber: number,
+    id: c.req.param("id"),
+    ttlMs: claimTtlMs(body, now),
+    now,
+  });
+  if (!claim) return c.json(...notFound("claim not found or expired"));
+  return c.json({ claim });
+});
+
+issues.delete("/:owner/:repo/issues/:number/claim/:id", async (c) => {
+  const number = parseIssueNumber(c.req.param("number"));
+  if (number === null) return c.json(...bad("bad number"));
+  const released = releaseClaim(c.get("db"), {
+    slug: c.get("workspace").slug,
+    issueNumber: number,
+    id: c.req.param("id"),
+  });
+  return c.json({ ok: released });
 });
 
 // Typed because issue creation emits workspace SSE and returns the compact row

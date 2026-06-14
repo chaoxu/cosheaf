@@ -13,6 +13,20 @@ export interface Label {
   scope: string | null;
 }
 
+// An optional live-work lease on an issue (#95). Pure coordination state, not
+// durable knowledge: it expires and carries no Forgejo source. Lets concurrent
+// runners avoid duplicating work on the same issue.
+export interface IssueClaim {
+  id: string;
+  issue_number: number;
+  runner_name: string;
+  purpose: string;
+  holder_username: string;
+  created_at: number;
+  heartbeat_at: number;
+  expires_at: number;
+}
+
 export interface IssueRow {
   number: number;
   title: string;
@@ -22,6 +36,8 @@ export interface IssueRow {
   comment_count: number;
   created_at: number;
   updated_at: number;
+  /** Active non-expired live-work leases (#95); omitted when none. */
+  claims?: IssueClaim[];
 }
 
 export interface IssueDetail {
@@ -37,6 +53,8 @@ export interface IssueDetail {
   created_at: number;
   updated_at: number;
   closed_at: number | null;
+  /** Active non-expired live-work leases (#95); omitted when none. */
+  claims?: IssueClaim[];
 }
 
 export interface IssueComment {

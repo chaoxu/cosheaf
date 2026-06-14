@@ -107,6 +107,24 @@ CREATE TABLE IF NOT EXISTS webhook_log (
   event_type TEXT NOT NULL
 );
 
+-- Optional live-work leases for concurrent agents (#95). Pure local
+-- coordination state — NOT durable knowledge and with no Forgejo source; rows
+-- expire and are disposable (analogous to webhook_log). They let multiple
+-- runners avoid duplicating live work on the same issue; issues/PRs remain the
+-- only durable state on Forgejo.
+CREATE TABLE IF NOT EXISTS issue_claims (
+  id TEXT PRIMARY KEY,
+  workspace_slug TEXT NOT NULL,
+  issue_number INTEGER NOT NULL,
+  runner_name TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT '',
+  holder_username TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  heartbeat_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS issue_claims_active ON issue_claims(workspace_slug, issue_number, expires_at);
+
 -- Branches and pull requests: removed. They live on Forgejo as their natural
 -- representation. The server reads them on demand via the Forgejo client and
 -- relies on push/PR/review webhooks only for cache invalidation (page
