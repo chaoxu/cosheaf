@@ -98,7 +98,7 @@ function appStatusbar(path: StatusCrumb[] | undefined): Html {
     html`<a class="status-home" href="/" aria-label="Home" title="Home">⌂</a>`,
     ...(path ?? []).map(renderCrumb),
   ].flatMap((crumb, i) => (i === 0 ? [crumb] : [sep, crumb]));
-  return html`<footer class="app-statusbar"><span class="status-path">${crumbs}</span><div class="status-editor-slot"></div></footer>`;
+  return html`<footer class="app-statusbar"><span class="status-path">${crumbs}<span class="status-rename-slot"></span></span><div class="status-editor-slot"></div></footer>`;
 }
 
 function renderCrumb(segment: StatusCrumb): Html {

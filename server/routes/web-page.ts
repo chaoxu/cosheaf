@@ -46,7 +46,7 @@ export function repoPageShell(
   active: RepoTab,
   title: string,
   body: Html,
-  opts: { readerAssets?: boolean; sidebarPanels?: readonly Panel[]; statusExtra?: readonly StatusCrumb[] } = {},
+  opts: { readerAssets?: boolean; sidebarPanels?: readonly Panel[]; statusExtra?: readonly StatusCrumb[]; statusOmitTab?: boolean } = {},
 ): string {
   return repoPage({
     title,
@@ -60,6 +60,7 @@ export function repoPageShell(
     readerAssets: opts.readerAssets,
     sidebarPanels: opts.sidebarPanels,
     statusExtra: opts.statusExtra,
+    statusOmitTab: opts.statusOmitTab,
   });
 }
 
@@ -79,8 +80,12 @@ export function repoPage(opts: {
   // (#119 file tree via the #120 panel seam); other tabs leave it unset.
   sidebarPanels?: readonly Panel[];
   // Extra status-bar breadcrumb segments appended after owner/repo/tab — the
-  // edit page uses this to show the branch + file path being edited (#126).
+  // edit page uses this to show the branch being edited (#126).
   statusExtra?: readonly StatusCrumb[];
+  // Drop the active-tab crumb from the breadcrumb. The edit page sets this so
+  // the trail reads owner / repo / branch / <filename> instead of carrying a
+  // pointless "files" segment (#164).
+  statusOmitTab?: boolean;
 }): string {
   const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix));
   const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
@@ -107,7 +112,7 @@ export function repoPage(opts: {
       // workspace title (#147); with no title these stay plain owner/repo.
       { label: opts.owner, cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
-      { label: activeLabel.toLowerCase() },
+      ...(opts.statusOmitTab ? [] : [{ label: activeLabel.toLowerCase() }]),
       ...(opts.statusExtra ?? []),
     ],
     body: html`

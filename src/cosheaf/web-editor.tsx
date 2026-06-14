@@ -471,12 +471,14 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           )}
         </aside>
       </div>
-      {renderStatusbar(
-        <footer className="web-editor-statusbar" data-testid="statusbar">
+      {renderEditorChrome(
+        <>
+          <span className="status-sep">/</span>
           <input
             className="web-editor-path"
             data-testid="editor-path-input"
             aria-label="File path"
+            title="Rename file"
             spellCheck={false}
             value={currentPath}
             disabled={busy}
@@ -489,10 +491,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           <span className="dirty-dot" hidden={!uncommitted && !pathDirty}>
             *
           </span>
+        </>,
+        <>
           <span className="web-editor-status">{status ?? ""}</span>
-          <span data-testid="active-branch-name" className="web-editor-branch">
-            {branch}
-          </span>
           {config.formatId === COFLAT_FORMAT_ID ? (
             <button type="button" data-testid="editor-mode-toggle" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
               {mode === "rich" ? "Source" : "Rich"}
@@ -516,19 +517,38 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           <a className="web-editor-cancel" data-testid="editor-cancel" href={cancelHref}>
             Cancel
           </a>
-        </footer>,
+        </>,
       )}
     </div>
   );
 }
 
-// Render the editor status controls into the app status bar so the page has a
-// single bottom bar; fall back to in-place rendering if the shell slot is
-// absent (tests, standalone mounts).
+// Split the editor chrome across the single app status bar (#164): the editable
+// filename goes into the breadcrumb's rename slot (the file shows once, as the
+// rename affordance — no duplicate filename/branch), the actions into the editor
+// slot. Fall back to one in-place footer if the shell slots are absent (tests,
+// standalone mounts).
+const renameSlot = document.querySelector(".app-statusbar .status-rename-slot");
 const statusbarSlot = document.querySelector(".app-statusbar .status-editor-slot");
 
-function renderStatusbar(statusbar: ReactNode): ReactNode {
-  return statusbarSlot ? createPortal(statusbar, statusbarSlot) : statusbar;
+function renderEditorChrome(filename: ReactNode, actions: ReactNode): ReactNode {
+  // With the shell slots present (the real app), the filename portals into the
+  // breadcrumb and only the actions go in the editor footer. Without them
+  // (tests/standalone), both render inline in one footer.
+  const split = Boolean(statusbarSlot && renameSlot);
+  const footer = (
+    <footer className="web-editor-statusbar" data-testid="statusbar">
+      {split ? null : filename}
+      {actions}
+    </footer>
+  );
+  if (!split || !statusbarSlot || !renameSlot) return footer;
+  return (
+    <>
+      {createPortal(filename, renameSlot)}
+      {createPortal(footer, statusbarSlot)}
+    </>
+  );
 }
 
 const { config, content } = readConfig();

@@ -284,7 +284,8 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
           </noscript>
         </section>
       ` : textEditPage(ctx, branch, rel, content, treeBranch), {
-        statusExtra: [{ label: branch }, { label: rel }],
+        statusExtra: [{ label: branch }],
+        statusOmitTab: true,
         sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel)],
       }),
   );

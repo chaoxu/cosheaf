@@ -311,7 +311,11 @@ web.get("/account/avatar", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return c.body(null, 401);
   const me = await c.get("fjUser").getCurrentUser();
-  if (!hasCustomAvatar(me) || !me.avatar_url) return c.body(null, 404);
+  // 204 (not 404) for "no custom avatar": this is the normal state (the chrome
+  // probes /account/avatar on every signed-in page), so a 4xx here would
+  // pollute the no-4xx browser-smoke invariant. The Image() probe still fails
+  // to decode an empty body → onerror → keeps the initials chip.
+  if (!hasCustomAvatar(me) || !me.avatar_url) return c.body(null, 204);
   let res: Response;
   try {
     // Fetch via the reachable forge URL + the avatar path, not the (possibly

@@ -52,6 +52,7 @@ try {
     const cm = document.querySelector(".cm-editor");
     const outline = document.querySelector(".web-editor-outline");
     const statusbar = document.querySelector('[data-testid="statusbar"]');
+    const breadcrumb = document.querySelector(".app-statusbar .status-path");
     const pathInput = document.querySelector('[data-testid="editor-path-input"]');
     const rect = (el) => {
       if (!el) return null;
@@ -63,6 +64,7 @@ try {
       codeMirror: rect(cm),
       outline: rect(outline),
       statusbar: statusbar?.textContent ?? "",
+      breadcrumb: breadcrumb?.textContent ?? "",
       path: pathInput instanceof HTMLInputElement ? pathInput.value : "",
       activeElementRole: document.activeElement?.getAttribute("role") ?? null,
     };
@@ -74,8 +76,10 @@ try {
   if (!stats.codeMirror || stats.codeMirror.h < 400) {
     throw new Error(`CodeMirror did not mount correctly: ${JSON.stringify(stats.codeMirror)}`);
   }
-  if (stats.path !== PAGE_PATH || !stats.statusbar.includes(BRANCH)) {
-    throw new Error(`statusbar missing file/branch context: ${stats.statusbar}`);
+  // The branch lives in the breadcrumb now (#164); the filename is the rename
+  // input, and the editor action slot no longer duplicates either.
+  if (stats.path !== PAGE_PATH || !stats.breadcrumb.includes(BRANCH)) {
+    throw new Error(`breadcrumb missing file/branch context: ${stats.breadcrumb} (statusbar: ${stats.statusbar})`);
   }
   if (badResponses.length > 0 || pageErrors.length > 0) {
     throw new Error("edit page emitted browser errors");
