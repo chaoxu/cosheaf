@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
+import { checkCoflatRef, checkDocPins, DEFAULT_COFLAT_REF } from "./check-coflat-ref.mjs";
 
 function loadDotenvDev() {
   const file = resolve(process.cwd(), ".env.dev");
@@ -46,6 +47,17 @@ if (!(await portAvailable(vitePort))) blocked.push(viteUrl);
 if (blocked.length > 0) {
   console.error(`Cannot start dev servers; port already in use: ${blocked.join(", ")}`);
   process.exit(1);
+}
+
+// Non-blocking coflat pin notice: a stale sibling checkout or a doc that drifted
+// from DEFAULT_COFLAT_REF is the classic "works on my machine" trap. Warn loudly
+// at dev start; never block (setup:deps and check:pre-push are the hard gates).
+const coflat = checkCoflatRef();
+if (!coflat.ok) {
+  process.stdout.write(`\x1b[33m⚠ coflat: ${coflat.message}\x1b[0m\n`);
+}
+for (const drift of checkDocPins()) {
+  process.stdout.write(`\x1b[33m⚠ coflat pin drift: ${drift.file} says ${drift.found}, expected ${DEFAULT_COFLAT_REF} (pnpm bump:coflat)\x1b[0m\n`);
 }
 
 process.stdout.write(`Cosheaf dev\n`);
