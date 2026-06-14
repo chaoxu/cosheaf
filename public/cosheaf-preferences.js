@@ -65,6 +65,25 @@
   });
 })();
 
+// Reading width (#151): Narrow · Normal · Wide. The pre-paint head script sets
+// html[data-cosheaf-reading] before paint; this wires the settings select and
+// applies the choice live (the CSS rule reflows the reader without reload).
+// Normal keeps each surface's default; Narrow/Wide override the reading measure.
+(() => {
+  const select = document.querySelector("[data-reading-width-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:reading-width";
+  const user = select.dataset.readingWidthUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "narrow" || value === "wide" ? value : "normal");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    localStorage.setItem(key, select.value);
+    localStorage.setItem(legacyKey, select.value);
+    document.documentElement.setAttribute("data-cosheaf-reading", select.value);
+  });
+})();
+
 // UI density / display size (#154): Compact · Normal · Comfortable · Large.
 // The pre-paint head script sets html[data-cosheaf-density] before paint (no
 // reflow); this wires the settings select and applies the choice live. A single

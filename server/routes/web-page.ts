@@ -166,6 +166,14 @@ export function userPreferencesSection(user: string): Html {
         </select>
       </label>
       <label class="settings-row">
+        <span>Reading width</span>
+        <select data-testid="settings-reading-width-select" data-reading-width-user="${user}">
+          <option value="narrow">Narrow</option>
+          <option value="normal">Normal</option>
+          <option value="wide">Wide</option>
+        </select>
+      </label>
+      <label class="settings-row">
         <span>Document theme</span>
         <select data-testid="settings-document-theme-select" data-document-theme-user="${user}">
           <option value="default">Default</option>
