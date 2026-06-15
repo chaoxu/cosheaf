@@ -9,7 +9,8 @@ export interface ForgejoIssue {
   title: string;
   body: string;
   state: "open" | "closed";
-  user: { id: number; login: string } | null;
+  // Full user object (carries avatar_url + email for same-origin avatars, #177).
+  user: ForgejoUser | null;
   assignees: Array<{ id: number; login: string }> | null;
   labels: ForgejoLabel[];
   milestone?: { id: number; title: string; state: "open" | "closed" } | null;
@@ -23,7 +24,7 @@ export interface ForgejoIssue {
 export interface ForgejoIssueComment {
   id: number;
   body: string;
-  user: { id: number; login: string } | null;
+  user: ForgejoUser | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,7 +57,7 @@ export interface ForgejoActivity {
 export interface ForgejoTimelineEvent {
   id: number;
   type: string;
-  user?: { id: number; login: string };
+  user?: ForgejoUser;
   body?: string;
   created_at: string;
   updated_at?: string;

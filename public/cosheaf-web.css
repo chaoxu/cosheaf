@@ -125,7 +125,7 @@ html[data-cosheaf-reading="wide"] :is(.coflat-reader-island,.cosheaf-document-re
 /* avatar chips + thread participants bar */
 .avatar-chip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;font:600 10px/1 var(--cf-font-mono,monospace);color:#fff;background:var(--cf-muted);text-transform:uppercase;flex:0 0 auto}
 /* uploaded profile picture (#150): same round footprint as the initials chip, image cropped to cover */
-.avatar-chip-img{object-fit:cover;background:transparent;padding:0}
+.avatar-chip--photo{position:relative;overflow:hidden}.avatar-chip-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:inherit}
 .avatar-edit{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.avatar-preview{display:inline-flex}.avatar-preview .avatar-chip{width:48px;height:48px;font-size:18px}.avatar-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.avatar-controls form{margin:0}.avatar-upload-form{display:flex;align-items:center;gap:8px}
 .avatar-chip--0{background:#0f766e}.avatar-chip--1{background:#6e56cf}.avatar-chip--2{background:#9f1239}.avatar-chip--3{background:#0369a1}.avatar-chip--4{background:#92400e}.avatar-chip--5{background:#3f6212}.avatar-chip--6{background:#7c3aed}.avatar-chip--7{background:#0e7490}
 .thread-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--cf-border);padding:0 0 8px;margin:0 0 4px;font-size:12.5px}

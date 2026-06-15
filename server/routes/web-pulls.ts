@@ -200,7 +200,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
             </nav>
           </header>
           ${threadLayout(
-            html`${threadParticipantsBar(pull.user?.login, conversation)}
+            html`${threadParticipantsBar(pull.user, conversation)}
               <div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
@@ -600,7 +600,7 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
         <span class="list-row-title"><span class="state ${state}">${state}</span><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></span>
         ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill">→${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
       </span>
-      ${listRowSide(pull.user?.login, pull.created_at, pull.comments)}
+      ${listRowSide(pull.user, pull.created_at, pull.comments)}
     </a>`;
   });
   return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;

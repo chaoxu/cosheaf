@@ -68,6 +68,7 @@ export function repoPageShell(
     sidebarPanels: opts.sidebarPanels,
     statusExtra: opts.statusExtra,
     statusOmitTab: opts.statusOmitTab,
+    userAvatarSrc: ctx.userAvatarSrc,
   });
 }
 
@@ -93,6 +94,8 @@ export function repoPage(opts: {
   // the trail reads owner / repo / branch / <filename> instead of carrying a
   // pointless "files" segment (#164).
   statusOmitTab?: boolean;
+  // The signed-in user's same-origin avatar src for the sidebar identity (#177).
+  userAvatarSrc?: string | null;
 }): string {
   const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix));
   const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
@@ -101,7 +104,7 @@ export function repoPage(opts: {
     user: opts.user,
     readerAssets: opts.readerAssets,
     sidebar: html`
-      ${sidebarIdentity(opts.user)}
+      ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null)}
       ${modeToggle()}
       <nav class="sidebar-topnav">
         <a href="/">‹ Workspaces</a>

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { avatarChip } from "./avatar.js";
+import { avatar } from "./avatar.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
 // A breadcrumb segment. `wsTitle` carries the workspace's Read-mode title
@@ -34,7 +34,7 @@ export function pageShell(opts: {
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
-        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script><script src="/cosheaf-mode.js" defer></script><script src="/cosheaf-avatar.js" defer></script>`) : ""}
+        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script><script src="/cosheaf-mode.js" defer></script>`) : ""}
       </head>
       <body data-cosheaf-user="${opts.user ?? ""}">
         <div class="app-frame">
@@ -53,8 +53,8 @@ function cosheafWebCssVersion(): string {
   return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
-export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string): Html {
-  return html`${sidebarIdentity(user, active === "notifications")}
+export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string, avatarSrc: string | null = null): Html {
+  return html`${sidebarIdentity(user, active === "notifications", avatarSrc)}
     ${user ? modeToggle() : ""}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
@@ -79,10 +79,10 @@ export function modeToggle(): Html {
 // renders in the global and repo sidebars so identity + notifications are always
 // visible. Logged-out chrome (only the pre-auth message pages) shows a sign-in
 // link instead — and no bell.
-export function sidebarIdentity(user: string | undefined, notificationsActive = false): Html {
+export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null): Html {
   if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">Sign in</a></div>`;
   return html`<div class="sidebar-identity">
-    <a class="sidebar-identity-link" href="/account/settings" title="Account">${avatarChip(user)}<span class="sidebar-identity-name">${user}</span></a>
+    <a class="sidebar-identity-link" href="/account/settings" title="Account">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
     ${notificationsBell(notificationsActive)}
   </div>`;
 }

@@ -11,12 +11,12 @@ import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, configReposForUser, htmlResponse, positiveInt, redirect, repoHref, resolveWebAuth, safeWebRedirect, stringField } from "./web-context.js";
+import { badRequestPage, configReposForUser, currentUserAvatarSrc, htmlResponse, invalidateCurrentUserAvatar, positiveInt, redirect, repoHref, resolveWebAuth, safeWebRedirect, stringField } from "./web-context.js";
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
-import { avatarChip, avatarImg, hasCustomAvatar } from "./avatar.js";
+import { avatarForUser, forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
 import { userPreferencesSection, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
@@ -73,18 +73,19 @@ web.post("/logout", (c) => {
 web.get("/", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
-  const [repos, threads] = await Promise.all([
+  const [repos, threads, avatarSrc] = await Promise.all([
     configReposForUser(c),
     // Forgejo's account-level notifications are already cross-repo — the daily
     // "what needs my attention anywhere" inbox the per-repo tab can't give.
     c.get("fjUser").listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] }).catch(() => []),
+    currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken),
   ]);
   const inbox = mapThreads(threads);
   return htmlResponse(
     pageShell({
       title: "Repositories",
       user: auth.user.username,
-      sidebar: globalSidebar("workspaces", auth.user.username),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc),
       body: html`
         <main class="page">
           <div class="page-title page-title--actions-only">
@@ -212,18 +213,21 @@ web.get("/account/notifications", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
   const all = c.req.query("state") === "all";
-  const threads = await c
-    .get("fjUser")
-    .listNotifications({
-      statusTypes: all ? ["unread", "read", "pinned"] : ["unread"],
-      subjectTypes: ["Issue", "Pull"],
-    })
-    .catch(() => []);
+  const [threads, avatarSrc] = await Promise.all([
+    c
+      .get("fjUser")
+      .listNotifications({
+        statusTypes: all ? ["unread", "read", "pinned"] : ["unread"],
+        subjectTypes: ["Issue", "Pull"],
+      })
+      .catch(() => []),
+    currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken),
+  ]);
   return htmlResponse(
     pageShell({
       title: "Notifications",
       user: auth.user.username,
-      sidebar: globalSidebar("notifications", auth.user.username),
+      sidebar: globalSidebar("notifications", auth.user.username, avatarSrc),
       statusPath: [{ label: "notifications" }],
       body: notificationsAccountPage(mapThreads(threads), all),
     }),
@@ -240,7 +244,7 @@ web.get("/account/settings", async (c) => {
     pageShell({
       title: "Account settings",
       user: auth.user.username,
-      sidebar: globalSidebar("account", auth.user.username),
+      sidebar: globalSidebar("account", auth.user.username, forgeAvatarSrc(me)),
       statusPath: [{ label: "account" }],
       body: html`
         <main class="page">
@@ -278,8 +282,8 @@ function accountSignOutSection(): Html {
 }
 
 // Profile-picture section (#150): initials by default, opt-in uploaded avatar.
-// The preview and the chrome both render the upload through the /account/avatar
-// proxy, never the Forgejo avatar URL — the backing forge stays hidden.
+// The preview renders the same server-rendered <img> the chrome does — a
+// same-origin /forge-avatars/* URL, never the Forgejo avatar URL (#177).
 function avatarSection(me: ForgejoUser): Html {
   const custom = hasCustomAvatar(me);
   return html`<section class="settings-section" data-testid="settings-avatar">
@@ -290,7 +294,7 @@ function avatarSection(me: ForgejoUser): Html {
     <div class="settings-form">
       <div class="avatar-edit">
         <span class="avatar-preview" data-testid="avatar-preview">
-          ${custom ? avatarImg(me.login, "/account/avatar") : avatarChip(me.login)}
+          ${avatarForUser(me)}
         </span>
         <div class="avatar-controls">
           <form method="post" action="/account/avatar" enctype="multipart/form-data" class="avatar-upload-form" data-testid="avatar-upload-form">
@@ -304,35 +308,37 @@ function avatarSection(me: ForgejoUser): Html {
   </section>`;
 }
 
-// Avatar image proxy (#150): streams the current user's uploaded avatar from the
-// forge so the browser never sees the Forgejo URL. 204 when the user has only
-// the default identicon (a 4xx would pollute the no-4xx smoke invariant; the
-// chrome then keeps the initials chip).
-web.get("/account/avatar", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return c.body(null, 401);
-  const me = await c.get("fjUser").getCurrentUser();
-  // 204 (not 404) for "no custom avatar": this is the normal state (the chrome
-  // probes /account/avatar on every signed-in page), so a 4xx here would
-  // pollute the no-4xx browser-smoke invariant. The Image() probe still fails
-  // to decode an empty body → onerror → keeps the initials chip.
-  if (!hasCustomAvatar(me) || !me.avatar_url) return c.body(null, 204);
+// Same-origin avatar route (#177): a transparent pass-through to Forgejo's
+// content-addressed avatar paths, so cosheaf can emit <img src="/forge-avatars/…">
+// for any user without leaking the forge host into client URLs. Forgejo's own
+// ETag/Cache-Control flow through unchanged — the browser caches the image
+// directly; there is no app-side cache and no per-user proxy. Public (avatars
+// aren't sensitive) and constrained to the avatar path prefixes so it can't be
+// used as an open proxy. Conditional requests are forwarded so revalidation
+// returns 304s. In production this same prefix may instead be routed straight to
+// Forgejo by the edge reverse proxy; cosheaf serving it keeps dev self-contained.
+web.get("/forge-avatars/*", async (c) => {
+  const rest = c.req.path.slice("/forge-avatars/".length);
+  if (!isForgeAvatarPath(rest)) return c.body(null, 404);
+  const forward = new Headers();
+  const inm = c.req.header("if-none-match");
+  if (inm) forward.set("if-none-match", inm);
+  const ims = c.req.header("if-modified-since");
+  if (ims) forward.set("if-modified-since", ims);
   let res: Response;
   try {
-    // Fetch via the reachable forge URL + the avatar path, not the (possibly
-    // public/unreachable) host Forgejo baked into avatar_url.
-    res = await fetch(`${c.get("config").forgejoUrl}${new URL(me.avatar_url).pathname}`);
+    res = await fetch(`${c.get("config").forgejoUrl}/${rest}`, { headers: forward });
   } catch (_err) {
     return c.body(null, 502);
   }
-  if (!res.ok) return c.body(null, 404);
-  const bytes = await res.arrayBuffer();
-  return c.body(bytes, 200, {
-    "content-type": res.headers.get("content-type") ?? "image/png",
-    // A profile picture is mutable (upload/remove), so don't let the browser
-    // serve a stale image after a change — revalidate each load.
-    "cache-control": "private, no-cache",
-  });
+  const passHeaders: Record<string, string> = {};
+  for (const h of ["content-type", "cache-control", "etag", "last-modified", "expires"]) {
+    const v = res.headers.get(h);
+    if (v) passHeaders[h] = v;
+  }
+  if (res.status === 304) return c.body(null, 304, passHeaders);
+  if (!res.ok) return c.body(null, res.status === 404 ? 404 : 502);
+  return c.body(await res.arrayBuffer(), 200, passHeaders);
 });
 
 const settingsError = (msg: string): Response => redirect(`/account/settings?error=${encodeURIComponent(msg)}`);
@@ -350,6 +356,7 @@ web.post("/account/avatar", async (c) => {
   } catch (err) {
     return settingsError(`Could not set profile picture: ${(err as Error).message}`);
   }
+  invalidateCurrentUserAvatar(auth.forgejoToken);
   return redirect("/account/settings?saved=1");
 });
 
@@ -361,6 +368,7 @@ web.post("/account/avatar/remove", async (c) => {
   } catch (err) {
     return settingsError(`Could not remove profile picture: ${(err as Error).message}`);
   }
+  invalidateCurrentUserAvatar(auth.forgejoToken);
   return redirect("/account/settings?saved=1");
 });
 
@@ -389,11 +397,12 @@ web.get("/new", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return redirect("/login");
   const error = c.req.query("error");
+  const avatarSrc = await currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken);
   return htmlResponse(
     pageShell({
       title: "New repository",
       user: auth.user.username,
-      sidebar: globalSidebar("workspaces", auth.user.username),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc),
       statusPath: [{ label: "new repository" }],
       body: html`
         <main class="page">

@@ -11,7 +11,7 @@ import type {
   ForgejoTimelineEvent,
   ForgejoUser,
 } from "../forgejo-types.js";
-import { avatarChip } from "./avatar.js";
+import { type AvatarUser, avatarForUser } from "./avatar.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
 import {
@@ -415,15 +415,16 @@ function isReferenceTimelineEvent(type: string): boolean {
 export { initials, tint } from "./avatar.js";
 
 // The right-hand metadata cluster for an issue/pull list row: author avatar +
-// name, short date, and bare comment count — all on one line. Uses the initials
-// avatar chip (not the Forgejo avatar URL) so the backing forge stays hidden.
+// name, short date, and bare comment count — all on one line. The avatar is a
+// server-rendered <img> for uploaders (same-origin /forge-avatars/*), else the
+// initials chip; the forge host never appears in a client URL (#177).
 export function listRowSide(
-  login: string | null | undefined,
+  author: AvatarUser | null | undefined,
   createdAt: string | undefined,
   comments: number | undefined,
 ): Html {
   return html`<span class="list-row-side">
-    ${avatarChip(login)}<span class="row-who">${displayLogin(login)}</span>
+    ${avatarForUser(author)}<span class="row-who">${displayLogin(author?.login)}</span>
     <span class="row-sep">·</span>${timeEl(createdAt)}
     <span class="row-sep">·</span><span class="row-count" title="comments">(${comments ?? 0})</span>
   </span>`;
@@ -434,20 +435,20 @@ export function listRowSide(
 // #thread-bottom by the composer). Generic over issue/PR comment shapes so both
 // thread kinds reuse it; all computed from data already fetched.
 export function threadParticipantsBar(
-  authorLogin: string | null | undefined,
-  comments: readonly { user?: { login?: string } | null; created_at?: string }[],
+  author: AvatarUser | null | undefined,
+  comments: readonly { user?: AvatarUser | null; created_at?: string }[],
 ): Html {
   const seen = new Set<string>();
-  const participants: string[] = [];
-  for (const login of [authorLogin, ...comments.map((c) => c.user?.login)]) {
-    if (login && !seen.has(login)) {
-      seen.add(login);
-      participants.push(login);
+  const participants: AvatarUser[] = [];
+  for (const user of [author, ...comments.map((c) => c.user)]) {
+    if (user?.login && !seen.has(user.login)) {
+      seen.add(user.login);
+      participants.push(user);
     }
   }
   const last = comments[comments.length - 1];
   return html`<div class="thread-bar" data-testid="thread-bar">
-    <span class="thread-faces" aria-label="Participants">${participants.map((login) => avatarChip(login))}</span>
+    <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarForUser(user))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
       last?.created_at ? html` · last ${timeEl(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
     }</span>
@@ -545,11 +546,11 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
 
 // Compact comment: avatar gutter + a single (author · time) byline + body, with
 // the hover edit affordance floated top-right.
-function commentEntry(opts: { login: string | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html }): Html {
+function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html }): Html {
   return html`<article class="comment" id="${opts.anchorId}">
-    <span class="comment-avatar">${avatarChip(opts.login)}</span>
+    <span class="comment-avatar">${avatarForUser(opts.author)}</span>
     <div class="comment-body">
-      <div class="comment-byline"><span class="comment-who">${displayLogin(opts.login)}</span> ${opts.whenHtml}</div>
+      <div class="comment-byline"><span class="comment-who">${displayLogin(opts.author?.login)}</span> ${opts.whenHtml}</div>
       <div class="comment-text">${opts.body}</div>
       ${opts.actions}
     </div>
@@ -579,7 +580,7 @@ function commitGroup(commits: readonly ForgejoCommit[]): Html {
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<Html> {
   if (item.kind === "comment") {
     return commentEntry({
-      login: item.comment.user?.login,
+      author: item.comment.user,
       anchorId: `comment-${item.comment.id}`,
       whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
@@ -588,7 +589,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   }
   if (item.kind === "line-comment") {
     return commentEntry({
-      login: item.comment.user?.login,
+      author: item.comment.user,
       anchorId: `comment-${item.comment.id}`,
       whenHtml: html`<span class="comment-on">on ${item.comment.path}</span> · ${timeEl(item.comment.created_at)}`,
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),

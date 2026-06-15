@@ -5,8 +5,10 @@ import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { Role } from "../../shared/roles.js";
+import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
+import { forgeAvatarSrc } from "./avatar.js";
 import { html, type Html, raw } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
@@ -21,6 +23,32 @@ export interface WebCtx {
   // Drives the Read-mode workspace identity in the chrome (#147); the chrome
   // falls back to the owner/repo slug when empty.
   wsTitle: string;
+  // The signed-in user's same-origin avatar src for the sidebar identity (#177),
+  // or null when they have no uploaded avatar (the chrome shows initials).
+  userAvatarSrc: string | null;
+}
+
+// The current user's avatar src, cached by bearer so the chrome doesn't re-fetch
+// the user object on every page (#177). The cache stores "" as the sentinel for
+// "no upload" (TTLCache.get returns null on a miss, so null can't double as a
+// real value); callers see null for both no-upload and miss-then-no-upload.
+const CURRENT_USER_AVATAR_CACHE = new TTLCache<string, string>(60_000);
+export async function currentUserAvatarSrc(fj: Forgejo, bearer: string): Promise<string | null> {
+  const cached = CURRENT_USER_AVATAR_CACHE.get(bearer);
+  if (cached !== null) return cached || null;
+  const src = await fj
+    .getCurrentUser()
+    .then((me) => forgeAvatarSrc(me))
+    .catch(() => null);
+  CURRENT_USER_AVATAR_CACHE.set(bearer, src ?? "");
+  return src;
+}
+
+// Drop the cached avatar for a bearer right after that user uploads/removes their
+// picture, so the chrome reflects the change on the next page instead of lagging
+// up to the cache TTL (#177).
+export function invalidateCurrentUserAvatar(bearer: string): void {
+  CURRENT_USER_AVATAR_CACHE.delete(bearer);
 }
 
 export type WebRepoResult = { ok: true } & WebCtx | { ok: false; response: Response };
@@ -66,8 +94,11 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
-  const wsTitle = await resolveWorkspaceTitle(fj, owner, repo);
-  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db"), wsTitle };
+  const [wsTitle, userAvatarSrc] = await Promise.all([
+    resolveWorkspaceTitle(fj, owner, repo),
+    currentUserAvatarSrc(fj, auth.forgejoToken),
+  ]);
+  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db"), wsTitle, userAvatarSrc };
 }
 
 // resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the

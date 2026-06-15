@@ -127,7 +127,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   // Repo labels back the rail's inline editor; only fetched when editing is
   // possible (read role and chat-backed issues show chips only).
   const allLabels = canEditIssue ? await ctx.fj.listLabels(ctx.owner, ctx.repo) : [];
-  const main = html`${threadParticipantsBar(issue.user?.login, comments)}
+  const main = html`${threadParticipantsBar(issue.user, comments)}
     <div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
@@ -467,7 +467,7 @@ function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyTex
         <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></span>
         ${hasMeta ? html`<span class="list-meta">${issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : ""}${labelChips(issue.labels)}</span>` : ""}
       </span>
-      ${listRowSide(issue.user?.login, issue.created_at, issue.comments)}
+      ${listRowSide(issue.user, issue.created_at, issue.comments)}
     </a>`;
         })
   }</div>`;
