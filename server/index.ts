@@ -69,7 +69,9 @@ app.route("/api/v1/webhooks", webhooks);
 
 const distDir = path.resolve(process.cwd(), "dist");
 const publicDir = path.resolve(process.cwd(), "public");
-const publicAssetPaths = new Set(listPublicAssetPaths(publicDir));
+// Scan both roots: dev serves these from public/, but the production image
+// ships only dist/ (Vite copies public/ → dist/ at build).
+const publicAssetPaths = new Set(listPublicAssetPaths(publicDir, distDir));
 const coflatEditorDistDir = path.dirname(
   requireResolve("@chaoxu/coflat/style.css"),
 );
