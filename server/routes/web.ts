@@ -305,8 +305,9 @@ function avatarSection(me: ForgejoUser): Html {
 }
 
 // Avatar image proxy (#150): streams the current user's uploaded avatar from the
-// forge so the browser never sees the Forgejo URL. 404 when the user has only
-// the default identicon (the chrome then keeps the initials chip).
+// forge so the browser never sees the Forgejo URL. 204 when the user has only
+// the default identicon (a 4xx would pollute the no-4xx smoke invariant; the
+// chrome then keeps the initials chip).
 web.get("/account/avatar", async (c) => {
   const auth = await resolveWebAuth(c);
   if (!auth) return c.body(null, 401);

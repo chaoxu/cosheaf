@@ -31,7 +31,7 @@ const badResponses = [];
 attachPageListeners(page, { consoleSink: consoleMessages, errorSink: pageErrors, badResponseSink: badResponses });
 
 try {
-  await page.goto(WEB_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await signInIfNeeded(page, USERNAME, PASSWORD);
 
   const editUrl = new URL(

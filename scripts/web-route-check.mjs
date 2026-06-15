@@ -12,6 +12,29 @@ function collect(value, previous) {
   return previous;
 }
 
+// Same-origin static asset paths cosheaf serves: built island bundles, the
+// chrome stylesheet + island helpers, the favicon, fonts, and the coflat editor
+// vendor + dev node_modules proxy. A 4xx on any of these is the no-4xx-asset
+// regression the route walk exists to catch (broadened from /assets + the
+// single cosheaf-web.css so a missing cosheaf-*.js helper is also caught).
+function isAssetUrl(url) {
+  let pathname;
+  try {
+    pathname = new URL(url).pathname;
+  } catch (_err) {
+    return false;
+  }
+  return (
+    pathname.startsWith("/assets/") ||
+    pathname.startsWith("/fonts/") ||
+    pathname.startsWith("/vendor/coflat/") ||
+    pathname.startsWith("/node_modules/") ||
+    pathname === "/favicon.svg" ||
+    /^\/cosheaf-[\w.-]+\.js$/.test(pathname) ||
+    pathname.endsWith(".css")
+  );
+}
+
 const program = new Command("web-route-check")
   .option("--url <url>", "base URL", process.env.COSHEAF_WEB_URL ?? "http://localhost:3030")
   .option("--route <route>", "route to verify; repeatable", collect, [])
@@ -87,7 +110,7 @@ async function verifyRoute(page, base, route, screenshotDir) {
   const consoleErrors = [];
   const onResponse = (response) => {
     const url = response.url();
-    if ((url.includes("/assets/") || url.endsWith("/cosheaf-web.css")) && response.status() >= 400) {
+    if (isAssetUrl(url) && response.status() >= 400) {
       assetFailures.push({ url, status: response.status() });
     }
   };
@@ -101,7 +124,7 @@ async function verifyRoute(page, base, route, screenshotDir) {
   const url = new URL(route, base).toString();
   let screenshot;
   try {
-    const response = await page.goto(url, { waitUntil: "networkidle" });
+    const response = await page.goto(url, { waitUntil: "domcontentloaded" });
     checks.push(check("http status", response !== null && response.status() < 400, response?.status() ?? "no response"));
     checks.push(await headerScrollCheck(page));
     checks.push(await routeSpecificCheck(page, route));

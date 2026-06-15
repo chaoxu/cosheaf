@@ -47,7 +47,7 @@ async function ensureSignedIn() {
 }
 
 try {
-  await page.goto(WEB_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await ensureSignedIn();
   postLoginUrl = page.url();
 

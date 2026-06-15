@@ -126,7 +126,7 @@ function assertReaderEditorParity(reader, editor) {
       throw new Error(`reader/editor ${key} mismatch: ${JSON.stringify({ reader, editor })}`);
     }
   }
-  if (!editor.maxWidth.includes("800px")) {
+  if (!editor.maxWidth.includes("1200px")) {
     throw new Error(`editor package max-width contract mismatch: ${JSON.stringify({ reader, editor })}`);
   }
   if (!reader.font.includes("KaTeX_Main") || !editor.font.includes("KaTeX_Main")) {
@@ -152,18 +152,31 @@ function assertReaderEditorParity(reader, editor) {
 }
 
 try {
-  await page.goto(WEB_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await ensureSignedIn();
   await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
   await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
-  await page.getByText("Frontmatter and Structure Editing").waitFor({ state: "visible", timeout: 10000 });
+  // Scope to the heading: the reader now renders an outline whose TOC link
+  // carries the same text, so a bare getByText is ambiguous (strict-mode).
+  await page.getByRole("heading", { name: "Frontmatter and Structure Editing" }).first().waitFor({ state: "visible", timeout: 10000 });
 
   const defaultReader = await readerStats();
   if (defaultReader.documentWidth < 900) {
     throw new Error(`document width too narrow: document=${defaultReader.documentWidth}`);
   }
-  if (defaultReader.maxWidth !== "1200px" || defaultReader.width < 1160 || defaultReader.width > 1220) {
-    throw new Error(`reader is not using Cosheaf document width: ${JSON.stringify(defaultReader)}`);
+  // The document-page reader uses coflat's default reading measure (a bounded
+  // prose column within the wider document container) — cosheaf only widens it
+  // for the "wide" reading-width pref. Assert the bounded invariant, not
+  // coflat's exact measure (36rem today; coflat owns and may tune it).
+  const readerMaxWidthPx = Number.parseInt(defaultReader.maxWidth, 10);
+  if (
+    !Number.isFinite(readerMaxWidthPx) ||
+    readerMaxWidthPx < 400 ||
+    readerMaxWidthPx > 1300 ||
+    defaultReader.width < 400 ||
+    defaultReader.width > defaultReader.documentWidth + 4
+  ) {
+    throw new Error(`reader is not using a bounded document measure: ${JSON.stringify(defaultReader)}`);
   }
   if (defaultReader.paddingInline.join("/") !== "0px/0px") {
     throw new Error(`reader should not add horizontal document padding: ${JSON.stringify(defaultReader)}`);

@@ -36,12 +36,12 @@ const pageErrors = [];
 const badResponses = [];
 attachPageListeners(page, { consoleSink: consoleMessages, errorSink: pageErrors, badResponseSink: badResponses });
 
-await page.goto(WEB_URL, { waitUntil: "networkidle" });
+await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
 await signInIfNeeded(page, USERNAME, PASSWORD);
 
 // Open the seeded page.
 const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL).toString();
-await page.goto(fileUrl, { waitUntil: "networkidle" });
+await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
 await page.getByRole("heading", { name: PAGE_PATH }).waitFor({ state: "visible", timeout: 10000 });
 await page.getByText(PAGE).first().waitFor({ state: "visible", timeout: 10000 });
 

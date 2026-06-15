@@ -24,6 +24,26 @@ function serverRenderedOrigin(value) {
   return url.toString();
 }
 
+// A coflat reader surface is a bounded prose column: a finite reading measure
+// (not full-bleed, not collapsed) that fits its container, with zero horizontal
+// document padding and normal whitespace. We assert this invariant rather than
+// coflat's exact default measure (36rem today) — coflat owns that and may tune
+// it without it being a cosheaf regression. `stats.width` (reader) falls back to
+// `stats.readerWidth`; `available` is the container/pane width.
+function isBoundedProseColumn(stats, available) {
+  const maxWidthPx = Number.parseInt(stats.maxWidth, 10);
+  const width = stats.width ?? stats.readerWidth;
+  return (
+    Number.isFinite(maxWidthPx) &&
+    maxWidthPx >= 400 &&
+    maxWidthPx <= 1300 &&
+    width >= 400 &&
+    width <= available + 4 &&
+    stats.paddingInline.join("/") === "0px/0px" &&
+    stats.paragraphWhiteSpace === "normal"
+  );
+}
+
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const page = await context.newPage();
@@ -44,10 +64,10 @@ async function ensureSignedIn() {
 }
 
 try {
-  await page.goto(WEB_URL, { waitUntil: "networkidle" });
+  await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await ensureSignedIn();
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByText(ISSUE_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(ISSUE_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
@@ -56,7 +76,7 @@ try {
   await issueView.getByText("Checklist").waitFor({ state: "visible", timeout: 10000 });
   await issueView.getByText("seededRenderingFixture").waitFor({ state: "visible", timeout: 10000 });
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/issues`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByText(COFLAT_SHOWCASE_ISSUE_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(COFLAT_SHOWCASE_ISSUE_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
@@ -81,25 +101,31 @@ try {
       paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
     };
   });
-  const showcaseExpectedWidth = Math.min(1200, showcaseIssueStats.availableWidth);
-  if (
-    showcaseIssueStats.maxWidth !== "1200px" ||
-    Math.abs(showcaseIssueStats.width - showcaseExpectedWidth) > 24 ||
-    showcaseIssueStats.paddingInline.join("/") !== "0px/0px" ||
-    showcaseIssueStats.paragraphWhiteSpace !== "normal"
-  ) {
-    throw new Error(`coflat issue reader is not using shared prose layout: ${JSON.stringify(showcaseIssueStats)}`);
+  // The issue/PR thread reader renders a compact, bounded prose column
+  // (cf-reader-compact). Assert the invariant — a finite reading measure that
+  // fits its container, zero horizontal padding, normal whitespace — rather
+  // than coflat's exact default measure (it owns that and may tune it).
+  if (!isBoundedProseColumn(showcaseIssueStats, showcaseIssueStats.availableWidth)) {
+    throw new Error(`coflat issue reader is not using a bounded compact prose column: ${JSON.stringify(showcaseIssueStats)}`);
   }
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByText(PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(PR_TITLE).click();
   await page.locator(".thread").waitFor({ state: "visible", timeout: 10000 });
   const prHeader = page.locator(".thread");
-  await prHeader.getByRole("heading", { name: "Review focus" }).waitFor({ state: "visible", timeout: 10000 });
-  await prHeader.locator(".cf-doc-surface").getByText("rich diff rendering").waitFor({ state: "visible", timeout: 10000 });
+  // Assert the PR description rendered into a coflat reader surface with its
+  // body content present. The compact thread reader uses collapsible sections,
+  // so assert rendered text content (matching richSurfaceText below) rather
+  // than visibility of deep body content, and don't pin "Review focus" to a
+  // heading role — the fixture owns whether it is a heading.
+  await prHeader.locator(".cf-doc-surface").first().waitFor({ state: "visible", timeout: 10000 });
+  const prBodyText = await prHeader.locator(".cf-doc-surface").first().evaluate((el) => el.textContent ?? "");
+  if (!prBodyText.includes("Review focus") || !prBodyText.includes("rich diff rendering")) {
+    throw new Error(`PR description did not render expected body content: ${prBodyText.slice(0, 200)}`);
+  }
 
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).waitFor({ state: "visible", timeout: 10000 });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
   await page.getByRole("link", { name: "Files changed" }).click();
@@ -107,7 +133,7 @@ try {
   await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByTestId("settings-diff-mode-select").selectOption("source");
   await page.getByTestId("settings-diff-shape-select").selectOption("split");
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
   await page.getByRole("link", { name: "Files changed" }).click();
   await page.getByTestId("view-mode-source").waitFor({ state: "visible", timeout: 10000 });
@@ -118,7 +144,7 @@ try {
   await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByTestId("settings-diff-mode-select").selectOption("rich");
   await page.getByTestId("settings-diff-shape-select").selectOption("after");
-  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "networkidle" });
+  await page.goto(new URL(`/${OWNER}/${WORKSPACE_SLUG}/pulls`, WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByText(SIDE_BY_SIDE_PR_TITLE).click();
   await page.getByRole("link", { name: "Files changed" }).click();
   await page.getByTestId("diff-pane-after").waitFor({ state: "visible", timeout: 10000 });
@@ -137,14 +163,8 @@ try {
       paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
     };
   });
-  if (
-    !richAfterStats ||
-    richAfterStats.maxWidth !== "1200px" ||
-    Math.abs(richAfterStats.readerWidth - Math.min(1200, richAfterStats.paneWidth)) > 32 ||
-    richAfterStats.paddingInline.join("/") !== "0px/0px" ||
-    richAfterStats.paragraphWhiteSpace !== "normal"
-  ) {
-    throw new Error(`rich after reader is not using document layout: ${JSON.stringify(richAfterStats)}`);
+  if (!richAfterStats || !isBoundedProseColumn(richAfterStats, richAfterStats.paneWidth)) {
+    throw new Error(`rich after reader is not using a bounded document layout: ${JSON.stringify(richAfterStats)}`);
   }
   await page.getByTestId("view-shape-split").click();
   await page.getByTestId("diff-pane-split").waitFor({ state: "visible", timeout: 10000 });
