@@ -82,7 +82,11 @@ cd cosheaf
 pnpm setup:deps  # verifies the pinned Coflat checkout, then builds it
 pnpm install
 cp .env.example .env.dev
-# edit .env.dev with COSHEAF_FORGEJO_TOKEN and COSHEAF_FORGEJO_ADMIN_TOKEN
+# Prerequisite: a Forgejo reachable at COSHEAF_FORGEJO_URL (default :3002).
+# Edit .env.dev with COSHEAF_FORGEJO_TOKEN and COSHEAF_FORGEJO_ADMIN_TOKEN —
+# mint both from Forgejo (Settings → Applications → Generate New Token); see
+# .env.example for the required scopes.
+pnpm preflight   # checks Node, the Coflat pin, .env.dev, and Forgejo
 pnpm setup:dev
 pnpm dev:all
 # → http://localhost:3030
