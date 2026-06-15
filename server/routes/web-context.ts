@@ -147,6 +147,23 @@ export const webRoute = makeWebRoute(resolveWebRepo);
 export const webRouteForWrite = makeWebRoute(resolveWebRepoForWrite);
 export const webRouteForAdmin = makeWebRoute(resolveWebRepoForAdmin);
 
+type WebAuth = NonNullable<Awaited<ReturnType<typeof resolveWebAuth>>>;
+type GlobalHandler = (c: Context<AppEnv>, auth: WebAuth) => Response | Promise<Response>;
+
+// Wrapper for non-repo signed-in pages (home, account, notifications, new repo,
+// avatar/profile POSTs): folds the `resolveWebAuth → redirect("/login")`
+// preamble the global handlers share, mirroring webRoute for repo pages so the
+// auth gate can't be forgotten. The resolved auth (and its `c.set` side effects:
+// user/forgejoToken/fjUser) is passed through. NOT for /login, /logout, or
+// public routes like /forge-avatars/* that have no auth gate.
+export function globalRoute(handler: GlobalHandler) {
+  return async (c: Context<AppEnv>): Promise<Response> => {
+    const auth = await resolveWebAuth(c);
+    if (!auth) return redirect("/login");
+    return handler(c, auth);
+  };
+}
+
 export async function configReposForUser(c: Context<AppEnv>) {
   const userFj = c.get("fjUser");
   const repos = await listVisibleWorkspaceRepos(userFj);

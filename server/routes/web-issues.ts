@@ -26,7 +26,7 @@ import {
   type WebListState,
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
-import { composeField, renderMarkdownSurface } from "./web-markdown.js";
+import { composeField } from "./web-markdown.js";
 import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
 import { webCommentEditorAssets } from "./web-shell.js";
 import {
@@ -38,6 +38,7 @@ import {
   listRowSide,
   rejectChatIssueMutation,
   renderIssueTimeline,
+  threadDescription,
   threadLayout,
   threadParticipantsBar,
 } from "./web-thread.js";
@@ -119,8 +120,6 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const chatBackedIssue = isChatIssue(issue);
   const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
   const bodyText = chatBackedIssue ? stripChatMetadata(issue.body ?? "") : issue.body ?? "";
-  // Skip an empty body so an empty reader island doesn't render as a tall band (#135).
-  const body = bodyText.trim().length > 0 ? await renderMarkdownSurface(ctx, bodyText, { surface: "thread" }) : null;
   const nextIssueState = issue.state === "open" ? "closed" : "open";
   const stateActionLabel = issue.state === "open" ? "Close issue" : "Reopen";
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
@@ -128,7 +127,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   // possible (read role and chat-backed issues show chips only).
   const allLabels = canEditIssue ? await ctx.fj.listLabels(ctx.owner, ctx.repo) : [];
   const main = html`${threadParticipantsBar(issue.user, comments)}
-    <div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>
+    ${await threadDescription(ctx, bodyText)}
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
       ctx.ws.role === "read" || chatBackedIssue

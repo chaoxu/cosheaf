@@ -31,7 +31,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
-import { composeField, renderMarkdownSurface } from "./web-markdown.js";
+import { composeField } from "./web-markdown.js";
 import { webCommentEditorAssets } from "./web-shell.js";
 import {
   diffModeControls,
@@ -46,6 +46,7 @@ import {
 } from "./web-pulls-diff.js";
 import { USERNAME_DATALIST_ID, branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
 import {
+  isVisibleReview,
   labelSelectionPatch,
   labelsPanel,
   listRowSide,
@@ -54,6 +55,7 @@ import {
   renderPullTimeline,
   reviewForms,
   reviewersPanel,
+  threadDescription,
   threadLayout,
   threadParticipantsBar,
 } from "./web-thread.js";
@@ -157,10 +159,6 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
     ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
-  // Only render the description surface when there is one — an empty body would
-  // otherwise render an empty reader island as a tall bordered band (#135).
-  const bodyText = pull.body ?? "";
-  const body = bodyText.trim().length > 0 ? await renderMarkdownSurface(ctx, bodyText, { surface: "thread" }) : null;
   const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
   // The participants bar must reflect the conversation the timeline shows —
   // submitted reviews + inline review comments — not just the line comments, so
@@ -168,7 +166,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   // below. Same review filter as renderPullTimeline; sorted so "last" is latest.
   const conversation = [
     ...reviews
-      .filter((r) => r.state !== "PENDING" && (r.state !== "COMMENT" || Boolean(r.body?.trim())))
+      .filter(isVisibleReview)
       .map((r) => ({ user: r.user, created_at: r.submitted_at })),
     ...comments.map((c) => ({ user: c.user, created_at: c.created_at })),
   ].sort((a, b) => Date.parse(a.created_at ?? "") - Date.parse(b.created_at ?? ""));
@@ -201,7 +199,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
           </header>
           ${threadLayout(
             html`${threadParticipantsBar(pull.user, conversation)}
-              <div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>
+              ${await threadDescription(ctx, pull.body ?? "")}
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
               <span id="thread-bottom"></span>

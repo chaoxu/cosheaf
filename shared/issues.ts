@@ -3,6 +3,10 @@
 // the client (which types fetches against them). Single source of truth so
 // the two can't drift.
 
+// The issue lifecycle state (kept separate from review.ts's PrState, which
+// documents PR-specific merged-vs-closed semantics).
+export type IssueState = "open" | "closed";
+
 export interface Label {
   id: number;
   name: string;
@@ -30,7 +34,7 @@ export interface IssueClaim {
 export interface IssueRow {
   number: number;
   title: string;
-  state: "open" | "closed";
+  state: IssueState;
   author_username: string;
   labels: Label[];
   comment_count: number;
@@ -44,7 +48,7 @@ export interface IssueDetail {
   number: number;
   title: string;
   body: string;
-  state: "open" | "closed";
+  state: IssueState;
   author_username: string;
   assignees: string[];
   labels: Label[];
@@ -69,7 +73,7 @@ export interface Milestone {
   id: number;
   title: string;
   description: string;
-  state: "open" | "closed";
+  state: IssueState;
   open_issues: number;
   closed_issues: number;
   due_on: number | null;
@@ -78,7 +82,7 @@ export interface Milestone {
 export interface DependencyRow {
   number: number;
   title: string;
-  state: "open" | "closed";
+  state: IssueState;
   is_pr: boolean;
 }
 

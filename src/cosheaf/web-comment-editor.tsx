@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { MarkdownEditor } from "./editor";
 import { readEditorMode } from "./document-theme";
-import { resolveRepoLink } from "./coflat-document-context";
+import { coflatLinkResolver } from "./coflat-document-context";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -29,14 +29,7 @@ interface ComposeConfig {
 // rich markdown editing with working relative links.
 function composeContext(config: ComposeConfig): DocumentContext {
   const payload = { source: "", owner: config.owner, repo: config.repo, branch: config.branch, path: "" };
-  return {
-    linkResolver: {
-      resolve: (href) => {
-        const resolved = resolveRepoLink(payload, href);
-        return resolved ? { href: resolved } : null;
-      },
-    },
-  };
+  return { linkResolver: coflatLinkResolver(payload) };
 }
 
 function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; config: ComposeConfig }): ReactElement {

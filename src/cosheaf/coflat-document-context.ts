@@ -5,9 +5,6 @@ import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { urlPath } from "../../shared/url";
 
-// Re-exported for web-reader, which imports urlPath from this module.
-export { urlPath };
-
 export interface CoflatDocumentPayload {
   source: string;
   owner: string;
@@ -86,15 +83,23 @@ function isLineFragment(hash: string): boolean {
   return /^L\d+(?:-(?:L)?\d+)?$/.test(hash);
 }
 
+// The coflat link resolver shared by the full reader context and the link-only
+// compose island (#20): turns a relative repo link into a same-origin href, and
+// returns null for a non-resolvable link — both surfaces must agree on that null
+// contract, so it lives in one place.
+export function coflatLinkResolver(payload: CoflatDocumentPayload): DocumentContext["linkResolver"] {
+  return {
+    resolve: (href) => {
+      const resolved = resolveRepoLink(payload, href);
+      return resolved ? { href: resolved } : null;
+    },
+  };
+}
+
 export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatLocalRefs): DocumentContext {
   const citations = refs.citations;
   return {
-    linkResolver: {
-      resolve: (href) => {
-        const resolved = resolveRepoLink(payload, href);
-        return resolved ? { href: resolved } : null;
-      },
-    },
+    linkResolver: coflatLinkResolver(payload),
     refResolver: {
       resolve: (key, _mode, env) => {
         const crossref = refs.crossrefs.get(key);

@@ -54,7 +54,7 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
               ${
                 ws.role === "read"
                   ? ""
-                  : html`<a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, "main"))}`}">New file</a>`
+                  : html`<a class="button" href="${editHref(owner, repo, user, "main")}">New file</a>`
               }
             </span>
           </div>
@@ -126,7 +126,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
                 ws.role === "read"
                   ? ""
                   : html`${resolved.branch === "main" ? "" : html`<a class="button primary" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open PR</a>`}
-                    <a class="button" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}`}">New file</a>`
+                    <a class="button" href="${editHref(owner, repo, user, resolved.branch)}">New file</a>`
               }
             </div>
           </div>
@@ -169,37 +169,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             <h1>${rel}</h1>
             <p class="file-meta">${fileKindLabel(kind)} <span>${formatBytes(meta.size)}</span></p>
           </div>
-          <div class="toolbar-actions">
-            <a class="button build-only" href="${repoHref(owner, repo, "/branches")}">Branches</a>
-            <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">Raw</a>
-            ${
-              kind === "markdown"
-                ? sourceView
-                  ? html`<a class="button" href="${fileHref}">Rendered</a>`
-                  : html`<a class="button" href="${`${fileHref}?view=source`}">Source</a>`
-                : ""
-            }
-            ${
-              ws.role === "read" || resolved.branch === "main"
-                ? ""
-                : html`<a class="button build-only" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open PR</a>`
-            }
-            ${
-              ws.role === "read"
-                ? ""
-                : editableFileKind(kind)
-                  ? html`<a class="button primary build-only" href="${`${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, resolved.branch))}&path=${encodeURIComponent(rel)}`}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
-                  : ""
-            }
-            ${
-              ws.role === "read" || resolved.branch === "main"
-                ? ""
-                : html`<form class="inline-form build-only" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`}">
-                    <input type="hidden" name="action" value="delete">
-                    <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
-                  </form>`
-            }
-          </div>
+          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView })}
         </div>
         ${docBody}
       `, {
@@ -278,18 +248,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           ${webEditorAssets()}
-          <noscript>
-            <form method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
-              <input type="hidden" name="old_path" value="${rel}">
-              <label>Branch <input name="branch" value="${branch}" required></label>
-              <label>Path <input name="path" value="${rel}" required></label>
-              <textarea name="content" spellcheck="false">${content}</textarea>
-              <div class="form-actions">
-                <button class="button primary" type="submit">Save</button>
-                <a class="button" href="${cancelHref}">Cancel</a>
-              </div>
-            </form>
-          </noscript>
+          <noscript>${editFallbackForm(ctx, { branch, rel, content, cancelHref })}</noscript>
         </section>
       ` : textEditPage(ctx, branch, rel, content, treeBranch), {
         statusExtra: [{ label: branch }],
@@ -308,14 +267,11 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
   await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
   const kind = fileKindForPath(rel);
+  if (kind !== "markdown" && kind !== "text") {
+    return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
+  }
   try {
-    if (kind === "markdown") {
-      await writeMarkdownFile(ctx, branch, rel, content, oldRel ?? undefined);
-    } else if (kind === "text") {
-      await writeTextFile(ctx, branch, rel, content, oldRel ?? undefined);
-    } else {
-      return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
-    }
+    await writeFile(ctx, branch, rel, content, oldRel ?? undefined);
   } catch (err) {
     // A concurrent save advanced the branch head between our read and write.
     // Surface a reload-and-retry message instead of a bare gateway error (#92).
@@ -408,6 +364,50 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
+// The per-file action toolbar on the file-view page: Branches/Raw, the
+// markdown Source↔Rendered toggle, and the write controls (Open PR, Edit,
+// Delete) gated by role/branch and marked build-only so Read mode hides them
+// (#171). Extracted from the file-view handler (#24) to keep the handler legible.
+function fileToolbar(
+  ctx: WebCtx,
+  opts: { branch: string; rel: string; kind: FileKind; fileHref: string; sourceView: boolean },
+): Html {
+  const { owner, repo, user } = ctx;
+  const role = ctx.ws.role;
+  const { branch, rel, kind, fileHref, sourceView } = opts;
+  return html`<div class="toolbar-actions">
+    <a class="button build-only" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+    <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Raw</a>
+    ${
+      kind === "markdown"
+        ? sourceView
+          ? html`<a class="button" href="${fileHref}">Rendered</a>`
+          : html`<a class="button" href="${`${fileHref}?view=source`}">Source</a>`
+        : ""
+    }
+    ${
+      role === "read" || branch === "main"
+        ? ""
+        : html`<a class="button build-only" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(branch)}&base=main`}">Open PR</a>`
+    }
+    ${
+      role === "read"
+        ? ""
+        : editableFileKind(kind)
+          ? html`<a class="button primary build-only" href="${editHref(owner, repo, user, branch, rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
+          : ""
+    }
+    ${
+      role === "read" || branch === "main"
+        ? ""
+        : html`<form class="inline-form build-only" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">
+            <input type="hidden" name="action" value="delete">
+            <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
+          </form>`
+    }
+  </div>`;
+}
+
 function filePreview(
   ctx: WebCtx,
   branch: string,
@@ -474,21 +474,34 @@ function sourceFilePreview(content: string): Html {
   </article>`;
 }
 
+// The non-island /_edit fallback form (the markdown editor's <noscript> and the
+// plain text-file editor): a hidden old_path + Branch/Path inputs + content
+// textarea + Save, all matching the POST /_edit field contract. The two callers
+// differ only in classes/test-id and whether a Cancel sits in the form (the text
+// page owns its own titlebar Cancel instead).
+function editFallbackForm(
+  ctx: WebCtx,
+  opts: { branch: string; rel: string; content: string; cancelHref?: string; formClass?: string; formTestId?: string; textareaClass?: string },
+): Html {
+  return html`<form${opts.formClass ? html` class="${opts.formClass}"` : emptyHtml}${opts.formTestId ? html` data-testid="${opts.formTestId}"` : emptyHtml} method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
+    <input type="hidden" name="old_path" value="${opts.rel}">
+    <label>Branch <input name="branch" value="${opts.branch}" required></label>
+    <label>Path <input name="path" value="${opts.rel}" required></label>
+    <textarea${opts.textareaClass ? html` class="${opts.textareaClass}"` : emptyHtml} name="content" spellcheck="false">${opts.content}</textarea>
+    <div class="form-actions">
+      <button class="button primary" type="submit">Save</button>
+      ${opts.cancelHref ? html`<a class="button" href="${opts.cancelHref}">Cancel</a>` : emptyHtml}
+    </div>
+  </form>`;
+}
+
 function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string, cancelBranch: string): Html {
   return html`<section class="edit-page text-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><h1>${rel}</h1></div>
       <a class="button subtle" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(cancelBranch)}/${urlPath(rel)}`}">Cancel</a>
     </div>
-    <form class="compose-form" data-testid="text-edit-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
-      <input type="hidden" name="old_path" value="${rel}">
-      <label>Branch <input name="branch" value="${branch}" required></label>
-      <label>Path <input name="path" value="${rel}" required></label>
-      <textarea class="text-file-editor" name="content" spellcheck="false">${content}</textarea>
-      <div class="form-actions">
-        <button class="button primary" type="submit">Save</button>
-      </div>
-    </form>
+    ${editFallbackForm(ctx, { branch, rel, content, formClass: "compose-form", formTestId: "text-edit-form", textareaClass: "text-file-editor" })}
   </section>`;
 }
 
@@ -498,20 +511,21 @@ async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: st
   if (!exists) await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
 }
 
-async function writeMarkdownFile(
+// Write a Markdown or text file on a branch, handling create / update / rename
+// uniformly. Markdown additionally runs the index plan (frontmatter/id handling
+// + synchronous doc_map/FTS update); text writes its content as-is.
+async function writeFile(
   ctx: WebCtx,
   branch: string,
   rel: string,
   content: string,
   previousRel?: string,
 ): Promise<void> {
-  const plan = planIndexPage(ctx.db, {
-    workspaceSlug: ctx.ws.slug,
-    filePath: rel,
-    bodyText: content,
-    formatId: ctx.ws.defaultMdFormat,
-  });
-  const finalContent = plan.rewrittenContent ?? content;
+  const isMarkdown = fileKindForPath(rel) === "markdown";
+  const plan = isMarkdown
+    ? planIndexPage(ctx.db, { workspaceSlug: ctx.ws.slug, filePath: rel, bodyText: content, formatId: ctx.ws.defaultMdFormat })
+    : null;
+  const finalContent = plan?.rewrittenContent ?? content;
   const isRename = Boolean(previousRel && previousRel !== rel);
   const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
   if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
@@ -531,37 +545,12 @@ async function writeMarkdownFile(
       message: `remove ${previousRel} after rename`,
     });
   }
-  plan.commit();
-  if (isRename) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
-  invalidateBranchTree(ctx.owner, ctx.repo, branch);
-}
-
-async function writeTextFile(
-  ctx: WebCtx,
-  branch: string,
-  rel: string,
-  content: string,
-  previousRel?: string,
-): Promise<void> {
-  const isRename = Boolean(previousRel && previousRel !== rel);
-  const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
-  if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
-  const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
-  await ctx.fj.putFile(ctx.owner, ctx.repo, {
-    branch,
-    path: rel,
-    content,
-    sha: existing?.sha,
-    message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
-  });
-  if (isRename && previous) {
-    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
-      branch,
-      path: previousRel as string,
-      sha: previous.sha,
-      message: `remove ${previousRel} after rename`,
-    });
-    if ((previousRel as string).endsWith(".md")) deletePage(ctx.db, ctx.ws.slug, previousRel as string);
+  plan?.commit();
+  // Drop the old doc_map row when renaming away from a markdown page — whether
+  // the NEW path is markdown (rename within pages) or not (an .md→non-md rename
+  // must still de-index the old path).
+  if (isRename && (isMarkdown || (previousRel as string).endsWith(".md"))) {
+    deletePage(ctx.db, ctx.ws.slug, previousRel as string);
   }
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }
@@ -784,6 +773,13 @@ function fileList(owner: string, repo: string, branch: string, files: ForgejoTre
 function editBranchFor(username: string, requested: string | null | undefined): string {
   const trimmed = requested?.trim();
   return trimmed && trimmed !== "main" ? trimmed : `user/${username}/web-edit`;
+}
+
+// The /_edit URL for a (branch, optional file) — co-locates the edit-branch
+// convention (editBranchFor) and the query encoding. Mirrors rawFileHref.
+function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
+  const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}`;
+  return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
 }
 
 function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {

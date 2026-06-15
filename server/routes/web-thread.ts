@@ -159,6 +159,15 @@ export function threadLayout(main: Html, railPanels: readonly Panel[]): Html {
   </div>`;
 }
 
+// The issue/PR description block. Renders the body markdown, or — when the body
+// is empty — a muted "No description." rather than an empty reader island that
+// would show as a tall bordered band (#135). The `.issue-document` class is
+// shared by both thread kinds; callers pass the (already chat-stripped) body.
+export async function threadDescription(ctx: WebCtx, rawBody: string): Promise<Html> {
+  const body = rawBody.trim().length > 0 ? await renderMarkdownSurface(ctx, rawBody, { surface: "thread" }) : null;
+  return html`<div class="issue-document">${body ?? html`<p class="muted">No description.</p>`}</div>`;
+}
+
 // The rail Labels panel: chips plus, for write+ roles, an inline "+ edit"
 // disclosure revealing the same checkbox picker the edit page uses. Submitting
 // posts the selected label ids to `action`, which sets them via Forgejo and
@@ -457,6 +466,13 @@ export function threadParticipantsBar(
   </div>`;
 }
 
+// Which reviews are worth surfacing: not a PENDING (unsubmitted) review, and not
+// an empty bare-COMMENT review. The timeline and the participants bar/count MUST
+// agree on this, so they share the one predicate (#14).
+export function isVisibleReview(review: Pick<ForgejoReview, "state" | "body">): boolean {
+  return review.state !== "PENDING" && (review.state !== "COMMENT" || Boolean(review.body?.trim()));
+}
+
 export async function renderPullTimeline(
   ctx: WebCtx,
   number: number,
@@ -470,7 +486,7 @@ export async function renderPullTimeline(
       .filter((event) => event.type !== "comment" && event.type !== "pull_push" && event.type !== "review")
       .map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event })),
     ...reviews
-      .filter((review) => review.state !== "PENDING" && (review.state !== "COMMENT" || Boolean(review.body?.trim())))
+      .filter(isVisibleReview)
       .map((review) => ({ kind: "review" as const, ts: toEpochMs(review.submitted_at), review })),
     ...comments.map((comment) => ({
       kind: "line-comment" as const,

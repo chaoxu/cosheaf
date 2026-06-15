@@ -4,6 +4,7 @@
 
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { lineFromOffset } from "../shared/coflat-xrefs.js";
 import type { DocumentLink } from "./document-format/types.js";
 import { getDocumentFormat } from "./format-registry.js";
 import { generateDocId } from "./ids.js";
@@ -160,15 +161,6 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   }
 
   return { cosheafId, title, rewrittenContent: rewritten, commit };
-}
-
-function lineFromOffset(source: string, offset: number): number {
-  let line = 1;
-  const end = Math.max(0, Math.min(offset, source.length));
-  for (let i = 0; i < end; i++) {
-    if (source.charCodeAt(i) === 10) line++;
-  }
-  return line;
 }
 
 // Convenience for webhook-driven reindex where there's no Forgejo write to fail.

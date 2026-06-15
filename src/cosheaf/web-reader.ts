@@ -1,5 +1,6 @@
 import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews, type ReaderOutlineEntry } from "@chaoxu/coflat/reader";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
+import { urlPath } from "../../shared/url";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
@@ -11,7 +12,6 @@ import {
   resolveRepoLink,
   resolveRawRepoLink,
   type CoflatDocumentPayload,
-  urlPath,
 } from "./coflat-document-context";
 
 function readPayload(root: HTMLElement): CoflatDocumentPayload | null {

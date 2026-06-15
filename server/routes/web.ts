@@ -11,7 +11,7 @@ import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, configReposForUser, currentUserAvatarSrc, htmlResponse, invalidateCurrentUserAvatar, positiveInt, redirect, repoHref, resolveWebAuth, safeWebRedirect, stringField } from "./web-context.js";
+import { badRequestPage, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, positiveInt, redirect, repoHref, safeWebRedirect, stringField } from "./web-context.js";
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
@@ -70,9 +70,7 @@ web.post("/logout", (c) => {
   return c.redirect("/login", 303);
 });
 
-web.get("/", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.get("/", globalRoute(async (c, auth) => {
   const [repos, threads, avatarSrc] = await Promise.all([
     configReposForUser(c),
     // Forgejo's account-level notifications are already cross-repo — the daily
@@ -112,7 +110,7 @@ web.get("/", async (c) => {
       `,
     }),
   );
-});
+}));
 
 // Cross-repo unread inbox on the home page. Each row links to the cosheaf
 // issue/PR route and carries a subtle mark-read action. Rendered only when
@@ -178,40 +176,32 @@ function notificationsAccountPage(rows: readonly NotificationRow[], all: boolean
 
 // Server-rendered inbox fragment the home page swaps in on a live notification
 // SSE hint (#116), so the inbox HTML is never duplicated in client JS.
-web.get("/account/inbox", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.get("/account/inbox", globalRoute(async (c) => {
   const threads = await c
     .get("fjUser")
     .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
     .catch(() => []);
   return htmlResponse(String(inboxSection(mapThreads(threads))));
-});
+}));
 
-web.post("/account/notifications/:id/read", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.post("/account/notifications/:id/read", globalRoute(async (c) => {
   const id = positiveInt(c.req.param("id"));
   if (id) await c.get("fjUser").markNotificationRead(id).catch(() => {});
   // Home inbox forms omit `next` and fall back to "/"; the account
   // notifications page passes its own path so it returns there.
   return redirect(safeWebRedirect(stringField((await c.req.parseBody()).next)) ?? "/");
-});
+}));
 
-web.post("/account/notifications/read-all", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.post("/account/notifications/read-all", globalRoute(async (c) => {
   await c.get("fjUser").markAllNotificationsRead().catch(() => {});
   return redirect(safeWebRedirect(stringField((await c.req.parseBody()).next)) ?? "/");
-});
+}));
 
 // Dedicated cross-repo notifications page (#129): the persistent global feed
 // reachable from the sidebar on every page, including when empty. Unread by
 // default; `?state=all` includes already-read threads. Mark-read reuses the
 // POST handlers above (passing `next` so they return here).
-web.get("/account/notifications", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.get("/account/notifications", globalRoute(async (c, auth) => {
   const all = c.req.query("state") === "all";
   const [threads, avatarSrc] = await Promise.all([
     c
@@ -232,11 +222,9 @@ web.get("/account/notifications", async (c) => {
       body: notificationsAccountPage(mapThreads(threads), all),
     }),
   );
-});
+}));
 
-web.get("/account/settings", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.get("/account/settings", globalRoute(async (c, auth) => {
   const me = await c.get("fjUser").getCurrentUser();
   const saved = c.req.query("saved") === "1";
   const error = c.req.query("error") ?? undefined;
@@ -263,7 +251,7 @@ web.get("/account/settings", async (c) => {
       `,
     }),
   );
-});
+}));
 
 // Sign-out lives on the Account page (#127) instead of an always-present
 // status-bar button. A plain POST form to /logout — no island needed.
@@ -343,9 +331,7 @@ web.get("/forge-avatars/*", async (c) => {
 
 const settingsError = (msg: string): Response => redirect(`/account/settings?error=${encodeURIComponent(msg)}`);
 
-web.post("/account/avatar", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.post("/account/avatar", globalRoute(async (c, auth) => {
   const file = (await c.req.parseBody()).avatar;
   if (!(file instanceof File) || file.size === 0) return settingsError("Choose an image to upload.");
   if (!file.type.startsWith("image/")) return settingsError("Profile picture must be an image.");
@@ -358,11 +344,9 @@ web.post("/account/avatar", async (c) => {
   }
   invalidateCurrentUserAvatar(auth.forgejoToken);
   return redirect("/account/settings?saved=1");
-});
+}));
 
-web.post("/account/avatar/remove", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.post("/account/avatar/remove", globalRoute(async (c, auth) => {
   try {
     await c.get("fjUser").deleteUserAvatar();
   } catch (err) {
@@ -370,11 +354,9 @@ web.post("/account/avatar/remove", async (c) => {
   }
   invalidateCurrentUserAvatar(auth.forgejoToken);
   return redirect("/account/settings?saved=1");
-});
+}));
 
-web.post("/account/settings", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.post("/account/settings", globalRoute(async (c) => {
   const form = await c.req.parseBody();
   // Forgejo treats omitted keys as "leave unchanged" and empty strings as
   // "clear", which is exactly the form's semantics: every field is always
@@ -388,14 +370,12 @@ web.post("/account/settings", async (c) => {
   try {
     await c.get("fjUser").editUserSettings(patch);
   } catch (err) {
-    return redirect(`/account/settings?error=${encodeURIComponent(`Could not save profile: ${(err as Error).message}`)}`);
+    return settingsError(`Could not save profile: ${(err as Error).message}`);
   }
   return redirect("/account/settings?saved=1");
-});
+}));
 
-web.get("/new", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.get("/new", globalRoute(async (c, auth) => {
   const error = c.req.query("error");
   const avatarSrc = await currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken);
   return htmlResponse(
@@ -445,11 +425,9 @@ web.get("/new", async (c) => {
       `,
     }),
   );
-});
+}));
 
-web.post("/new", async (c) => {
-  const auth = await resolveWebAuth(c);
-  if (!auth) return redirect("/login");
+web.post("/new", globalRoute(async (c, auth) => {
   const form = await c.req.parseBody();
   const slug = stringField(form.slug)?.trim();
   // Description is optional and writes to the Forgejo repo description (the
@@ -482,7 +460,7 @@ web.post("/new", async (c) => {
     return badRequestPage(auth.user.username, `Could not create repository: ${(err as Error).message}`);
   }
   return redirect(repoHref(owner, slug));
-});
+}));
 
 registerFileRoutes(web);
 

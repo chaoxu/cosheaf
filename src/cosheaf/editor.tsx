@@ -103,11 +103,7 @@ export function MarkdownEditor({
       mode,
       extensions: mountExtensions,
       onChange: (next) => onChangeRef.current(next),
-      // `from` is in the published .d.ts (v0.2.0) but accepting it via
-      // a type-narrow cast lets us forward it even if the local resolved
-      // module type doesn't yet surface it. Drop the cast when typecheck
-      // sees the field directly.
-      ...(from ? ({ from } as { from: string }) : {}),
+      ...(from ? { from } : {}),
       ...(documentContext ? { context: documentContext } : {}),
       ...(saveHandler ? { saveHandler: stableSaveHandler } : {}),
       ...(statusEvents ? { statusEvents: stableStatusEvents } : {}),

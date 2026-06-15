@@ -9,7 +9,7 @@ export interface CoflatXrefTarget {
   line: number;
 }
 
-export interface CoflatBlockDefinition {
+interface CoflatBlockDefinition {
   title: string;
   numbered: boolean;
   counter?: string;
@@ -18,7 +18,7 @@ export interface CoflatBlockDefinition {
   displayHeader?: boolean;
 }
 
-export interface CoflatBlockEntry {
+interface CoflatBlockEntry {
   type: string;
   id?: string;
   title?: string;
@@ -70,8 +70,9 @@ export function extractCoflatXrefTargets(source: string): CoflatXrefTarget[] {
   ];
 }
 
-export function collectCoflatBlockEntries(source: string): CoflatBlockEntry[] {
-  const body = parseFrontmatterYaml(source).body;
+// Caller (extractCoflatXrefTargets) already strips frontmatter, so this takes
+// the body directly — no second parseFrontmatterYaml pass.
+function collectCoflatBlockEntries(body: string): CoflatBlockEntry[] {
   const entries: CoflatBlockEntry[] = [];
   const counters = new Map<string, number>();
   const lines = body.split("\n");
@@ -180,7 +181,10 @@ function blockNumbered(definition: CoflatBlockDefinition, attrs: ParsedBlockAttr
   return !["false", "0", "no"].includes(numbered.toLowerCase());
 }
 
-function lineFromOffset(source: string, offset: number): number {
+// 1-based line number of a char offset — the single source of truth for the
+// line-attribution math both xref extraction (here) and backlink indexing
+// (server/indexer.ts) rely on, so a future CRLF fix lands once.
+export function lineFromOffset(source: string, offset: number): number {
   let line = 1;
   const end = Math.max(0, Math.min(offset, source.length));
   for (let i = 0; i < end; i += 1) {

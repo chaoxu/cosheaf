@@ -149,29 +149,18 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     }
     let cancelled = false;
     setDocumentContextReady(false);
-    void loadCoflatRefs({
+    const payload = {
       source: initialContent,
       owner: config.owner,
       repo: config.repo,
       branch: config.branch,
       branchExists: config.branchExists,
       path: config.path,
-    }).then((refs) => {
+    };
+    void loadCoflatRefs(payload).then((refs) => {
       if (cancelled) return;
       setCoflatRefs(refs);
-      setDocumentContext(
-        coflatDocumentContext(
-          {
-            source: initialContent,
-            owner: config.owner,
-            repo: config.repo,
-            branch: config.branch,
-            branchExists: config.branchExists,
-            path: config.path,
-          },
-          refs,
-        ),
-      );
+      setDocumentContext(coflatDocumentContext(payload, refs));
       setDocumentContextReady(true);
     });
     return () => {
