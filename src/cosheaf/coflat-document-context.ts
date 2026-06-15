@@ -17,6 +17,10 @@ export interface CoflatDocumentPayload {
   /** PR diff surface only: source line numbers changed on this side. The reader
    * renders with sourceLineAttribution and marks blocks intersecting them (#113). */
   markedLines?: readonly number[];
+  /** Render the frontmatter `title` as a document-title heading, matching the
+   * editor's rich-mode title widget. Set only for the document surface (not
+   * comments/diffs). */
+  renderTitle?: boolean;
 }
 
 export interface CoflatLocalRefs {

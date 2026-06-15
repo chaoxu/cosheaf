@@ -46,6 +46,16 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
   fixLabeledDisplayMath(fragment);
   rewriteRenderedRepoUrls(fragment, payload);
+  // Match the editor's rich mode, which draws the frontmatter `title` as a
+  // `.cf-doc-title` widget — the reader otherwise drops it (renderToHtml has no
+  // title concept). Document surface only; plain textContent (DOMPurify-safe).
+  const title = payload.renderTitle ? parsed.frontmatter.title : undefined;
+  if (typeof title === "string" && title.trim()) {
+    const titleEl = document.createElement("div");
+    titleEl.className = "cf-doc-title";
+    titleEl.textContent = title;
+    fragment.insertBefore(titleEl, fragment.firstChild);
+  }
   root.replaceChildren(fragment);
   hydrateMath(root);
   // Coflat resolves citation/crossref hover natively from the context; the

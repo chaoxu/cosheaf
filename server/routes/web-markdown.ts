@@ -13,6 +13,11 @@ export type SurfaceOpts = {
   documentPath?: string;
   surface?: MarkdownSurface;
   markedLines?: readonly number[];
+  // Render the frontmatter title as a .cf-doc-title heading (the file view +
+  // README landing set this). Explicit — not inferred from `surface` — because
+  // the rich-diff "after" pane also renders with surface "document" but must NOT
+  // show a title.
+  renderTitle?: boolean;
 };
 
 function coflatSurfaceClass(surface: MarkdownSurface): string {
@@ -44,6 +49,9 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts): Htm
     branch: opts.branch ?? "main",
     path: opts.documentPath ?? "",
     ...(opts.markedLines?.length ? { markedLines: opts.markedLines } : {}),
+    // Doc title is opt-in per call site (file view / README), never on comment
+    // threads or the rich-diff "after" pane (which also uses surface "document").
+    ...(opts.renderTitle ? { renderTitle: true } : {}),
   };
   const className = ["cf-reader", "cf-doc-surface", "cf-doc-flow", "coflat-reader-island", coflatSurfaceClass(opts.surface ?? "document")]
     .filter(Boolean)

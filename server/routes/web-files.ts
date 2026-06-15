@@ -1,6 +1,6 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { type FileKind, fileKindForPath, fileKindLabel } from "../../shared/file-kind.js";
+import { type FileKind, fileKindForPath } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
@@ -38,14 +38,16 @@ import { webEditorAssets } from "./web-shell.js";
 export function registerFileRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
-  const files = await repoFiles(fj, owner, repo, "main").catch(() => []);
+  const [files, branches] = await Promise.all([
+    repoFiles(fj, owner, repo, "main").catch(() => []),
+    fj.listBranches(owner, repo).catch(() => []),
+  ]);
   const titles = workspacePageTitles(ctx.db, ws.slug);
   const cloneUrl = `${requestOrigin(c)}/${owner}/${repo}.git`;
-  const readme = await repoReadme(ctx, files);
+  const readme = await repoReadme(ctx, "main", files);
   return htmlResponse(
     repoPageShell(ctx, "files", `Files - ${repo}`, html`
-        <div class="page-title compact">
-          <div><h1>main</h1></div>
+        <div class="page-title compact page-title--actions-only">
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
             <span class="build-only toolbar-actions">
@@ -59,10 +61,10 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
             </span>
           </div>
         </div>
-        ${repoLanding(ctx, files, titles, readme)}
+        ${repoLanding(ctx, "main", files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles)],
+        sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles, branches)],
       }),
   );
 }));
@@ -113,13 +115,18 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
   const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
-  const files = await repoFiles(fj, owner, repo, resolved.branch);
+  const [files, branches] = await Promise.all([
+    repoFiles(fj, owner, repo, resolved.branch),
+    fj.listBranches(owner, repo).catch(() => []),
+  ]);
   if (!resolved.path) {
     const branchTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
+    // The sidebar tree is the file navigator; the main panel shows the branch's
+    // README (or a title-first page index), never a second copy of the file list.
+    const readme = await repoReadme(ctx, resolved.branch, files);
     return htmlResponse(
       repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
-          <div class="page-title compact">
-            <div><h1>${resolved.branch}</h1></div>
+          <div class="page-title compact page-title--actions-only">
             <div class="toolbar-actions build-only">
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
@@ -130,8 +137,11 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               }
             </div>
           </div>
-          ${fileList(owner, repo, resolved.branch, files, branchTitles)}
-        `, { sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null, branchTitles)] }),
+          ${repoLanding(ctx, resolved.branch, files, branchTitles ?? new Map<string, string>(), readme)}
+        `, {
+          readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+          sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null, branchTitles, branches)],
+        }),
     );
   }
   const rel = safeRel(resolved.path);
@@ -143,7 +153,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
   const rendered =
     kind === "markdown" && content !== null && !sourceView
-      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel })
+      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   // Coflat-rendered markdown gets a sticky table-of-contents rail (filled by the
@@ -165,16 +175,19 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     repoPageShell(ctx, "files", `${rel} - ${repo}`, html`
         <div class="file-toolbar">
           <div>
-            <p class="eyebrow">${resolved.branch}</p>
-            <h1>${rel}</h1>
-            <p class="file-meta">${fileKindLabel(kind)} <span>${formatBytes(meta.size)}</span></p>
+            ${
+              // A rendered markdown page shows its own .cf-doc-title (and the
+              // sidebar highlights the file), so the filename H1 + kind/size are
+              // redundant noise; other kinds keep a filename header for identity.
+              kind === "markdown" && !sourceView ? emptyHtml : html`<h1>${rel}</h1>`
+            }
           </div>
           ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView })}
         </div>
         ${docBody}
       `, {
         readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles)],
+        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles, branches)],
       }),
   );
 }));
@@ -591,11 +604,6 @@ function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: 
   })}</div>`;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} bytes`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
 
 function pageSearchForm(owner: string, repo: string): Html {
   return html`<form class="page-search" method="get" action="${repoHref(owner, repo, "/search")}">
@@ -677,10 +685,29 @@ function renderFileTreeLevel(
   return html`${dirs}${fileRows}`;
 }
 
-function fileTreeSidebar(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles: Map<string, string> | undefined): Html {
+// Branch indicator + switcher in the file-tree header: shows the current branch
+// and, when more than one exists, a <select> that navigates to that branch's
+// files. NOT build-only, so it's the branch affordance available in Read mode
+// too. An empty `branches` (the edit page) renders just the label — no
+// navigate-away mid-edit. cosheaf-select.js styles the select and fires the
+// native `change` the inline handler listens for; with JS off the native select
+// still navigates.
+function branchSwitcher(owner: string, repo: string, branch: string, branches: readonly ForgejoBranch[]): Html {
+  const names = branches.map((b) => b.name);
+  if (!names.includes(branch)) names.unshift(branch);
+  const icon = html`<span class="ftree-branch-icon" aria-hidden="true">⎇</span>`;
+  if (names.length <= 1) {
+    return html`<span class="ftree-branch">${icon}<span class="ftree-branch-name">${branch}</span></span>`;
+  }
+  return html`<span class="ftree-branch">${icon}<select class="ftree-branch-select" aria-label="Switch branch" onchange="if(this.value)location.assign(this.value)">${names.map(
+    (name) => html`<option value="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(name)}`}"${name === branch ? " selected" : ""}>${name}</option>`,
+  )}</select></span>`;
+}
+
+function fileTreeSidebar(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles: Map<string, string> | undefined, branches: readonly ForgejoBranch[]): Html {
   if (files.length === 0) return emptyHtml;
   return html`<nav class="file-tree" aria-label="Files">
-    <div class="file-tree-head">Files</div>
+    <div class="file-tree-head">${branchSwitcher(owner, repo, branch, branches)}</div>
     ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles)}
   </nav>`;
 }
@@ -689,21 +716,21 @@ function fileTreeSidebar(owner: string, repo: string, branch: string, files: rea
 // own <nav class="file-tree">; the host page places it into a region (the left
 // sidebar today), so it could move to another region unchanged. `titles` is the
 // workspace page-title map (main branch only — the index tracks main); leaves
-// render titles where present (#168).
-export function fileTreePanel(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles?: Map<string, string>): Panel {
-  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles));
+// render titles where present (#168). `branches` feeds the header switcher
+// (empty = label only).
+export function fileTreePanel(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles?: Map<string, string>, branches: readonly ForgejoBranch[] = []): Panel {
+  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches));
 }
 
 // README at the repo root, rendered for the /files landing (#136). The nav tree
 // owns navigation; the main panel shows the README when present so it adds value
 // instead of repeating the file list. Case-insensitive `README.md` at the root.
-// Landing is main-only, so the branch is fixed to main.
-async function repoReadme(ctx: WebCtx, files: readonly ForgejoTreeEntry[]): Promise<{ path: string; rendered: Html } | null> {
+async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry[]): Promise<{ path: string; rendered: Html } | null> {
   const readme = files.find((file) => /^readme\.md$/i.test(file.path));
   if (!readme) return null;
-  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, "main", readme.path).catch(() => null);
+  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, readme.path).catch(() => null);
   if (content === null) return null;
-  const rendered = await renderMarkdown(ctx, content, { branch: "main", documentPath: readme.path });
+  const rendered = await renderMarkdown(ctx, content, { branch, documentPath: readme.path, renderTitle: true });
   return { path: readme.path, rendered };
 }
 
@@ -713,12 +740,13 @@ async function repoReadme(ctx: WebCtx, files: readonly ForgejoTreeEntry[]): Prom
 // landing reads the workspace's knowledge.
 function repoLanding(
   ctx: WebCtx,
+  branch: string,
   files: readonly ForgejoTreeEntry[],
   titles: Map<string, string>,
   readme: { path: string; rendered: Html } | null,
 ): Html {
   if (readme) return markdownArticle(ctx, readme.rendered, "files-readme");
-  return pageIndex(ctx, files, titles);
+  return pageIndex(ctx, branch, files, titles);
 }
 
 // The shared reader-surface shell for a rendered markdown document: the file
@@ -733,42 +761,23 @@ function markdownArticle(ctx: WebCtx, rendered: Html, testId: string): Html {
 // the workspace's markdown pages as title-first reading entries with a one-line
 // body excerpt (#136). Distinct from the nav tree by scope (pages only, not
 // every file) and form (titles + descriptions, not a compact file list).
-function pageIndex(ctx: WebCtx, files: readonly ForgejoTreeEntry[], titles: Map<string, string>): Html {
+function pageIndex(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry[], titles: Map<string, string>): Html {
   const pages = files.filter((file) => fileKindForPath(file.path) === "markdown");
   if (pages.length === 0) return html`<div class="list"><div class="empty">No pages yet.</div></div>`;
-  const excerpts = workspacePageExcerpts(ctx.db, ctx.ws.slug);
+  // Titles + excerpts come from the sidecar, which only indexes main.
+  const excerpts = branch === "main" ? workspacePageExcerpts(ctx.db, ctx.ws.slug) : new Map<string, string>();
   return html`<div class="files-landing" data-testid="files-page-index">
     <p class="files-landing-hint muted">Pages in this workspace. The file tree (left) navigates every file.</p>
     <div class="list">${pages.map((file) => {
       const title = titles.get(file.path) || file.path;
       const excerpt = excerpts.get(file.path);
-      return html`<a class="list-row page-row" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/main/${urlPath(file.path)}`}">
+      return html`<a class="list-row page-row" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
           <span class="list-row-main"><strong>${title}</strong>${excerpt ? html`<span class="page-row-excerpt">${excerpt}</span>` : emptyHtml}<small>${file.path}</small></span>
         </a>`;
     })}</div>
   </div>`;
 }
 
-function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[], titles?: Map<string, string>): Html {
-  if (files.length === 0) return html`<div class="list"><div class="empty">No files yet.</div></div>`;
-  return html`<div class="list">${files.map((file) => {
-    const kind = fileKindForPath(file.path);
-    // Title-first for indexed pages (#132): the knowledge, not the storage.
-    // The path drops to a muted subtitle and the byte size is omitted for
-    // pages; non-page files keep their path + kind + size.
-    const title = kind === "markdown" ? titles?.get(file.path) : undefined;
-    if (title) {
-      return html`<a class="list-row page-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
-          <span class="list-row-main"><strong>${title}</strong><small>${file.path}</small></span>
-        </a>`;
-    }
-    return html`<a class="list-row" href="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
-        <strong>${file.path}</strong>
-        <span>${fileKindLabel(kind)}</span>
-        <small>${formatBytes(file.size ?? 0)}</small>
-      </a>`;
-  })}</div>`;
-}
 
 function editBranchFor(username: string, requested: string | null | undefined): string {
   const trimmed = requested?.trim();
