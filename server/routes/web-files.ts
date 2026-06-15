@@ -160,6 +160,8 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
           <nav class="doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
         </div>`
       : preview;
+  // Page titles for the tree are only indexed for main (#168), mirroring fileList.
+  const fileTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
   return htmlResponse(
     repoPageShell(ctx, "files", `${rel} - ${repo}`, html`
         <div class="file-toolbar">
@@ -203,7 +205,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
         ${docBody}
       `, {
         readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined)],
+        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles)],
       }),
   );
 }));
@@ -256,6 +258,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   // branch the tree (file list) and Cancel target come from main instead.
   const treeBranch = branchExists ? branch : "main";
   const files = await repoFiles(ctx.fj, ctx.owner, ctx.repo, treeBranch).catch(() => []);
+  const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(treeBranch)}/${urlPath(rel)}`;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
   // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The
@@ -292,7 +295,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
       ` : textEditPage(ctx, branch, rel, content, treeBranch), {
         statusExtra: [{ label: branch }],
         statusOmitTab: true,
-        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined)],
+        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles)],
       }),
   );
 }));
@@ -416,9 +419,7 @@ function filePreview(
   const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
   if (view.sourceView && view.source !== null) return sourceFilePreview(view.source);
   if (kind === "markdown") {
-    return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
-      ${markdownSurface(ctx, view.rendered ?? emptyHtml)}
-    </article>`;
+    return markdownArticle(ctx, view.rendered ?? emptyHtml, "file-preview-markdown");
   }
   if (kind === "text") {
     return html`<article class="file-preview file-preview-embed" data-testid="file-preview-text">
@@ -728,12 +729,16 @@ function repoLanding(
   titles: Map<string, string>,
   readme: { path: string; rendered: Html } | null,
 ): Html {
-  if (readme) {
-    return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="files-readme">
-      ${markdownSurface(ctx, readme.rendered)}
-    </article>`;
-  }
+  if (readme) return markdownArticle(ctx, readme.rendered, "files-readme");
   return pageIndex(ctx, files, titles);
+}
+
+// The shared reader-surface shell for a rendered markdown document: the file
+// preview and the /files README landing render the same article.
+function markdownArticle(ctx: WebCtx, rendered: Html, testId: string): Html {
+  return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="${testId}">
+    ${markdownSurface(ctx, rendered)}
+  </article>`;
 }
 
 // Reading-oriented page index for the /files landing when there is no README:

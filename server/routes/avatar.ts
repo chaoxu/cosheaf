@@ -7,7 +7,7 @@
 // import cycle.
 import { createHash } from "node:crypto";
 import { DELETED_USER_LOGIN, type ForgejoUser } from "../forgejo-types.js";
-import { html, type Html } from "./web-html.js";
+import { emptyHtml, html, type Html } from "./web-html.js";
 
 // The user fields needed to render an avatar: login plus the Forgejo avatar_url
 // and email used to tell a real upload from a generated identicon.
@@ -49,8 +49,16 @@ export function forgeAvatarSrc(user: AvatarUser | null | undefined): string | nu
 // `src` null → just the initials chip.
 export function avatar(login: string | null | undefined, src: string | null): Html {
   if (!src) return avatarChip(login);
+  return chip(login, " avatar-chip--photo", html`<img class="avatar-chip-photo" src="${src}" alt="" loading="lazy">`);
+}
+
+// The avatar-chip <span> skeleton shared by the initials chip and the photo
+// variant: role=img + aria-label announce the participant to a screen reader
+// (the visible title stays for mouse hover); `extraClass`/`child` carry the
+// photo bits when present.
+function chip(login: string | null | undefined, extraClass: string, child: Html): Html {
   const name = login || DELETED_USER_LOGIN;
-  return html`<span class="avatar-chip avatar-chip--${tint(login)} avatar-chip--photo" role="img" aria-label="${name}" title="${name}">${initials(login)}<img class="avatar-chip-photo" src="${src}" alt="" loading="lazy"></span>`;
+  return html`<span class="avatar-chip avatar-chip--${tint(login)}${extraClass}" role="img" aria-label="${name}" title="${name}">${initials(login)}${child}</span>`;
 }
 
 // Whether a `/forge-avatars/<rest>` tail is a single content-addressed avatar
@@ -84,8 +92,5 @@ export function tint(login: string | null | undefined): number {
 }
 
 export function avatarChip(login: string | null | undefined): Html {
-  // role=img + aria-label so each chip announces the participant to a screen
-  // reader (the visible title stays for mouse hover).
-  const name = login || DELETED_USER_LOGIN;
-  return html`<span class="avatar-chip avatar-chip--${tint(login)}" role="img" aria-label="${name}" title="${name}">${initials(login)}</span>`;
+  return chip(login, "", emptyHtml);
 }
