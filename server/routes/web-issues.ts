@@ -65,7 +65,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
     repoPageShell(ctx, "issues", `Issues - ${ctx.repo}`, html`
         <div class="page-title compact">
           <div><h1>Issues</h1></div>
-          ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
+          ${ctx.ws.role === "read" ? "" : html`<a class="button primary build-only" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
         ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
@@ -133,7 +133,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
     ${
       ctx.ws.role === "read" || chatBackedIssue
         ? ""
-        : html`<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
+        : html`<form class="comment-form build-only" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
              ${composeField(ctx, { placeholder: "Leave a comment", required: true })}
              <div class="form-actions"><button class="button small primary" type="submit">Comment</button></div>
            </form>`
@@ -153,7 +153,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
               <h1>${issue.title} <span>#${issue.number}</span></h1>
               ${
                 canEditIssue
-                  ? html`<div class="toolbar-actions">
+                  ? html`<div class="toolbar-actions build-only">
                       <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}" data-testid="issue-edit-button">Edit issue</a>
                       <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
                         <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">

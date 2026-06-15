@@ -35,6 +35,27 @@ export function workspacePageTitles(
   return titles;
 }
 
+// Short body excerpts per page from the FTS sidecar, keyed by file path — used by
+// the /files landing index (#136) to show a one-line description under each page
+// title, so the main panel reads richer than the nav tree. Whitespace-collapsed
+// and clipped; pages with empty bodies are omitted.
+export function workspacePageExcerpts(
+  db: Database.Database,
+  workspaceSlug: string,
+  maxLength = 180,
+): Map<string, string> {
+  const rows = db
+    .prepare("SELECT path, body FROM notes_fts WHERE workspace_slug = ?")
+    .all(workspaceSlug) as Array<{ path: string; body: string | null }>;
+  const excerpts = new Map<string, string>();
+  for (const row of rows) {
+    const text = (row.body ?? "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    excerpts.set(row.path, text.length > maxLength ? `${text.slice(0, maxLength).trimEnd()}…` : text);
+  }
+  return excerpts;
+}
+
 function likeEscape(s: string): string {
   return s.replace(/[\\%_]/g, (m) => `\\${m}`);
 }

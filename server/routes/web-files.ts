@@ -7,7 +7,7 @@ import { type Forgejo, ForgejoError } from "../forgejo.js";
 import { is404, onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { deletePage, planIndexPage } from "../indexer.js";
-import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageTitles } from "../page-search.js";
+import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageExcerpts, workspacePageTitles } from "../page-search.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -40,11 +40,13 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
   const files = await repoFiles(fj, owner, repo, "main").catch(() => []);
+  const titles = workspacePageTitles(ctx.db, ws.slug);
   const cloneUrl = `${requestOrigin(c)}/${owner}/${repo}.git`;
+  const readme = await repoReadme(ctx, files);
   return htmlResponse(
     repoPageShell(ctx, "files", `Files - ${repo}`, html`
         <div class="page-title compact">
-          <div><p class="eyebrow">Branch</p><h1>main</h1></div>
+          <div><h1>main</h1></div>
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
             <span class="build-only toolbar-actions">
@@ -58,8 +60,11 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
             </span>
           </div>
         </div>
-        ${fileList(owner, repo, "main", files, workspacePageTitles(ctx.db, ws.slug))}
-      `, { sidebarPanels: [fileTreePanel(owner, repo, "main", files, null)] }),
+        ${repoLanding(ctx, files, titles, readme)}
+      `, {
+        readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+        sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles)],
+      }),
   );
 }));
 
@@ -111,10 +116,11 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   if (!resolved) return notFoundPage(user, "Branch not found");
   const files = await repoFiles(fj, owner, repo, resolved.branch);
   if (!resolved.path) {
+    const branchTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
     return htmlResponse(
       repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
           <div class="page-title compact">
-            <div><p class="eyebrow">Branch</p><h1>${resolved.branch}</h1></div>
+            <div><h1>${resolved.branch}</h1></div>
             <div class="toolbar-actions build-only">
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
@@ -125,8 +131,8 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               }
             </div>
           </div>
-          ${fileList(owner, repo, resolved.branch, files, resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined)}
-        `, { sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null)] }),
+          ${fileList(owner, repo, resolved.branch, files, branchTitles)}
+        `, { sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null, branchTitles)] }),
     );
   }
   const rel = safeRel(resolved.path);
@@ -197,7 +203,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
         ${docBody}
       `, {
         readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel)],
+        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined)],
       }),
   );
 }));
@@ -286,7 +292,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
       ` : textEditPage(ctx, branch, rel, content, treeBranch), {
         statusExtra: [{ label: branch }],
         statusOmitTab: true,
-        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel)],
+        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined)],
       }),
   );
 }));
@@ -655,6 +661,7 @@ function renderFileTreeLevel(
   repo: string,
   branch: string,
   activeRel: string | null,
+  titles: Map<string, string> | undefined,
 ): Html {
   const dirs = [...node.dirs.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -663,29 +670,90 @@ function renderFileTreeLevel(
       const open = activeRel === dirPath || (activeRel?.startsWith(`${dirPath}/`) ?? false);
       return html`<details class="ftree-dir"${open ? " open" : ""}>
         <summary>${name}</summary>
-        <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel)}</div>
+        <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel, titles)}</div>
       </details>`;
     });
   const fileRows = node.files.map((file) => {
     const href = `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`;
-    return html`<a class="ftree-file${file.path === activeRel ? " active" : ""}" href="${href}">${file.name}</a>`;
+    // Title-first leaves (#168), matching the main fileList: a titled page shows
+    // its title in Read mode and its filename in Build mode (CSS swaps the two
+    // spans by html[data-cosheaf-mode]); untitled/non-page leaves show the
+    // filename in both modes. `title=` keeps the storage filename on hover.
+    const title = file.path.endsWith(".md") ? titles?.get(file.path) : undefined;
+    const label = title
+      ? html`<span class="ftree-title">${title}</span><span class="ftree-name">${file.name}</span>`
+      : file.name;
+    return html`<a class="ftree-file${file.path === activeRel ? " active" : ""}" href="${href}" title="${file.name}">${label}</a>`;
   });
   return html`${dirs}${fileRows}`;
 }
 
-function fileTreeSidebar(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null): Html {
+function fileTreeSidebar(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles: Map<string, string> | undefined): Html {
   if (files.length === 0) return emptyHtml;
   return html`<nav class="file-tree" aria-label="Files">
     <div class="file-tree-head">Files</div>
-    ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel)}
+    ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles)}
   </nav>`;
 }
 
 // Portable Panel unit (#120) for the branch file tree. The panel owns only its
 // own <nav class="file-tree">; the host page places it into a region (the left
-// sidebar today), so it could move to another region unchanged.
-export function fileTreePanel(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null): Panel {
-  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel));
+// sidebar today), so it could move to another region unchanged. `titles` is the
+// workspace page-title map (main branch only — the index tracks main); leaves
+// render titles where present (#168).
+export function fileTreePanel(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles?: Map<string, string>): Panel {
+  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles));
+}
+
+// README at the repo root, rendered for the /files landing (#136). The nav tree
+// owns navigation; the main panel shows the README when present so it adds value
+// instead of repeating the file list. Case-insensitive `README.md` at the root.
+// Landing is main-only, so the branch is fixed to main.
+async function repoReadme(ctx: WebCtx, files: readonly ForgejoTreeEntry[]): Promise<{ path: string; rendered: Html } | null> {
+  const readme = files.find((file) => /^readme\.md$/i.test(file.path));
+  if (!readme) return null;
+  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, "main", readme.path).catch(() => null);
+  if (content === null) return null;
+  const rendered = await renderMarkdown(ctx, content, { branch: "main", documentPath: readme.path });
+  return { path: readme.path, rendered };
+}
+
+// The /files main panel (#136): the README when present, otherwise a title-first
+// reading index of the workspace's pages. Either way it complements the nav tree
+// rather than duplicating it — the tree carries navigation over every file; the
+// landing reads the workspace's knowledge.
+function repoLanding(
+  ctx: WebCtx,
+  files: readonly ForgejoTreeEntry[],
+  titles: Map<string, string>,
+  readme: { path: string; rendered: Html } | null,
+): Html {
+  if (readme) {
+    return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="files-readme">
+      ${markdownSurface(ctx, readme.rendered)}
+    </article>`;
+  }
+  return pageIndex(ctx, files, titles);
+}
+
+// Reading-oriented page index for the /files landing when there is no README:
+// the workspace's markdown pages as title-first reading entries with a one-line
+// body excerpt (#136). Distinct from the nav tree by scope (pages only, not
+// every file) and form (titles + descriptions, not a compact file list).
+function pageIndex(ctx: WebCtx, files: readonly ForgejoTreeEntry[], titles: Map<string, string>): Html {
+  const pages = files.filter((file) => fileKindForPath(file.path) === "markdown");
+  if (pages.length === 0) return html`<div class="list"><div class="empty">No pages yet.</div></div>`;
+  const excerpts = workspacePageExcerpts(ctx.db, ctx.ws.slug);
+  return html`<div class="files-landing" data-testid="files-page-index">
+    <p class="files-landing-hint muted">Pages in this workspace. The file tree (left) navigates every file.</p>
+    <div class="list">${pages.map((file) => {
+      const title = titles.get(file.path) || file.path;
+      const excerpt = excerpts.get(file.path);
+      return html`<a class="list-row page-row" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/main/${urlPath(file.path)}`}">
+          <span class="list-row-main"><strong>${title}</strong>${excerpt ? html`<span class="page-row-excerpt">${excerpt}</span>` : emptyHtml}<small>${file.path}</small></span>
+        </a>`;
+    })}</div>
+  </div>`;
 }
 
 function fileList(owner: string, repo: string, branch: string, files: ForgejoTreeEntry[], titles?: Map<string, string>): Html {

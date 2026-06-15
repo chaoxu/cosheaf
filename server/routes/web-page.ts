@@ -3,7 +3,7 @@ import type { WorkspaceContext } from "../types.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { type Panel, renderRegion } from "./web-panels.js";
-import { modeToggle, notificationsNavLink, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
+import { modeToggle, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
 
@@ -14,7 +14,10 @@ export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | 
 // for settings create-forms, issue dependencies, PR reviewer requests, and rail
 // label editing.
 export function addDisclosure(label: string, form: Html): Html {
-  return html`<details class="add-disclosure">
+  // Always a write affordance (settings create-forms, issue dependencies, PR
+  // reviewer requests, rail label/assignee editing), so it is build-only and
+  // hides in Read mode (#171) while the surrounding read content stays.
+  return html`<details class="add-disclosure build-only">
     <summary>+ ${label}</summary>
     ${form}
   </details>`;
@@ -27,6 +30,10 @@ export const USERNAME_DATALIST_ID = "repo-usernames";
 export function usernameDatalist(collaborators: readonly ForgejoUser[]): Html {
   return html`<datalist id="${USERNAME_DATALIST_ID}">${collaborators.map((u) => html`<option value="${u.login}"></option>`)}</datalist>`;
 }
+
+// Repo tabs that stay visible in Read mode (#171): the readable surfaces. The
+// rest (chat, notifications, settings) are contribute/admin-only and hide.
+const READABLE_TABS = new Set(["files", "issues", "pulls", "activity"]);
 
 const REPO_TABS = [
   ["files", "Files", ""],
@@ -94,12 +101,10 @@ export function repoPage(opts: {
     user: opts.user,
     readerAssets: opts.readerAssets,
     sidebar: html`
-      <span class="brand">Cosheaf</span>
       ${sidebarIdentity(opts.user)}
       ${modeToggle()}
       <nav class="sidebar-topnav">
         <a href="/">‹ Workspaces</a>
-        ${notificationsNavLink(false)}
       </nav>
       <div class="sidebar-workspace">
         <a href="${repoHref(opts.owner, opts.repo)}">${workspaceChipIdent(opts.owner, opts.repo, opts.wsTitle)}</a>
@@ -140,9 +145,13 @@ function tab(
   suffix: string,
 ): Html {
   // Plain-label nav (Files, Issues, …) in the typography-first mono chrome (#149).
-  // Every tab except Files is a contribute/forge surface — marked build-only so
-  // Read mode (#131) can hide it and foreground the knowledge base.
-  const buildOnly = id === "files" ? emptyHtml : html` data-build-only`;
+  // Read mode (#131) is a per-action lens, not per-resource (#171): reading any
+  // resource stays in Read, only changing it is Build. So the readable surfaces
+  // (Files, Issues, PR discussions, Activity) keep their tabs; the pure
+  // contribute/admin surfaces (Chat, Notifications, Settings) are build-only and
+  // hide in Read mode. The write controls *inside* Issues/PRs are marked
+  // build-only individually so the threads themselves stay readable.
+  const buildOnly = READABLE_TABS.has(id) ? emptyHtml : html` data-build-only`;
   return html`<a class="${opts.active === id ? "active" : ""}"${buildOnly} href="${repoHref(opts.owner, opts.repo, suffix)}">${label}</a>`;
 }
 

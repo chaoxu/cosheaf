@@ -54,12 +54,10 @@ function cosheafWebCssVersion(): string {
 }
 
 export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string): Html {
-  return html`<span class="brand">Cosheaf</span>
-    ${sidebarIdentity(user)}
+  return html`${sidebarIdentity(user, active === "notifications")}
     ${user ? modeToggle() : ""}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
-      ${notificationsNavLink(active === "notifications")}
     </nav>`;
 }
 
@@ -76,20 +74,29 @@ export function modeToggle(): Html {
   </div>`;
 }
 
-// Signed-in identity directly under the brand (#127): an initials avatar + the
-// username, linking to Account. The same block renders in the global and repo
-// sidebars so identity is always visible at the top. Logged-out chrome (only the
-// pre-auth message pages) shows a sign-in link instead.
-export function sidebarIdentity(user: string | undefined): Html {
-  if (!user) return html`<a class="sidebar-identity" href="/login">Sign in</a>`;
-  return html`<a class="sidebar-identity" href="/account/settings" title="Account">${avatarChip(user)}<span class="sidebar-identity-name">${user}</span></a>`;
+// Signed-in identity at the top of the sidebar (#127): an initials avatar + the
+// username (linking to Account) plus a notifications bell (#167). The same block
+// renders in the global and repo sidebars so identity + notifications are always
+// visible. Logged-out chrome (only the pre-auth message pages) shows a sign-in
+// link instead — and no bell.
+export function sidebarIdentity(user: string | undefined, notificationsActive = false): Html {
+  if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">Sign in</a></div>`;
+  return html`<div class="sidebar-identity">
+    <a class="sidebar-identity-link" href="/account/settings" title="Account">${avatarChip(user)}<span class="sidebar-identity-name">${user}</span></a>
+    ${notificationsBell(notificationsActive)}
+  </div>`;
 }
 
-// Persistent global-notifications entry point (#129) shared by both sidebars.
-// The unread count badge is filled client-side by cosheaf-notifications.js (and
-// kept live over the per-user SSE channel), so server renders stay cheap.
-export function notificationsNavLink(active: boolean): Html {
-  return html`<a class="${active ? "active" : ""}" href="/account/notifications">Notifications<span class="notif-badge" data-notif-badge hidden></span></a>`;
+// Persistent notifications entry point (#129, #167): a bell beside the username
+// carrying the unread-count badge. Replaces the old standalone "Notifications"
+// nav link. The badge is filled client-side by cosheaf-notifications.js (kept
+// live over the per-user SSE channel) against [data-notif-badge], so server
+// renders stay cheap.
+export function notificationsBell(active = false): Html {
+  return html`<a class="notif-bell${active ? " active" : ""}" href="/account/notifications" aria-label="Notifications" title="Notifications">
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.6a3.1 3.1 0 0 0-3.1 3.1c0 2.4-.55 3.55-1.15 4.25-.32.37-.06.95.42.95h7.66c.48 0 .74-.58.42-.95-.6-.7-1.15-1.85-1.15-4.25A3.1 3.1 0 0 0 8 1.6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.6 12.4a1.45 1.45 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    <span class="notif-badge" data-notif-badge hidden></span>
+  </a>`;
 }
 
 function appStatusbar(path: StatusCrumb[] | undefined): Html {

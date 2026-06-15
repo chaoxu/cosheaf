@@ -104,6 +104,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [coflatRefs, setCoflatRefs] = useState<CoflatLocalRefs | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
+  const pathInputRef = useRef<HTMLInputElement | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const branchRef = useRef(branch);
   const currentPathRef = useRef(currentPath);
@@ -475,9 +476,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         <>
           <span className="status-sep">/</span>
           <input
+            ref={pathInputRef}
             className="web-editor-path"
             data-testid="editor-path-input"
-            aria-label="File path"
+            aria-label="Rename file"
             title="Rename file"
             spellCheck={false}
             value={currentPath}
@@ -487,7 +489,34 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               setPathDirty(e.target.value.trim() !== savedPath);
               setStatus(null);
             }}
+            onKeyDown={(e) => {
+              // Esc abandons an in-progress rename, restoring the saved path;
+              // Enter commits by blurring (the underlying save picks up pathDirty).
+              if (e.key === "Escape") {
+                setCurrentPath(savedPath);
+                setPathDirty(false);
+                e.currentTarget.blur();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
           />
+          {/* Edit cue so the inline-editable filename is discoverable (#173):
+              the pencil focuses + selects the field; clicking the name works too. */}
+          <button
+            type="button"
+            className="web-editor-path-pencil"
+            data-testid="editor-path-pencil"
+            aria-label="Rename file"
+            title="Rename file"
+            disabled={busy}
+            onClick={() => pathInputRef.current?.select()}
+          >
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            </svg>
+          </button>
           <span className="dirty-dot" hidden={!uncommitted && !pathDirty}>
             *
           </span>

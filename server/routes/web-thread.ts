@@ -66,7 +66,7 @@ export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
   if (ctx.ws.role === "read" || pull.merged) return emptyHtml;
   const nextState = pull.state === "open" ? "closed" : "open";
   const label = pull.state === "open" ? "Close PR" : "Reopen PR";
-  return html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
+  return html`<form class="inline-form build-only" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
     <input type="hidden" name="state" value="${nextState}">
     <button class="button" type="submit" data-testid="pull-toggle-state">${label}</button>
   </form>`;
@@ -122,7 +122,7 @@ function issueRelationList(
         ${
           ctx.ws.role === "read"
             ? ""
-            : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies/delete`)}">
+            : html`<form class="inline-form build-only" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies/delete`)}">
                 <input type="hidden" name="relation" value="${relation}">
                 <input type="hidden" name="index" value="${item.number}">
                 <button class="button" type="submit">Remove</button>
@@ -370,7 +370,7 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
   const remove =
     ctx.ws.role === "read" || pull.state === "closed"
       ? ""
-      : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests/delete`)}">
+      : html`<form class="build-only" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests/delete`)}">
           <input type="hidden" name="reviewer" value="${reviewer}">
           <button class="button" type="submit">Remove</button>
         </form>`;
@@ -505,7 +505,7 @@ function commentActions(opts: { ctx: WebCtx; testId: string; formId: string; edi
   // Save and Delete share one action row even though they POST to different
   // endpoints: the Delete button lives in the edit form's row but targets the
   // separate (empty) delete form via the HTML `form=` attribute.
-  return html`<details class="comment-actions" data-testid="${opts.testId}">
+  return html`<details class="comment-actions build-only" data-testid="${opts.testId}">
     <summary title="Edit or delete" aria-label="Edit or delete comment"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></summary>
     <form method="post" action="${opts.editAction}">
       ${composeField(opts.ctx, { value: opts.body, required: true })}
@@ -650,7 +650,9 @@ function reviewStateLabel(state: string): string {
 
 export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): Html {
   if (ctx.ws.role === "read" || pull.user?.login === ctx.user || pull.state === "closed") return emptyHtml;
-  return html`
+  // Review/merge are propose/change actions — hidden in Read mode (#171); the PR
+  // discussion above stays readable.
+  return html`<div class="build-only">
     <form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">
       ${redirectTo ? html`<input type="hidden" name="redirect_to" value="${redirectTo}">` : ""}
       ${composeField(ctx, { placeholder: "Leave a review comment" })}
@@ -665,5 +667,5 @@ export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string)
         ? html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/merge`)}"><button class="button primary" type="submit">Merge PR</button></form>`
         : ""
     }
-  `;
+  </div>`;
 }
