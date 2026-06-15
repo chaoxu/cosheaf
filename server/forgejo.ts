@@ -141,13 +141,30 @@ export class Forgejo {
     };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 
-    const res = await fetch(url, {
-      method: opts.method ?? "GET",
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    });
+    const method = opts.method ?? "GET";
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers,
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      });
+    } catch (err) {
+      // Network/DNS/connection failure never becomes a ForgejoError, so a
+      // caller that swallows reads into [] would hide a dead backend. Log it.
+      console.error(`forgejo ${method} ${p} -> network error: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
     if (!res.ok) {
-      throw new ForgejoError(res.status, await res.text(), opts.method ?? "GET", p);
+      const bodyText = await res.text();
+      // 5xx means the forge itself is unhealthy. List reads are commonly
+      // swallowed into [] (a page degrades to empty), so log boundary failures
+      // here — once, centrally — instead of at 35 call sites. 4xx are semantic
+      // (handled by callers: 404 → null, 403 → forbidden) and stay quiet.
+      if (res.status >= 500) {
+        console.error(`forgejo ${method} ${p} -> ${res.status}: ${bodyText.slice(0, 200)}`);
+      }
+      throw new ForgejoError(res.status, bodyText, method, p);
     }
     if (opts.rawBytes) return Buffer.from(await res.arrayBuffer()) as unknown as T;
     if (opts.raw) return (await res.text()) as unknown as T;

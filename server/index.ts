@@ -1,6 +1,8 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
+import { logger } from "hono/logger";
+import { requestId } from "hono/request-id";
 import { statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -32,6 +34,11 @@ const fjAdmin = new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoA
 const sse = new SSEHub();
 
 const app = new Hono<AppEnv>();
+// Correlation id first so every later log line and the X-Request-Id response
+// header share one id. The access log is opt-in (COSHEAF_REQUEST_LOG) to keep
+// quiet runs quiet while giving a one-flag firehose when debugging.
+app.use("*", requestId());
+if (process.env.COSHEAF_REQUEST_LOG) app.use("*", logger());
 app.use("*", async (c, next) => {
   c.set("db", db);
   c.set("config", config);

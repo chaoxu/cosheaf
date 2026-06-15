@@ -27,12 +27,17 @@ export class SSEHub {
 
   publish(slug: string, e: SSEEvent): void {
     const set = this.subs.get(slug);
+    if (process.env.COSHEAF_REQUEST_LOG) {
+      console.log(`sse publish slug=${slug} type=${e.type} subscribers=${set?.size ?? 0}`);
+    }
     if (!set) return;
     for (const h of set) {
       try {
         h(e);
-      } catch (_err) {
-        // swallow — one bad subscriber should not affect the rest
+      } catch (err) {
+        // One bad subscriber must not block the rest — but a silently swallowed
+        // handler error is invisible, so log it (don't rethrow).
+        console.error(`sse subscriber failed (slug=${slug} type=${e.type}): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }

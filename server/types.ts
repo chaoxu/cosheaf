@@ -28,6 +28,9 @@ export interface RepoCtx {
 
 export interface AppEnv {
   Variables: {
+    // Per-request correlation id (hono/request-id): echoed in the
+    // X-Request-Id response header and included in error logs.
+    requestId: string;
     db: Database.Database;
     config: Config;
     // Admin-bound Forgejo client. Used only by the webhook handler and

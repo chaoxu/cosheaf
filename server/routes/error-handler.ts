@@ -30,13 +30,17 @@ export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Re
   }
 
   const user = c.get("user")?.username ?? "";
+  const reqId = c.get("requestId") ?? "";
   if (isApi) {
     if (err.status === 404) return c.json(...notFound());
     if (err.status === 403) return c.json(...forbidden("backend denied the operation"));
+    // The API 502 path used to return without a trace; log it so a caller's
+    // bad_gateway can be correlated to the upstream failure by request id.
+    console.error(`[${reqId}] backend request failed on ${c.req.method} ${c.req.path}: ${err.message}`);
     return c.json(...badGateway(`backend request failed (${err.status})`));
   }
   if (err.status === 404) return notFoundPage(user, "Not found");
   if (err.status === 403) return forbiddenPage(user);
-  console.error(`unhandled forgejo error on ${c.req.method} ${c.req.path}: ${err.message}`);
+  console.error(`[${reqId}] unhandled forgejo error on ${c.req.method} ${c.req.path}: ${err.message}`);
   return errorPage(user, "The backing forge failed to answer. Try again in a moment.", 502);
 }
