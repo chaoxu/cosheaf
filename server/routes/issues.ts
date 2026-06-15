@@ -18,6 +18,8 @@ import {
   type ForgejoIssueComment,
   type ForgejoMilestone,
   type ForgejoTimelineEvent,
+  toEpochMs,
+  toEpochMsOrNull,
   userLogin,
 } from "../forgejo-types.js";
 import type {
@@ -31,7 +33,7 @@ import type {
 } from "../../shared/issues.js";
 import { normalizeLabelColor, toLabel, validateLabelSelection } from "./label-utils.js";
 import { bad, conflict, notFound } from "./responses.js";
-import { parseListState } from "./query-params.js";
+import { parseListState, parsePositiveIntId, parseTitleBodyPatch, requireCommentBody } from "./query-params.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
   return {
@@ -41,8 +43,8 @@ function toIssueRow(i: ForgejoIssue): IssueRow {
     author_username: userLogin(i.user),
     labels: i.labels.map(toLabel),
     comment_count: i.comments,
-    created_at: new Date(i.created_at).getTime(),
-    updated_at: new Date(i.updated_at).getTime(),
+    created_at: toEpochMs(i.created_at),
+    updated_at: toEpochMs(i.updated_at),
   };
 }
 
@@ -51,8 +53,8 @@ function toIssueComment(cm: ForgejoIssueComment): IssueComment {
     id: cm.id,
     body: cm.body,
     author_username: userLogin(cm.user),
-    created_at: Date.parse(cm.created_at) || 0,
-    updated_at: Date.parse(cm.updated_at) || 0,
+    created_at: toEpochMs(cm.created_at),
+    updated_at: toEpochMs(cm.updated_at),
   };
 }
 
@@ -64,7 +66,7 @@ function toMilestone(milestone: ForgejoMilestone): Milestone {
     state: milestone.state,
     open_issues: milestone.open_issues,
     closed_issues: milestone.closed_issues,
-    due_on: milestone.due_on ? Date.parse(milestone.due_on) || null : null,
+    due_on: toEpochMsOrNull(milestone.due_on),
   };
 }
 
@@ -94,19 +96,6 @@ function toRefIssue(
     is_pull: ref.pull_request != null,
     pull_merged: ref.pull_request ? ref.pull_request.merged ?? false : null,
   };
-}
-
-// Accept unknown: these parse path params (strings) AND JSON body fields, which
-// may already be numbers — so they can't reuse parsePositiveInt's string-only
-// contract.
-function parseIssueNumber(value: unknown): number | null {
-  const number = Number(value);
-  return Number.isInteger(number) && number > 0 ? number : null;
-}
-
-function parseId(value: unknown): number | null {
-  const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? id : null;
 }
 
 function trimmedQuery(value: string | undefined): string | undefined {
@@ -204,7 +193,7 @@ issues.get("/:owner/:repo/issues/pinned", async (c) => {
       title: i.title,
       state: i.state,
       comment_count: i.comments,
-      updated_at: new Date(i.updated_at).getTime(),
+      updated_at: toEpochMs(i.updated_at),
       author_username: userLogin(i.user),
     })),
   });
@@ -214,7 +203,7 @@ issues.get("/:owner/:repo/issues/pinned", async (c) => {
 // deleted-user fallback and normalized timestamps.
 issues.get("/:owner/:repo/issues/:number", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   try {
     const issue = await fj.getIssue(owner, repo, number);
@@ -229,9 +218,9 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
       labels: issue.labels.map(toLabel),
       milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,
       comment_count: issue.comments,
-      created_at: new Date(issue.created_at).getTime(),
-      updated_at: new Date(issue.updated_at).getTime(),
-      closed_at: issue.closed_at ? new Date(issue.closed_at).getTime() : null,
+      created_at: toEpochMs(issue.created_at),
+      updated_at: toEpochMs(issue.updated_at),
+      closed_at: toEpochMsOrNull(issue.closed_at),
     };
     const claims = activeClaims(c.get("db"), c.get("workspace").slug, number, Date.now());
     if (claims.length) detail.claims = claims;
@@ -248,7 +237,7 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
 // Exclusive per (workspace, issue): a second runner gets 409 with the active
 // claim. Ephemeral local coordination state — not durable knowledge.
 issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const runnerName = typeof body.runner_name === "string" ? body.runner_name.trim() : "";
@@ -269,7 +258,7 @@ issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
 });
 
 issues.patch("/:owner/:repo/issues/:number/claim/:id/heartbeat", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const now = Date.now();
@@ -285,7 +274,7 @@ issues.patch("/:owner/:repo/issues/:number/claim/:id/heartbeat", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/claim/:id", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const released = releaseClaim(c.get("db"), {
     slug: c.get("workspace").slug,
@@ -318,7 +307,7 @@ issues.post("/:owner/:repo/issues", async (c) => {
 
 issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
   const ws = c.get("workspace");
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { state?: unknown } | null;
   if (body?.state !== "open" && body?.state !== "closed") return c.json(...bad("state must be open or closed"));
@@ -330,24 +319,12 @@ issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
 
 issues.patch("/:owner/:repo/issues/:number", async (c) => {
   const ws = c.get("workspace");
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
-  const body = (await c.req.json().catch(() => null)) as {
-    title?: unknown;
-    body?: unknown;
-  } | null;
-  const patch: { title?: string; body?: string } = {};
-  if (body?.title !== undefined) {
-    if (typeof body.title !== "string" || !body.title.trim()) return c.json(...bad("title required"));
-    patch.title = body.title.trim();
-  }
-  if (body?.body !== undefined) {
-    if (typeof body.body !== "string") return c.json(...bad("body must be a string"));
-    patch.body = body.body;
-  }
-  if (patch.title === undefined && patch.body === undefined) return c.json(...bad("title or body required"));
+  const parsed = parseTitleBodyPatch(await c.req.json().catch(() => null));
+  if (!parsed.ok) return c.json(...bad(parsed.message));
   const { fj, owner, repo } = c.get("repoCtx");
-  const issue = await fj.editIssue(owner, repo, number, patch);
+  const issue = await fj.editIssue(owner, repo, number, parsed.patch);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "edited" });
   return c.json({
     number: issue.number,
@@ -358,7 +335,7 @@ issues.patch("/:owner/:repo/issues/:number", async (c) => {
 });
 
 issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const comments = await fj.listIssueComments(owner, repo, number);
@@ -366,11 +343,11 @@ issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
 });
 
 issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
-  const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
-  const text = typeof body?.body === "string" ? body.body : "";
-  if (!text.trim()) return c.json(...bad("comment body required"));
+  const parsed = requireCommentBody(await c.req.json().catch(() => null));
+  if (!parsed.ok) return c.json(...bad(parsed.message));
+  const text = parsed.text;
   const { fj, owner, repo } = c.get("repoCtx");
   const comment = await fj.createIssueComment(owner, repo, number, text);
   c.get("sse").publish(c.get("workspace").slug, { type: "issue", number, action: "commented" });
@@ -378,21 +355,21 @@ issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
 });
 
 issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
-  const id = parseId(c.req.param("id"));
+  const number = parsePositiveIntId(c.req.param("number"));
+  const id = parsePositiveIntId(c.req.param("id"));
   if (number === null) return c.json(...bad("bad number"));
   if (id === null) return c.json(...bad("bad comment id"));
-  const body = (await c.req.json().catch(() => null)) as { body?: unknown } | null;
-  const text = typeof body?.body === "string" ? body.body : "";
-  if (!text.trim()) return c.json(...bad("comment body required"));
+  const parsed = requireCommentBody(await c.req.json().catch(() => null));
+  if (!parsed.ok) return c.json(...bad(parsed.message));
+  const text = parsed.text;
   const { fj, owner, repo } = c.get("repoCtx");
   const comment = await fj.editIssueComment(owner, repo, id, text);
   return c.json(toIssueComment(comment));
 });
 
 issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
-  const id = parseId(c.req.param("id"));
+  const number = parsePositiveIntId(c.req.param("number"));
+  const id = parsePositiveIntId(c.req.param("id"));
   if (number === null) return c.json(...bad("bad number"));
   if (id === null) return c.json(...bad("bad comment id"));
   const { fj, owner, repo } = c.get("repoCtx");
@@ -428,7 +405,7 @@ issues.post("/:owner/:repo/labels", async (c) => {
 });
 
 issues.patch("/:owner/:repo/labels/:id", async (c) => {
-  const id = parseId(c.req.param("id"));
+  const id = parsePositiveIntId(c.req.param("id"));
   if (id === null) return c.json(...bad("bad label id"));
   const body = (await c.req.json().catch(() => null)) as {
     name?: unknown;
@@ -455,7 +432,7 @@ issues.patch("/:owner/:repo/labels/:id", async (c) => {
 });
 
 issues.delete("/:owner/:repo/labels/:id", async (c) => {
-  const id = parseId(c.req.param("id"));
+  const id = parsePositiveIntId(c.req.param("id"));
   if (id === null) return c.json(...bad("bad label id"));
   const { fj, owner, repo } = c.get("repoCtx");
   try {
@@ -468,7 +445,7 @@ issues.delete("/:owner/:repo/labels/:id", async (c) => {
 });
 
 issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { labels?: unknown } | null;
   if (!Array.isArray(body?.labels) || !body.labels.every((id) => Number.isInteger(id) && id > 0)) {
@@ -487,7 +464,7 @@ issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
 });
 
 issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.pinIssue(owner, repo, number);
@@ -495,7 +472,7 @@ issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/pin", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.unpinIssue(owner, repo, number);
@@ -525,7 +502,7 @@ issues.post("/:owner/:repo/milestones", async (c) => {
 });
 
 issues.patch("/:owner/:repo/milestones/:id", async (c) => {
-  const id = parseId(c.req.param("id"));
+  const id = parsePositiveIntId(c.req.param("id"));
   if (id === null) return c.json(...bad("bad milestone id"));
   const body = (await c.req.json().catch(() => null)) as {
     title?: unknown;
@@ -546,7 +523,7 @@ issues.patch("/:owner/:repo/milestones/:id", async (c) => {
 });
 
 issues.delete("/:owner/:repo/milestones/:id", async (c) => {
-  const id = parseId(c.req.param("id"));
+  const id = parsePositiveIntId(c.req.param("id"));
   if (id === null) return c.json(...bad("bad milestone id"));
   const { fj, owner, repo } = c.get("repoCtx");
   try {
@@ -559,7 +536,7 @@ issues.delete("/:owner/:repo/milestones/:id", async (c) => {
 });
 
 issues.patch("/:owner/:repo/issues/:number/milestone", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { id?: unknown } | null;
   const milestoneId = body?.id;
@@ -580,7 +557,7 @@ issues.post("/:owner/:repo/markdown/render", async (c) => {
 // Typed because Forgejo's dependency mutation body redundantly requires the
 // owner/repo, which clients should not know.
 issues.get("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listIssueDependencies(owner, repo, number);
@@ -588,7 +565,7 @@ issues.get("/:owner/:repo/issues/:number/dependencies", async (c) => {
 });
 
 issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const list = await fj.listIssueBlocks(owner, repo, number);
@@ -596,10 +573,10 @@ issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
 });
 
 issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
-  const index = parseIssueNumber(body?.index);
+  const index = parsePositiveIntId(body?.index);
   if (index === null) {
     return c.json(...bad("dependency issue number required"));
   }
@@ -610,10 +587,10 @@ issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { index?: unknown } | null;
-  const index = parseIssueNumber(body?.index);
+  const index = parsePositiveIntId(body?.index);
   if (index === null) {
     return c.json(...bad("dependency issue number required"));
   }
@@ -667,7 +644,7 @@ issues.get("/:owner/:repo/activities", async (c) => {
         commit_sha: commit?.sha ?? null,
         commit_message: commit?.message ?? null,
         repeat_count: item.repeatCount,
-        created_at: new Date(a.created).getTime(),
+        created_at: toEpochMs(a.created),
       };
     }),
   });
@@ -676,7 +653,7 @@ issues.get("/:owner/:repo/activities", async (c) => {
 // Typed because public API clients use a narrowed event DTO with normalized
 // label/milestone/dependency references.
 issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
-  const number = parseIssueNumber(c.req.param("number"));
+  const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
   const events = await fj.listIssueTimeline(owner, repo, number);
@@ -688,8 +665,8 @@ issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
       type: e.type,
       author_username: e.user?.login ?? null,
       body: e.body ?? null,
-      created_at: new Date(e.created_at).getTime(),
-      updated_at: e.updated_at ? new Date(e.updated_at).getTime() : null,
+      created_at: toEpochMs(e.created_at),
+      updated_at: toEpochMsOrNull(e.updated_at),
       label: e.label ? { name: e.label.name, color: e.label.color } : null,
       old_title: e.old_title ?? null,
       new_title: e.new_title ?? null,

@@ -4,6 +4,7 @@ import { requireAuth, requireMembership } from "../middleware.js";
 import { notificationChannel } from "../../shared/conventions.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
 import type { NotificationRow } from "../../shared/issues.js";
+import { toEpochMs } from "../forgejo-types.js";
 import { bad, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
 
@@ -72,7 +73,7 @@ function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
     number,
     title: t.subject.title,
     repo: t.repository.full_name,
-    updated_at: new Date(t.updated_at).getTime(),
+    updated_at: toEpochMs(t.updated_at),
     url: t.subject.html_url ?? t.subject.url,
   };
 }

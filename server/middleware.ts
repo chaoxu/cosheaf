@@ -156,11 +156,7 @@ export async function resolveRepoRole(
   forgejoUsername: string,
 ): Promise<Role | "none"> {
   const key = `${owner}/${repo}/${forgejoUsername}`;
-  const cached = PERM_CACHE.get(key);
-  if (cached !== null) return cached;
-  const p = await fj.getRepoPermission(owner, repo, forgejoUsername);
-  PERM_CACHE.set(key, p);
-  return p;
+  return PERM_CACHE.getOrFetch(key, () => fj.getRepoPermission(owner, repo, forgejoUsername));
 }
 
 export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next) => {
@@ -203,11 +199,9 @@ export async function resolveWorkspaceFormat(
   owner: string,
   repo: string,
 ): Promise<DocumentFormatId> {
-  const cached = FORMAT_CACHE.get(`${owner}/${repo}`);
-  if (cached !== null) return cached;
-  const format = documentFormatFromTopics(await fj.listRepoTopics(owner, repo));
-  FORMAT_CACHE.set(`${owner}/${repo}`, format);
-  return format;
+  return FORMAT_CACHE.getOrFetch(`${owner}/${repo}`, async () =>
+    documentFormatFromTopics(await fj.listRepoTopics(owner, repo)),
+  );
 }
 
 // Cached workspace title (the Forgejo repo description) for the web chrome's
@@ -222,18 +216,14 @@ export function _resetTitleCacheForTests(): void {
 }
 
 export async function resolveWorkspaceTitle(fj: Forgejo, owner: string, repo: string): Promise<string> {
-  const key = `${owner}/${repo}`;
-  const cached = TITLE_CACHE.get(key);
-  if (cached !== null) return cached;
-  let title = "";
-  try {
-    const repoMeta = await fj.getRepo(owner, repo);
-    title = (repoMeta?.description ?? "").trim();
-  } catch (_err) {
-    // The title is a cosmetic Read-mode label; a forge hiccup must never break
-    // page rendering. Fall back to the slug (empty title) and move on.
-    title = "";
-  }
-  TITLE_CACHE.set(key, title);
-  return title;
+  return TITLE_CACHE.getOrFetch(`${owner}/${repo}`, async () => {
+    try {
+      const repoMeta = await fj.getRepo(owner, repo);
+      return (repoMeta?.description ?? "").trim();
+    } catch (_err) {
+      // The title is a cosmetic Read-mode label; a forge hiccup must never break
+      // page rendering. Fall back to the slug (empty title) and move on.
+      return "";
+    }
+  });
 }

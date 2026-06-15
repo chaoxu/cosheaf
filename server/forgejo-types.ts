@@ -3,6 +3,22 @@
 // type defs. Imported by forgejo.ts; route code generally goes through
 // shared/ for response shapes, not these directly.
 
+// A bare user reference (id + login) as Forgejo attaches to assignees, activity
+// actors, and timeline assign/resolve events — distinct from the full ForgejoUser
+// (which also carries avatar_url/email for rendering).
+export interface ForgejoUserRef {
+  id: number;
+  login: string;
+}
+
+// The milestone summary embedded on issues and pulls (carries `state`, unlike
+// the bare {id,title} on timeline events).
+export interface ForgejoMilestoneRef {
+  id: number;
+  title: string;
+  state: "open" | "closed";
+}
+
 export interface ForgejoIssue {
   id: number;
   number: number;
@@ -11,9 +27,9 @@ export interface ForgejoIssue {
   state: "open" | "closed";
   // Full user object (carries avatar_url + email for same-origin avatars, #177).
   user: ForgejoUser | null;
-  assignees: Array<{ id: number; login: string }> | null;
+  assignees: ForgejoUserRef[] | null;
   labels: ForgejoLabel[];
-  milestone?: { id: number; title: string; state: "open" | "closed" } | null;
+  milestone?: ForgejoMilestoneRef | null;
   comments: number;
   created_at: string;
   updated_at: string;
@@ -45,7 +61,7 @@ export interface ForgejoMilestone {
 export interface ForgejoActivity {
   id: number;
   op_type: string;
-  act_user?: { id: number; login: string };
+  act_user?: ForgejoUserRef;
   repo?: { full_name: string };
   comment_id?: number;
   comment?: { id: number; body: string; issue_url?: string; pull_request_url?: string };
@@ -66,7 +82,7 @@ export interface ForgejoTimelineEvent {
   label?: { id: number; name: string; color: string };
   old_title?: string;
   new_title?: string;
-  assignee?: { id: number; login: string };
+  assignee?: ForgejoUserRef;
   // Forgejo serializes ref_issue as a FULL Issue object on pull_ref/commit_ref/
   // comment_ref events (carrying number, title, state, and pull_request when the
   // ref is a PR) — not the bare number the field name suggests.
@@ -81,7 +97,7 @@ export interface ForgejoTimelineEvent {
   ref_commit_sha?: string;
   milestone?: { id: number; title: string };
   dependent_issue?: { id: number; number: number; title: string; state: string };
-  resolve_doer?: { id: number; login: string };
+  resolve_doer?: ForgejoUserRef;
   removed_assignee?: boolean;
 }
 
@@ -121,6 +137,20 @@ export const DELETED_USER_LOGIN = "(deleted)";
 // fallback the API routes apply when shaping author fields.
 export function userLogin(user: { login: string } | null | undefined): string {
   return user?.login ?? DELETED_USER_LOGIN;
+}
+
+// Forgejo serves ISO-8601 dates; the Cosheaf DTO wire shape is epoch-ms. Two
+// conversions so each field matches its DTO type: `toEpochMs` for required
+// `number` fields (0 on absent/unparseable), `toEpochMsOrNull` for nullable
+// (`number | null`) fields (null preserved). Use the matching one per field — a
+// nullable field must NOT collapse to 0.
+export function toEpochMs(value: string | null | undefined): number {
+  return value ? Date.parse(value) || 0 : 0;
+}
+export function toEpochMsOrNull(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
 }
 export interface ForgejoRepo {
   id: number;
@@ -192,7 +222,7 @@ export interface ForgejoPull {
   deletions?: number;
   changed_files?: number;
   labels?: ForgejoLabel[];
-  milestone?: { id: number; title: string; state: "open" | "closed" } | null;
+  milestone?: ForgejoMilestoneRef | null;
   requested_reviewers?: ForgejoUser[];
   requested_reviewers_teams?: Array<{ id: number; name: string; username?: string }>;
   head: { ref: string; sha: string; label: string };

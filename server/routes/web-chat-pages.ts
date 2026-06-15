@@ -25,11 +25,11 @@ import {
   redirect,
   repoHref,
   stringField,
-  validBranchName,
   webRoute,
   webRouteForWrite,
   type WebCtx,
 } from "./web-context.js";
+import { validBranchName } from "../branch-path.js";
 import { emptyHtml, html, type Html, raw } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";

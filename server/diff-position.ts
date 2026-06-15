@@ -7,33 +7,13 @@
 // We use `parse-diff` to tokenize hunks; the Forgejo-specific position math
 // and the "skip the `\` marker" rule live here.
 
-import parseDiffLib from "parse-diff";
+import { type ParsedChange, chunks } from "./diff-parse.js";
 
 // PR-native side vocabulary: `head` = PR's head ref (added/context lines,
 // right side of diff); `base` = PR's base ref (deleted lines, left side).
 // Forgejo's review-comment write API uses `new_position` / `old_position`
 // integers — head maps to new_position, base maps to old_position.
 export type Side = "base" | "head";
-
-interface ParsedChange {
-  type: "add" | "del" | "normal";
-  ln1?: number; // old-side line (set on del + normal)
-  ln2?: number; // new-side line (set on add + normal)
-  ln?: number;
-  content: string;
-}
-
-interface ParsedChunk {
-  changes: ParsedChange[];
-}
-
-function chunks(patch: string): ParsedChunk[] {
-  if (!patch) return [];
-  // parse-diff is loose about input — accepting bare hunks (no `diff --git`
-  // header) works fine.
-  const parsed = (parseDiffLib as unknown as (s: string) => Array<{ chunks: ParsedChunk[] }>)(patch);
-  return parsed.flatMap((f) => f.chunks ?? []);
-}
 
 function changeLines(c: ParsedChange): { oldLine: number | null; newLine: number | null } {
   if (c.type === "add") return { oldLine: null, newLine: c.ln ?? null };
@@ -59,6 +39,26 @@ export function positionToFileLine(patch: string, position: number): { line: num
     }
   }
   return null;
+}
+
+// Resolve a Forgejo review comment to its (line, side, outdated) display
+// coordinates — shared by the typed comments API and the rich-diff renderer so
+// the subtle invariant stays in lockstep: the line uses the fallback position
+// (`position ?? original_position`), the side falls back by file status, but
+// `outdated` keys on the RAW `position === null` (a comment whose anchor line is
+// gone from the head). Pass `patch ?? ""` for a missing patch (→ no mapped line).
+export function resolveLineComment(
+  comment: { position: number | null; original_position: number | null },
+  patch: string,
+  status: string,
+): { line: number | null; side: Side; outdated: boolean } {
+  const pos = comment.position ?? comment.original_position;
+  const mapped = pos === null ? null : positionToFileLine(patch, pos);
+  return {
+    line: mapped?.line ?? null,
+    side: mapped?.side ?? (status === "deleted" ? "base" : "head"),
+    outdated: comment.position === null,
+  };
 }
 
 // (line, side) → write payload for `CreatePullReviewComment`.

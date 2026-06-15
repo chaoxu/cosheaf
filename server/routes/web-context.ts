@@ -227,16 +227,6 @@ export function positiveIntFields(value: unknown): number[] {
     .filter((item) => Number.isInteger(item) && item > 0);
 }
 
-export function validBranchName(value: string | null | undefined): value is string {
-  return Boolean(
-    value &&
-      /^[A-Za-z0-9._/-]+$/.test(value) &&
-      !value.includes("..") &&
-      !value.startsWith("/") &&
-      !value.endsWith("/"),
-  );
-}
-
 export function repoHref(owner: string, repo: string, suffix = ""): string {
   return `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
 }

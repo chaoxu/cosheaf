@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { resolveBranchPathFromNames } from "./branch-path.js";
+import { resolveBranchPathFromNames, validBranchName } from "./branch-path.js";
+
+describe("validBranchName", () => {
+  it("accepts allowlisted names including multi-segment", () => {
+    for (const ok of ["main", "feat", "user/chao/web-edit", "a.b-c_d", "v1.2.3"]) {
+      expect(validBranchName(ok)).toBe(true);
+    }
+  });
+  it("rejects empty, traversal, leading/trailing slash, and bad chars", () => {
+    for (const bad of [null, undefined, "", "a..b", "/leading", "trailing/", "has space", "bad~char", "x:y"]) {
+      expect(validBranchName(bad)).toBe(false);
+    }
+  });
+});
 
 describe("resolveBranchPathFromNames", () => {
   it("defaults an empty route tail to main", () => {

@@ -13,6 +13,45 @@ export function parsePositiveInt(value: string | undefined): number | undefined 
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
+// Positive-integer id parser over `unknown`: handles both path params (strings)
+// and JSON body fields (already numbers). Returns null when not a positive int.
+// The string-only `parsePositiveInt` stays for query-param callers that want
+// `undefined`.
+export function parsePositiveIntId(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// The {title?, body?} edit body shared by PATCH issue and PATCH pull: title is
+// required + trimmed when present, body must be a string (passed through
+// untrimmed), and at least one must be present. Returns a discriminated result
+// so each route keeps its own error envelope and forge call.
+export function parseTitleBodyPatch(
+  raw: unknown,
+): { ok: true; patch: { title?: string; body?: string } } | { ok: false; message: string } {
+  const body = raw as { title?: unknown; body?: unknown } | null;
+  const patch: { title?: string; body?: string } = {};
+  if (body?.title !== undefined) {
+    if (typeof body.title !== "string" || !body.title.trim()) return { ok: false, message: "title required" };
+    patch.title = body.title.trim();
+  }
+  if (body?.body !== undefined) {
+    if (typeof body.body !== "string") return { ok: false, message: "body must be a string" };
+    patch.body = body.body;
+  }
+  if (patch.title === undefined && patch.body === undefined) return { ok: false, message: "title or body required" };
+  return { ok: true, patch };
+}
+
+// A non-empty comment body from a JSON request payload — pins the one
+// "comment body required" spelling shared by issue/PR comment post + edit.
+export function requireCommentBody(raw: unknown): { ok: true; text: string } | { ok: false; message: string } {
+  const body = raw as { body?: unknown } | null;
+  const text = typeof body?.body === "string" ? body.body : "";
+  if (!text.trim()) return { ok: false, message: "comment body required" };
+  return { ok: true, text };
+}
+
 export function parsePositiveIntList(value: string | undefined): number[] | undefined {
   if (!value?.trim()) return undefined;
   const ids = value.split(",").map((part) => Number(part.trim())).filter((n) => Number.isInteger(n) && n > 0);

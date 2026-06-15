@@ -1,23 +1,4 @@
-import parseDiffLib from "parse-diff";
-
-interface ParsedChange {
-  type: "add" | "del" | "normal";
-  ln1?: number;
-  ln2?: number;
-  ln?: number;
-  content: string;
-}
-
-interface ParsedChunk {
-  content: string;
-  changes: ParsedChange[];
-}
-
-function chunks(patch: string): ParsedChunk[] {
-  if (!patch) return [];
-  const parsed = (parseDiffLib as unknown as (s: string) => Array<{ chunks: ParsedChunk[] }>)(patch);
-  return parsed.flatMap((file) => file.chunks ?? []);
-}
+import { chunks } from "./diff-parse.js";
 
 export function changedLines(patch: string): { added: Set<number>; deleted: Set<number> } {
   const added = new Set<number>();

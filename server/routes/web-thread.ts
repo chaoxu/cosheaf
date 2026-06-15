@@ -11,6 +11,7 @@ import type {
   ForgejoTimelineEvent,
   ForgejoUser,
 } from "../forgejo-types.js";
+import { toEpochMs } from "../forgejo-types.js";
 import { type AvatarUser, avatarForUser } from "./avatar.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
@@ -393,13 +394,13 @@ export async function renderIssueTimeline(
   const referenceEvents = timeline.filter((event) => event.type !== "comment" && isReferenceTimelineEvent(event.type));
   const visibleEvents = timeline.filter((event) => event.type !== "comment" && !isReferenceTimelineEvent(event.type));
   const items: WebTimelineItem[] = [
-    ...comments.map((comment) => ({ kind: "comment" as const, ts: parseDateMs(comment.created_at), number, comment })),
-    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
+    ...comments.map((comment) => ({ kind: "comment" as const, ts: toEpochMs(comment.created_at), number, comment })),
+    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event })),
   ].sort(compareTimelineItems);
   const visibleHtml = joinHtml(await Promise.all(items.map((item) => renderTimelineItem(ctx, item))));
   if (referenceEvents.length === 0) return visibleHtml;
   const referenceItems = referenceEvents
-    .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event }))
+    .map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event }))
     .sort(compareTimelineItems);
   const referenceHtml = joinHtml(await Promise.all(referenceItems.map((item) => renderTimelineItem(ctx, item))));
   return html`${visibleHtml}<details class="timeline-collapsed"><summary>References (${referenceEvents.length})</summary>${referenceHtml}</details>`;
@@ -467,13 +468,13 @@ export async function renderPullTimeline(
   const items: WebTimelineItem[] = [
     ...timeline
       .filter((event) => event.type !== "comment" && event.type !== "pull_push" && event.type !== "review")
-      .map((event) => ({ kind: "event" as const, ts: parseDateMs(event.created_at), event })),
+      .map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event })),
     ...reviews
       .filter((review) => review.state !== "PENDING" && (review.state !== "COMMENT" || Boolean(review.body?.trim())))
-      .map((review) => ({ kind: "review" as const, ts: parseDateMs(review.submitted_at), review })),
+      .map((review) => ({ kind: "review" as const, ts: toEpochMs(review.submitted_at), review })),
     ...comments.map((comment) => ({
       kind: "line-comment" as const,
-      ts: parseDateMs(comment.created_at),
+      ts: toEpochMs(comment.created_at),
       number,
       comment,
     })),
@@ -622,14 +623,8 @@ function compareTimelineItems(a: WebTimelineItem, b: WebTimelineItem): number {
   return compareWebTimelineItems(a, b);
 }
 
-function parseDateMs(value: string | number | null | undefined): number {
-  if (typeof value === "number") return value;
-  if (!value) return 0;
-  return Date.parse(value) || 0;
-}
-
 function commitDateMs(commit: ForgejoCommit): number {
-  return parseDateMs(commit.commit.author?.date ?? commit.commit.committer?.date);
+  return toEpochMs(commit.commit.author?.date ?? commit.commit.committer?.date);
 }
 
 function firstCommitLine(message: string): string {

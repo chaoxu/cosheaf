@@ -4,10 +4,11 @@
 // file stays focused; the handlers import the small exported surface here.
 
 import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
-import { positionToFileLine, type Side } from "../diff-position.js";
+import { resolveLineComment, type Side } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import type { ForgejoPull } from "../forgejo.js";
 import type { ForgejoPullReviewComment } from "../forgejo-types.js";
+import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
 import { html, type Html } from "./web-html.js";
@@ -215,16 +216,15 @@ export function mapLineComments(file: PrFileView, comments: readonly ForgejoPull
   return comments
     .filter((comment) => comment.path === file.path)
     .map((comment) => {
-      const pos = comment.position ?? comment.original_position;
-      const mapped = pos === null ? null : positionToFileLine(file.patch, pos);
+      const { line, side, outdated } = resolveLineComment(comment, file.patch, file.status);
       return {
         id: comment.id,
-        line: mapped?.line ?? null,
-        side: mapped?.side ?? (file.status === "deleted" ? "base" : "head"),
+        line,
+        side,
         body: comment.body,
         author: displayLogin(comment.user?.login),
-        createdAt: Date.parse(comment.created_at) || 0,
-        outdated: comment.position === null,
+        createdAt: toEpochMs(comment.created_at),
+        outdated,
       };
     });
 }

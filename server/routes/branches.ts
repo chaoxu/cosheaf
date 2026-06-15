@@ -15,6 +15,7 @@ import {
   requireWriteOnMutation,
 } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
+import { validBranchName } from "../branch-path.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 
 export const branches = new Hono<AppEnv>();
@@ -50,25 +51,18 @@ branches.get("/:owner/:repo/branches/mine", async (c) => {
 
 branches.post("/:owner/:repo/branches", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { name?: string } | null;
-  if (
-    !body?.name ||
-    !/^[A-Za-z0-9._/-]+$/.test(body.name) ||
-    body.name === "main" ||
-    body.name.includes("..") ||
-    body.name.startsWith("/") ||
-    body.name.endsWith("/")
-  )
-    return c.json(...bad("valid branch name required"));
+  const name = body?.name;
+  if (!validBranchName(name) || name === "main") return c.json(...bad("valid branch name required"));
   const { fj, owner, repo } = c.get("repoCtx");
   try {
-    await fj.createBranch(owner, repo, { newBranchName: body.name, oldBranchName: "main" });
+    await fj.createBranch(owner, repo, { newBranchName: name, oldBranchName: "main" });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 409)
       return c.json(...conflict("branch already exists"));
     throw err;
   }
   invalidateRepoTrees(owner, repo);
-  return c.json({ name: body.name }, 201);
+  return c.json({ name }, 201);
 });
 
 // `:name{.+}` captures multi-segment names so `user/chao/foo` works whether
@@ -77,15 +71,7 @@ branches.post("/:owner/:repo/branches", async (c) => {
 // allowlist.
 branches.delete("/:owner/:repo/branches/:name{.+}", async (c) => {
   const name = c.req.param("name");
-  if (
-    !name ||
-    !/^[A-Za-z0-9._/-]+$/.test(name) ||
-    name === "main" ||
-    name.includes("..") ||
-    name.startsWith("/") ||
-    name.endsWith("/")
-  )
-    return c.json(...bad("valid branch name required (not main)"));
+  if (!validBranchName(name) || name === "main") return c.json(...bad("valid branch name required (not main)"));
   const { fj, owner, repo } = c.get("repoCtx");
   await deleteBranchQuietly(fj, owner, repo, name);
   invalidateRepoTrees(owner, repo);

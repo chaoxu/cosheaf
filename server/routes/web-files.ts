@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { type FileKind, fileKindForPath, fileKindLabel } from "../../shared/file-kind.js";
-import { resolveBranchPath } from "../branch-path.js";
+import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
 import { is404, onForgejo404 } from "../forgejo-errors.js";
@@ -25,7 +25,6 @@ import {
   stringField,
   textField,
   urlPath,
-  validBranchName,
   webRoute,
   webRouteForWrite,
   type WebCtx,
