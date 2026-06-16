@@ -367,17 +367,39 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       setBusy(true);
       setStatus(null);
       try {
+        // #179: publish what's in the editor, not the last commit. Commit any
+        // pending content (or a pending rename) first — this also creates the
+        // edit branch on Forgejo, so a never-saved branch no longer makes the
+        // PR call fail on a missing head ref. Abort if that commit fails.
+        // Gate on the same uncommitted/pathDirty signals the Save button uses
+        // (commitSource resets both), so a retry after a failed openPull/merge
+        // doesn't re-commit an unchanged doc; take the live source from the
+        // editor handle so we publish exactly what's on screen.
+        const editor = editorRef.current;
+        if (editor && (uncommitted || pathDirty)) {
+          const committed = await commitSource(editor.getDoc());
+          if (!committed.ok) {
+            setStatus(`save failed: ${committed.error}`);
+            return;
+          }
+        }
+        const path = currentPathRef.current;
         const pr = await api.openPull(config.owner, config.repo, {
           head: branch,
-          title: branch,
-          body: `Update ${currentPath}`,
+          title: `Update ${path}`,
+          body: `Update ${path}`,
         });
         if (directMerge) {
-          await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash", force: true });
+          // #180: respect the workspace's branch protection — no force bypass.
+          // A repo that requires approvals blocks here ("needs approval")
+          // rather than the editor silently overriding its own review gate.
+          await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash" });
           setStatus("merged to main");
-          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(currentPath)}`;
+          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(path)}`;
           return;
         }
+        // #181: openPull returns the existing PR when one is already open for
+        // this branch, so this navigates to it instead of erroring on a dup.
         window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}`;
       } catch (err) {
         setStatus(err instanceof ApiError ? err.message : "Open pull request failed");
@@ -385,7 +407,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         setBusy(false);
       }
     },
-    [branch, config.owner, config.repo, currentPath],
+    [branch, uncommitted, pathDirty, commitSource, config.owner, config.repo],
   );
 
   const readerClass =

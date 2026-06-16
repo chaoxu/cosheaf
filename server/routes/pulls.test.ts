@@ -843,3 +843,56 @@ describe("pulls + branches routes", () => {
     });
   });
 });
+
+describe("POST /pulls duplicate-PR resolution (#181)", () => {
+  it("returns the existing open PR when one already exists for this head→base", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    let created = false;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.post("/api/v1/repos/owner/w/pulls", (c) => {
+          created = true;
+          return c.text("pull request already exists", 409 as 200);
+        });
+        forge.get("/api/v1/repos/owner/w/pulls", (c) =>
+          c.json([
+            pull({ number: 3, head: { ref: "other/branch", sha: "x" } }),
+            pull({ number: 12, head: { ref: "user/alice/wip", sha: "h" }, base: { ref: "main", sha: "b" } }),
+          ]),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ head: "user/alice/wip", base: "main", title: "x" }),
+    });
+
+    expect(created).toBe(true);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ number: 12 });
+  });
+
+  it("passes a 409 through as a conflict when no open PR matches (e.g. empty diff)", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.post("/api/v1/repos/owner/w/pulls", (c) => c.text("no diff between head and base", 409 as 200));
+        forge.get("/api/v1/repos/owner/w/pulls", (c) => c.json([]));
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ head: "user/alice/wip", base: "main", title: "x" }),
+    });
+
+    expect(res.status).toBe(409);
+  });
+});

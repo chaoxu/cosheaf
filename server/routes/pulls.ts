@@ -270,8 +270,15 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
     // 422 for validation. Pass the actual message through so the client
     // can show something useful.
     if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
-      // Pass the Forgejo message through (empty diff, duplicate-PR, etc.)
-      // rather than collapsing every 4xx to "no diff vs base".
+      // The common 409 here is an already-open PR for this head→base (e.g. the
+      // editor re-clicking "Open PR"): resolve and return it so the caller
+      // navigates to the existing PR instead of seeing a duplicate-PR error
+      // (#181). Other 409s (empty diff, etc.) have no matching open PR and fall
+      // through to the passed-through Forgejo message.
+      const base = body.base ?? "main";
+      const existing = (await fj.listPulls(owner, repo, "open").catch(() => []))
+        .find((p) => p.head.ref === body.head && p.base.ref === base);
+      if (existing) return c.json(prMeta(existing), 200);
       return c.json(...conflict(err.message));
     }
     throw err;
