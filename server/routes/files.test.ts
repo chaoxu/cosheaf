@@ -354,6 +354,75 @@ describe("files mutation gates", () => {
   });
 });
 
+describe("files non-markdown text files (#178)", () => {
+  it("writes a .bib file verbatim without indexing it as a page", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    let written: string | undefined;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
+      forge.get("/api/v1/repos/owner/w/contents/refs.bib", (c) => c.text("not found", 404));
+      forge.post("/api/v1/repos/owner/w/contents/refs.bib", async (c) => {
+        const body = (await c.req.json()) as { content: string };
+        written = Buffer.from(body.content, "base64").toString("utf8");
+        return c.json({ commit: { sha: "bib-commit" }, content: { sha: "bib-sha" } });
+      });
+    }));
+
+    const bib = "@book{knuth1984,\n  title={The TeXbook}\n}\n";
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=refs.bib&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: bib }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok: boolean; meta: { id: string | null }; content?: string };
+    expect(json.ok).toBe(true);
+    expect(json.meta.id).toBeNull(); // not a page
+    expect(json.content).toBeUndefined(); // no frontmatter id was injected
+    expect(written).toBe(bib); // committed verbatim, no YAML frontmatter added
+    // It must NOT have been indexed as a page.
+    const rows = db.prepare("SELECT cosheaf_id FROM doc_map WHERE workspace_slug = ?").all("owner/w");
+    expect(rows).toEqual([]);
+  });
+
+  it("still rejects a non-text (binary/image) path", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=logo.png&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: "x" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid path", code: "validation" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes a .bib file", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    let deleted = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
+      forge.get("/api/v1/repos/owner/w/contents/refs.bib", (c) => c.json({ sha: "bib-sha" }));
+      forge.delete("/api/v1/repos/owner/w/contents/refs.bib", (c) => {
+        deleted = true;
+        return c.body(null, 200);
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=refs.bib&branch=user/alice/wip", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(deleted).toBe(true);
+  });
+});
+
 describe("files concurrent-write conflicts (#92)", () => {
   function writeReq(db: ReturnType<typeof freshDb>, token: string, body: unknown) {
     return appFor(db).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/wip", {

@@ -58,6 +58,15 @@ export function fileKindForPath(filePath: string): FileKind {
   return fileKindInfoForPath(filePath).kind;
 }
 
+// Files cosheaf can create/edit/delete through the editor and typed file route:
+// Markdown pages (.md, indexed) plus plain-text companions (.bib, .csv, .tex, …)
+// that are committed verbatim and never indexed. Binary/image/pdf go through the
+// asset-upload path instead.
+export function isEditableTextFile(filePath: string): boolean {
+  const kind = fileKindForPath(filePath);
+  return kind === "markdown" || kind === "text";
+}
+
 export function fileKindLabel(kind: FileKind): string {
   if (kind === "markdown") return "Markdown";
   if (kind === "text") return "Text";

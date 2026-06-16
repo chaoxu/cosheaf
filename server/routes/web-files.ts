@@ -56,7 +56,7 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
               ${
                 ws.role === "read"
                   ? ""
-                  : html`<a class="button" href="${editHref(owner, repo, user, "main")}">New file</a>`
+                  : newFileControl(owner, repo, user, "main")
               }
             </span>
           </div>
@@ -133,7 +133,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
                 ws.role === "read"
                   ? ""
                   : html`${resolved.branch === "main" ? "" : html`<a class="button primary" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open PR</a>`}
-                    <a class="button" href="${editHref(owner, repo, user, resolved.branch)}">New file</a>`
+                    ${newFileControl(owner, repo, user, resolved.branch)}`
               }
             </div>
           </div>
@@ -789,6 +789,18 @@ function editBranchFor(username: string, requested: string | null | undefined): 
 function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
   const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}`;
   return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
+}
+
+// "New file" as a name-it-first control: a GET form whose `path` routes to
+// /_edit, which picks the Markdown or plain-text editor from the extension — so
+// you can create a `.bib` (or .csv, .tex, …), not only `.md`. Blank submits as
+// `new.md`, preserving the old one-click create-a-page behavior.
+function newFileControl(owner: string, repo: string, user: string, branch: string): Html {
+  return html`<form class="newfile" action="${repoHref(owner, repo, "/_edit")}" method="get">
+    <input type="hidden" name="branch" value="${editBranchFor(user, branch)}">
+    <input class="newfile-path" name="path" placeholder="new.md" aria-label="New file name" autocomplete="off" spellcheck="false">
+    <button class="button" type="submit">New file</button>
+  </form>`;
 }
 
 function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {

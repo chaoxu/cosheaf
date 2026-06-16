@@ -9,7 +9,7 @@ import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
 } from "../../shared/conventions.js";
-import { fileKindForPath } from "../../shared/file-kind.js";
+import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 import { bad, conflict, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
@@ -171,7 +171,7 @@ files.get("/:owner/:repo/file", async (c) => {
 
 files.put("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
-  if (!rel || !rel.endsWith(".md"))
+  if (!rel || !isEditableTextFile(rel))
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (branch === "main")
@@ -194,16 +194,21 @@ files.put("/:owner/:repo/file", async (c) => {
   const db = c.get("db");
   const hub = c.get("sse");
 
-  // Pass the workspace's declared markdown format explicitly so passthrough
-  // workspaces don't inherit coflat indexing behavior (e.g. backlink
-  // extraction for `[@id]` references). #25.
-  const plan = planIndexPage(db, {
-    workspaceSlug: ws.slug,
-    filePath: rel,
-    bodyText: body.content,
-    formatId: ws.defaultMdFormat,
-  });
-  const finalContent = plan.rewrittenContent ?? body.content;
+  // Only Markdown files are pages: parse/inject the frontmatter id and index
+  // doc_map/FTS/backlinks. Plain-text companions (.bib, .csv, …) are committed
+  // verbatim and never indexed (mirrors the web _edit writeFile path). The
+  // workspace's declared markdown format is passed explicitly so passthrough
+  // workspaces don't inherit coflat indexing behavior (#25).
+  const isMarkdown = fileKindForPath(rel) === "markdown";
+  const plan = isMarkdown
+    ? planIndexPage(db, {
+        workspaceSlug: ws.slug,
+        filePath: rel,
+        bodyText: body.content,
+        formatId: ws.defaultMdFormat,
+      })
+    : null;
+  const finalContent = plan?.rewrittenContent ?? body.content;
 
   const isRename = Boolean(previousRel && previousRel !== rel);
   const existing = await fj.getFileMeta(owner, repo, branch, rel);
@@ -248,7 +253,7 @@ files.put("/:owner/:repo/file", async (c) => {
   // fires and typed read-after-write (search, suggest, /backlinks) breaks.
   // The sidecar tracks the latest write across branches (no branch dimension);
   // title display is therefore scoped to the main file view (#132).
-  plan.commit();
+  plan?.commit();
   if (isRename) deletePage(db, ws.slug, previousRel as string);
   invalidateBranchTree(owner, repo, branch);
   if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
@@ -256,8 +261,8 @@ files.put("/:owner/:repo/file", async (c) => {
   return c.json({
     ok: true,
     branch,
-    meta: { id: plan.cosheafId, title: plan.title },
-    content: plan.rewrittenContent ?? undefined,
+    meta: { id: plan?.cosheafId ?? null, title: plan?.title },
+    content: plan?.rewrittenContent ?? undefined,
     commit: r.commit?.sha,
     sha: r.content?.sha,
   });
@@ -422,7 +427,7 @@ files.get("/:owner/:repo/refs", (c) => {
 
 files.delete("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
-  if (!rel || !rel.endsWith(".md"))
+  if (!rel || !isEditableTextFile(rel))
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (branch === "main")
