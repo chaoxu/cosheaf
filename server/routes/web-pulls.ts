@@ -359,14 +359,31 @@ web.post("/:owner/:repo/pulls/:number/comments", webRouteForWrite(async (c, ctx)
 web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  await mergePullWithRetry(() =>
-    ctx.fj.mergePull(ctx.owner, ctx.repo, pull.number, { Do: "squash" }),
-  );
+  const prHref = repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`);
+  // "Merge anyway" submits force=true: an explicit, admin-only bypass of the
+  // required-approvals branch protection. #180 keeps the implicit/editor path
+  // honest (no silent force); this is a deliberate click. force does NOT bypass
+  // a real content conflict.
+  const force = (await c.req.parseBody()).force === "true";
+  try {
+    await mergePullWithRetry(() => ctx.fj.mergePull(ctx.owner, ctx.repo, pull.number, { Do: "squash", force }));
+  } catch (err) {
+    if (!(err instanceof ForgejoError)) throw err;
+    // Never surface Forgejo's raw body — it carries the internal backend URL.
+    console.error(`[${c.get("requestId") ?? ""}] web merge ${ctx.owner}/${ctx.repo}#${pull.number} failed (${err.status})`);
+    const blocked = err.status === 405 || err.status === 409;
+    const msg = !blocked
+      ? "The merge service is unavailable — try again in a moment."
+      : force
+        ? "Merge still failed — resolve the branch's conflicts with main, then try again."
+        : "This pull request needs its required approvals. Use “Merge anyway” to bypass them.";
+    return redirect(`${prHref}?toast=${encodeURIComponent(msg)}&toastKind=error`);
+  }
   if (pull.head.ref && pull.head.ref !== "main") {
     await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, pull.head.ref);
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
-  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+  return redirect(`${prHref}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`);
 }));
 
 web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {

@@ -425,12 +425,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           body: `Update ${path}`,
         });
         if (directMerge) {
-          // #180: respect the workspace's branch protection — no force bypass.
-          // A repo that requires approvals blocks here ("needs approval")
-          // rather than the editor silently overriding its own review gate.
-          await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash" });
-          // #184: carry the confirmation across the redirect as a one-shot toast.
-          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(path)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
+          // #180: respect the workspace's branch protection — the editor never
+          // force-merges. On success, carry the confirmation across the redirect
+          // (#184). On a blocked/failed merge, send the author to the PR (which
+          // now exists) with the reason — that's where they review, get approval,
+          // or use the explicit admin "Merge anyway" bypass — rather than
+          // dead-ending on a toast.
+          try {
+            await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash" });
+            window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(path)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
+          } catch (mergeErr) {
+            const reason = mergeErr instanceof ApiError ? mergeErr.message : "Couldn't merge to main";
+            window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}?toast=${encodeURIComponent(reason)}&toastKind=error`;
+          }
           return;
         }
         // #181: openPull returns the existing PR when one is already open for

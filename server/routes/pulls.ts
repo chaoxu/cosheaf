@@ -204,7 +204,6 @@ async function readReviewGate(
 // `transientExhausted` is whether the retried path stayed transient.
 export function classifyMergeFailure(
   pull: ForgejoPull | null,
-  message: string,
   reviewGate: ReviewGate | null,
   transientExhausted: boolean,
 ): MergeFailure {
@@ -221,7 +220,35 @@ export function classifyMergeFailure(
   else if (reviewBlocked) reason = "blocked";
   else if (mergeable === null || transientExhausted) reason = "transient";
   else reason = "unknown";
-  return { error: `merge failed: ${message}`, code: "conflict", reason, mergeable, head_sha, base_sha, state, merged };
+  return { error: mergeFailureMessage(reason), code: "conflict", reason, mergeable, head_sha, base_sha, state, merged };
+}
+
+// Client-safe merge-failure copy keyed on the structured reason/status. NEVER echo
+// Forgejo's raw body text to a caller — it carries internal backend URLs (e.g. the
+// forge host:port). The raw text is logged server-side (with the request id) for
+// debugging; only these sentences reach the browser/agent.
+export function mergeFailureMessage(reason: MergeFailureReason): string {
+  switch (reason) {
+    case "blocked":
+      return "This pull request needs its required approvals before it can merge.";
+    case "conflict":
+      return "This pull request has conflicts that must be resolved before it can merge.";
+    case "stale":
+      return "This pull request is already merged or no longer open.";
+    case "transient":
+      return "The merge service is busy — try again in a moment.";
+    case "unknown":
+      return "The merge was rejected.";
+  }
+}
+
+function mergeStatusMessage(status: number): string {
+  if (status === 401 || status === 403) return "You don't have permission to merge this pull request.";
+  if (status === 404) return "This pull request no longer exists.";
+  if (status === 422) return "The merge request was invalid.";
+  if (status === 429) return "Too many merge attempts — try again shortly.";
+  if (status === 502) return "The merge service is unavailable — try again shortly.";
+  return "The merge failed unexpectedly.";
 }
 
 
@@ -330,6 +357,9 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   // passing `force: true`. Callers default to false (normal review flow).
   const result = await mergeWithRetry(fj, owner, repo, n, { Do: body.Do, force: body.force });
   if (!result.ok) {
+    // Capture Forgejo's raw reason server-side (it carries internal URLs we must
+    // not leak to the client) so a failure can be debugged by request id.
+    console.error(`[${c.get("requestId") ?? ""}] merge ${owner}/${repo}#${n} failed (${result.status}): ${result.message}`);
     // The 409 bucket (merge-precondition failures) gets re-read + classified so
     // the agent can tell a real conflict from transient / needs-approval / stale
     // and pick the right recovery instead of blindly retrying (#94).
@@ -339,10 +369,10 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
       // merged) needs the review-gate read to tell "blocked" from "transient".
       const ambiguous = pull !== null && pull.merged !== true && pull.mergeable !== false;
       const reviewGate = ambiguous ? await readReviewGate(fj, owner, repo, n, pull.base.ref) : null;
-      return c.json(classifyMergeFailure(pull, result.message, reviewGate, result.transientExhausted), 409);
+      return c.json(classifyMergeFailure(pull, reviewGate, result.transientExhausted), 409);
     }
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
-    return c.json({ error: `merge failed: ${result.message}`, code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);
+    return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);
   }
   const pull = await fj.getPull(owner, repo, n);
   if (pull) await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
