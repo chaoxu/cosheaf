@@ -1,17 +1,19 @@
 import { Hono } from "hono";
 import { compress } from "hono/compress";
-import { deleteCookie, setCookie } from "hono/cookie";
+import { deleteCookie } from "hono/cookie";
 import { AUTH_COOKIE } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import type { ForgejoUser } from "../forgejo-types.js";
-import { WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
+import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { allDocumentFormats } from "../format-registry.js";
 import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
+import { ForgejoError } from "../forgejo.js";
+import { FixedWindowRateLimiter } from "../rate-limit.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, positiveInt, redirect, repoHref, safeWebRedirect, stringField } from "./web-context.js";
+import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, positiveInt, redirect, repoHref, requestOrigin, safeWebRedirect, setAuthCookie, stringField } from "./web-context.js";
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
@@ -26,23 +28,75 @@ import { globalSidebar, pageShell } from "./web-shell.js";
 export const web = new Hono<AppEnv>();
 web.use("*", compress());
 
-web.get("/login", (_c) =>
-  htmlResponse(
+// Shared chrome for the sign-in / sign-up cards: the same `.auth-page` >
+// `.auth-card` shell with a username + password pair; only the action, button
+// label, optional notice, and the cross-link differ.
+function authNotice(message: string, kind: "error" | "info"): Html {
+  return html`<p class="auth-notice auth-notice--${kind}" role="alert">${message}</p>`;
+}
+
+function authPage(opts: {
+  title: string;
+  action: string;
+  submitLabel: string;
+  passwordAutocomplete: "current-password" | "new-password";
+  notice?: Html;
+  altLink?: Html;
+}): Response {
+  return htmlResponse(
     pageShell({
-      title: "Sign in",
+      title: opts.title,
       body: html`
         <main class="auth-page">
-          <form class="auth-card" method="post" action="/login">
+          <form class="auth-card" method="post" action="${opts.action}">
             <h1>Cosheaf</h1>
+            ${opts.notice ?? emptyHtml}
             <label>Username <input name="username" autocomplete="username" required></label>
-            <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-            <button type="submit">Sign in</button>
+            <label>Password <input name="password" type="password" autocomplete="${opts.passwordAutocomplete}" required></label>
+            <button type="submit">${opts.submitLabel}</button>
+            ${opts.altLink ?? emptyHtml}
           </form>
         </main>
       `,
     }),
-  ),
-);
+  );
+}
+
+// Friendly messages for the ?error= codes /register and /login redirect with.
+const REGISTER_NOTICES: Record<string, string> = {
+  missing: "Enter a username and password.",
+  invalid: "That username or password wasn’t accepted. Use letters, numbers, and - _ . for the username.",
+  taken: "That username is already taken.",
+  rate: "Too many attempts. Please wait a few minutes and try again.",
+  upstream: "Registration is temporarily unavailable. Please try again shortly.",
+};
+const LOGIN_NOTICES: Record<string, string> = {
+  missing: "Enter a username and password.",
+  invalid: "Incorrect username or password.",
+};
+
+// Per-IP throttle for the anonymous, admin-token-backed /register endpoint:
+// 5 account creations per 10 minutes. In-process (one cosheaf process); paired
+// with the same-origin check it blunts trivial signup abuse.
+const registerRateLimiter = new FixedWindowRateLimiter(5, 10 * 60 * 1000);
+
+web.get("/login", (c) => {
+  const open = c.get("config").registrationOpen;
+  const error = c.req.query("error");
+  const notice = c.req.query("registered") === "1"
+    ? authNotice("Account created — please sign in.", "info")
+    : error
+      ? authNotice(LOGIN_NOTICES[error] ?? "Sign-in failed. Please try again.", "error")
+      : undefined;
+  return authPage({
+    title: "Sign in",
+    action: "/login",
+    submitLabel: "Sign in",
+    passwordAutocomplete: "current-password",
+    notice,
+    altLink: open ? html`<p class="auth-alt">New to Cosheaf? <a href="/register">Create an account</a></p>` : undefined,
+  });
+});
 
 web.post("/login", async (c) => {
   const form = await c.req.parseBody();
@@ -56,18 +110,92 @@ web.post("/login", async (c) => {
     password,
   );
   if (outcome.kind !== "ok") return redirect("/login?error=invalid");
-  setCookie(c, AUTH_COOKIE, outcome.pat, {
-    httpOnly: true,
-    sameSite: "Lax",
-    path: "/",
-    secure: c.req.url.startsWith("https://"),
-  });
+  setAuthCookie(c, outcome.pat);
   return c.redirect("/", 303);
 });
 
 web.post("/logout", (c) => {
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.redirect("/login", 303);
+});
+
+// Self-service signup. Disabled unless COSHEAF_REGISTRATION_MODE=open
+// (config.registrationOpen) — both handlers 404 otherwise so the form isn't
+// even discoverable. Account creation IS a Forgejo operation: we create the
+// Forgejo user with the site-admin client, then mint the same cosheaf PAT
+// /login mints and drop the user straight into a session. No cosheaf users
+// table — identity stays {username} from the PAT.
+web.get("/register", (c) => {
+  if (!c.get("config").registrationOpen) return c.notFound();
+  const error = c.req.query("error");
+  return authPage({
+    title: "Create account",
+    action: "/register",
+    submitLabel: "Create account",
+    passwordAutocomplete: "new-password",
+    notice: error ? authNotice(REGISTER_NOTICES[error] ?? "Registration failed. Please try again.", "error") : undefined,
+    altLink: html`<p class="auth-alt">Already have an account? <a href="/login">Sign in</a></p>`,
+  });
+});
+
+web.post("/register", async (c) => {
+  const config = c.get("config");
+  if (!config.registrationOpen) return c.notFound();
+
+  // This is an unauthenticated, state-changing POST that creates a real Forgejo
+  // user via the site-admin token, so SameSite cookies give no protection.
+  // Reject a cross-site submit when the browser sends a mismatched Origin
+  // (absent on same-origin in some flows and in tests — only reject a present,
+  // mismatched value).
+  const origin = c.req.header("origin");
+  if (origin && origin !== requestOrigin(c)) return new Response("forbidden", { status: 403 });
+
+  // Per-IP throttle (in-process). Counts every attempt, before validation, so a
+  // flood of malformed requests can't bypass it. clientIp ignores a spoofable
+  // X-Forwarded-For unless a trusted-proxy hop count is configured.
+  if (!registerRateLimiter.tryAcquire(clientIp(c, config.trustedProxyHops))) {
+    return redirect("/register?error=rate");
+  }
+
+  const form = await c.req.parseBody();
+  const username = stringField(form.username);
+  const password = stringField(form.password);
+  if (!username || !password) return redirect("/register?error=missing");
+  // A name Forgejo might accept but that fails FORGEJO_NAME_RE would create an
+  // account unusable as a workspace owner segment, so gate on it up front. 40 is
+  // Forgejo's username cap — reject longer up front so an over-long name never
+  // reaches the admin-token round-trip.
+  if (username.length > 40 || !FORGEJO_NAME_RE.test(username)) return redirect("/register?error=invalid");
+
+  const fjAdmin = c.get("fjAdmin");
+  // Friendly duplicate check before the create (createUser otherwise throws on
+  // collision). Racy, so the create still maps a 409/422 below.
+  if (await fjAdmin.getUserByName(username)) return redirect("/register?error=taken");
+
+  try {
+    // Email is synthesized (no form field, nothing stored locally) — matches
+    // the CLI's `pnpm cli user add` path. Add a real email field only if/when
+    // Forgejo email confirmation is turned on.
+    await fjAdmin.createUser({ username, email: `${username}@cosheaf.local`, password });
+  } catch (err) {
+    if (err instanceof ForgejoError) {
+      if (err.status === 409 || (err.status === 422 && /exist|already|taken/i.test(err.bodyText))) {
+        return redirect("/register?error=taken");
+      }
+      if (err.status === 400 || err.status === 422) return redirect("/register?error=invalid");
+    }
+    return redirect("/register?error=upstream");
+  }
+
+  // Log the new user straight in with the same PAT mint /login uses.
+  const outcome = await exchangeForgejoCredsForPat(c.get("db"), config.forgejoUrl, username, password);
+  if (outcome.kind !== "ok") {
+    // The account was created but the immediate mint couldn't complete (e.g. a
+    // Forgejo signup gate). Don't fail a successful signup — send them to sign in.
+    return redirect("/login?registered=1");
+  }
+  setAuthCookie(c, outcome.pat);
+  return c.redirect("/", 303);
 });
 
 web.get("/", globalRoute(async (c, auth) => {

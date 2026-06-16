@@ -1,9 +1,10 @@
 import type Database from "better-sqlite3";
 import type { Context } from "hono";
+import { setCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
-import { resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
+import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { Role } from "../../shared/roles.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
@@ -61,6 +62,33 @@ export function requestOrigin(c: Context<AppEnv>): string {
   const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.replace(":", "");
   const host = c.req.header("x-forwarded-host")?.split(",")[0]?.trim() || c.req.header("host") || url.host;
   return `${proto}://${host}`;
+}
+
+// Set the cosheaf_pat session cookie (the user's minted Forgejo PAT). `secure`
+// is derived from the proxy-aware origin so the flag is set behind a
+// TLS-terminating reverse proxy (where c.req.url is the internal http URL) and
+// stays unset over plain http in local dev.
+export function setAuthCookie(c: Context<AppEnv>, pat: string): void {
+  setCookie(c, AUTH_COOKIE, pat, {
+    httpOnly: true,
+    sameSite: "Lax",
+    path: "/",
+    secure: requestOrigin(c).startsWith("https://"),
+  });
+}
+
+// The client IP for rate-limiting, read from X-Forwarded-For only as far as the
+// configured number of trusted reverse-proxy hops. With 0 hops (no trusted
+// proxy, e.g. local dev) X-Forwarded-For is fully client-controlled, so it is
+// ignored and callers share one "unknown" bucket — fail-closed, never
+// bypassable by spoofing the header. Behind the lab's single Caddy,
+// trustedProxyHops=1 selects the entry Caddy appended (the real client), which
+// an upstream client cannot forge past.
+export function clientIp(c: Context<AppEnv>, trustedProxyHops: number): string {
+  if (trustedProxyHops <= 0) return "unknown";
+  const parts = (c.req.header("x-forwarded-for") ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return "unknown";
+  return parts[Math.max(0, parts.length - trustedProxyHops)];
 }
 
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {

@@ -26,10 +26,22 @@ export interface Config {
   // app env and should not carry Forgejo site-admin privileges.
   forgejoToken: string;
   // Site-admin/provisioning token. Keep its usage limited to explicit
-  // provisioning, webhook reconciliation, and operator CLI paths.
+  // provisioning, webhook reconciliation, operator CLI paths, and the
+  // open-registration route (gated by registrationOpen below, default-off).
   forgejoAdminToken: string;
   webhookSecret: string;
   webhookUrl: string;
+  // Web self-service signup. false (default) makes GET/POST /register 404;
+  // true enables anonymous account creation through the admin token. Set via
+  // COSHEAF_REGISTRATION_MODE=open. This is the only request-path consumer of
+  // forgejoAdminToken, so it stays off unless explicitly enabled.
+  registrationOpen: boolean;
+  // Number of trusted reverse-proxy hops in front of cosheaf, used to pick the
+  // real client IP out of X-Forwarded-For for the registration rate limiter.
+  // 0 (default) trusts no proxy (dev / direct) and the limiter falls back to a
+  // single shared bucket; behind the lab's single Caddy set
+  // COSHEAF_TRUSTED_PROXY_HOPS=1 so the limiter keys on the real client.
+  trustedProxyHops: number;
   // Coverify chat-reply shell-out. The bot account is distinct from the human
   // user; coverify authenticates to the Cosheaf API with its own token and
   // posts the reply itself. An empty token disables the chat launcher/reply path.
@@ -67,6 +79,8 @@ export function loadConfig(): Config {
     forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),
     webhookUrl: withDefault("COSHEAF_WEBHOOK_URL", "http://127.0.0.1:3030/api/v1/webhooks/forgejo"),
+    registrationOpen: withDefault("COSHEAF_REGISTRATION_MODE", "off") === "open",
+    trustedProxyHops: Number.parseInt(withDefault("COSHEAF_TRUSTED_PROXY_HOPS", "0"), 10) || 0,
     coverifyCmd: withDefault("COSHEAF_COVERIFY_CMD", "coverify"),
     coverifyApiUrl: withDefault("COSHEAF_COVERIFY_API_URL", "http://127.0.0.1:3030/api/v1"),
     coverifyBotToken: withDefault("COSHEAF_COVERIFY_BOT_TOKEN", ""),
