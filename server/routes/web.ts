@@ -551,7 +551,7 @@ web.get("/new", globalRoute(async (c, auth) => {
               <form class="settings-form" method="post" action="/new" data-testid="new-repo-form">
                 <label class="settings-row">
                   <span>Repository name</span>
-                  <input name="slug" data-testid="new-repo-slug" pattern="[A-Za-z0-9._-]+" required>
+                  <input name="slug" data-testid="new-repo-slug" pattern="[A-Za-z0-9._\\-]+" required>
                 </label>
                 <label class="settings-row">
                   <span>Description</span>
