@@ -580,7 +580,7 @@ function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Htm
       <input name="name" placeholder="user/${ctx.user}/work" required data-testid="branch-create-name">
     </label>
     <label>Base
-      <select name="base" data-testid="branch-create-base">
+      <select name="base" data-testid="branch-create-base" data-option-icon="branch">
         ${branchOptions(branches, "main")}
       </select>
     </label>
@@ -700,6 +700,11 @@ function renderFileTreeLevel(
 function branchSwitcher(owner: string, repo: string, branch: string, branches: readonly ForgejoBranch[]): Html {
   const names = branches.map((b) => b.name);
   if (!names.includes(branch)) names.unshift(branch);
+  // The switcher carries its own external icon span (the #185 canonical fix):
+  // it must show even in the single-branch case below, which renders no <select>
+  // for the widget to enhance, and its option values are URLs, not branch names.
+  // So it does NOT use the form selects' data-option-icon="branch" hook (#187) —
+  // that would render a second icon on the enhanced trigger.
   const icon = html`<span class="ftree-branch-icon">${branchIcon({ size: 13 })}</span>`;
   if (names.length <= 1) {
     return html`<span class="ftree-branch">${icon}<span class="ftree-branch-name">${branch}</span></span>`;

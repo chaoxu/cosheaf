@@ -38,6 +38,37 @@
   const labelText = (option) =>
     (option.label || option.textContent || "").trim();
 
+  // Option-icon glyphs for selects that opt in via data-option-icon="<name>":
+  // each option row and the trigger then show the icon before the label. Built
+  // as real SVG nodes (never an HTML string) so no sanitizer is needed; this
+  // plain public script can't import server routes/icons.ts, the same constraint
+  // as the editor's inlined pencil (#186). `branch` mirrors the server
+  // branchIcon() (lucide git-branch) so branch dropdowns match chrome icons
+  // rendered elsewhere (#187).
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const OPTION_ICONS = {
+    branch: [
+      ["path", { d: "M15 6a9 9 0 0 0-9 9V3" }],
+      ["circle", { cx: "18", cy: "6", r: "3" }],
+      ["circle", { cx: "6", cy: "18", r: "3" }],
+    ],
+  };
+  function buildIcon(children) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    const frame = {
+      width: "13", height: "13", viewBox: "0 0 24 24", fill: "none",
+      stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round",
+      "stroke-linejoin": "round", class: "lucide cf-opt-icon", "aria-hidden": "true",
+    };
+    for (const [k, v] of Object.entries(frame)) svg.setAttribute(k, v);
+    for (const [tag, attrs] of children) {
+      const el = document.createElementNS(SVG_NS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      svg.append(el);
+    }
+    return svg;
+  }
+
   /** @param {HTMLSelectElement} select */
   function enhance(select) {
     if (enhanced.has(select) || shouldSkip(select)) return;
@@ -46,6 +77,22 @@
     const multiple = select.multiple;
     const id = `cf-select-${++idSeq}`;
     const listId = `${id}-list`;
+    const optionIcon = OPTION_ICONS[select.dataset.optionIcon];
+
+    // Set a row's or the trigger's text. When the select opts into an option
+    // icon, prepend the icon and keep the text in its own ellipsis-able span.
+    const setLabel = (container, text) => {
+      if (!optionIcon) {
+        container.textContent = text;
+        return;
+      }
+      container.textContent = "";
+      container.classList.add("has-opt-icon");
+      const label = document.createElement("span");
+      label.className = "cf-opt-label";
+      label.textContent = text;
+      container.append(buildIcon(optionIcon), label);
+    };
 
     // Trigger button: replaces the visual select; tab order matches the select.
     const trigger = document.createElement("button");
@@ -104,7 +151,7 @@
         row.className = "cf-select-option";
         row.id = `${id}-opt-${i}`;
         row.setAttribute("role", "option");
-        row.textContent = labelText(option) || " ";
+        setLabel(row, labelText(option) || " ");
         if (option.disabled) row.setAttribute("aria-disabled", "true");
         row.addEventListener("click", () => {
           if (option.disabled) return;
@@ -141,7 +188,7 @@
         return;
       }
       const option = select.selectedOptions[0] || select.options[select.selectedIndex];
-      triggerText.textContent = option ? labelText(option) : "";
+      setLabel(triggerText, option ? labelText(option) : "");
       triggerText.classList.remove("is-placeholder");
     }
 

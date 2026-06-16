@@ -517,12 +517,12 @@ function pullCreatePage(
       <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}" data-testid="pull-create-form">
         <div class="branch-compare">
           <label>Base
-            <select name="base" required data-testid="pull-create-base">
+            <select name="base" required data-testid="pull-create-base" data-option-icon="branch">
               ${branchOptions(branches, base)}
             </select>
           </label>
           <label>Head
-            <select name="head" required data-testid="pull-create-head">
+            <select name="head" required data-testid="pull-create-head" data-option-icon="branch">
               ${branchOptions(branches, head)}
             </select>
           </label>

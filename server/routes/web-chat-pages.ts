@@ -102,7 +102,7 @@ web.get("/:owner/:repo/chat", webRoute(async (c, ctx) => {
                 : html`<div class="chat-blank">Start a new chat with Coverify, or pick a chat on the left.</div>
                    <form class="chat-composer" method="post" action="${repoHref(ctx.owner, ctx.repo, "/chat/new")}">
                      <label>Branch
-                       <select name="branch">${branchOptions(branches, "main")}</select>
+                       <select name="branch" data-option-icon="branch">${branchOptions(branches, "main")}</select>
                      </label>
                      <textarea name="message" placeholder="Start a chat with Coverify" required></textarea>
                      <button class="button primary" type="submit">Send</button>
