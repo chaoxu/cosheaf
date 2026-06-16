@@ -225,7 +225,7 @@ export function mapLineComments(file: PrFileView, comments: readonly ForgejoPull
   return comments
     .filter((comment) => comment.path === file.path)
     .map((comment) => {
-      const { line, side, outdated } = resolveLineComment(comment, file.patch, file.status);
+      const { line, side, outdated } = resolveLineComment(comment, file.status);
       return {
         id: comment.id,
         line,
@@ -253,9 +253,11 @@ export function splitDiffByFile(diff: string): Map<string, string> {
 }
 
 function renderPatch(patch: string): Html {
-  if (!patch) return html`<pre class="patch empty">No textual diff.</pre>`;
-  const rows = patchRows(patch).map(
+  // A binary edit or a pure rename has a non-empty header-only patch but zero
+  // body rows; show the placeholder instead of an empty table (#1).
+  const rows = patch ? patchRows(patch) : [];
+  if (rows.length === 0) return html`<pre class="patch empty">No textual diff.</pre>`;
+  return html`<table class="patch"><tbody>${rows.map(
     (row) => html`<tr class="${row.kind}"><td class="sign">${row.sign}</td><td><pre>${row.text}</pre></td></tr>`,
-  );
-  return html`<table class="patch"><tbody>${rows}</tbody></table>`;
+  )}</tbody></table>`;
 }

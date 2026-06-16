@@ -94,4 +94,33 @@ describe("splitUnifiedDiff", () => {
     expect(out[0].path).toBe("new.md");
     expect(out[0].previous_path).toBe("old.md");
   });
+
+  it("unquotes a path with spaces (git appends a trailing TAB on ---/+++)", () => {
+    // Forgejo's file list reports the plain name "my file.md"; the patch lookup
+    // must key by that, not "my file.md\t".
+    const input = [
+      "diff --git a/my file.md b/my file.md",
+      "index 7898192..6178079 100644",
+      "--- a/my file.md\t",
+      "+++ b/my file.md\t",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+    ].join("\n");
+    expect(splitUnifiedDiff(input)[0].path).toBe("my file.md");
+  });
+
+  it("unquotes a non-ASCII path (git double-quotes + octal-escapes)", () => {
+    // café.md → caf\303\251.md (UTF-8 bytes 0xC3 0xA9 for é).
+    const input = [
+      'diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"',
+      "index 7898192..6178079 100644",
+      '--- "a/caf\\303\\251.md"',
+      '+++ "b/caf\\303\\251.md"',
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+    ].join("\n");
+    expect(splitUnifiedDiff(input)[0].path).toBe("café.md");
+  });
 });

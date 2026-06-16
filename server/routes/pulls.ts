@@ -597,15 +597,15 @@ pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { fj, owner, repo } = c.get("repoCtx");
-  const [allComments, metas, unified] = await Promise.all([
+  // Comment line/side come straight from Forgejo's position/original_position
+  // (absolute file lines), so the read path no longer needs the unified diff.
+  const [allComments, metas] = await Promise.all([
     fj.listPullComments(owner, repo, n),
     fj.listPullFiles(owner, repo, n),
-    fj.getPullDiff(owner, repo, n),
   ]);
-  const patchesByPath = new Map(splitUnifiedDiff(unified).map((p) => [p.path, p.patch]));
   const status = new Map(metas.map((m) => [m.filename, m.status]));
   const out: LineComment[] = allComments.map((cm) => {
-    const { line, side, outdated } = resolveLineComment(cm, patchesByPath.get(cm.path) ?? "", status.get(cm.path) ?? "");
+    const { line, side, outdated } = resolveLineComment(cm, status.get(cm.path) ?? "");
     return {
       id: cm.id,
       review_id: cm.pull_request_review_id,

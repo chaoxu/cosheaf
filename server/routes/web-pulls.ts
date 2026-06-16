@@ -1,5 +1,6 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
 import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoUser } from "../forgejo-types.js";
@@ -139,13 +140,22 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
     c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "opened" });
     return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
   } catch (err) {
-    if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
-      return htmlResponse(
-        repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, { ...values, error: err.message })),
-        err.status,
-      );
-    }
-    throw err;
+    if (!(err instanceof ForgejoError) || !(err.status === 409 || err.status === 422)) throw err;
+    // Never echo Forgejo's body into the form — it leaks the internal forge URL.
+    console.error(`[${c.get("requestId") ?? ""}] create PR ${ctx.owner}/${ctx.repo} ${head}->${base} failed (${err.status})`);
+    // A 409 usually means a PR already exists for this head->base (open OR closed-
+    // unmerged); navigate to it instead of erroring (#181). Other 409/422 get a
+    // clean canned message.
+    const existing = (await ctx.fj.listPulls(ctx.owner, ctx.repo, "all").catch(() => []))
+      .find((p) => p.head.ref === head && p.base.ref === base && !p.merged);
+    if (existing) return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${existing.number}`));
+    return htmlResponse(
+      repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, {
+        ...values,
+        error: "Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid.",
+      })),
+      err.status,
+    );
   }
 }));
 
@@ -188,7 +198,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                     ? ""
                     : html`<a class="button build-only" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit PR</a>`
                 }
-                <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
+                ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>`}
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
@@ -297,7 +307,8 @@ web.post("/:owner/:repo/pulls/:number/review-requests/delete", webRouteForWrite(
 web.post("/:owner/:repo/pulls/:number/reviews", webRouteForWrite(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
+  // No self-review, and no reviewing a closed PR (mirrors the comments route).
+  if (pull.user?.login === ctx.user || pull.state === "closed") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const event = stringField(form.event);
   const body = stringField(form.body) ?? "";
@@ -348,7 +359,8 @@ web.post("/:owner/:repo/pulls/:number/comments", webRouteForWrite(async (c, ctx)
     body: "",
     comments: [{ path, body, ...pos }],
   });
-  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  // Mirror the files-page gate: a non-markdown file's redirect stays in source.
+  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && fileKindForPath(path) === "markdown";
   const mode = parseDiffMode(stringField(form.mode) ?? undefined, richOk);
   const shape = parseDiffShape(stringField(form.shape) ?? undefined, mode);
   return redirect(
@@ -372,11 +384,15 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
     // Never surface Forgejo's raw body — it carries the internal backend URL.
     console.error(`[${c.get("requestId") ?? ""}] web merge ${ctx.owner}/${ctx.repo}#${pull.number} failed (${err.status})`);
     const blocked = err.status === 405 || err.status === 409;
+    // A real content conflict (mergeable === false) isn't an approvals problem and
+    // "Merge anyway" won't fix it — say so distinctly (#7).
     const msg = !blocked
       ? "The merge service is unavailable — try again in a moment."
-      : force
-        ? "Merge still failed — resolve the branch's conflicts with main, then try again."
-        : "This pull request needs its required approvals. Use “Merge anyway” to bypass them.";
+      : pull.mergeable === false
+        ? "This pull request has conflicts with main that must be resolved before it can merge."
+        : force
+          ? "Merge still failed — try again in a moment."
+          : "This pull request needs its required approvals. Use “Merge anyway” to bypass them.";
     return redirect(`${prHref}?toast=${encodeURIComponent(msg)}&toastKind=error`);
   }
   if (pull.head.ref && pull.head.ref !== "main") {
@@ -395,7 +411,10 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   ]);
   const selected = c.req.query("file") ?? files[0]?.path ?? "";
   const file = files.find((f) => f.path === selected) ?? files[0] ?? null;
-  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  // Rich rendering is only meaningful for markdown; a .bib/.json/.png/binary file
+  // fed through the Coflat reader renders as garbage (#2). Gate rich on the
+  // selected file's kind so those default to (and are pinned to) source.
+  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && file !== null && fileKindForPath(file.path) === "markdown";
   const mode = parseDiffMode(c.req.query("mode"), richOk);
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
@@ -410,7 +429,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
           <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
           <div class="thread-title-row">
             <h1>${pull.title} <span>#${pull.number}</span></h1>
-            <a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>
+            ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>`}
           </div>
           <nav class="subtabs">
             <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>

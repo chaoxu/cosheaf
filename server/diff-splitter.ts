@@ -34,9 +34,9 @@ function parsePaths(slice: string[]): { path: string; previous_path?: string } {
 
   for (const line of slice) {
     if (line.startsWith("--- ")) {
-      aPath = stripPrefix(line.slice(4));
+      aPath = stripPrefix(gitUnquotePath(line.slice(4)));
     } else if (line.startsWith("+++ ")) {
-      bPath = stripPrefix(line.slice(4));
+      bPath = stripPrefix(gitUnquotePath(line.slice(4)));
       break;
     }
   }
@@ -46,8 +46,15 @@ function parsePaths(slice: string[]): { path: string; previous_path?: string } {
   }
   if (aPath && aPath !== "/dev/null") return { path: aPath };
 
-  // Fallback: parse the `diff --git a/X b/Y` header itself (e.g. for binary diffs).
+  // Fallback: parse the `diff --git a/X b/Y` header itself (e.g. for binary
+  // diffs with no ---/+++ lines). Handle git's quoted form first.
   const header = slice[0];
+  const quoted = /^diff --git "a\/(.+)" "b\/(.+)"$/.exec(header);
+  if (quoted) {
+    const a = gitUnquotePath(`"${quoted[1]}"`);
+    const b = gitUnquotePath(`"${quoted[2]}"`);
+    return a !== b ? { path: b, previous_path: a } : { path: b };
+  }
   const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(header);
   if (match) {
     const previous = match[1] !== match[2] ? match[1] : undefined;
@@ -59,4 +66,35 @@ function parsePaths(slice: string[]): { path: string; previous_path?: string } {
 function stripPrefix(s: string): string {
   if (s.startsWith("a/") || s.startsWith("b/")) return s.slice(2);
   return s;
+}
+
+// git renders a path in a `---`/`+++`/`diff --git` line one of two ways: an
+// unquoted path with a trailing TAB delimiter when it merely contains spaces, or
+// a double-quoted C-style string (with octal byte escapes) when it has non-ASCII
+// or control characters. Forgejo's file list reports the plain UTF-8 name, so the
+// patch lookup only matches if we undo git's quoting here.
+function gitUnquotePath(raw: string): string {
+  const s = raw.endsWith("\t") ? raw.slice(0, -1) : raw;
+  if (!(s.length >= 2 && s.startsWith('"') && s.endsWith('"'))) return s;
+  const body = s.slice(1, -1);
+  const bytes: number[] = [];
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== "\\") {
+      bytes.push(body.charCodeAt(i));
+      continue;
+    }
+    const next = body[i + 1];
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      while (i + 1 < body.length && oct.length < 3 && body[i + 1] >= "0" && body[i + 1] <= "7") {
+        oct += body[++i];
+      }
+      bytes.push(parseInt(oct, 8) & 0xff);
+    } else {
+      const simple: Record<string, number> = { n: 10, t: 9, r: 13, '"': 34, "\\": 92, a: 7, b: 8, f: 12, v: 11 };
+      bytes.push(simple[next] ?? next.charCodeAt(0));
+      i += 1;
+    }
+  }
+  return new TextDecoder().decode(Uint8Array.from(bytes));
 }

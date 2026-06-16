@@ -610,9 +610,9 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(200);
       const { comments } = (await res.json()) as { comments: Array<{ id: number; line: number | null; side: string; outdated: boolean; author_username: string }> };
       expect(comments.find((c) => c.id === 1)).toMatchObject({ line: 1, side: "head", outdated: false, author_username: "bob" });
-      // outdated comment still resolves a line via original_position
-      expect(comments.find((c) => c.id === 2)).toMatchObject({ line: 1, side: "head", outdated: true });
-      // no position resolves -> line null, side falls back to base for a deleted file
+      // position 0/null with a base anchor -> base side at original_position, outdated
+      expect(comments.find((c) => c.id === 2)).toMatchObject({ line: 1, side: "base", outdated: true });
+      // no anchor resolves -> line null, side falls back to base for a deleted file
       expect(comments.find((c) => c.id === 3)).toMatchObject({ line: null, side: "base", outdated: true });
     });
   });
@@ -883,7 +883,6 @@ describe("pulls + branches routes", () => {
       fetchMock
         .mockResolvedValueOnce(new Response("not found", { status: 404 })) // aggregate comments endpoint absent
         .mockResolvedValueOnce(ok([])) // files
-        .mockResolvedValueOnce(new Response("", { status: 200 })) // diff
         .mockResolvedValueOnce(ok([{ id: 11, state: "COMMENT", body: "", user: { login: "test-bob" } }])) // reviews
         .mockResolvedValueOnce(new Response("forgejo down", { status: 503 })); // per-review comments
 
