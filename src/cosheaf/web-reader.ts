@@ -57,7 +57,16 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     fragment.insertBefore(titleEl, fragment.firstChild);
   }
   root.replaceChildren(fragment);
-  hydrateMath(root);
+  // hydrateMath does NOT read the document — it needs the macros explicitly, or
+  // any non-builtin (e.g. \DecRank) renders as "undefined control sequence" red.
+  // renderToHtml only resolves frontmatter `math:` from the full source, but we
+  // hand it the frontmatter-stripped body (the diff line-offset logic relies on
+  // that), so result.mathMacros is empty. Forward cosheaf's own merged macro set
+  // instead — repo-wide cosheaf.yaml ∪ this doc's frontmatter `math:`, the same
+  // set already on ctx.mathMacros — with result.mathMacros layered on for any
+  // in-body definitions. \R only worked before because it is a KaTeX builtin,
+  // which masked this missing wire for both the repo-wide and frontmatter paths.
+  hydrateMath(root, { mathMacros: { ...ctx.mathMacros, ...result.mathMacros } });
   // Coflat resolves citation/crossref hover natively from the context; the
   // source feeds equation/block previews.
   hydrateReaderHoverPreviews(root, { source: payload.source, context: ctx });

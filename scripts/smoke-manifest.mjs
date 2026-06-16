@@ -49,4 +49,14 @@ export const smokeChecks = [
     prod: true,
     covers: "server-rendered edit page, Coflat editor island, Vite assets, controls, outline",
   },
+  {
+    name: "math-macros",
+    command: "pnpm smoke:math",
+    grep: "@smoke-math",
+    script: "scripts/browser-math-macros.mjs",
+    seed: "basic",
+    destructive: false,
+    prod: false,
+    covers: "repo-wide cosheaf.yaml + doc frontmatter KaTeX macros render (non-builtin) without undefined-control-sequence",
+  },
 ];
