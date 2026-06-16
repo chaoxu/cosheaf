@@ -80,38 +80,33 @@ export async function renderPrFileView(
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
   if (mode === "source" && shape === "split") {
     return html`<div data-testid="diff-pane-split" class="source-split">
-      ${sourcePane("Base", nextVersions.base, "base", changed.deleted, commentable.base, comments, commentForm)}
-      ${sourcePane("Head", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}
+      ${sourcePane("Base", nextVersions.base, "base", file.status, changed.deleted, commentable.base, comments, commentForm)}
+      ${sourcePane("Head", nextVersions.head, "head", file.status, changed.added, commentable.head, comments, commentForm)}
     </div>`;
   }
   if (mode === "source") {
-    return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", changed.added, commentable.head, comments, commentForm)}</div>`;
+    return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", file.status, changed.added, commentable.head, comments, commentForm)}</div>`;
   }
+  // Rich split: render each side through the reader, but show the empty-side
+  // notice when a version is absent (new/deleted file) rather than a blank reader.
+  const renderSide = (src: string, branch: string, marked: ReadonlySet<number>, side: Side): Promise<Html> =>
+    src === ""
+      ? Promise.resolve(diffSideEmptyNotice(file.status, side))
+      : renderMarkdownSurface(ctx, src, { branch, documentPath: file.path, surface: "diff", markedLines: [...marked] });
   if (shape === "split") {
     const [base, head] = await Promise.all([
-      renderMarkdownSurface(ctx, nextVersions.base, {
-        branch: pull.base.ref,
-        documentPath: file.path,
-        surface: "diff",
-        markedLines: [...changed.deleted],
-      }),
-      renderMarkdownSurface(ctx, nextVersions.head, {
-        branch: pull.head.ref,
-        documentPath: file.path,
-        surface: "diff",
-        markedLines: [...changed.added],
-      }),
+      renderSide(nextVersions.base, pull.base.ref, changed.deleted, "base"),
+      renderSide(nextVersions.head, pull.head.ref, changed.added, "head"),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
       <section><h3>Head</h3>${head}</section>
     </div>`;
   }
-  const head = await renderMarkdownSurface(ctx, nextVersions.head, {
-    branch: pull.head.ref,
-    documentPath: file.path,
-    surface: "document",
-  });
+  const head =
+    nextVersions.head === ""
+      ? diffSideEmptyNotice(file.status, "head")
+      : await renderMarkdownSurface(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path, surface: "document" });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
@@ -137,10 +132,23 @@ export function prFilesHref(ctx: WebCtx, prNumber: number, filePath: string, mod
   return `${repoHref(ctx.owner, ctx.repo, `/pulls/${prNumber}/files`)}?file=${encodeURIComponent(filePath)}&mode=${mode}&shape=${shape}`;
 }
 
+// A side with no content — a new file's Base, a deleted file's Head — is shown
+// with an explicit notice rather than a blank box so it reads as intentional.
+function diffSideEmptyNotice(status: string, side: Side): Html {
+  const text =
+    status === "added" || (side === "base" && status !== "deleted")
+      ? "New file — no previous version."
+      : status === "deleted" || side === "head"
+        ? "File deleted — no version on this side."
+        : "No content on this side.";
+  return html`<div class="diff-side-empty">${text}</div>`;
+}
+
 function sourcePane(
   title: string,
   source: string,
   side: Side,
+  status: string,
   marked: ReadonlySet<number>,
   commentable: ReadonlySet<number>,
   comments: readonly WebLineComment[],
@@ -148,6 +156,7 @@ function sourcePane(
 ): Html {
   const lines = source.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  if (lines.length === 0) return html`<section><h3>${title}</h3>${diffSideEmptyNotice(status, side)}</section>`;
   return html`<section><h3>${title}</h3><table class="source-lines"><tbody>${lines.map((line, index) => {
     const lineNo = index + 1;
     const lineComments = comments.filter((comment) => comment.side === side && comment.line === lineNo);
