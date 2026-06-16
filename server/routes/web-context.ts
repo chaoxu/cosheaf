@@ -5,6 +5,7 @@ import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
+import type { LocaleId, T } from "../../shared/i18n/index.js";
 import type { Role } from "../../shared/roles.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
@@ -27,6 +28,10 @@ export interface WebCtx {
   // The signed-in user's same-origin avatar src for the sidebar identity (#177),
   // or null when they have no uploaded avatar (the chrome shows initials).
   userAvatarSrc: string | null;
+  // Per-request UI locale and a locale-bound translate, threaded into repo-page
+  // chrome/renderers (no AsyncLocalStorage).
+  locale: LocaleId;
+  t: T;
 }
 
 // The current user's avatar src, cached by bearer so the chrome doesn't re-fetch
@@ -126,7 +131,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     resolveWorkspaceTitle(fj, owner, repo),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db"), wsTitle, userAvatarSrc };
+  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db"), wsTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
 }
 
 // resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the

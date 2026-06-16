@@ -9,6 +9,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppEnv } from "./types.js";
 import { getDb, loadConfig } from "./db.js";
+import { resolveLocale } from "./locale.js";
+import { makeT } from "../shared/i18n/index.js";
 import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import { auth } from "./routes/auth.js";
@@ -44,6 +46,9 @@ app.use("*", async (c, next) => {
   c.set("config", config);
   c.set("fjAdmin", fjAdmin);
   c.set("sse", sse);
+  const locale = resolveLocale(c);
+  c.set("locale", locale);
+  c.set("t", makeT(locale));
   await next();
 });
 

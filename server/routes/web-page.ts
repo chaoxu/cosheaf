@@ -1,7 +1,8 @@
 import type { ForgejoBranch, ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
-import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
+import { emptyHtml, html, type Html, joinHtml, raw } from "./web-html.js";
+import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import { type Panel, renderRegion } from "./web-panels.js";
 import { modeToggle, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 
@@ -35,15 +36,17 @@ export function usernameDatalist(collaborators: readonly ForgejoUser[]): Html {
 // rest (chat, notifications, settings) are contribute/admin-only and hide.
 const READABLE_TABS = new Set(["files", "issues", "pulls", "activity"]);
 
+// [id, message key, url suffix]. Labels resolve through t() at render time so
+// the repo nav translates without REPO_TABS holding pre-baked English.
 const REPO_TABS = [
-  ["files", "Files", ""],
-  ["issues", "Issues", "/issues"],
-  ["pulls", "PRs", "/pulls"],
-  ["chat", "Chat", "/chat"],
-  ["notifications", "Notifications", "/notifications"],
-  ["activity", "Activity", "/activity"],
-  ["settings", "Settings", "/settings"],
-] as const;
+  ["files", "tab.files", ""],
+  ["issues", "tab.issues", "/issues"],
+  ["pulls", "tab.pulls", "/pulls"],
+  ["chat", "tab.chat", "/chat"],
+  ["notifications", "nav.notifications", "/notifications"],
+  ["activity", "tab.activity", "/activity"],
+  ["settings", "settings.title", "/settings"],
+] as const satisfies ReadonlyArray<readonly [string, MessageKey, string]>;
 
 // Prefill repoPage's owner/repo/user/ws from a resolved WebCtx; handlers pass
 // only what actually varies (active tab, title, body, and optional reader
@@ -69,6 +72,8 @@ export function repoPageShell(
     statusExtra: opts.statusExtra,
     statusOmitTab: opts.statusOmitTab,
     userAvatarSrc: ctx.userAvatarSrc,
+    locale: ctx.locale,
+    t: ctx.t,
   });
 }
 
@@ -96,18 +101,23 @@ export function repoPage(opts: {
   statusOmitTab?: boolean;
   // The signed-in user's same-origin avatar src for the sidebar identity (#177).
   userAvatarSrc?: string | null;
+  locale: LocaleId;
+  t: T;
 }): string {
-  const nav = REPO_TABS.map(([id, label, suffix]) => tab(opts, id, label, suffix));
-  const activeLabel = REPO_TABS.find(([id]) => id === opts.active)?.[1] ?? opts.active;
+  const t = opts.t;
+  const nav = REPO_TABS.map(([id, key, suffix]) => tab(opts, id, t(key), suffix));
+  const activeKey = REPO_TABS.find(([id]) => id === opts.active)?.[1];
+  const activeLabel = activeKey ? t(activeKey) : opts.active;
   return pageShell({
     title: opts.title,
     user: opts.user,
+    locale: opts.locale,
     readerAssets: opts.readerAssets,
     sidebar: html`
-      ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null)}
-      ${modeToggle()}
+      ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null, t)}
+      ${modeToggle(t)}
       <nav class="sidebar-topnav">
-        <a href="/">‹ Workspaces</a>
+        <a href="/">‹ ${t("nav.workspaces")}</a>
       </nav>
       <div class="sidebar-workspace">
         <a href="${repoHref(opts.owner, opts.repo)}">${workspaceChipIdent(opts.owner, opts.repo, opts.wsTitle)}</a>
@@ -158,96 +168,109 @@ function tab(
   return html`<a class="${opts.active === id ? "active" : ""}"${buildOnly} href="${repoHref(opts.owner, opts.repo, suffix)}">${label}</a>`;
 }
 
-export function userPreferencesSection(user: string): Html {
+export function userPreferencesSection(user: string, locale: LocaleId, t: T): Html {
+  // Language is server-driven (the chosen option is `selected` from the resolved
+  // locale) because the server needs it at render time; cosheaf-preferences.js
+  // writes the cosheaf_lang cookie + reloads on change. The other selects stay
+  // client-only (localStorage), so only their display text is translated — their
+  // option values are unchanged.
+  const langSelected = (id: LocaleId): Html => (locale === id ? raw(" selected") : emptyHtml);
   return html`<section class="settings-section" data-testid="settings-user-preferences">
     <div class="settings-section-header">
-      <h2>User preferences</h2>
-      <p>These settings follow your browser session and apply across workspaces.</p>
+      <h2>${t("prefs.heading")}</h2>
+      <p>${t("prefs.desc")}</p>
     </div>
     <div class="settings-form">
       <label class="settings-row">
-        <span>Color scheme</span>
+        <span>${t("prefs.language")}</span>
+        <select data-testid="settings-language-select" data-lang-select>
+          <option value="en"${langSelected("en")}>English</option>
+          <option value="zh"${langSelected("zh")}>中文</option>
+        </select>
+      </label>
+      <label class="settings-row">
+        <span>${t("prefs.color_scheme")}</span>
         <select data-testid="settings-color-scheme-select" data-color-scheme-user="${user}">
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-          <option value="system">System</option>
+          <option value="light">${t("prefs.opt.light")}</option>
+          <option value="dark">${t("prefs.opt.dark")}</option>
+          <option value="system">${t("prefs.opt.system")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Display density</span>
+        <span>${t("prefs.density")}</span>
         <select data-testid="settings-density-select" data-density-user="${user}">
-          <option value="compact">Compact</option>
-          <option value="normal">Normal</option>
-          <option value="comfortable">Comfortable</option>
-          <option value="large">Large</option>
+          <option value="compact">${t("prefs.opt.compact")}</option>
+          <option value="normal">${t("prefs.opt.normal")}</option>
+          <option value="comfortable">${t("prefs.opt.comfortable")}</option>
+          <option value="large">${t("prefs.opt.large")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Reading width</span>
+        <span>${t("prefs.reading_width")}</span>
         <select data-testid="settings-reading-width-select" data-reading-width-user="${user}">
-          <option value="narrow">Narrow</option>
-          <option value="normal">Normal</option>
-          <option value="wide">Wide</option>
+          <option value="narrow">${t("prefs.opt.narrow")}</option>
+          <option value="normal">${t("prefs.opt.normal")}</option>
+          <option value="wide">${t("prefs.opt.wide")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Section numbering</span>
+        <span>${t("prefs.section_numbering")}</span>
         <select data-testid="settings-section-numbering-select" data-section-numbering-user="${user}">
-          <option value="on">On</option>
-          <option value="off">Off</option>
+          <option value="on">${t("common.on")}</option>
+          <option value="off">${t("common.off")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Document theme</span>
+        <span>${t("prefs.document_theme")}</span>
         <select data-testid="settings-document-theme-select" data-document-theme-user="${user}">
-          <option value="default">Default</option>
+          <option value="default">${t("prefs.opt.theme_default")}</option>
           <option value="blueprint-book">Blueprint Book</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Changed files default view</span>
+        <span>${t("prefs.diff_default_view")}</span>
         <span class="settings-inline-controls">
           <select data-testid="settings-diff-mode-select" data-diff-mode-user="${user}">
-            <option value="source">Source</option>
-            <option value="rich">Rich</option>
+            <option value="source">${t("prefs.opt.source")}</option>
+            <option value="rich">${t("prefs.opt.rich")}</option>
           </select>
           <select data-testid="settings-diff-shape-select" data-diff-shape-user="${user}">
-            <option value="unified">Unified</option>
-            <option value="split">Side-by-side</option>
-            <option value="after">After only</option>
+            <option value="unified">${t("prefs.opt.unified")}</option>
+            <option value="split">${t("prefs.opt.split")}</option>
+            <option value="after">${t("prefs.opt.after")}</option>
           </select>
         </span>
       </label>
       <label class="settings-row">
-        <span>Date format</span>
+        <span>${t("prefs.date_format")}</span>
         <select data-testid="settings-time-format-select" data-cosheaf-time-user="${user}">
-          <option value="relative">Relative</option>
-          <option value="absolute">Absolute</option>
+          <option value="relative">${t("prefs.opt.relative")}</option>
+          <option value="absolute">${t("prefs.opt.absolute")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Default mode</span>
+        <span>${t("prefs.default_mode")}</span>
         <select data-testid="settings-landing-mode-select" data-landing-mode-user="${user}">
-          <option value="last">Last used</option>
-          <option value="read">Read</option>
-          <option value="build">Build</option>
+          <option value="last">${t("prefs.opt.last_used")}</option>
+          <option value="read">${t("mode.read")}</option>
+          <option value="build">${t("mode.build")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Default editor mode</span>
+        <span>${t("prefs.default_editor_mode")}</span>
         <select data-testid="settings-editor-mode-select" data-editor-mode-user="${user}">
-          <option value="rich">Rich</option>
-          <option value="source">Source</option>
+          <option value="rich">${t("prefs.opt.rich")}</option>
+          <option value="source">${t("prefs.opt.source")}</option>
         </select>
       </label>
       <label class="settings-row">
-        <span>Autosave</span>
+        <span>${t("prefs.autosave")}</span>
         <select data-testid="settings-autosave-select" data-autosave-user="${user}">
-          <option value="off">Off</option>
-          <option value="1000">Every 1s</option>
-          <option value="1500">Every 1.5s</option>
-          <option value="3000">Every 3s</option>
-          <option value="5000">Every 5s</option>
+          <option value="off">${t("common.off")}</option>
+          <option value="1000">${t("prefs.opt.every_1s")}</option>
+          <option value="1500">${t("prefs.opt.every_1_5s")}</option>
+          <option value="3000">${t("prefs.opt.every_3s")}</option>
+          <option value="5000">${t("prefs.opt.every_5s")}</option>
         </select>
       </label>
     </div>

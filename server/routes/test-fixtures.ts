@@ -14,6 +14,8 @@ import { workspaceSlug } from "../../shared/conventions.js";
 import { DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
 import type { Config } from "../db.js";
 import { Forgejo } from "../forgejo.js";
+import { makeT } from "../../shared/i18n/index.js";
+import { resolveLocale } from "../locale.js";
 import { _seedFormatCacheForTests } from "../middleware.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv } from "../types.js";
@@ -108,6 +110,9 @@ export function testApp(
     c.set("config", config);
     c.set("fjAdmin", fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
     c.set("sse", new SSEHub());
+    const locale = resolveLocale(c);
+    c.set("locale", locale);
+    c.set("t", makeT(locale));
     await next();
   });
   mount(app);

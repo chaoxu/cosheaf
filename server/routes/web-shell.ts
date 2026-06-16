@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { avatar } from "./avatar.js";
+import { DEFAULT_LOCALE, localeDir, type LocaleId, makeT, type T } from "../../shared/i18n/index.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
+
+// English-bound translate, used as the default for chrome helpers whose call
+// sites haven't been threaded the request `t` yet (incremental rollout). Wired
+// call sites pass the real per-request `t` and render the active locale.
+const enT: T = makeT(DEFAULT_LOCALE);
 
 // A breadcrumb segment. `wsTitle` carries the workspace's Read-mode title
 // alongside the slug `label`; `cls` marks the owner segment so Read mode can
@@ -15,9 +21,13 @@ export function pageShell(opts: {
   readerAssets?: boolean;
   sidebar?: Html;
   statusPath?: StatusCrumb[];
+  locale?: LocaleId;
 }): string {
+  // Default to en when a caller hasn't been wired to pass the request locale yet
+  // (incremental rollout); the seam still renders correct lang/dir per page.
+  const locale = opts.locale ?? DEFAULT_LOCALE;
   return String(html`<!doctype html>
-    <html lang="en">
+    <html lang="${locale}" dir="${localeDir(locale)}">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -36,13 +46,13 @@ export function pageShell(opts: {
         <script src="/cosheaf-select.js" defer></script>
         ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script><script src="/cosheaf-mode.js" defer></script>`) : ""}
       </head>
-      <body data-cosheaf-user="${opts.user ?? ""}">
+      <body data-cosheaf-user="${opts.user ?? ""}" data-cosheaf-locale="${locale}">
         <div class="app-frame">
           <div class="app-main">
             ${opts.sidebar ? html`<aside class="app-sidebar">${opts.sidebar}</aside>` : ""}
             <div class="app-content">${opts.body}</div>
           </div>
-          ${appStatusbar(opts.statusPath)}
+          ${appStatusbar(opts.statusPath, makeT(locale))}
         </div>
       </body>
     </html>`);
@@ -53,11 +63,11 @@ function cosheafWebCssVersion(): string {
   return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
-export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string, avatarSrc: string | null = null): Html {
-  return html`${sidebarIdentity(user, active === "notifications", avatarSrc)}
-    ${user ? modeToggle() : ""}
+export function globalSidebar(active: "workspaces" | "account" | "notifications", user?: string, avatarSrc: string | null = null, t: T = enT): Html {
+  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t)}
+    ${user ? modeToggle(t) : ""}
     <nav class="repo-tabs">
-      <a class="${active === "workspaces" ? "active" : ""}" href="/">Workspaces</a>
+      <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
     </nav>`;
 }
 
@@ -67,10 +77,10 @@ export function globalSidebar(active: "workspaces" | "account" | "notifications"
 // the default. The choice persists per user in localStorage and is applied as
 // `html[data-cosheaf-mode]` before paint (see pageShell) so there's no flash;
 // cosheaf-mode.js wires the toggle. Pure presentation — no routes change.
-export function modeToggle(): Html {
+export function modeToggle(t: T = enT): Html {
   return html`<div class="mode-toggle" role="group" aria-label="View mode" data-mode-toggle>
-    <button type="button" class="mode-opt" data-mode="read">Read</button>
-    <button type="button" class="mode-opt" data-mode="build">Build</button>
+    <button type="button" class="mode-opt" data-mode="read">${t("mode.read")}</button>
+    <button type="button" class="mode-opt" data-mode="build">${t("mode.build")}</button>
   </div>`;
 }
 
@@ -79,11 +89,11 @@ export function modeToggle(): Html {
 // renders in the global and repo sidebars so identity + notifications are always
 // visible. Logged-out chrome (only the pre-auth message pages) shows a sign-in
 // link instead — and no bell.
-export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null): Html {
-  if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">Sign in</a></div>`;
+export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT): Html {
+  if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">${t("auth.sign_in")}</a></div>`;
   return html`<div class="sidebar-identity">
-    <a class="sidebar-identity-link" href="/account/settings" title="Account">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
-    ${notificationsBell(notificationsActive)}
+    <a class="sidebar-identity-link" href="/account/settings" title="${t("nav.account")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
+    ${notificationsBell(notificationsActive, t)}
   </div>`;
 }
 
@@ -92,17 +102,17 @@ export function sidebarIdentity(user: string | undefined, notificationsActive = 
 // nav link. The badge is filled client-side by cosheaf-notifications.js (kept
 // live over the per-user SSE channel) against [data-notif-badge], so server
 // renders stay cheap.
-export function notificationsBell(active = false): Html {
-  return html`<a class="notif-bell${active ? " active" : ""}" href="/account/notifications" aria-label="Notifications" title="Notifications">
+export function notificationsBell(active = false, t: T = enT): Html {
+  return html`<a class="notif-bell${active ? " active" : ""}" href="/account/notifications" aria-label="${t("nav.notifications")}" title="${t("nav.notifications")}">
     <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.6a3.1 3.1 0 0 0-3.1 3.1c0 2.4-.55 3.55-1.15 4.25-.32.37-.06.95.42.95h7.66c.48 0 .74-.58.42-.95-.6-.7-1.15-1.85-1.15-4.25A3.1 3.1 0 0 0 8 1.6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.6 12.4a1.45 1.45 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
     <span class="notif-badge" data-notif-badge hidden></span>
   </a>`;
 }
 
-function appStatusbar(path: StatusCrumb[] | undefined): Html {
+function appStatusbar(path: StatusCrumb[] | undefined, t: T = enT): Html {
   const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
-    html`<a class="status-home" href="/" aria-label="Home" title="Home">⌂</a>`,
+    html`<a class="status-home" href="/" aria-label="${t("nav.home")}" title="${t("nav.home")}">⌂</a>`,
     ...(path ?? []).map(renderCrumb),
   ].flatMap((crumb, i) => (i === 0 ? [crumb] : [sep, crumb]));
   return html`<footer class="app-statusbar"><span class="status-path">${crumbs}<span class="status-rename-slot"></span></span><div class="status-editor-slot"></div></footer>`;

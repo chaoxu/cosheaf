@@ -9,6 +9,7 @@ import { allDocumentFormats } from "../format-registry.js";
 import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { ForgejoError } from "../forgejo.js";
+import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import { FixedWindowRateLimiter } from "../rate-limit.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
@@ -40,19 +41,22 @@ function authPage(opts: {
   action: string;
   submitLabel: string;
   passwordAutocomplete: "current-password" | "new-password";
+  t: T;
+  locale: LocaleId;
   notice?: Html;
   altLink?: Html;
 }): Response {
   return htmlResponse(
     pageShell({
       title: opts.title,
+      locale: opts.locale,
       body: html`
         <main class="auth-page">
           <form class="auth-card" method="post" action="${opts.action}">
             <h1>Cosheaf</h1>
             ${opts.notice ?? emptyHtml}
-            <label>Username <input name="username" autocomplete="username" required></label>
-            <label>Password <input name="password" type="password" autocomplete="${opts.passwordAutocomplete}" required></label>
+            <label>${opts.t("auth.username")} <input name="username" autocomplete="username" required></label>
+            <label>${opts.t("auth.password")} <input name="password" type="password" autocomplete="${opts.passwordAutocomplete}" required></label>
             <button type="submit">${opts.submitLabel}</button>
             ${opts.altLink ?? emptyHtml}
           </form>
@@ -62,17 +66,18 @@ function authPage(opts: {
   );
 }
 
-// Friendly messages for the ?error= codes /register and /login redirect with.
-const REGISTER_NOTICES: Record<string, string> = {
-  missing: "Enter a username and password.",
-  invalid: "That username or password wasn’t accepted. Use letters, numbers, and - _ . for the username.",
-  taken: "That username is already taken.",
-  rate: "Too many attempts. Please wait a few minutes and try again.",
-  upstream: "Registration is temporarily unavailable. Please try again shortly.",
+// ?error= codes (and ?registered=1) map to message keys; t() renders them in the
+// request locale. The whitelist keeps an arbitrary ?error= value from rendering.
+const REGISTER_ERROR_KEYS: Record<string, MessageKey> = {
+  missing: "err.register.missing",
+  invalid: "err.register.invalid",
+  taken: "err.register.taken",
+  rate: "err.register.rate",
+  upstream: "err.register.upstream",
 };
-const LOGIN_NOTICES: Record<string, string> = {
-  missing: "Enter a username and password.",
-  invalid: "Incorrect username or password.",
+const LOGIN_ERROR_KEYS: Record<string, MessageKey> = {
+  missing: "err.login.missing",
+  invalid: "err.login.invalid",
 };
 
 // Per-IP throttle for the anonymous, admin-token-backed /register endpoint:
@@ -81,20 +86,26 @@ const LOGIN_NOTICES: Record<string, string> = {
 const registerRateLimiter = new FixedWindowRateLimiter(5, 10 * 60 * 1000);
 
 web.get("/login", (c) => {
+  const t = c.get("t");
   const open = c.get("config").registrationOpen;
   const error = c.req.query("error");
+  const errorKey = error ? LOGIN_ERROR_KEYS[error] : undefined;
   const notice = c.req.query("registered") === "1"
-    ? authNotice("Account created — please sign in.", "info")
-    : error
-      ? authNotice(LOGIN_NOTICES[error] ?? "Sign-in failed. Please try again.", "error")
-      : undefined;
+    ? authNotice(t("auth.registered"), "info")
+    : errorKey
+      ? authNotice(t(errorKey), "error")
+      : error
+        ? authNotice(t("auth.login_failed"), "error")
+        : undefined;
   return authPage({
-    title: "Sign in",
+    title: t("auth.sign_in"),
     action: "/login",
-    submitLabel: "Sign in",
+    submitLabel: t("auth.sign_in"),
     passwordAutocomplete: "current-password",
+    t,
+    locale: c.get("locale"),
     notice,
-    altLink: open ? html`<p class="auth-alt">New to Cosheaf? <a href="/register">Create an account</a></p>` : undefined,
+    altLink: open ? html`<p class="auth-alt">${t("auth.new_here")} <a href="/register">${t("auth.create_account_link")}</a></p>` : undefined,
   });
 });
 
@@ -127,14 +138,18 @@ web.post("/logout", (c) => {
 // table — identity stays {username} from the PAT.
 web.get("/register", (c) => {
   if (!c.get("config").registrationOpen) return c.notFound();
+  const t = c.get("t");
   const error = c.req.query("error");
+  const errorKey = error ? REGISTER_ERROR_KEYS[error] : undefined;
   return authPage({
-    title: "Create account",
+    title: t("auth.create_account"),
     action: "/register",
-    submitLabel: "Create account",
+    submitLabel: t("auth.create_account"),
     passwordAutocomplete: "new-password",
-    notice: error ? authNotice(REGISTER_NOTICES[error] ?? "Registration failed. Please try again.", "error") : undefined,
-    altLink: html`<p class="auth-alt">Already have an account? <a href="/login">Sign in</a></p>`,
+    t,
+    locale: c.get("locale"),
+    notice: error ? authNotice(errorKey ? t(errorKey) : t("err.register.failed"), "error") : undefined,
+    altLink: html`<p class="auth-alt">${t("auth.have_account")} <a href="/login">${t("auth.sign_in")}</a></p>`,
   });
 });
 
@@ -207,20 +222,22 @@ web.get("/", globalRoute(async (c, auth) => {
     currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken),
   ]);
   const inbox = mapThreads(threads);
+  const t = c.get("t");
   return htmlResponse(
     pageShell({
-      title: "Repositories",
+      title: t("home.title"),
       user: auth.user.username,
-      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc),
+      locale: c.get("locale"),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, t),
       body: html`
         <main class="page">
           <div class="page-title page-title--actions-only">
-            <a class="button primary" href="/new" data-testid="new-repo">New repository</a>
+            <a class="button primary" href="/new" data-testid="new-repo">${t("home.new_repo")}</a>
           </div>
-          <div id="home-inbox-slot">${inboxSection(inbox)}</div>
+          <div id="home-inbox-slot">${inboxSection(inbox, t)}</div>
           <div class="list">
             ${repos.length === 0
-              ? html`<div class="empty">No repositories available.</div>`
+              ? html`<div class="empty">${t("home.no_repos")}</div>`
               : repos.map(
                   (repo) => html`
                   <a class="list-row repo-row" href="${repoHref(repo.owner, repo.name)}">
@@ -228,7 +245,7 @@ web.get("/", globalRoute(async (c, auth) => {
                       <strong class="ws-slug">${repo.full_name}</strong>
                       ${repo.description ? html`<span class="ws-title">${repo.description}</span>` : emptyHtml}
                     </span>
-                    <small>${repo.private ? "private" : "public"} · ${repo.role}</small>
+                    <small>${repo.private ? t("common.private") : t("common.public")} · ${repo.role}</small>
                   </a>
                 `,
                 )}
@@ -243,16 +260,16 @@ web.get("/", globalRoute(async (c, auth) => {
 // Cross-repo unread inbox on the home page. Each row links to the cosheaf
 // issue/PR route and carries a subtle mark-read action. Rendered only when
 // there are unread threads, so home stays clean when caught up.
-function inboxSection(rows: readonly NotificationRow[]): Html {
+function inboxSection(rows: readonly NotificationRow[], t: T): Html {
   if (rows.length === 0) return emptyHtml;
   return html`<section class="inbox" data-testid="home-inbox">
     <div class="inbox-head">
-      <h2>Inbox</h2>
-      <span class="inbox-count">${rows.length} unread</span>
-      <form method="post" action="/account/notifications/read-all"><button class="button small" type="submit">Mark all read</button></form>
+      <h2>${t("home.inbox")}</h2>
+      <span class="inbox-count">${t("home.unread", { count: rows.length })}</span>
+      <form method="post" action="/account/notifications/read-all"><button class="button small" type="submit">${t("home.mark_all_read")}</button></form>
     </div>
     <div class="list">
-      ${rows.map((row) => notificationRow(row))}
+      ${rows.map((row) => notificationRow(row, t))}
     </div>
   </section>`;
 }
@@ -260,7 +277,7 @@ function inboxSection(rows: readonly NotificationRow[]): Html {
 // One cross-repo notification row, shared by the home inbox and the dedicated
 // account notifications page. `next` (when given) rides the mark-read POST so
 // the handler returns to the page the row was acted on from.
-function notificationRow(row: NotificationRow, next?: string): Html {
+function notificationRow(row: NotificationRow, t: T, next?: string): Html {
   return html`<div class="list-row inbox-row">
     <a class="inbox-link" href="/${row.repo}/${row.kind === "pr" ? "pulls" : "issues"}/${row.number}">
       <span class="inbox-kind ${row.kind}">${row.kind === "pr" ? "PR" : "issue"}</span>
@@ -269,7 +286,7 @@ function notificationRow(row: NotificationRow, next?: string): Html {
     </a>
     <form method="post" action="/account/notifications/${row.id}/read">
       ${next ? html`<input type="hidden" name="next" value="${next}">` : ""}
-      <button class="button small" type="submit" title="Mark read">Done</button>
+      <button class="button small" type="submit" title="${t("home.mark_read_title")}">${t("home.mark_read")}</button>
     </form>
   </div>`;
 }
@@ -278,25 +295,25 @@ function notificationRow(row: NotificationRow, next?: string): Html {
 // always renders — including a calm empty state — so the affordance is
 // discoverable rather than appearing only when something is unread. Mark-read
 // forms carry `next` so the POST handlers return here instead of home.
-function notificationsAccountPage(rows: readonly NotificationRow[], all: boolean): Html {
+function notificationsAccountPage(rows: readonly NotificationRow[], all: boolean, t: T): Html {
   const NEXT = "/account/notifications";
   const toggle = html`<span class="state-toggles" aria-label="Filter">
-    <a class="state-toggle ${all ? "" : "active"}" href="/account/notifications">unread</a> ·
-    <a class="state-toggle ${all ? "active" : ""}" href="/account/notifications?state=all">all</a>
+    <a class="state-toggle ${all ? "" : "active"}" href="/account/notifications">${t("notif.unread")}</a> ·
+    <a class="state-toggle ${all ? "active" : ""}" href="/account/notifications?state=all">${t("notif.all")}</a>
   </span>`;
   return html`<main class="page">
     <div class="page-title">
-      <h1>Notifications</h1>
+      <h1>${t("nav.notifications")}</h1>
       <div class="toolbar-actions">
         ${toggle}
-        ${rows.length === 0 ? "" : html`<form method="post" action="/account/notifications/read-all"><input type="hidden" name="next" value="${NEXT}"><button class="button small" type="submit">Mark all read</button></form>`}
+        ${rows.length === 0 ? "" : html`<form method="post" action="/account/notifications/read-all"><input type="hidden" name="next" value="${NEXT}"><button class="button small" type="submit">${t("home.mark_all_read")}</button></form>`}
       </div>
     </div>
     ${
       rows.length === 0
-        ? html`<div class="empty" data-testid="notifications-empty">${all ? "No notifications." : "You're all caught up."}</div>`
+        ? html`<div class="empty" data-testid="notifications-empty">${all ? t("notif.empty") : t("notif.caught_up")}</div>`
         : html`<div class="list" data-testid="notifications-list">
-            ${rows.map((row) => notificationRow(row, NEXT))}
+            ${rows.map((row) => notificationRow(row, t, NEXT))}
           </div>`
     }
   </main>`;
@@ -309,7 +326,7 @@ web.get("/account/inbox", globalRoute(async (c) => {
     .get("fjUser")
     .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
     .catch(() => []);
-  return htmlResponse(String(inboxSection(mapThreads(threads))));
+  return htmlResponse(String(inboxSection(mapThreads(threads), c.get("t"))));
 }));
 
 web.post("/account/notifications/:id/read", globalRoute(async (c) => {
@@ -341,13 +358,15 @@ web.get("/account/notifications", globalRoute(async (c, auth) => {
       .catch(() => []),
     currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken),
   ]);
+  const t = c.get("t");
   return htmlResponse(
     pageShell({
-      title: "Notifications",
+      title: t("nav.notifications"),
       user: auth.user.username,
-      sidebar: globalSidebar("notifications", auth.user.username, avatarSrc),
-      statusPath: [{ label: "notifications" }],
-      body: notificationsAccountPage(mapThreads(threads), all),
+      locale: c.get("locale"),
+      sidebar: globalSidebar("notifications", auth.user.username, avatarSrc, t),
+      statusPath: [{ label: t("nav.notifications") }],
+      body: notificationsAccountPage(mapThreads(threads), all, t),
     }),
   );
 }));
@@ -356,24 +375,26 @@ web.get("/account/settings", globalRoute(async (c, auth) => {
   const me = await c.get("fjUser").getCurrentUser();
   const saved = c.req.query("saved") === "1";
   const error = c.req.query("error") ?? undefined;
+  const t = c.get("t");
   return htmlResponse(
     pageShell({
-      title: "Account settings",
+      title: t("settings.account_settings"),
       user: auth.user.username,
-      sidebar: globalSidebar("account", auth.user.username, forgeAvatarSrc(me)),
-      statusPath: [{ label: "account" }],
+      locale: c.get("locale"),
+      sidebar: globalSidebar("account", auth.user.username, forgeAvatarSrc(me), t),
+      statusPath: [{ label: t("nav.account") }],
       body: html`
         <main class="page">
           <div class="settings-page account-settings">
             <div class="page-title compact">
               <div>
-                <h1>Settings</h1>
+                <h1>${t("settings.title")}</h1>
               </div>
             </div>
             ${userProfileSection(me, { saved, error })}
             ${avatarSection(me)}
-            ${userPreferencesSection(auth.user.username)}
-            ${accountSignOutSection()}
+            ${userPreferencesSection(auth.user.username, c.get("locale"), t)}
+            ${accountSignOutSection(t)}
           </div>
         </main>
       `,
@@ -383,15 +404,15 @@ web.get("/account/settings", globalRoute(async (c, auth) => {
 
 // Sign-out lives on the Account page (#127) instead of an always-present
 // status-bar button. A plain POST form to /logout — no island needed.
-function accountSignOutSection(): Html {
+function accountSignOutSection(t: T): Html {
   return html`<section class="settings-section" data-testid="account-signout">
     <div class="settings-section-header">
-      <h2>Session</h2>
-      <p>Sign out of Cosheaf on this device.</p>
+      <h2>${t("settings.session")}</h2>
+      <p>${t("settings.sign_out_desc")}</p>
     </div>
     <form class="settings-form" method="post" action="/logout">
       <div class="settings-actions">
-        <button class="button" type="submit" data-testid="signout">Sign out</button>
+        <button class="button" type="submit" data-testid="signout">${t("auth.sign_out")}</button>
       </div>
     </form>
   </section>`;
@@ -506,18 +527,20 @@ web.post("/account/settings", globalRoute(async (c) => {
 web.get("/new", globalRoute(async (c, auth) => {
   const error = c.req.query("error");
   const avatarSrc = await currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken);
+  const t = c.get("t");
   return htmlResponse(
     pageShell({
-      title: "New repository",
+      title: t("home.new_repo"),
       user: auth.user.username,
-      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc),
-      statusPath: [{ label: "new repository" }],
+      locale: c.get("locale"),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, t),
+      statusPath: [{ label: t("home.new_repo") }],
       body: html`
         <main class="page">
           <div class="settings-page">
             <div class="page-title compact">
               <div>
-                <h1>New repository</h1>
+                <h1>${t("home.new_repo")}</h1>
               </div>
             </div>
             <section class="settings-section">

@@ -172,6 +172,19 @@
   });
 })();
 
+// UI language: unlike the other prefs (localStorage, client-only), the server
+// needs the locale at render time, so this writes the non-HttpOnly cosheaf_lang
+// cookie and reloads. The <select> is server-rendered with the active locale
+// already `selected`, so there is no initial value to read here.
+(() => {
+  const select = document.querySelector("[data-lang-select]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  select.addEventListener("change", () => {
+    document.cookie = `cosheaf_lang=${encodeURIComponent(select.value)}; path=/; max-age=31536000; samesite=lax`;
+    location.reload();
+  });
+})();
+
 // Autosave preference (#158): Off, or a debounce interval. With #162 autosave
 // writes a local draft (not a commit); "off" disables drafting (manual save
 // only). The editor reads this on mount via readAutosave(); this wires the
