@@ -489,6 +489,53 @@ describe("pulls + branches routes", () => {
     });
   });
 
+  describe("POST /pulls dedup + clean errors (#181)", () => {
+    const dup409 = () =>
+      new Response(
+        '{"message":"pull request already exists for these targets [id: 890, issue_id: 2, head_branch: user/chao/web-edit, base_branch: main]","url":"http://jupiter:3002/api/swagger"}',
+        { status: 409 },
+      );
+
+    it("returns the existing CLOSED PR on a duplicate 409 (navigate, not error)", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(dup409()) // createPull -> Forgejo 409
+        // listPulls(state:"all") finds the closed-unmerged PR for this head->base
+        .mockResolvedValueOnce(
+          ok([pull({ number: 2, state: "closed", merged: false, head: { ref: "user/chao/web-edit", sha: "h" }, base: { ref: "main", sha: "b" } })]),
+        );
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ head: "user/chao/web-edit", base: "main", title: "x" }),
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ number: 2 });
+      // The dedup lookup must query all states, not just open ones.
+      expect(String(fetchMock.mock.calls[1][0])).toMatch(/state=all/);
+    });
+
+    it("never leaks Forgejo's raw body when no existing PR matches", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock
+        .mockResolvedValueOnce(dup409()) // createPull -> 409 (e.g. empty diff)
+        .mockResolvedValueOnce(ok([])); // listPulls: nothing matches
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ head: "user/chao/web-edit", base: "main", title: "x" }),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).not.toMatch(/jupiter|:30\d\d|api\/swagger|\{|http:\/\//);
+      expect(body.error).toMatch(/pull request/i);
+    });
+  });
+
   describe("self-review block", () => {
     it("POST /pulls/:n/reviews returns 403 when the PR is the caller's", async () => {
       const db = freshDb();

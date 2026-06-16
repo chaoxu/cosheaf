@@ -292,21 +292,22 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
     return c.json(prMeta(pr), 201);
   } catch (err) {
-    // Forgejo POST /pulls returns 409 for several reasons — empty diff,
-    // an already-open PR for this head→base, or a duplicate title — and
-    // 422 for validation. Pass the actual message through so the client
-    // can show something useful.
+    // Forgejo POST /pulls returns 409 for several reasons — empty diff, an
+    // existing PR for this head→base, or a duplicate title — and 422 for
+    // validation.
     if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
-      // The common 409 here is an already-open PR for this head→base (e.g. the
-      // editor re-clicking "Open PR"): resolve and return it so the caller
-      // navigates to the existing PR instead of seeing a duplicate-PR error
-      // (#181). Other 409s (empty diff, etc.) have no matching open PR and fall
-      // through to the passed-through Forgejo message.
+      // The common 409 is an existing PR for this head→base (e.g. the editor
+      // re-clicking "Open PR"). Forgejo blocks a duplicate against any UNMERGED
+      // PR — open OR closed — so resolve across all states and return it, letting
+      // the caller navigate to the existing PR instead of seeing a duplicate-PR
+      // error (#181). Other 409/422 (empty diff, validation) have no matching PR
+      // and get a clean message — never Forgejo's raw body, which leaks the
+      // internal forge URL.
       const base = body.base ?? "main";
-      const existing = (await fj.listPulls(owner, repo, "open").catch(() => []))
-        .find((p) => p.head.ref === body.head && p.base.ref === base);
+      const existing = (await fj.listPulls(owner, repo, "all").catch(() => []))
+        .find((p) => p.head.ref === body.head && p.base.ref === base && !p.merged);
       if (existing) return c.json(prMeta(existing), 200);
-      return c.json(...conflict(err.message));
+      return c.json(...conflict("Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid."));
     }
     throw err;
   }
