@@ -39,12 +39,12 @@
     (option.label || option.textContent || "").trim();
 
   // Option-icon glyphs for selects that opt in via data-option-icon="<name>":
-  // each option row and the trigger then show the icon before the label. Built
-  // as real SVG nodes (never an HTML string) so no sanitizer is needed; this
-  // plain public script can't import server routes/icons.ts, the same constraint
-  // as the editor's inlined pencil (#186). `branch` mirrors the server
-  // branchIcon() (lucide git-branch) so branch dropdowns match chrome icons
-  // rendered elsewhere (#187).
+  // each option row and the trigger then show the icon before the label. The
+  // canonical icon source is shared/lucide.ts (server chrome and the bundled
+  // React islands import it directly). This is a plain, non-module <script>
+  // loaded on every page, so it cannot import ESM — it is the one place a lucide
+  // path is hand-copied, kept in lockstep by the drift-guard test. Built as real
+  // SVG nodes (no innerHTML / no sanitizer). `branch` = lucide git-branch (#187).
   const SVG_NS = "http://www.w3.org/2000/svg";
   const OPTION_ICONS = {
     branch: [

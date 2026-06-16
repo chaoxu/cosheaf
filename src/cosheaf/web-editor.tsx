@@ -12,6 +12,7 @@ import type {
 } from "@chaoxu/coflat";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { urlPath } from "../../shared/url";
 import {
   MAX_ASSET_BYTES,
@@ -566,11 +567,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             disabled={busy}
             onClick={() => pathInputRef.current?.select()}
           >
-            {/* Lucide pencil (#186), inline so the island doesn't import server icons.ts. */}
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="lucide" aria-hidden="true">
-              <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
-              <path d="m15 5 4 4" />
-            </svg>
+            {/* #186: render the shared lucide source (shared/lucide.ts), the same
+                node data + markup the server chrome uses — no hand-drawn SVG. The
+                markup is hardcoded/trusted (no user input), so inserting it is safe. */}
+            <span className="web-editor-path-pencil-icon" dangerouslySetInnerHTML={{ __html: iconMarkup(lucideIcons.pencil, { size: 13 }) }} />
           </button>
           <span className="dirty-dot" hidden={!uncommitted && !pathDirty}>
             *

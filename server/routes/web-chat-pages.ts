@@ -30,6 +30,7 @@ import {
   type WebCtx,
 } from "./web-context.js";
 import { validBranchName } from "../branch-path.js";
+import { eyeIcon } from "./icons.js";
 import { emptyHtml, html, type Html, raw } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
@@ -93,7 +94,7 @@ web.get("/:owner/:repo/chat", webRoute(async (c, ctx) => {
         <div class="chat-app">
           ${chatSidebar(ctx.owner, ctx.repo, chats, null, ctx.ws.role, canStartChat)}
           <section class="chat-main">
-            <p class="chat-notice">Everyone with access to this workspace can see these chats — they're not private.</p>
+            <p class="chat-notice">${eyeIcon({ size: 14 })}Everyone with access to this workspace can see these chats — they're not private.</p>
             ${
               ctx.ws.role === "read"
                 ? html`<div class="chat-blank">Read-only access — you can't start chats here.</div>`
