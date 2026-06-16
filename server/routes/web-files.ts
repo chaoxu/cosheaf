@@ -35,7 +35,7 @@ import { type Panel, panel } from "./web-panels.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
-import { branchIcon } from "./icons.js";
+import { branchIcon, chevronIcon } from "./icons.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -671,7 +671,7 @@ function renderFileTreeLevel(
       const dirPath = prefix ? `${prefix}/${name}` : name;
       const open = activeRel === dirPath || (activeRel?.startsWith(`${dirPath}/`) ?? false);
       return html`<details class="ftree-dir"${open ? " open" : ""}>
-        <summary>${name}</summary>
+        <summary>${chevronIcon({ size: 11, class: "disclosure-chevron" })}${name}</summary>
         <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel, titles)}</div>
       </details>`;
     });

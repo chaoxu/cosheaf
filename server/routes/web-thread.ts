@@ -29,7 +29,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { composeField, renderMarkdownSurface } from "./web-markdown.js";
 import { webCommentEditorAssets } from "./web-shell.js";
-import { editIcon } from "./icons.js";
+import { chevronIcon, editIcon } from "./icons.js";
 import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { type Panel, panel, renderRegion } from "./web-panels.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
@@ -590,7 +590,7 @@ function commitGroup(commits: readonly ForgejoCommit[]): Html {
       ? html`${displayLogin([...authors][0])} pushed ${commits.length} commits`
       : html`${commits.length} commits`;
   return html`<details class="commit-group">
-    <summary><span>${label}</span> ${timeEl(commitDateMs(commits[commits.length - 1]))}</summary>
+    <summary>${chevronIcon({ size: 12, class: "disclosure-chevron" })}<span>${label}</span> ${timeEl(commitDateMs(commits[commits.length - 1]))}</summary>
     <div class="commit-list">${commits.map(compactCommitRow)}</div>
   </details>`;
 }

@@ -1,4 +1,4 @@
-import { Bell, ChevronLeft, GitBranch, Home, Pencil } from "lucide";
+import { Bell, ChevronLeft, ChevronRight, GitBranch, Home, Pencil } from "lucide";
 import { type Html, raw } from "./web-html.js";
 
 // Lucide icons, rendered once to inline SVG for the server-rendered chrome
@@ -42,6 +42,9 @@ function renderIcon(node: IconNode, opts: IconOpts = {}): Html {
 const asNode = (icon: unknown): IconNode => icon as IconNode;
 
 export const branchIcon = (opts?: IconOpts): Html => renderIcon(asNode(GitBranch), opts);
+// Disclosure chevron: points right when closed, rotated to down on [open] by CSS
+// (so one icon serves both states), replacing the ▸/▾ glyphs.
+export const chevronIcon = (opts?: IconOpts): Html => renderIcon(asNode(ChevronRight), opts);
 export const homeIcon = (opts?: IconOpts): Html => renderIcon(asNode(Home), opts);
 export const backIcon = (opts?: IconOpts): Html => renderIcon(asNode(ChevronLeft), opts);
 export const bellIcon = (opts?: IconOpts): Html => renderIcon(asNode(Bell), opts);
