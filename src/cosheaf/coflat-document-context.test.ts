@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRawRepoLink, resolveRepoLink, type CoflatDocumentPayload } from "./coflat-document-context";
+import { resolveMathMacros, resolveRawRepoLink, resolveRepoLink, type CoflatDocumentPayload } from "./coflat-document-context";
 
 const payload: CoflatDocumentPayload = {
   source: "",
@@ -8,6 +8,29 @@ const payload: CoflatDocumentPayload = {
   branch: "main",
   path: "notes/current.md",
 };
+
+describe("resolveMathMacros (repo-wide macros + per-doc override, #183)", () => {
+  it("uses the repo macros when the doc has none", () => {
+    expect(resolveMathMacros({ ...payload, mathMacros: { "\\R": "\\mathbb{R}" } })).toEqual({ "\\R": "\\mathbb{R}" });
+  });
+
+  it("lets a doc's own frontmatter math override the repo per key", () => {
+    expect(
+      resolveMathMacros({
+        ...payload,
+        mathMacros: { "\\R": "\\mathbb{R}", "\\norm": "\\lVert#1\\rVert" },
+        source: "---\nmath:\n  '\\R': '\\mathbb{Q}'\n---\n# doc\n",
+      }),
+    ).toEqual({ "\\R": "\\mathbb{Q}", "\\norm": "\\lVert#1\\rVert" });
+  });
+
+  it("works with no repo macros (doc-only) and ignores non-string frontmatter math", () => {
+    expect(resolveMathMacros({ ...payload, source: "---\nmath:\n  '\\Z': '\\mathbb{Z}'\n  bad: 5\n---\nx\n" })).toEqual({
+      "\\Z": "\\mathbb{Z}",
+    });
+    expect(resolveMathMacros(payload)).toEqual({});
+  });
+});
 
 describe("resolveRepoLink", () => {
   it("routes source line fragments to the source view", () => {

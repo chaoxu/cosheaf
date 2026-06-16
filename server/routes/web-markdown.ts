@@ -1,5 +1,6 @@
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
+import { loadRepoConfig } from "../repo-config.js";
 import type { WebCtx } from "./web-context.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
@@ -29,7 +30,11 @@ function coflatSurfaceClass(surface: MarkdownSurface): string {
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
   const { body } = parseFrontmatterYaml(source);
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
-    return coflatReaderIsland(ctx, source, opts);
+    // Repo-wide math macros (#183) live in cosheaf.yaml (#182), cached per
+    // branch; thread them into every coflat surface via the island payload so
+    // they apply to documents, issue/PR/comment bodies, and diffs alike.
+    const { mathMacros } = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, opts.branch ?? "main");
+    return coflatReaderIsland(ctx, source, opts, mathMacros);
   }
   // Forgejo's repo-scoped /markdown endpoint returns sanitized HTML; it is
   // the rendered document, not text content.
@@ -41,7 +46,7 @@ export async function renderMarkdownSurface(ctx: WebCtx, source: string, opts: S
   return markdownSurface(ctx, rendered, opts.surface ?? "document");
 }
 
-function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts): Html {
+function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, mathMacros: Record<string, string> = {}): Html {
   const payload = {
     source,
     owner: ctx.owner,
@@ -52,6 +57,9 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts): Htm
     // Doc title is opt-in per call site (file view / README), never on comment
     // threads or the rich-diff "after" pane (which also uses surface "document").
     ...(opts.renderTitle ? { renderTitle: true } : {}),
+    // Repo-wide KaTeX macros (#183); the reader merges the doc's own frontmatter
+    // math on top (doc overrides repo) when building the document context.
+    ...(Object.keys(mathMacros).length ? { mathMacros } : {}),
   };
   const className = ["cf-reader", "cf-doc-surface", "cf-doc-flow", "coflat-reader-island", coflatSurfaceClass(opts.surface ?? "document")]
     .filter(Boolean)

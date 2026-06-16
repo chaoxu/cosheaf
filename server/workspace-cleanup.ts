@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
+import { clearRepoConfig } from "./repo-config.js";
 
 // Delete every sidecar row for a workspace. Shared by the workspace-rm
 // CLI (admin teardown) and the repository-deleted webhook handler
@@ -12,6 +13,7 @@ export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: 
   db.prepare("DELETE FROM xref_targets WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM xref_target_duplicates WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM page_tags WHERE workspace_slug = ?").run(workspaceSlug);
+  clearRepoConfig(db, workspaceSlug);
 }
 
 // Forgejo.deleteBranch with 404-tolerance — used in PR-merge cleanup and the

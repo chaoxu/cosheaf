@@ -21,6 +21,10 @@ export interface CoflatDocumentPayload {
    * editor's rich-mode title widget. Set only for the document surface (not
    * comments/diffs). */
   renderTitle?: boolean;
+  /** Repo-wide KaTeX macros from cosheaf.yaml `math:` (#182/#183), resolved
+   * server-side per branch. The document's own frontmatter `math:` overrides
+   * these per key when the context is built. */
+  mathMacros?: Record<string, string>;
 }
 
 export interface CoflatLocalRefs {
@@ -100,8 +104,24 @@ export function coflatLinkResolver(payload: CoflatDocumentPayload): DocumentCont
   };
 }
 
+// Repo-wide macros (payload.mathMacros) as the base, the document's own
+// frontmatter `math:` overriding per key. Coflat applies ctx.mathMacros to every
+// math render path, so passing the pre-merged result here makes repo macros work
+// on every surface (incl. comments) while a doc can still redefine one (#183).
+export function resolveMathMacros(payload: CoflatDocumentPayload): Record<string, string> {
+  const docMath = parseFrontmatterYaml(payload.source).frontmatter.math;
+  const doc: Record<string, string> = {};
+  if (docMath && typeof docMath === "object" && !Array.isArray(docMath)) {
+    for (const [k, v] of Object.entries(docMath as Record<string, unknown>)) {
+      if (typeof v === "string") doc[k] = v;
+    }
+  }
+  return { ...(payload.mathMacros ?? {}), ...doc };
+}
+
 export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatLocalRefs): DocumentContext {
   const citations = refs.citations;
+  const mathMacros = resolveMathMacros(payload);
   return {
     linkResolver: coflatLinkResolver(payload),
     refResolver: {
@@ -127,6 +147,7 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
     // own catalog (renderToHtml resolveReferences), with refResolver as the
     // fallback for cross-file workspace targets.
     ...(citations ? { citationFormatter: citations.formatter, citationKeys: citations.keys } : {}),
+    ...(Object.keys(mathMacros).length ? { mathMacros } : {}),
   };
 }
 

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
+import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
 import { deletePage, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -255,6 +256,10 @@ files.put("/:owner/:repo/file", async (c) => {
   // title display is therefore scoped to the main file view (#132).
   plan?.commit();
   if (isRename) deletePage(db, ws.slug, previousRel as string);
+  // #182: a cosheaf.yaml write through the typed route busts its cached config
+  // for this branch so the change is read-after-write consistent (the webhook
+  // only reconciles main; external non-main pushes reconcile on reindex).
+  if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
   invalidateBranchTree(owner, repo, branch);
   if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
   hub.publish(ws.slug, { type: "change", path: rel });
@@ -442,6 +447,7 @@ files.delete("/:owner/:repo/file", async (c) => {
     sha: meta.sha,
     message: `delete ${rel}`,
   });
+  if (rel === REPO_CONFIG_PATH) bustRepoConfig(c.get("db"), c.get("workspace").slug, branch);
   invalidateBranchTree(owner, repo, branch);
   return c.json({ ok: true, branch });
 });

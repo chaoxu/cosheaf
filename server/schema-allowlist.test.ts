@@ -15,6 +15,9 @@ const ALLOWED_TABLES = new Set([
   "xref_targets",
   "xref_target_duplicates",
   "page_tags",
+  // Parsed cosheaf.yaml cached per branch (#182). Derived/rebuildable from the
+  // authoritative file on Forgejo; busted by webhook, cleared by reindex.
+  "repo_config",
   "notes_fts",
   // FTS5 virtual table emits configuration rows in sqlite_master:
   "notes_fts_data",

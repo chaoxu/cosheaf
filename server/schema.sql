@@ -106,6 +106,18 @@ CREATE TABLE IF NOT EXISTS page_tags (
   PRIMARY KEY (workspace_slug, cosheaf_id, tag)
 );
 
+-- Parsed cosheaf.yaml cached per branch (#182). Derived/rebuildable from
+-- Forgejo (the file is authoritative); the webhook busts a row on a cosheaf.yaml
+-- push and `workspace reindex` clears them, so the next render reloads. NOT
+-- durable knowledge.
+CREATE TABLE IF NOT EXISTS repo_config (
+  workspace_slug TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  config_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace_slug, branch)
+);
+
 CREATE TABLE IF NOT EXISTS webhook_log (
   delivery_id TEXT PRIMARY KEY,
   delivered_at INTEGER NOT NULL,

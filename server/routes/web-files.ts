@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { type FileKind, fileKindForPath } from "../../shared/file-kind.js";
+import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
@@ -565,6 +566,9 @@ async function writeFile(
   if (isRename && (isMarkdown || (previousRel as string).endsWith(".md"))) {
     deletePage(ctx.db, ctx.ws.slug, previousRel as string);
   }
+  // #182: a cosheaf.yaml edit through the editor busts its cached config for
+  // this branch (read-after-write, same contract as the index update above).
+  if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, branch);
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }
 

@@ -4,6 +4,7 @@ import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
 import { deletePage, indexPage } from "./indexer.js";
+import { clearRepoConfig } from "./repo-config.js";
 import type { User } from "./users.js";
 import { workspaceSlug } from "../shared/conventions.js";
 import {
@@ -321,6 +322,9 @@ export async function reindexWorkspaceFromForgejo(
   workspace: { owner: string; repo: string; slug: string; defaultMdFormat?: DocumentFormatId },
 ): Promise<number> {
   const seen = new Set<string>();
+  // #182: drop cached cosheaf.yaml config so it rebuilds from Forgejo on next
+  // render (the file is authoritative; the sidecar only caches it).
+  clearRepoConfig(db, workspace.slug);
   const tree = await forgejo.getTree(workspace.owner, workspace.repo, "main", true);
   const mdPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))

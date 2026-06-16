@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { deletePage, indexPage } from "../indexer.js";
+import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
 import { notificationChannel, parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
 import { documentFormatFromTopics } from "../../shared/document-format.js";
@@ -140,6 +141,11 @@ webhooks.post("/forgejo", async (c) => {
         }
         for (const path of removed) {
           if (path.endsWith(".md")) deletePage(db, ws.slug, path);
+        }
+        // #182: a cosheaf.yaml change busts the cached repo config for main; the
+        // next render reloads + re-caches it from the authoritative file.
+        if (touched.has(REPO_CONFIG_PATH) || removed.has(REPO_CONFIG_PATH)) {
+          bustRepoConfig(db, ws.slug, "main");
         }
         const mdPaths = [...touched].filter((p) => p.endsWith(".md"));
         // Parallel fetch — each Forgejo getRawFile is independent and the
