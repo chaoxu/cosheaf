@@ -34,13 +34,13 @@ describe("server diff line helpers", () => {
   it("renders source diff rows without git metadata", () => {
     expect(patchRows(patch).map((row) => [row.kind, row.sign, row.text])).toEqual([
       ["hunk", "@", "@ -1,3 +1,4 @@"],
-      ["ctx", " ", " context-one"],
+      ["ctx", " ", "context-one"],
       ["del", "-", "old-two"],
       ["add", "+", "new-two"],
       ["add", "+", "new-three"],
-      ["ctx", " ", " context-three"],
+      ["ctx", " ", "context-three"],
       ["hunk", "@", "@ -10,2 +11,2 @@"],
-      ["ctx", " ", " later-context"],
+      ["ctx", " ", "later-context"],
       ["del", "-", "old-later"],
       ["add", "+", "new-later"],
     ]);

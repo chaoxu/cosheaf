@@ -369,6 +369,11 @@ web.post("/:owner/:repo/pulls/:number/comments", webRouteForWrite(async (c, ctx)
 }));
 
 web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) => {
+  // Merge is irreversible: re-check admin against Forgejo (bypassing the 30s role
+  // cache), mirroring requireAdminFresh on the typed route and the repo-delete
+  // route — so a just-demoted admin can't merge in the stale window.
+  const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const prHref = repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`);
@@ -384,21 +389,26 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
     // Never surface Forgejo's raw body — it carries the internal backend URL.
     console.error(`[${c.get("requestId") ?? ""}] web merge ${ctx.owner}/${ctx.repo}#${pull.number} failed (${err.status})`);
     const blocked = err.status === 405 || err.status === 409;
-    // A real content conflict (mergeable === false) isn't an approvals problem and
-    // "Merge anyway" won't fix it — say so distinctly (#7).
+    // Re-read the PR — the pre-merge snapshot's mergeable can be stale/null. A real
+    // content conflict (mergeable === false) isn't an approvals problem and "Merge
+    // anyway" won't fix it; a still-null mergeable is transient, not approvals (#7).
+    const fresh2 = blocked ? await ctx.fj.getPull(ctx.owner, ctx.repo, pull.number).catch(() => null) : null;
     const msg = !blocked
       ? "The merge service is unavailable — try again in a moment."
-      : pull.mergeable === false
+      : fresh2?.mergeable === false
         ? "This pull request has conflicts with main that must be resolved before it can merge."
-        : force
-          ? "Merge still failed — try again in a moment."
-          : "This pull request needs its required approvals. Use “Merge anyway” to bypass them.";
+        : fresh2?.mergeable == null
+          ? "Mergeability is still being computed — try again in a moment."
+          : force
+            ? "Merge still failed — try again in a moment."
+            : "This pull request needs its required approvals. Use “Merge anyway” to bypass them.";
     return redirect(`${prHref}?toast=${encodeURIComponent(msg)}&toastKind=error`);
   }
   if (pull.head.ref && pull.head.ref !== "main") {
     await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, pull.head.ref);
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
+  c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "merged" });
   return redirect(`${prHref}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`);
 }));
 
@@ -417,7 +427,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && file !== null && fileKindForPath(file.path) === "markdown";
   const mode = parseDiffMode(c.req.query("mode"), richOk);
   const shape = parseDiffShape(c.req.query("shape"), mode);
-  const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file.path) : null;
+  const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file) : null;
   const fileComments = file ? mapLineComments(file, allComments) : [];
   return htmlResponse(
     repoPageShell(
@@ -488,6 +498,7 @@ async function pullFiles(ctx: WebCtx, number: number) {
   const sections = splitDiffByFile(unified);
   return metas.map((meta) => ({
     path: meta.filename,
+    previous_path: meta.previous_filename,
     status: meta.status,
     additions: meta.additions,
     deletions: meta.deletions,

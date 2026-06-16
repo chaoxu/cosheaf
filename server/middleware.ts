@@ -40,25 +40,15 @@ function bearerToken(authHeader?: string): string | null {
 
 export const AUTH_COOKIE = "cosheaf_pat";
 
-// EventSource can't set headers; the SSE route accepts the PAT via a
-// `?pat=` query param as a narrowly-scoped fallback. The PAT is the
-// credential either way — Forgejo validates it the same way.
-function bearerFromQuery(c: Context<AppEnv>): string | null {
-  const v = c.req.query("pat")?.trim();
-  return v && v.length > 0 ? v : null;
-}
-
 // PAT-only authentication. API clients and agents send the PAT as
-// `Authorization: Bearer <pat>`; server-rendered pages receive the same PAT
-// through an HttpOnly cookie. There is no cosheaf-side user table or session
-// record: the PAT is the credential.
+// `Authorization: Bearer <pat>`; server-rendered pages (and same-origin
+// EventSource, which sends the cookie) receive the same PAT through an HttpOnly
+// cookie. There is no cosheaf-side user table or session record: the PAT is the
+// credential. No `?pat=` query path — keeping the credential out of URLs/logs;
+// re-add it scoped to a specific SSE handler if an off-cookie client ever needs it.
 export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | null> {
   const config = c.get("config");
-  const bearer =
-    bearerToken(c.req.header("authorization")) ??
-    bearerFromQuery(c) ??
-    getCookie(c, AUTH_COOKIE) ??
-    null;
+  const bearer = bearerToken(c.req.header("authorization")) ?? getCookie(c, AUTH_COOKIE) ?? null;
   if (!bearer) return null;
   let username = BEARER_CACHE.get(bearer);
   if (!username) {

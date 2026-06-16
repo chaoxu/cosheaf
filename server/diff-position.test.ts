@@ -71,11 +71,11 @@ describe("resolveLineComment (position/original_position are absolute file lines
     });
   });
 
-  it("maps a base-side / outdated comment from original_position when position is 0", () => {
+  it("maps a base-side comment from original_position when position is 0 (not outdated — no freshness signal)", () => {
     expect(resolveLineComment({ position: 0, original_position: 3 }, "modified")).toEqual({
       line: 3,
       side: "base",
-      outdated: true,
+      outdated: false,
     });
   });
 

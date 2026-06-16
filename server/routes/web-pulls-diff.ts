@@ -20,6 +20,7 @@ export type DiffShape = "unified" | "split" | "after";
 
 export interface PrFileView {
   path: string;
+  previous_path?: string;
   status: string;
   additions: number;
   deletions: number;
@@ -55,10 +56,11 @@ export function parseDiffShape(value: string | undefined, mode: DiffMode): DiffS
   return mode === "rich" && shape === "unified" ? "after" : shape;
 }
 
-export async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, filePath: string): Promise<PrFileVersions> {
-  const read = (ref: string) =>
-    ctx.fj.getRawFile(ctx.owner, ctx.repo, ref, filePath).catch(onForgejo404(""));
-  const [base, head] = await Promise.all([read(pull.base.ref), read(pull.head.ref)]);
+export async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, file: { path: string; previous_path?: string }): Promise<PrFileVersions> {
+  const read = (ref: string, p: string) => ctx.fj.getRawFile(ctx.owner, ctx.repo, ref, p).catch(onForgejo404(""));
+  // A renamed file lives under its OLD name on the base ref; reading the new name
+  // there would 404 → empty Base → wrong "new file" rendering (it isn't new).
+  const [base, head] = await Promise.all([read(pull.base.ref, file.previous_path ?? file.path), read(pull.head.ref, file.path)]);
   return { base, head };
 }
 
@@ -74,7 +76,7 @@ export async function renderPrFileView(
   if (mode === "source" && shape === "unified") {
     return html`<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
   }
-  const nextVersions = versions ?? (await prFileVersions(ctx, pull, file.path));
+  const nextVersions = versions ?? (await prFileVersions(ctx, pull, file));
   const changed = changedLines(file.patch);
   const commentable = commentableLines(file.patch);
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
@@ -103,10 +105,13 @@ export async function renderPrFileView(
       <section><h3>Head</h3>${head}</section>
     </div>`;
   }
+  // Rich "after": mark the changed head lines (surface "diff" + markedLines) like
+  // the split head side, so changed blocks are highlighted and the change stepper
+  // has hunks to navigate — not a plain unmarked document.
   const head =
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
-      : await renderMarkdownSurface(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path, surface: "document" });
+      : await renderMarkdownSurface(ctx, nextVersions.head, { branch: pull.head.ref, documentPath: file.path, surface: "diff", markedLines: [...changed.added] });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
@@ -135,12 +140,16 @@ export function prFilesHref(ctx: WebCtx, prNumber: number, filePath: string, mod
 // A side with no content — a new file's Base, a deleted file's Head — is shown
 // with an explicit notice rather than a blank box so it reads as intentional.
 function diffSideEmptyNotice(status: string, side: Side): Html {
+  // Key the message on the file status, not the side, so a renamed/modified file
+  // with a momentarily-empty side is never mislabeled "New file" (#renamed).
   const text =
-    status === "added" || (side === "base" && status !== "deleted")
+    status === "added"
       ? "New file — no previous version."
-      : status === "deleted" || side === "head"
+      : status === "deleted"
         ? "File deleted — no version on this side."
-        : "No content on this side.";
+        : side === "base"
+          ? "No content on the base side."
+          : "No content on this side.";
   return html`<div class="diff-side-empty">${text}</div>`;
 }
 

@@ -35,6 +35,11 @@
   }
   window.cosheafToast = toast;
 
+  // Create the aria-live host up front, empty, so screen readers monitor it
+  // before any toast text is inserted (a region populated in the same paint as
+  // it's created may not be announced).
+  ensureHost();
+
   // Flash carried across a redirect (e.g. the editor's Merge/Open-PR navigation).
   const params = new URLSearchParams(location.search);
   const flash = params.get("toast");

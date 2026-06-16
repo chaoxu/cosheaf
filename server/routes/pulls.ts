@@ -304,8 +304,13 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
       // and get a clean message — never Forgejo's raw body, which leaks the
       // internal forge URL.
       const base = body.base ?? "main";
-      const existing = (await fj.listPulls(owner, repo, "all").catch(() => []))
-        .find((p) => p.head.ref === body.head && p.base.ref === base && !p.merged);
+      // Don't silently swallow a dedup-lookup failure into the generic message —
+      // log it (with the request id) so a real listPulls error is debuggable.
+      const all = await fj.listPulls(owner, repo, "all").catch((e: unknown) => {
+        console.error(`[${c.get("requestId") ?? ""}] dedup listPulls failed for ${owner}/${repo}: ${e instanceof Error ? e.message : String(e)}`);
+        return [];
+      });
+      const existing = all.find((p) => p.head.ref === body.head && p.base.ref === base && !p.merged);
       if (existing) return c.json(prMeta(existing), 200);
       return c.json(...conflict("Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid."));
     }
@@ -376,7 +381,8 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
     return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);
   }
   const pull = await fj.getPull(owner, repo, n);
-  if (pull) await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
+  // Never delete main even if it was somehow the head (mirrors the web route).
+  if (pull && pull.head.ref && pull.head.ref !== "main") await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
   // Invalidate eagerly so the post-merge tree fetch sees the new main
   // commit before the push webhook lands (in tests/dev the webhook may
   // never fire, leaving stale entries up to the 5min TTL otherwise).
@@ -495,6 +501,7 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
+  if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
   const payload = (await c.req.json().catch(() => ({}))) as { event?: string; body?: string | null };
   const event = payload.event as keyof typeof EVENT_MAP | undefined;
@@ -642,6 +649,7 @@ pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
   if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot comment on your own pull request"));
+  if (pull.state === "closed") return c.json(...forbidden("cannot comment on a closed pull request"));
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
   if ("error" in pos) return c.json(...bad(pos.error));
 

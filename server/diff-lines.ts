@@ -46,7 +46,9 @@ export function patchRows(patch: string): PatchRow[] {
       if (change.content.startsWith("\\")) continue;
       if (change.type === "add") rows.push({ kind: "add", sign: "+", text: change.content.slice(1) });
       else if (change.type === "del") rows.push({ kind: "del", sign: "-", text: change.content.slice(1) });
-      else rows.push({ kind: "ctx", sign: change.content[0] ?? "", text: change.content });
+      // Strip the leading marker like add/del do, so context lines aren't
+      // indented one space more than changed lines.
+      else rows.push({ kind: "ctx", sign: " ", text: change.content.slice(1) });
     }
   }
   return rows;

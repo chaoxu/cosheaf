@@ -46,6 +46,12 @@ function parsePaths(slice: string[]): { path: string; previous_path?: string } {
   }
   if (aPath && aPath !== "/dev/null") return { path: aPath };
 
+  // For a pure rename/copy (no ---/+++), git emits unambiguous `rename from` /
+  // `rename to` lines — prefer them over the ambiguous header split.
+  const renameFrom = slice.find((l) => l.startsWith("rename from ") || l.startsWith("copy from "))?.replace(/^(rename|copy) from /, "");
+  const renameTo = slice.find((l) => l.startsWith("rename to ") || l.startsWith("copy to "))?.replace(/^(rename|copy) to /, "");
+  if (renameTo) return renameFrom && renameFrom !== renameTo ? { path: renameTo, previous_path: renameFrom } : { path: renameTo };
+
   // Fallback: parse the `diff --git a/X b/Y` header itself (e.g. for binary
   // diffs with no ---/+++ lines). Handle git's quoted form first.
   const header = slice[0];

@@ -248,7 +248,10 @@ export function forbiddenPage(user: string): Response {
 
 export function safeWebRedirect(raw: string | null): string | null {
   if (!raw) return null;
-  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
+  // Same-origin path only: a single leading slash followed by a char that is
+  // neither / nor \ — browsers treat "\" as "/" in the authority, so "/\evil.com"
+  // is an open redirect just like "//evil.com".
+  if (!/^\/($|[^/\\])/.test(raw)) return null;
   return raw;
 }
 

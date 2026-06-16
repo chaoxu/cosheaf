@@ -610,8 +610,8 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(200);
       const { comments } = (await res.json()) as { comments: Array<{ id: number; line: number | null; side: string; outdated: boolean; author_username: string }> };
       expect(comments.find((c) => c.id === 1)).toMatchObject({ line: 1, side: "head", outdated: false, author_username: "bob" });
-      // position 0/null with a base anchor -> base side at original_position, outdated
-      expect(comments.find((c) => c.id === 2)).toMatchObject({ line: 1, side: "base", outdated: true });
+      // position 0/null with a base anchor -> base side at original_position (no freshness signal -> not outdated)
+      expect(comments.find((c) => c.id === 2)).toMatchObject({ line: 1, side: "base", outdated: false });
       // no anchor resolves -> line null, side falls back to base for a deleted file
       expect(comments.find((c) => c.id === 3)).toMatchObject({ line: null, side: "base", outdated: true });
     });

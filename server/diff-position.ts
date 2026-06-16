@@ -22,13 +22,18 @@ function changeLines(c: ParsedChange): { oldLine: number | null; newLine: number
   return { oldLine: c.ln1 ?? null, newLine: c.ln2 ?? null };
 }
 
-// Resolve a Forgejo review comment to its (line, side, outdated) display
-// coordinates. `position > 0` → the comment is on the head side at that file
-// line. Otherwise it is anchored to the base side at `original_position`; a
-// comment with no live head anchor (`position === 0`) is shown as outdated.
-// `status` only seeds the side when neither anchor is present (a wholly-removed
-// file). Forgejo serializes these as plain integers (0, never null) but we accept
-// null defensively.
+// Resolve a Forgejo review comment to its (line, side) display coordinates.
+// `position > 0` → the comment is on the head side at that file line; otherwise
+// it is anchored to the base side at `original_position` (a base/old-side line,
+// e.g. a comment on a removed line — which is a current review of that removal,
+// not stale). `status` only seeds the side when neither anchor is present.
+//
+// `outdated` can only be true when the comment resolves to no line at all:
+// Forgejo's API serializes no freshness signal (the `Invalidated` column is
+// never sent and `position`/`original_position` are absolute file lines that
+// don't change on invalidation), so we must NOT infer staleness from which side
+// a comment is on. Forgejo serializes these as plain integers (0, never null) but
+// we accept null defensively.
 export function resolveLineComment(
   comment: { position: number | null; original_position: number | null },
   status: string,
@@ -36,7 +41,7 @@ export function resolveLineComment(
   const position = comment.position ?? 0;
   const original = comment.original_position ?? 0;
   if (position > 0) return { line: position, side: "head", outdated: false };
-  if (original > 0) return { line: original, side: "base", outdated: true };
+  if (original > 0) return { line: original, side: "base", outdated: false };
   return { line: null, side: status === "deleted" ? "base" : "head", outdated: true };
 }
 
