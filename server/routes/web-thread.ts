@@ -29,6 +29,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
 import { composeField, renderMarkdownSurface } from "./web-markdown.js";
 import { webCommentEditorAssets } from "./web-shell.js";
+import { editIcon } from "./icons.js";
 import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { type Panel, panel, renderRegion } from "./web-panels.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
@@ -524,7 +525,7 @@ function commentActions(opts: { ctx: WebCtx; testId: string; formId: string; edi
   // endpoints: the Delete button lives in the edit form's row but targets the
   // separate (empty) delete form via the HTML `form=` attribute.
   return html`<details class="comment-actions build-only" data-testid="${opts.testId}">
-    <summary title="Edit or delete" aria-label="Edit or delete comment"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg></summary>
+    <summary title="Edit or delete" aria-label="Edit or delete comment">${editIcon({ size: 13 })}</summary>
     <form method="post" action="${opts.editAction}">
       ${composeField(opts.ctx, { value: opts.body, required: true })}
       <div class="comment-action-row">

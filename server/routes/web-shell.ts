@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { avatar } from "./avatar.js";
+import { bellIcon, homeIcon } from "./icons.js";
 import { DEFAULT_LOCALE, localeDir, type LocaleId, makeT, type T } from "../../shared/i18n/index.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
@@ -12,7 +13,7 @@ const enT: T = makeT(DEFAULT_LOCALE);
 // A breadcrumb segment. `wsTitle` carries the workspace's Read-mode title
 // alongside the slug `label`; `cls` marks the owner segment so Read mode can
 // hide it and surface the title instead (#147). Both are unset for plain crumbs.
-export type StatusCrumb = { label: string; href?: string; cls?: string; wsTitle?: string };
+export type StatusCrumb = { label: string; href?: string; cls?: string; wsTitle?: string; icon?: Html };
 
 export function pageShell(opts: {
   title: string;
@@ -104,7 +105,7 @@ export function sidebarIdentity(user: string | undefined, notificationsActive = 
 // renders stay cheap.
 export function notificationsBell(active = false, t: T = enT): Html {
   return html`<a class="notif-bell${active ? " active" : ""}" href="/account/notifications" aria-label="${t("nav.notifications")}" title="${t("nav.notifications")}">
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 1.6a3.1 3.1 0 0 0-3.1 3.1c0 2.4-.55 3.55-1.15 4.25-.32.37-.06.95.42.95h7.66c.48 0 .74-.58.42-.95-.6-.7-1.15-1.85-1.15-4.25A3.1 3.1 0 0 0 8 1.6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6.6 12.4a1.45 1.45 0 0 0 2.8 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    ${bellIcon({ size: 15 })}
     <span class="notif-badge" data-notif-badge hidden></span>
   </a>`;
 }
@@ -112,7 +113,7 @@ export function notificationsBell(active = false, t: T = enT): Html {
 function appStatusbar(path: StatusCrumb[] | undefined, t: T = enT): Html {
   const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
-    html`<a class="status-home" href="/" aria-label="${t("nav.home")}" title="${t("nav.home")}">⌂</a>`,
+    html`<a class="status-home" href="/" aria-label="${t("nav.home")}" title="${t("nav.home")}">${homeIcon({ size: 14 })}</a>`,
     ...(path ?? []).map(renderCrumb),
   ].flatMap((crumb, i) => (i === 0 ? [crumb] : [sep, crumb]));
   return html`<footer class="app-statusbar"><span class="status-path">${crumbs}<span class="status-rename-slot"></span></span><div class="status-editor-slot"></div></footer>`;
@@ -121,10 +122,17 @@ function appStatusbar(path: StatusCrumb[] | undefined, t: T = enT): Html {
 function renderCrumb(segment: StatusCrumb): Html {
   // A workspace crumb carries both the slug label and the Read-mode title; CSS
   // swaps which is shown by mode. Plain crumbs render just their label.
-  const inner = segment.wsTitle
+  const label = segment.wsTitle
     ? html`<span class="status-slug">${segment.label}</span><span class="status-title">${segment.wsTitle}</span>`
     : segment.label;
-  const cls = segment.cls ? html` class="${segment.cls}"` : emptyHtml;
+  // An optional leading icon (e.g. the branch crumb in the editor) marks what
+  // the segment is; CSS aligns it inline with the text.
+  const inner = segment.icon ? html`${segment.icon}${label}` : label;
+  const cls = segment.icon
+    ? html` class="branch-ref${segment.cls ? ` ${segment.cls}` : ""}"`
+    : segment.cls
+      ? html` class="${segment.cls}"`
+      : emptyHtml;
   return segment.href
     ? html`<a${cls} href="${segment.href}">${inner}</a>`
     : html`<span${cls}>${inner}</span>`;

@@ -30,6 +30,7 @@ import {
   type WebListState,
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
+import { branchIcon } from "./icons.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 import { composeField } from "./web-markdown.js";
 import { webCommentEditorAssets } from "./web-shell.js";
@@ -191,7 +192,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>by ${displayLogin(pull.user?.login)}${pull.base.ref !== "main" ? html` · into <code>${pull.base.ref}</code>` : ""}</p>
+            <p>by ${displayLogin(pull.user?.login)}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
@@ -596,7 +597,7 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
     return html`<a class="list-row pull-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
       <span class="list-row-main">
         <span class="list-row-title"><span class="state ${state}">${state}</span><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></span>
-        ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill">→${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
+        ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
       </span>
       ${listRowSide(pull.user, pull.created_at, pull.comments)}
     </a>`;

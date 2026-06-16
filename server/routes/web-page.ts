@@ -5,6 +5,7 @@ import { emptyHtml, html, type Html, joinHtml, raw } from "./web-html.js";
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import { type Panel, renderRegion } from "./web-panels.js";
 import { modeToggle, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
+import { backIcon } from "./icons.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
 
@@ -117,7 +118,7 @@ export function repoPage(opts: {
       ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null, t)}
       ${modeToggle(t)}
       <nav class="sidebar-topnav">
-        <a href="/">‹ ${t("nav.workspaces")}</a>
+        <a href="/">${backIcon({ size: 14 })} ${t("nav.workspaces")}</a>
       </nav>
       <div class="sidebar-workspace">
         <a href="${repoHref(opts.owner, opts.repo)}">${workspaceChipIdent(opts.owner, opts.repo, opts.wsTitle)}</a>

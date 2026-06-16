@@ -35,6 +35,7 @@ import { type Panel, panel } from "./web-panels.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
+import { branchIcon } from "./icons.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -265,7 +266,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
           <noscript>${editFallbackForm(ctx, { branch, rel, content, cancelHref })}</noscript>
         </section>
       ` : textEditPage(ctx, branch, rel, content, treeBranch), {
-        statusExtra: [{ label: branch }],
+        statusExtra: [{ label: branch, icon: branchIcon({ size: 12 }) }],
         statusOmitTab: true,
         sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles)],
       }),
@@ -594,7 +595,7 @@ function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: 
   return html`<div class="list">${branches.map((branch) => {
     const hasOpenPr = openHeads.has(branch.name);
     return html`<div class="list-row branch-row">
-        <a class="inline-link" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}`}"><strong>${branch.name}</strong></a>
+        <a class="inline-link branch-ref" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}`}">${branchIcon({ size: 13 })}<strong>${branch.name}</strong></a>
         <span>${branch.commit.id.slice(0, 10)}${hasOpenPr ? html` <span class="meta-pill">open PR</span>` : ""}</span>
         ${
           ctx.ws.role === "read" || branch.name === "main" || hasOpenPr
@@ -699,7 +700,7 @@ function renderFileTreeLevel(
 function branchSwitcher(owner: string, repo: string, branch: string, branches: readonly ForgejoBranch[]): Html {
   const names = branches.map((b) => b.name);
   if (!names.includes(branch)) names.unshift(branch);
-  const icon = html`<span class="ftree-branch-icon" aria-hidden="true">⎇</span>`;
+  const icon = html`<span class="ftree-branch-icon">${branchIcon({ size: 13 })}</span>`;
   if (names.length <= 1) {
     return html`<span class="ftree-branch">${icon}<span class="ftree-branch-name">${branch}</span></span>`;
   }
