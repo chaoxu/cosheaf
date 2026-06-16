@@ -45,6 +45,7 @@ export function pageShell(opts: {
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
+        <script src="/cosheaf-toast.js" defer></script>
         ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script><script src="/cosheaf-mode.js" defer></script>`) : ""}
       </head>
       <body data-cosheaf-user="${opts.user ?? ""}" data-cosheaf-locale="${locale}">

@@ -52,6 +52,29 @@ function nowTime(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// Fire an app-wide toast (cosheaf-toast.js, loaded by the page shell). A no-op
+// if the script hasn't loaded; toasts are for discrete events (merge/PR/errors/
+// upload), never for per-save feedback.
+function toast(message: string, kind: "info" | "success" | "error" = "info"): void {
+  (window as unknown as { cosheafToast?: (m: string, o?: { kind?: string }) => void }).cosheafToast?.(message, { kind });
+}
+
+// Persistent, glance-able save-state label + style class (#184), priority-ordered:
+// in-flight > error > unsaved > last saved > idle. Discrete events (merge/PR/
+// upload) go to toasts instead, so constant saves don't spam.
+function saveState(args: {
+  busy: boolean;
+  saveError: string | null;
+  dirty: boolean;
+  lastSavedAt: string | null;
+}): { text: string; cls: string } {
+  if (args.busy) return { text: "Saving…", cls: "saving" };
+  if (args.saveError) return { text: "Save failed", cls: "error" };
+  if (args.dirty) return { text: "Unsaved changes", cls: "dirty" };
+  if (args.lastSavedAt) return { text: `Saved · ${args.lastSavedAt}`, cls: "saved" };
+  return { text: "", cls: "idle" };
+}
+
 function readConfig(): { config: EditorConfig; content: string } {
   const mount = document.getElementById("web-editor-root");
   const payload = document.getElementById("web-editor-content");
@@ -84,7 +107,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // server's check and flips true once a save creates the branch — drives the
   // Cancel target so it never links to a not-yet-created branch (#121).
   const [branchExists, setBranchExists] = useState(config.branchExists);
-  const [status, setStatus] = useState<string | null>(null);
+  // Persistent save-state (#184): the inline indicator shows Unsaved/Saving/Saved
+  // from these + busy/uncommitted/pathDirty. Discrete events (merge, PR, upload,
+  // errors) go to toasts instead, so constant saves don't spam.
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // Uncommitted-to-Forgejo changes (#162). Distinct from a local draft being
   // saved: autosave persists a draft without committing, so the editor stays
   // "uncommitted" until an explicit Save/Cmd-S. Drives the dirty dot, the Save
@@ -264,24 +291,26 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     () => ({
       onSaveStart: () => {
         setBusy(true);
-        setStatus(null);
+        setSaveError(null);
       },
       onSaveSucceeded: () => {
         setBusy(false);
-        if (lastReasonRef.current !== "autosave") setStatus(`committed · ${nowTime()}`);
-        // Autosave off still fires a Coflat tick that the handler no-ops; don't
-        // claim a "draft saved" when nothing was persisted (#158).
-        else if (autosave.enabled) setStatus(`draft saved · ${nowTime()}`);
+        // A real commit updates the persistent "Saved · HH:MM" state; an autosave
+        // tick (local draft, or a no-op when autosave is off) leaves the state as
+        // "Unsaved changes" since the branch still lags (#158/#162).
+        if (lastReasonRef.current !== "autosave") setLastSavedAt(nowTime());
       },
       onSaveFailed: (event) => {
         setBusy(false);
-        setStatus(`save failed: ${event.error}`);
+        setSaveError(event.error);
+        toast(`Save failed: ${event.error}`, "error");
       },
-      onAssetUploading: (event) => setStatus(`uploading ${event.file.name}...`),
-      onAssetUploadSucceeded: (event) => setStatus(`uploaded ${event.path}`),
-      onAssetUploadFailed: (event) => setStatus(`upload failed: ${event.error}`),
+      // Asset upload is a discrete action → toast, not the save indicator.
+      onAssetUploading: () => {},
+      onAssetUploadSucceeded: (event) => toast(`Uploaded ${event.path}`),
+      onAssetUploadFailed: (event) => toast(`Upload failed: ${event.error}`, "error"),
     }),
-    [autosave.enabled],
+    [],
   );
 
   const assetUploader = useMemo<EditorAssetUploader>(
@@ -337,11 +366,15 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     // the current content directly to carry the rename through.
     if (!pathDirty) return;
     setBusy(true);
-    setStatus(null);
+    setSaveError(null);
     lastReasonRef.current = "manual";
     void commitSource(content).then((result) => {
       setBusy(false);
-      setStatus(result.ok ? `committed · ${nowTime()}` : `save failed: ${result.error}`);
+      if (result.ok) setLastSavedAt(nowTime());
+      else {
+        setSaveError(result.error);
+        toast(`Save failed: ${result.error}`, "error");
+      }
     });
   }, [busy, content, uncommitted, pathDirty, commitSource]);
 
@@ -349,7 +382,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     if (!pendingDraft) return;
     setContent(pendingDraft.source);
     setUncommitted(true);
-    setStatus(`restored local draft · ${nowTime()}`);
+    setSaveError(null);
+    toast("Restored local draft");
     setPendingDraft(null);
   }, [pendingDraft]);
 
@@ -361,11 +395,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {
       if (!branch || branch === "main") {
-        setStatus("nothing on this branch to merge or review");
+        toast("Nothing on this branch to merge or review");
         return;
       }
       setBusy(true);
-      setStatus(null);
+      setSaveError(null);
       try {
         // #179: publish what's in the editor, not the last commit. Commit any
         // pending content (or a pending rename) first — this also creates the
@@ -379,7 +413,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         if (editor && (uncommitted || pathDirty)) {
           const committed = await commitSource(editor.getDoc());
           if (!committed.ok) {
-            setStatus(`save failed: ${committed.error}`);
+            setSaveError(committed.error);
+            toast(`Save failed: ${committed.error}`, "error");
             return;
           }
         }
@@ -394,15 +429,15 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           // A repo that requires approvals blocks here ("needs approval")
           // rather than the editor silently overriding its own review gate.
           await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash" });
-          setStatus("merged to main");
-          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(path)}`;
+          // #184: carry the confirmation across the redirect as a one-shot toast.
+          window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(path)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
           return;
         }
         // #181: openPull returns the existing PR when one is already open for
         // this branch, so this navigates to it instead of erroring on a dup.
-        window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}`;
+        window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}?toast=${encodeURIComponent(`PR #${pr.number} opened`)}&toastKind=success`;
       } catch (err) {
-        setStatus(err instanceof ApiError ? err.message : "Open pull request failed");
+        toast(err instanceof ApiError ? err.message : "Open pull request failed", "error");
       } finally {
         setBusy(false);
       }
@@ -454,7 +489,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               onChange={(next) => {
                 setContent(next);
                 setUncommitted(true);
-                setStatus(null);
+                setSaveError(null);
               }}
               saveHandler={saveHandler}
               statusEvents={statusEvents}
@@ -498,7 +533,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             onChange={(e) => {
               setCurrentPath(e.target.value);
               setPathDirty(e.target.value.trim() !== savedPath);
-              setStatus(null);
+              setSaveError(null);
             }}
             onKeyDown={(e) => {
               // Esc abandons an in-progress rename, restoring the saved path;
@@ -524,8 +559,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             disabled={busy}
             onClick={() => pathInputRef.current?.select()}
           >
-            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-              <path d="M11.6 2a1.5 1.5 0 0 1 2.1 2.1l-8 8-2.9.8.8-2.9 8-8z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            {/* Lucide pencil (#186), inline so the island doesn't import server icons.ts. */}
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="lucide" aria-hidden="true">
+              <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+              <path d="m15 5 4 4" />
             </svg>
           </button>
           <span className="dirty-dot" hidden={!uncommitted && !pathDirty}>
@@ -533,7 +570,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </span>
         </>,
         <>
-          <span className="web-editor-status">{status ?? ""}</span>
+          {(() => {
+            // Glance-able, paired with the dirty-dot. title surfaces the full error.
+            const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty, lastSavedAt });
+            return (
+              <span
+                className={`web-editor-status web-editor-status--${s.cls}`}
+                data-testid="editor-save-state"
+                title={saveError ?? undefined}
+              >
+                {s.text}
+              </span>
+            );
+          })()}
           {config.formatId === COFLAT_FORMAT_ID ? (
             <button type="button" data-testid="editor-mode-toggle" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
               {mode === "rich" ? "Source" : "Rich"}
