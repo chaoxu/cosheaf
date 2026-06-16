@@ -428,7 +428,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   const mode = parseDiffMode(c.req.query("mode"), richOk);
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file) : null;
-  const fileComments = file ? mapLineComments(file, allComments) : [];
+  const fileComments = file ? await mapLineComments(ctx, file, allComments) : [];
   return htmlResponse(
     repoPageShell(
       ctx,
@@ -478,7 +478,10 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
           ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
         </div>
       `,
-      { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && mode === "rich" },
+      // Load the reader island on coflat in BOTH modes: rich diffs need it, and
+      // so do the now-markdown-rendered line comments (which are reader islands)
+      // even in source mode.
+      { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID },
     ),
   );
 }));

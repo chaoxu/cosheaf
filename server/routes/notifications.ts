@@ -94,8 +94,9 @@ notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) return c.json(...bad("bad id"));
   const { fj } = c.get("repoCtx");
-  const thread = await fj.getNotificationThread(id);
-  if (thread.repository.full_name !== c.get("workspace").slug) return c.json(...notFound());
+  // A stale/cross-repo/unreadable id should 404, not 500 — normalize the fetch.
+  const thread = await fj.getNotificationThread(id).catch(() => null);
+  if (!thread || thread.repository?.full_name !== c.get("workspace").slug) return c.json(...notFound());
   await fj.markNotificationRead(id);
   return c.json({ ok: true });
 });

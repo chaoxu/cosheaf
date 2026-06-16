@@ -252,8 +252,12 @@ webhooks.post("/forgejo", async (c) => {
     // spurious refetch is cheap, and the inbox itself stays Forgejo-sourced.
     if (NOTIFY_EVENTS.has(event)) {
       const collaborators = await fj.listCollaborators(owner, repoName).catch(() => []);
-      for (const collaborator of collaborators) {
-        sse.publish(notificationChannel(collaborator.login), { type: "notification" });
+      // Forgejo's collaborators list EXCLUDES the repo owner, but on a user-owned
+      // workspace (the common cosheaf case) the owner is the primary recipient —
+      // include them. A spurious publish to an org-owner channel has no subscribers.
+      const recipients = new Set([owner, ...collaborators.map((collaborator) => collaborator.login)]);
+      for (const login of recipients) {
+        sse.publish(notificationChannel(login), { type: "notification" });
       }
     }
     } catch (err) {

@@ -36,7 +36,7 @@ interface WebLineComment {
   id: number;
   line: number | null;
   side: Side;
-  body: string;
+  bodyHtml: Html;
   author: string;
   createdAt: number;
   outdated: boolean;
@@ -224,27 +224,35 @@ function renderInlineComment(comment: WebLineComment): Html {
       <div class="line-comment ${comment.outdated ? "outdated" : ""}">
         <strong>${comment.author}</strong>
         <span>${comment.outdated ? "outdated" : timeEl(comment.createdAt)}</span>
-        <p>${comment.body}</p>
+        ${comment.bodyHtml}
       </div>
     </td>
   </tr>`;
 }
 
-export function mapLineComments(file: PrFileView, comments: readonly ForgejoPullReviewComment[]): WebLineComment[] {
-  return comments
-    .filter((comment) => comment.path === file.path)
-    .map((comment) => {
+// Render each comment body through the same markdown surface the conversation
+// timeline uses, so a `**bold**`/`[@ref]` comment renders identically on the
+// Files-changed tab instead of showing raw, escaped markdown.
+export async function mapLineComments(
+  ctx: WebCtx,
+  file: PrFileView,
+  comments: readonly ForgejoPullReviewComment[],
+): Promise<WebLineComment[]> {
+  const mine = comments.filter((comment) => comment.path === file.path);
+  return Promise.all(
+    mine.map(async (comment) => {
       const { line, side, outdated } = resolveLineComment(comment, file.status);
       return {
         id: comment.id,
         line,
         side,
-        body: comment.body,
+        bodyHtml: await renderMarkdownSurface(ctx, comment.body, { surface: "thread" }),
         author: displayLogin(comment.user?.login),
         createdAt: toEpochMs(comment.created_at),
         outdated,
       };
-    });
+    }),
+  );
 }
 
 export function renderFileCommentSummary(comments: readonly WebLineComment[]): Html {
@@ -252,7 +260,7 @@ export function renderFileCommentSummary(comments: readonly WebLineComment[]): H
   return html`<div class="file-comments">${comments.map(
     (comment) => html`<div class="file-comment ${comment.outdated ? "outdated" : ""}">
         <div><strong>${comment.author}</strong><span>${comment.side}:${comment.line ?? "outdated"}</span></div>
-        <p>${comment.body}</p>
+        ${comment.bodyHtml}
       </div>`,
   )}</div>`;
 }

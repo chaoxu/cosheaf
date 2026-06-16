@@ -12,6 +12,7 @@ import type {
 } from "@chaoxu/coflat";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { urlPath } from "../../shared/url";
 import {
@@ -243,7 +244,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       const writeBranch = branchForWrite();
       const nextPath = currentPathRef.current.trim();
       const previousPath = savedPathRef.current;
-      if (!nextPath.endsWith(".md")) return { ok: false, error: "path must end with .md" };
+      // Markdown or any supported text file (#178) — mirror the server's
+      // isEditableTextFile gate so an in-editor rename to .bib/.txt/.tex isn't
+      // rejected client-side when the backend would accept it.
+      if (!isEditableTextFile(nextPath)) return { ok: false, error: "path must be a Markdown or text file (e.g. .md, .bib, .txt)" };
       try {
         const result = await api.putFile(
           config.owner,

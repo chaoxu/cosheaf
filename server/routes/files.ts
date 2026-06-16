@@ -215,13 +215,16 @@ files.put("/:owner/:repo/file", async (c) => {
   const existing = await fj.getFileMeta(owner, repo, branch, rel);
   if (isRename && existing)
     return c.json(...conflict("destination already exists"));
-  // Compare-and-set: if the caller declared the blob sha its edit was based on
-  // and the branch has since moved, reject before issuing the write so a
-  // concurrent edit isn't silently clobbered (#92).
-  if (expectedSha !== undefined && (existing?.sha ?? null) !== expectedSha) {
-    return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
-  }
   const previous = isRename ? await fj.getFileMeta(owner, repo, branch, previousRel as string) : null;
+  // Compare-and-set: if the caller declared the blob sha its edit was based on and
+  // the branch has since moved, reject before writing so a concurrent edit isn't
+  // silently clobbered (#92). On a rename the edit was based on the SOURCE blob,
+  // not the (normally empty) destination — compare against the source.
+  const casMeta = isRename ? previous : existing;
+  const casPath = isRename ? (previousRel as string) : rel;
+  if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
+    return c.json(...(await staleShaConflict(fj, owner, repo, branch, casPath, expectedSha)));
+  }
   let r;
   try {
     r = await fj.putFile(owner, repo, {
