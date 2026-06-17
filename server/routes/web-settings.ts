@@ -73,8 +73,24 @@ web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
           ${dangerZoneSection(ctx)}
         </div>
         <script src="/cosheaf-confirm.js" defer></script>
+        <script src="/cosheaf-user-autocomplete.js" defer></script>
       `),
   );
+}));
+
+web.get("/:owner/:repo/settings/user-suggestions", webRouteForAdmin(async (c, ctx) => {
+  const q = c.req.query("q")?.trim() ?? "";
+  if (q.length < 1) return Response.json({ users: [] });
+  const [users, collaborators] = await Promise.all([
+    ctx.fj.searchUsers(q, 10).catch(() => []),
+    ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
+  ]);
+  const existing = new Set(collaborators.map((user) => user.login));
+  const suggestions = users
+    .map((user) => user.login)
+    .filter((login) => login && !existing.has(login))
+    .slice(0, 10);
+  return Response.json({ users: suggestions });
 }));
 
 web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
@@ -456,7 +472,8 @@ function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], acces
       ${addDisclosure("Add collaborator", html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
         <label class="settings-row">
           <span>Username</span>
-          <input name="username" data-testid="settings-access-username" required>
+          <input name="username" data-testid="settings-access-username" autocomplete="off" list="settings-access-usernames" data-user-autocomplete="${repoHref(ctx.owner, ctx.repo, "/settings/user-suggestions")}" required>
+          <datalist id="settings-access-usernames"></datalist>
         </label>
         <label class="settings-row">
           <span>Role</span>

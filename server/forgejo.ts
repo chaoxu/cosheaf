@@ -93,6 +93,11 @@ export interface CreateRepoOpts {
   default_branch?: string;
 }
 
+interface ForgejoUserSearchResponse {
+  ok?: boolean;
+  data?: ForgejoUser[];
+}
+
 // Shared request body for the three repo-creation endpoints (user, org, admin).
 function repoBody(opts: CreateRepoOpts) {
   return {
@@ -229,6 +234,13 @@ export class Forgejo {
 
   async getUserByName(username: string): Promise<ForgejoUser | null> {
     return this.reqOpt<ForgejoUser>(`/api/v1/users/${encodeURIComponent(username)}`);
+  }
+
+  async searchUsers(query: string, limit = 10): Promise<ForgejoUser[]> {
+    const result = await this.req<ForgejoUserSearchResponse>("/api/v1/users/search", {
+      query: { q: query, limit },
+    });
+    return result.data ?? [];
   }
 
   // Set the authenticated user's avatar (#150). `image` is the base64 of the

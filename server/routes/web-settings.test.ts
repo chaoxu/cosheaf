@@ -93,6 +93,73 @@ describe("web repository settings", () => {
     expect(await res.text()).toContain('name="required_approvals" type="number" min="0" value="2"');
   });
 
+  it("renders collaborator username autocomplete on the access form", async () => {
+    const db = freshTestDb("cosheaf-web-settings-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "admin" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w", () => Response.json({
+        name: "w",
+        full_name: "owner/w",
+        description: "Workspace",
+        private: true,
+        owner: { login: "owner" },
+      }));
+      forge.get("/api/v1/repos/owner/w/branch_protections/main", () => Response.json({ required_approvals: 2 }));
+      forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
+      forge.get("/api/v1/repos/owner/w/milestones", () => Response.json([]));
+      forge.get("/api/v1/repos/owner/w/collaborators", () => Response.json([]));
+      forge.get("/api/v1/repos/owner/w/branches", () => Response.json([]));
+    }));
+
+    const res = await appFor(db).request("/owner/w/settings", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-user-autocomplete="/owner/w/settings/user-suggestions"');
+    expect(body).toContain('list="settings-access-usernames"');
+    expect(body).toContain('id="settings-access-usernames"');
+    expect(body).toContain('/cosheaf-user-autocomplete.js');
+  });
+
+  it("returns user suggestions for adding repository access", async () => {
+    const db = freshTestDb("cosheaf-web-settings-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "admin" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/users/search", () => Response.json({
+        ok: true,
+        data: [
+          { id: 1, login: "bob" },
+          { id: 2, login: "carol" },
+          { id: 3, login: "existing" },
+        ],
+      }));
+      forge.get("/api/v1/repos/owner/w/collaborators", () => Response.json([{ id: 3, login: "existing" }]));
+    }));
+
+    const res = await appFor(db).request("/owner/w/settings/user-suggestions?q=b", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ users: ["bob", "carol"] });
+  });
+
+  it("keeps user suggestions admin-only", async () => {
+    const db = freshTestDb("cosheaf-web-settings-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+
+    const res = await appFor(db).request("/owner/w/settings/user-suggestions?q=b", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(404);
+  });
+
   it("accepts zero required approvals", async () => {
     const db = freshTestDb("cosheaf-web-settings-");
     seedTestWorkspace(db);
