@@ -123,6 +123,11 @@ describe("web file editor route", () => {
     const body = await res.text();
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
+    expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
+    expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
+    expect(body).toContain('<summary class="button">More</summary>');
+    expect(body).toContain('<a href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
+    expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {

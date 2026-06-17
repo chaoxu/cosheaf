@@ -431,9 +431,9 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
-// The per-file action toolbar on the file-view page: Raw, the markdown
-// Source↔Rendered toggle, and the write controls (Open PR, Edit, Delete) gated
-// by role/branch.
+// The per-file action toolbar on the file-view page: the primary write controls
+// stay visible; secondary representations (Raw, Source/Rendered) sit in a small
+// menu so the reader's top row stays about the document.
 // (#171). Extracted from the file-view handler (#24) to keep the handler legible.
 function fileToolbar(
   ctx: WebCtx,
@@ -443,14 +443,6 @@ function fileToolbar(
   const role = ctx.ws.role;
   const { branch, rel, kind, fileHref, sourceView } = opts;
   return html`<div class="toolbar-actions">
-    <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Raw</a>
-    ${
-      kind === "markdown"
-        ? sourceView
-          ? html`<a class="button" href="${fileHref}">Rendered</a>`
-          : html`<a class="button" href="${`${fileHref}?view=source`}">Source</a>`
-        : ""
-    }
     ${
       role === "read" || branch === "main"
         ? ""
@@ -463,6 +455,7 @@ function fileToolbar(
           ? html`<a class="button primary" href="${editHref(owner, repo, user, branch, rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
           : ""
     }
+    ${fileRepresentationMenu(owner, repo, branch, rel, kind, fileHref, sourceView)}
     ${
       role === "read" || branch === "main"
         ? ""
@@ -473,6 +466,30 @@ function fileToolbar(
           </form>`
     }
   </div>`;
+}
+
+function fileRepresentationMenu(
+  owner: string,
+  repo: string,
+  branch: string,
+  rel: string,
+  kind: FileKind,
+  fileHref: string,
+  sourceView: boolean,
+): Html {
+  return html`<details class="action-menu">
+    <summary class="button">More</summary>
+    <div class="action-menu-popover">
+      ${
+        kind === "markdown"
+          ? sourceView
+            ? html`<a href="${fileHref}">Rendered</a>`
+            : html`<a href="${`${fileHref}?view=source`}">Source</a>`
+          : emptyHtml
+      }
+      <a href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Raw</a>
+    </div>
+  </details>`;
 }
 
 function filePreview(
