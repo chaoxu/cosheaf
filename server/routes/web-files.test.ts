@@ -97,7 +97,9 @@ describe("web file editor route", () => {
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
     expect(body).toContain('value="ssh://git@forge.cosheaf.test:2222/owner/w.git"');
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=README.md"');
+    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=README.md" data-read-href="/owner/w/src/branch/main/README.md"');
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md"');
+    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md" data-read-href="/owner/w/src/branch/main/notes/a.md"');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
   });
 

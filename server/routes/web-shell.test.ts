@@ -56,6 +56,8 @@ describe("shell preference wiring", () => {
 
     expect(shell).toContain("cosheaf:file-labels");
     expect(shell).toContain("data-cosheaf-file-labels");
+    expect(prefs).toContain("cosheaf:file-open-mode");
+    expect(prefs).toContain("data-file-open-link");
     expect(shell).not.toContain("data-cosheaf-mode");
     expect(shell).not.toContain("cosheaf-mode.js");
     expect(prefs).not.toContain("cosheaf:landing-mode");

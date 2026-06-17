@@ -738,8 +738,7 @@ function renderSnippet(parts: readonly SnippetPart[]): Html {
 }
 
 function searchResultRow(ctx: WebCtx, r: PageSearchResult): Html {
-  const href = defaultFileHref(ctx.owner, ctx.repo, ctx.user, "main", r.path, ctx.ws.role !== "read");
-  return html`<a class="list-row search-result" href="${href}">
+  return html`<a class="list-row search-result" ${defaultFileLinkAttrs(ctx.owner, ctx.repo, ctx.user, "main", r.path, ctx.ws.role !== "read")}>
     <span class="search-result-head"><strong>${r.title || r.path}</strong> <small class="muted">${r.path}</small></span>
     <span class="search-snippet">${renderSnippet(r.snippet)}</span>
   </a>`;
@@ -795,7 +794,6 @@ function renderFileTreeLevel(
       </details>`;
     });
   const fileRows = node.files.map((file) => {
-    const href = defaultFileHref(owner, repo, user, branch, file.path, editByDefault);
     // Titled Markdown leaves render both labels; the user's file-label
     // preference chooses whether the visible label is the indexed Markdown
     // title or the storage filename. `title=` keeps the filename on hover.
@@ -803,7 +801,7 @@ function renderFileTreeLevel(
     const label = title
       ? html`<span class="ftree-title">${title}</span><span class="ftree-name">${file.name}</span>`
       : file.name;
-    return html`<a class="ftree-file${file.path === activeRel ? " active" : ""}" href="${href}" title="${file.name}">${label}</a>`;
+    return html`<a class="ftree-file${file.path === activeRel ? " active" : ""}" ${defaultFileLinkAttrs(owner, repo, user, branch, file.path, editByDefault)} title="${file.name}">${label}</a>`;
   });
   return html`${dirs}${fileRows}`;
 }
@@ -958,7 +956,7 @@ function pageIndex(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry
     <div class="list">${pages.map((file) => {
       const title = titles.get(file.path) || file.path;
       const excerpt = excerpts.get(file.path);
-      return html`<a class="list-row page-row" href="${defaultFileHref(ctx.owner, ctx.repo, ctx.user, branch, file.path, ctx.ws.role !== "read")}">
+      return html`<a class="list-row page-row" ${defaultFileLinkAttrs(ctx.owner, ctx.repo, ctx.user, branch, file.path, ctx.ws.role !== "read")}>
           <span class="list-row-main"><strong>${title}</strong>${excerpt ? html`<span class="page-row-excerpt">${excerpt}</span>` : emptyHtml}<small>${file.path}</small></span>
         </a>`;
     })}</div>
@@ -978,11 +976,15 @@ function editHref(owner: string, repo: string, user: string, branch: string, rel
   return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
 }
 
-function defaultFileHref(owner: string, repo: string, user: string | undefined, branch: string, rel: string, editByDefault: boolean): string {
-  if (editByDefault && user && isEditableTextFile(rel)) {
-    return editHref(owner, repo, user, branch, rel);
-  }
+function readHref(owner: string, repo: string, branch: string, rel: string): string {
   return `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
+}
+
+function defaultFileLinkAttrs(owner: string, repo: string, user: string | undefined, branch: string, rel: string, canEdit: boolean): Html {
+  const read = readHref(owner, repo, branch, rel);
+  if (!canEdit || !user || !isEditableTextFile(rel)) return html`href="${read}"`;
+  const edit = editHref(owner, repo, user, branch, rel);
+  return html`href="${edit}" data-file-open-link data-edit-href="${edit}" data-read-href="${read}"`;
 }
 
 // "New file" as a name-it-first control: a GET form whose `path` routes to

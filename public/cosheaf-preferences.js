@@ -102,6 +102,39 @@
   });
 })();
 
+// Open editable files in Edit or Read mode. Server-rendered links default to
+// Edit for writable users; this swaps the href to the read target when the user
+// prefers reading first. Read-only users and non-editable files do not get these
+// data attributes, so they keep their normal route.
+(() => {
+  const legacyKey = "cosheaf:file-open-mode";
+  const bodyUser = document.body && document.body.dataset ? document.body.dataset.cosheafUser || "" : "";
+  const select = document.querySelector("[data-file-open-mode-user]");
+  const selectUser = select instanceof HTMLSelectElement ? select.dataset.fileOpenModeUser || "" : "";
+  const user = selectUser || bodyUser;
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "read" ? "read" : "edit");
+  const readMode = () => normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  const apply = (mode) => {
+    document.querySelectorAll("[data-file-open-link]").forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement)) return;
+      const next = mode === "read" ? link.dataset.readHref : link.dataset.editHref;
+      if (next) link.href = next;
+    });
+  };
+  const initial = readMode();
+  if (select instanceof HTMLSelectElement) select.value = initial;
+  apply(initial);
+  if (select instanceof HTMLSelectElement) {
+    select.addEventListener("change", () => {
+      const value = normalize(select.value);
+      localStorage.setItem(key, value);
+      localStorage.setItem(legacyKey, value);
+      apply(value);
+    });
+  }
+})();
+
 // Reading width (#151): Narrow · Normal · Wide. The pre-paint head script sets
 // html[data-cosheaf-reading] before paint; this wires the settings select and
 // applies the choice live (the CSS rule reflows the reader without reload).
