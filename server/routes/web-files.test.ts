@@ -96,6 +96,33 @@ describe("web file editor route", () => {
     expect(body).toContain('data-testid="repo-readme"');
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
     expect(body).toContain('value="ssh://git@forge.cosheaf.test:2222/owner/w.git"');
+    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=README.md"');
+    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md"');
+    expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
+  });
+
+  it("keeps the rendered file reader available without a Branches toolbar button", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/web-edit" }]));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }),
+        );
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+        forge.post("/api/v1/repos/owner/w/markdown", () => Response.json({ html: "<h1>Notes</h1>" }));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/src/branch/main/notes.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
+    expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {
@@ -529,7 +556,7 @@ describe("web file editor route", () => {
     });
 
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/owner/w/src/branch/user/alice/wip/new.md");
+    expect(res.headers.get("location")).toBe("/owner/w/_edit?branch=user%2Falice%2Fwip&path=new.md");
     expect(deletedOld).toBe(false);
   });
 

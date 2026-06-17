@@ -60,14 +60,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
         <div class="page-title compact page-title--actions-only">
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
-            <span class="toolbar-actions">
-              <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
-              ${
-                ws.role === "read"
-                  ? ""
-                  : newFileControl(owner, repo, user, "main")
-              }
-            </span>
+            <span class="toolbar-actions">${ws.role === "read" ? "" : newFileControl(owner, repo, user, "main")}</span>
           </div>
         </div>
         ${repoHomeHeader(ctx, owner, repo, stats)}
@@ -75,7 +68,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
         ${repoLanding(ctx, "main", files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles, branches)],
+        sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles, branches, user, ws.role !== "read")],
       }),
     );
   }));
@@ -145,7 +138,6 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
           <div class="page-title compact page-title--actions-only">
             <div class="toolbar-actions">
-              <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
                   ? ""
@@ -157,7 +149,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
           ${repoLanding(ctx, resolved.branch, files, branchTitles ?? new Map<string, string>(), readme)}
         `, {
           readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-          sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null, branchTitles, branches)],
+          sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null, branchTitles, branches, user, ws.role !== "read")],
         }),
     );
   }
@@ -204,7 +196,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
         ${docBody}
       `, {
         readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles, branches)],
+        sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles, branches, user, ws.role !== "read")],
       }),
   );
 }));
@@ -306,7 +298,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
       ` : textEditPage(ctx, branch, rel, content, baseSha, sourceSha, treeBranch), {
         statusExtra: [{ label: branch, icon: branchIcon({ size: 12 }) }],
         statusOmitTab: true,
-        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles)],
+        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles, [], ctx.user, ctx.ws.role !== "read")],
       }),
   );
 }));
@@ -351,7 +343,7 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   }
   if (oldRel && oldRel !== rel) c.get("sse").publish(ctx.ws.slug, { type: "change", path: oldRel });
   c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
-  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
+  return redirect(`${repoHref(ctx.owner, ctx.repo, "/_edit")}?branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(rel)}`);
 }));
 }
 
@@ -439,9 +431,9 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
-// The per-file action toolbar on the file-view page: Branches/Raw, the
-// markdown Source↔Rendered toggle, and the write controls (Open PR, Edit,
-// Delete) gated by role/branch.
+// The per-file action toolbar on the file-view page: Raw, the markdown
+// Source↔Rendered toggle, and the write controls (Open PR, Edit, Delete) gated
+// by role/branch.
 // (#171). Extracted from the file-view handler (#24) to keep the handler legible.
 function fileToolbar(
   ctx: WebCtx,
@@ -451,7 +443,6 @@ function fileToolbar(
   const role = ctx.ws.role;
   const { branch, rel, kind, fileHref, sourceView } = opts;
   return html`<div class="toolbar-actions">
-    <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
     <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Raw</a>
     ${
       kind === "markdown"
@@ -730,7 +721,7 @@ function renderSnippet(parts: readonly SnippetPart[]): Html {
 }
 
 function searchResultRow(ctx: WebCtx, r: PageSearchResult): Html {
-  const href = `${repoHref(ctx.owner, ctx.repo, "/src/branch/main/")}${urlPath(r.path)}`;
+  const href = defaultFileHref(ctx.owner, ctx.repo, ctx.user, "main", r.path, ctx.ws.role !== "read");
   return html`<a class="list-row search-result" href="${href}">
     <span class="search-result-head"><strong>${r.title || r.path}</strong> <small class="muted">${r.path}</small></span>
     <span class="search-snippet">${renderSnippet(r.snippet)}</span>
@@ -773,6 +764,8 @@ function renderFileTreeLevel(
   branch: string,
   activeRel: string | null,
   titles: Map<string, string> | undefined,
+  user: string | undefined,
+  editByDefault: boolean,
 ): Html {
   const dirs = [...node.dirs.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -781,11 +774,11 @@ function renderFileTreeLevel(
       const open = activeRel === dirPath || (activeRel?.startsWith(`${dirPath}/`) ?? false);
       return html`<details class="ftree-dir"${open ? " open" : ""}>
         <summary>${chevronIcon({ size: 11, class: "disclosure-chevron" })}${name}</summary>
-        <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel, titles)}</div>
+        <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel, titles, user, editByDefault)}</div>
       </details>`;
     });
   const fileRows = node.files.map((file) => {
-    const href = `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`;
+    const href = defaultFileHref(owner, repo, user, branch, file.path, editByDefault);
     // Titled Markdown leaves render both labels; the user's file-label
     // preference chooses whether the visible label is the indexed Markdown
     // title or the storage filename. `title=` keeps the filename on hover.
@@ -821,11 +814,21 @@ function branchSwitcher(owner: string, repo: string, branch: string, branches: r
   )}</select></span>`;
 }
 
-function fileTreeSidebar(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles: Map<string, string> | undefined, branches: readonly ForgejoBranch[]): Html {
+function fileTreeSidebar(
+  owner: string,
+  repo: string,
+  branch: string,
+  files: readonly ForgejoTreeEntry[],
+  activeRel: string | null,
+  titles: Map<string, string> | undefined,
+  branches: readonly ForgejoBranch[],
+  user?: string,
+  editByDefault = false,
+): Html {
   if (files.length === 0) return emptyHtml;
   return html`<nav class="file-tree" aria-label="Files">
     <div class="file-tree-head">${branchSwitcher(owner, repo, branch, branches)}</div>
-    ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles)}
+    ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles, user, editByDefault)}
   </nav>`;
 }
 
@@ -835,8 +838,18 @@ function fileTreeSidebar(owner: string, repo: string, branch: string, files: rea
 // workspace page-title map (main branch only — the index tracks main); leaves
 // render titles where present (#168). `branches` feeds the header switcher
 // (empty = label only).
-export function fileTreePanel(owner: string, repo: string, branch: string, files: readonly ForgejoTreeEntry[], activeRel: string | null, titles?: Map<string, string>, branches: readonly ForgejoBranch[] = []): Panel {
-  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches));
+export function fileTreePanel(
+  owner: string,
+  repo: string,
+  branch: string,
+  files: readonly ForgejoTreeEntry[],
+  activeRel: string | null,
+  titles?: Map<string, string>,
+  branches: readonly ForgejoBranch[] = [],
+  user?: string,
+  editByDefault = false,
+): Panel {
+  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches, user, editByDefault));
 }
 
 // README at the repo root, rendered for the /files landing (#136). The nav tree
@@ -928,7 +941,7 @@ function pageIndex(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry
     <div class="list">${pages.map((file) => {
       const title = titles.get(file.path) || file.path;
       const excerpt = excerpts.get(file.path);
-      return html`<a class="list-row page-row" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`}">
+      return html`<a class="list-row page-row" href="${defaultFileHref(ctx.owner, ctx.repo, ctx.user, branch, file.path, ctx.ws.role !== "read")}">
           <span class="list-row-main"><strong>${title}</strong>${excerpt ? html`<span class="page-row-excerpt">${excerpt}</span>` : emptyHtml}<small>${file.path}</small></span>
         </a>`;
     })}</div>
@@ -946,6 +959,13 @@ function editBranchFor(username: string, requested: string | null | undefined): 
 function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
   const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}`;
   return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
+}
+
+function defaultFileHref(owner: string, repo: string, user: string | undefined, branch: string, rel: string, editByDefault: boolean): string {
+  if (editByDefault && user && isEditableTextFile(rel)) {
+    return editHref(owner, repo, user, branch, rel);
+  }
+  return `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
 // "New file" as a name-it-first control: a GET form whose `path` routes to

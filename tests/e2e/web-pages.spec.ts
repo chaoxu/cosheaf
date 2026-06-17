@@ -89,7 +89,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     "href",
     `/${owner}/${repo}/src/branch/main/theory/cross-file-theorem.md#thm%3Acoin-conservation`,
   );
-  await expect(page.getByRole("link", { name: "Branches" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Branches" })).toHaveCount(0);
 
   await page.goto(`${repoBase}/_edit?branch=main&path=hello.md`);
   await expect(page.getByTestId("editor")).toBeVisible();
