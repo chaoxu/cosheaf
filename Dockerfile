@@ -55,11 +55,9 @@ RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
 
 FROM node:24-bookworm-slim AS runtime
 
-ARG COSHEAF_GIT_SHA=unknown
 ENV NODE_ENV=production
 ENV COSHEAF_PORT=3030
 ENV COSHEAF_DATA_DIR=/var/lib/cosheaf
-ENV COSHEAF_GIT_SHA=${COSHEAF_GIT_SHA}
 
 WORKDIR /app
 
@@ -68,11 +66,14 @@ RUN --mount=type=cache,id=cosheaf-runtime-apt-cache,target=/var/cache/apt,sharin
   rm -f /etc/apt/apt.conf.d/docker-clean \
   && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
   && apt-get update \
-  && apt-get install -y --no-install-recommends pandoc texlive-xetex texlive-latex-extra texlive-publishers texlive-science lmodern \
+  && apt-get install -y --no-install-recommends pandoc texlive-xetex texlive-latex-extra texlive-publishers texlive-science texlive-plain-generic lmodern \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/lib/cosheaf \
   && chown -R node:node /var/lib/cosheaf /app
+
+ARG COSHEAF_GIT_SHA=unknown
+ENV COSHEAF_GIT_SHA=${COSHEAF_GIT_SHA}
 
 COPY --from=build --chown=node:node /workspace/cosheaf/package.json ./package.json
 COPY --from=build --chown=node:node /workspace/cosheaf/node_modules ./node_modules
