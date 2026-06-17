@@ -35,6 +35,25 @@ export function workspacePageTitles(
   return titles;
 }
 
+// The repo chrome's Read-mode identity should follow the knowledge base title
+// when the root README is indexed. Forgejo's repository description remains the
+// fallback for repos that have no titled README in the sidecar yet.
+export function workspaceReadmeTitle(
+  db: Database.Database,
+  workspaceSlug: string,
+): string {
+  const row = db
+    .prepare(
+      `SELECT title
+         FROM doc_map
+        WHERE workspace_slug = ? AND lower(forgejo_id) = 'readme.md'
+        ORDER BY CASE forgejo_id WHEN 'README.md' THEN 0 ELSE 1 END
+        LIMIT 1`,
+    )
+    .get(workspaceSlug) as { title: string | null } | undefined;
+  return row?.title?.trim() ?? "";
+}
+
 // Short body excerpts per page from the FTS sidecar, keyed by file path — used by
 // the /files landing index (#136) to show a one-line description under each page
 // title, so the main panel reads richer than the nav tree. Whitespace-collapsed

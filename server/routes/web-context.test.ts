@@ -29,6 +29,7 @@ function appFor(db: Database.Database, appConfig = config): Hono<AppEnv> {
     app.get("/:owner/:repo/probe-read", webRoute((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-write", webRouteForWrite((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-admin", webRouteForAdmin((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
+    app.get("/:owner/:repo/probe-title", webRoute((_c, ctx) => new Response(ctx.wsTitle)));
     app.post("/:owner/:repo/probe-write", webRouteForWrite((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.post("/probe-global", globalRoute(() => new Response("ok:global")));
     app.get("/probe-ip", (c) => new Response(clientIp(c, c.get("config").trustedProxyHops)));
@@ -140,6 +141,27 @@ describe("web role gates pass through on sufficient role", () => {
     const res = await get(appFor(db), "/owner/w/probe-admin", token);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("ok:admin");
+  });
+});
+
+describe("web workspace title", () => {
+  it("prefers the indexed README title over the Forgejo repo description", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    db.prepare("INSERT INTO doc_map (workspace_slug, cosheaf_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run("owner/w", "readme", "README.md", "Fresh Project Title", "2026-06-16T00:00:00Z");
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "writer" }));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w", full_name: "owner/w", description: "Old Repo Description" }));
+      }),
+    );
+
+    const res = await get(appFor(db), "/owner/w/probe-title", token);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("Fresh Project Title");
   });
 });
 

@@ -10,6 +10,7 @@ import type { Role } from "../../shared/roles.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
+import { workspaceReadmeTitle } from "../page-search.js";
 import { forgeAvatarSrc } from "./avatar.js";
 import { parsePositiveIntId } from "./query-params.js";
 import { html, type Html, raw } from "./web-html.js";
@@ -22,9 +23,10 @@ export interface WebCtx {
   fj: Forgejo;
   ws: WorkspaceContext;
   db: Database.Database;
-  // The workspace's display title (Forgejo repo description), or "" when none.
-  // Drives the Read-mode workspace identity in the chrome (#147); the chrome
-  // falls back to the owner/repo slug when empty.
+  // The workspace's display title (indexed README title, falling back to the
+  // Forgejo repo description), or "" when none. Drives the Read-mode workspace
+  // identity in the chrome (#147); the chrome falls back to the owner/repo slug
+  // when empty.
   wsTitle: string;
   // The signed-in user's same-origin avatar src for the sidebar identity (#177),
   // or null when they have no uploaded avatar (the chrome shows initials).
@@ -149,11 +151,13 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
-  const [wsTitle, userAvatarSrc] = await Promise.all([
-    resolveWorkspaceTitle(fj, owner, repo),
+  const db = c.get("db");
+  const indexedTitle = workspaceReadmeTitle(db, ws.slug);
+  const [fallbackTitle, userAvatarSrc] = await Promise.all([
+    indexedTitle ? Promise.resolve("") : resolveWorkspaceTitle(fj, owner, repo),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db: c.get("db"), wsTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db, wsTitle: indexedTitle || fallbackTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
 }
 
 // resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the
