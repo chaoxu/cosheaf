@@ -45,6 +45,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       fj.listPulls(owner, repo, "open").catch(() => []),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
+    const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
     const readme = await repoReadme(ctx, "main", files);
     const stats = {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
@@ -60,7 +61,6 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
             <span class="build-only toolbar-actions">
-              ${cloneBox(sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url))}
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
@@ -71,6 +71,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
           </div>
         </div>
         ${repoHomeHeader(ctx, owner, repo, stats)}
+        ${clonePanel(cloneUrl)}
         ${repoLanding(ctx, "main", files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
@@ -81,17 +82,18 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
 
 // Git clone affordance. SSH goes straight to Forgejo's restricted git-over-SSH
 // endpoint; Cosheaf only helps users add keys from account settings.
-function cloneBox(cloneUrl: string): Html {
-  return html`<details class="clone-box">
-    <summary class="button">Clone</summary>
-    <div class="clone-popover">
-      <p class="clone-hint">Clone with SSH. Add your public key in Account settings:</p>
-      <div class="clone-row">
-        <input class="clone-url" readonly value="${cloneUrl}" aria-label="Clone URL" onclick="this.select()">
-        <button class="button" type="button" onclick="navigator.clipboard?.writeText(this.previousElementSibling.value)">Copy</button>
-      </div>
+function clonePanel(cloneUrl: string): Html {
+  return html`<section class="repo-clone build-only" data-testid="repo-clone">
+    <div class="repo-clone-label">
+      <strong>Clone</strong>
+      <span>SSH</span>
     </div>
-  </details>`;
+    <div class="repo-clone-row">
+      <input class="clone-url" readonly value="${cloneUrl}" aria-label="SSH clone URL" onclick="this.select()">
+      <button class="button" type="button" onclick="navigator.clipboard?.writeText(this.previousElementSibling.value)">Copy</button>
+      <a class="button" href="/account/settings">SSH keys</a>
+    </div>
+  </section>`;
 }
 
 function sshCloneUrl(forgejoUrl: string, owner: string, repo: string, forgejoSshUrl?: string): string {

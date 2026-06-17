@@ -91,6 +91,8 @@ describe("web file editor route", () => {
     expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">branches</span>');
     expect(body).toContain('<span class="repo-stat-num">3</span><span class="repo-stat-label">open issues</span>');
     expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">open PRs</span>');
+    expect(body).toContain('data-testid="repo-clone"');
+    expect(body).toContain('aria-label="SSH clone URL"');
     expect(body).toContain('data-testid="repo-readme"');
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
     expect(body).toContain('value="ssh://git@forge.cosheaf.test:2222/owner/w.git"');
