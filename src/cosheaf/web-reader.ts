@@ -62,6 +62,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // fallback for cross-file workspace refs Coflat can't number (#124, #11/#12).
   const result = renderToHtml(parsed.body, ctx, {
     outline: true,
+    referencePreviews: true,
     resolveReferences: true,
     sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
     ...(payload.markedLines ? { sourceLineAttribution: true } : {}),
@@ -91,9 +92,14 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // in-body definitions. \R only worked before because it is a KaTeX builtin,
   // which masked this missing wire for both the repo-wide and frontmatter paths.
   hydrateMath(root, { mathMacros: { ...ctx.mathMacros, ...result.mathMacros } });
-  // Coflat resolves citation/crossref hover natively from the context; the
-  // source feeds equation/block previews.
-  hydrateReaderHoverPreviews(root, { source: payload.source, context: ctx });
+  // Coflat resolves citation/crossref hover natively from the context. The
+  // preview index and source are both relative to the frontmatter-stripped body
+  // passed to renderToHtml.
+  hydrateReaderHoverPreviews(root, {
+    source: parsed.body,
+    context: ctx,
+    referencePreviewIndex: result.referencePreviewIndex,
+  });
   // Section + block (theorem) collapse toggles (#115). Without this the
   // disclosure controls render but never get behavior.
   hydrateReaderDisclosures(root);

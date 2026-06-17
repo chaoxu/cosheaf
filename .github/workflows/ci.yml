@@ -6,7 +6,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  COFLAT_REF: 74c3d29df0f937f1eaa71dbcda0627d3294bdbaa
+  COFLAT_REF: 1a2b7cfb8ea5dbaac6f258fe73acb8d8fbb854b1
 
 jobs:
   test:
