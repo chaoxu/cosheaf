@@ -49,15 +49,18 @@ describe("vite island wiring stays in lockstep", () => {
 });
 
 describe("shell preference wiring", () => {
-  it("applies file labels from an explicit preference instead of read/build mode", () => {
+  it("applies file labels from an explicit preference without read/build mode", () => {
     const shell = read("server/routes/web-shell.ts");
     const css = read("public/cosheaf-web.css");
+    const prefs = read("public/cosheaf-preferences.js");
 
     expect(shell).toContain("cosheaf:file-labels");
     expect(shell).toContain("data-cosheaf-file-labels");
+    expect(shell).not.toContain("data-cosheaf-mode");
+    expect(shell).not.toContain("cosheaf-mode.js");
+    expect(prefs).not.toContain("cosheaf:landing-mode");
     expect(css).toContain('html[data-cosheaf-file-labels="title"] .ftree-name{display:none}');
     expect(css).toContain('html[data-cosheaf-file-labels="title"] .ftree-title{display:inline}');
-    expect(css).not.toContain('html[data-cosheaf-mode="read"] .ftree-name');
-    expect(css).not.toContain('html[data-cosheaf-mode="read"] .ftree-title');
+    expect(css).not.toContain("data-cosheaf-mode");
   });
 });

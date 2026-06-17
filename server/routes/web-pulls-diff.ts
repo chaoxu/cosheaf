@@ -202,8 +202,8 @@ function commentFormOptions(
 }
 
 function lineCommentComposer(form: LineCommentFormOptions, side: Side, line: number): Html {
-  // A write control — hidden in Read mode (#171); the diff itself stays readable.
-  return html`<details class="line-composer build-only">
+  // A write control; the diff itself stays readable.
+  return html`<details class="line-composer">
     <summary aria-label="Comment on line ${line}">+</summary>
     <form method="post" action="${form.action}">
       <input type="hidden" name="path" value="${form.path}">

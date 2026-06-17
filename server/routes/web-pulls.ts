@@ -99,7 +99,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
       html`
         <div class="page-title compact">
           <div><h1>PRs</h1></div>
-          ${ctx.ws.role === "read" ? "" : html`<a class="button primary build-only" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New PR</a>`}
+          ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New PR</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
         ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.")}
@@ -207,7 +207,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${
                   ctx.ws.role === "read" || pull.state === "closed"
                     ? ""
-                    : html`<a class="button build-only" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit PR</a>`
+                    : html`<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit PR</a>`
                 }
                 ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>`}
                 ${pullStateForm(ctx, pull)}

@@ -4,7 +4,7 @@ import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml, raw } from "./web-html.js";
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import { type Panel, renderRegion } from "./web-panels.js";
-import { modeToggle, pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
+import { pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 import { backIcon } from "./icons.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
@@ -17,9 +17,8 @@ export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | 
 // label editing.
 export function addDisclosure(label: string, form: Html): Html {
   // Always a write affordance (settings create-forms, issue dependencies, PR
-  // reviewer requests, rail label/assignee editing), so it is build-only and
-  // hides in Read mode (#171) while the surrounding read content stays.
-  return html`<details class="add-disclosure build-only">
+  // reviewer requests, rail label/assignee editing).
+  return html`<details class="add-disclosure">
     <summary>+ ${label}</summary>
     ${form}
   </details>`;
@@ -32,10 +31,6 @@ export const USERNAME_DATALIST_ID = "repo-usernames";
 export function usernameDatalist(collaborators: readonly ForgejoUser[]): Html {
   return html`<datalist id="${USERNAME_DATALIST_ID}">${collaborators.map((u) => html`<option value="${u.login}"></option>`)}</datalist>`;
 }
-
-// Repo tabs that stay visible in Read mode (#171): the readable surfaces. The
-// rest (chat, notifications, settings) are contribute/admin-only and hide.
-const READABLE_TABS = new Set(["files", "issues", "pulls", "activity"]);
 
 // [id, message key, url suffix]. Labels resolve through t() at render time so
 // the repo nav translates without REPO_TABS holding pre-baked English.
@@ -85,8 +80,7 @@ export function repoPage(opts: {
   active: RepoTab;
   user: string;
   ws: WorkspaceContext;
-  // Workspace title (Forgejo repo description) for the Read-mode identity (#147);
-  // "" falls back to the owner/repo slug in both the sidebar chip and breadcrumb.
+  // Workspace title (Forgejo repo description); "" falls back to the owner/repo slug.
   wsTitle: string;
   body: Html;
   readerAssets?: boolean;
@@ -116,7 +110,6 @@ export function repoPage(opts: {
     readerAssets: opts.readerAssets,
     sidebar: html`
       ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null, t)}
-      ${modeToggle(t)}
       <nav class="sidebar-topnav">
         <a href="/">${backIcon({ size: 14 })} ${t("nav.workspaces")}</a>
       </nav>
@@ -127,8 +120,6 @@ export function repoPage(opts: {
       <nav class="repo-tabs">${nav}</nav>
       ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
-      // In Read mode the owner crumb hides and the repo crumb surfaces the
-      // workspace title (#147); with no title these stay plain owner/repo.
       { label: opts.owner, cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
       ...(opts.statusOmitTab ? [] : [{ label: activeLabel.toLowerCase() }]),
@@ -143,9 +134,7 @@ export function repoPage(opts: {
 }
 
 // Sidebar workspace identity (#147). With a title we render both the title and
-// the owner/repo slug; CSS shows the slug in Build mode and the title (slug
-// demoted to a muted subtitle) in Read mode. With no title the slug alone shows
-// in both modes (marked --only so Read mode doesn't demote it to nothing).
+// the owner/repo slug; current chrome keeps the slug primary.
 function workspaceChipIdent(owner: string, repo: string, title: string): Html {
   const slug = `${owner}/${repo}`;
   if (!title) return html`<span class="ws-slug ws-slug--only">${slug}</span>`;
@@ -159,14 +148,7 @@ function tab(
   suffix: string,
 ): Html {
   // Plain-label nav (Files, Issues, …) in the typography-first mono chrome (#149).
-  // Read mode (#131) is a per-action lens, not per-resource (#171): reading any
-  // resource stays in Read, only changing it is Build. So the readable surfaces
-  // (Files, Issues, PR discussions, Activity) keep their tabs; the pure
-  // contribute/admin surfaces (Chat, Notifications, Settings) are build-only and
-  // hide in Read mode. The write controls *inside* Issues/PRs are marked
-  // build-only individually so the threads themselves stay readable.
-  const buildOnly = READABLE_TABS.has(id) ? emptyHtml : html` data-build-only`;
-  return html`<a class="${opts.active === id ? "active" : ""}"${buildOnly} href="${repoHref(opts.owner, opts.repo, suffix)}">${label}</a>`;
+  return html`<a class="${opts.active === id ? "active" : ""}" href="${repoHref(opts.owner, opts.repo, suffix)}">${label}</a>`;
 }
 
 export function userPreferencesSection(user: string, locale: LocaleId, t: T): Html {
@@ -254,14 +236,6 @@ export function userPreferencesSection(user: string, locale: LocaleId, t: T): Ht
         <select data-testid="settings-time-format-select" data-cosheaf-time-user="${user}">
           <option value="relative">${t("prefs.opt.relative")}</option>
           <option value="absolute">${t("prefs.opt.absolute")}</option>
-        </select>
-      </label>
-      <label class="settings-row">
-        <span>${t("prefs.default_mode")}</span>
-        <select data-testid="settings-landing-mode-select" data-landing-mode-user="${user}">
-          <option value="last">${t("prefs.opt.last_used")}</option>
-          <option value="read">${t("mode.read")}</option>
-          <option value="build">${t("mode.build")}</option>
         </select>
       </label>
       <label class="settings-row">

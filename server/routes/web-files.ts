@@ -60,7 +60,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
         <div class="page-title compact page-title--actions-only">
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
-            <span class="build-only toolbar-actions">
+            <span class="toolbar-actions">
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
@@ -83,7 +83,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
 // Git clone affordance. SSH goes straight to Forgejo's restricted git-over-SSH
 // endpoint; Cosheaf only helps users add keys from account settings.
 function clonePanel(cloneUrl: string): Html {
-  return html`<section class="repo-clone build-only" data-testid="repo-clone">
+  return html`<section class="repo-clone" data-testid="repo-clone">
     <div class="repo-clone-label">
       <strong>Clone</strong>
       <span>SSH</span>
@@ -144,7 +144,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     return htmlResponse(
       repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
           <div class="page-title compact page-title--actions-only">
-            <div class="toolbar-actions build-only">
+            <div class="toolbar-actions">
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
@@ -441,7 +441,7 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
 
 // The per-file action toolbar on the file-view page: Branches/Raw, the
 // markdown Source↔Rendered toggle, and the write controls (Open PR, Edit,
-// Delete) gated by role/branch and marked build-only so Read mode hides them
+// Delete) gated by role/branch.
 // (#171). Extracted from the file-view handler (#24) to keep the handler legible.
 function fileToolbar(
   ctx: WebCtx,
@@ -451,7 +451,7 @@ function fileToolbar(
   const role = ctx.ws.role;
   const { branch, rel, kind, fileHref, sourceView } = opts;
   return html`<div class="toolbar-actions">
-    <a class="button build-only" href="${repoHref(owner, repo, "/branches")}">Branches</a>
+    <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
     <a class="button" href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Raw</a>
     ${
       kind === "markdown"
@@ -463,19 +463,19 @@ function fileToolbar(
     ${
       role === "read" || branch === "main"
         ? ""
-        : html`<a class="button build-only" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(branch)}&base=main`}">Open PR</a>`
+        : html`<a class="button" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(branch)}&base=main`}">Open PR</a>`
     }
     ${
       role === "read"
         ? ""
         : editableFileKind(kind)
-          ? html`<a class="button primary build-only" href="${editHref(owner, repo, user, branch, rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
+          ? html`<a class="button primary" href="${editHref(owner, repo, user, branch, rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
           : ""
     }
     ${
       role === "read" || branch === "main"
         ? ""
-        : html`<form class="inline-form build-only" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">
+        : html`<form class="inline-form" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">
             <input type="hidden" name="action" value="delete">
             <input type="hidden" name="expected_sha" value="${opts.sha}">
             <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
@@ -800,8 +800,7 @@ function renderFileTreeLevel(
 
 // Branch indicator + switcher in the file-tree header: shows the current branch
 // and, when more than one exists, a <select> that navigates to that branch's
-// files. NOT build-only, so it's the branch affordance available in Read mode
-// too. An empty `branches` (the edit page) renders just the label — no
+// files. An empty `branches` (the edit page) renders just the label — no
 // navigate-away mid-edit. cosheaf-select.js styles the select and fires the
 // native `change` the inline handler listens for; with JS off the native select
 // still navigates.

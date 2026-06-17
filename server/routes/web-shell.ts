@@ -11,9 +11,8 @@ import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 // call sites pass the real per-request `t` and render the active locale.
 const enT: T = makeT(DEFAULT_LOCALE);
 
-// A breadcrumb segment. `wsTitle` carries the workspace's Read-mode title
-// alongside the slug `label`; `cls` marks the owner segment so Read mode can
-// hide it and surface the title instead (#147). Both are unset for plain crumbs.
+// A breadcrumb segment. `wsTitle` carries the workspace title alongside the
+// slug `label`; current chrome keeps the slug primary.
 export type StatusCrumb = { label: string; href?: string; cls?: string; wsTitle?: string; icon?: Html };
 
 export function pageShell(opts: {
@@ -41,14 +40,13 @@ export function pageShell(opts: {
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
-        ${opts.user ? html`<script>(function(){try{var u=${jsonScript(opts.user)};var L=localStorage.getItem("cosheaf:landing-mode:"+u);var m=(L==="read"||L==="build")?L:(localStorage.getItem("cosheaf:mode:"+u)==="read"?"read":"build");document.documentElement.setAttribute("data-cosheaf-mode",m);}catch(e){}})();</script>` : ""}
         <script>(function(){try{var u=${jsonScript(opts.user ?? "")};var s=localStorage.getItem(u?"cosheaf:color-scheme:"+u:"cosheaf:color-scheme")||localStorage.getItem("cosheaf:color-scheme")||"light";if(s!=="dark"&&s!=="system")s="light";document.documentElement.setAttribute("data-cosheaf-color-scheme",s);var d=localStorage.getItem(u?"cosheaf:density:"+u:"cosheaf:density")||localStorage.getItem("cosheaf:density")||"normal";if(d!=="compact"&&d!=="comfortable"&&d!=="large")d="normal";document.documentElement.setAttribute("data-cosheaf-density",d);var rw=localStorage.getItem(u?"cosheaf:reading-width:"+u:"cosheaf:reading-width")||localStorage.getItem("cosheaf:reading-width")||"normal";if(rw!=="narrow"&&rw!=="wide")rw="normal";document.documentElement.setAttribute("data-cosheaf-reading",rw);var fl=localStorage.getItem(u?"cosheaf:file-labels:"+u:"cosheaf:file-labels")||localStorage.getItem("cosheaf:file-labels")||"filename";if(fl!=="title")fl="filename";document.documentElement.setAttribute("data-cosheaf-file-labels",fl);}catch(e){}})();</script>
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
         <script src="/cosheaf-toast.js" defer></script>
         <script src="/cosheaf-diff-nav.js" defer></script>
-        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script><script src="/cosheaf-mode.js" defer></script>`) : ""}
+        ${opts.user ? raw(`<script src="/cosheaf-notifications.js" defer></script>`) : ""}
       </head>
       <body data-cosheaf-user="${opts.user ?? ""}" data-cosheaf-locale="${locale}">
         <div class="app-frame">
@@ -75,25 +73,10 @@ export function globalSidebar(
   opts: { siteAdmin?: boolean } = {},
 ): Html {
   return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t)}
-    ${user ? modeToggle(t) : ""}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
       ${opts.siteAdmin ? html`<a class="${active === "admin" ? "active" : ""}" href="/admin">Admin</a>` : emptyHtml}
     </nav>`;
-}
-
-// Per-user Read | Build chrome lens (#131). Read demotes the forge/contribute
-// surface (issues, pulls, chat, activity, settings) to foreground the knowledge
-// base (reader, search); Build is the full forge surface and the default. The
-// file tree label style is a separate preference. The choice persists per user
-// in localStorage and is applied as `html[data-cosheaf-mode]` before paint (see
-// pageShell) so there's no flash; cosheaf-mode.js wires the toggle. Pure
-// presentation — no routes change.
-export function modeToggle(t: T = enT): Html {
-  return html`<div class="mode-toggle" role="group" aria-label="View mode" data-mode-toggle>
-    <button type="button" class="mode-opt" data-mode="read">${t("mode.read")}</button>
-    <button type="button" class="mode-opt" data-mode="build">${t("mode.build")}</button>
-  </div>`;
 }
 
 // Signed-in identity at the top of the sidebar (#127): an initials avatar + the

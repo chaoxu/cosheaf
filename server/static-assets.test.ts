@@ -34,12 +34,12 @@ describe("listPublicAssetPaths", () => {
     const root = mkdtempSync(path.join(tmpdir(), "cosheaf-assets-"));
     const distDir = path.join(root, "dist");
     mkdirSync(distDir, { recursive: true });
-    for (const name of ["cosheaf-web.css", "cosheaf-mode.js", "favicon.svg"]) {
+    for (const name of ["cosheaf-web.css", "cosheaf-notifications.js", "favicon.svg"]) {
       writeFileSync(path.join(distDir, name), "");
     }
     const missingPublic = path.join(root, "public");
     expect(listPublicAssetPaths(missingPublic, distDir)).toEqual([
-      "/cosheaf-mode.js",
+      "/cosheaf-notifications.js",
       "/cosheaf-web.css",
       "/favicon.svg",
     ]);
