@@ -23,9 +23,6 @@ export interface Config {
   dataDir: string;
   port: number;
   forgejoUrl: string;
-  // Public SSH host for git clone URLs. Usually the Forgejo host (e.g.
-  // gitea.lab), not Cosheaf.
-  gitSshHost: string;
   // Non-site-admin runtime token. This is the token name exposed in normal
   // app env and should not carry Forgejo site-admin privileges.
   forgejoToken: string;
@@ -161,7 +158,6 @@ export function loadConfig(): Config {
     dataDir,
     port: serverPort(),
     forgejoUrl,
-    gitSshHost: withDefault("COSHEAF_GIT_SSH_HOST", new URL(forgejoUrl).hostname),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),

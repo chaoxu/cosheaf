@@ -11,7 +11,6 @@ const config: Config = {
   dataDir: "/tmp/cosheaf-api-csrf-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",
-  gitSshHost: "forgejo.test",
   forgejoToken: "runtime-token",
   forgejoAdminToken: "admin-token",
   webhookSecret: "secret",

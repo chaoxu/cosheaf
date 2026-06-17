@@ -30,7 +30,6 @@ const config: Config = {
   dataDir: "/tmp/cosheaf-middleware-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",
-  gitSshHost: "forgejo.test",
   forgejoToken: "admin-token",
   forgejoAdminToken: "admin-token",
   webhookSecret: "secret",

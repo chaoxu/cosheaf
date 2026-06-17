@@ -92,6 +92,7 @@ describe("web file editor route", () => {
     expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">open PRs</span>');
     expect(body).toContain('data-testid="repo-readme"');
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
+    expect(body).toContain('value="git@forgejo.test:owner/w.git"');
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {

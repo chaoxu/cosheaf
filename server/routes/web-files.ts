@@ -45,7 +45,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       fj.listPulls(owner, repo, "open").catch(() => []),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
-    const cloneUrl = sshCloneUrl(c.get("config").gitSshHost, owner, repo);
+    const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo);
     const readme = await repoReadme(ctx, "main", files);
     const stats = {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
@@ -95,7 +95,8 @@ function cloneBox(cloneUrl: string): Html {
   </details>`;
 }
 
-function sshCloneUrl(host: string, owner: string, repo: string): string {
+function sshCloneUrl(forgejoUrl: string, owner: string, repo: string): string {
+  const host = new URL(forgejoUrl).hostname;
   return `git@${host}:${owner}/${repo}.git`;
 }
 
