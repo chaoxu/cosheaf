@@ -83,6 +83,25 @@
   });
 })();
 
+// File labels: filenames · Markdown titles. The file tree always renders both
+// when a Markdown title is indexed; CSS chooses which one to show from this
+// preference. Default: filenames, so Read and Build use the same labels.
+(() => {
+  const select = document.querySelector("[data-file-labels-user]");
+  if (!(select instanceof HTMLSelectElement)) return;
+  const legacyKey = "cosheaf:file-labels";
+  const user = select.dataset.fileLabelsUser || "";
+  const key = user ? `${legacyKey}:${user}` : legacyKey;
+  const normalize = (value) => (value === "title" ? "title" : "filename");
+  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
+  select.addEventListener("change", () => {
+    const value = normalize(select.value);
+    localStorage.setItem(key, value);
+    localStorage.setItem(legacyKey, value);
+    document.documentElement.setAttribute("data-cosheaf-file-labels", value);
+  });
+})();
+
 // Reading width (#151): Narrow · Normal · Wide. The pre-paint head script sets
 // html[data-cosheaf-reading] before paint; this wires the settings select and
 // applies the choice live (the CSS rule reflows the reader without reload).

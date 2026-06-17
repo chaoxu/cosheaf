@@ -786,10 +786,9 @@ function renderFileTreeLevel(
     });
   const fileRows = node.files.map((file) => {
     const href = `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(file.path)}`;
-    // Title-first leaves (#168), matching the main fileList: a titled page shows
-    // its title in Read mode and its filename in Build mode (CSS swaps the two
-    // spans by html[data-cosheaf-mode]); untitled/non-page leaves show the
-    // filename in both modes. `title=` keeps the storage filename on hover.
+    // Titled Markdown leaves render both labels; the user's file-label
+    // preference chooses whether the visible label is the indexed Markdown
+    // title or the storage filename. `title=` keeps the filename on hover.
     const title = file.path.endsWith(".md") ? titles?.get(file.path) : undefined;
     const label = title
       ? html`<span class="ftree-title">${title}</span><span class="ftree-name">${file.name}</span>`

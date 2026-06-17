@@ -45,4 +45,20 @@ describe("web-panels portability seam (#120)", () => {
     expect(inRail).toContain('class="thread-rail"');
     expect(inSidebar).not.toContain('class="thread-rail"');
   });
+
+  it("renders filename and Markdown title labels for the user label preference", () => {
+    const tree = fileTreePanel(
+      "chao",
+      "flushing-coin",
+      "main",
+      files,
+      null,
+      new Map([["intro.md", "Introduction"]]),
+    );
+    const out = String(renderRegion([tree]));
+
+    expect(out).toContain('<span class="ftree-title">Introduction</span>');
+    expect(out).toContain('<span class="ftree-name">intro.md</span>');
+    expect(out).toContain("guide.md");
+  });
 });

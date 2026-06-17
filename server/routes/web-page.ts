@@ -222,6 +222,13 @@ export function userPreferencesSection(user: string, locale: LocaleId, t: T): Ht
         </select>
       </label>
       <label class="settings-row">
+        <span>${t("prefs.file_labels")}</span>
+        <select data-testid="settings-file-labels-select" data-file-labels-user="${user}">
+          <option value="filename">${t("prefs.opt.filenames")}</option>
+          <option value="title">${t("prefs.opt.markdown_titles")}</option>
+        </select>
+      </label>
+      <label class="settings-row">
         <span>${t("prefs.document_theme")}</span>
         <select data-testid="settings-document-theme-select" data-document-theme-user="${user}">
           <option value="default">${t("prefs.opt.theme_default")}</option>

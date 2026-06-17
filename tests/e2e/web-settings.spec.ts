@@ -24,6 +24,7 @@ test("account preferences are separate from repository settings", async ({ page 
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
   await expect(page.getByTestId("settings-document-theme-select")).toBeVisible();
+  await expect(page.getByTestId("settings-file-labels-select")).toBeVisible();
   await expect(page.getByTestId("settings-diff-mode-select")).toBeVisible();
   await expect(page.getByTestId("settings-diff-shape-select")).toBeVisible();
 

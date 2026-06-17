@@ -42,7 +42,7 @@ export function pageShell(opts: {
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
         ${opts.user ? html`<script>(function(){try{var u=${jsonScript(opts.user)};var L=localStorage.getItem("cosheaf:landing-mode:"+u);var m=(L==="read"||L==="build")?L:(localStorage.getItem("cosheaf:mode:"+u)==="read"?"read":"build");document.documentElement.setAttribute("data-cosheaf-mode",m);}catch(e){}})();</script>` : ""}
-        <script>(function(){try{var u=${jsonScript(opts.user ?? "")};var s=localStorage.getItem(u?"cosheaf:color-scheme:"+u:"cosheaf:color-scheme")||localStorage.getItem("cosheaf:color-scheme")||"light";if(s!=="dark"&&s!=="system")s="light";document.documentElement.setAttribute("data-cosheaf-color-scheme",s);var d=localStorage.getItem(u?"cosheaf:density:"+u:"cosheaf:density")||localStorage.getItem("cosheaf:density")||"normal";if(d!=="compact"&&d!=="comfortable"&&d!=="large")d="normal";document.documentElement.setAttribute("data-cosheaf-density",d);var rw=localStorage.getItem(u?"cosheaf:reading-width:"+u:"cosheaf:reading-width")||localStorage.getItem("cosheaf:reading-width")||"normal";if(rw!=="narrow"&&rw!=="wide")rw="normal";document.documentElement.setAttribute("data-cosheaf-reading",rw);}catch(e){}})();</script>
+        <script>(function(){try{var u=${jsonScript(opts.user ?? "")};var s=localStorage.getItem(u?"cosheaf:color-scheme:"+u:"cosheaf:color-scheme")||localStorage.getItem("cosheaf:color-scheme")||"light";if(s!=="dark"&&s!=="system")s="light";document.documentElement.setAttribute("data-cosheaf-color-scheme",s);var d=localStorage.getItem(u?"cosheaf:density:"+u:"cosheaf:density")||localStorage.getItem("cosheaf:density")||"normal";if(d!=="compact"&&d!=="comfortable"&&d!=="large")d="normal";document.documentElement.setAttribute("data-cosheaf-density",d);var rw=localStorage.getItem(u?"cosheaf:reading-width:"+u:"cosheaf:reading-width")||localStorage.getItem("cosheaf:reading-width")||"normal";if(rw!=="narrow"&&rw!=="wide")rw="normal";document.documentElement.setAttribute("data-cosheaf-reading",rw);var fl=localStorage.getItem(u?"cosheaf:file-labels:"+u:"cosheaf:file-labels")||localStorage.getItem("cosheaf:file-labels")||"filename";if(fl!=="title")fl="filename";document.documentElement.setAttribute("data-cosheaf-file-labels",fl);}catch(e){}})();</script>
         <link rel="stylesheet" href="${`/cosheaf-web.css${cosheafWebCssVersion()}`}">
         <script src="/cosheaf-preferences.js" defer></script>
         <script src="/cosheaf-select.js" defer></script>
@@ -84,10 +84,11 @@ export function globalSidebar(
 
 // Per-user Read | Build chrome lens (#131). Read demotes the forge/contribute
 // surface (issues, pulls, chat, activity, settings) to foreground the knowledge
-// base (title-first files, reader, search); Build is the full forge surface and
-// the default. The choice persists per user in localStorage and is applied as
-// `html[data-cosheaf-mode]` before paint (see pageShell) so there's no flash;
-// cosheaf-mode.js wires the toggle. Pure presentation — no routes change.
+// base (reader, search); Build is the full forge surface and the default. The
+// file tree label style is a separate preference. The choice persists per user
+// in localStorage and is applied as `html[data-cosheaf-mode]` before paint (see
+// pageShell) so there's no flash; cosheaf-mode.js wires the toggle. Pure
+// presentation — no routes change.
 export function modeToggle(t: T = enT): Html {
   return html`<div class="mode-toggle" role="group" aria-label="View mode" data-mode-toggle>
     <button type="button" class="mode-opt" data-mode="read">${t("mode.read")}</button>
