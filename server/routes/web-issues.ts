@@ -7,7 +7,6 @@ import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue, stripChatMetadata } from "./web-chat.js";
 import {
   badRequestPage,
-  displayLogin,
   timeEl,
   htmlResponse,
   notFoundPage,
@@ -20,6 +19,7 @@ import {
   stringField,
   stringFields,
   textField,
+  userLink,
   webRoute,
   webRouteForWrite,
   type WebCtx,
@@ -179,7 +179,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
                   : ""
               }
             </div>
-            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${displayLogin(issue.user?.login)} - ${timeEl(issue.created_at)}</p>
+            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.user?.login)} - ${timeEl(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
           ${threadLayout(main, railPanels)}

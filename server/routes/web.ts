@@ -386,6 +386,67 @@ web.get("/account/notifications", globalRoute(async (c, auth) => {
   );
 }));
 
+web.get("/users/:username", globalRoute(async (c, auth) => {
+  const username = c.req.param("username");
+  if (!username || !FORGEJO_NAME_RE.test(username)) return notFoundPage(auth.user.username, "User not found");
+  const fj = c.get("fjUser");
+  const [profile, repos, avatarSrc] = await Promise.all([
+    fj.getUserByName(username),
+    fj.listUserRepos(username).catch(() => []),
+    currentUserAvatarSrc(fj, auth.forgejoToken),
+  ]);
+  if (!profile) return notFoundPage(auth.user.username, "User not found");
+  const website = profile.website ? normalizedExternalHref(profile.website) : null;
+  const displayName = profile.full_name?.trim() || profile.login;
+  return htmlResponse(
+    pageShell({
+      title: `${displayName} - Cosheaf`,
+      user: auth.user.username,
+      locale: c.get("locale"),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, c.get("t")),
+      statusPath: [{ label: "users" }, { label: profile.login }],
+      body: html`<main class="page user-page" data-testid="user-page">
+        <section class="settings-section user-profile-card">
+          <div class="settings-section-header user-profile-header">
+            ${avatarForUser(profile)}
+            <div>
+              <h1>${displayName}</h1>
+              <p>${profile.login}</p>
+            </div>
+          </div>
+          ${profile.description ? html`<p>${profile.description}</p>` : emptyHtml}
+          ${
+            profile.location || website
+              ? html`<dl class="meta-list">
+                ${profile.location ? html`<div><dt>Location</dt><dd>${profile.location}</dd></div>` : emptyHtml}
+                ${website ? html`<div><dt>Website</dt><dd><a href="${website}" rel="nofollow noreferrer">${website}</a></dd></div>` : emptyHtml}
+              </dl>`
+              : emptyHtml
+          }
+        </section>
+        <section class="settings-section">
+          <div class="settings-section-header">
+            <h2>Repositories</h2>
+            <p>Forgejo repositories visible to you.</p>
+          </div>
+          ${
+            repos.length === 0
+              ? html`<div class="empty">No visible repositories.</div>`
+              : html`<div class="list">${repos.map((repo) => html`
+                <a class="list-row" href="${repoHref(repo.owner.login, repo.name)}">
+                  <span class="list-row-main">
+                    <strong>${repo.name}</strong>
+                    ${repo.description ? html`<span class="muted">${repo.description}</span>` : emptyHtml}
+                  </span>
+                </a>
+              `)}</div>`
+          }
+        </section>
+      </main>`,
+    }),
+  );
+}));
+
 web.get("/account/settings", globalRoute(async (c, auth) => {
   const me = await c.get("fjUser").getCurrentUser();
   const saved = c.req.query("saved") === "1";
@@ -416,6 +477,15 @@ web.get("/account/settings", globalRoute(async (c, auth) => {
     }),
   );
 }));
+
+function normalizedExternalHref(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch (_err) {
+    return null;
+  }
+}
 
 // Sign-out lives on the Account page (#127) instead of an always-present
 // status-bar button. A plain POST form to /logout — no island needed.

@@ -124,6 +124,78 @@ describe("POST /account/settings (profile)", () => {
   });
 });
 
+describe("GET /users/:username", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    _resetMiddlewareCachesForTests();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("renders a Forgejo-backed user profile page with visible repositories", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/users/bob", () =>
+          Response.json({
+            id: 2,
+            login: "bob",
+            full_name: "Bob Builder",
+            description: "Builds notes.",
+            website: "https://example.test/bob",
+            location: "Moon",
+          }),
+        );
+        forge.get("/api/v1/users/bob/repos", () =>
+          Response.json([
+            {
+              id: 10,
+              name: "notes",
+              full_name: "bob/notes",
+              description: "Public notes",
+              owner: { id: 2, login: "bob" },
+            },
+          ]),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/users/bob", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="user-page"');
+    expect(body).toContain("Bob Builder");
+    expect(body).toContain("Builds notes.");
+    expect(body).toContain("https://example.test/bob");
+    expect(body).toContain('href="/bob/notes"');
+  });
+
+  it("returns a not-found page when Forgejo has no such user", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/users/missing", (c) => c.text("not found", 404 as 200));
+        forge.get("/api/v1/users/missing/repos", () => Response.json([]));
+      }),
+    );
+
+    const res = await appFor(db).request("/users/missing", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(404);
+    expect(await res.text()).toContain("User not found");
+  });
+});
+
 describe("POST /account/avatar", () => {
   const fetchMock = vi.fn();
   beforeEach(() => {

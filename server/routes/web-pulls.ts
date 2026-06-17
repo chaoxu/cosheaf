@@ -10,7 +10,6 @@ import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { safeRel } from "./files.js";
 import {
   badRequestPage,
-  displayLogin,
   forbiddenPage,
   htmlResponse,
   notFoundPage,
@@ -24,6 +23,7 @@ import {
   stringFields,
   textField,
   urlPath,
+  userLink,
   webRoute,
   webRouteForAdmin,
   webRouteForWrite,
@@ -213,7 +213,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>by ${displayLogin(pull.user?.login)}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
+            <p>by ${userLink(pull.user?.login)}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>

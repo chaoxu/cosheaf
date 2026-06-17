@@ -358,10 +358,20 @@ export function repoHref(owner: string, repo: string, suffix = ""): string {
   return `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
 }
 
+export function userHref(login: string): string {
+  return `/users/${encodeURIComponent(login)}`;
+}
+
 export { urlPath } from "../../shared/url.js";
 
 export function displayLogin(login: string | null | undefined): string {
   return login || DELETED_USER_LOGIN;
+}
+
+export function userLink(login: string | null | undefined): Html {
+  const label = displayLogin(login);
+  if (!login || login === DELETED_USER_LOGIN || !FORGEJO_NAME_RE.test(login)) return html`${label}`;
+  return html`<a class="user-link" href="${userHref(login)}">${label}</a>`;
 }
 
 // A machine-readable <time> that the client reformatter (cosheaf-preferences.js)

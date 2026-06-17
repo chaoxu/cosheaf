@@ -24,6 +24,7 @@ import {
   positiveIntFields,
   repoHref,
   stringField,
+  userLink,
   type WebCtx,
 } from "./web-context.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
@@ -397,7 +398,7 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
           <input type="hidden" name="reviewer" value="${reviewer}">
           <button class="button" type="submit">Remove</button>
         </form>`;
-  return html`<span class="meta-pill">${displayLogin(reviewer)}${remove}</span>`;
+  return html`<span class="meta-pill">${userLink(reviewer)}${remove}</span>`;
 }
 
 type WebTimelineItem =
@@ -447,7 +448,7 @@ export function listRowSide(
   comments: number | undefined,
 ): Html {
   return html`<span class="list-row-side">
-    ${avatarForUser(author)}<span class="row-who">${displayLogin(author?.login)}</span>
+    ${avatarForUser(author)}<span class="row-who">${userLink(author?.login)}</span>
     <span class="row-sep">·</span>${timeEl(createdAt)}
     <span class="row-sep">·</span><span class="row-count" title="comments">(${comments ?? 0})</span>
   </span>`;
@@ -473,7 +474,7 @@ export function threadParticipantsBar(
   return html`<div class="thread-bar" data-testid="thread-bar">
     <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarForUser(user))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
-      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${displayLogin(last.user?.login)}` : emptyHtml
+      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${userLink(last.user?.login)}` : emptyHtml
     }</span>
     ${comments.length ? html`<a class="thread-jump" href="#thread-bottom">Jump to latest ↓</a>` : emptyHtml}
   </div>`;
@@ -580,7 +581,7 @@ function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: s
   return html`<article class="comment" id="${opts.anchorId}">
     <span class="comment-avatar">${avatarForUser(opts.author)}</span>
     <div class="comment-body">
-      <div class="comment-byline"><span class="comment-who">${displayLogin(opts.author?.login)}</span> ${opts.whenHtml}</div>
+      <div class="comment-byline"><span class="comment-who">${userLink(opts.author?.login)}</span> ${opts.whenHtml}</div>
       <div class="comment-text">${opts.body}</div>
       ${opts.actions}
     </div>
@@ -599,7 +600,7 @@ function commitGroup(commits: readonly ForgejoCommit[]): Html {
   const authors = new Set(commits.map((c) => c.author?.login ?? c.commit.author?.name ?? null));
   const label =
     authors.size === 1
-      ? html`${displayLogin([...authors][0])} pushed ${commits.length} commits`
+      ? html`${userLink([...authors][0])} pushed ${commits.length} commits`
       : html`${commits.length} commits`;
   return html`<details class="commit-group">
     <summary>${chevronIcon({ size: 12, class: "disclosure-chevron" })}<span>${label}</span> ${timeEl(commitDateMs(commits[commits.length - 1]))}</summary>
@@ -630,7 +631,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     const label = reviewStateLabel(item.review.state);
     const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
     return html`<div class="timeline-event">
-      <strong>${displayLogin(item.review.user?.login)}</strong>
+      <strong>${userLink(item.review.user?.login)}</strong>
       <span>${label}</span>
       <small>${timeEl(item.review.submitted_at)}</small>
       ${body}
@@ -644,7 +645,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   // collapsed by renderIssueTimeline.
   if (!webTimelineDescriptionText(item.event)) return emptyHtml;
   return html`<p class="timeline-note">${
-    item.event.user?.login ? html`${displayLogin(item.event.user.login)} ` : emptyHtml
+    item.event.user?.login ? html`${userLink(item.event.user.login)} ` : emptyHtml
   }${webTimelineDescriptionHtml(item.event)} · ${timeEl(item.event.created_at)}</p>`;
 }
 
