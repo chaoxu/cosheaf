@@ -17,19 +17,18 @@ RUN if [ -n "$NPM_CONFIG_REGISTRY" ]; then npm config set registry "$NPM_CONFIG_
 
 FROM base AS build
 
-# Coflat is sourced from the lab Gitea at the same pinned ref used by local
-# setup/CI. Override COFLAT_GIT_REF explicitly for a deliberate Coflat bump.
-# gitea.lab uses the lab internal CA, so the fetch skips TLS verification.
-ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
-ARG COFLAT_GIT_REF=32799903b5191f32cac15a10143db749b52e93c1
-ARG COSHEAF_GIT_SHA=unknown
-
 RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,id=cosheaf-apt-lib,target=/var/lib/apt,sharing=locked \
   rm -f /etc/apt/apt.conf.d/docker-clean \
   && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
   && apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git python3 make g++ pkg-config rsync
+
+# Coflat is sourced from the lab Gitea at the same pinned ref used by local
+# setup/CI. Override COFLAT_GIT_REF explicitly for a deliberate Coflat bump.
+# gitea.lab uses the lab internal CA, so the fetch skips TLS verification.
+ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
+ARG COFLAT_GIT_REF=32799903b5191f32cac15a10143db749b52e93c1
 
 RUN echo "coflat ${COFLAT_GIT_REF}" \
   && git init coflat \
@@ -47,6 +46,7 @@ RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
 RUN pnpm --dir cosheaf rebuild better-sqlite3 esbuild
 
 COPY . ./cosheaf
+ARG COSHEAF_GIT_SHA=unknown
 RUN echo "cosheaf ${COSHEAF_GIT_SHA}"
 RUN pnpm --dir cosheaf build
 RUN pnpm --dir cosheaf build:server
@@ -72,13 +72,13 @@ RUN --mount=type=cache,id=cosheaf-runtime-apt-cache,target=/var/cache/apt,sharin
 RUN mkdir -p /var/lib/cosheaf \
   && chown -R node:node /var/lib/cosheaf /app
 
-ARG COSHEAF_GIT_SHA=unknown
-ENV COSHEAF_GIT_SHA=${COSHEAF_GIT_SHA}
-
 COPY --from=build --chown=node:node /workspace/cosheaf/package.json ./package.json
 COPY --from=build --chown=node:node /workspace/cosheaf/node_modules ./node_modules
 COPY --from=build --chown=node:node /workspace/cosheaf/dist ./dist
 COPY --from=build --chown=node:node /workspace/cosheaf/dist-server ./dist-server
+
+ARG COSHEAF_GIT_SHA=unknown
+ENV COSHEAF_GIT_SHA=${COSHEAF_GIT_SHA}
 
 USER node
 
