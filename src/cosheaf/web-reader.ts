@@ -1,3 +1,4 @@
+import { renderInlineMarkdown } from "@chaoxu/coflat";
 import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews, type ReaderOutlineEntry } from "@chaoxu/coflat/reader";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { urlPath } from "../../shared/url";
@@ -18,6 +19,27 @@ function readPayload(root: HTMLElement): CoflatDocumentPayload | null {
   const script = root.querySelector<HTMLScriptElement>('script[type="application/json"]');
   if (!script?.textContent) return null;
   return JSON.parse(script.textContent) as CoflatDocumentPayload;
+}
+
+function renderChromeInline(container: HTMLElement, text: string, mathMacros?: Record<string, string>): void {
+  container.replaceChildren();
+  renderInlineMarkdown(container, text, mathMacros ?? {}, "ui-chrome-inline");
+}
+
+function renderChromeHtmlInline(container: HTMLElement, html: string | undefined, fallback: string, mathMacros?: Record<string, string>): void {
+  if (!html) {
+    renderChromeInline(container, fallback, mathMacros);
+    return;
+  }
+  const fragment = sanitizeAndRewriteRefsFragment(html);
+  for (const interactive of Array.from(fragment.querySelectorAll("a, button"))) {
+    const span = document.createElement("span");
+    span.className = interactive.className;
+    span.replaceChildren(...Array.from(interactive.childNodes));
+    interactive.replaceWith(span);
+  }
+  container.replaceChildren(fragment);
+  hydrateMath(container, { mathMacros: mathMacros ?? {} });
 }
 
 async function renderIsland(root: HTMLElement): Promise<void> {
@@ -53,7 +75,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   if (typeof title === "string" && title.trim()) {
     const titleEl = document.createElement("div");
     titleEl.className = "cf-doc-title";
-    titleEl.textContent = title;
+    renderChromeInline(titleEl, title, ctx.mathMacros);
     fragment.insertBefore(titleEl, fragment.firstChild);
   }
   root.replaceChildren(fragment);
@@ -82,7 +104,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     const frontmatterLines = bodyStart > 0 ? (payload.source.slice(0, bodyStart).match(/\n/g)?.length ?? 0) : 0;
     markChangedBlocks(root, new Set(payload.markedLines.map((line) => line - frontmatterLines)));
   }
-  buildReaderToc(result.outline ?? []);
+  buildReaderToc(result.outline ?? [], ctx.mathMacros);
   // The browser's native fragment jump fired before this island swapped the
   // rendered document in, so it missed; re-apply it now that the heading exists
   // (#114). Scrolls within .app-content, the only scroll container.
@@ -125,7 +147,7 @@ function applyHashScroll(root: HTMLElement): void {
 // rendered HTML and returns these entries, so there is no client-side heading
 // scan or slug regex. Only the file-reader page provides a [data-reader-toc]
 // slot, so this is a no-op for issue/comment/PR readers.
-function buildReaderToc(outline: readonly ReaderOutlineEntry[]): void {
+function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>): void {
   // Find the TOC fill slot by its stable attribute regardless of region (#120),
   // not via the .doc-with-toc grid — so the TOC could live in the rail or the
   // sidebar. File pages render exactly one slot and one reader island.
@@ -145,8 +167,8 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[]): void {
   for (const item of items) {
     const link = document.createElement("a");
     link.href = `#${item.id}`;
-    link.textContent = item.text;
     link.className = `doc-toc-link lvl-${item.level - minLevel}`;
+    renderChromeHtmlInline(link, item.html, item.text, mathMacros);
     slot.appendChild(link);
   }
   slot.hidden = false;

@@ -10,6 +10,7 @@ import type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
 } from "@chaoxu/coflat";
+import { renderInlineMarkdown } from "@chaoxu/coflat";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
@@ -113,6 +114,17 @@ function readConfig(): { config: EditorConfig; content: string } {
     },
     content: JSON.parse(payload.textContent || "\"\"") as string,
   };
+}
+
+function InlineChromeMarkdown({ text, mathMacros }: { text: string; mathMacros?: Record<string, string> }): ReactNode {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.replaceChildren();
+    renderInlineMarkdown(el, text, mathMacros ?? {}, "ui-chrome-inline");
+  }, [text, mathMacros]);
+  return <span ref={ref}>{text}</span>;
 }
 
 function WebEditor({ config, initialContent }: { config: EditorConfig; initialContent: string }) {
@@ -567,6 +579,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // in-progress renames don't point at a path that was never written.
   const cancelBranch = branchExists && branch !== "main" ? branch : "main";
   const cancelHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(cancelBranch)}/${urlPath(savedPath)}`;
+  const outlineMathMacros = documentContext?.mathMacros;
 
   return (
     <div className={readerClass}>
@@ -619,7 +632,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
                 <li key={entry.key} style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 12}px` }}>
                   <button type="button" onClick={() => editorRef.current?.scrollToLine(entry.line, { center: true })}>
                     {entry.number ? `${entry.number} ` : ""}
-                    {entry.text}
+                    <InlineChromeMarkdown text={entry.text} mathMacros={outlineMathMacros} />
                   </button>
                 </li>
               ))}
