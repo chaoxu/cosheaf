@@ -78,7 +78,7 @@ agent/API calls, all with `Authorization: Bearer <token>`:
 ```bash
 cd ..
 git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
-git -C coflat checkout da2f4f0c3ab0f71c55e04a215ab952740f2ac713
+git -C coflat checkout e57b712c8d7bc346f88c71cc0b6a36d84f16a451
 cd cosheaf
 pnpm setup:deps  # verifies the pinned Coflat checkout, then builds it
 pnpm install
