@@ -15,6 +15,8 @@ import {
   type CoflatDocumentPayload,
 } from "./coflat-document-context";
 
+const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
+
 function readPayload(root: HTMLElement): CoflatDocumentPayload | null {
   const script = root.querySelector<HTMLScriptElement>('script[type="application/json"]');
   if (!script?.textContent) return null;
@@ -138,8 +140,69 @@ function markChangedBlocks(root: HTMLElement, marked: ReadonlySet<number>): void
 function applyHashScroll(root: HTMLElement): void {
   const id = decodeURIComponent(location.hash.slice(1));
   if (!id) return;
-  const target = root.querySelector(`#${CSS.escape(id)}`);
+  const target = root.querySelector(`#${CSS.escape(id)}`) ?? document.getElementById(id);
   if (target instanceof HTMLElement) target.scrollIntoView({ block: "start" });
+}
+
+function readerScrollContainer(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".app-content");
+}
+
+function replaceCurrentHistoryScrollState(scrollTop: number): void {
+  const existing = history.state;
+  const base = existing && typeof existing === "object" && !Array.isArray(existing)
+    ? existing as Record<string, unknown>
+    : {};
+  history.replaceState({ ...base, [READER_SCROLL_STATE_KEY]: scrollTop }, "", window.location.href);
+}
+
+function rememberCurrentReaderScrollPosition(): void {
+  const container = readerScrollContainer();
+  if (!container) return;
+  replaceCurrentHistoryScrollState(container.scrollTop);
+}
+
+function restoreReaderScrollPosition(state: unknown): boolean {
+  const scrollTop = state && typeof state === "object"
+    ? (state as Record<string, unknown>)[READER_SCROLL_STATE_KEY]
+    : undefined;
+  if (typeof scrollTop !== "number" || !Number.isFinite(scrollTop)) return false;
+  const container = readerScrollContainer();
+  if (!container) return false;
+  requestAnimationFrame(() => {
+    container.scrollTo({ top: Math.max(0, scrollTop), left: 0, behavior: "auto" });
+  });
+  return true;
+}
+
+function isSameDocumentHashHref(href: string): boolean {
+  if (!href) return false;
+  const url = new URL(href, window.location.href);
+  return (
+    url.origin === window.location.origin &&
+    url.pathname === window.location.pathname &&
+    url.search === window.location.search &&
+    url.hash.length > 1
+  );
+}
+
+function installReaderHashHistory(): void {
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const anchor = target.closest<HTMLAnchorElement>("a[href]");
+    const href = anchor?.getAttribute("href");
+    if (!href || !isSameDocumentHashHref(href)) return;
+    rememberCurrentReaderScrollPosition();
+  }, { capture: true });
+
+  window.addEventListener("popstate", (event) => {
+    if (restoreReaderScrollPosition(event.state)) return;
+    requestAnimationFrame(() => applyHashScroll(document.body));
+  });
 }
 
 // Fill the file reader's table-of-contents rail from Coflat's outline (#117).
@@ -259,3 +322,4 @@ new MutationObserver((mutations) => {
 }).observe(document.body, { childList: true, subtree: true });
 
 installRefNavigation();
+installReaderHashHistory();
