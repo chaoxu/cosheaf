@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../types.js";
+import { setRegistrationOpen } from "../site-admin.js";
 import { web } from "./web.js";
 import { fakeForgejo, freshTestDb, testApp, testConfig } from "./test-fixtures.js";
 
@@ -56,6 +57,17 @@ describe("web /register", () => {
       form({ username: "newbie", password: "secret123" }, "10.0.0.1"),
     );
     expect(postRes.status).toBe(404);
+  });
+
+  it("uses the site-admin registration setting over the environment default", async () => {
+    const db = freshTestDb("cosheaf-register-");
+    setRegistrationOpen(db, true, "chao");
+    const opened = await appFor(db, false).request("/register");
+    expect(opened.status).toBe(200);
+
+    setRegistrationOpen(db, false, "chao");
+    const closed = await appFor(db).request("/register");
+    expect(closed.status).toBe(404);
   });
 
   it("creates the Forgejo user, mints a PAT, sets the cookie, and redirects home", async () => {

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { bootstrapSiteAdmins } from "./site-admin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -324,6 +325,7 @@ export function getDb(config: Config): Database.Database {
   migrateDropWorkspacesTable(db);
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  bootstrapSiteAdmins(db);
   migrateOwnerQualifySlugs(db);
   migrateAddLoginTokenScopes(db);
   dbInstance = db;

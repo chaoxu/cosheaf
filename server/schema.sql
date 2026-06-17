@@ -24,6 +24,21 @@ CREATE TABLE IF NOT EXISTS login_tokens (
   scopes TEXT
 );
 
+-- Site-wide admin state. These rows are Cosheaf-local operator state, not
+-- workspace knowledge: Forgejo owns repository membership, while Cosheaf owns
+-- global toggles such as whether public registration is currently open.
+CREATE TABLE IF NOT EXISTS site_admins (
+  username TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS site_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT
+);
+
 -- No workspaces table. The workspace slug IS the Forgejo `owner/repo` full
 -- name, the display name comes from the Forgejo repo description, and the
 -- workspace's default markdown format lives in a Forgejo repo topic

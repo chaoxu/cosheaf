@@ -9,9 +9,11 @@ import { allDocumentFormats } from "../format-registry.js";
 import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { ForgejoError } from "../forgejo.js";
+import { effectiveRegistrationOpen, isSiteAdmin } from "../site-admin.js";
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import { FixedWindowRateLimiter } from "../rate-limit.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
+import { registerAdminRoutes } from "./web-admin.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
 import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField } from "./web-context.js";
@@ -87,7 +89,7 @@ const registerRateLimiter = new FixedWindowRateLimiter(5, 10 * 60 * 1000);
 
 web.get("/login", (c) => {
   const t = c.get("t");
-  const open = c.get("config").registrationOpen;
+  const open = effectiveRegistrationOpen(c.get("db"), c.get("config"));
   const error = c.req.query("error");
   const errorKey = error ? LOGIN_ERROR_KEYS[error] : undefined;
   const notice = c.req.query("registered") === "1"
@@ -141,7 +143,7 @@ web.post("/logout", (c) => {
 // /login mints and drop the user straight into a session. No cosheaf users
 // table — identity stays {username} from the PAT.
 web.get("/register", (c) => {
-  if (!c.get("config").registrationOpen) return c.notFound();
+  if (!effectiveRegistrationOpen(c.get("db"), c.get("config"))) return c.notFound();
   const t = c.get("t");
   const error = c.req.query("error");
   const errorKey = error ? REGISTER_ERROR_KEYS[error] : undefined;
@@ -159,7 +161,7 @@ web.get("/register", (c) => {
 
 web.post("/register", async (c) => {
   const config = c.get("config");
-  if (!config.registrationOpen) return c.notFound();
+  if (!effectiveRegistrationOpen(c.get("db"), config)) return c.notFound();
 
   const crossOrigin = rejectCrossOriginMutation(c);
   if (crossOrigin) return crossOrigin;
@@ -226,12 +228,13 @@ web.get("/", globalRoute(async (c, auth) => {
   ]);
   const inbox = notificationResult.ok ? mapThreads(notificationResult.threads) : null;
   const t = c.get("t");
+  const siteAdmin = isSiteAdmin(c.get("db"), auth.user.username);
   return htmlResponse(
     pageShell({
       title: t("home.title"),
       user: auth.user.username,
       locale: c.get("locale"),
-      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, t),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, t, { siteAdmin }),
       body: html`
         <main class="page">
           <div class="page-title page-title--actions-only">
@@ -336,6 +339,8 @@ web.get("/account/inbox", globalRoute(async (c) => {
     .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] });
   return htmlResponse(String(inboxSection(mapThreads(threads), c.get("t"))));
 }));
+
+registerAdminRoutes(web);
 
 web.post("/account/notifications/:id/read", globalRoute(async (c, auth) => {
   const id = positiveInt(c.req.param("id"));
