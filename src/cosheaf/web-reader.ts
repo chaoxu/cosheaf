@@ -1,6 +1,5 @@
 import { renderInlineMarkdown } from "@chaoxu/coflat";
 import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews, type ReaderOutlineEntry } from "@chaoxu/coflat/reader";
-import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { urlPath } from "../../shared/url";
 import {
   REF_BUTTON_CLASS,
@@ -48,7 +47,6 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const payload = readPayload(root);
   if (!payload) return;
   applyDocumentTheme(root);
-  const parsed = parseFrontmatterYaml(payload.source);
   const refs = await loadCoflatRefs(payload);
   const ctx = coflatDocumentContext(payload, refs);
   // outline:true makes coflat emit stable, collision-free heading ids on the
@@ -60,7 +58,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // References list, and hover — from the catalog + citationFormatter on the
   // context. cosheaf only supplies the data; the host refResolver remains a
   // fallback for cross-file workspace refs Coflat can't number (#124, #11/#12).
-  const result = renderToHtml(parsed.body, ctx, {
+  const result = renderToHtml(payload.source, ctx, {
     outline: true,
     referencePreviews: true,
     resolveReferences: true,
@@ -71,32 +69,25 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
   fixLabeledDisplayMath(fragment);
   rewriteRenderedRepoUrls(fragment, payload);
-  // Match the editor's rich mode, which draws the frontmatter `title` as a
-  // `.cf-doc-title` widget — the reader otherwise drops it (renderToHtml has no
-  // title concept). Document surface only; plain textContent (DOMPurify-safe).
-  const title = payload.renderTitle ? parsed.frontmatter.title : undefined;
-  if (typeof title === "string" && title.trim()) {
-    const titleEl = document.createElement("div");
-    titleEl.className = "cf-doc-title";
-    renderChromeInline(titleEl, title, ctx.mathMacros);
-    fragment.insertBefore(titleEl, fragment.firstChild);
+  // Coflat needs the full source so frontmatter-controlled numbering (e.g.
+  // `numbering: global`) and block config are visible to the reader. It also
+  // renders the frontmatter title itself; hide that only for non-document
+  // surfaces that opted out of title rendering.
+  if (!payload.renderTitle) {
+    fragment.querySelector(".cf-doc-title")?.remove();
   }
   root.replaceChildren(fragment);
   // hydrateMath does NOT read the document — it needs the macros explicitly, or
   // any non-builtin (e.g. \DecRank) renders as "undefined control sequence" red.
-  // renderToHtml only resolves frontmatter `math:` from the full source, but we
-  // hand it the frontmatter-stripped body (the diff line-offset logic relies on
-  // that), so result.mathMacros is empty. Forward cosheaf's own merged macro set
-  // instead — repo-wide cosheaf.yaml ∪ this doc's frontmatter `math:`, the same
-  // set already on ctx.mathMacros — with result.mathMacros layered on for any
-  // in-body definitions. \R only worked before because it is a KaTeX builtin,
-  // which masked this missing wire for both the repo-wide and frontmatter paths.
+  // result.mathMacros covers frontmatter/in-body macros from Coflat's render;
+  // ctx.mathMacros also includes Cosheaf's repo-wide cosheaf.yaml macros.
+  // Forward both so hydration sees the same macro set as the render pass.
   hydrateMath(root, { mathMacros: { ...ctx.mathMacros, ...result.mathMacros } });
   // Coflat resolves citation/crossref hover natively from the context. The
-  // preview index and source are both relative to the frontmatter-stripped body
-  // passed to renderToHtml.
+  // preview index and source are both relative to the full source passed to
+  // renderToHtml.
   hydrateReaderHoverPreviews(root, {
-    source: parsed.body,
+    source: payload.source,
     context: ctx,
     referencePreviewIndex: result.referencePreviewIndex,
   });
@@ -104,13 +95,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // disclosure controls render but never get behavior.
   hydrateReaderDisclosures(root);
   if (payload.markedLines?.length) {
-    // The diff's changed-line numbers are raw-file 1-based (they include any
-    // YAML frontmatter), but sourceLineAttribution numbers the rendered body —
-    // which parseFrontmatterYaml stripped of frontmatter. Shift the marked set
-    // by the frontmatter line count so block source-ranges line up (#113).
-    const bodyStart = payload.source.length - parsed.body.length;
-    const frontmatterLines = bodyStart > 0 ? (payload.source.slice(0, bodyStart).match(/\n/g)?.length ?? 0) : 0;
-    markChangedBlocks(root, new Set(payload.markedLines.map((line) => line - frontmatterLines)));
+    markChangedBlocks(root, new Set(payload.markedLines));
   }
   buildReaderToc(result.outline ?? [], ctx.mathMacros);
   // The browser's native fragment jump fired before this island swapped the

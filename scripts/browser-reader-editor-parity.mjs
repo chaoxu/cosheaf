@@ -120,8 +120,11 @@ function assertReaderEditorParity(reader, editor) {
       throw new Error(`reader/editor ${key} mismatch: ${JSON.stringify({ reader, editor })}`);
     }
   }
-  if (!editor.maxWidth.includes("1200px")) {
-    throw new Error(`editor package max-width contract mismatch: ${JSON.stringify({ reader, editor })}`);
+  if (Math.abs(reader.width - editor.width) > 1) {
+    throw new Error(`reader/editor effective width mismatch: ${JSON.stringify({ reader, editor })}`);
+  }
+  if (reader.paddingInline.join("/") !== editor.paddingInline.join("/")) {
+    throw new Error(`reader/editor horizontal padding mismatch: ${JSON.stringify({ reader, editor })}`);
   }
   if (!reader.font.includes("KaTeX_Main") || !editor.font.includes("KaTeX_Main")) {
     throw new Error(`reader/editor content font mismatch: ${JSON.stringify({ reader, editor })}`);
@@ -143,6 +146,34 @@ function assertReaderEditorParity(reader, editor) {
   if (editor.listMarkers === 0) {
     throw new Error(`editor package list markers missing: ${JSON.stringify({ reader, editor })}`);
   }
+}
+
+async function assertHoverPreview(selector, expectedText) {
+  const tooltip = page.locator(".cf-hover-preview-tooltip[data-visible=\"true\"]");
+  await page.locator(selector).first().hover();
+  await tooltip.waitFor({ state: "visible", timeout: 3000 });
+  const text = await tooltip.textContent();
+  if (!text?.includes(expectedText)) {
+    throw new Error(`hover preview text mismatch for ${selector}: ${JSON.stringify(text)}`);
+  }
+  await page.mouse.move(10, 10);
+  await tooltip.waitFor({ state: "hidden", timeout: 3000 }).catch(() => undefined);
+}
+
+async function scrollEditorUntilMounted(selector) {
+  const scroller = page.locator(".cm-scroller").first();
+  await scroller.waitFor({ state: "visible", timeout: 10000 });
+  for (let step = 0; step < 12; step += 1) {
+    if (await page.locator(selector).first().isVisible().catch(() => false)) return;
+    await scroller.evaluate((el, index) => {
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * (index / 11);
+    }, step);
+    await page.waitForTimeout(150);
+  }
+  const visibleReferences = await page.locator("[data-reference-widget]").evaluateAll((nodes) =>
+    nodes.slice(0, 12).map((node) => node.textContent ?? ""),
+  );
+  throw new Error(`editor reference widget did not mount for ${selector}: ${JSON.stringify(visibleReferences)}`);
 }
 
 try {
@@ -205,6 +236,7 @@ try {
   if (defaultReader.redSample.length !== 0) {
     throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
+  await assertHoverPreview(".cf-reader [data-ref-key=\"thm:hover-preview\"]", "Hover Preview Stress Test");
 
   await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   const themeSelect = page.getByTestId("settings-document-theme-select");
@@ -229,6 +261,9 @@ try {
     throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
   }
   assertReaderEditorParity(defaultReader, defaultEditor);
+  const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"]";
+  await scrollEditorUntilMounted(editorHoverTarget);
+  await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;
