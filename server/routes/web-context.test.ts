@@ -145,16 +145,17 @@ describe("web role gates pass through on sufficient role", () => {
 });
 
 describe("web workspace title", () => {
-  it("prefers the indexed README title over the Forgejo repo description", async () => {
+  it("refreshes stale indexed README title from Forgejo before falling back to the repo description", async () => {
     const db = freshTestDb("cosheaf-webctx-");
     seedTestWorkspace(db);
     db.prepare("INSERT INTO doc_map (workspace_slug, cosheaf_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run("owner/w", "readme", "README.md", "Fresh Project Title", "2026-06-16T00:00:00Z");
+      .run("owner/w", "readme", "README.md", "Old Sidecar Title", "2026-06-16T00:00:00Z");
     const token = seedAuthUser(db, config, { username: "writer", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/user", () => Response.json({ id: 1, login: "writer" }));
         forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w", full_name: "owner/w", description: "Old Repo Description" }));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("---\ntitle: Fresh Project Title\n---\n# Old heading\n"));
       }),
     );
 
@@ -162,6 +163,8 @@ describe("web workspace title", () => {
 
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("Fresh Project Title");
+    expect(db.prepare("SELECT title FROM doc_map WHERE workspace_slug = ? AND forgejo_id = ?").get("owner/w", "README.md"))
+      .toEqual({ title: "Fresh Project Title" });
   });
 });
 

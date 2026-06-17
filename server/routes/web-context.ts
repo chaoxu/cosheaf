@@ -7,6 +7,7 @@ import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
 import type { Role } from "../../shared/roles.js";
+import { indexPage } from "../indexer.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
@@ -152,12 +153,30 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   c.set("workspace", ws);
   c.set("repoCtx", { fj, owner, repo });
   const db = c.get("db");
-  const indexedTitle = workspaceReadmeTitle(db, ws.slug);
-  const [fallbackTitle, userAvatarSrc] = await Promise.all([
-    indexedTitle ? Promise.resolve("") : resolveWorkspaceTitle(fj, owner, repo),
+  const [wsTitle, userAvatarSrc] = await Promise.all([
+    resolveWorkspaceDisplayTitle(db, fj, ws),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db, wsTitle: indexedTitle || fallbackTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db, wsTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
+}
+
+async function resolveWorkspaceDisplayTitle(
+  db: Database.Database,
+  fj: Forgejo,
+  ws: WorkspaceContext,
+): Promise<string> {
+  try {
+    const readme = await fj.getRawFile(ws.owner, ws.repo, "main", "README.md");
+    const indexed = indexPage(db, {
+      workspaceSlug: ws.slug,
+      filePath: "README.md",
+      bodyText: readme,
+      formatId: ws.defaultMdFormat,
+    });
+    return indexed.title?.trim() || workspaceReadmeTitle(db, ws.slug) || await resolveWorkspaceTitle(fj, ws.owner, ws.repo);
+  } catch (_err) {
+    return workspaceReadmeTitle(db, ws.slug) || await resolveWorkspaceTitle(fj, ws.owner, ws.repo);
+  }
 }
 
 // resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the
