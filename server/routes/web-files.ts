@@ -45,7 +45,6 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       fj.listPulls(owner, repo, "open").catch(() => []),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
-    const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo);
     const readme = await repoReadme(ctx, "main", files);
     const stats = {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
@@ -61,7 +60,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
             <span class="build-only toolbar-actions">
-              ${cloneBox(cloneUrl)}
+              ${cloneBox(sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url))}
               <a class="button" href="${repoHref(owner, repo, "/branches")}">Branches</a>
               ${
                 ws.role === "read"
@@ -95,7 +94,8 @@ function cloneBox(cloneUrl: string): Html {
   </details>`;
 }
 
-function sshCloneUrl(forgejoUrl: string, owner: string, repo: string): string {
+function sshCloneUrl(forgejoUrl: string, owner: string, repo: string, forgejoSshUrl?: string): string {
+  if (forgejoSshUrl) return forgejoSshUrl;
   const host = new URL(forgejoUrl).hostname;
   return `git@${host}:${owner}/${repo}.git`;
 }

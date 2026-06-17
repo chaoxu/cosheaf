@@ -55,6 +55,7 @@ describe("web file editor route", () => {
             name: "w",
             full_name: "owner/w",
             description: "A focused knowledge repo",
+            ssh_url: "ssh://git@forge.cosheaf.test:2222/owner/w.git",
             updated_at: "2026-06-16T12:34:00Z",
             open_issues_count: 3,
           }),
@@ -92,7 +93,7 @@ describe("web file editor route", () => {
     expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">open PRs</span>');
     expect(body).toContain('data-testid="repo-readme"');
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
-    expect(body).toContain('value="git@forgejo.test:owner/w.git"');
+    expect(body).toContain('value="ssh://git@forge.cosheaf.test:2222/owner/w.git"');
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {

@@ -168,6 +168,9 @@ export interface ForgejoRepo {
   description?: string;
   private?: boolean;
   owner: ForgejoUser;
+  html_url?: string;
+  ssh_url?: string;
+  clone_url?: string;
   // Present when the search/list endpoints include topics; the dedicated
   // /topics endpoint (Forgejo client `listRepoTopics`) is the authoritative
   // read otherwise.
