@@ -395,16 +395,25 @@ describe("pulls + branches routes", () => {
   });
 
   describe("write+ gates", () => {
-    it("POST /pulls/:n/reviews rejects a read user with 403", async () => {
+    it("POST /pulls/:n/reviews lets Forgejo decide read-user comment permission", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "test-bob", "read");
+      fetchMock
+        .mockResolvedValueOnce(ok(pull({ user: { login: "alice" } })))
+        .mockResolvedValueOnce(ok({ id: 99 }))
+        .mockResolvedValueOnce(ok([]));
       const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ event: "APPROVE" }),
+        body: JSON.stringify({ event: "COMMENT", body: "question" }),
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls/7/reviews");
+      expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+        event: "COMMENT",
+        body: "question",
+      });
     });
 
     it("POST /pulls/:n/close rejects a read user with 403", async () => {
@@ -447,16 +456,33 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(403);
     });
 
-    it("POST /pulls/:n/comments rejects a read user with 403", async () => {
+    it("POST /pulls/:n/comments lets Forgejo decide read-user line-comment permission", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "test-bob", "read");
+      const diff = [
+        "diff --git a/x.md b/x.md",
+        "--- a/x.md",
+        "+++ b/x.md",
+        "@@ -1,1 +1,1 @@",
+        "-old",
+        "+new",
+      ].join("\n");
+      fetchMock
+        .mockResolvedValueOnce(ok(pull({ user: { login: "alice" } })))
+        .mockResolvedValueOnce(new Response(diff, { status: 200 }))
+        .mockResolvedValueOnce(ok({ id: 99 }));
       const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments", {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ path: "x.md", line: 1, side: "head", body: "hi" }),
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(200);
+      expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/pulls/7/reviews");
+      expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toMatchObject({
+        event: "COMMENT",
+        comments: [{ path: "x.md", body: "hi", new_position: 1 }],
+      });
     });
 
     it("POST /pulls/:n/comments rejects bad shapes before reaching Forgejo", async () => {

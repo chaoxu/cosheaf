@@ -93,6 +93,32 @@ describe("web pull request routes", () => {
     expect(body).toContain('/cosheaf-user-autocomplete.js');
   });
 
+  it("lets read users submit PR review comments through Forgejo", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    let reviewBody: unknown = null;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
+        forge.post("/api/v1/repos/owner/w/pulls/7/reviews", async (c) => {
+          reviewBody = await c.req.json();
+          return Response.json({ id: 1 });
+        });
+      }),
+    );
+
+    const form = new URLSearchParams({ event: "COMMENT", body: "question" });
+    const res = await appFor(db).request("/owner/w/pulls/7/reviews", {
+      method: "POST",
+      headers: formHeaders(token),
+      body: form.toString(),
+    });
+
+    expect(res.status).toBe(303);
+    expect(reviewBody).toEqual({ event: "COMMENT", body: "question" });
+  });
+
   it("rejects malformed PR edit milestones before mutating the pull", async () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);

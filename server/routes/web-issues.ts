@@ -143,7 +143,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
     ${await threadDescription(ctx, bodyText)}
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
-      ctx.ws.role === "read" || chatBackedIssue
+      chatBackedIssue
         ? ""
         : html`<form class="comment-form build-only" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
              ${composeField(ctx, { placeholder: "Leave a comment", required: true })}
@@ -250,7 +250,7 @@ web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) 
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
-web.post("/:owner/:repo/issues/:number/comments", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/issues/:number/comments", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
@@ -261,7 +261,7 @@ web.post("/:owner/:repo/issues/:number/comments", webRouteForWrite(async (c, ctx
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
-web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
@@ -275,7 +275,7 @@ web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRouteForWrite(asyn
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
-web.post("/:owner/:repo/issues/:number/comments/:id/delete", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/issues/:number/comments/:id/delete", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   if (!number || !id) return notFoundPage(ctx.user, "Comment not found");

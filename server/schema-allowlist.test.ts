@@ -29,6 +29,9 @@ const ALLOWED_TABLES = new Set([
   "webhook_log",
   // Cosheaf-issued Forgejo PAT cache; login validates credentials before reuse
   "login_tokens",
+  // Cosheaf-owned site controls: global admin bootstrap and registration gate.
+  "site_admins",
+  "site_settings",
   // Optional live-work leases (#95): ephemeral coordination state, no Forgejo
   // source. Disposable like webhook_log — rows expire; NOT durable knowledge,
   // and issues/PRs stay the only durable state on Forgejo.

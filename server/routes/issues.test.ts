@@ -138,6 +138,30 @@ describe("issues routes", () => {
     });
   });
 
+  it("lets Forgejo decide read-user issue comment permission", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "bob", role: "read" });
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok({
+        id: 101,
+        body: "question",
+        user: { login: "bob" },
+        created_at: "2026-05-20T00:00:00Z",
+        updated_at: "2026-05-20T00:00:00Z",
+      }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/comments", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ body: "question" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/comments");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ body: "question" });
+  });
+
   it("does not edit or delete comments outside the requested issue", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

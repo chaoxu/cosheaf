@@ -175,6 +175,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+      forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
     }));
 
     const res = await appFor(db).request("/owner/w/_edit?branch=bad..branch&path=notes.md", {
@@ -184,7 +185,7 @@ describe("web file editor route", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Valid branch name is required");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/raw/README.md?ref=main");
   });
 
   it("rejects invalid edit paths instead of falling back to the default new file", async () => {
@@ -193,6 +194,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+      forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
     }));
 
     const res = await appFor(db).request("/owner/w/_edit?path=docs/./escape.md", {
@@ -202,7 +204,7 @@ describe("web file editor route", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Valid file path is required");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/raw/README.md?ref=main");
   });
 
   it("rejects a stale plain form save before overwriting the branch file", async () => {
@@ -349,6 +351,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+      forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
     }));
 
     const form = new URLSearchParams({
@@ -366,7 +369,7 @@ describe("web file editor route", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Valid branch name is required");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/raw/README.md?ref=main");
   });
 
   it("rejects a plain form rename from a non-editable source path before deleting it", async () => {

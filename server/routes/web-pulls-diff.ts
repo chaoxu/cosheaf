@@ -192,7 +192,7 @@ function commentFormOptions(
   mode: DiffMode,
   shape: DiffShape,
 ): LineCommentFormOptions | null {
-  if (ctx.ws.role === "read" || pull.user?.login === ctx.user || pull.state === "closed") return null;
+  if (pull.state === "closed") return null;
   return {
     action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/comments`),
     path: filePath,

@@ -551,7 +551,7 @@ function commentActions(opts: { ctx: WebCtx; testId: string; formId: string; edi
 }
 
 function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
-  if (ctx.ws.role === "read") return emptyHtml;
+  if (ctx.ws.role === "read" && comment.user?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "issue-comment-actions",
@@ -563,7 +563,7 @@ function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueC
 }
 
 function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): Html {
-  if (ctx.ws.role === "read") return emptyHtml;
+  if (ctx.ws.role === "read" && comment.user?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "pull-comment-actions",
@@ -675,29 +675,21 @@ function reviewStateLabel(state: string): string {
 }
 
 export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): Html {
-  // Review/merge are propose/change actions — hidden in Read mode (#171) and on a
-  // closed PR; the discussion above stays readable.
-  if (ctx.ws.role === "read" || pull.state === "closed") return emptyHtml;
+  if (pull.state === "closed") return emptyHtml;
   const isAuthor = pull.user?.login === ctx.user;
-  // The PR author can't review their own PR (no self-approval). But an admin —
-  // including the author on a solo repo — must still be able to merge it, and
-  // "Merge anyway" is the explicit force bypass of required approvals they
-  // otherwise can't satisfy alone. A non-admin author has nothing to do here.
-  if (isAuthor && ctx.ws.role !== "admin") return emptyHtml;
+  const canVerdict = ctx.ws.role !== "read" && !isAuthor;
   return html`<div class="build-only">
-    ${
-      isAuthor
-        ? ""
-        : html`<form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">
-            ${redirectTo ? html`<input type="hidden" name="redirect_to" value="${redirectTo}">` : ""}
-            ${composeField(ctx, { placeholder: "Leave a review comment" })}
-            <div class="toolbar-actions">
-              <button class="button" name="event" value="COMMENT" type="submit">Comment</button>
-              <button class="button" name="event" value="REQUEST_CHANGES" type="submit">Request changes</button>
-              <button class="button" name="event" value="APPROVED" type="submit">Approve</button>
-            </div>
-          </form>`
-    }
+    <form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">
+      ${redirectTo ? html`<input type="hidden" name="redirect_to" value="${redirectTo}">` : ""}
+      ${composeField(ctx, { placeholder: "Leave a review comment" })}
+      <div class="toolbar-actions">
+        <button class="button" name="event" value="COMMENT" type="submit">Comment</button>
+        ${canVerdict ? html`
+          <button class="button" name="event" value="REQUEST_CHANGES" type="submit">Request changes</button>
+          <button class="button" name="event" value="APPROVED" type="submit">Approve</button>
+        ` : ""}
+      </div>
+    </form>
     ${
       ctx.ws.role === "admin"
         ? html`<form class="merge-actions" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/merge`)}">

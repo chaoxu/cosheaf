@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
@@ -140,10 +140,21 @@ function parseIssueSort(value: string | undefined): IssueSort | undefined {
   return value && allowed.has(value) ? value as IssueSort : undefined;
 }
 
+const issueCommentMutationRe = /\/issues\/\d+\/comments(?:\/\d+)?$/;
+
+const requireIssueWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  if ((method === "POST" || method === "PATCH" || method === "DELETE") && issueCommentMutationRe.test(c.req.path)) {
+    await next();
+    return;
+  }
+  return requireWriteOnMutation(c, next);
+};
+
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
 issues.use("/:owner/:repo/*", requireMembership());
-issues.use("/:owner/:repo/*", requireWriteOnMutation);
+issues.use("/:owner/:repo/*", requireIssueWriteOnMutation);
 
 // Typed because the public API needs an issue-only row shape and "mine"
 // composes two Forgejo filters (created_by OR assigned_by).

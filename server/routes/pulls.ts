@@ -26,7 +26,7 @@
 //
 // Branches live in routes/branches.ts.
 
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types.js";
 import {
   requireAdminFresh,
@@ -53,7 +53,19 @@ import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntL
 export const pulls = new Hono<AppEnv>();
 pulls.use("*", requireAuth);
 pulls.use("/:owner/:repo/*", requireMembership());
-pulls.use("/:owner/:repo/*", requireWriteOnMutation);
+
+const pullDiscussionMutationRe = /\/pulls\/\d+\/(?:reviews|comments(?:\/\d+)?)$/;
+
+const requirePullWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  if ((method === "POST" || method === "PATCH" || method === "DELETE") && pullDiscussionMutationRe.test(c.req.path)) {
+    await next();
+    return;
+  }
+  return requireWriteOnMutation(c, next);
+};
+
+pulls.use("/:owner/:repo/*", requirePullWriteOnMutation);
 
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict, forbidden, notFound } from "./responses.js";
@@ -526,7 +538,7 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  if (pull.user?.login === c.get("user").username)
+  if (EVENT_MAP[event] !== "COMMENT" && pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
@@ -681,8 +693,6 @@ pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  if (pull.user?.login === c.get("user").username)
-    return c.json(...forbidden("cannot comment on your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot comment on a closed pull request"));
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
   if ("error" in pos) return c.json(...bad(pos.error));

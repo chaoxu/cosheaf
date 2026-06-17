@@ -130,6 +130,32 @@ describe("web issue routes", () => {
     expect(commented).toBe(false);
   });
 
+  it("lets read users submit issue comments through Forgejo", async () => {
+    const db = freshTestDb("cosheaf-web-issues-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    let commentBody: unknown = null;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/issues/7", () => Response.json(forgejoIssue()));
+        forge.post("/api/v1/repos/owner/w/issues/7/comments", async (c) => {
+          commentBody = await c.req.json();
+          return Response.json({ id: 1, body: "created" });
+        });
+      }),
+    );
+
+    const form = new URLSearchParams({ body: "question" });
+    const res = await appFor(db).request("/owner/w/issues/7/comments", {
+      method: "POST",
+      headers: formHeaders(token),
+      body: form.toString(),
+    });
+
+    expect(res.status).toBe(303);
+    expect(commentBody).toEqual({ body: "question" });
+  });
+
   it("does not edit comments outside the requested issue", async () => {
     const db = freshTestDb("cosheaf-web-issues-");
     seedTestWorkspace(db);

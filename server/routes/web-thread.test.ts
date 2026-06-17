@@ -45,20 +45,30 @@ describe("reviewForms merge controls (#180 admin bypass)", () => {
       ),
     );
 
-  it("shows admin merge controls to the PR author (solo merge), without the review form", () => {
+  it("shows admin merge controls and comment-only review form to the PR author", () => {
     const html = render("admin", "chao");
     expect(html).toContain("Merge PR");
     expect(html).toContain("Merge anyway");
-    // Author can't review their own PR — no approve/request-changes form.
-    expect(html).not.toContain("review-form");
+    expect(html).toContain("review-form");
+    expect(html).toContain("Comment");
+    expect(html).not.toContain("Approve");
+    expect(html).not.toContain("Request changes");
   });
 
-  it("hides everything from a non-admin author (must wait for a reviewer)", () => {
-    expect(render("write", "chao")).toBe("");
+  it("shows comment-only review form to a non-admin author", () => {
+    const html = render("write", "chao");
+    expect(html).toContain("review-form");
+    expect(html).toContain("Comment");
+    expect(html).not.toContain("Approve");
+    expect(html).not.toContain("Request changes");
   });
 
-  it("hides everything in read mode and on a closed PR", () => {
-    expect(render("read", "someone-else")).toBe("");
+  it("shows comment-only review form in read mode and hides closed PR actions", () => {
+    const html = render("read", "someone-else");
+    expect(html).toContain("review-form");
+    expect(html).toContain("Comment");
+    expect(html).not.toContain("Approve");
+    expect(html).not.toContain("Request changes");
     expect(render("admin", "someone-else", "closed")).toBe("");
   });
 });

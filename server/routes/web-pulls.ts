@@ -315,22 +315,22 @@ web.post("/:owner/:repo/pulls/:number/review-requests/delete", webRouteForWrite(
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
-web.post("/:owner/:repo/pulls/:number/reviews", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/pulls/:number/reviews", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  // No self-review, and no reviewing a closed PR (mirrors the comments route).
-  if (pull.user?.login === ctx.user || pull.state === "closed") return forbiddenPage(ctx.user);
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const event = stringField(form.event);
   const body = stringField(form.body) ?? "";
   if (event !== "APPROVED" && event !== "REQUEST_CHANGES" && event !== "COMMENT")
     return badRequestPage(ctx.user, "Review event is required.");
+  if (event !== "COMMENT" && pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
   await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
-web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const body = stringField((await c.req.parseBody()).body);
@@ -342,7 +342,7 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRouteForWrite(async
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
-web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   const id = positiveInt(c.req.param("id"));
   const reviewId = positiveInt(stringField((await c.req.parseBody()).review_id) ?? undefined);
@@ -354,10 +354,10 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRouteForWrite(asy
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
-web.post("/:owner/:repo/pulls/:number/comments", webRouteForWrite(async (c, ctx) => {
+web.post("/:owner/:repo/pulls/:number/comments", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.user?.login === ctx.user || pull.state === "closed") return forbiddenPage(ctx.user);
+  if (pull.state === "closed") return forbiddenPage(ctx.user);
   const form = await c.req.parseBody();
   const path = safeRel(stringField(form.path) ?? "");
   const side = stringField(form.side);
