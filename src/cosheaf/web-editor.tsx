@@ -643,7 +643,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
                 <li key={entry.key} style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 12}px` }}>
                   <button type="button" onClick={() => editorRef.current?.scrollToLine(entry.line, { center: true })}>
                     {entry.number ? `${entry.number} ` : ""}
-                    <InlineChromeMarkdown text={entry.text} mathMacros={outlineMathMacros} />
+                    <InlineChromeMarkdown text={entry.markdown} mathMacros={outlineMathMacros} />
                   </button>
                 </li>
               ))}
