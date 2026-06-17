@@ -200,6 +200,7 @@ describe("web file editor route", () => {
     expect(pandoc?.args).toContain("--pdf-engine-opt=-no-shell-escape");
     expect(pandoc?.args).toContain("--pdf-engine-opt=-halt-on-error");
     expect(pandoc?.args.some((arg) => arg.startsWith("--lua-filter=") && arg.endsWith("/latex/filter.lua"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--csl=") && arg.endsWith("/latex/csl/ieee.csl"))).toBe(true);
     expect(pandoc?.args.some((arg) => arg.startsWith("--resource-path="))).toBe(true);
   });
 
@@ -232,6 +233,26 @@ describe("web file editor route", () => {
 
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Invalid PDF template path.");
+  });
+
+  it("rejects absolute custom PDF citation style paths", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    _setPdfExportCommandRunnerForTest(async () => {});
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => Response.json({ tree: [{ path: "notes.md", type: "blob", size: 8 }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md?csl=/etc/passwd", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Invalid PDF citation style path.");
   });
 
   it("reports missing PDF export dependencies clearly", async () => {

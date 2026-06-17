@@ -281,6 +281,7 @@ web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
       files: projectFiles,
       flags: {
         bibliography: c.req.query("bibliography"),
+        csl: c.req.query("csl"),
         template: c.req.query("template"),
       },
     });

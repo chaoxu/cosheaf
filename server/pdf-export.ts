@@ -7,9 +7,11 @@ import {
   buildLatexPandocArgs,
   buildPandocResourcePath,
   exportDependencyTools,
+  LATEX_CSL_NAMES,
   LATEX_TEMPLATE_NAMES,
   parseLatexFrontmatterConfig,
   preprocessWithReadFile,
+  resolveLatexCslPath,
   resolveLatexExportOptions,
   resolveLatexTemplatePath,
 } from "@chaoxu/coflat/latex";
@@ -31,6 +33,7 @@ interface ExportCoflatPdfOptions {
   readonly files: readonly PdfProjectFile[];
   readonly flags?: {
     readonly bibliography?: unknown;
+    readonly csl?: unknown;
     readonly template?: unknown;
   };
 }
@@ -88,9 +91,15 @@ export async function exportCoflatMarkdownPdf(options: ExportCoflatPdfOptions): 
       root,
       sourceDir,
     });
+    const csl = resolveCslPath(exportOptions.csl, {
+      latexDir,
+      root,
+      sourceDir,
+    });
     const args = [
       ...buildLatexPandocArgs({
         bibliography: exportOptions.bibliography,
+        cslPath: csl,
         filterPath: path.join(latexDir, "filter.lua"),
         format: "pdf",
         output: outputFile,
@@ -141,6 +150,27 @@ function resolveTemplatePath(
     throw new PdfExportError(400, "Invalid PDF template path.");
   }
   return templatePath;
+}
+
+function resolveCslPath(
+  csl: string,
+  options: { root: string; sourceDir: string; latexDir: string },
+): string {
+  if (LATEX_CSL_NAMES.has(csl)) {
+    return resolveLatexCslPath(csl, {
+      cwd: options.sourceDir,
+      latexDir: options.latexDir,
+    });
+  }
+  const rel = safeRel(csl);
+  if (!rel) {
+    throw new PdfExportError(400, "Invalid PDF citation style path.");
+  }
+  const cslPath = path.resolve(options.sourceDir, rel);
+  if (!isWithin(options.root, cslPath)) {
+    throw new PdfExportError(400, "Invalid PDF citation style path.");
+  }
+  return cslPath;
 }
 
 function isWithin(root: string, target: string): boolean {
