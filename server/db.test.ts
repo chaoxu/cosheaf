@@ -130,6 +130,7 @@ describe("loadConfig", () => {
 
     expect(config.port).toBe(3030);
     expect(config.forgejoUrl).toBe("http://127.0.0.1:3002");
+    expect(config.gitSshHost).toBe("127.0.0.1");
     expect(config.webhookUrl).toBe("http://127.0.0.1:3030/api/v1/webhooks/forgejo");
     expect(config.coverifyCmd).toBe("coverify");
     expect(config.coverifyApiUrl).toBe("http://127.0.0.1:3030/api/v1");

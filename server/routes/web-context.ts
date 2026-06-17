@@ -65,8 +65,8 @@ export type WebRepoResult = { ok: true } & WebCtx | { ok: false; response: Respo
 
 // The browser-facing origin (scheme://host) cosheaf should present. A configured
 // public origin wins; otherwise we derive it from the request, honoring forwarded
-// headers only when a trusted proxy hop is configured. Used for CSRF checks,
-// secure cookies, and clone URLs that point at cosheaf, not the backing Forgejo.
+// headers only when a trusted proxy hop is configured. Used for CSRF checks and
+// secure cookies.
 export function requestOrigin(c: Context<AppEnv>): string {
   const publicOrigin = c.get("config")?.publicOrigin;
   if (publicOrigin) return publicOrigin;

@@ -23,6 +23,9 @@ export interface Config {
   dataDir: string;
   port: number;
   forgejoUrl: string;
+  // Public SSH host for git clone URLs. Usually the Forgejo host (e.g.
+  // gitea.lab), not Cosheaf.
+  gitSshHost: string;
   // Non-site-admin runtime token. This is the token name exposed in normal
   // app env and should not carry Forgejo site-admin privileges.
   forgejoToken: string;
@@ -32,10 +35,9 @@ export interface Config {
   forgejoAdminToken: string;
   webhookSecret: string;
   webhookUrl: string;
-  // Canonical browser origin for CSRF checks, secure-cookie detection, and
-  // self-referential clone URLs. Set COSHEAF_PUBLIC_ORIGIN behind a reverse
-  // proxy so these browser decisions do not depend on client-controlled
-  // Forwarded headers.
+  // Canonical browser origin for CSRF checks and secure-cookie detection. Set
+  // COSHEAF_PUBLIC_ORIGIN behind a reverse proxy so these browser decisions do
+  // not depend on client-controlled Forwarded headers.
   publicOrigin: string | null;
   // Web self-service signup. false (default) makes GET/POST /register 404;
   // true enables anonymous account creation through the admin token. Set via
@@ -44,8 +46,8 @@ export interface Config {
   registrationOpen: boolean;
   // Number of trusted reverse-proxy hops in front of cosheaf. Used to pick the
   // real client IP out of X-Forwarded-For for registration rate limiting and to
-  // trust the matching X-Forwarded-Proto/Host hop for CSRF origin checks,
-  // secure-cookie detection, and clone URLs. 0 (default) trusts no proxy
+  // trust the matching X-Forwarded-Proto/Host hop for CSRF origin checks and
+  // secure-cookie detection. 0 (default) trusts no proxy
   // (dev / direct) and the limiter falls back to a single shared bucket; behind
   // the lab's single Caddy set COSHEAF_TRUSTED_PROXY_HOPS=1.
   trustedProxyHops: number;
@@ -146,6 +148,7 @@ export function validateTrustedProxyOrigin(publicOrigin: string | null, trustedP
 export function loadConfig(): Config {
   const dataDir = withDefault("COSHEAF_DATA_DIR", path.resolve(process.cwd(), "data"));
   mkdirSync(dataDir, { recursive: true });
+  const forgejoUrl = withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002");
   const publicOrigin = optionalOrigin("COSHEAF_PUBLIC_ORIGIN");
   const proxyHops = trustedProxyHops();
   try {
@@ -157,7 +160,8 @@ export function loadConfig(): Config {
   return {
     dataDir,
     port: serverPort(),
-    forgejoUrl: withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002"),
+    forgejoUrl,
+    gitSshHost: withDefault("COSHEAF_GIT_SSH_HOST", new URL(forgejoUrl).hostname),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),

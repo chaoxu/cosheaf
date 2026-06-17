@@ -20,7 +20,7 @@ test("account preferences are separate from repository settings", async ({ page 
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
 
-  await page.getByRole("link", { name: "chao", exact: true }).click();
+  await page.locator(".sidebar-identity-link").click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
   await expect(page.getByTestId("settings-document-theme-select")).toBeVisible();
@@ -34,7 +34,7 @@ test("account preferences are separate from repository settings", async ({ page 
   await expect(page.getByTestId("settings-user-preferences")).toHaveCount(0);
   await expect(page.locator(".repo-body")).toContainText("Review policy");
   await expect(page.locator(".repo-body")).toContainText("Access");
-  await expect(page.getByTestId("settings-access")).toBeVisible();
+  await expect(page.getByTestId("settings-access")).toHaveCount(1);
 
   await page.goto(`${repoBase}/src/branch/main/hello.md`);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);

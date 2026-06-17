@@ -25,6 +25,7 @@ import type {
   ForgejoPullReviewComment,
   ForgejoRepo,
   ForgejoReview,
+  ForgejoSshKey,
   ForgejoTimelineEvent,
   ForgejoTreeEntry,
   ForgejoUser,
@@ -251,6 +252,21 @@ export class Forgejo {
 
   async deleteUserAvatar(): Promise<void> {
     await this.req("/api/v1/user/avatar", { method: "DELETE", expectEmpty: true });
+  }
+
+  async listUserSshKeys(): Promise<ForgejoSshKey[]> {
+    return this.pagedList<ForgejoSshKey>("/api/v1/user/keys", {}, "limit");
+  }
+
+  async createUserSshKey(opts: { title: string; key: string }): Promise<ForgejoSshKey> {
+    return this.req<ForgejoSshKey>("/api/v1/user/keys", {
+      method: "POST",
+      body: { title: opts.title, key: opts.key },
+    });
+  }
+
+  async deleteUserSshKey(id: number): Promise<void> {
+    await this.req(`/api/v1/user/keys/${id}`, { method: "DELETE", expectEmpty: true });
   }
 
   async createUser(opts: {

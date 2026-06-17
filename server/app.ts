@@ -15,7 +15,6 @@ import { rejectCrossOriginCookieApiMutation } from "./api-csrf.js";
 import { auth } from "./routes/auth.js";
 import { branches } from "./routes/branches.js";
 import { files } from "./routes/files.js";
-import { gitProxy } from "./routes/git-proxy.js";
 import { handleAppError } from "./routes/error-handler.js";
 import { issues } from "./routes/issues.js";
 import { globalNotifications, notifications } from "./routes/notifications.js";
@@ -122,7 +121,6 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     return response ?? c.json({ error: "not found" }, 404);
   });
 
-  app.route("/", gitProxy);
   app.route("/", web);
 
   return app;

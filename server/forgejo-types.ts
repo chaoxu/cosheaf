@@ -129,6 +129,14 @@ export interface ForgejoUser {
   avatar_url?: string;
 }
 
+export interface ForgejoSshKey {
+  id: number;
+  key: string;
+  title: string;
+  fingerprint?: string;
+  created_at?: string;
+}
+
 /** Stand-in login when a Forgejo response has `user: null`. */
 export const DELETED_USER_LOGIN = "(deleted)";
 

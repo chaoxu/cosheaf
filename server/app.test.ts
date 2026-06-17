@@ -44,4 +44,16 @@ describe("createApp API route assembly", () => {
     expect(await res.json()).toEqual({ ok: true });
     expect(res.headers.get("set-cookie")).toContain("cosheaf_pat=");
   });
+
+  it("does not expose git-over-HTTPS clone endpoints from Cosheaf", async () => {
+    const config = testConfig("app-assembly");
+    const db = freshTestDb("cosheaf-app-assembly-");
+    const app = createApp({ config, db });
+
+    const res = await app.request("/owner/repo.git/info/refs?service=git-upload-pack", {
+      headers: { authorization: `Basic ${Buffer.from("git:token").toString("base64")}` },
+    });
+
+    expect(res.status).toBe(404);
+  });
 });

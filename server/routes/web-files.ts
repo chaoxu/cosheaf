@@ -21,7 +21,6 @@ import {
   notFoundPage,
   redirect,
   repoHref,
-  requestOrigin,
   stringField,
   textField,
   urlPath,
@@ -46,7 +45,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       fj.listPulls(owner, repo, "open").catch(() => []),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
-    const cloneUrl = `${requestOrigin(c)}/${owner}/${repo}.git`;
+    const cloneUrl = sshCloneUrl(c.get("config").gitSshHost, owner, repo);
     const readme = await repoReadme(ctx, "main", files);
     const stats = {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
@@ -81,20 +80,23 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
     );
   }));
 
-// Git clone affordance. The URL points at cosheaf's own origin; the proxy in
-// routes/git-proxy.ts authenticates with the user's cosheaf PAT (used as the
-// git password) and forwards to Forgejo, so the backing forge is never shown.
+// Git clone affordance. SSH goes straight to Forgejo's restricted git-over-SSH
+// endpoint; Cosheaf only helps users add keys from account settings.
 function cloneBox(cloneUrl: string): Html {
   return html`<details class="clone-box">
     <summary class="button">Clone</summary>
     <div class="clone-popover">
-      <p class="clone-hint">Clone over HTTPS with your Cosheaf token as the password:</p>
+      <p class="clone-hint">Clone with SSH. Add your public key in Account settings:</p>
       <div class="clone-row">
         <input class="clone-url" readonly value="${cloneUrl}" aria-label="Clone URL" onclick="this.select()">
         <button class="button" type="button" onclick="navigator.clipboard?.writeText(this.previousElementSibling.value)">Copy</button>
       </div>
     </div>
   </details>`;
+}
+
+function sshCloneUrl(host: string, owner: string, repo: string): string {
+  return `git@${host}:${owner}/${repo}.git`;
 }
 
 // Full-text page search over the workspace's indexed pages (the SQLite FTS

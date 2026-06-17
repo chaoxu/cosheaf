@@ -80,6 +80,7 @@ export function testConfig(name: string, overrides: Partial<Config> = {}): Confi
     dataDir: `/tmp/cosheaf-${name}-test`,
     port: 3030,
     forgejoUrl: "http://forgejo.test",
+    gitSshHost: "forgejo.test",
     forgejoToken: "admin-token",
     forgejoAdminToken: "admin-token",
     webhookSecret: "secret",

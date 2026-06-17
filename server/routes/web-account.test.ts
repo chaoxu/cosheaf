@@ -108,6 +108,7 @@ describe("POST /account/settings (profile)", () => {
         forge.get("/api/v1/user", (c) =>
           c.json({ id: 1, login: "alice", email: "a@x.test", full_name: "Alice A", location: "Mars" }),
         );
+        forge.get("/api/v1/user/keys", () => Response.json([]));
       }),
     );
 
@@ -121,6 +122,86 @@ describe("POST /account/settings (profile)", () => {
     expect(body).toContain('value="Mars"');
     // email is shown read-only
     expect(body).toContain('value="a@x.test"');
+    expect(body).toContain('data-testid="settings-ssh-keys"');
+    expect(body).toContain('data-testid="ssh-key-form"');
+    expect(body).toContain("No SSH keys yet.");
+    expect(body).toContain("without a Cosheaf password");
+  });
+
+  it("renders existing SSH keys from Forgejo on GET", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/user/keys", () =>
+          Response.json([{ id: 7, title: "Laptop", key: "ssh-ed25519 AAAA", fingerprint: "SHA256:abc" }]),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/account/settings", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Laptop");
+    expect(body).toContain("SHA256:abc");
+    expect(body).toContain('name="id" value="7"');
+  });
+
+  it("adds an SSH public key through Forgejo and redirects with ssh_key=1", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    let created: unknown;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.post("/api/v1/user/keys", async (c) => {
+          created = await c.req.json();
+          return c.json({ id: 8, title: "Work laptop", key: "ssh-ed25519 AAAA..." });
+        });
+      }),
+    );
+
+    const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE9wZW5zc2hQdWJsaWNLZXlQbGFjZWhvbGRlcg== alice@laptop";
+    const res = await appFor(db).request("/account/ssh-keys", form({ title: " Work laptop ", key }, token));
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/account/settings?ssh_key=1");
+    expect(created).toEqual({ title: "Work laptop", key });
+  });
+
+  it("rejects malformed SSH keys before contacting Forgejo", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(fakeForgejo(() => {}));
+
+    const res = await appFor(db).request("/account/ssh-keys", form({ title: "bad", key: "not a key" }, token));
+
+    expect(res.status).toBe(303);
+    expect(decodeURIComponent(res.headers.get("location") ?? "")).toContain("valid SSH public key");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes an SSH key through Forgejo", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    const deleted: string[] = [];
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.delete("/api/v1/user/keys/:id", (c) => {
+          deleted.push(c.req.param("id"));
+          return c.body(null, 204);
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/account/ssh-keys/delete", form({ id: "7" }, token));
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/account/settings?ssh_key=1");
+    expect(deleted).toEqual(["7"]);
   });
 });
 

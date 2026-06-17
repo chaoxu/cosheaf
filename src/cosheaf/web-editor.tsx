@@ -56,6 +56,21 @@ function nowTime(): string {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function relativeAssetPath(documentPath: string, assetPath: string): string {
+  const dirDepth = documentPath.split("/").slice(0, -1).filter(Boolean).length;
+  return `${"../".repeat(dirDepth)}${assetPath}`;
+}
+
+function markdownLabel(name: string): string {
+  return (name.replace(/\.[^.]+$/, "").trim() || "asset").replace(/[\\[\]]/g, "");
+}
+
+function uploadedAssetSnippet(file: File, path: string): string {
+  const label = markdownLabel(file.name);
+  const isImage = file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.name);
+  return isImage ? `![${label}](${path})` : `[${label}](${path})`;
+}
+
 // Fire an app-wide toast (cosheaf-toast.js, loaded by the page shell). A no-op
 // if the script hasn't loaded; toasts are for discrete events (merge/PR/errors/
 // upload), never for per-save feedback.
@@ -138,6 +153,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
+  const assetInputRef = useRef<HTMLInputElement | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const branchRef = useRef(branch);
   const currentPathRef = useRef(currentPath);
@@ -345,19 +361,58 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     () => ({
       accept: (file) =>
         file.size > MAX_ASSET_BYTES ? { reject: `asset exceeds ${MAX_ASSET_DISPLAY}` } : null,
-      upload: async (file) => {
+      upload: async (file, env) => {
         const writeBranch = branchForWrite();
         try {
           const result = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
           setBranch(writeBranch);
           setBranchExists(true);
-          return { path: result.path };
+          return { path: relativeAssetPath(env.from ?? (currentPathRef.current.trim() || config.path), result.path) };
         } catch (err) {
           return { error: err instanceof ApiError ? err.message : "upload failed" };
         }
       },
     }),
-    [branchForWrite, config.owner, config.repo],
+    [branchForWrite, config.owner, config.path, config.repo],
+  );
+
+  const uploadPickedAssets = useCallback(
+    async (files: FileList | null) => {
+      const picked = Array.from(files ?? []);
+      if (picked.length === 0 || busy) return;
+      setBusy(true);
+      setSaveError(null);
+      try {
+        const writeBranch = branchForWrite();
+        const snippets: string[] = [];
+        for (const file of picked) {
+          const rejection = assetUploader.accept?.(file);
+          if (rejection?.reject) {
+            toast(`Upload failed: ${rejection.reject}`, "error");
+            continue;
+          }
+          const uploaded = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
+          const rel = relativeAssetPath(currentPathRef.current.trim() || config.path, uploaded.path);
+          snippets.push(uploadedAssetSnippet(file, rel));
+          toast(`Uploaded ${uploaded.path}`);
+        }
+        if (snippets.length > 0) {
+          const source = editorRef.current?.getDoc() ?? content;
+          const separator = source.length === 0 ? "" : source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
+          const next = `${source}${separator}${snippets.join("\n")}\n`;
+          setContent(next);
+          setUncommitted(true);
+          setBranch(writeBranch);
+          setBranchExists(true);
+        }
+      } catch (err) {
+        toast(`Upload failed: ${err instanceof ApiError ? err.message : "upload failed"}`, "error");
+      } finally {
+        setBusy(false);
+        if (assetInputRef.current) assetInputRef.current.value = "";
+      }
+    },
+    [assetUploader, branchForWrite, busy, config.owner, config.path, config.repo, content],
   );
 
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
@@ -645,6 +700,17 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           ) : null}
           <button type="button" onClick={save} disabled={(!uncommitted && !pathDirty) || busy}>
             Save
+          </button>
+          <input
+            ref={assetInputRef}
+            className="web-editor-asset-input"
+            data-testid="editor-asset-input"
+            type="file"
+            multiple
+            onChange={(event) => void uploadPickedAssets(event.currentTarget.files)}
+          />
+          <button type="button" data-testid="editor-upload-asset" onClick={() => assetInputRef.current?.click()} disabled={busy}>
+            Upload
           </button>
           {branch && branch !== "main" ? (
             <>
