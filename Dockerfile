@@ -21,7 +21,7 @@ FROM base AS build
 # setup/CI. Override COFLAT_GIT_REF explicitly for a deliberate Coflat bump.
 # gitea.lab uses the lab internal CA, so the fetch skips TLS verification.
 ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
-ARG COFLAT_GIT_REF=a75e1ddc422c2cc8357062061a3c5b37ac358d47
+ARG COFLAT_GIT_REF=ce2647be40a22cb48b2e1f0122632f44962a0e90
 ARG COSHEAF_GIT_SHA=unknown
 
 RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked \
@@ -62,6 +62,14 @@ ENV COSHEAF_DATA_DIR=/var/lib/cosheaf
 ENV COSHEAF_GIT_SHA=${COSHEAF_GIT_SHA}
 
 WORKDIR /app
+
+RUN --mount=type=cache,id=cosheaf-runtime-apt-cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,id=cosheaf-runtime-apt-lib,target=/var/lib/apt,sharing=locked \
+  rm -f /etc/apt/apt.conf.d/docker-clean \
+  && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends pandoc texlive-xetex texlive-latex-extra texlive-publishers texlive-science lmodern \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/lib/cosheaf \
   && chown -R node:node /var/lib/cosheaf /app

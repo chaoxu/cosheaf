@@ -9,6 +9,7 @@ import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { planIndexPage } from "../indexer.js";
 import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageExcerpts, workspacePageTitles } from "../page-search.js";
+import { exportCoflatMarkdownPdf, PdfExportError, type PdfProjectFile } from "../pdf-export.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
@@ -34,6 +35,9 @@ import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
 import { branchIcon, chevronIcon } from "./icons.js";
+
+const PDF_EXPORT_MAX_FILES = 500;
+const PDF_EXPORT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -250,6 +254,54 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
   return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
 }));
 
+web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
+  if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
+    return new Response("PDF export is only available for Coflat Markdown workspaces.", { status: 400 });
+  }
+  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/branch/"));
+  if (!resolved?.path) return new Response("not found", { status: 404 });
+  const rel = safeRel(resolved.path);
+  if (!rel) return new Response("not found", { status: 404 });
+  if (fileKindForPath(rel) !== "markdown") {
+    return new Response("PDF export is only available for Markdown files.", { status: 400 });
+  }
+  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
+  if (!meta) return new Response("not found", { status: 404 });
+
+  const [source, files] = await Promise.all([
+    ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
+    repoFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch),
+  ]);
+
+  try {
+    const projectFiles = await collectPdfProjectFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
+    const result = await exportCoflatMarkdownPdf({
+      source,
+      sourcePath: rel,
+      files: projectFiles,
+      flags: {
+        bibliography: c.req.query("bibliography"),
+        template: c.req.query("template"),
+      },
+    });
+    return new Response(result.pdf, {
+      headers: {
+        "cache-control": "no-store",
+        "content-disposition": `inline; filename="${httpQuotedString(result.filename)}"`,
+        "content-type": "application/pdf",
+      },
+    });
+  } catch (error) {
+    if (error instanceof PdfExportError) {
+      return new Response(error.detail ? `${error.publicMessage}\n${error.detail}` : error.publicMessage, {
+        status: error.status,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    throw error;
+  }
+}));
+
 web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const branch = editBranchFor(ctx.user, c.req.query("branch"));
   if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
@@ -428,12 +480,56 @@ async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) 
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
+async function collectPdfProjectFiles(
+  fj: Forgejo,
+  owner: string,
+  repo: string,
+  branch: string,
+  sourceRel: string,
+  source: string,
+  files: readonly ForgejoTreeEntry[],
+): Promise<PdfProjectFile[]> {
+  if (files.length > PDF_EXPORT_MAX_FILES) {
+    throw new PdfExportError(413, `PDF export is limited to ${PDF_EXPORT_MAX_FILES} repository files.`);
+  }
+  const out: PdfProjectFile[] = [];
+  let totalBytes = 0;
+  for (const file of files) {
+    const rel = safeRel(file.path);
+    if (!rel) continue;
+    if (typeof file.size === "number" && totalBytes + file.size > PDF_EXPORT_MAX_PROJECT_BYTES) {
+      throw new PdfExportError(413, "PDF export project files are too large.");
+    }
+    const content = rel === sourceRel
+      ? Buffer.from(source, "utf8")
+      : await fj.getRawFileBytes(owner, repo, branch, rel);
+    totalBytes += content.byteLength;
+    if (totalBytes > PDF_EXPORT_MAX_PROJECT_BYTES) {
+      throw new PdfExportError(413, "PDF export project files are too large.");
+    }
+    out.push({ path: rel, content });
+  }
+  if (!out.some((file) => file.path === sourceRel)) {
+    const content = Buffer.from(source, "utf8");
+    totalBytes += content.byteLength;
+    if (totalBytes > PDF_EXPORT_MAX_PROJECT_BYTES) {
+      throw new PdfExportError(413, "PDF export project files are too large.");
+    }
+    out.push({ path: sourceRel, content });
+  }
+  return out;
+}
+
 function editableFileKind(kind: FileKind): boolean {
   return kind === "markdown" || kind === "text";
 }
 
 function rawFileHref(owner: string, repo: string, branch: string, rel: string): string {
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
+}
+
+function pdfExportHref(owner: string, repo: string, branch: string, rel: string): string {
+  return `${repoHref(owner, repo, "/export/pdf/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
 // The per-file action toolbar on the file-view page: the primary write controls
@@ -480,6 +576,7 @@ function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; k
     <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
     ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
     ${opts.kind === "markdown" ? html`<a href="${`${opts.fileHref}?view=source`}">Source</a>` : emptyHtml}
+    ${opts.kind === "markdown" ? html`<a href="${pdfExportHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
     <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
   </div>`;
 }
@@ -1027,4 +1124,8 @@ function decodePathPart(value: string): string {
   } catch (_err) {
     return "";
   }
+}
+
+function httpQuotedString(value: string): string {
+  return value.replaceAll(/["\\\r\n]/g, "_");
 }

@@ -1,9 +1,11 @@
 import type Database from "better-sqlite3";
+import { readFile, writeFile } from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { indexPage } from "../indexer.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
+import { _setPdfExportCommandRunnerForTest } from "../pdf-export.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
@@ -35,7 +37,10 @@ describe("web file editor route", () => {
     _resetMiddlewareCachesForTests();
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    _setPdfExportCommandRunnerForTest(null);
+    vi.unstubAllGlobals();
+  });
 
   it("renders a repo-home overview above the README", async () => {
     const db = freshTestDb("cosheaf-web-files-");
@@ -128,12 +133,127 @@ describe("web file editor route", () => {
     expect(body).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
     expect(body).toContain('<a class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
     expect(body).toContain('<a href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
+    expect(body).toContain('<a href="/owner/w/export/pdf/branch/main/notes.md">PDF</a>');
     expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).toContain('class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
     expect(body).not.toContain('<summary class="button">More</summary>');
+  });
+
+  it("exports a Coflat markdown file as PDF through the shared Latex contract", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const commands: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    _setPdfExportCommandRunnerForTest(async (command, args, options) => {
+      commands.push({ command, args, cwd: options.cwd });
+      if (command !== "pandoc") return;
+      const outputArg = args.find((arg) => arg.startsWith("--output="));
+      if (!outputArg) return;
+      const inputPath = args[args.length - 1];
+      const source = await readFile(inputPath, "utf8");
+      expect(source).toContain("\\begin{equation}\\label{eq:main}");
+      await writeFile(outputArg.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", (c) => {
+          expect(c.req.query("ref")).toBe("main");
+          return Response.json({ sha: "current-sha" });
+        });
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({
+            tree: [
+              { path: "docs/main.md", type: "blob" },
+              { path: "figures/example.png", type: "blob" },
+            ],
+            truncated: false,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", (c) => {
+          expect(c.req.query("ref")).toBe("main");
+          return new Response("# Printable\n\n$$\nx\n$$ {#eq:main}\n");
+        });
+        forge.get("/api/v1/repos/owner/w/raw/figures/example.png", (c) => {
+          expect(c.req.query("ref")).toBe("main");
+          return new Response("image bytes");
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(res.headers.get("content-disposition")).toBe('inline; filename="main.pdf"');
+    expect(await res.text()).toBe("%PDF-test\n");
+    expect(commands.map((entry) => `${entry.command} ${entry.args.join(" ")}`)).toEqual([
+      "pandoc --version",
+      "xelatex --version",
+      expect.stringContaining("pandoc --from=markdown+fenced_divs+raw_tex"),
+    ]);
+    const pandoc = commands.at(-1);
+    expect(pandoc?.args).toContain("--pdf-engine=xelatex");
+    expect(pandoc?.args).toContain("--pdf-engine-opt=-no-shell-escape");
+    expect(pandoc?.args).toContain("--pdf-engine-opt=-halt-on-error");
+    expect(pandoc?.args.some((arg) => arg.startsWith("--lua-filter=") && arg.endsWith("/latex/filter.lua"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--resource-path="))).toBe(true);
+  });
+
+  it("rejects PDF export for non-Coflat markdown workspaces", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Coflat Markdown");
+  });
+
+  it("rejects absolute custom PDF template paths", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    _setPdfExportCommandRunnerForTest(async () => {});
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => Response.json({ tree: [{ path: "notes.md", type: "blob", size: 8 }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md?template=/etc/passwd", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Invalid PDF template path.");
+  });
+
+  it("reports missing PDF export dependencies clearly", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    _setPdfExportCommandRunnerForTest(async (command) => {
+      if (command === "xelatex") throw new Error("not found");
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain("PDF export requires xelatex.");
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {
