@@ -42,6 +42,7 @@ interface EditorConfig {
   path: string;
   branch: string;
   branchExists: boolean;
+  readBranch: string;
   username: string;
   role: "admin" | "write" | "read";
   formatId: DocumentFormatId;
@@ -106,6 +107,7 @@ function readConfig(): { config: EditorConfig; content: string } {
       path: mount.dataset.path ?? "",
       branch: mount.dataset.branch ?? "",
       branchExists: mount.dataset.branchExists !== "0",
+      readBranch: mount.dataset.readBranch ?? "main",
       username: mount.dataset.username ?? "",
       role: (mount.dataset.role ?? "read") as EditorConfig["role"],
       formatId: (mount.dataset.formatId ?? "forgejo-passthrough") as DocumentFormatId,
@@ -136,6 +138,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [currentPath, setCurrentPath] = useState(config.path);
   const [savedPath, setSavedPath] = useState(config.path);
   const [branch, setBranch] = useState(config.branch);
+  const [savedReadBranch, setSavedReadBranch] = useState(config.readBranch);
   // Tracks whether the edit branch exists on the forge yet. Starts from the
   // server's check and flips true once a save creates the branch — drives the
   // Cancel target so it never links to a not-yet-created branch (#121).
@@ -310,6 +313,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         if (result.content !== undefined) setContent(result.content);
         setBranch(result.branch);
         setBranchExists(true);
+        setSavedReadBranch(result.branch);
         setSavedPath(nextPath);
         savedShaRef.current = result.sha;
         sourceShaRef.current = undefined;
@@ -573,12 +577,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       ? "web-editor-shell cf-theme-scope cf-theme-blueprint-book"
       : "web-editor-shell cf-theme-scope";
 
-  // Cancel returns to the file as it's actually viewable: the edit branch only
-  // once it exists, otherwise main (the branch the edit derives from). Never a
-  // not-yet-created branch (#121). Uses the last-saved path so discarded
-  // in-progress renames don't point at a path that was never written.
-  const cancelBranch = branchExists && branch !== "main" ? branch : "main";
-  const cancelHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(cancelBranch)}/${urlPath(savedPath)}`;
+  // Reader/Cancel return to the last saved file as it is actually viewable. For
+  // a lazy edit branch, that may still be main until the first successful save.
+  // Uses the last-saved path so discarded in-progress renames do not point at a
+  // path that was never written.
+  const readHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(savedReadBranch)}/${urlPath(savedPath)}`;
   const outlineMathMacros = documentContext?.mathMacros;
 
   return (
@@ -725,6 +728,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           <button type="button" data-testid="editor-upload-asset" onClick={() => assetInputRef.current?.click()} disabled={busy}>
             Upload
           </button>
+          <a className="web-editor-read" data-testid="editor-read-link" href={readHref}>
+            Read
+          </a>
           {branch && branch !== "main" ? (
             <>
               {config.role === "admin" ? (
@@ -737,7 +743,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               </button>
             </>
           ) : null}
-          <a className="web-editor-cancel" data-testid="editor-cancel" href={cancelHref}>
+          <a className="web-editor-cancel" data-testid="editor-cancel" href={readHref}>
             Cancel
           </a>
         </>,

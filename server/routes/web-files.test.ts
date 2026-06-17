@@ -163,6 +163,7 @@ describe("web file editor route", () => {
     const body = await res.text();
     expect(body).toContain('id="web-editor-root"');
     expect(body).toContain('data-branch-exists="1"');
+    expect(body).toContain('data-read-branch="main"');
     expect(body).toContain('data-base-sha=""');
     expect(body).toContain('data-source-sha="main-sha"');
     expect(body).toContain('name="expected_sha" value=""');
@@ -201,6 +202,7 @@ describe("web file editor route", () => {
     const body = await res.text();
     expect(body).toContain('id="web-editor-root"');
     expect(body).toContain('data-branch-exists="0"');
+    expect(body).toContain('data-read-branch="main"');
     expect(body).toContain('data-base-sha="main-sha"');
     expect(body).toContain('data-source-sha=""');
     expect(body).toContain('name="expected_sha" value="main-sha"');

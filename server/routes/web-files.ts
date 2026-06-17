@@ -269,9 +269,10 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   // The edit branch is created lazily on first save, so for a brand-new edit
   // branch the tree (file list) and Cancel target come from main instead.
   const treeBranch = branchExists ? branch : "main";
+  const readBranch = branchMeta ? branch : mainMeta ? "main" : treeBranch;
   const files = await repoFiles(ctx.fj, ctx.owner, ctx.repo, treeBranch).catch(() => []);
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
-  const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(treeBranch)}/${urlPath(rel)}`;
+  const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
   // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The
   // file tree mirrors the read page's sidebar so edit/read chrome match (#123).
@@ -285,6 +286,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
             data-path="${rel}"
             data-branch="${branch}"
             data-branch-exists="${branchExists ? "1" : "0"}"
+            data-read-branch="${readBranch}"
             data-username="${ctx.user}"
             data-role="${ctx.ws.role}"
             data-format-id="${ctx.ws.defaultMdFormat}"
