@@ -123,6 +123,8 @@ describe("POST /account/settings (profile)", () => {
     // email is shown read-only
     expect(body).toContain('value="a@x.test"');
     expect(body).toContain('data-testid="settings-ssh-keys"');
+    expect(body).toContain('<summary>+ Add SSH key</summary>');
+    expect(body).toContain('<details class="add-disclosure build-only">');
     expect(body).toContain('data-testid="ssh-key-form"');
     expect(body).toContain("No SSH keys yet.");
     expect(body).toContain("without a Cosheaf password");

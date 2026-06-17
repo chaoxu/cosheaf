@@ -22,7 +22,7 @@ import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
 import { avatarForUser, forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
-import { userPreferencesSection, userProfileSection } from "./web-page.js";
+import { addDisclosure, userPreferencesSection, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
@@ -530,7 +530,7 @@ function accountSshKeysSection(keys: ForgejoSshKey[], saved: boolean): Html {
               </div>
             `)}</div>`
       }
-      <form class="ssh-key-add-form" method="post" action="/account/ssh-keys" data-testid="ssh-key-form">
+      ${addDisclosure("Add SSH key", html`<form class="ssh-key-add-form" method="post" action="/account/ssh-keys" data-testid="ssh-key-form">
         <label class="settings-row">
           <span>Title</span>
           <input name="title" autocomplete="off" placeholder="Laptop">
@@ -543,7 +543,7 @@ function accountSshKeysSection(keys: ForgejoSshKey[], saved: boolean): Html {
           <button class="button primary" type="submit" data-testid="ssh-key-submit">Add SSH key</button>
           ${saved ? html`<p class="muted" data-testid="ssh-key-saved">Saved.</p>` : emptyHtml}
         </div>
-      </form>
+      </form>`)}
       <div class="settings-note">
         <p>SSH clone uses your private key locally. Cosheaf stores only the public key in Forgejo.</p>
       </div>
