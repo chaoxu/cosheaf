@@ -122,7 +122,6 @@ export default defineConfig({
       // PR-review surface deps — pre-bundle so the first visit to a PR
       // doesn't trigger a 5–15s optimize pause.
       "parse-diff",
-      "react-diff-view",
       // hydrateMath dynamic-imports katex; pre-bundle so it's ready on first paint.
       "katex",
       // citation-js is CommonJS; pre-bundle so the reader's dynamic

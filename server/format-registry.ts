@@ -1,21 +1,22 @@
 import type { DocumentFormat } from "./document-format/types.js";
 import { coflatMarkdownFormat } from "./document-format/coflat.js";
 import { forgejoPassthroughFormat } from "./document-format/forgejo-passthrough.js";
-import { normalizeDocumentFormatId } from "../shared/document-format.js";
+import {
+  COFLAT_FORMAT_ID,
+  FORGEJO_PASSTHROUGH_FORMAT_ID,
+  normalizeDocumentFormatId,
+  type DocumentFormatId,
+} from "../shared/document-format.js";
 
-const formats = new Map<string, DocumentFormat>();
-
-export function registerDocumentFormat(format: DocumentFormat): void {
-  formats.set(format.id, format);
-}
+const formats: Record<DocumentFormatId, DocumentFormat> = {
+  [COFLAT_FORMAT_ID]: coflatMarkdownFormat,
+  [FORGEJO_PASSTHROUGH_FORMAT_ID]: forgejoPassthroughFormat,
+};
 
 export function getDocumentFormat(id: string | null | undefined): DocumentFormat {
-  return formats.get(normalizeDocumentFormatId(id)) ?? forgejoPassthroughFormat;
+  return formats[normalizeDocumentFormatId(id)] ?? forgejoPassthroughFormat;
 }
 
 export function allDocumentFormats(): DocumentFormat[] {
-  return [...formats.values()];
+  return Object.values(formats);
 }
-
-registerDocumentFormat(coflatMarkdownFormat);
-registerDocumentFormat(forgejoPassthroughFormat);

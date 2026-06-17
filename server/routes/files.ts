@@ -4,6 +4,7 @@ import { requireAuth, requireMembership, requireWriteOnMutation } from "../middl
 import { ForgejoError } from "../forgejo.js";
 import { validBranchName } from "../branch-path.js";
 import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
+import { getDocumentFormat } from "../format-registry.js";
 import { planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -49,6 +50,10 @@ function refFromQuery(c: import("hono").Context<AppEnv>): string {
 
 function validRequestedBranch(branch: string): boolean {
   return branch === "main" || validBranchName(branch);
+}
+
+function workspaceSupportsXrefs(formatId: string | null | undefined): boolean {
+  return Boolean(getDocumentFormat(formatId).extractXrefTargets);
 }
 
 // A write that lost a branch-head race: Forgejo rejects a stale blob sha as
@@ -434,7 +439,7 @@ files.get("/:owner/:repo/suggest", (c) => {
     )
     .all(ws.slug, term, term, limit) as Array<{ id: string; title: string | null }>;
   const remaining = Math.max(0, limit - pageRows.length);
-  const xrefRows = remaining === 0
+  const xrefRows = remaining === 0 || !workspaceSupportsXrefs(ws.defaultMdFormat)
     ? []
     : c
         .get("db")
@@ -482,24 +487,29 @@ files.get("/:owner/:repo/refs", (c) => {
         WHERE workspace_slug = ? AND cosheaf_id IN (${placeholders})`,
     )
     .all(ws.slug, ...ids) as Array<{ id: string; path: string; label: string }>;
-  const xrefRows = c
-    .get("db")
-    .prepare(
-      `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
-         FROM xref_targets
-        WHERE workspace_slug = ? AND target_id IN (${placeholders})
-        ORDER BY source_path`,
-    )
-    .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>;
-  const sameFileDuplicates = c
-    .get("db")
-    .prepare(
-      `SELECT target_id AS id, source_path AS path, count
-         FROM xref_target_duplicates
-        WHERE workspace_slug = ? AND target_id IN (${placeholders})
-        ORDER BY source_path`,
-    )
-    .all(ws.slug, ...ids) as Array<{ id: string; path: string; count: number }>;
+  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
+  const xrefRows = supportsXrefs
+    ? c
+        .get("db")
+        .prepare(
+          `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
+             FROM xref_targets
+            WHERE workspace_slug = ? AND target_id IN (${placeholders})
+            ORDER BY source_path`,
+        )
+        .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>
+    : [];
+  const sameFileDuplicates = supportsXrefs
+    ? c
+        .get("db")
+        .prepare(
+          `SELECT target_id AS id, source_path AS path, count
+             FROM xref_target_duplicates
+            WHERE workspace_slug = ? AND target_id IN (${placeholders})
+            ORDER BY source_path`,
+        )
+        .all(ws.slug, ...ids) as Array<{ id: string; path: string; count: number }>
+    : [];
   const xrefGroups = new Map<string, typeof xrefRows>();
   for (const row of xrefRows) xrefGroups.set(row.id, [...(xrefGroups.get(row.id) ?? []), row]);
   const duplicateIds = new Set(sameFileDuplicates.map((row) => row.id));
@@ -631,6 +641,7 @@ files.get("/:owner/:repo/backlinks", (c) => {
 files.get("/:owner/:repo/validation", (c) => {
   const ws = c.get("workspace");
   const db = c.get("db");
+  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
   const brokenRefs = db
     .prepare(
       `SELECT b.src_id AS source_id,
@@ -652,11 +663,11 @@ files.get("/:owner/:repo/validation", (c) => {
                  WHERE target.workspace_slug = b.workspace_slug
                    AND target.cosheaf_id = b.target_id
               )
-              AND NOT EXISTS (
+              ${supportsXrefs ? `AND NOT EXISTS (
                 SELECT 1 FROM xref_targets target
                  WHERE target.workspace_slug = b.workspace_slug
                    AND target.target_id = b.target_id
-              )
+              )` : ""}
             )
           )
         ORDER BY b.src_path, b.line, b.target_label`,
@@ -677,29 +688,31 @@ files.get("/:owner/:repo/validation", (c) => {
         ORDER BY d.forgejo_id`,
     )
     .all(ws.slug) as WorkspaceValidation["orphan_labels"];
-  const duplicateXrefs = db
-    .prepare(
-      `SELECT id, group_concat(path_note, ', ') AS paths, sum(count) AS count
-         FROM (
-           SELECT target_id AS id, source_path AS path_note, 1 AS count
-             FROM xref_targets
-            WHERE workspace_slug = ?
-              AND NOT EXISTS (
-                SELECT 1 FROM xref_target_duplicates duplicate
-                 WHERE duplicate.workspace_slug = xref_targets.workspace_slug
-                   AND duplicate.target_id = xref_targets.target_id
-                   AND duplicate.source_path = xref_targets.source_path
-              )
-           UNION ALL
-           SELECT target_id AS id, source_path || ' (' || count || ' definitions)' AS path_note, count
-             FROM xref_target_duplicates
-            WHERE workspace_slug = ?
-         )
-        GROUP BY id
-       HAVING sum(count) > 1
-        ORDER BY id`,
-    )
-    .all(ws.slug, ws.slug) as WorkspaceValidation["duplicate_xrefs"];
+  const duplicateXrefs = supportsXrefs
+    ? db
+        .prepare(
+          `SELECT id, group_concat(path_note, ', ') AS paths, sum(count) AS count
+             FROM (
+               SELECT target_id AS id, source_path AS path_note, 1 AS count
+                 FROM xref_targets
+                WHERE workspace_slug = ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM xref_target_duplicates duplicate
+                     WHERE duplicate.workspace_slug = xref_targets.workspace_slug
+                       AND duplicate.target_id = xref_targets.target_id
+                       AND duplicate.source_path = xref_targets.source_path
+                  )
+               UNION ALL
+               SELECT target_id AS id, source_path || ' (' || count || ' definitions)' AS path_note, count
+                 FROM xref_target_duplicates
+                WHERE workspace_slug = ?
+             )
+            GROUP BY id
+           HAVING sum(count) > 1
+            ORDER BY id`,
+        )
+        .all(ws.slug, ws.slug) as WorkspaceValidation["duplicate_xrefs"]
+    : [];
   return c.json({ broken_refs: brokenRefs, duplicate_xrefs: duplicateXrefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
 });
 

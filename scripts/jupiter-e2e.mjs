@@ -6,11 +6,11 @@ import { run } from "./lib/run.mjs";
 
 const targets = {
   prod: {
-    url: "https://cosheaf.lab/",
-    workspace: "poa-network-game-oracle-first",
-    slug: "poa-network-game-oracle-first",
-    page: "Hello",
-    pagePath: "hello.md",
+    url: process.env.COSHEAF_PROD_URL ?? "https://cosheaf.lab/",
+    workspace: process.env.COSHEAF_PROD_WORKSPACE ?? "poa-network-game-oracle-first",
+    slug: process.env.COSHEAF_PROD_WORKSPACE_SLUG ?? "poa-network-game-oracle-first",
+    page: process.env.COSHEAF_PROD_PAGE ?? "Hello",
+    pagePath: process.env.COSHEAF_PROD_PAGE_PATH ?? "hello.md",
     prod: true,
   },
 };
@@ -39,19 +39,26 @@ const target = targetFor(targetArg);
 const destructive = values.destructive || process.env.COSHEAF_E2E_DESTRUCTIVE === "1";
 const checks = smokeChecks.filter((check) => (!target.prod || check.prod) && (!check.destructive || destructive));
 const grep = checks.map((check) => check.grep).join("|");
+if (target.prod && !process.env.COSHEAF_SMOKE_PASSWORD) {
+  console.error("COSHEAF_SMOKE_PASSWORD is required for prod E2E runs");
+  process.exit(2);
+}
+const childEnv = {
+  ...process.env,
+  URL: target.url,
+  COSHEAF_SMOKE_USER: process.env.COSHEAF_SMOKE_USER ?? "chao",
+  COSHEAF_SMOKE_PASSWORD: process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!",
+  COSHEAF_SMOKE_WORKSPACE: target.workspace,
+  COSHEAF_SMOKE_WORKSPACE_SLUG: target.slug,
+  COSHEAF_SMOKE_PAGE: target.page,
+  COSHEAF_SMOKE_PAGE_PATH: target.pagePath,
+};
+if (!target.prod) {
+  childEnv.COSHEAF_ADMIN_PASSWORD = process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
+  childEnv.COSHEAF_MERI_PASSWORD = process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
+  childEnv.COSHEAF_VERA_PASSWORD = process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
+}
 run("pnpm", ["exec", "playwright", "test", "--config", "playwright.smoke.config.ts", "--grep", grep], {
-  env: {
-    ...process.env,
-    URL: target.url,
-    COSHEAF_SMOKE_USER: process.env.COSHEAF_SMOKE_USER ?? "chao",
-    COSHEAF_SMOKE_PASSWORD: process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-    COSHEAF_SMOKE_WORKSPACE: target.workspace,
-    COSHEAF_SMOKE_WORKSPACE_SLUG: target.slug,
-    COSHEAF_SMOKE_PAGE: target.page,
-    COSHEAF_SMOKE_PAGE_PATH: target.pagePath,
-    COSHEAF_ADMIN_PASSWORD: process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-    COSHEAF_MERI_PASSWORD: process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-    COSHEAF_VERA_PASSWORD: process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "123123aA",
-  },
+  env: childEnv,
 });
 console.log(`\nE2E checks passed for ${target.url}`);

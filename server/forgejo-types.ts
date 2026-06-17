@@ -167,6 +167,10 @@ export interface ForgejoRepo {
   // Included by Forgejo when listing/getting repos with an authenticated
   // user — saves an extra `getRepoPermission` round-trip per repo.
   permissions?: { admin?: boolean; push?: boolean; pull?: boolean };
+  // Repo-overview stats Forgejo includes on getRepo (issues-only count; PRs are
+  // counted separately). Used by the repo-home header.
+  updated_at?: string;
+  open_issues_count?: number;
 }
 export interface ForgejoNotificationThread {
   id: number;

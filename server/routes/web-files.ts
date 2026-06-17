@@ -37,17 +37,27 @@ import { webEditorAssets } from "./web-shell.js";
 import { branchIcon, chevronIcon } from "./icons.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo", webRoute(async (c, ctx) => {
-  const { owner, repo, fj, ws, user } = ctx;
-  const [files, branches] = await Promise.all([
-    repoFiles(fj, owner, repo, "main").catch(() => []),
-    fj.listBranches(owner, repo).catch(() => []),
-  ]);
-  const titles = workspacePageTitles(ctx.db, ws.slug);
-  const cloneUrl = `${requestOrigin(c)}/${owner}/${repo}.git`;
-  const readme = await repoReadme(ctx, "main", files);
-  return htmlResponse(
-    repoPageShell(ctx, "files", `Files - ${repo}`, html`
+  web.get("/:owner/:repo", webRoute(async (c, ctx) => {
+    const { owner, repo, fj, ws, user } = ctx;
+    const [files, branches, repoMeta, openPulls] = await Promise.all([
+      repoFiles(fj, owner, repo, "main").catch(() => []),
+      fj.listBranches(owner, repo).catch(() => []),
+      fj.getRepo(owner, repo).catch(() => null),
+      fj.listPulls(owner, repo, "open").catch(() => []),
+    ]);
+    const titles = workspacePageTitles(ctx.db, ws.slug);
+    const cloneUrl = `${requestOrigin(c)}/${owner}/${repo}.git`;
+    const readme = await repoReadme(ctx, "main", files);
+    const stats = {
+      pages: files.filter((file) => /\.md$/i.test(file.path)).length,
+      branches: branches.length,
+      openIssues: repoMeta?.open_issues_count ?? 0,
+      openPrs: openPulls.length,
+      updated: repoMeta?.updated_at,
+      description: repoMeta?.description,
+    };
+    return htmlResponse(
+      repoPageShell(ctx, "files", `Files - ${repo}`, html`
         <div class="page-title compact page-title--actions-only">
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
@@ -62,13 +72,14 @@ web.get("/:owner/:repo", webRoute(async (c, ctx) => {
             </span>
           </div>
         </div>
+        ${repoHomeHeader(ctx, owner, repo, stats)}
         ${repoLanding(ctx, "main", files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
         sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles, branches)],
       }),
-  );
-}));
+    );
+  }));
 
 // Git clone affordance. The URL points at cosheaf's own origin; the proxy in
 // routes/git-proxy.ts authenticates with the user's cosheaf PAT (used as the
@@ -841,6 +852,40 @@ async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTr
 // reading index of the workspace's pages. Either way it complements the nav tree
 // rather than duplicating it — the tree carries navigation over every file; the
 // landing reads the workspace's knowledge.
+// The repo-overview header: a clear "this is the repo, not a file" identity
+// band + a few glanceable stats, shown above the README so the landing reads as
+// an overview rather than just another rendered file.
+interface RepoHomeStats {
+  pages: number;
+  branches: number;
+  openIssues: number;
+  openPrs: number;
+  updated?: string;
+  description?: string;
+}
+function repoHomeHeader(ctx: WebCtx, owner: string, repo: string, stats: RepoHomeStats): Html {
+  const stat = (value: Html | string | number, label: string, href?: string) => {
+    const inner = html`<span class="repo-stat-num">${value}</span><span class="repo-stat-label">${label}</span>`;
+    return href ? html`<a class="repo-stat" href="${href}">${inner}</a>` : html`<div class="repo-stat">${inner}</div>`;
+  };
+  const format = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? "Coflat" : "Markdown";
+  return html`<header class="repo-home" data-testid="repo-home-header">
+    <div class="repo-home-id">
+      <h1 class="repo-home-name">${repo}</h1>
+      <span class="repo-home-owner">${owner}</span>
+      <span class="repo-home-badge">${format}</span>
+    </div>
+    ${stats.description ? html`<p class="repo-home-desc">${stats.description}</p>` : ""}
+    <div class="repo-home-stats">
+      ${stat(stats.pages, stats.pages === 1 ? "page" : "pages")}
+      ${stat(stats.branches, stats.branches === 1 ? "branch" : "branches", repoHref(owner, repo, "/branches"))}
+      ${stat(stats.openIssues, "open issues", repoHref(owner, repo, "/issues"))}
+      ${stat(stats.openPrs, "open PRs", repoHref(owner, repo, "/pulls"))}
+      ${stats.updated ? html`<div class="repo-stat"><span class="repo-stat-num">${timeEl(stats.updated)}</span><span class="repo-stat-label">updated</span></div>` : ""}
+    </div>
+  </header>`;
+}
+
 function repoLanding(
   ctx: WebCtx,
   branch: string,
@@ -848,7 +893,13 @@ function repoLanding(
   titles: Map<string, string>,
   readme: { path: string; rendered: Html } | null,
 ): Html {
-  if (readme) return markdownArticle(ctx, readme.rendered, "files-readme");
+  // Label the README so it's clear the overview is showing README.md (not the
+  // whole repo or an arbitrary file); the rendered README follows below it.
+  if (readme)
+    return html`<section class="repo-readme" data-testid="repo-readme">
+      <div class="repo-readme-label">${readme.path}</div>
+      ${markdownArticle(ctx, readme.rendered, "files-readme")}
+    </section>`;
   return pageIndex(ctx, branch, files, titles);
 }
 

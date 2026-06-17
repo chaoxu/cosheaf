@@ -37,6 +37,63 @@ describe("web file editor route", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it("renders a repo-home overview above the README", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "README.md",
+      bodyText: "---\nid: readme\n---\n# Read Me\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/repos/owner/w", () =>
+          Response.json({
+            name: "w",
+            full_name: "owner/w",
+            description: "A focused knowledge repo",
+            updated_at: "2026-06-16T12:34:00Z",
+            open_issues_count: 3,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({
+            tree: [
+              { path: "README.md", name: "README.md", type: "blob" },
+              { path: "notes/a.md", name: "a.md", type: "blob" },
+              { path: "assets/logo.png", name: "logo.png", type: "blob" },
+            ],
+            truncated: false,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "draft" }]));
+        forge.get("/api/v1/repos/owner/w/pulls", () =>
+          Response.json([
+            { number: 1, title: "One", state: "open", head: { ref: "draft" }, base: { ref: "main" }, user: { login: "alice" } },
+            { number: 2, title: "Two", state: "open", head: { ref: "other" }, base: { ref: "main" }, user: { login: "bob" } },
+          ]),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Read Me\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="repo-home-header"');
+    expect(body).toContain("A focused knowledge repo");
+    expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">pages</span>');
+    expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">branches</span>');
+    expect(body).toContain('<span class="repo-stat-num">3</span><span class="repo-stat-label">open issues</span>');
+    expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">open PRs</span>');
+    expect(body).toContain('data-testid="repo-readme"');
+    expect(body).toContain('<div class="repo-readme-label">README.md</div>');
+  });
+
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db);

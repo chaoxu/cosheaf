@@ -7,14 +7,15 @@ import { seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { files, safeRel } from "./files.js";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { COFLAT_FORMAT_ID, FORGEJO_PASSTHROUGH_FORMAT_ID } from "../../shared/document-format.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import type { WorkspaceValidation } from "../../shared/validation.js";
 
 const config = testConfig("files");
 
-function freshDb(): Database.Database {
+function freshDb(defaultMdFormat = COFLAT_FORMAT_ID): Database.Database {
   const db = freshTestDb("cosheaf-files-");
-  seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+  seedTestWorkspace(db, { default_md_format: defaultMdFormat });
   return db;
 }
 
@@ -32,6 +33,17 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+function seedStaleXrefs(db: Database.Database): void {
+  db.prepare("INSERT INTO doc_map (workspace_slug, cosheaf_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run("owner/w", "source", "source.md", "Source", "2026-06-16T00:00:00Z");
+  db.prepare("INSERT INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)")
+    .run("owner/w", "source", "source.md", "thm:stale", "[@thm:stale]", 3);
+  db.prepare("INSERT INTO xref_targets (workspace_slug, target_id, source_path, kind, display_label, line) VALUES (?, ?, ?, ?, ?, ?)")
+    .run("owner/w", "thm:stale", "stale.md", "block", "Theorem 1", 7);
+  db.prepare("INSERT INTO xref_target_duplicates (workspace_slug, target_id, source_path, count) VALUES (?, ?, ?, ?)")
+    .run("owner/w", "thm:dup", "stale.md", 2);
+}
 
 describe("safeRel repo-path validator", () => {
   // Imported via the route module's export so all consumers share one
@@ -187,6 +199,30 @@ describe("files validation route", () => {
     const body = (await res.json()) as { duplicate_xrefs: Array<{ id: string; paths: string; count: number }> };
     expect(body.duplicate_xrefs).toEqual([{ id: "thm:dup", paths: "a.md (2 definitions)", count: 2 }]);
   });
+
+  it("ignores stale Coflat xref validation rows for passthrough workspaces", async () => {
+    const db = freshDb(FORGEJO_PASSTHROUGH_FORMAT_ID);
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedStaleXrefs(db);
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as WorkspaceValidation;
+    expect(body.duplicate_xrefs).toEqual([]);
+    expect(body.broken_refs).toEqual([
+      {
+        source_id: "source",
+        source_path: "source.md",
+        source_title: "Source",
+        target_id: "thm:stale",
+        target_label: "[@thm:stale]",
+        line: 3,
+      },
+    ]);
+  });
 });
 
 describe("files refs route", () => {
@@ -257,6 +293,19 @@ describe("files refs route", () => {
       ambiguous_refs: [{ id: "thm:dup", paths: ["a.md (2 definitions)"] }],
     });
   });
+
+  it("does not expose stale Coflat xrefs for passthrough workspaces", async () => {
+    const db = freshDb(FORGEJO_PASSTHROUGH_FORMAT_ID);
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedStaleXrefs(db);
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=thm:stale,thm:dup", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ refs: [], ambiguous_refs: [] });
+  });
 });
 
 describe("files suggest route", () => {
@@ -282,6 +331,19 @@ describe("files suggest route", () => {
       expect(body.suggestions).toHaveLength(10);
       expect(body.suggestions[0].id).toBe("alpha-0");
     }
+  });
+
+  it("does not suggest stale Coflat xrefs for passthrough workspaces", async () => {
+    const db = freshDb(FORGEJO_PASSTHROUGH_FORMAT_ID);
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedStaleXrefs(db);
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=thm", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ suggestions: [] });
   });
 });
 

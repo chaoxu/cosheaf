@@ -74,7 +74,7 @@
     "check:web": "node scripts/playwright-devx.mjs tests/e2e/web-pages.spec.ts",
     "check:web:settings": "node scripts/playwright-devx.mjs tests/e2e/web-settings.spec.ts",
     "check:stability": "pnpm test && pnpm check:e2e",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-server test-results playwright-report",
     "prepare": "lefthook install",
     "setup:dev:manual": "pnpm setup:dev:review && tsx server/cli.ts user create test-bob Cosheaf123! && tsx server/cli.ts workspace member chao/flushing-coin test-bob read && tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace chao/passthrough-demo --workspace-name \"Passthrough Demo\" --default-md-format forgejo-passthrough && tsx server/cli.ts workspace member chao/passthrough-demo test-vera write && tsx server/cli.ts workspace member chao/passthrough-demo test-meri write && tsx server/cli.ts workspace member chao/passthrough-demo test-bob read && node scripts/manual-seed-checklist.mjs"
   },
