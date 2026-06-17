@@ -31,9 +31,9 @@ import type {
   Milestone,
   TimelineEvent,
 } from "../../shared/issues.js";
-import { normalizeLabelColor, toLabel, validateLabelSelection } from "./label-utils.js";
+import { normalizeLabelColor, parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
 import { bad, conflict, notFound } from "./responses.js";
-import { parseListState, parsePositiveIntId, parseTitleBodyPatch, requireCommentBody } from "./query-params.js";
+import { parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitleBodyPatch, requireCommentBody } from "./query-params.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
   return {
@@ -77,6 +77,26 @@ function toDependencyRow(i: ForgejoIssue): DependencyRow {
     state: i.state,
     is_pr: !!i.pull_request,
   };
+}
+
+async function requireTypedIssue(c: Context<AppEnv>, number: number): Promise<ForgejoIssue | Response> {
+  const { fj, owner, repo } = c.get("repoCtx");
+  try {
+    const issue = await fj.getIssue(owner, repo, number);
+    return issue.pull_request ? c.json(...notFound("issue not found")) : issue;
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("issue not found"));
+    throw err;
+  }
+}
+
+async function requireIssueComment(c: Context<AppEnv>, number: number, id: number): Promise<ForgejoIssueComment | Response> {
+  const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
+  const comments = await fj.listIssueComments(owner, repo, number);
+  const comment = comments.find((item) => item.id === id);
+  return comment ?? c.json(...notFound("comment not found"));
 }
 
 // Normalize a timeline event's `ref_issue` into the public causality sub-shape.
@@ -242,6 +262,8 @@ issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const runnerName = typeof body.runner_name === "string" ? body.runner_name.trim() : "";
   if (!runnerName) return c.json(...bad("runner_name required"));
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const purpose = typeof body.purpose === "string" ? body.purpose.slice(0, 500) : "";
   const now = Date.now();
   const result = claimIssue(c.get("db"), {
@@ -262,6 +284,8 @@ issues.patch("/:owner/:repo/issues/:number/claim/:id/heartbeat", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const now = Date.now();
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const claim = heartbeatClaim(c.get("db"), {
     slug: c.get("workspace").slug,
     issueNumber: number,
@@ -293,13 +317,21 @@ issues.post("/:owner/:repo/issues", async (c) => {
     body?: string;
     labels?: number[];
   } | null;
-  if (!body?.title || !body.title.trim())
+  const title = typeof body?.title === "string" ? body.title.trim() : "";
+  if (!title)
     return c.json(...bad("title required"));
+  if (body?.body !== undefined && typeof body.body !== "string") {
+    return c.json(...bad("body must be a string"));
+  }
+  const labels = body?.labels === undefined ? undefined : parsePositiveLabelIds(body.labels);
+  if (body?.labels !== undefined && labels === null) {
+    return c.json(...bad("labels must be positive integer ids"));
+  }
   const { fj, owner, repo } = c.get("repoCtx");
   const created = await fj.createIssue(owner, repo, {
-    title: body.title.trim(),
-    body: body.body ?? "",
-    labels: body.labels,
+    title,
+    body: typeof body?.body === "string" ? body.body : "",
+    labels: labels ?? undefined,
   });
   c.get("sse").publish(ws.slug, { type: "issue", number: created.number, action: "opened" });
   return c.json({ number: created.number, title: created.title, state: created.state }, 201);
@@ -312,6 +344,8 @@ issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { state?: unknown } | null;
   if (body?.state !== "open" && body?.state !== "closed") return c.json(...bad("state must be open or closed"));
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const issue = await fj.editIssue(owner, repo, number, { state: body.state });
   c.get("sse").publish(ws.slug, { type: "issue", number, action: body.state === "closed" ? "closed" : "reopened" });
   return c.json({ ok: true, state: issue.state });
@@ -324,6 +358,8 @@ issues.patch("/:owner/:repo/issues/:number", async (c) => {
   const parsed = parseTitleBodyPatch(await c.req.json().catch(() => null));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const issue = await fj.editIssue(owner, repo, number, parsed.patch);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "edited" });
   return c.json({
@@ -349,6 +385,8 @@ issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const comment = await fj.createIssueComment(owner, repo, number, text);
   c.get("sse").publish(c.get("workspace").slug, { type: "issue", number, action: "commented" });
   return c.json(toIssueComment(comment), 201);
@@ -363,6 +401,8 @@ issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireIssueComment(c, number, id);
+  if (target instanceof Response) return target;
   const comment = await fj.editIssueComment(owner, repo, id, text);
   return c.json(toIssueComment(comment));
 });
@@ -373,6 +413,8 @@ issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   if (id === null) return c.json(...bad("bad comment id"));
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireIssueComment(c, number, id);
+  if (target instanceof Response) return target;
   await fj.deleteIssueComment(owner, repo, id);
   return c.json({ ok: true });
 });
@@ -426,6 +468,7 @@ issues.patch("/:owner/:repo/labels/:id", async (c) => {
   }
   if (typeof body?.description === "string") patch.description = body.description;
   if (typeof body?.exclusive === "boolean") patch.exclusive = body.exclusive;
+  if (Object.keys(patch).length === 0) return c.json(...bad("label field required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const label = await fj.editLabel(owner, repo, id, patch);
   return c.json(toLabel(label));
@@ -448,15 +491,14 @@ issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
   const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { labels?: unknown } | null;
-  if (!Array.isArray(body?.labels) || !body.labels.every((id) => Number.isInteger(id) && id > 0)) {
+  const labelIds = parsePositiveLabelIds(body?.labels);
+  if (labelIds === null) {
     return c.json(...bad("labels must be positive integer ids"));
   }
-  const labelIds = body.labels as number[];
   const { fj, owner, repo } = c.get("repoCtx");
-  const [allLabels, issue] = await Promise.all([
-    fj.listLabels(owner, repo),
-    fj.getIssue(owner, repo, number),
-  ]);
+  const issue = await requireTypedIssue(c, number);
+  if (issue instanceof Response) return issue;
+  const allLabels = await fj.listLabels(owner, repo);
   const validation = validateLabelSelection(labelIds, allLabels, issue.labels);
   if (!validation.ok) return c.json(...bad(validation.message));
   const labels = await fj.setIssueLabels(owner, repo, number, labelIds);
@@ -467,6 +509,8 @@ issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
   const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   await fj.pinIssue(owner, repo, number);
   return c.json({ ok: true });
 });
@@ -475,6 +519,8 @@ issues.delete("/:owner/:repo/issues/:number/pin", async (c) => {
   const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   await fj.unpinIssue(owner, repo, number);
   return c.json({ ok: true });
 });
@@ -517,6 +563,7 @@ issues.patch("/:owner/:repo/milestones/:id", async (c) => {
   }
   if (typeof body?.description === "string") patch.description = body.description;
   if (body?.state === "open" || body?.state === "closed") patch.state = body.state;
+  if (Object.keys(patch).length === 0) return c.json(...bad("milestone field required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const milestone = await fj.editMilestone(owner, repo, id, patch);
   return c.json(toMilestone(milestone));
@@ -539,10 +586,12 @@ issues.patch("/:owner/:repo/issues/:number/milestone", async (c) => {
   const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
   const body = (await c.req.json().catch(() => null)) as { id?: unknown } | null;
-  const milestoneId = body?.id;
-  if (milestoneId !== null && !Number.isInteger(milestoneId)) return c.json(...bad("milestone id must be an integer or null"));
+  const milestoneId = body?.id === null ? 0 : typeof body?.id === "number" ? parsePositiveIntId(body.id) : null;
+  if (milestoneId === null) return c.json(...bad("milestone id must be a positive integer or null"));
   const { fj, owner, repo } = c.get("repoCtx");
-  await fj.editIssue(owner, repo, number, { milestone: milestoneId === null ? 0 : milestoneId as number });
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
+  await fj.editIssue(owner, repo, number, { milestone: milestoneId });
   return c.json({ ok: true });
 });
 
@@ -582,6 +631,8 @@ issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
   }
   if (index === number) return c.json(...bad("issue cannot depend on itself"));
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const updated = await fj.addIssueDependency(owner, repo, number, index);
   return c.json({ issue: toDependencyRow(updated) }, 201);
 });
@@ -595,6 +646,8 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
     return c.json(...bad("dependency issue number required"));
   }
   const { fj, owner, repo } = c.get("repoCtx");
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
   const updated = await fj.removeIssueDependency(owner, repo, number, index);
   return c.json({ issue: toDependencyRow(updated) });
 });
@@ -602,8 +655,7 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
 // Typed because Forgejo activities encode references in JSON-ish strings;
 // clients get parsed issue refs and normalized timestamps.
 issues.get("/:owner/:repo/activities", async (c) => {
-  const rawLimit = Number(c.req.query("limit") ?? 50);
-  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, rawLimit)) : 50;
+  const limit = parseBoundedPositiveInt(c.req.query("limit"), 50, 100);
   const { fj, owner, repo } = c.get("repoCtx");
   const raw = await fj.listRepoActivities(owner, repo, { limit });
   const safe = collapseNoisyEditBranchCommits(raw ?? []);

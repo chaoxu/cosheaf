@@ -23,6 +23,7 @@ function form(fields: Record<string, string>, ip: string, extraHeaders: Record<s
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       "x-forwarded-for": ip,
+      origin: "http://localhost",
       ...extraHeaders,
     },
     body: new URLSearchParams(fields).toString(),
@@ -212,5 +213,30 @@ describe("web /register", () => {
     }
     expect(locations[0]).toBe("/register?error=missing");
     expect(locations).toContain("/register?error=rate");
+  });
+});
+
+describe("web auth form origin checks", () => {
+  it("rejects cross-origin login and logout posts", async () => {
+    const db = freshTestDb("cosheaf-auth-origin-");
+    const app = appFor(db);
+    const headers = {
+      "content-type": "application/x-www-form-urlencoded",
+      origin: "http://evil.test",
+      host: "cosheaf.test",
+    };
+
+    const login = await app.request("/login", {
+      method: "POST",
+      headers,
+      body: new URLSearchParams({ username: "alice", password: "secret" }).toString(),
+    });
+    const logout = await app.request("/logout", {
+      method: "POST",
+      headers,
+    });
+
+    expect(login.status).toBe(403);
+    expect(logout.status).toBe(403);
   });
 });

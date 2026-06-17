@@ -2,6 +2,9 @@
 // run, so e2e specs don't accumulate files in the Forgejo repo across runs.
 
 import { spawnSync } from "node:child_process";
+import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
+
+const webBase = defaultWebUrl();
 
 function run(label: string, cmd: string, args: string[]): void {
   const r = spawnSync(cmd, args, { stdio: "inherit", cwd: process.cwd() });
@@ -15,7 +18,7 @@ export default async function globalSetup(): Promise<void> {
 }
 
 async function loginForPat(username: string, password: string): Promise<string> {
-  const res = await fetch("http://localhost:3030/api/v1/login", {
+  const res = await fetch(`${webBase}/api/v1/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -35,7 +38,7 @@ async function seedReviewablePr(): Promise<void> {
     { path: "demo2.md", content: "# Companion\n\nA second file on the same branch.\n" },
   ]) {
     const put = await fetch(
-      `http://localhost:3030/api/v1/repos/chao/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
+      `${webBase}/api/v1/repos/chao/flushing-coin/file?path=${file.path}&branch=${encodeURIComponent(branch)}`,
       {
         method: "PUT",
         headers: { "content-type": "application/json", authorization: `Bearer ${meriPat}` },
@@ -45,7 +48,7 @@ async function seedReviewablePr(): Promise<void> {
     if (!put.ok) throw new Error(`seedReviewablePr putFile ${file.path}: ${put.status}`);
   }
 
-  const opened = await fetch("http://localhost:3030/api/v1/repos/chao/flushing-coin/pulls", {
+  const opened = await fetch(`${webBase}/api/v1/repos/chao/flushing-coin/pulls`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${meriPat}` },
     body: JSON.stringify({ head: branch, title: "e2e demo PR" }),
@@ -59,7 +62,7 @@ async function seedReviewablePr(): Promise<void> {
     { path: "demo2.md", line: 3, body: "This companion note needs a source." },
   ]) {
     const cmt = await fetch(
-      `http://localhost:3030/api/v1/repos/chao/flushing-coin/pulls/${prNumber}/comments`,
+      `${webBase}/api/v1/repos/chao/flushing-coin/pulls/${prNumber}/comments`,
       {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${veraPat}` },

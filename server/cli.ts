@@ -3,6 +3,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import repl from "node:repl";
 import { stdin, stdout } from "node:process";
+import type Database from "better-sqlite3";
 import { Command, InvalidArgumentError } from "commander";
 import { WORKSPACE_SLUG_RE, parseWorkspaceSlug, workspaceSlug } from "../shared/conventions.js";
 import { getDb, loadConfig } from "./db.js";
@@ -13,7 +14,9 @@ import {
   readWorkspaceFormatFromTopics,
   reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
+import { invalidateWorkspaceCaches } from "./middleware.js";
 import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
+import { invalidateRepoTrees } from "./tree-cache.js";
 import { listVisibleWorkspaceRepos } from "./workspace-discovery.js";
 import {
   COFLAT_FORMAT_ID,
@@ -232,19 +235,40 @@ async function seed(options: SeedOptions): Promise<void> {
   await seedWorkspace({ options, db, forgejo, config });
 }
 
-async function workspaceRm(workspaceArg: string): Promise<void> {
-  await withWorkspace(workspaceArg, async ({ db, forgejo, workspace: ws }) => {
-    try {
-      await forgejo.deleteRepo(ws.owner, ws.repo);
-    } catch (err) {
-      if (!(err instanceof ForgejoError && err.status === 404)) {
-        console.error(`forgejo deleteRepo failed: ${(err as Error).message}`);
-        process.exit(1);
-      }
+export async function deleteWorkspaceRepoAndSidecar(args: {
+  db: Database.Database;
+  forgejo: Pick<Forgejo, "deleteRepo">;
+  owner: string;
+  repo: string;
+}): Promise<string> {
+  const slug = workspaceSlug(args.owner, args.repo);
+  try {
+    await args.forgejo.deleteRepo(args.owner, args.repo);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 404)) {
+      throw new Error(`forgejo deleteRepo failed: ${(err as Error).message}`);
     }
-    deleteSidecarForWorkspace(db, ws.slug);
-    console.log(`deleted workspace ${ws.slug} (forgejo repo + sidecar)`);
+  }
+  deleteSidecarForWorkspace(args.db, slug);
+  invalidateRepoTrees(args.owner, args.repo);
+  invalidateWorkspaceCaches(args.owner, args.repo);
+  return slug;
+}
+
+async function workspaceRm(workspaceArg: string): Promise<void> {
+  const parsed = parseWorkspaceSlug(workspaceArg);
+  if (!parsed) {
+    console.error(`workspace must be <owner>/<repo>, got '${workspaceArg}'`);
+    process.exit(1);
+  }
+  const { db, forgejo } = ctx();
+  const slug = await deleteWorkspaceRepoAndSidecar({
+    db,
+    forgejo,
+    owner: parsed.owner,
+    repo: parsed.repo,
   });
+  console.log(`deleted workspace ${slug} (forgejo repo + sidecar)`);
 }
 
 async function workspaceReindex(workspaceArg: string): Promise<void> {

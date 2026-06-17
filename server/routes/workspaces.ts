@@ -50,13 +50,17 @@ workspaces.post("/", async (c) => {
     name?: string;
     default_md_format?: string;
   } | null;
-  if (!body?.slug || !body.name)
+  const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  const owner = body?.owner === undefined ? undefined : typeof body.owner === "string" ? body.owner.trim() : null;
+  const defaultMdFormat = body?.default_md_format;
+  if (!slug || !name)
     return c.json(...bad("slug and name required"));
-  if (!WORKSPACE_SLUG_RE.test(body.slug))
+  if (!WORKSPACE_SLUG_RE.test(slug))
     return c.json(...bad("invalid slug"));
-  if (body.owner !== undefined && !FORGEJO_NAME_RE.test(body.owner))
+  if (owner !== undefined && (!owner || !FORGEJO_NAME_RE.test(owner)))
     return c.json(...bad("invalid owner"));
-  if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format))
+  if (defaultMdFormat !== undefined && !isDocumentFormatId(defaultMdFormat))
     return c.json(...bad("invalid default_md_format"));
 
   const db = c.get("db");
@@ -66,28 +70,28 @@ workspaces.post("/", async (c) => {
   // rights cover webhook + branch-protection setup. No admin token involved.
   const fj = c.get("fjUser");
   const user = c.get("user");
-  const owner = body.owner ?? user.username;
+  const workspaceOwner = owner ?? user.username;
 
-  const existing = await fj.getRepo(owner, body.slug);
+  const existing = await fj.getRepo(workspaceOwner, slug);
   if (existing) return c.json(...conflict("slug already taken"));
 
   try {
     const { workspace } = await provisionWorkspace(db, fj, config, {
-      owner,
-      repo: body.slug,
-      name: body.name,
+      owner: workspaceOwner,
+      repo: slug,
+      name,
       user,
       forgejoUsername: user.username,
       provisionVia: "user-pat",
       rollbackCreatedRepoOnLocalFailure: true,
-      defaultMdFormat: body.default_md_format,
+      defaultMdFormat,
     });
     return c.json(
       {
         owner: workspace.owner,
         repo: workspace.repo,
         full_name: workspace.slug,
-        name: body.name,
+        name,
         role: "admin",
         default_md_format: normalizeDocumentFormatId(workspace.defaultMdFormat),
       },
@@ -111,6 +115,7 @@ members.use("*", requireAuth);
 members.put("/:owner/:repo/members/:username", requireMembership(), requireAdminFresh, async (c) => {
   const username = c.req.param("username")?.trim();
   if (!username) return c.json(...bad("username required"));
+  if (!FORGEJO_NAME_RE.test(username)) return c.json(...bad("invalid username"));
 
   const body = (await c.req.json().catch(() => null)) as { role?: string } | null;
   if (!body?.role || !(ROLES as readonly string[]).includes(body.role))

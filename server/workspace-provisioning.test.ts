@@ -28,6 +28,7 @@ const config: Config = {
   forgejoAdminToken: "admin-token",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
+  publicOrigin: null,
   registrationOpen: false,
   trustedProxyHops: 0,
   coverifyCmd: "coverify",
@@ -105,6 +106,13 @@ describe("workspace provisioning", () => {
       .toEqual({ path: "readme.md" });
     expect(forgejo.createBranchProtection).toHaveBeenCalledOnce();
     expect(forgejo.createRepoHook).toHaveBeenCalledOnce();
+    expect(forgejo.createRepoHook).toHaveBeenCalledWith(
+      "owner",
+      "notes",
+      config.webhookUrl,
+      config.webhookSecret,
+      expect.arrayContaining(["push", "repository"]),
+    );
     expect(forgejo.putFile).toHaveBeenCalledWith(
       "owner",
       "notes",

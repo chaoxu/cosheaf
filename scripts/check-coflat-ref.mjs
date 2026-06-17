@@ -14,14 +14,35 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // docs (README, AGENTS) must agree with this; `checkDocPins` enforces it so a
 // `bump:coflat` that misses a doc site is caught by setup:deps, not by a
 // developer following a stale README into a failing checkout.
-export const DEFAULT_COFLAT_REF = "15d1ee4147da05600778aa7a800bbf2ce2056419";
+export const DEFAULT_COFLAT_REF = "caffb29cdb20f2125cb3cb177f44618936e15a0e";
 
-// Doc files that pin the coflat SHA in a `git -C coflat checkout <sha>` line.
+// Files that pin the Coflat SHA. Keep these in sync with bump-coflat.mjs.
 export const DOC_PIN_FILES = ["README.md", "AGENTS.md"];
+export const CONFIG_PIN_FILES = ["Dockerfile", "compose.yaml", ".github/workflows/ci.yml"];
+
+function envCoflatRef(env = process.env) {
+  const ref = env.COFLAT_REF?.trim();
+  return ref || DEFAULT_COFLAT_REF;
+}
+
+function pinnedCoflatRef(rel, text) {
+  const patterns = rel === "Dockerfile"
+    ? [/ARG COFLAT_GIT_REF=([^\s]+)/]
+    : rel === "compose.yaml"
+      ? [/COFLAT_GIT_REF:\s*\$\{COFLAT_GIT_REF:-([^}]+)\}/]
+      : rel === ".github/workflows/ci.yml"
+        ? [/COFLAT_REF:\s*([^\s]+)/]
+        : [/coflat checkout ([^\s]+)/];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
 
 export function checkCoflatRef({
   coflatDir = resolve(REPO_ROOT, "..", "coflat"),
-  expectedRef = process.env.COFLAT_REF ?? DEFAULT_COFLAT_REF,
+  expectedRef = envCoflatRef(),
   execFile = execFileSync,
 } = {}) {
   if (!existsSync(coflatDir)) {
@@ -56,7 +77,7 @@ export function checkCoflatRef({
 export function checkDocPins({
   repoRoot = REPO_ROOT,
   expectedRef = DEFAULT_COFLAT_REF,
-  files = DOC_PIN_FILES,
+  files = [...DOC_PIN_FILES, ...CONFIG_PIN_FILES],
   readFile = (p) => readFileSync(p, "utf8"),
 } = {}) {
   const drifted = [];
@@ -68,8 +89,12 @@ export function checkDocPins({
       // Missing doc (e.g. a partial checkout) is not a drift; skip it.
       continue;
     }
-    const match = text.match(/coflat checkout ([0-9a-f]{40})/);
-    if (match && match[1] !== expectedRef) drifted.push({ file: rel, found: match[1] });
+    const found = pinnedCoflatRef(rel, text);
+    if (!found || (CONFIG_PIN_FILES.includes(rel) && !/^[0-9a-f]{40}$/.test(found))) {
+      drifted.push({ file: rel, found: found ?? "<missing>" });
+    } else if (found && found !== expectedRef) {
+      drifted.push({ file: rel, found });
+    }
   }
   return drifted;
 }

@@ -6,6 +6,7 @@ import type { ForgejoNotificationThread } from "../forgejo.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { bad, notFound } from "./responses.js";
+import { parsePositiveIntId } from "./query-params.js";
 import { streamHubChannel } from "./sse-helpers.js";
 
 export const notifications = new Hono<AppEnv>();
@@ -23,8 +24,7 @@ globalNotifications.use("*", requireAuth);
 globalNotifications.get("/notifications", async (c) => {
   const threads = await c
     .get("fjUser")
-    .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
-    .catch(() => []);
+    .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] });
   return c.json({ notifications: mapThreads(threads) });
 });
 
@@ -91,8 +91,8 @@ notifications.get("/:owner/:repo/notifications", async (c) => {
 
 // POST /api/v1/repos/:owner/:repo/notifications/:id/read
 notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
-  const id = Number(c.req.param("id"));
-  if (!Number.isInteger(id) || id <= 0) return c.json(...bad("bad id"));
+  const id = parsePositiveIntId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad id"));
   const { fj } = c.get("repoCtx");
   // A stale/cross-repo/unreadable id should 404, not 500 — normalize the fetch.
   const thread = await fj.getNotificationThread(id).catch(() => null);

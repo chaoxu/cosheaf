@@ -19,7 +19,7 @@
   DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm check:web:settings` runs only account/repository settings separation and
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
-- `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `http://localhost:3030`.
+- `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).
 
 Useful overrides for `pnpm dev:login-state`:
 
@@ -37,7 +37,7 @@ pnpm dev:login-state
   - Verify with `pnpm check:web` and `pnpm devx:verify-route`.
 - Server-rendered web CSS: `public/cosheaf-web.css`
   - Verify with `pnpm check:web` and `pnpm devx:verify-route -- --route /chao/flushing-coin/activity`.
-- Static asset serving and route mounting: `server/index.ts`
+- Static asset serving and route mounting: `server/app.ts`
   - Verify with `pnpm build`, `pnpm check:web`, and `pnpm devx:verify-route`.
 - Page editor island: `src/cosheaf/web-editor.tsx`
   - Verify with `pnpm smoke:edit`, `pnpm build`, and `pnpm check:web`.

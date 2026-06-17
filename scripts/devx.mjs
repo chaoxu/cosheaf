@@ -1,28 +1,32 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { resolve } from "node:path";
 import { Command } from "commander";
+import { defaultWebUrl, loadDotenvDev } from "./lib/env-dev.mjs";
 import { smokeChecks } from "./smoke-manifest.mjs";
 import { run } from "./lib/run.mjs";
 
-const program = new Command("devx");
+export function buildProgram() {
+  const program = new Command("devx");
+  program
+    .command("ready", { isDefault: true })
+    .description("prepare an agent-ready local Cosheaf workspace")
+    .option("--no-seed", "skip setup:dev:manual")
+    .option("--no-login-state", "skip writing Playwright login state")
+    .option("--no-server", "do not start dev:all if the local Cosheaf web URL is down")
+    .option("--url <url>", "local web URL", defaultWebUrl())
+    .action((opts) => ready(opts));
+  return program;
+}
 
-program
-  .command("ready", { isDefault: true })
-  .description("prepare an agent-ready local Cosheaf workspace")
-  .option("--no-seed", "skip setup:dev:manual")
-  .option("--no-login-state", "skip writing Playwright login state")
-  .option("--no-server", "do not start dev:all if http://localhost:3030 is down")
-  .option("--url <url>", "local web URL", process.env.COSHEAF_WEB_URL ?? "http://localhost:3030")
-  .action((opts) => ready(opts));
-
-program.parse(normalizeArgv(process.argv));
+export async function main(argv = process.argv) {
+  loadDotenvDev();
+  await buildProgram().parseAsync(normalizeArgv(argv));
+}
 
 async function ready(opts) {
-  loadDotenvDev();
   const host = readHost();
   console.log(`Cosheaf agent DevX on ${host}`);
   const forgejoOpen = await portOpen("127.0.0.1", 3002);
@@ -86,20 +90,6 @@ function normalizeArgv(argv) {
   return argv.filter((arg, index) => index < 2 || arg !== "--");
 }
 
-function loadDotenvDev() {
-  const file = resolve(process.cwd(), ".env.dev");
-  if (!existsSync(file)) return;
-  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
-
 function readHost() {
   try {
     return readFileSync("/etc/lab-host", "utf8").trim() || "unknown";
@@ -139,4 +129,8 @@ async function waitForHealth(baseUrl) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 500));
   }
   throw new Error(`${baseUrl} did not become healthy within 30s`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  await main();
 }

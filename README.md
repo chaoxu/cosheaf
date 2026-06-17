@@ -54,15 +54,16 @@ auth, scopes the request to the workspace, and returns stable Cosheaf response
 shapes so callers do not need to know which forge backs the workspace.
 
 Use typed routes for normal workflows: Coflat page reads/writes with
-frontmatter/id handling, path validation, synchronous sidecar indexing,
+frontmatter/id handling, path validation, main-branch sidecar indexing,
 backlinks, FTS search, document lists, branch creation, pull request
 list/detail/open/review/merge, issue comments, labels, milestones,
 notifications, markdown rendering, SSE updates, and merge/admin gates.
 
 File writes have a clear boundary. Markdown writes made outside Cosheaf are
 treated as external repo edits and reach the SQLite index through
-webhook/reindex reconciliation. A Markdown write that needs immediate Cosheaf
-document/index behavior should use the typed file route.
+webhook/reindex reconciliation. Branch writes through the typed file route get
+immediate Cosheaf frontmatter/id behavior and SSE, while search/backlinks/doc
+metadata continue to mirror `main` after the merge push webhook or reindex.
 
 Workspaces are addressed by their Forgejo `(owner, repo)` pair. Example
 agent/API calls, all with `Authorization: Bearer <token>`:
@@ -77,7 +78,7 @@ agent/API calls, all with `Authorization: Bearer <token>`:
 ```bash
 cd ..
 git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
-git -C coflat checkout 15d1ee4147da05600778aa7a800bbf2ce2056419
+git -C coflat checkout caffb29cdb20f2125cb3cb177f44618936e15a0e
 cd cosheaf
 pnpm setup:deps  # verifies the pinned Coflat checkout, then builds it
 pnpm install

@@ -1,6 +1,7 @@
 interface PutFileResult {
   ok: true;
   branch: string;
+  sha: string | null;
   content?: string;
 }
 
@@ -8,10 +9,18 @@ interface OpenPullResult {
   number: number;
 }
 
+interface ErrorBody {
+  error?: string;
+  code?: string;
+  details?: Record<string, unknown>;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
+    public details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -30,6 +39,15 @@ function queryString(params: Record<string, string | undefined>): string {
   return text ? `?${text}` : "";
 }
 
+export function putFileBody(content: string, previousPath?: string, expectedSha?: string | null, expectedSourceSha?: string): Record<string, unknown> {
+  return {
+    content,
+    ...(previousPath !== undefined ? { previous_path: previousPath } : {}),
+    ...(expectedSha !== undefined ? { expected_sha: expectedSha } : {}),
+    ...(expectedSourceSha !== undefined ? { expected_source_sha: expectedSourceSha } : {}),
+  };
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -40,7 +58,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    const body = (await res.json().catch(() => ({}))) as ErrorBody;
     if (
       res.status === 401 &&
       (body.code === "pat_invalid" || body.code === "unauthorized") &&
@@ -48,7 +66,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     ) {
       window.location.assign("/login");
     }
-    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`, body.code, body.details);
   }
   if (res.status === 204 || res.status === 304) return undefined as T;
   const text = await res.text();
@@ -56,10 +74,19 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  putFile: (owner: string, repo: string, path: string, content: string, branch: string, previousPath?: string) =>
+  putFile: (
+    owner: string,
+    repo: string,
+    path: string,
+    content: string,
+    branch: string,
+    previousPath?: string,
+    expectedSha?: string | null,
+    expectedSourceSha?: string,
+  ) =>
     jsonFetch<PutFileResult>(`${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`, {
       method: "PUT",
-      body: JSON.stringify({ content, previous_path: previousPath }),
+      body: JSON.stringify(putFileBody(content, previousPath, expectedSha, expectedSourceSha)),
     }),
 
   uploadAsset: async (owner: string, repo: string, branch: string, file: File): Promise<{ path: string }> => {
@@ -72,13 +99,17 @@ export const api = {
     });
     if (!res.ok) {
       let msg = `asset upload ${res.status}`;
+      let code: string | undefined;
+      let details: Record<string, unknown> | undefined;
       try {
-        const data = (await res.json()) as { error?: string };
+        const data = (await res.json()) as ErrorBody;
         if (data.error) msg = data.error;
+        code = data.code;
+        details = data.details;
       } catch (_err) {
         /* body was not JSON; keep the status message */
       }
-      throw new ApiError(res.status, msg);
+      throw new ApiError(res.status, msg, code, details);
     }
     return (await res.json()) as { path: string };
   },

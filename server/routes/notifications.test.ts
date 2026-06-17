@@ -1,10 +1,11 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
+import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
-import { notifications } from "./notifications.js";
+import { handleAppError } from "./error-handler.js";
+import { globalNotifications, notifications } from "./notifications.js";
 import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("notifications");
@@ -16,7 +17,12 @@ function freshDb(): Database.Database {
 }
 
 function appFor(db: Database.Database): Hono<AppEnv> {
-  return testApp(db, config, (app) => app.route("/api/v1/repos", notifications));
+  const app = testApp(db, config, (hono) => {
+    hono.route("/api/v1", globalNotifications);
+    hono.route("/api/v1/repos", notifications);
+  });
+  app.onError(handleAppError);
+  return app;
 }
 
 
@@ -24,8 +30,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  _resetPermCacheForTests();
-  _resetBearerAuthCacheForTests();
+  _resetMiddlewareCachesForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -46,6 +51,19 @@ describe("notifications route", () => {
     expect(url.pathname).toBe("/api/v1/repos/owner/w/notifications");
     expect(url.searchParams.get("status-types")).toBe("unread");
     expect(url.searchParams.get("subject-type")).toBe("Issue,Pull");
+  });
+
+  it("does not hide global notification list failures as an empty inbox", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(new Response("forgejo down", { status: 503 }));
+
+    const res = await appFor(db).request("/api/v1/notifications", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(502);
+    await expect(res.json()).resolves.toMatchObject({ code: "bad_gateway" });
   });
 
   it("normalizes Forgejo threads into NotificationRow shape", async () => {
@@ -163,17 +181,19 @@ describe("notifications route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(foreign.length);
   });
 
-  it("rejects non-integer notification ids before calling Forgejo", async () => {
+  it("rejects malformed notification ids before calling Forgejo", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
 
-    const res = await appFor(db).request("/api/v1/repos/owner/w/notifications/1.5/read", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` },
-    });
+    for (const id of ["1.5", "1e2"]) {
+      const res = await appFor(db).request(`/api/v1/repos/owner/w/notifications/${id}/read`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
 
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "bad id", code: "validation" });
+      expect(res.status, `expected ${id} to be rejected`).toBe(400);
+      expect(await res.json()).toEqual({ error: "bad id", code: "validation" });
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -188,6 +208,8 @@ describe("notifications route", () => {
     expect(res.status).toBe(200);
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.pathname).toBe("/api/v1/repos/owner/w/notifications");
+    expect(url.searchParams.get("status-types")).toBe("unread");
+    expect(url.searchParams.get("to-status")).toBe("read");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
   });
 

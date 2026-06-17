@@ -26,6 +26,7 @@ const WEBHOOK_EVENTS = [
   "pull_request_review",
   "issues",
   "issue_comment",
+  "repository",
 ];
 
 // A workspace is identified by (owner, repo) — any Forgejo user or org can

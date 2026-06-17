@@ -7,10 +7,31 @@
 
 export interface EditorDraft {
   source: string;
-  // The file sha the draft was branched from, when known (null today — the
-  // typed file route doesn't surface a sha; reserved for a freshness check).
-  baseSha: string | null;
+  path?: string;
+  // The file sha the draft was branched from. `null` is meaningful only when
+  // baseShaKnown is true: the draft was based on the target branch not having
+  // this path yet. Legacy drafts left this unknown.
+  baseSha?: string | null;
+  baseShaKnown?: true;
+  sourceSha?: string;
+  sourceShaKnown?: true;
   savedAt: number;
+}
+
+export interface DraftFreshness {
+  baseSha: string | null | undefined;
+  sourceSha: string | undefined;
+}
+
+export function restoredDraftFreshness(current: DraftFreshness, draft: EditorDraft): DraftFreshness {
+  const baseSha = draft.baseShaKnown ? (draft.baseSha ?? null) : current.baseSha;
+  let sourceSha = current.sourceSha;
+  if (draft.sourceShaKnown) {
+    sourceSha = draft.sourceSha;
+  } else if (draft.baseShaKnown) {
+    sourceSha = undefined;
+  }
+  return { baseSha, sourceSha };
 }
 
 function draftKey(owner: string, repo: string, branch: string, path: string): string {
@@ -21,8 +42,27 @@ export function readDraft(owner: string, repo: string, branch: string, path: str
   try {
     const raw = localStorage.getItem(draftKey(owner, repo, branch, path));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as EditorDraft;
-    return typeof parsed?.source === "string" ? parsed : null;
+    const parsed = JSON.parse(raw) as Partial<EditorDraft> | null;
+    if (typeof parsed?.source !== "string") return null;
+    const baseShaKnown = parsed.baseShaKnown === true || typeof parsed.baseSha === "string";
+    const sourceShaKnown = parsed.sourceShaKnown === true || typeof parsed.sourceSha === "string";
+    return {
+      source: parsed.source,
+      ...(typeof parsed.path === "string" ? { path: parsed.path } : {}),
+      ...(baseShaKnown
+        ? {
+            baseSha: typeof parsed.baseSha === "string" ? parsed.baseSha : null,
+            baseShaKnown: true as const,
+          }
+        : {}),
+      ...(sourceShaKnown && typeof parsed.sourceSha === "string"
+        ? {
+            sourceSha: parsed.sourceSha,
+            sourceShaKnown: true as const,
+          }
+        : {}),
+      savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : 0,
+    };
   } catch (_err) {
     // Corrupt/blocked storage: treat as no draft rather than break the editor.
     return null;

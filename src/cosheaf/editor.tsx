@@ -79,6 +79,7 @@ export function MarkdownEditor({
         saveRef.current?.save(payload) ??
         Promise.resolve({ ok: false as const, error: "no save handler" }),
       isBusy: () => saveRef.current?.isBusy?.() ?? false,
+      autosaveDebounceMs: saveRef.current?.autosaveDebounceMs,
     };
     const stableStatusEvents: StatusEvents = {
       onSaveStart: () => statusRef.current?.onSaveStart?.(),
@@ -134,6 +135,12 @@ export function MarkdownEditor({
     if (!editor) return;
     if (editor.getMode() !== mode) editor.setMode(mode);
   }, [mode]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !documentContext) return;
+    editor.setContext(documentContext);
+  }, [documentContext]);
 
   return <div ref={containerRef} data-testid={testId} className="cm-host" />;
 }

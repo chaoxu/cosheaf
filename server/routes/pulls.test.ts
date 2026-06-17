@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
-import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests } from "../middleware.js";
+import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { classifyMergeFailure, pulls } from "./pulls.js";
 import { branches } from "./branches.js";
@@ -40,9 +40,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  _resetPermCacheForTests();
-  _resetBearerAuthCacheForTests();
-  _resetFormatCacheForTests();
+  _resetMiddlewareCachesForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -106,17 +104,35 @@ describe("pulls + branches routes", () => {
     fetchMock.mockResolvedValueOnce(ok([]));
 
     const res = await appFor(db).request(
-      "/api/v1/repos/owner/w/pulls?state=all&labels=4&milestone=2&author=test-meri&sort=oldest",
+      "/api/v1/repos/owner/w/pulls?state=all&labels=4,5&milestone=2&author=test-meri&sort=oldest",
       { headers: { authorization: `Bearer ${token}` } },
     );
 
     expect(res.status).toBe(200);
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get("state")).toBe("all");
-    expect(url.searchParams.get("labels")).toBe("4");
+    expect(url.searchParams.get("labels")).toBe("4,5");
+    expect(url.searchParams.getAll("labels")).toEqual(["4,5"]);
     expect(url.searchParams.get("milestone")).toBe("2");
     expect(url.searchParams.get("poster")).toBe("test-meri");
     expect(url.searchParams.get("sort")).toBe("oldest");
+  });
+
+  it("GET /pulls does not coerce malformed numeric filters", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok([]));
+
+    const res = await appFor(db).request(
+      "/api/v1/repos/owner/w/pulls?labels=4.0,1e2&milestone=2.0",
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+
+    expect(res.status).toBe(200);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.has("labels")).toBe(false);
+    expect(url.searchParams.has("milestone")).toBe(false);
   });
 
   it("GET /pulls/:n returns stable Cosheaf PR metadata", async () => {
@@ -294,6 +310,52 @@ describe("pulls + branches routes", () => {
       expect(fetchMock).toHaveBeenCalledOnce();
     });
 
+    it("PUT /settings accepts zero required approvals", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" }))
+        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 2 }))
+        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 0 }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/settings", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ min_approvals: 0 }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { min_approvals: number };
+      expect(body.min_approvals).toBe(0);
+      const updateCall = fetchMock.mock.calls[2];
+      expect(String(updateCall?.[0] ?? "")).toContain("/api/v1/repos/owner/w/branch_protections/main");
+      expect(JSON.parse(String((updateCall?.[1] as RequestInit | undefined)?.body ?? "{}"))).toEqual({
+        required_approvals: 0,
+      });
+    });
+
+    it("PUT /settings rejects non-object JSON payloads before settings reads", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+      fetchMock.mockResolvedValue(ok({ permission: "admin" }));
+
+      for (const payload of ["[]", "\"noop\""]) {
+        fetchMock.mockClear();
+        fetchMock.mockResolvedValue(ok({ permission: "admin" }));
+        const res = await appFor(db).request("/api/v1/repos/owner/w/settings", {
+          method: "PUT",
+          headers,
+          body: payload,
+        });
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toMatchObject({ error: "settings payload required" });
+        expect(fetchMock).toHaveBeenCalledOnce();
+      }
+    });
+
     it("PUT /settings writes the format topic to Forgejo before reindex", async () => {
       const db = freshDb();
       seedWorkspace(db);
@@ -469,6 +531,22 @@ describe("pulls + branches routes", () => {
       await expect(res.json()).resolves.toMatchObject({ pull: { requested_reviewers: ["test-vera"] } });
     });
 
+    it("rejects malformed reviewer arrays before calling Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/review-requests", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ reviewers: ["test-vera", 42] }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ error: "reviewers required" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it("DELETE /pulls/:n/review-requests cancels reviewers through Forgejo", async () => {
       const db = freshDb();
       seedWorkspace(db);
@@ -552,6 +630,44 @@ describe("pulls + branches routes", () => {
       const body = (await res.json()) as Record<string, unknown>;
       expect(body.error).toMatch(/own pull request/);
     });
+
+    it("POST /pulls/:n/reviews rejects inherited event keys before calling Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ event: "toString" }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        code: "validation",
+        error: "event must be APPROVE|REQUEST_CHANGES|COMMENT",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("POST /pulls/:n/reviews rejects malformed body text before calling Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ event: "APPROVE", body: { text: "looks good" } }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({
+        code: "validation",
+        error: "body must be a string",
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("pending review ids", () => {
@@ -575,6 +691,136 @@ describe("pulls + branches routes", () => {
       expect(submit.status).toBe(400);
       expect(comment.status).toBe(400);
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid pending-review submit events before calling Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review/1/submit", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ event: "bogus" }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ code: "validation", error: "invalid event" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects malformed pending-review submit body text before calling Forgejo", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review/1/submit", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ event: "approve", body: { text: "looks good" } }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ code: "validation", error: "body must be a string" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects pending-review mutations for foreign or non-pending review ids", async () => {
+      const reviewCases = [
+        { label: "missing", reviews: [] },
+        { label: "wrong user", reviews: [{ id: 9, state: "PENDING", body: "", user: { login: "mallory" } }] },
+        { label: "submitted", reviews: [{ id: 9, state: "APPROVED", body: "", user: { login: "alice" } }] },
+      ];
+      const endpointCases = [
+        {
+          methodPath: "/api/v1/repos/owner/w/pulls/7/pending-review/9/submit",
+          body: { event: "approve" },
+          mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9",
+        },
+        {
+          methodPath: "/api/v1/repos/owner/w/pulls/7/pending-review/9/comments",
+          body: { path: "x.md", line: 1, side: "head", body: "hi" },
+          mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9/comments",
+        },
+      ];
+
+      for (const reviewCase of reviewCases) {
+        for (const endpointCase of endpointCases) {
+          const db = freshDb();
+          seedWorkspace(db);
+          const token = seedUser(db, 1, "alice", "write");
+          let mutated = false;
+          fetchMock.mockReset();
+          fetchMock.mockImplementation(fakeForgejo((forge) => {
+            forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(pull({ user: { login: "bob" } })));
+            forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => Response.json(reviewCase.reviews));
+            forge.post(endpointCase.mutationPath, () => {
+              mutated = true;
+              return Response.json({ id: 9 });
+            });
+          }));
+
+          const res = await appFor(db).request(endpointCase.methodPath, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            body: JSON.stringify(endpointCase.body),
+          });
+
+          expect(res.status, `${reviewCase.label} ${endpointCase.methodPath}`).toBe(404);
+          expect(mutated, `${reviewCase.label} ${endpointCase.methodPath}`).toBe(false);
+        }
+      }
+    });
+
+    it("rejects pending-review mutations when the pull cannot be reviewed by the caller", async () => {
+      const pullCases = [
+        { label: "self-authored", pull: pull() },
+        { label: "closed", pull: pull({ state: "closed", user: { login: "bob" } }) },
+      ];
+      const endpointCases = [
+        {
+          methodPath: "/api/v1/repos/owner/w/pulls/7/pending-review/9/submit",
+          body: { event: "approve" },
+          mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9",
+        },
+        {
+          methodPath: "/api/v1/repos/owner/w/pulls/7/pending-review/9/comments",
+          body: { path: "x.md", line: 1, side: "head", body: "hi" },
+          mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9/comments",
+        },
+      ];
+
+      for (const pullCase of pullCases) {
+        for (const endpointCase of endpointCases) {
+          const db = freshDb();
+          seedWorkspace(db);
+          const token = seedUser(db, 1, "alice", "write");
+          let listedReviews = false;
+          let mutated = false;
+          fetchMock.mockReset();
+          fetchMock.mockImplementation(fakeForgejo((forge) => {
+            forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(pullCase.pull));
+            forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => {
+              listedReviews = true;
+              return Response.json([{ id: 9, state: "PENDING", body: "", user: { login: "alice" } }]);
+            });
+            forge.post(endpointCase.mutationPath, () => {
+              mutated = true;
+              return Response.json({ id: 9 });
+            });
+          }));
+
+          const res = await appFor(db).request(endpointCase.methodPath, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+            body: JSON.stringify(endpointCase.body),
+          });
+
+          expect(res.status, `${pullCase.label} ${endpointCase.methodPath}`).toBe(403);
+          expect(listedReviews, `${pullCase.label} ${endpointCase.methodPath}`).toBe(false);
+          expect(mutated, `${pullCase.label} ${endpointCase.methodPath}`).toBe(false);
+        }
+      }
     });
   });
 
@@ -673,6 +919,27 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(409);
       expect(await res.json()).toMatchObject({ reason: "blocked", mergeable: true });
     });
+
+    it("does not classify unreadable review state as approval-blocked", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
+        .mockResolvedValueOnce(new Response("not allowed to merge", { status: 405 }))
+        .mockResolvedValueOnce(ok(pull({ mergeable: true }))) // re-read PR: no content conflict
+        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 1 }))
+        .mockResolvedValueOnce(new Response("reviews unavailable", { status: 503 }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "squash" }),
+      });
+
+      expect(res.status).toBe(409);
+      await expect(res.json()).resolves.toMatchObject({ reason: "unknown", mergeable: true });
+    });
   });
 
   describe("classifyMergeFailure (#94)", () => {
@@ -743,9 +1010,7 @@ describe("pulls + branches routes", () => {
       // wip-1 excluded (open PR by alice), feature/passthrough kept (alice
       // authored, no PR), test-bob excluded (different author), main excluded
       // (also has no open-PR check but does have an unrelated commit shape).
-      expect(body.branches.map((b) => b.name).sort()).toEqual(
-        ["feature/passthrough", "main"].sort(),
-      );
+      expect(body.branches.map((b) => b.name)).toEqual(["feature/passthrough"]);
     });
 
     it("POST /branches rejects names without a valid shape", async () => {
@@ -775,6 +1040,21 @@ describe("pulls + branches routes", () => {
       expect(String(fetchMock.mock.calls[0][0])).toContain(
         "/branches/user%2Falice%2Fwip-2",
       );
+    });
+
+    it("DELETE /branches/:name propagates Forgejo delete failures", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock.mockResolvedValueOnce(new Response("forgejo down", { status: 500 }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branches/user/alice/wip-2", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(500);
+      expect(await res.text()).not.toContain("\"ok\":true");
     });
 
     it("DELETE /branches refuses main and invalid name shapes", async () => {
@@ -859,6 +1139,22 @@ describe("pulls + branches routes", () => {
   });
 
   describe("line comments", () => {
+    const reviewComment = (overrides: Record<string, unknown> = {}) => ({
+      id: 123,
+      pull_request_review_id: 9,
+      path: "new.md",
+      body: "note",
+      position: 1,
+      original_position: 1,
+      commit_id: "c",
+      original_commit_id: "c",
+      diff_hunk: "",
+      user: { id: 2, login: "bob" },
+      created_at: "2026-05-20T00:00:00Z",
+      updated_at: "2026-05-20T00:00:00Z",
+      ...overrides,
+    });
+
     it("does not hide Forgejo failures as an empty comments list", async () => {
       const db = freshDb();
       seedWorkspace(db);
@@ -893,10 +1189,158 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(500);
       expect(await res.text()).not.toContain("\"comments\":[]");
     });
+
+    it("edits only comments that belong to the requested pull request", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      let editedBody: unknown = null;
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment()]));
+        forge.patch("/api/v1/repos/owner/w/issues/comments/123", async (c) => {
+          editedBody = await c.req.json();
+          return Response.json({ id: 123, body: "updated" });
+        });
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments/123", {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ body: "updated" }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(editedBody).toEqual({ body: "updated" });
+    });
+
+    it("rejects editing a comment that is not on the requested pull request", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      let edited = false;
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ id: 456 })]));
+        forge.patch("/api/v1/repos/owner/w/issues/comments/123", () => {
+          edited = true;
+          return Response.json({ id: 123, body: "updated" });
+        });
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments/123", {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ body: "updated" }),
+      });
+
+      expect(res.status).toBe(404);
+      expect(edited).toBe(false);
+    });
+
+    it("deletes only comments whose review id matches the requested pull request comment", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      let deleted = false;
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ pull_request_review_id: 9 })]));
+        forge.delete("/api/v1/repos/owner/w/pulls/7/reviews/9/comments/123", () => {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        });
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments/123?review_id=9", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      expect(deleted).toBe(true);
+    });
+
+    it("rejects deleting a comment when the review id does not match", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      let deleted = false;
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ pull_request_review_id: 9 })]));
+        forge.delete("/api/v1/repos/owner/w/pulls/7/reviews/11/comments/123", () => {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        });
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/comments/123?review_id=11", {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(400);
+      expect(deleted).toBe(false);
+    });
   });
 });
 
 describe("POST /pulls duplicate-PR resolution (#181)", () => {
+  it("rejects invalid head/base branch names before calling Forgejo", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    const invalidHead = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ head: "bad..head", base: "main", title: "x" }),
+    });
+    const invalidBase = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ head: "user/alice/wip", base: "../main", title: "x" }),
+    });
+    const numericHead = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ head: 123, base: "main", title: "x" }),
+    });
+    const numericBase = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ head: "user/alice/wip", base: 123, title: "x" }),
+    });
+
+    expect(invalidHead.status).toBe(400);
+    await expect(invalidHead.json()).resolves.toMatchObject({ error: "valid head branch name required" });
+    expect(invalidBase.status).toBe(400);
+    await expect(invalidBase.json()).resolves.toMatchObject({ error: "valid base branch name required" });
+    expect(numericHead.status).toBe(400);
+    await expect(numericHead.json()).resolves.toMatchObject({ error: "valid head branch name required" });
+    expect(numericBase.status).toBe(400);
+    await expect(numericBase.json()).resolves.toMatchObject({ error: "valid base branch name required" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed optional PR title/body before calling Forgejo", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    for (const payload of [
+      { head: "user/alice/wip", base: "main", title: { text: "bad" } },
+      { head: "user/alice/wip", base: "main", body: { text: "bad" } },
+    ]) {
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      expect(res.status).toBe(400);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("returns the existing open PR when one already exists for this head→base", async () => {
     const db = freshDb();
     seedWorkspace(db);

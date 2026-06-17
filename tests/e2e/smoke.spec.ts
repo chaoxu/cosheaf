@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { test } from "@playwright/test";
+import { browserWebUrl } from "../../scripts/browser-utils.mjs";
 import { smokeChecks } from "../../scripts/smoke-manifest.mjs";
 
 function runSmokeScript(script: string, name: string): void {
-  const slug = (process.env.URL ?? "local").replace(/[^a-z0-9]/gi, "-");
+  const slug = browserWebUrl().replace(/[^a-z0-9]/gi, "-");
   const result = spawnSync("node", [script], {
     stdio: "inherit",
     env: {
@@ -22,4 +23,3 @@ for (const check of smokeChecks) {
     runSmokeScript(check.script, check.name);
   });
 }
-

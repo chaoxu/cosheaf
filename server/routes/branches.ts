@@ -23,7 +23,6 @@ branches.use("*", requireAuth);
 branches.use("/:owner/:repo/*", requireMembership());
 branches.use("/:owner/:repo/*", requireWriteOnMutation);
 
-import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict } from "./responses.js";
 
 branches.get("/:owner/:repo/branches/mine", async (c) => {
@@ -39,7 +38,7 @@ branches.get("/:owner/:repo/branches/mine", async (c) => {
   // prefix convention.
   const me = c.get("user").username;
   const mine = list
-    .filter((b) => b.commit?.author?.username === me && !openHeads.has(b.name))
+    .filter((b) => b.name !== "main" && b.commit?.author?.username === me && !openHeads.has(b.name))
     .map((b) => ({
       name: b.name,
       commit_sha: b.commit?.id ?? null,
@@ -73,7 +72,11 @@ branches.delete("/:owner/:repo/branches/:name{.+}", async (c) => {
   const name = c.req.param("name");
   if (!validBranchName(name) || name === "main") return c.json(...bad("valid branch name required (not main)"));
   const { fj, owner, repo } = c.get("repoCtx");
-  await deleteBranchQuietly(fj, owner, repo, name);
+  try {
+    await fj.deleteBranch(owner, repo, name);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+  }
   invalidateRepoTrees(owner, repo);
   return c.json({ ok: true });
 });

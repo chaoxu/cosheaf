@@ -22,13 +22,14 @@ import {
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { repoPageShell } from "./web-page.js";
+import { parsePositiveIntId } from "./query-params.js";
 
 export function registerNotificationActivityRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/notifications", webRoute(async (_c, ctx) => {
   const threads = await ctx.fj.listRepoNotifications(ctx.owner, ctx.repo, {
     statusTypes: ["unread"],
     subjectTypes: ["Issue", "Pull"],
-  }).catch(() => []);
+  });
   return htmlResponse(
     repoPageShell(ctx, "notifications", `Notifications - ${ctx.repo}`, notificationsPage(ctx, threads)),
   );
@@ -37,8 +38,8 @@ web.get("/:owner/:repo/notifications", webRoute(async (_c, ctx) => {
 web.post("/:owner/:repo/notifications/:id/read", webRoute(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return notFoundPage(ctx.user, "Notification not found");
-  const thread = await ctx.fj.getNotificationThread(id);
-  if (thread.repository.full_name !== `${ctx.owner}/${ctx.repo}`) return notFoundPage(ctx.user, "Notification not found");
+  const thread = await ctx.fj.getNotificationThread(id).catch(() => null);
+  if (!thread || thread.repository.full_name !== `${ctx.owner}/${ctx.repo}`) return notFoundPage(ctx.user, "Notification not found");
   await ctx.fj.markNotificationRead(id);
   return redirect(repoHref(ctx.owner, ctx.repo, "/notifications"));
 }));
@@ -179,15 +180,15 @@ function firstLine(value: string): string {
 
 function activityPullRef(value: unknown): { number: number; label: string } | null {
   if (!Array.isArray(value) || value.length < 2 || typeof value[1] !== "string") return null;
-  const number = Number(value[0]);
-  if (!Number.isInteger(number) || number <= 0) return null;
+  const number = parsePositiveIntId(value[0]);
+  if (number === null) return null;
   return { number, label: value[1] };
 }
 
 function activityIssueRef(value: unknown, issueUrl: string | undefined): number | null {
   if (Array.isArray(value)) {
-    const number = Number(value[0]);
-    if (Number.isInteger(number) && number > 0) return number;
+    const number = parsePositiveIntId(value[0]);
+    if (number !== null) return number;
   }
   const match = issueUrl?.match(/\/issues\/(\d+)(?:$|[#?])/);
   if (!match) return null;

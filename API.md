@@ -6,11 +6,13 @@ DTO types under `shared/`.
 
 Base path: `/api/v1`
 
-All JSON routes return `{ error, code }` on expected failures. API requests
-authenticate via `Authorization: Bearer <token>`. Server-rendered web pages
-authenticate with the same PAT in an HttpOnly `cosheaf_pat` cookie. Cosheaf
-validates the token, resolves workspace membership, and forwards the caller
-identity on backend-backed operations.
+All JSON routes return `{ error, code }` on expected failures. External API
+clients authenticate via `Authorization: Bearer <token>`. Server-rendered web
+pages and page islands authenticate with the same PAT in an HttpOnly
+`cosheaf_pat` cookie; unsafe cookie-authenticated API requests must be
+same-origin and include a matching `Origin` or `Referer`. Cosheaf validates the
+token, resolves workspace membership, and forwards the caller identity on
+backend-backed operations.
 
 ## Core Types
 
@@ -72,10 +74,10 @@ type ErrorCode =
 
 Cosheaf owns the login UX so users do not need to know which forge is the
 backend. Login exchanges username/password credentials for a fresh API token
-and sets it as an HttpOnly cookie for server-rendered browser pages. The JSON
-response still includes the token for API clients that explicitly call the
-login route; external clients can also skip login and send their own Cosheaf
-API token directly.
+and sets it as an HttpOnly cookie for server-rendered browser pages and page
+islands. The JSON response still includes the token for API clients that
+explicitly call the login route; external clients can also skip login and send
+their own Cosheaf API token directly.
 
 ```http
 POST /login
@@ -129,28 +131,48 @@ whitelist in sync for admin users.
 
 Workspace routes require membership. File reads and writes use typed routes
 when callers need Cosheaf document behavior: path validation, Coflat
-frontmatter/id handling, branch naming, synchronous reindexing, backlinks/FTS,
-and SSE updates.
+frontmatter/id handling, branch naming, main-derived backlinks/FTS/search,
+and SSE updates. Branch writes do not update the branchless sidecar; push
+webhooks from merged changes or `pnpm cli workspace reindex <owner>/<repo>`
+reconcile `main`.
 
 ```http
 GET /repos/:owner/:repo/tree?branch=<branch>
 → { "files": FileEntry[] }
 
 GET /repos/:owner/:repo/file?path=<path>&branch=<branch>
-→ { "content": string }
+→ { "content": string, "sha": string | null, "source_ref"?: "main", "source_sha"?: string | null }
 
 PUT /repos/:owner/:repo/file?path=<path>&branch=<branch>
-{ "content": string }
-→ { "ok": true, "branch": string, "meta": DocumentMeta, "content"?: string, "commit"?: string }
+{ "content": string, "previous_path"?: string, "expected_sha"?: string | null, "expected_source_sha"?: string }
+→ { "ok": true, "branch": string, "meta": DocumentMeta, "content"?: string, "commit"?: string, "sha": string | null }
 
 DELETE /repos/:owner/:repo/file?path=<path>&branch=<branch>
+{ "expected_sha"?: string | null }
 → { "ok": true, "branch": string }
 ```
+
+`sha` is the Forgejo blob SHA to pass back as `expected_sha` on the next
+write or delete. `DELETE` also accepts `expected_sha` as a query parameter
+for clients that do not send JSON bodies with DELETE requests. `DELETE` does
+not create missing branches as a side effect; create the branch first when
+staging deletion of a file inherited from `main`. When an existing branch
+lacks the file and Cosheaf falls back to
+`main`, `sha` is `null`, `source_ref` is `"main"`, and `source_sha` is the
+main blob SHA; saving with `expected_sha: null` means "only write if this file
+is still absent on the target branch", and `expected_source_sha` additionally
+rejects the save if the copied-from main blob changed. When a requested branch
+does not exist yet, fallback returns the main blob SHA as both `sha` and
+`source_sha` because the first write creates the branch from `main`.
+Stale or mismatched `expected_sha` returns `409 { code: "conflict", ... }`
+with `details.current_sha` and `details.head_sha` for reload/retry.
 
 A Markdown write made outside Cosheaf is treated as an external repository
 edit. It reaches SQLite through webhook or `pnpm cli workspace reindex
 <owner>/<repo>` reconciliation, not through immediate typed file-route
-indexing.
+indexing. Branch writes through the typed route are similar for sidecar
+purposes: they immediately apply frontmatter/id handling and emit SSE, but
+search/backlinks/doc metadata continue to reflect `main`.
 
 ## Search, Backlinks, Suggestions
 

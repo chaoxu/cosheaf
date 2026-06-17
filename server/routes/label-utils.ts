@@ -27,6 +27,11 @@ export function toLabel(label: ForgejoLabel): Label {
   };
 }
 
+export function parsePositiveLabelIds(value: unknown): number[] | null {
+  if (!Array.isArray(value) || !value.every((id) => Number.isInteger(id) && id > 0)) return null;
+  return value;
+}
+
 export function validateLabelSelection(
   requestedIds: number[],
   allLabels: ForgejoLabel[],

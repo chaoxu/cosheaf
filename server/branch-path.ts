@@ -36,9 +36,10 @@ export async function resolveBranchPath(
 // A syntactically valid Forgejo branch name: the allowlisted charset, no `..`
 // traversal, and no leading/trailing slash. Does NOT reject "main" — callers
 // that forbid main add `=== "main"` themselves (base branches may be main).
-export function validBranchName(value: string | null | undefined): value is string {
+export function validBranchName(value: unknown): value is string {
   return Boolean(
-    value &&
+    typeof value === "string" &&
+      value &&
       /^[A-Za-z0-9._/-]+$/.test(value) &&
       !value.includes("..") &&
       !value.startsWith("/") &&

@@ -1,8 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
-  _resetBearerAuthCacheForTests,
-  _resetFormatCacheForTests,
-  _resetPermCacheForTests,
+  _resetMiddlewareCachesForTests,
   _seedFormatCacheForTests,
 } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
@@ -25,9 +23,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  _resetBearerAuthCacheForTests();
-  _resetPermCacheForTests();
-  _resetFormatCacheForTests();
+  _resetMiddlewareCachesForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -167,12 +163,13 @@ describe("POST /api/v1/workspaces", () => {
     const res = await app.request("/api/v1/workspaces", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ owner: "the-org", slug: "new-ws", name: "New workspace" }),
+      body: JSON.stringify({ owner: " the-org ", slug: " new-ws ", name: " New workspace " }),
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { owner: string; full_name: string };
+    const body = (await res.json()) as { owner: string; full_name: string; name: string };
     expect(body.owner).toBe("the-org");
     expect(body.full_name).toBe("the-org/new-ws");
+    expect(body.name).toBe("New workspace");
     expect(orgCreateBody).toMatchObject({ name: "new-ws" });
   });
 
@@ -224,6 +221,42 @@ describe("POST /api/v1/workspaces", () => {
       body: JSON.stringify({ slug: "Bad Slug!", name: "x" }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects non-string slug/name before contacting Forgejo", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao" });
+
+    for (const payload of [
+      { slug: { value: "new-ws" }, name: "x" },
+      { slug: "new-ws", name: { value: "Workspace" } },
+      { slug: "new-ws", name: "   " },
+    ]) {
+      fetchMock.mockClear();
+      const res = await app.request("/api/v1/workspaces", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ error: "slug and name required" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects non-string owners before contacting Forgejo", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao" });
+
+    const res = await app.request("/api/v1/workspaces", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ owner: 123, slug: "new-ws", name: "Workspace" }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "invalid owner" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects an invalid default markdown format", async () => {
@@ -352,5 +385,29 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  it("rejects invalid member usernames before mutating collaborators", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
+    _seedFormatCacheForTests("owner", "w", "coflat");
+    let mutated = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
+      forge.put("/api/v1/repos/owner/w/collaborators/bad%20name", () => {
+        mutated = true;
+        return new Response(null, { status: 204 });
+      });
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w/members/bad%20name", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ role: "write" }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "invalid username" });
+    expect(mutated).toBe(false);
   });
 });

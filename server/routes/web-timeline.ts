@@ -1,4 +1,5 @@
 import type { ForgejoTimelineEvent } from "../forgejo-types.js";
+import { parsePositiveIntId } from "./query-params.js";
 import { html, type Html } from "./web-html.js";
 
 export interface WebTimelineSortItem {
@@ -74,10 +75,10 @@ export function webTimelineDescriptionText(event: ForgejoTimelineEvent): string 
 
 function refIssueNumber(event: ForgejoTimelineEvent): number | null {
   const ref = event.ref_issue as unknown;
-  if (typeof ref === "number") return ref;
+  if (typeof ref === "number") return parsePositiveIntId(ref);
   if (ref && typeof ref === "object" && "number" in ref) {
     const number = (ref as { number?: unknown }).number;
-    return typeof number === "number" ? number : null;
+    return parsePositiveIntId(number);
   }
   return null;
 }

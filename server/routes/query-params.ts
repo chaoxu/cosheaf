@@ -8,9 +8,18 @@ export function parseListState(value: string | undefined): ListState {
 }
 
 export function parsePositiveInt(value: string | undefined): number | undefined {
-  if (!value?.trim()) return undefined;
-  const n = Number(value);
+  const trimmed = value?.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return undefined;
+  const n = Number(trimmed);
   return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+export function parseBoundedPositiveInt(value: string | undefined, fallback: number, max: number): number {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  if (!/^-?\d+$/.test(trimmed)) return fallback;
+  const parsed = Number(trimmed);
+  return Math.max(1, Math.min(max, parsed));
 }
 
 // Positive-integer id parser over `unknown`: handles both path params (strings)
@@ -18,7 +27,9 @@ export function parsePositiveInt(value: string | undefined): number | undefined 
 // The string-only `parsePositiveInt` stays for query-param callers that want
 // `undefined`.
 export function parsePositiveIntId(value: unknown): number | null {
-  const n = Number(value);
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !/^\d+$/.test(value.trim())) return null;
+  const n = typeof value === "string" ? Number(value.trim()) : value;
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
@@ -54,6 +65,9 @@ export function requireCommentBody(raw: unknown): { ok: true; text: string } | {
 
 export function parsePositiveIntList(value: string | undefined): number[] | undefined {
   if (!value?.trim()) return undefined;
-  const ids = value.split(",").map((part) => Number(part.trim())).filter((n) => Number.isInteger(n) && n > 0);
+  const parts = value.split(",").map((part) => part.trim());
+  if (!parts.every((part) => /^\d+$/.test(part))) return undefined;
+  const ids = parts.map((part) => Number(part));
+  if (!ids.every((n) => Number.isInteger(n) && n > 0)) return undefined;
   return ids.length > 0 ? ids : undefined;
 }

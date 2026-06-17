@@ -4,8 +4,9 @@
 // else falls through to Hono's default 500.
 
 import type { Context } from "hono";
+import { getCookie } from "hono/cookie";
 import { ForgejoError } from "../forgejo.js";
-import { invalidateBearerCache } from "../middleware.js";
+import { AUTH_COOKIE, invalidateBearerCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { badGateway, forbidden, notFound } from "./responses.js";
 import { errorPage, forbiddenPage, notFoundPage, redirect } from "./web-context.js";
@@ -22,6 +23,8 @@ export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Re
     const auth = c.req.header("authorization") ?? "";
     const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
     if (bearer) invalidateBearerCache(bearer);
+    const cookiePat = getCookie(c, AUTH_COOKIE);
+    if (cookiePat) invalidateBearerCache(cookiePat);
     if (!isApi) return redirect("/login");
     return c.json(
       { error: "Backend rejected the credentials; please log in again.", code: "pat_invalid" },

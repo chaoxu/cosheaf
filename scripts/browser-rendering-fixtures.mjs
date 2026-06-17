@@ -1,11 +1,13 @@
 // Browser smoke for seeded long-form Markdown issue and PR rendering.
 
-import { attachPageListeners, loadChromium } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
+import { loadDotenvDev } from "./lib/env-dev.mjs";
+
+loadDotenvDev();
 
 const chromium = await loadChromium();
 
-const APP_URL = process.env.URL ?? "http://localhost:3030/";
-const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
+const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-rendering-fixtures.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
@@ -15,14 +17,6 @@ const ISSUE_TITLE = "Rendering fixture: long Markdown issue";
 const COFLAT_SHOWCASE_ISSUE_TITLE = "Rendering fixture: Coflat feature showcase";
 const PR_TITLE = "Rendering fixture: long Markdown PR";
 const SIDE_BY_SIDE_PR_TITLE = "Rendering fixture: side-by-side Markdown PR";
-
-function serverRenderedOrigin(value) {
-  const url = new URL(value);
-  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") {
-    url.port = "3030";
-  }
-  return url.toString();
-}
 
 // A coflat reader surface is a bounded prose column: a finite reading measure
 // (not full-bleed, not collapsed) that fits its container, with zero horizontal

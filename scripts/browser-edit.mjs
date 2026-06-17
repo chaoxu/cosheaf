@@ -1,11 +1,13 @@
 // Browser smoke for the server-rendered edit page's Coflat editor island.
 
-import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { loadDotenvDev } from "./lib/env-dev.mjs";
+
+loadDotenvDev();
 
 const chromium = await loadChromium();
 
-const APP_URL = process.env.URL ?? "http://localhost:3030/";
-const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
+const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-edit.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
@@ -13,14 +15,6 @@ const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "coflat-feature-showcase.md";
 const BRANCH = process.env.COSHEAF_SMOKE_EDIT_BRANCH ?? `user/${USERNAME}/smoke-edit-check`;
-
-function serverRenderedOrigin(value) {
-  const url = new URL(value);
-  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") {
-    url.port = "3030";
-  }
-  return url.toString();
-}
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

@@ -11,6 +11,7 @@ import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { forgeAvatarSrc } from "./avatar.js";
+import { parsePositiveIntId } from "./query-params.js";
 import { html, type Html, raw } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
@@ -59,14 +60,34 @@ export function invalidateCurrentUserAvatar(bearer: string): void {
 
 export type WebRepoResult = { ok: true } & WebCtx | { ok: false; response: Response };
 
-// The browser-facing origin (scheme://host) cosheaf was reached at, honoring a
-// reverse proxy's forwarded headers. Used to build the git clone URL so it
-// points at cosheaf's own domain — the user never sees the backing Forgejo.
+// The browser-facing origin (scheme://host) cosheaf should present. A configured
+// public origin wins; otherwise we derive it from the request, honoring forwarded
+// headers only when a trusted proxy hop is configured. Used for CSRF checks,
+// secure cookies, and clone URLs that point at cosheaf, not the backing Forgejo.
 export function requestOrigin(c: Context<AppEnv>): string {
+  const publicOrigin = c.get("config")?.publicOrigin;
+  if (publicOrigin) return publicOrigin;
   const url = new URL(c.req.url);
-  const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.replace(":", "");
-  const host = c.req.header("x-forwarded-host")?.split(",")[0]?.trim() || c.req.header("host") || url.host;
+  const trustedProxyHops = c.get("config")?.trustedProxyHops ?? 0;
+  const proto = forwardedHeaderValue(c.req.header("x-forwarded-proto"), trustedProxyHops) ?? url.protocol.replace(":", "");
+  const host = forwardedHeaderValue(c.req.header("x-forwarded-host"), trustedProxyHops) ?? c.req.header("host") ?? url.host;
   return `${proto}://${host}`;
+}
+
+function forwardedHeaderValue(header: string | undefined, trustedProxyHops: number): string | null {
+  if (trustedProxyHops <= 0) return null;
+  const parts = (header ?? "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length < trustedProxyHops) return null;
+  return parts[parts.length - trustedProxyHops];
+}
+
+function normalizedOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch (_err) {
+    return null;
+  }
 }
 
 // Set the cosheaf_pat session cookie (the user's minted Forgejo PAT). `secure`
@@ -93,7 +114,8 @@ export function clientIp(c: Context<AppEnv>, trustedProxyHops: number): string {
   if (trustedProxyHops <= 0) return "unknown";
   const parts = (c.req.header("x-forwarded-for") ?? "").split(",").map((p) => p.trim()).filter(Boolean);
   if (parts.length === 0) return "unknown";
-  return parts[Math.max(0, parts.length - trustedProxyHops)];
+  if (parts.length < trustedProxyHops) return "unknown";
+  return parts[parts.length - trustedProxyHops];
 }
 
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {
@@ -167,9 +189,29 @@ export function resolveWebRepoForAdmin(c: Context<AppEnv>): Promise<WebRepoResul
 // `if (!ctx.ok) return ctx.response` guard.
 type WebHandler = (c: Context<AppEnv>, ctx: WebCtx) => Response | Promise<Response>;
 
+export function rejectCrossOriginMutation(c: Context<AppEnv>, opts: { allowOriginless?: boolean } = {}): Response | null {
+  if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") return null;
+  const expected = normalizedOrigin(requestOrigin(c));
+  if (!expected) return new Response("forbidden", { status: 403 });
+  const origin = c.req.header("origin");
+  if (origin) {
+    const actual = normalizedOrigin(origin);
+    if (!actual || actual !== expected) return new Response("forbidden", { status: 403 });
+    return null;
+  }
+  const referer = c.req.header("referer");
+  if (!referer) return opts.allowOriginless ? null : new Response("forbidden", { status: 403 });
+  const actual = normalizedOrigin(referer);
+  if (!actual) return new Response("forbidden", { status: 403 });
+  if (actual && actual !== expected) return new Response("forbidden", { status: 403 });
+  return null;
+}
+
 function makeWebRoute(resolve: (c: Context<AppEnv>) => Promise<WebRepoResult>) {
   return (handler: WebHandler) =>
     async (c: Context<AppEnv>): Promise<Response> => {
+      const crossOrigin = rejectCrossOriginMutation(c);
+      if (crossOrigin) return crossOrigin;
       const ctx = await resolve(c);
       if (!ctx.ok) return ctx.response;
       return handler(c, ctx);
@@ -191,6 +233,8 @@ type GlobalHandler = (c: Context<AppEnv>, auth: WebAuth) => Response | Promise<R
 // public routes like /forge-avatars/* that have no auth gate.
 export function globalRoute(handler: GlobalHandler) {
   return async (c: Context<AppEnv>): Promise<Response> => {
+    const crossOrigin = rejectCrossOriginMutation(c);
+    if (crossOrigin) return crossOrigin;
     const auth = await resolveWebAuth(c);
     if (!auth) return redirect("/login");
     return handler(c, auth);
@@ -256,8 +300,7 @@ export function safeWebRedirect(raw: string | null): string | null {
 }
 
 export function positiveInt(raw: string | undefined): number | null {
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  return parsePositiveIntId(raw);
 }
 
 export function stringField(value: unknown): string | null {
@@ -274,10 +317,18 @@ export function stringFields(value: unknown): string[] {
   return [...new Set(values.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))];
 }
 
-export function positiveIntFields(value: unknown): number[] {
-  return stringFields(value)
-    .map((item) => Number(item))
-    .filter((item) => Number.isInteger(item) && item > 0);
+export function positiveIntFields(value: unknown): number[] | null {
+  const values = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  const ids = new Set<number>();
+  for (const item of values) {
+    if (typeof item !== "string") return null;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    const id = positiveInt(trimmed);
+    if (id === null) return null;
+    ids.add(id);
+  }
+  return [...ids];
 }
 
 export function repoHref(owner: string, repo: string, suffix = ""): string {

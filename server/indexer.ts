@@ -14,6 +14,10 @@ export interface PageIngest {
   filePath: string;
   bodyText: string; // raw file content (frontmatter + body)
   formatId?: string;
+  // Existing path being canonically replaced by this write. Used by typed
+  // branch-only renames so a stable page id can move paths without being treated
+  // as a duplicate of itself.
+  replacePath?: string;
 }
 
 export interface IngestPlan {
@@ -57,8 +61,12 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
 
   const collision = prep(
     db,
-    "SELECT forgejo_id FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ? AND forgejo_id != ?",
-  ).get(p.workspaceSlug, cosheafId, p.filePath) as { forgejo_id: string } | undefined;
+    `SELECT forgejo_id FROM doc_map
+      WHERE workspace_slug = ?
+        AND cosheaf_id = ?
+        AND forgejo_id != ?
+        AND (? IS NULL OR forgejo_id != ?)`,
+  ).get(p.workspaceSlug, cosheafId, p.filePath, p.replacePath ?? null, p.replacePath ?? null) as { forgejo_id: string } | undefined;
   if (collision) cosheafId = generateDocId();
 
   const explicitTitle =

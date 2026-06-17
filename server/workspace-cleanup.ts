@@ -13,12 +13,12 @@ export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: 
   db.prepare("DELETE FROM xref_targets WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM xref_target_duplicates WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM page_tags WHERE workspace_slug = ?").run(workspaceSlug);
+  db.prepare("DELETE FROM issue_claims WHERE workspace_slug = ?").run(workspaceSlug);
   clearRepoConfig(db, workspaceSlug);
 }
 
-// Forgejo.deleteBranch with 404-tolerance — used in PR-merge cleanup and the
-// typed DELETE /branches route. Both call sites want "ensure the branch is
-// gone; don't fail if it was already gone."
+// Forgejo.deleteBranch with 404-tolerance for cleanup-only call sites. Typed
+// API routes should call Forgejo directly so real delete failures propagate.
 export async function deleteBranchQuietly(
   fj: Forgejo,
   owner: string,

@@ -2,6 +2,7 @@
 
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { defaultWebUrl, serverPort, vitePort } from "./lib/env-dev.mjs";
 
 const candidates = [
   path.join(process.cwd(), "node_modules/playwright/index.js"),
@@ -26,6 +27,30 @@ export function attachPageListeners(page, { label = "", consoleSink, errorSink, 
   page.on("response", (res) => {
     if (res.status() >= 400) badResponseSink.push(`${tag} ${res.status()} ${res.url()}`);
   });
+}
+
+export function browserAppUrl(env = process.env) {
+  return optionalEnv(env.URL) ?? `${defaultWebUrl(env)}/`;
+}
+
+export function browserWebUrl(env = process.env) {
+  return serverRenderedOrigin(browserAppUrl(env), env);
+}
+
+export function serverRenderedOrigin(value, env = process.env) {
+  const url = new URL(value);
+  const viteDevPort = vitePort(env);
+  const apiPort = serverPort(env);
+  const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  if ((hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") && url.port === viteDevPort) {
+    url.port = apiPort;
+  }
+  return url.toString();
+}
+
+function optionalEnv(value) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 export async function signInIfNeeded(page, username, password) {

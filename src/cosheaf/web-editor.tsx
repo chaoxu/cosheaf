@@ -23,7 +23,7 @@ import {
 import { ApiError, api } from "./api";
 import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
 import type { DocumentThemeId } from "./document-theme";
-import { clearDraft, type EditorDraft, readDraft, writeDraft } from "./editor-draft";
+import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import {
   type CoflatLocalRefs,
@@ -44,6 +44,8 @@ interface EditorConfig {
   username: string;
   role: "admin" | "write" | "read";
   formatId: DocumentFormatId;
+  baseSha: string | null;
+  sourceSha: string | null;
 }
 
 function shortId(): string {
@@ -91,6 +93,8 @@ function readConfig(): { config: EditorConfig; content: string } {
       username: mount.dataset.username ?? "",
       role: (mount.dataset.role ?? "read") as EditorConfig["role"],
       formatId: (mount.dataset.formatId ?? "forgejo-passthrough") as DocumentFormatId,
+      baseSha: mount.dataset.baseSha || null,
+      sourceSha: mount.dataset.sourceSha || null,
     },
     content: JSON.parse(payload.textContent || "\"\"") as string,
   };
@@ -138,6 +142,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const branchRef = useRef(branch);
   const currentPathRef = useRef(currentPath);
   const savedPathRef = useRef(savedPath);
+  const savedShaRef = useRef<string | null | undefined>(config.baseSha);
+  const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
+  const contextLoadedRef = useRef(config.formatId !== COFLAT_FORMAT_ID);
   branchRef.current = branch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
@@ -157,7 +164,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // so the committed file is never silently overwritten.
   useEffect(() => {
     const draft = readDraft(config.owner, config.repo, config.branch, config.path);
-    if (draft && draft.source !== initialContent) setPendingDraft(draft);
+    if (draft && (draft.source !== initialContent || (draft.path && draft.path !== config.path))) setPendingDraft(draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -173,29 +180,31 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     if (config.formatId !== COFLAT_FORMAT_ID) {
       setDocumentContext(null);
       setCoflatRefs(null);
+      contextLoadedRef.current = true;
       setDocumentContextReady(true);
       return;
     }
     let cancelled = false;
-    setDocumentContextReady(false);
+    if (!contextLoadedRef.current) setDocumentContextReady(false);
     const payload = {
-      source: initialContent,
+      source: content,
       owner: config.owner,
       repo: config.repo,
-      branch: config.branch,
-      branchExists: config.branchExists,
-      path: config.path,
+      branch,
+      branchExists,
+      path: currentPath.trim() || config.path,
     };
     void loadCoflatRefs(payload).then((refs) => {
       if (cancelled) return;
       setCoflatRefs(refs);
       setDocumentContext(coflatDocumentContext(payload, refs));
+      contextLoadedRef.current = true;
       setDocumentContextReady(true);
     });
     return () => {
       cancelled = true;
     };
-  }, [config.branch, config.formatId, config.owner, config.path, config.repo, initialContent]);
+  }, [branch, branchExists, config.formatId, config.owner, config.path, config.repo, content, currentPath]);
 
   useEffect(() => {
     if (!coflatRefs) return;
@@ -230,17 +239,25 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // selection (#161) or produce commit noise. Synchronous, so it returns ok.
   const saveDraft = useCallback(
     (source: string): { ok: true } => {
-      writeDraft(config.owner, config.repo, config.branch, config.path, { source, baseSha: null, savedAt: Date.now() });
+      const baseSha = savedShaRef.current;
+      const sourceSha = sourceShaRef.current;
+      writeDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, {
+        source,
+        path: currentPathRef.current,
+        ...(baseSha === undefined ? {} : { baseSha, baseShaKnown: true as const }),
+        ...(sourceSha === undefined ? {} : { sourceSha, sourceShaKnown: true as const }),
+        savedAt: Date.now(),
+      });
       return { ok: true };
     },
-    [config.owner, config.repo, config.branch, config.path],
+    [config.owner, config.repo],
   );
 
   // Explicit commit (Save / Cmd-S): the real Forgejo write. Creates the edit
   // branch lazily on this first commit, reconciles the server-injected
   // frontmatter id into the editor, and clears the local draft on success.
   const commitSource = useCallback(
-    async (source: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    async (source: string): Promise<{ ok: true; branch: string; path: string } | { ok: false; error: string }> => {
       const writeBranch = branchForWrite();
       const nextPath = currentPathRef.current.trim();
       const previousPath = savedPathRef.current;
@@ -256,6 +273,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           source,
           writeBranch,
           previousPath !== nextPath ? previousPath : undefined,
+          savedShaRef.current,
+          sourceShaRef.current,
         );
         // Reconcile the server's frontmatter id into the controlled editor. This
         // now happens only on an explicit commit (rare), never every autosave
@@ -264,11 +283,15 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         setBranch(result.branch);
         setBranchExists(true);
         setSavedPath(nextPath);
+        savedShaRef.current = result.sha;
+        sourceShaRef.current = undefined;
         setCurrentPath(nextPath);
         setPathDirty(false);
         setUncommitted(false);
         clearDraft(config.owner, config.repo, config.branch, config.path);
-        return { ok: true };
+        if (previousPath !== nextPath) clearDraft(config.owner, config.repo, result.branch, previousPath);
+        clearDraft(config.owner, config.repo, result.branch, nextPath);
+        return { ok: true, branch: result.branch, path: nextPath };
       } catch (err) {
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
@@ -327,6 +350,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         try {
           const result = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
           setBranch(writeBranch);
+          setBranchExists(true);
           return { path: result.path };
         } catch (err) {
           return { error: err instanceof ApiError ? err.message : "upload failed" };
@@ -385,6 +409,16 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 
   const restoreDraft = useCallback(() => {
     if (!pendingDraft) return;
+    const freshness = restoredDraftFreshness(
+      { baseSha: savedShaRef.current, sourceSha: sourceShaRef.current },
+      pendingDraft,
+    );
+    savedShaRef.current = freshness.baseSha;
+    sourceShaRef.current = freshness.sourceSha;
+    if (pendingDraft.path && pendingDraft.path !== currentPathRef.current) {
+      setCurrentPath(pendingDraft.path);
+      setPathDirty(pendingDraft.path !== savedPathRef.current);
+    }
     setContent(pendingDraft.source);
     setUncommitted(true);
     setSaveError(null);
@@ -399,7 +433,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {
-      if (!branch || branch === "main") {
+      const editor = editorRef.current;
+      const needsCommit = uncommitted || pathDirty;
+      if ((!branch || branch === "main") && !needsCommit) {
         toast("Nothing on this branch to merge or review");
         return;
       }
@@ -413,21 +449,29 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         // Gate on the same uncommitted/pathDirty signals the Save button uses
         // (commitSource resets both), so a retry after a failed openPull/merge
         // doesn't re-commit an unchanged doc; take the live source from the
-        // editor handle so we publish exactly what's on screen.
-        const editor = editorRef.current;
-        if (editor && (uncommitted || pathDirty)) {
-          const committed = await commitSource(editor.getDoc());
+        // editor handle when available so we publish exactly what's on screen.
+        // For a path-only rename before the lazy editor is ready, commit the
+        // unchanged content state instead of opening a PR for stale contents.
+        let reviewBranch = branch;
+        let reviewPath = currentPathRef.current.trim();
+        if (needsCommit) {
+          const committed = await commitSource(editor?.getDoc() ?? content);
           if (!committed.ok) {
             setSaveError(committed.error);
             toast(`Save failed: ${committed.error}`, "error");
             return;
           }
+          reviewBranch = committed.branch;
+          reviewPath = committed.path;
         }
-        const path = currentPathRef.current;
+        if (!reviewBranch || reviewBranch === "main") {
+          toast("Nothing on this branch to merge or review");
+          return;
+        }
         const pr = await api.openPull(config.owner, config.repo, {
-          head: branch,
-          title: `Update ${path}`,
-          body: `Update ${path}`,
+          head: reviewBranch,
+          title: `Update ${reviewPath}`,
+          body: `Update ${reviewPath}`,
         });
         if (directMerge) {
           // #180: respect the workspace's branch protection — the editor never
@@ -438,7 +482,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           // dead-ending on a toast.
           try {
             await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash" });
-            window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(path)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
+            window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(reviewPath)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
           } catch (mergeErr) {
             const reason = mergeErr instanceof ApiError ? mergeErr.message : "Couldn't merge to main";
             window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}?toast=${encodeURIComponent(reason)}&toastKind=error`;
@@ -454,7 +498,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         setBusy(false);
       }
     },
-    [branch, uncommitted, pathDirty, commitSource, config.owner, config.repo],
+    [branch, uncommitted, pathDirty, commitSource, content, config.owner, config.repo],
   );
 
   const readerClass =

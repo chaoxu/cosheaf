@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { healthPayload, healthStatus } from "./health.js";
+import { freshTestDb } from "./routes/test-fixtures.js";
+
+describe("healthPayload", () => {
+  it("reports ok when the SQLite sidecar schema is queryable", () => {
+    const db = freshTestDb("cosheaf-health-");
+
+    expect(healthPayload(db, "abc123")).toEqual({
+      ok: true,
+      commit: "abc123",
+      checks: { sqlite: "ok" },
+    });
+  });
+
+  it("reports failure when the SQLite sidecar check throws", () => {
+    const db = {
+      prepare: () => {
+        throw new Error("database is locked");
+      },
+    };
+
+    expect(healthPayload(db as never, "abc123")).toEqual({
+      ok: false,
+      commit: "abc123",
+      checks: { sqlite: "fail" },
+      error: "database is locked",
+    });
+  });
+});
+
+describe("healthStatus", () => {
+  it("returns the HTTP status consumed by container healthchecks", () => {
+    expect(healthStatus({ ok: true, commit: "abc123", checks: { sqlite: "ok" } })).toBe(200);
+    expect(healthStatus({ ok: false, commit: "abc123", checks: { sqlite: "fail" } })).toBe(503);
+  });
+});

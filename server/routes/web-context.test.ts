@@ -8,21 +8,30 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests } from "../middleware.js";
+import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
-import { webRoute, webRouteForAdmin, webRouteForWrite } from "./web-context.js";
+import { clientIp, globalRoute, positiveInt, positiveIntFields, webRoute, webRouteForAdmin, webRouteForWrite } from "./web-context.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("web-context");
+const proxiedConfig = testConfig("web-context-proxy", { trustedProxyHops: 1 });
+const overconfiguredProxyConfig = testConfig("web-context-proxy-overconfigured", { trustedProxyHops: 2 });
+const publicOriginConfig = testConfig("web-context-public-origin", {
+  trustedProxyHops: 1,
+  publicOrigin: "https://cosheaf.lab",
+});
 
-function appFor(db: Database.Database): Hono<AppEnv> {
-  return testApp(db, config, (app) => {
+function appFor(db: Database.Database, appConfig = config): Hono<AppEnv> {
+  return testApp(db, appConfig, (app) => {
     // Probe routes that echo the resolved role on success; the HOF short-circuits
     // to the resolver's response (404/redirect) on failure.
     app.get("/:owner/:repo/probe-read", webRoute((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-write", webRouteForWrite((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-admin", webRouteForAdmin((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
+    app.post("/:owner/:repo/probe-write", webRouteForWrite((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
+    app.post("/probe-global", globalRoute(() => new Response("ok:global")));
+    app.get("/probe-ip", (c) => new Response(clientIp(c, c.get("config").trustedProxyHops)));
   });
 }
 
@@ -30,9 +39,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  _resetBearerAuthCacheForTests();
-  _resetPermCacheForTests();
-  _resetFormatCacheForTests();
+  _resetMiddlewareCachesForTests();
   // A non-member has no seeded perm-cache entry, so resolveRepoRole falls
   // through to Forgejo; the collaborator-permission endpoint 404s → role "none".
   fetchMock.mockImplementation(
@@ -90,6 +97,23 @@ describe("web role gates return 404 (not 403) on insufficient role", () => {
   });
 });
 
+describe("web numeric parsers", () => {
+  it("accept only digit-shaped positive integer strings", () => {
+    expect(positiveInt("7")).toBe(7);
+    expect(positiveInt(" 7 ")).toBe(7);
+    expect(positiveInt("0")).toBeNull();
+    expect(positiveInt("7.0")).toBeNull();
+    expect(positiveInt("1e2")).toBeNull();
+    expect(positiveInt("true")).toBeNull();
+  });
+
+  it("does not coerce malformed form id lists", () => {
+    expect(positiveIntFields(["1", " 2 "])).toEqual([1, 2]);
+    expect(positiveIntFields(["1e2", "3.0", "4"])).toBeNull();
+    expect(positiveIntFields([4])).toBeNull();
+  });
+});
+
 describe("web role gates pass through on sufficient role", () => {
   it("read member reaches a read route", async () => {
     const db = freshTestDb("cosheaf-webctx-");
@@ -126,5 +150,257 @@ describe("unauthenticated web access redirects to login", () => {
     const res = await appFor(db).request("/owner/w/probe-read");
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/login");
+  });
+});
+
+describe("web mutating routes reject cross-origin form posts", () => {
+  it("rejects a mismatched Origin before a repo write handler runs", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+
+    const res = await appFor(db).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://evil.example",
+        host: "cosheaf.test",
+      },
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe("forbidden");
+  });
+
+  it("allows same-origin web POSTs and rejects originless mutations", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+    const app = appFor(db);
+
+    const sameOrigin = await app.request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://cosheaf.test",
+        host: "cosheaf.test",
+      },
+    });
+    const originless = await app.request("/owner/w/probe-write", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(sameOrigin.status).toBe(200);
+    expect(originless.status).toBe(403);
+    expect(await originless.text()).toBe("forbidden");
+  });
+
+  it("falls back to Referer when Origin is absent", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+    const app = appFor(db);
+
+    const sameOrigin = await app.request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        host: "cosheaf.test",
+        referer: "http://cosheaf.test/owner/w",
+      },
+    });
+    const crossOrigin = await app.request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        host: "cosheaf.test",
+        referer: "http://evil.example/owner/w",
+      },
+    });
+
+    expect(sameOrigin.status).toBe(200);
+    expect(crossOrigin.status).toBe(403);
+  });
+
+  it("rejects malformed Origin and Referer headers", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+    const app = appFor(db);
+
+    const badOrigin = await app.request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        host: "cosheaf.test",
+        origin: "not a url",
+      },
+    });
+    const badReferer = await app.request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        host: "cosheaf.test",
+        referer: "not a url",
+      },
+    });
+
+    expect(badOrigin.status).toBe(403);
+    expect(badReferer.status).toBe(403);
+  });
+
+  it("compares normalized origins", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+
+    const res = await appFor(db).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://cosheaf.test",
+        host: "cosheaf.test:80",
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("applies the same Origin check to signed-in global POSTs", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+
+    const res = await appFor(db).request("/probe-global", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://evil.example",
+        host: "cosheaf.test",
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("ignores spoofed forwarded origin headers when no proxy is trusted", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+
+    const res = await appFor(db).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "http://evil.example",
+        host: "cosheaf.test",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "http",
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("allows same-origin posts through a trusted reverse proxy", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, proxiedConfig, { username: "writer", role: "write" });
+
+    const res = await appFor(db, proxiedConfig).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "https://cosheaf.lab",
+        host: "127.0.0.1:3030",
+        "x-forwarded-host": "cosheaf.lab",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("uses the trusted forwarded origin hop from the right", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, proxiedConfig, { username: "writer", role: "write" });
+
+    const res = await appFor(db, proxiedConfig).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "https://cosheaf.lab",
+        host: "127.0.0.1:3030",
+        "x-forwarded-host": "evil.example, cosheaf.lab",
+        "x-forwarded-proto": "http, https",
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("does not trust forwarded origin headers when fewer entries than trusted hops are present", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, overconfiguredProxyConfig, { username: "writer", role: "write" });
+
+    const res = await appFor(db, overconfiguredProxyConfig).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "https://cosheaf.lab",
+        host: "127.0.0.1:3030",
+        "x-forwarded-host": "cosheaf.lab",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("does not trust forwarded client IP headers when fewer entries than trusted hops are present", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    const app = appFor(db, overconfiguredProxyConfig);
+
+    const tooFew = await app.request("/probe-ip", {
+      headers: { "x-forwarded-for": "203.0.113.9" },
+    });
+    const enough = await app.request("/probe-ip", {
+      headers: { "x-forwarded-for": "198.51.100.7, 203.0.113.9" },
+    });
+
+    expect(await tooFew.text()).toBe("unknown");
+    expect(await enough.text()).toBe("198.51.100.7");
+  });
+
+  it("uses configured public origin instead of forwarded headers for mutation checks", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, publicOriginConfig, { username: "writer", role: "write" });
+
+    const samePublicOrigin = await appFor(db, publicOriginConfig).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "https://cosheaf.lab",
+        host: "127.0.0.1:3030",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      },
+    });
+    const spoofedForwardedOrigin = await appFor(db, publicOriginConfig).request("/owner/w/probe-write", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        origin: "https://evil.example",
+        host: "127.0.0.1:3030",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-proto": "https",
+      },
+    });
+
+    expect(samePublicOrigin.status).toBe(200);
+    expect(spoofedForwardedOrigin.status).toBe(403);
   });
 });

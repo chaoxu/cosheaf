@@ -3,32 +3,33 @@
 // server together, forwarding logs and signals. No extra deps.
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { resolve } from "node:path";
 import { checkCoflatRef, checkDocPins, DEFAULT_COFLAT_REF } from "./check-coflat-ref.mjs";
-
-function loadDotenvDev() {
-  const file = resolve(process.cwd(), ".env.dev");
-  if (!existsSync(file)) return;
-  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
+import { defaultApiUrl, defaultServerUrl, defaultViteUrl, defaultWebUrl, loadDotenvDev, serverPort, vitePort } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
 
-const apiPort = process.env.COSHEAF_PORT ?? "3030";
-const vitePort = process.env.COSHEAF_VITE_PORT ?? "5173";
-const apiUrl = `http://localhost:${apiPort}`;
-const viteUrl = `http://localhost:${vitePort}`;
-const proxyUrl = process.env.COSHEAF_SERVER_URL ?? apiUrl;
+const apiPort = serverPort();
+const viteDevPort = vitePort();
+const localApiUrl = `http://localhost:${apiPort}`;
+const localViteUrl = `http://localhost:${viteDevPort}`;
+const webUrl = defaultWebUrl();
+const apiUrl = defaultApiUrl();
+const viteUrl = defaultViteUrl();
+const proxyUrl = defaultServerUrl();
+const viteHostArgs = viteBindHostArgs(viteUrl);
+
+function viteBindHostArgs(origin) {
+  if (!origin) return [];
+  let hostname;
+  try {
+    hostname = new URL(origin).hostname.replace(/^\[(.*)\]$/, "$1");
+  } catch (_err) {
+    return [];
+  }
+  if (["localhost", "127.0.0.1", "::1"].includes(hostname)) return [];
+  return ["--host", "0.0.0.0"];
+}
 
 function portAvailable(port) {
   return new Promise((resolvePort) => {
@@ -42,8 +43,8 @@ function portAvailable(port) {
 }
 
 const blocked = [];
-if (!(await portAvailable(apiPort))) blocked.push(apiUrl);
-if (!(await portAvailable(vitePort))) blocked.push(viteUrl);
+if (!(await portAvailable(apiPort))) blocked.push(localApiUrl);
+if (!(await portAvailable(viteDevPort))) blocked.push(localViteUrl);
 if (blocked.length > 0) {
   console.error(`Cannot start dev servers; port already in use: ${blocked.join(", ")}`);
   process.exit(1);
@@ -61,7 +62,7 @@ for (const drift of checkDocPins()) {
 }
 
 process.stdout.write(`Cosheaf dev\n`);
-process.stdout.write(`  web: ${apiUrl}\n`);
+process.stdout.write(`  web: ${webUrl}\n`);
 process.stdout.write(`  page island dev assets: ${viteUrl}\n`);
 process.stdout.write(`  api: ${apiUrl}\n`);
 process.stdout.write(`  vite proxy: ${proxyUrl}\n\n`);
@@ -77,7 +78,7 @@ const procs = [
     args: ["exec", "tsx", "watch", "server/index.ts"],
     color: "\x1b[36m",
   },
-  { name: "vite", cmd: "pnpm", args: ["exec", "vite", "--strictPort", "--port", vitePort], color: "\x1b[35m" },
+  { name: "vite", cmd: "pnpm", args: ["exec", "vite", "--strictPort", "--port", viteDevPort, ...viteHostArgs], color: "\x1b[35m" },
 ];
 const reset = "\x1b[0m";
 

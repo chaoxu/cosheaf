@@ -1,10 +1,13 @@
 import type { Hono } from "hono";
 import { ROLES, type Role } from "../../shared/roles.js";
+import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
 import { ForgejoError } from "../forgejo.js";
 import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { isFormatTopic } from "../../shared/document-format.js";
-import { invalidateWorkspacePermissionCache } from "../middleware.js";
+import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalidateWorkspaceTitleCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
+import { invalidateRepoTrees } from "../tree-cache.js";
+import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
 import { setWorkspaceMember } from "../workspace-members.js";
 import {
   badRequestPage,
@@ -75,12 +78,24 @@ web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
 }));
 
 web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
-  const approvals = Number(stringField((await c.req.parseBody()).required_approvals) ?? "1");
+  const approvals = nonNegativeInt(stringField((await c.req.parseBody()).required_approvals));
+  if (approvals === null) {
+    return badRequestPage(ctx.user, "Required approvals must be a non-negative integer.");
+  }
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
   if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
   else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
+
+function nonNegativeInt(raw: string | null): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isInteger(value) ? value : null;
+}
 
 web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();
@@ -90,6 +105,8 @@ web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
   const exclusive = stringField(form.exclusive) === "on";
   if (!name) return badRequestPage(ctx.user, "Label name is required.");
   if (color === null) return badRequestPage(ctx.user, "Label color must be six hex digits.");
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   await ctx.fj.createLabel(ctx.owner, ctx.repo, { name, color, description, exclusive });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
@@ -99,6 +116,8 @@ web.post("/:owner/:repo/settings/milestones", webRouteForAdmin(async (c, ctx) =>
   const title = stringField(form.title);
   const description = textField(form.description) ?? "";
   if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   await ctx.fj.createMilestone(ctx.owner, ctx.repo, { title, description });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
@@ -111,6 +130,8 @@ web.post("/:owner/:repo/settings/labels/:id/edit", webRouteForAdmin(async (c, ct
   const color = normalizeLabelColor(stringField(form.color) ?? "");
   if (!name) return badRequestPage(ctx.user, "Label name is required.");
   if (color === null) return badRequestPage(ctx.user, "Label color must be six hex digits.");
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   await ctx.fj.editLabel(ctx.owner, ctx.repo, id, {
     name,
     color,
@@ -123,6 +144,8 @@ web.post("/:owner/:repo/settings/labels/:id/edit", webRouteForAdmin(async (c, ct
 web.post("/:owner/:repo/settings/labels/:id/delete", webRouteForAdmin(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return badRequestPage(ctx.user, "Invalid label.");
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   try {
     await ctx.fj.deleteLabel(ctx.owner, ctx.repo, id);
   } catch (err) {
@@ -138,6 +161,8 @@ web.post("/:owner/:repo/settings/milestones/:id/edit", webRouteForAdmin(async (c
   const title = stringField(form.title);
   if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
   const stateRaw = stringField(form.state);
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   await ctx.fj.editMilestone(ctx.owner, ctx.repo, id, {
     title,
     description: textField(form.description) ?? "",
@@ -149,6 +174,8 @@ web.post("/:owner/:repo/settings/milestones/:id/edit", webRouteForAdmin(async (c
 web.post("/:owner/:repo/settings/milestones/:id/delete", webRouteForAdmin(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return badRequestPage(ctx.user, "Invalid milestone.");
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   try {
     await ctx.fj.deleteMilestone(ctx.owner, ctx.repo, id);
   } catch (err) {
@@ -161,9 +188,11 @@ web.post("/:owner/:repo/settings/access", webRouteForAdmin(async (c, ctx) => {
   const body = await c.req.parseBody();
   const username = stringField(body.username)?.trim();
   const role = stringField(body.role)?.trim();
-  if (!username || !role || !(ROLES as readonly string[]).includes(role)) {
+  if (!username || !FORGEJO_NAME_RE.test(username) || !role || !(ROLES as readonly string[]).includes(role)) {
     return htmlResponse(pageShell({ title: "Bad request", body: html`<main class="auth-page"><p>Invalid access update.</p></main>` }), 400);
   }
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
 
   // The caller is repo admin (gated above) — their own PAT carries the
   // collaborator-management rights; no admin token needed.
@@ -185,11 +214,14 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
   const description = textField(form.description) ?? "";
   const visibility = stringField(form.visibility);
   const defaultBranch = stringField(form.default_branch) ?? undefined;
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   await ctx.fj.editRepo(ctx.owner, ctx.repo, {
     description,
     private: visibility === "private" ? true : visibility === "public" ? false : undefined,
     default_branch: defaultBranch,
   });
+  invalidateWorkspaceTitleCache(ctx.owner, ctx.repo);
   // Topics: the user edits only the free topics; the cosheaf-format-* topic is
   // managed by the document format and must survive a topics edit.
   if (form.topics !== undefined) {
@@ -202,6 +234,9 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
 web.post("/:owner/:repo/settings/access/remove", webRouteForAdmin(async (c, ctx) => {
   const username = stringField((await c.req.parseBody()).username)?.trim();
   if (!username) return badRequestPage(ctx.user, "Username is required.");
+  if (!FORGEJO_NAME_RE.test(username)) return badRequestPage(ctx.user, "Invalid username.");
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
   try {
     await ctx.fj.removeCollaborator(ctx.owner, ctx.repo, username);
   } catch (err) {
@@ -215,15 +250,37 @@ web.post("/:owner/:repo/settings/access/remove", webRouteForAdmin(async (c, ctx)
 // against Forgejo (bypassing the role cache, mirroring requireAdminFresh) and
 // require the caller to re-type the full owner/repo name as confirmation.
 web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
-  const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
-  if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   const confirm = stringField((await c.req.parseBody()).confirm)?.trim();
   if (confirm !== ctx.ws.slug) {
     return badRequestPage(ctx.user, `Type ${ctx.ws.slug} to confirm deletion.`);
   }
-  await ctx.fj.deleteRepo(ctx.owner, ctx.repo);
+  const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  if (fresh !== "admin") {
+    const gone = fresh === "none" && !(await c.get("fjAdmin").getRepo(ctx.owner, ctx.repo));
+    if (!gone) return notFoundPage(ctx.user, "Repository not found");
+    cleanupDeletedWorkspace(ctx);
+    return redirect("/");
+  }
+  try {
+    await ctx.fj.deleteRepo(ctx.owner, ctx.repo);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+  }
+  cleanupDeletedWorkspace(ctx);
   return redirect("/");
 }));
+}
+
+async function requireFreshAdminPage(ctx: WebCtx): Promise<Response | null> {
+  const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
+  return null;
+}
+
+function cleanupDeletedWorkspace(ctx: WebCtx): void {
+  deleteSidecarForWorkspace(ctx.db, ctx.ws.slug);
+  invalidateRepoTrees(ctx.owner, ctx.repo);
+  invalidateWorkspaceCaches(ctx.owner, ctx.repo);
 }
 
 function labelRow(ctx: WebCtx, label: ForgejoLabel): Html {

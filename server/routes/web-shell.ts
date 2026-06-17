@@ -3,6 +3,7 @@ import path from "node:path";
 import { avatar } from "./avatar.js";
 import { bellIcon, homeIcon } from "./icons.js";
 import { DEFAULT_LOCALE, localeDir, type LocaleId, makeT, type T } from "../../shared/i18n/index.js";
+import { viteDevOrigin } from "../vite-dev-origin.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
 // English-bound translate, used as the default for chrome helpers whose call
@@ -162,8 +163,7 @@ function webReaderAssets(): Html {
 
 function viteEntryAssets(entryId: string): Html {
   if (process.env.NODE_ENV !== "production") {
-    const devOrigin = process.env.COSHEAF_VITE_ORIGIN ?? "http://localhost:5173";
-    return html`<script type="module" src="${`${devOrigin}/${entryId}`}"></script>`;
+    return html`<script type="module" src="${`${viteDevOrigin()}/${entryId}`}"></script>`;
   }
   const manifest = readViteManifest();
   if (!manifest) return emptyHtml;

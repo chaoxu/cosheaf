@@ -4,6 +4,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
 import { chromium } from "@playwright/test";
+import { defaultWebUrl, loadDotenvDev } from "./lib/env-dev.mjs";
 
 const defaultRoutes = ["/chao/flushing-coin/activity", "/chao/flushing-coin/issues", "/chao/flushing-coin/pulls"];
 
@@ -35,8 +36,10 @@ function isAssetUrl(url) {
   );
 }
 
+loadDotenvDev();
+
 const program = new Command("web-route-check")
-  .option("--url <url>", "base URL", process.env.COSHEAF_WEB_URL ?? "http://localhost:3030")
+  .option("--url <url>", "base URL", defaultWebUrl())
   .option("--route <route>", "route to verify; repeatable", collect, [])
   .option("--user <user>", "login user", process.env.COSHEAF_SMOKE_USER ?? "chao")
   .option("--password <password>", "login password")

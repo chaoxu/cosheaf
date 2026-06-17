@@ -6,10 +6,19 @@ import { Command } from "commander";
 const rules = [
   {
     id: "web-shell",
-    matches: [/^public\/cosheaf-web\.css$/, /^server\/routes\/web(?:-shell)?\.ts$/, /^server\/index\.ts$/],
+    matches: [/^public\/cosheaf-web\.css$/, /^server\/routes\/web(?:-shell)?\.ts$/, /^server\/index\.ts$/, /^server\/app\.ts$/],
     commands: [
+      command("pnpm exec vitest run server/app.test.ts server/static-assets.test.ts server/routes/web-shell.test.ts", "app assembly and server-rendered asset wiring"),
       command("pnpm check:web", "server-rendered route flow, browser behavior, assets"),
       command("pnpm devx:verify-route -- --route /chao/flushing-coin/activity", "real browser scroll/header check"),
+    ],
+  },
+  {
+    id: "auth-csrf",
+    matches: [/^server\/api-csrf\.ts$/, /^server\/routes\/auth\.ts$/, /^server\/routes\/web-context\.ts$/],
+    commands: [
+      command("pnpm exec vitest run server/api-csrf.test.ts server/routes/auth.test.ts server/routes/web-context.test.ts", "cookie auth, login/logout, and same-origin mutation gates"),
+      command("pnpm check:static", "types, lints, API contract, unused exports"),
     ],
   },
   {
@@ -32,8 +41,9 @@ const rules = [
   },
   {
     id: "editor",
-    matches: [/^src\/cosheaf\/web-editor\.tsx$/, /^src\/cosheaf\/editor\.tsx$/, /^src\/cosheaf\/api\.ts$/],
+    matches: [/^server\/routes\/web-files\.ts$/, /^src\/cosheaf\/web-editor\.tsx$/, /^src\/cosheaf\/editor\.tsx$/, /^src\/cosheaf\/api\.ts$/],
     commands: [
+      command("pnpm exec vitest run server/routes/web-files.test.ts src/cosheaf/api.test.ts", "web file route and editor API contract coverage"),
       command("pnpm smoke:edit", "server-rendered edit route and editor island"),
       command("pnpm build", "production Vite manifest and island assets"),
       command("pnpm check:web", "full page-owned editor path"),
@@ -65,9 +75,20 @@ const rules = [
   },
   {
     id: "devx",
-    matches: [/^scripts\/devx-/, /^scripts\/web-route-check\.mjs$/, /^scripts\/playwright-devx\.mjs$/, /^docs\/DEVX\.md$/],
+    matches: [
+      /^scripts\/devx-/,
+      /^scripts\/web-route-check\.mjs$/,
+      /^scripts\/playwright-devx\.mjs$/,
+      /^scripts\/lib\/env-dev\.mjs$/,
+      /^scripts\/browser-utils\.mjs$/,
+      /^server\/vite-dev-origin\.ts$/,
+      /^vite\.config\.ts$/,
+      /^playwright\.smoke\.config\.ts$/,
+      /^docs\/DEVX\.md$/,
+    ],
     commands: [
       command("pnpm exec vitest run scripts/devx-what-to-run.test.mjs", "route-to-gate suggestion coverage"),
+      command("pnpm exec vitest run scripts/devx.test.mjs scripts/browser-utils.test.mjs server/vite-dev-origin.test.ts server/vite-config.test.ts", "dev URL/env normalization coverage"),
       command("pnpm devx:what-to-run", "changed-file gate suggestions"),
       command("pnpm devx:verify-route -- --route /chao/flushing-coin/activity", "browser route checker sanity"),
     ],

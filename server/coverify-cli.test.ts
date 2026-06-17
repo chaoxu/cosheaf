@@ -10,6 +10,7 @@ const config: Config = {
   forgejoAdminToken: "admin-token",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
+  publicOrigin: null,
   registrationOpen: false,
   trustedProxyHops: 0,
   coverifyCmd: "coverify",

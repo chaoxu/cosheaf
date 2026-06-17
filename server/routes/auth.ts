@@ -4,11 +4,12 @@
 
 import { Hono } from "hono";
 import type Database from "better-sqlite3";
-import { deleteCookie, setCookie } from "hono/cookie";
+import { deleteCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
 import type { AppEnv } from "../types.js";
 import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
 import { bad, unauthorized } from "./responses.js";
+import { rejectCrossOriginMutation, setAuthCookie } from "./web-context.js";
 
 export const auth = new Hono<AppEnv>();
 
@@ -41,6 +42,7 @@ const TOKEN_SCOPES = [
 // when a scope is added or removed. Stored on each login_tokens row; a cached
 // row whose stored signature no longer matches is re-minted on next login.
 const TOKEN_SCOPES_SIGNATURE = [...TOKEN_SCOPES].sort().join(",");
+const TOKEN_MINT_ATTEMPTS = 3;
 
 interface CreateTokenResponse { sha1: string }
 interface ForgejoUserResponse { login?: string }
@@ -141,16 +143,16 @@ async function mintAndStoreLoginToken(
   username: string,
   password: string,
 ): Promise<LoginOutcome> {
-  const tokenName = `${TOKEN_NAME_PREFIX}-${randomUUID()}`;
-  const created = await createForgejoToken(baseUrl, username, password, tokenName);
-  if (created.kind === "created") {
-    storeLoginToken(db, username, created.pat, tokenName);
-    return { kind: "ok", pat: created.pat };
+  for (let attempt = 0; attempt < TOKEN_MINT_ATTEMPTS; attempt++) {
+    const tokenName = `${TOKEN_NAME_PREFIX}-${randomUUID()}`;
+    const created = await createForgejoToken(baseUrl, username, password, tokenName);
+    if (created.kind === "created") {
+      storeLoginToken(db, username, created.pat, tokenName);
+      return { kind: "ok", pat: created.pat };
+    }
+    if (created.kind !== "name_taken") return created;
   }
-  if (created.kind === "name_taken") {
-    return { kind: "upstream_unavailable", detail: "token name already exists" };
-  }
-  return created;
+  return { kind: "upstream_unavailable", detail: "token name already exists" };
 }
 
 async function createForgejoToken(
@@ -238,10 +240,12 @@ async function verifyForgejoUser(
 }
 
 auth.post("/login", async (c) => {
+  const crossOrigin = rejectCrossOriginMutation(c, { allowOriginless: true });
+  if (crossOrigin) return crossOrigin;
   const body = (await c.req.json().catch(() => null)) as
     | { username?: string; password?: string }
     | null;
-  if (!body?.username || !body.password)
+  if (typeof body?.username !== "string" || !body.username || typeof body.password !== "string" || !body.password)
     return c.json(...bad("missing credentials"));
 
   const config = c.get("config");
@@ -260,18 +264,15 @@ auth.post("/login", async (c) => {
       502,
     );
   }
-  setCookie(c, AUTH_COOKIE, outcome.pat, {
-    httpOnly: true,
-    sameSite: "Lax",
-    path: "/",
-    secure: c.req.url.startsWith("https://"),
-  });
+  setAuthCookie(c, outcome.pat);
   return c.json({ username: body.username, pat: outcome.pat });
 });
 
 // Logout clears the browser cookie. We deliberately do NOT revoke the cached
 // Forgejo PAT because other API clients may still use it.
 auth.post("/logout", (c) => {
+  const crossOrigin = rejectCrossOriginMutation(c);
+  if (crossOrigin) return crossOrigin;
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.json({ ok: true });
 });

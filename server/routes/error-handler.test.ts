@@ -1,8 +1,10 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForgejoError } from "../forgejo.js";
+import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests, resolveAuth } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { handleAppError } from "./error-handler.js";
+import { testConfig } from "./test-fixtures.js";
 
 function appThrowing(status: number): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -21,6 +23,11 @@ function appThrowing(status: number): Hono<AppEnv> {
 }
 
 describe("handleAppError", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    _resetBearerAuthCacheForTests();
+  });
+
   it("maps Forgejo 404 to the typed envelope on /api", async () => {
     const res = await appThrowing(404).request("/api/v1/repos/owner/w/issues");
     expect(res.status).toBe(404);
@@ -63,6 +70,37 @@ describe("handleAppError", () => {
     const res = await appThrowing(401).request("/owner/repo/issues");
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("invalidates a rejected cookie PAT from the auth cache", async () => {
+    const app = new Hono<AppEnv>();
+    app.onError(handleAppError);
+    app.use("*", async (c, next) => {
+      c.set("config", testConfig("error-handler-cookie-cache"));
+      await next();
+    });
+    app.get("/owner/repo/issues", () => {
+      throw new ForgejoError(401, "boom", "GET", "/x");
+    });
+    app.get("/probe-auth", async (c) => {
+      const auth = await resolveAuth(c);
+      return c.text(auth?.user.username ?? "none");
+    });
+
+    _seedBearerAuthCacheForTests("pat-cookie", "alice");
+    const rejected = await app.request("/owner/repo/issues", {
+      headers: { cookie: "cosheaf_pat=pat-cookie" },
+    });
+    expect(rejected.status).toBe(303);
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("bad token", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const next = await app.request("/probe-auth", {
+      headers: { cookie: "cosheaf_pat=pat-cookie" },
+    });
+
+    expect(await next.text()).toBe("none");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rethrows non-Forgejo errors", async () => {

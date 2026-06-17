@@ -1,18 +1,17 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { type FileKind, fileKindForPath } from "../../shared/file-kind.js";
+import { type FileKind, fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
-import { is404, onForgejo404 } from "../forgejo-errors.js";
+import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
-import { deletePage, planIndexPage } from "../indexer.js";
+import { planIndexPage } from "../indexer.js";
 import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageExcerpts, workspacePageTitles } from "../page-search.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { deleteBranchQuietly } from "../workspace-cleanup.js";
-import { isStaleShaConflict, safeRel } from "./files.js";
+import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
 import {
   badRequestPage,
   displayLogin,
@@ -184,7 +183,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               kind === "markdown" && !sourceView ? emptyHtml : html`<h1>${rel}</h1>`
             }
           </div>
-          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView })}
+          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha })}
         </div>
         ${docBody}
       `, {
@@ -202,15 +201,32 @@ web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
   if (resolved.branch === "main") return forbiddenPage(ctx.user);
   const rel = safeRel(resolved.path);
   if (!rel) return notFoundPage(ctx.user, "File not found");
+  const expectedShaField = form.expected_sha;
+  if (expectedShaField !== undefined && typeof expectedShaField !== "string") {
+    return badRequestPage(ctx.user, "Invalid delete freshness token.");
+  }
+  const expectedSha = typeof expectedShaField === "string" ? expectedShaField : undefined;
   const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel);
   if (!meta) return notFoundPage(ctx.user, "File not found");
-  await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
-    branch: resolved.branch,
-    path: rel,
-    sha: meta.sha,
-    message: `delete ${rel}`,
-  });
+  if (expectedSha !== undefined && meta.sha !== expectedSha) {
+    return badRequestPage(ctx.user, "This file changed on the branch while you were viewing it. Reload and try again.");
+  }
+  try {
+    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+      branch: resolved.branch,
+      path: rel,
+      sha: meta.sha,
+      message: `delete ${rel}`,
+    });
+  } catch (err) {
+    if (isStaleShaConflict(err)) {
+      return badRequestPage(ctx.user, "This file changed on the branch while you were viewing it. Reload and try again.");
+    }
+    throw err;
+  }
+  if (rel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, resolved.branch);
   invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
+  c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(resolved.branch)}`);
 }));
 
@@ -225,19 +241,23 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
 
 web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const branch = editBranchFor(ctx.user, c.req.query("branch"));
-  const rel = safeRel(c.req.query("path") || "new.md") ?? "new.md";
+  if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+  const requestedPath = c.req.query("path");
+  const rel = requestedPath === undefined || requestedPath.trim() === "" ? "new.md" : safeRel(requestedPath);
+  if (!rel) return badRequestPage(ctx.user, "Valid file path is required.");
   const kind = fileKindForPath(rel);
   if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
-  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, rel).catch(async (err) => {
-    if (is404(err)) {
-      return ctx.fj.getRawFile(ctx.owner, ctx.repo, "main", rel).catch(() => "");
-    }
-    throw err;
-  });
-  const branchExists =
-    branch === "main" ||
-    (await ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []))
-      .some((candidate) => candidate.name === branch);
+  const branchInfo = branch === "main" ? await ctx.fj.getBranch(ctx.owner, ctx.repo, "main") : await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
+  const branchExists = branch === "main" || Boolean(branchInfo);
+  const branchRef = branchInfo?.commit?.id ?? branch;
+  const branchMeta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branchRef, rel);
+  const mainInfo = branchMeta ? null : await ctx.fj.getBranch(ctx.owner, ctx.repo, "main");
+  const mainRef = mainInfo?.commit?.id ?? "main";
+  const mainMeta = branchMeta ? null : await ctx.fj.getFileMeta(ctx.owner, ctx.repo, mainRef, rel);
+  const sourceRef = branchMeta ? branchRef : mainMeta ? mainRef : null;
+  const baseSha = branchMeta?.sha ?? (!branchExists ? mainMeta?.sha : null) ?? null;
+  const sourceSha = !branchMeta && branchExists ? (mainMeta?.sha ?? null) : null;
+  const content = sourceRef ? await ctx.fj.getRawFile(ctx.owner, ctx.repo, sourceRef, rel) : "";
   // The edit branch is created lazily on first save, so for a brand-new edit
   // branch the tree (file list) and Cancel target come from main instead.
   const treeBranch = branchExists ? branch : "main";
@@ -260,12 +280,14 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
             data-username="${ctx.user}"
             data-role="${ctx.ws.role}"
             data-format-id="${ctx.ws.defaultMdFormat}"
+            data-base-sha="${baseSha ?? ""}"
+            data-source-sha="${sourceSha ?? ""}"
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           ${webEditorAssets()}
-          <noscript>${editFallbackForm(ctx, { branch, rel, content, cancelHref })}</noscript>
+          <noscript>${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, cancelHref })}</noscript>
         </section>
-      ` : textEditPage(ctx, branch, rel, content, treeBranch), {
+      ` : textEditPage(ctx, branch, rel, content, baseSha, sourceSha, treeBranch), {
         statusExtra: [{ label: branch, icon: branchIcon({ size: 12 }) }],
         statusOmitTab: true,
         sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles)],
@@ -276,25 +298,43 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
 web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
   const branch = editBranchFor(ctx.user, stringField(form.branch));
+  if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
   const rel = safeRel(stringField(form.path) ?? undefined);
   const oldRel = safeRel(stringField(form.old_path) ?? undefined);
   const content = textField(form.content);
+  const expectedShaField = form.expected_sha;
+  if (expectedShaField !== undefined && typeof expectedShaField !== "string") {
+    return badRequestPage(ctx.user, "Invalid edit freshness token.");
+  }
+  const expectedSha = typeof expectedShaField === "string" ? expectedShaField === "" ? null : expectedShaField : undefined;
+  const expectedSourceShaField = form.expected_source_sha;
+  if (expectedSourceShaField !== undefined && typeof expectedSourceShaField !== "string") {
+    return badRequestPage(ctx.user, "Invalid source freshness token.");
+  }
+  const expectedSourceSha = typeof expectedSourceShaField === "string" && expectedSourceShaField ? expectedSourceShaField : undefined;
   if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
+  if (form.old_path !== undefined && (!oldRel || !isEditableTextFile(oldRel)))
+    return badRequestPage(ctx.user, "Invalid original path.");
   await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
   const kind = fileKindForPath(rel);
   if (kind !== "markdown" && kind !== "text") {
     return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
   }
   try {
-    await writeFile(ctx, branch, rel, content, oldRel ?? undefined);
+    await writeFile(ctx, branch, rel, content, oldRel ?? undefined, expectedSha, expectedSourceSha);
   } catch (err) {
     // A concurrent save advanced the branch head between our read and write.
     // Surface a reload-and-retry message instead of a bare gateway error (#92).
     if (isStaleShaConflict(err)) {
       return badRequestPage(ctx.user, "This file changed on the branch while you were editing. Reload the page to get the latest version, then reapply your edit.");
     }
+    if (err instanceof Error && /^destination already exists: /.test(err.message)) {
+      return badRequestPage(ctx.user, "A file already exists at the new path.");
+    }
     throw err;
   }
+  if (oldRel && oldRel !== rel) c.get("sse").publish(ctx.ws.slug, { type: "change", path: oldRel });
+  c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`);
 }));
 }
@@ -336,7 +376,11 @@ web.post("/:owner/:repo/branches/new", webRouteForWrite(async (c, ctx) => {
 web.post("/:owner/:repo/branches/delete", webRouteForWrite(async (c, ctx) => {
   const name = stringField((await c.req.parseBody()).name);
   if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
-  await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, name);
+  try {
+    await ctx.fj.deleteBranch(ctx.owner, ctx.repo, name);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+  }
   invalidateRepoTrees(ctx.owner, ctx.repo);
   return redirect(repoHref(ctx.owner, ctx.repo, "/branches"));
 }));
@@ -385,7 +429,7 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
 // (#171). Extracted from the file-view handler (#24) to keep the handler legible.
 function fileToolbar(
   ctx: WebCtx,
-  opts: { branch: string; rel: string; kind: FileKind; fileHref: string; sourceView: boolean },
+  opts: { branch: string; rel: string; kind: FileKind; fileHref: string; sourceView: boolean; sha: string },
 ): Html {
   const { owner, repo, user } = ctx;
   const role = ctx.ws.role;
@@ -417,6 +461,7 @@ function fileToolbar(
         ? ""
         : html`<form class="inline-form build-only" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">
             <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="expected_sha" value="${opts.sha}">
             <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
           </form>`
     }
@@ -496,10 +541,12 @@ function sourceFilePreview(content: string): Html {
 // page owns its own titlebar Cancel instead).
 function editFallbackForm(
   ctx: WebCtx,
-  opts: { branch: string; rel: string; content: string; cancelHref?: string; formClass?: string; formTestId?: string; textareaClass?: string },
+  opts: { branch: string; rel: string; content: string; baseSha?: string | null; sourceSha?: string | null; cancelHref?: string; formClass?: string; formTestId?: string; textareaClass?: string },
 ): Html {
   return html`<form${opts.formClass ? html` class="${opts.formClass}"` : emptyHtml}${opts.formTestId ? html` data-testid="${opts.formTestId}"` : emptyHtml} method="post" action="${repoHref(ctx.owner, ctx.repo, "/_edit")}">
     <input type="hidden" name="old_path" value="${opts.rel}">
+    ${opts.baseSha === undefined ? emptyHtml : html`<input type="hidden" name="expected_sha" value="${opts.baseSha ?? ""}">`}
+    ${opts.sourceSha ? html`<input type="hidden" name="expected_source_sha" value="${opts.sourceSha}">` : emptyHtml}
     <label>Branch <input name="branch" value="${opts.branch}" required></label>
     <label>Path <input name="path" value="${opts.rel}" required></label>
     <textarea${opts.textareaClass ? html` class="${opts.textareaClass}"` : emptyHtml} name="content" spellcheck="false">${opts.content}</textarea>
@@ -510,20 +557,26 @@ function editFallbackForm(
   </form>`;
 }
 
-function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string, cancelBranch: string): Html {
+function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string, baseSha: string | null, sourceSha: string | null, cancelBranch: string): Html {
   return html`<section class="edit-page text-edit-page">
     <div class="file-toolbar edit-titlebar">
       <div><h1>${rel}</h1></div>
       <a class="button subtle" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(cancelBranch)}/${urlPath(rel)}`}">Cancel</a>
     </div>
-    ${editFallbackForm(ctx, { branch, rel, content, formClass: "compose-form", formTestId: "text-edit-form", textareaClass: "text-file-editor" })}
+    ${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, formClass: "compose-form", formTestId: "text-edit-form", textareaClass: "text-file-editor" })}
   </section>`;
 }
 
 async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
   if (branch === "main") return;
   const exists = await fj.getBranch(owner, repo, branch);
-  if (!exists) await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
+  if (exists) return;
+  try {
+    await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 409 && await fj.getBranch(owner, repo, branch)) return;
+    throw err;
+  }
 }
 
 // Write a Markdown or text file on a branch, handling create / update / rename
@@ -535,17 +588,48 @@ async function writeFile(
   rel: string,
   content: string,
   previousRel?: string,
+  expectedSha?: string | null,
+  expectedSourceSha?: string,
 ): Promise<void> {
   const isMarkdown = fileKindForPath(rel) === "markdown";
-  const plan = isMarkdown
-    ? planIndexPage(ctx.db, { workspaceSlug: ctx.ws.slug, filePath: rel, bodyText: content, formatId: ctx.ws.defaultMdFormat })
-    : null;
-  const finalContent = plan?.rewrittenContent ?? content;
   const isRename = Boolean(previousRel && previousRel !== rel);
   const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
   if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
   const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
-  await ctx.fj.putFile(ctx.owner, ctx.repo, {
+  const fallbackRename =
+    isRename && !previous && expectedSha === null && expectedSourceSha !== undefined;
+  if (isRename && !previous && !fallbackRename) {
+    throw new ForgejoError(409, `missing source for rename ${previousRel}`, "PUT", `/repos/${ctx.owner}/${ctx.repo}/contents/${previousRel}`);
+  }
+  const casMeta = isRename ? previous : existing;
+  const casPath = isRename ? (previousRel as string) : rel;
+  let mainSourceMeta: Awaited<ReturnType<Forgejo["getFileMeta"]>> | undefined;
+  if (isRename && previous && isMarkdown && fileKindForPath(previousRel as string) === "markdown") {
+    mainSourceMeta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, "main", previousRel as string);
+  }
+  const replacePath = isRename && previous && mainSourceMeta === null
+    ? previousRel as string
+    : undefined;
+  const plan = isMarkdown
+    ? planIndexPage(ctx.db, {
+        workspaceSlug: ctx.ws.slug,
+        filePath: rel,
+        bodyText: content,
+        formatId: ctx.ws.defaultMdFormat,
+        replacePath,
+      })
+    : null;
+  const finalContent = plan?.rewrittenContent ?? content;
+  if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
+    throw new ForgejoError(409, `stale sha for ${casPath}`, "PUT", `/repos/${ctx.owner}/${ctx.repo}/contents/${casPath}`);
+  }
+  if (expectedSourceSha !== undefined && !casMeta?.sha) {
+    const sourceMeta = mainSourceMeta ?? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, "main", casPath);
+    if ((sourceMeta?.sha ?? null) !== expectedSourceSha) {
+      throw new ForgejoError(409, `stale source sha for ${casPath}`, "PUT", `/repos/${ctx.owner}/${ctx.repo}/contents/${casPath}`);
+    }
+  }
+  const written = await ctx.fj.putFile(ctx.owner, ctx.repo, {
     branch,
     path: rel,
     content: finalContent,
@@ -553,22 +637,31 @@ async function writeFile(
     message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
   });
   if (isRename && previous) {
-    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
-      branch,
-      path: previousRel as string,
-      sha: previous.sha,
-      message: `remove ${previousRel} after rename`,
-    });
+    try {
+      await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+        branch,
+        path: previousRel as string,
+        sha: previous.sha,
+        message: `remove ${previousRel} after rename`,
+      });
+    } catch (err) {
+      if (!isStaleShaConflict(err)) throw err;
+      try {
+        await rollbackCreatedRenameDestination(ctx.fj, ctx.owner, ctx.repo, branch, rel, written.content?.sha);
+      } catch (rollbackErr) {
+        invalidateBranchTree(ctx.owner, ctx.repo, branch);
+        throw new Error(`rename rollback failed for ${rel}: ${(rollbackErr as Error).message}`);
+      }
+      invalidateBranchTree(ctx.owner, ctx.repo, branch);
+      throw err;
+    }
   }
-  plan?.commit();
-  // Drop the old doc_map row when renaming away from a markdown page — whether
-  // the NEW path is markdown (rename within pages) or not (an .md→non-md rename
-  // must still de-index the old path).
-  if (isRename && (isMarkdown || (previousRel as string).endsWith(".md"))) {
-    deletePage(ctx.db, ctx.ws.slug, previousRel as string);
-  }
+  // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
+  // the plan for frontmatter/id rewriting, but must not publish unmerged branch
+  // content into search/backlinks/tree doc metadata.
+  // Deliberately do not call plan.commit() here; webhooks/reindex reconcile main.
   // #182: a cosheaf.yaml edit through the editor busts its cached config for
-  // this branch (read-after-write, same contract as the index update above).
+  // this branch (read-after-write for config, independent of sidecar indexing).
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, branch);
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }

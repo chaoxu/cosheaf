@@ -3,7 +3,12 @@
 // Pairs with SMOKE_CHECKLIST.md, which the operator runs from the freshly
 // seeded state.
 
-const BASE = process.env.URL ?? "http://localhost:3030";
+import { browserWebUrl } from "./browser-utils.mjs";
+import { loadDotenvDev } from "./lib/env-dev.mjs";
+
+loadDotenvDev();
+
+const BASE = browserWebUrl();
 
 const routes = [
   ["/chao/flushing-coin", "Coflat repo home"],

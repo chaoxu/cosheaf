@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { defaultApiUrl, loadDotenvDev } from "./lib/env-dev.mjs";
+
+loadDotenvDev();
 
 const program = new Command("api-smoke")
   .description("exercise the Cosheaf API flow used by agents")
-  .option("--api <url>", "Cosheaf API base URL", process.env.COSHEAF_API_URL ?? "http://localhost:3030/api/v1")
+  .option("--api <url>", "Cosheaf API base URL", defaultApiUrl())
   .option(
     "--workspace <owner/repo>",
     "workspace as <owner>/<repo>",
@@ -80,7 +83,7 @@ async function main() {
     "",
     "This file was created by the Cosheaf API smoke.",
     "",
-    "- typed file write should add frontmatter and update the sidecar index",
+    "- typed branch write should add frontmatter without polluting the main sidecar index",
     "- typed pull routes should open and review a PR",
     "- typed merge should enforce Cosheaf's merge boundary",
     "",
@@ -90,12 +93,15 @@ async function main() {
     method: "PUT",
     body: { content },
   });
+  if (!writeResult?.content?.includes("id:")) {
+    throw new Error(`typed branch write did not return rewritten frontmatter for ${path}`);
+  }
 
   const search = await request(`/repos/${workspace}/search?q=${encodeURIComponent(title)}`, {
     token: adminPat,
   });
   const indexed = search?.results?.some((row) => row.path === path);
-  if (!indexed) throw new Error(`typed write did not show up in search index for ${path}`);
+  if (indexed) throw new Error(`branch write leaked into the main search index for ${path}`);
 
   const pull = await request(`/repos/${workspace}/pulls`, {
     token: adminPat,

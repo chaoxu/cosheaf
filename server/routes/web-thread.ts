@@ -20,6 +20,7 @@ import {
   displayLogin,
   timeEl,
   notFoundPage,
+  positiveInt,
   positiveIntFields,
   repoHref,
   stringField,
@@ -316,10 +317,21 @@ export async function labelSelectionPatch(
 ): Promise<{ ok: true; labels?: number[] } | { ok: false; message: string }> {
   if (!stringField(form.labels_present)) return { ok: true };
   const labelIds = positiveIntFields(form.labels);
+  if (labelIds === null) return { ok: false, message: "Labels must be positive integer ids." };
   const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
   const validation = validateLabelSelection(labelIds, allLabels, [...current]);
   if (!validation.ok) return { ok: false, message: validation.message };
   return { ok: true, labels: labelIds };
+}
+
+export function milestoneFormValue(raw: unknown): { ok: true; milestone?: number } | { ok: false; message: string } {
+  const rawValue = stringField(raw);
+  if (rawValue === null) return { ok: true };
+  const value = rawValue.trim();
+  if (value === "0") return { ok: true, milestone: 0 };
+  const milestone = positiveInt(value);
+  if (milestone === null) return { ok: false, message: "Milestone must be a positive integer id." };
+  return { ok: true, milestone };
 }
 
 export function pullEditPage(

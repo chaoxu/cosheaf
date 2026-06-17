@@ -23,6 +23,13 @@ describe("web timeline descriptions", () => {
       "referenced this in #42",
     );
   });
+
+  it("does not render malformed issue references from Forgejo timeline payloads", () => {
+    expect(webTimelineDescriptionText(event({ type: "issue_ref", ref_issue: -7 }))).toBe("referenced this");
+    expect(webTimelineDescriptionText(event({ type: "pull_ref", ref_issue: { number: 0 } as unknown as number }))).toBe(
+      "referenced this in a pull request",
+    );
+  });
 });
 
 describe("web timeline ordering", () => {

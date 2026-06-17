@@ -3,6 +3,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { loadDotenvDev } from "./lib/env-dev.mjs";
+
+loadDotenvDev();
 
 const args = process.argv.slice(2);
 const result = spawnSync("pnpm", ["exec", "playwright", "test", ...args], {

@@ -1,6 +1,7 @@
 import { expect, type Locator, test } from "@playwright/test";
+import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 
-const webBase = "http://localhost:3030";
+const webBase = defaultWebUrl();
 const owner = "chao";
 const repo = "flushing-coin";
 const repoBase = `${webBase}/${owner}/${repo}`;

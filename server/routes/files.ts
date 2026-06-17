@@ -2,8 +2,9 @@ import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
+import { validBranchName } from "../branch-path.js";
 import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
-import { deletePage, planIndexPage } from "../indexer.js";
+import { planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import {
@@ -14,6 +15,7 @@ import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 import { bad, conflict, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
+import { parseBoundedPositiveInt } from "./query-params.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -21,7 +23,7 @@ files.use("/:owner/:repo/*", requireMembership());
 files.use("/:owner/:repo/*", requireWriteOnMutation);
 
 // Repository-relative path validator. Rejects absolute paths, traversal
-// segments (`..`), empty segments, backslashes (Forgejo treats `/` as the
+// segments (`.` or `..`), empty segments, backslashes (Forgejo treats `/` as the
 // only separator), control characters, and encoded-traversal forms. Exported
 // so other typed routes (e.g. PR review-comment paths) can apply the same
 // shape check.
@@ -32,7 +34,7 @@ export function safeRel(p: string | undefined): string | null {
     const code = p.charCodeAt(i);
     if (code < 0x20 || p[i] === "\\") return null;
   }
-  if (p.split(/[/\\]/).some((seg) => seg === ".." || seg === "")) return null;
+  if (p.split(/[/\\]/).some((seg) => seg === "." || seg === ".." || seg === "")) return null;
   if (/%2e%2e/i.test(p) || /%2f/i.test(p) || /%5c/i.test(p)) return null;
   return p;
 }
@@ -43,6 +45,10 @@ export function safeRel(p: string | undefined): string | null {
 function refFromQuery(c: import("hono").Context<AppEnv>): string {
   const b = c.req.query("branch")?.trim();
   return b && b.length > 0 ? b : "main";
+}
+
+function validRequestedBranch(branch: string): boolean {
+  return branch === "main" || validBranchName(branch);
 }
 
 // A write that lost a branch-head race: Forgejo rejects a stale blob sha as
@@ -66,7 +72,7 @@ export async function staleShaConflict(
   repo: string,
   branch: string,
   path: string,
-  expectedSha: string | undefined,
+  expectedSha: string | null | undefined,
 ): Promise<readonly [import("./responses.js").ErrorBody, 409]> {
   const [meta, branchInfo] = await Promise.all([
     fj.getFileMeta(owner, repo, branch, path).catch(() => null),
@@ -82,6 +88,25 @@ export async function staleShaConflict(
   });
 }
 
+export async function rollbackCreatedRenameDestination(
+  fj: import("../forgejo.js").Forgejo,
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+  createdSha: string | undefined,
+): Promise<void> {
+  if (!createdSha) {
+    throw new Error(`rename rollback unsafe for ${path}: created blob sha missing`);
+  }
+  await fj.deleteFile(owner, repo, {
+    branch,
+    path,
+    sha: createdSha,
+    message: `rollback incomplete rename to ${path}`,
+  });
+}
+
 // Auto-create the target branch from `main` if it doesn't exist. Any valid
 // branch name is allowed — cosheaf's job is to be a thin shell over Forgejo's
 // branch model, not to enforce a naming convention Forgejo itself doesn't
@@ -94,13 +119,19 @@ async function ensureBranch(
   const { fj, owner, repo } = c.get("repoCtx");
   const exists = await fj.getBranch(owner, repo, branch);
   if (exists) return;
-  await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
+  try {
+    await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 409 && await fj.getBranch(owner, repo, branch)) return;
+    throw err;
+  }
 }
 
 files.get("/:owner/:repo/tree", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
+  if (!validRequestedBranch(ref)) return c.json(...bad("valid branch name required"));
   let tree = getCachedTree(owner, repo, ref);
   if (!tree) {
     try {
@@ -127,12 +158,16 @@ files.get("/:owner/:repo/tree", async (c) => {
     .map((e) => ({ path: e.path, size: e.size ?? 0, kind: fileKindForPath(e.path) }))
     .sort((a, b) => a.path.localeCompare(b.path));
 
-  const docs = c
-    .get("db")
-    .prepare(
-      "SELECT cosheaf_id AS id, forgejo_id AS path, title FROM doc_map WHERE workspace_slug = ?",
-    )
-    .all(ws.slug) as Array<{ id: string; path: string; title: string | null }>;
+  // The SQLite sidecar is branchless and mirrors main; branch trees should not
+  // inherit stale main titles/ids for unmerged branch content.
+  const docs = ref === "main"
+    ? c
+        .get("db")
+        .prepare(
+          "SELECT cosheaf_id AS id, forgejo_id AS path, title FROM doc_map WHERE workspace_slug = ?",
+        )
+        .all(ws.slug) as Array<{ id: string; path: string; title: string | null }>
+    : [];
   const byPath = new Map(docs.map((d) => [d.path, d]));
   const merged = out.map((f) => {
     const meta = byPath.get(f.path);
@@ -148,16 +183,33 @@ files.get("/:owner/:repo/file", async (c) => {
   if (!rel) return c.json(...bad("path required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
+  if (!validRequestedBranch(ref)) return c.json(...bad("valid branch name required"));
+  let branchInfo: Awaited<ReturnType<typeof fj.getBranch>> | null = null;
   try {
-    const content = await fj.getRawFile(owner, repo, ref, rel);
-    return c.json({ content });
+    branchInfo = await fj.getBranch(owner, repo, ref);
+    const snapshotRef = branchInfo?.commit?.id ?? ref;
+    const [content, meta] = await Promise.all([
+      fj.getRawFile(owner, repo, snapshotRef, rel),
+      fj.getFileMeta(owner, repo, snapshotRef, rel),
+    ]);
+    return c.json({ content, sha: meta?.sha ?? null });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
       // File not on the branch — fall back to main so the editor can still
       // show the canonical version.
       try {
-        const content = await fj.getRawFile(owner, repo, "main", rel);
-        return c.json({ content });
+        const mainInfo = await fj.getBranch(owner, repo, "main");
+        const mainRef = mainInfo?.commit?.id ?? "main";
+        const [content, meta] = await Promise.all([
+          fj.getRawFile(owner, repo, mainRef, rel),
+          fj.getFileMeta(owner, repo, mainRef, rel),
+        ]);
+        return c.json({
+          content,
+          sha: branchInfo ? null : (meta?.sha ?? null),
+          source_ref: "main",
+          source_sha: meta?.sha ?? null,
+        });
       } catch (err2) {
         if (err2 instanceof ForgejoError && err2.status === 404)
           return c.json(...notFound());
@@ -175,19 +227,34 @@ files.put("/:owner/:repo/file", async (c) => {
   if (!rel || !isEditableTextFile(rel))
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
+  if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
   if (branch === "main")
     return c.json(...bad("branch required (cannot write to main)"));
   const body = (await c.req.json().catch(() => null)) as {
     content?: string;
     previous_path?: string;
-    expected_sha?: string;
+    expected_sha?: string | null;
+    expected_source_sha?: string;
   } | null;
   if (body?.content === undefined)
     return c.json(...bad("content required"));
+  if (typeof body.content !== "string")
+    return c.json(...bad("content must be a string"));
   const previousRel = safeRel(body.previous_path);
-  if (body.previous_path !== undefined && !previousRel)
+  if (body.previous_path !== undefined && (!previousRel || !isEditableTextFile(previousRel)))
     return c.json(...bad("invalid previous_path"));
-  const expectedSha = typeof body.expected_sha === "string" ? body.expected_sha : undefined;
+  let expectedSha: string | null | undefined;
+  if (body && Object.hasOwn(body, "expected_sha")) {
+    if (typeof body.expected_sha !== "string" && body.expected_sha !== null)
+      return c.json(...bad("expected_sha must be a string or null"));
+    expectedSha = body.expected_sha;
+  }
+  let expectedSourceSha: string | undefined;
+  if (body && Object.hasOwn(body, "expected_source_sha")) {
+    if (typeof body.expected_source_sha !== "string")
+      return c.json(...bad("expected_source_sha must be a string"));
+    expectedSourceSha = body.expected_source_sha;
+  }
 
   await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
@@ -195,27 +262,43 @@ files.put("/:owner/:repo/file", async (c) => {
   const db = c.get("db");
   const hub = c.get("sse");
 
+  const isRename = Boolean(previousRel && previousRel !== rel);
+  const existing = await fj.getFileMeta(owner, repo, branch, rel);
+  if (isRename && existing)
+    return c.json(...conflict("destination already exists"));
+  const previous = isRename ? await fj.getFileMeta(owner, repo, branch, previousRel as string) : null;
+  const fallbackRename =
+    isRename && !previous && expectedSha === null && expectedSourceSha !== undefined;
+  if (isRename && !previous && !fallbackRename) {
+    return c.json(...conflict("source file missing; reload and retry", {
+      path: previousRel as string,
+      branch,
+      branch_moved: true,
+    }));
+  }
   // Only Markdown files are pages: parse/inject the frontmatter id and index
   // doc_map/FTS/backlinks. Plain-text companions (.bib, .csv, …) are committed
   // verbatim and never indexed (mirrors the web _edit writeFile path). The
   // workspace's declared markdown format is passed explicitly so passthrough
   // workspaces don't inherit coflat indexing behavior (#25).
   const isMarkdown = fileKindForPath(rel) === "markdown";
+  let mainSourceMeta: Awaited<ReturnType<typeof fj.getFileMeta>> | undefined;
+  if (isRename && previous && isMarkdown && fileKindForPath(previousRel as string) === "markdown") {
+    mainSourceMeta = await fj.getFileMeta(owner, repo, "main", previousRel as string);
+  }
+  const replacePath = isRename && previous && mainSourceMeta === null
+    ? previousRel as string
+    : undefined;
   const plan = isMarkdown
     ? planIndexPage(db, {
         workspaceSlug: ws.slug,
         filePath: rel,
         bodyText: body.content,
         formatId: ws.defaultMdFormat,
+        replacePath,
       })
     : null;
   const finalContent = plan?.rewrittenContent ?? body.content;
-
-  const isRename = Boolean(previousRel && previousRel !== rel);
-  const existing = await fj.getFileMeta(owner, repo, branch, rel);
-  if (isRename && existing)
-    return c.json(...conflict("destination already exists"));
-  const previous = isRename ? await fj.getFileMeta(owner, repo, branch, previousRel as string) : null;
   // Compare-and-set: if the caller declared the blob sha its edit was based on and
   // the branch has since moved, reject before writing so a concurrent edit isn't
   // silently clobbered (#92). On a rename the edit was based on the SOURCE blob,
@@ -224,6 +307,19 @@ files.put("/:owner/:repo/file", async (c) => {
   const casPath = isRename ? (previousRel as string) : rel;
   if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
     return c.json(...(await staleShaConflict(fj, owner, repo, branch, casPath, expectedSha)));
+  }
+  if (expectedSourceSha !== undefined && !casMeta?.sha) {
+    const sourceMeta = mainSourceMeta ?? await fj.getFileMeta(owner, repo, "main", casPath);
+    if ((sourceMeta?.sha ?? null) !== expectedSourceSha) {
+      return c.json(...conflict("source file changed; reload and retry", {
+        path: casPath,
+        branch,
+        source_ref: "main",
+        expected_source_sha: expectedSourceSha,
+        current_source_sha: sourceMeta?.sha ?? null,
+        branch_moved: true,
+      }));
+    }
   }
   let r;
   try {
@@ -234,14 +330,6 @@ files.put("/:owner/:repo/file", async (c) => {
       sha: existing?.sha,
       message: isRename ? `rename ${previousRel} to ${rel}` : existing ? `update ${rel}` : `create ${rel}`,
     });
-    if (isRename && previous) {
-      await fj.deleteFile(owner, repo, {
-        branch,
-        path: previousRel as string,
-        sha: previous.sha,
-        message: `remove ${previousRel} after rename`,
-      });
-    }
   } catch (err) {
     // A concurrent writer landed a commit between our getFileMeta read and the
     // putFile: Forgejo rejects the stale blob sha as 422 "sha does not match"
@@ -252,13 +340,30 @@ files.put("/:owner/:repo/file", async (c) => {
     }
     throw err;
   }
-  // Commit the sidecar reindex now that the canonical write succeeded.
-  // Without this, doc_map / FTS / backlinks would lag until the webhook
-  // fires and typed read-after-write (search, suggest, /backlinks) breaks.
-  // The sidecar tracks the latest write across branches (no branch dimension);
-  // title display is therefore scoped to the main file view (#132).
-  plan?.commit();
-  if (isRename) deletePage(db, ws.slug, previousRel as string);
+  if (isRename && previous) {
+    try {
+      await fj.deleteFile(owner, repo, {
+        branch,
+        path: previousRel as string,
+        sha: previous.sha,
+        message: `remove ${previousRel} after rename`,
+      });
+    } catch (err) {
+      if (!isStaleShaConflict(err)) throw err;
+      try {
+        await rollbackCreatedRenameDestination(fj, owner, repo, branch, rel, r.content?.sha);
+      } catch (rollbackErr) {
+        invalidateBranchTree(owner, repo, branch);
+        throw new Error(`rename rollback failed for ${rel}: ${(rollbackErr as Error).message}`);
+      }
+      invalidateBranchTree(owner, repo, branch);
+      return c.json(...(await staleShaConflict(fj, owner, repo, branch, previousRel as string, expectedSha)));
+    }
+  }
+  // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
+  // the plan for frontmatter/id rewriting and response metadata, but must not
+  // publish unmerged branch content into search/backlinks/tree doc metadata.
+  // Deliberately do not call plan.commit() here; webhooks/reindex reconcile main.
   // #182: a cosheaf.yaml write through the typed route busts its cached config
   // for this branch so the change is read-after-write consistent (the webhook
   // only reconciles main; external non-main pushes reconcile on reindex).
@@ -266,13 +371,14 @@ files.put("/:owner/:repo/file", async (c) => {
   invalidateBranchTree(owner, repo, branch);
   if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
   hub.publish(ws.slug, { type: "change", path: rel });
+  const writtenSha = r.content?.sha ?? (await fj.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
   return c.json({
     ok: true,
     branch,
     meta: { id: plan?.cosheafId ?? null, title: plan?.title },
     content: plan?.rewrittenContent ?? undefined,
     commit: r.commit?.sha,
-    sha: r.content?.sha,
+    sha: writtenSha,
   });
 });
 
@@ -280,6 +386,8 @@ files.post("/:owner/:repo/assets", async (c) => {
   const branch = c.req.query("branch")?.trim();
   if (!branch)
     return c.json(...bad("branch required"));
+  if (!validBranchName(branch))
+    return c.json(...bad("valid branch name required"));
   if (branch === "main")
     return c.json(...bad("branch required (cannot upload assets to main)"));
   const form = await c.req.formData().catch(() => null);
@@ -310,8 +418,7 @@ files.post("/:owner/:repo/assets", async (c) => {
 files.get("/:owner/:repo/suggest", (c) => {
   const prefix = c.req.query("prefix")?.trim() ?? "";
   const trigger = c.req.query("trigger") ?? "[@";
-  const rawLimit = Number(c.req.query("limit") ?? 10);
-  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : 10;
+  const limit = parseBoundedPositiveInt(c.req.query("limit"), 10, 20);
   const ws = c.get("workspace");
   // For `[@` trigger we suggest from doc_map (cross-ref ids + titles).
   // Other triggers return empty until we add e.g. tag completion.
@@ -438,28 +545,62 @@ files.delete("/:owner/:repo/file", async (c) => {
   if (!rel || !isEditableTextFile(rel))
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
+  if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
   if (branch === "main")
     return c.json(...bad("branch required (cannot delete on main)"));
-  await ensureBranch(c, branch);
+  const rawBody = await c.req.text().catch(() => null);
+  if (rawBody === null)
+    return c.json(...bad("invalid JSON body"));
+  let body: unknown = null;
+  if (rawBody.trim()) {
+    try {
+      body = JSON.parse(rawBody) as unknown;
+    } catch (_err) {
+      return c.json(...bad("invalid JSON body"));
+    }
+  }
+  let expectedSha: string | null | undefined = c.req.query("expected_sha");
+  if (body !== null) {
+    if (typeof body !== "object" || Array.isArray(body))
+      return c.json(...bad("invalid JSON body"));
+    if (Object.hasOwn(body, "expected_sha")) {
+      const value = (body as { expected_sha?: unknown }).expected_sha;
+      if (typeof value !== "string" && value !== null)
+        return c.json(...bad("expected_sha must be a string or null"));
+      expectedSha = value;
+    }
+  }
   const { fj, owner, repo } = c.get("repoCtx");
   const meta = await fj.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json(...notFound());
-  await fj.deleteFile(owner, repo, {
-    branch,
-    path: rel,
-    sha: meta.sha,
-    message: `delete ${rel}`,
-  });
-  if (rel === REPO_CONFIG_PATH) bustRepoConfig(c.get("db"), c.get("workspace").slug, branch);
+  if (expectedSha !== undefined && meta.sha !== expectedSha) {
+    return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+  }
+  try {
+    await fj.deleteFile(owner, repo, {
+      branch,
+      path: rel,
+      sha: meta.sha,
+      message: `delete ${rel}`,
+    });
+  } catch (err) {
+    if (isStaleShaConflict(err)) {
+      return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+    }
+    throw err;
+  }
+  const db = c.get("db");
+  const ws = c.get("workspace");
+  if (rel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
   invalidateBranchTree(owner, repo, branch);
+  c.get("sse").publish(ws.slug, { type: "change", path: rel });
   return c.json({ ok: true, branch });
 });
 
 files.get("/:owner/:repo/search", (c) => {
   const q = c.req.query("q")?.trim();
   if (!q) return c.json({ results: [] });
-  const rawLimit = Number(c.req.query("limit") ?? 25);
-  const limit = Number.isFinite(rawLimit) ? rawLimit : 25;
+  const limit = parseBoundedPositiveInt(c.req.query("limit"), 25, 50);
   try {
     return c.json({ results: searchWorkspacePages(c.get("db"), c.get("workspace").slug, q, limit) });
   } catch (err) {

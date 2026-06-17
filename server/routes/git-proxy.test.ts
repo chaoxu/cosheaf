@@ -72,6 +72,20 @@ describe("git proxy route", () => {
             "content-type": "application/x-git-upload-pack-advertisement",
           }),
         );
+        forge.post("/:owner/:repo/git-upload-pack", async (c) =>
+          c.text(
+            `upload auth=${c.req.header("authorization") ?? ""} content-type=${c.req.header("content-type") ?? ""} body=${await c.req.text()}`,
+            200,
+            { "content-type": "application/x-git-upload-pack-result" },
+          ),
+        );
+        forge.post("/:owner/:repo/git-receive-pack", async (c) =>
+          c.text(
+            `receive auth=${c.req.header("authorization") ?? ""} body=${await c.req.text()}`,
+            200,
+            { "content-type": "application/x-git-receive-pack-result" },
+          ),
+        );
       }),
     );
   }
@@ -113,6 +127,42 @@ describe("git proxy route", () => {
     // The proxy authenticates upstream as the resolved Forgejo username + PAT,
     // not the arbitrary username the git client typed.
     expect(await res.text()).toBe(`auth=${basic("tok123", "alice")}`);
+  });
+
+  it("proxies upload-pack POST bodies for read collaborators", async () => {
+    const db = freshTestDb("cosheaf-gitproxy-");
+    fakeBackend("read");
+    const res = await appFor(db).request("/owner/w.git/git-upload-pack", {
+      method: "POST",
+      headers: {
+        authorization: basic("tok123", "whatever"),
+        "content-type": "application/x-git-upload-pack-request",
+      },
+      body: "0032want abcdef\n0000",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/x-git-upload-pack-result");
+    expect(await res.text()).toBe(
+      `upload auth=${basic("tok123", "alice")} content-type=application/x-git-upload-pack-request body=0032want abcdef\n0000`,
+    );
+  });
+
+  it("proxies receive-pack POST bodies only for write collaborators", async () => {
+    const db = freshTestDb("cosheaf-gitproxy-");
+    fakeBackend("write");
+    const res = await appFor(db).request("/owner/w.git/git-receive-pack", {
+      method: "POST",
+      headers: {
+        authorization: basic("tok456", "whatever"),
+        "content-type": "application/x-git-receive-pack-request",
+      },
+      body: "0000",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/x-git-receive-pack-result");
+    expect(await res.text()).toBe(`receive auth=${basic("tok456", "alice")} body=0000`);
   });
 
   it("rejects an unknown git service", async () => {

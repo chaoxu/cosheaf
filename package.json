@@ -30,7 +30,7 @@
     "server:start": "tsx server/index.ts",
     "cli": "tsx server/cli.ts",
     "build": "vite build",
-    "build:server": "tsc -p server/tsconfig.json",
+    "build:server": "rm -rf dist-server && tsc -p server/tsconfig.build.json && mkdir -p dist-server/server && cp server/schema.sql dist-server/server/schema.sql && node scripts/check-server-build-output.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "typecheck:server": "tsc --noEmit -p server/tsconfig.json",

@@ -12,7 +12,18 @@ import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { SSEHub } from "./sse.js";
 import type { AppEnv } from "./types.js";
-import { _resetBearerAuthCacheForTests, _resetFormatCacheForTests, _resetPermCacheForTests, _seedFormatCacheForTests, requireAdminFresh, requireAuth, requireMembership } from "./middleware.js";
+import {
+  _resetMiddlewareCachesForTests,
+  _resetPermCacheForTests,
+  _seedFormatCacheForTests,
+  _seedPermCacheForTests,
+  _seedTitleCacheForTests,
+  invalidateWorkspaceCaches,
+  requireAdminFresh,
+  requireAuth,
+  requireMembership,
+  resolveWorkspaceTitle,
+} from "./middleware.js";
 import { seedAuthUser } from "./test-helpers.js";
 
 const config: Config = {
@@ -23,6 +34,7 @@ const config: Config = {
   forgejoAdminToken: "admin-token",
   webhookSecret: "secret",
   webhookUrl: "http://cosheaf.test/webhook",
+  publicOrigin: null,
   registrationOpen: false,
   trustedProxyHops: 0,
   coverifyCmd: "coverify",
@@ -64,9 +76,7 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  _resetPermCacheForTests();
-  _resetBearerAuthCacheForTests();
-  _resetFormatCacheForTests();
+  _resetMiddlewareCachesForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -186,6 +196,33 @@ describe("requireMembership", () => {
     const r2 = await app.request("/repos/bob-org/w1/probe", { headers: { authorization: `Bearer ${token}` } });
     expect(await r1.json()).toEqual({ ok: true, role: "admin" });
     expect(r2.status).toBe(404);
+  });
+
+  it("invalidates all cached metadata for a repository", async () => {
+    const db = freshDb();
+    const token = seedUser(db, "alice");
+    _seedPermCacheForTests("owner", "w", "alice", "admin");
+    _seedFormatCacheForTests("owner", "w", "coflat");
+    _seedTitleCacheForTests("owner", "w", "Old title");
+
+    invalidateWorkspaceCaches("owner", "w");
+    fetchMock
+      .mockResolvedValueOnce(ok({ permission: "read" }))
+      .mockResolvedValueOnce(ok({ topics: [] }))
+      .mockResolvedValueOnce(ok({ description: "New title" }));
+
+    const res = await appFor(db).request("/repos/owner/w/probe", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const title = await resolveWorkspaceTitle(new Forgejo({ baseUrl: config.forgejoUrl, token }), "owner", "w");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, role: "read" });
+    expect(title).toBe("New title");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/collaborators/alice/permission");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/topics");
+    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/repos/owner/w");
   });
 });
 

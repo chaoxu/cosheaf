@@ -4,11 +4,13 @@
 // as "undefined control sequence". Deliberately uses NON-builtin macro names —
 // \R (a KaTeX builtin) masked this bug in the original verification.
 
-import { attachPageListeners, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { loadDotenvDev } from "./lib/env-dev.mjs";
+
+loadDotenvDev();
 
 const chromium = await loadChromium();
-const APP_URL = process.env.URL ?? "http://localhost:3030/";
-const WEB_URL = process.env.COSHEAF_WEB_URL ?? serverRenderedOrigin(APP_URL);
+const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-math-macros.png";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
@@ -31,12 +33,6 @@ const DOC_SOURCE = [
   "Frontmatter macro $\\DecRank$ and repo-wide macro $\\RepoMac$ must both expand.",
   "",
 ].join("\n");
-
-function serverRenderedOrigin(value) {
-  const url = new URL(value);
-  if ((url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "5173") url.port = "3030";
-  return url.toString();
-}
 
 function apiPath(p) {
   return new URL(`/api/v1/repos/${OWNER}/${WORKSPACE_SLUG}${p}`, WEB_URL).toString();

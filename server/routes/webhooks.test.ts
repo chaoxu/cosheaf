@@ -1,14 +1,19 @@
 import { createHmac } from "node:crypto";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Forgejo } from "../forgejo.js";
 import { SSEHub, type SSEEvent } from "../sse.js";
+import { _clearTreeCacheForTests, getCachedTree, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { webhooks } from "./webhooks.js";
 import { freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("webhook", { forgejoToken: "token" });
+
+afterEach(() => {
+  _clearTreeCacheForTests();
+});
 
 function freshDb(): Database.Database {
   const db = freshTestDb("cosheaf-webhook-");
@@ -55,6 +60,24 @@ function signedPush(body: string, delivery = "delivery-1"): RequestInit {
 }
 
 describe("forgejo webhooks", () => {
+  it("rejects signed JSON webhook payloads that are not objects", async () => {
+    const db = freshDb();
+    const forgejo = {
+      getRepo: vi.fn(async () => ({ id: 1, full_name: "owner/w" })),
+      listRepoTopics: vi.fn(async () => [] as string[]),
+    } as unknown as Forgejo;
+
+    const res = await appFor(db, forgejo).request(
+      "/api/v1/webhooks/forgejo",
+      signedPush("null", "json-null-1"),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "bad json" });
+    expect(forgejo.getRepo).not.toHaveBeenCalled();
+    expect(forgejo.listRepoTopics).not.toHaveBeenCalled();
+  });
+
   it("acks 200 + dedupes even when a per-path reindex fails (operator recovers via `cli workspace reindex`)", async () => {
     // We used to throw 500 here, which left the webhook_log row unwritten and
     // caused Forgejo to retry the delivery forever. Now we claim the dedupe
@@ -162,11 +185,73 @@ describe("forgejo webhooks", () => {
     expect((await fire("pull_request_approved", { pull_request: { number: 13 }, review: { type: "pull_request_review_approved" } }, "rev-1")).status).toBe(200);
     expect((await fire("pull_request_rejected", { pull_request: { number: 13 }, review: { type: "pull_request_review_rejected" } }, "rev-2")).status).toBe(200);
     expect((await fire("pull_request_comment", { pull_request: { number: 13 }, review: { type: "pull_request_review_comment" } }, "rev-3")).status).toBe(200);
+    expect((await fire("pull_request_approved", { pull_request: { number: "13.0" }, review: { type: "pull_request_review_approved" } }, "rev-bad-1")).status).toBe(200);
+    expect((await fire("pull_request_comment", { pull_request: { number: "1e2" }, review: { type: "pull_request_review_comment" } }, "rev-bad-2")).status).toBe(200);
 
     expect(events).toEqual([
       { type: "pull_reviewed", number: 13, state: "APPROVED" },
       { type: "pull_reviewed", number: 13, state: "REQUEST_CHANGES" },
       { type: "pull_commented", number: 13 },
+    ]);
+  });
+
+  it("does not publish pull SSE events for malformed webhook PR numbers", async () => {
+    const db = freshDb();
+    const hub = new SSEHub();
+    const events: SSEEvent[] = [];
+    hub.subscribe("owner/w", (e) => events.push(e));
+    const app = testApp(
+      db,
+      config,
+      (a) => {
+        a.use("*", (c, next) => {
+          c.set("sse", hub);
+          return next();
+        });
+        a.route("/api/v1/webhooks", webhooks);
+      },
+      withRepoDefaults({} as Forgejo),
+    );
+    const body = JSON.stringify({
+      action: "opened",
+      repository: { full_name: "owner/w" },
+      pull_request: { number: "12.0" },
+    });
+
+    const res = await app.request("/api/v1/webhooks/forgejo", signedForgejo(body, "pull_request", "pr-bad"));
+
+    expect(res.status).toBe(200);
+    expect(events).toEqual([]);
+  });
+
+  it("does not publish issue SSE events for malformed webhook issue numbers", async () => {
+    const db = freshDb();
+    const hub = new SSEHub();
+    const events: SSEEvent[] = [];
+    hub.subscribe("owner/w", (e) => events.push(e));
+    const app = testApp(
+      db,
+      config,
+      (a) => {
+        a.use("*", (c, next) => {
+          c.set("sse", hub);
+          return next();
+        });
+        a.route("/api/v1/webhooks", webhooks);
+      },
+      withRepoDefaults({} as Forgejo),
+    );
+    const fire = (event: string, payload: object, delivery: string) =>
+      app.request("/api/v1/webhooks/forgejo", signedForgejo(JSON.stringify({ repository: { full_name: "owner/w" }, ...payload }), event, delivery));
+
+    expect((await fire("issues", { action: "opened", issue: { number: 21 } }, "issue-1")).status).toBe(200);
+    expect((await fire("issue_comment", { action: "created", issue: { number: 21 } }, "issue-comment-1")).status).toBe(200);
+    expect((await fire("issues", { action: "opened", issue: { number: "21.0" } }, "issue-bad-1")).status).toBe(200);
+    expect((await fire("issue_comment", { action: "created", issue: { number: "2e1" } }, "issue-bad-2")).status).toBe(200);
+
+    expect(events).toEqual([
+      { type: "issue", number: 21, action: "opened" },
+      { type: "issue_comment", number: 21, action: "created" },
     ]);
   });
 
@@ -192,8 +277,12 @@ describe("forgejo webhooks", () => {
 
   it("acks and ignores deliveries for repos that don't exist on Forgejo", async () => {
     const db = freshDb();
+    const listRepoTopics = vi.fn(async () => {
+      throw new Error("topics should not be fetched for unknown repos");
+    });
     const forgejo = {
       getRepo: vi.fn(async () => null),
+      listRepoTopics,
       getRawFile: vi.fn(async () => "# Never\n"),
     } as unknown as Forgejo;
     const app = appFor(db, forgejo);
@@ -207,6 +296,7 @@ describe("forgejo webhooks", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ ok: true, ignored: "unknown_repo" });
     expect(db.prepare("SELECT count(*) AS c FROM webhook_log").get()).toEqual({ c: 1 });
+    expect(listRepoTopics).not.toHaveBeenCalled();
     expect(vi.mocked(forgejo.getRawFile)).not.toHaveBeenCalled();
     expect(db.prepare("SELECT count(*) AS c FROM doc_map").get()).toEqual({ c: 0 });
   });
@@ -236,6 +326,30 @@ describe("forgejo webhooks", () => {
         "SELECT cosheaf_id, forgejo_id, title FROM doc_map WHERE workspace_slug = 'owner/w'",
       ).get();
       expect(row).toMatchObject({ cosheaf_id: "foo-1", forgejo_id: "foo.md", title: "Foo" });
+    });
+
+    it("resolves backlinks between markdown files added in the same push", async () => {
+      const db = freshDb();
+      const fj = {
+        ...mockedForgejo({
+          "a.md": "---\nid: a\n---\n# A\n\n[B](b.md)\n",
+          "b.md": "---\nid: b\n---\n# B\n",
+        }),
+        listRepoTopics: vi.fn(async () => ["cosheaf-format-coflat"]),
+      } as unknown as Forgejo;
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/w" },
+        commits: [{ added: ["a.md", "b.md"] }],
+      });
+
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "multi-add-1"));
+
+      expect(res.status).toBe(200);
+      expect(
+        db.prepare("SELECT target_id FROM backlinks WHERE workspace_slug = 'owner/w' AND src_path = 'a.md'").get(),
+      ).toEqual({ target_id: "b" });
     });
 
     it("UPDATE: a push that modifies foo.md updates the existing row", async () => {
@@ -312,7 +426,23 @@ describe("forgejo webhooks", () => {
 
   it("removes sidecar rows on repository=deleted webhook", async () => {
     const db = freshDb();
-    const app = appFor(db, {} as Forgejo);
+    const hub = new SSEHub();
+    const events: SSEEvent[] = [];
+    hub.subscribe("owner/w", (e) => events.push(e));
+    const app = testApp(
+      db,
+      config,
+      (a) => {
+        a.use("*", (c, next) => {
+          c.set("sse", hub);
+          return next();
+        });
+        a.route("/api/v1/webhooks", webhooks);
+      },
+      withRepoDefaults({} as Forgejo),
+    );
+    setCachedTree("owner", "w", "main", [{ path: "page.md", type: "blob", sha: "tree-sha" }]);
+    setCachedTree("owner", "other", "main", [{ path: "keep.md", type: "blob", sha: "other-sha" }]);
     // Plant a row in each derived table so the cleanup is observable.
     db.prepare(
       "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -321,6 +451,9 @@ describe("forgejo webhooks", () => {
       "INSERT INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
     ).run("owner/w", "abc", "page.md", null, "external", 1);
     db.prepare("INSERT INTO page_tags (workspace_slug, cosheaf_id, tag) VALUES (?, ?, ?)").run("owner/w", "abc", "wip");
+    db.prepare(
+      "INSERT INTO issue_claims (id, workspace_slug, issue_number, runner_name, purpose, holder_username, created_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("claim-1", "owner/w", 3, "agent", "review", "alice", 1, 1, Date.now() + 60_000);
 
     const body = JSON.stringify({
       action: "deleted",
@@ -336,6 +469,38 @@ describe("forgejo webhooks", () => {
     expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
     expect(db.prepare("SELECT count(*) AS c FROM backlinks WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
     expect(db.prepare("SELECT count(*) AS c FROM page_tags WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM issue_claims WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+    expect(getCachedTree("owner", "w", "main")).toBeUndefined();
+    expect(getCachedTree("owner", "other", "main")).toEqual([{ path: "keep.md", type: "blob", sha: "other-sha" }]);
+    expect(events).toEqual([{ type: "workspace_deleted" }]);
+  });
+
+  it("removes sidecar rows on repository=deleted even after Forgejo no longer has the repo", async () => {
+    const db = freshDb();
+    const forgejo = { getRepo: vi.fn(async () => null) } as unknown as Forgejo;
+    const app = appFor(db, forgejo);
+    db.prepare(
+      "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+    ).run("abc", "owner/w", "page.md", "Page", Date.now());
+    db.prepare("INSERT INTO page_tags (workspace_slug, cosheaf_id, tag) VALUES (?, ?, ?)").run("owner/w", "abc", "wip");
+    db.prepare(
+      "INSERT INTO issue_claims (id, workspace_slug, issue_number, runner_name, purpose, holder_username, created_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("claim-missing-repo", "owner/w", 4, "agent", "review", "alice", 1, 1, Date.now() + 60_000);
+
+    const body = JSON.stringify({
+      action: "deleted",
+      repository: { full_name: "owner/w" },
+    });
+    const res = await app.request(
+      "/api/v1/webhooks/forgejo",
+      signedForgejo(body, "repository", "del-missing-repo-1"),
+    );
+
+    expect(res.status).toBe(200);
+    expect(vi.mocked(forgejo.getRepo)).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM page_tags WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM issue_claims WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
   });
 
   it("rejects deliveries that arrive with only x-gitea-* headers", async () => {

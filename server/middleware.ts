@@ -32,7 +32,7 @@ export function invalidateBearerCache(token: string): void {
   BEARER_CACHE.delete(token);
 }
 
-function bearerToken(authHeader?: string): string | null {
+export function bearerToken(authHeader?: string): string | null {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice("Bearer ".length).trim();
   return token || null;
@@ -203,6 +203,30 @@ const TITLE_CACHE = new TTLCache<string, string>(FORMAT_TTL_MS);
 
 export function _resetTitleCacheForTests(): void {
   TITLE_CACHE.clear();
+}
+
+export function _resetMiddlewareCachesForTests(): void {
+  _resetBearerAuthCacheForTests();
+  _resetPermCacheForTests();
+  _resetFormatCacheForTests();
+  _resetTitleCacheForTests();
+}
+
+export function _seedTitleCacheForTests(owner: string, repo: string, title: string): void {
+  TITLE_CACHE.set(`${owner}/${repo}`, title, 60_000);
+}
+
+export function invalidateWorkspaceTitleCache(owner: string, repo: string): void {
+  TITLE_CACHE.delete(`${owner}/${repo}`);
+}
+
+export function invalidateWorkspaceCaches(owner: string, repo: string): void {
+  const rolePrefix = `${owner}/${repo}/`;
+  for (const key of [...PERM_CACHE.keys()]) {
+    if (key.startsWith(rolePrefix)) PERM_CACHE.delete(key);
+  }
+  FORMAT_CACHE.delete(`${owner}/${repo}`);
+  invalidateWorkspaceTitleCache(owner, repo);
 }
 
 export async function resolveWorkspaceTitle(fj: Forgejo, owner: string, repo: string): Promise<string> {

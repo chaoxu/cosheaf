@@ -105,7 +105,7 @@ export function searchWorkspacePages(
   q: string,
   limit = 25,
 ): PageSearchResult[] {
-  const bounded = Number.isFinite(limit) ? Math.max(1, Math.min(MAX_LIMIT, limit)) : 25;
+  const bounded = Number.isInteger(limit) ? Math.max(1, Math.min(MAX_LIMIT, limit)) : 25;
   const terms = searchTerms(q);
   const ftsQuery = buildFtsQuery(q);
   if (!ftsQuery) return [];

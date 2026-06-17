@@ -55,4 +55,10 @@ describe("searchWorkspacePages", () => {
     for (let i = 0; i < 10; i++) seedPage(db, "owner/w", `p${i}`, `p${i}.md`, `Page ${i}`, "shared keyword body");
     expect(searchWorkspacePages(db, "owner/w", "keyword", 3)).toHaveLength(3);
   });
+
+  it("defaults non-integer limits before querying SQLite", () => {
+    db = freshTestDb("cosheaf-search-");
+    for (let i = 0; i < 30; i++) seedPage(db, "owner/w", `p${i}`, `p${i}.md`, `Page ${i}`, "shared keyword body");
+    expect(searchWorkspacePages(db, "owner/w", "keyword", 1.5)).toHaveLength(25);
+  });
 });

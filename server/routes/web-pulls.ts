@@ -3,7 +3,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
-import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment, ForgejoUser } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -52,6 +52,7 @@ import {
   labelSelectionPatch,
   labelsPanel,
   listRowSide,
+  milestoneFormValue,
   pullEditPage,
   pullStateForm,
   renderPullTimeline,
@@ -61,6 +62,15 @@ import {
   threadLayout,
   threadParticipantsBar,
 } from "./web-thread.js";
+
+async function pullCommentFor(
+  ctx: WebCtx,
+  pullNumber: number,
+  commentId: number,
+): Promise<ForgejoPullReviewComment | null> {
+  const comments = await ctx.fj.listPullComments(ctx.owner, ctx.repo, pullNumber);
+  return comments.find((comment) => comment.id === commentId) ?? null;
+}
 
 export function registerPullRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
@@ -163,14 +173,14 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const [reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
-    ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number).catch(() => []),
-    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number).catch(() => []),
-    ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number).catch(() => []),
-    ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number).catch(() => []),
+    ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number),
+    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number),
+    ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number),
+    ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
     ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
-  const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline ?? [], commits);
+  const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline, commits);
   // The participants bar must reflect the conversation the timeline shows —
   // submitted reviews + inline review comments — not just the line comments, so
   // its count, "last reply", and chips (incl. reviewers) match what's rendered
@@ -231,8 +241,8 @@ web.get("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
   const [allLabels, milestones] = await Promise.all([
-    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
-    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
+    ctx.fj.listLabels(ctx.owner, ctx.repo),
+    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "pulls", `Edit #${pull.number} - ${ctx.repo}`, pullEditPage(ctx, pull, allLabels, milestones)),
@@ -249,13 +259,13 @@ web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => 
   if (!title || body === null) return badRequestPage(ctx.user, "Pull request title and description are required.");
   const labelPatch = await labelSelectionPatch(ctx, form, pull.labels ?? []);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
-  const milestoneRaw = stringField(form.milestone);
-  const milestone = milestoneRaw != null ? (positiveInt(milestoneRaw) ?? 0) : undefined;
+  const milestonePatch = milestoneFormValue(form.milestone);
+  if (!milestonePatch.ok) return badRequestPage(ctx.user, milestonePatch.message);
   await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, {
     title,
     body,
     labels: labelPatch.labels,
-    ...(milestone !== undefined ? { milestone } : {}),
+    ...(milestonePatch.milestone !== undefined ? { milestone: milestonePatch.milestone } : {}),
   });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -265,7 +275,7 @@ web.post("/:owner/:repo/pulls/:number/labels", webRouteForWrite(async (c, ctx) =
   // label ids via Forgejo and return to the PR thread.
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody(), pull.labels ?? []);
+  const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), pull.labels ?? []);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, pull.number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "edited" });
@@ -312,9 +322,9 @@ web.post("/:owner/:repo/pulls/:number/reviews", webRouteForWrite(async (c, ctx) 
   const form = await c.req.parseBody();
   const event = stringField(form.event);
   const body = stringField(form.body) ?? "";
-  if (event === "APPROVED" || event === "REQUEST_CHANGES" || event === "COMMENT") {
-    await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
-  }
+  if (event !== "APPROVED" && event !== "REQUEST_CHANGES" && event !== "COMMENT")
+    return badRequestPage(ctx.user, "Review event is required.");
+  await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -325,6 +335,8 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRouteForWrite(async
   const body = stringField((await c.req.parseBody()).body);
   if (!pull || !id) return notFoundPage(ctx.user, "Comment not found");
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
+  const comment = await pullCommentFor(ctx, pull.number, id);
+  if (!comment) return notFoundPage(ctx.user, "Comment not found");
   await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -334,6 +346,9 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRouteForWrite(asy
   const id = positiveInt(c.req.param("id"));
   const reviewId = positiveInt(stringField((await c.req.parseBody()).review_id) ?? undefined);
   if (!pull || !id || !reviewId) return notFoundPage(ctx.user, "Comment not found");
+  const comment = await pullCommentFor(ctx, pull.number, id);
+  if (!comment) return notFoundPage(ctx.user, "Comment not found");
+  if (comment.pull_request_review_id !== reviewId) return badRequestPage(ctx.user, "Review id does not match comment.");
   await ctx.fj.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -417,7 +432,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const [files, allComments] = await Promise.all([
     pullFiles(ctx, pull.number),
-    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number).catch(() => []),
+    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number),
   ]);
   const selected = c.req.query("file") ?? files[0]?.path ?? "";
   const file = files.find((f) => f.path === selected) ?? files[0] ?? null;

@@ -1,4 +1,9 @@
 import { defineConfig } from "@playwright/test";
+import { defaultWebUrl, loadDotenvDev } from "./scripts/lib/env-dev.mjs";
+
+loadDotenvDev();
+
+const webBase = defaultWebUrl();
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -9,7 +14,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 1,
   reporter: process.env.CI ? "html" : "list",
   use: {
-    baseURL: "http://localhost:3030",
+    baseURL: webBase,
     headless: true,
     viewport: { width: 1400, height: 900 },
     trace: "retain-on-failure",

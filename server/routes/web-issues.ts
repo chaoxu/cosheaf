@@ -36,12 +36,18 @@ import {
   labelSelectionPatch,
   labelsPanel,
   listRowSide,
+  milestoneFormValue,
   rejectChatIssueMutation,
   renderIssueTimeline,
   threadDescription,
   threadLayout,
   threadParticipantsBar,
 } from "./web-thread.js";
+
+async function rejectMissingIssueComment(ctx: WebCtx, number: number, id: number): Promise<Response | null> {
+  const comments = await ctx.fj.listIssueComments(ctx.owner, ctx.repo, number);
+  return comments.some((comment) => comment.id === id) ? null : notFoundPage(ctx.user, "Comment not found");
+}
 
 export function registerIssueRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
@@ -87,6 +93,12 @@ web.post("/:owner/:repo/issues/new", webRouteForWrite(async (c, ctx) => {
   const body = textField(form.body) ?? "";
   const labelIds = positiveIntFields(form.labels);
   const labels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
+  if (labelIds === null) {
+    return htmlResponse(
+      repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels, { title: title ?? "", body, labelIds: [], error: "Labels must be positive integer ids." })),
+      400,
+    );
+  }
   if (!title) {
     return htmlResponse(
       repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels, { title: "", body, labelIds, error: "Issue title is required." })),
@@ -208,13 +220,13 @@ web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) =>
   const assignees = stringField(form.assignees_present) ? stringFields(form.assignees) : undefined;
   // Milestone select submits 0 for "no milestone", which Forgejo treats as
   // clear; only include it in the patch when the field was actually present.
-  const milestoneRaw = stringField(form.milestone);
-  const milestone = milestoneRaw != null ? (positiveInt(milestoneRaw) ?? 0) : undefined;
+  const milestonePatch = milestoneFormValue(form.milestone);
+  if (!milestonePatch.ok) return badRequestPage(ctx.user, milestonePatch.message);
   await ctx.fj.editIssue(ctx.owner, ctx.repo, number, {
     title,
     body,
     ...(assignees ? { assignees } : {}),
-    ...(milestone !== undefined ? { milestone } : {}),
+    ...(milestonePatch.milestone !== undefined ? { milestone: milestonePatch.milestone } : {}),
   });
   if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
@@ -230,7 +242,7 @@ web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) 
   if (immutable) return immutable;
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue) return notFoundPage(ctx.user, "Issue not found");
-  const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody(), issue.labels);
+  const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), issue.labels);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
@@ -239,13 +251,13 @@ web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) 
 
 web.post("/:owner/:repo/issues/:number/comments", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
-  if (number) {
-    const immutable = await rejectChatIssueMutation(ctx, number);
-    if (immutable) return immutable;
-  }
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  const immutable = await rejectChatIssueMutation(ctx, number);
+  if (immutable) return immutable;
   const body = stringField((await c.req.parseBody()).body);
-  if (number && body) await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
-  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number ?? ""}`));
+  if (!body) return badRequestPage(ctx.user, "Comment body is required.");
+  await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
 web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRouteForWrite(async (c, ctx) => {
@@ -256,6 +268,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRouteForWrite(asyn
   const immutable = await rejectChatIssueMutation(ctx, number);
   if (immutable) return immutable;
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
+  const missing = await rejectMissingIssueComment(ctx, number, id);
+  if (missing) return missing;
   await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
@@ -266,6 +280,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/delete", webRouteForWrite(as
   if (!number || !id) return notFoundPage(ctx.user, "Comment not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
   if (immutable) return immutable;
+  const missing = await rejectMissingIssueComment(ctx, number, id);
+  if (missing) return missing;
   await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));

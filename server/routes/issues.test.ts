@@ -1,11 +1,19 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { _resetBearerAuthCacheForTests, _resetPermCacheForTests } from "../middleware.js";
+import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { issues } from "./issues.js";
-import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import {
+  fakeForgejo,
+  freshTestDb,
+  responseEmpty as empty,
+  responseOk as ok,
+  seedTestWorkspace,
+  testApp,
+  testConfig,
+} from "./test-fixtures.js";
 
 const config = testConfig("issues");
 
@@ -69,14 +77,35 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  _resetPermCacheForTests();
-  _resetBearerAuthCacheForTests();
+  _resetMiddlewareCachesForTests();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("issues routes", () => {
+  it("rejects malformed issue creation payloads before contacting Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    for (const payload of [
+      { title: { value: "bad" } },
+      { title: "Valid", body: { text: "lost" } },
+      { title: "Valid", labels: ["bug"] },
+      { title: "Valid", labels: [0] },
+    ]) {
+      fetchMock.mockClear();
+      const res = await appFor(db).request("/api/v1/repos/owner/w/issues", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      expect(res.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
   it("serves issue comments through Cosheaf DTOs", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
@@ -109,10 +138,44 @@ describe("issues routes", () => {
     });
   });
 
+  it("does not edit or delete comments outside the requested issue", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok([{ id: 456, body: "other", user: { login: "alice" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }]));
+    const edit = await appFor(db).request("/api/v1/repos/owner/w/issues/7/comments/123", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ body: "updated" }),
+    });
+
+    expect(edit.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/comments?page=1&limit=50");
+
+    fetchMock.mockClear();
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok([{ id: 456, body: "other", user: { login: "alice" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }]));
+    const del = await appFor(db).request("/api/v1/repos/owner/w/issues/7/comments/123", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(del.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/comments?page=1&limit=50");
+  });
+
   it("updates issue state through a typed route", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem", { state: "closed" }), labels: [], comments: 0 }));
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem", { state: "closed" }), labels: [], comments: 0 }));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/state", {
       method: "PATCH",
@@ -122,14 +185,18 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ state: "closed" });
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ state: "closed" });
     await expect(res.json()).resolves.toEqual({ ok: true, state: "closed" });
   });
 
   it("PATCH /issues/:number edits the Forgejo issue title and body", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Retitled"), body: "Updated" }));
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Retitled"), body: "Updated" }));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7", {
       method: "PATCH",
@@ -139,11 +206,150 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       title: "Retitled",
       body: "Updated",
     });
     await expect(res.json()).resolves.toMatchObject({ title: "Retitled", body: "Updated" });
+  });
+
+  it("does not mutate pull requests through typed issue edit routes", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "PR", { isPr: true })));
+    const state = await appFor(db).request("/api/v1/repos/owner/w/issues/7/state", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ state: "closed" }),
+    });
+
+    expect(state.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "PR", { isPr: true })));
+    const edit = await appFor(db).request("/api/v1/repos/owner/w/issues/7", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ title: "Retitled" }),
+    });
+
+    expect(edit.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+  });
+
+  it("does not mutate pull requests through typed issue-only routes", async () => {
+    const cases: Array<{ method: string; path: string; body?: unknown; extraReads?: (forge: Hono) => void }> = [
+      { method: "POST", path: "/api/v1/repos/owner/w/issues/7/comments", body: { body: "note" } },
+      { method: "PATCH", path: "/api/v1/repos/owner/w/issues/7/comments/123", body: { body: "note" } },
+      { method: "DELETE", path: "/api/v1/repos/owner/w/issues/7/comments/123" },
+      {
+        method: "PUT",
+        path: "/api/v1/repos/owner/w/issues/7/labels",
+        body: { labels: [1] },
+        extraReads: (forge) => forge.get("/api/v1/repos/owner/w/labels", () => Response.json([{ id: 1, name: "bug", color: "ff0000" }])),
+      },
+      { method: "POST", path: "/api/v1/repos/owner/w/issues/7/pin" },
+      { method: "DELETE", path: "/api/v1/repos/owner/w/issues/7/pin" },
+      { method: "POST", path: "/api/v1/repos/owner/w/issues/7/dependencies", body: { index: 9 } },
+      { method: "DELETE", path: "/api/v1/repos/owner/w/issues/7/dependencies", body: { index: 9 } },
+    ];
+
+    for (const testCase of cases) {
+      const db = freshDb();
+      const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+      let mutated = false;
+      fetchMock.mockReset();
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        testCase.extraReads?.(forge);
+        forge.get("/api/v1/repos/owner/w/issues/7", () => Response.json(forgejoIssue(7, "PR", { isPr: true })));
+        forge.post("/api/v1/repos/owner/w/issues/7/comments", () => {
+          mutated = true;
+          return Response.json({ id: 1 });
+        });
+        forge.patch("/api/v1/repos/owner/w/issues/comments/123", () => {
+          mutated = true;
+          return Response.json({ id: 123 });
+        });
+        forge.delete("/api/v1/repos/owner/w/issues/comments/123", () => {
+          mutated = true;
+          return new Response(null, { status: 204 });
+        });
+        forge.put("/api/v1/repos/owner/w/issues/7/labels", () => {
+          mutated = true;
+          return Response.json([]);
+        });
+        forge.post("/api/v1/repos/owner/w/issues/7/pin", () => {
+          mutated = true;
+          return new Response(null, { status: 204 });
+        });
+        forge.delete("/api/v1/repos/owner/w/issues/7/pin", () => {
+          mutated = true;
+          return new Response(null, { status: 204 });
+        });
+        forge.post("/api/v1/repos/owner/w/issues/7/dependencies", () => {
+          mutated = true;
+          return Response.json(forgejoIssue(7, "PR", { isPr: true }));
+        });
+        forge.delete("/api/v1/repos/owner/w/issues/7/dependencies", () => {
+          mutated = true;
+          return Response.json(forgejoIssue(7, "PR", { isPr: true }));
+        });
+      }));
+
+      const res = await appFor(db).request(testCase.path, {
+        method: testCase.method,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: testCase.body === undefined ? undefined : JSON.stringify(testCase.body),
+      });
+
+      expect(res.status, `${testCase.method} ${testCase.path}`).toBe(404);
+      expect(mutated, `${testCase.method} ${testCase.path}`).toBe(false);
+    }
+  });
+
+  it("does not create issue claims for pull request numbers", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "PR", { isPr: true })));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/claim", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ runner_name: "agent", purpose: "triage" }),
+    });
+
+    expect(res.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(db.prepare("SELECT count(*) AS c FROM issue_claims WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+  });
+
+  it("does not heartbeat issue claims when the target number is a pull request", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    db.prepare(`
+      INSERT INTO issue_claims (
+        id, workspace_slug, issue_number, runner_name, purpose, holder_username,
+        created_at, heartbeat_at, expires_at
+      ) VALUES ('claim-1', 'owner/w', 7, 'agent', 'triage', 'alice', 1, 2, 9999999999999)
+    `).run();
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "PR", { isPr: true })));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/claim/claim-1/heartbeat", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ ttl_seconds: 30 }),
+    });
+
+    expect(res.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(db.prepare("SELECT heartbeat_at FROM issue_claims WHERE id = 'claim-1'").get()).toEqual({ heartbeat_at: 2 });
   });
 
   it("serves labels, milestones, and markdown rendering without backend-shaped paths", async () => {
@@ -242,7 +448,9 @@ describe("issues routes", () => {
   it("fills Forgejo owner/repo when adding an issue dependency", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "POST",
@@ -252,9 +460,13 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(201);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7",
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
       "http://forgejo.test/api/v1/repos/owner/w/issues/7/dependencies",
     );
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       index: 9,
       owner: "owner",
       repo: "w",
@@ -267,7 +479,9 @@ describe("issues routes", () => {
   it("fills Forgejo owner/repo when removing an issue dependency", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "DELETE",
@@ -277,10 +491,14 @@ describe("issues routes", () => {
 
     expect(res.status).toBe(200);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://forgejo.test/api/v1/repos/owner/w/issues/7",
+    );
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
       "http://forgejo.test/api/v1/repos/owner/w/issues/7/dependencies",
     );
-    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+    expect(fetchMock.mock.calls[1][1]?.method).toBe("DELETE");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       index: 9,
       owner: "owner",
       repo: "w",
@@ -321,8 +539,8 @@ describe("issues routes", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock
-      .mockResolvedValueOnce(ok([{ id: 3, name: "old", color: "888888", is_archived: true }]))
-      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok([{ id: 3, name: "old", color: "888888", is_archived: true }]));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
       method: "PUT",
@@ -338,11 +556,11 @@ describe("issues routes", () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
       .mockResolvedValueOnce(ok([
         { id: 1, name: "kind/bug", color: "ff0000", exclusive: true },
         { id: 2, name: "kind/task", color: "00ff00", exclusive: true },
-      ]))
-      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+      ]));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
       method: "PUT",
@@ -364,8 +582,8 @@ describe("issues routes", () => {
       { id: 2, name: "task", color: "00ff00", exclusive: true },
     ];
     fetchMock
-      .mockResolvedValueOnce(ok(labels))
       .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(labels))
       .mockResolvedValueOnce(ok(labels));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
@@ -388,8 +606,8 @@ describe("issues routes", () => {
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     const archived = { id: 3, name: "old", color: "888888", is_archived: true };
     fetchMock
-      .mockResolvedValueOnce(ok([archived]))
       .mockResolvedValueOnce(ok({ ...forgejoIssue(7, "Theorem"), labels: [archived] }))
+      .mockResolvedValueOnce(ok([archived]))
       .mockResolvedValueOnce(ok([archived]));
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/labels", {
@@ -419,6 +637,9 @@ describe("issues routes", () => {
     await app.request("/api/v1/repos/owner/w/activities?limit=abc", {
       headers: { authorization: `Bearer ${token}` },
     });
+    await app.request("/api/v1/repos/owner/w/activities?limit=1.5", {
+      headers: { authorization: `Bearer ${token}` },
+    });
     await app.request("/api/v1/repos/owner/w/activities?limit=999", {
       headers: { authorization: `Bearer ${token}` },
     });
@@ -427,7 +648,7 @@ describe("issues routes", () => {
       const url = new URL(String(call[0]));
       return url.searchParams.get("limit");
     });
-    expect(limits).toEqual(["1", "50", "100"]);
+    expect(limits).toEqual(["1", "50", "50", "100"]);
   });
 
   it("collapses adjacent edit-branch commit activity", async () => {
@@ -475,6 +696,11 @@ describe("issues routes", () => {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 9.5 }),
     });
+    const booleanBody = await app.request("/api/v1/repos/owner/w/issues/7/dependencies", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: true }),
+    });
     const self = await app.request("/api/v1/repos/owner/w/issues/7/dependencies", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -485,9 +711,19 @@ describe("issues routes", () => {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({ index: 9 }),
     });
+    const decimalStringParam = await app.request("/api/v1/repos/owner/w/issues/7.0/dependencies", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 9 }),
+    });
 
     expect(badBody.status).toBe(400);
     expect(await badBody.json()).toEqual({
+      error: "dependency issue number required",
+      code: "validation",
+    });
+    expect(booleanBody.status).toBe(400);
+    expect(await booleanBody.json()).toEqual({
       error: "dependency issue number required",
       code: "validation",
     });
@@ -497,6 +733,7 @@ describe("issues routes", () => {
       code: "validation",
     });
     expect(badParam.status).toBe(400);
+    expect(decimalStringParam.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -527,6 +764,19 @@ describe("issues routes", () => {
       body: JSON.stringify({ color: "nothex" }),
     });
     expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty label PATCH payloads before reaching Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const res = await appFor(db).request("/api/v1/repos/owner/w/labels/5", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ exclusive: "yes" }),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "label field required" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -575,6 +825,19 @@ describe("issues routes", () => {
     await expect(res.json()).resolves.toMatchObject({ id: 3, state: "closed" });
   });
 
+  it("rejects empty milestone PATCH payloads before reaching Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const res = await appFor(db).request("/api/v1/repos/owner/w/milestones/3", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ state: "done" }),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ error: "milestone field required" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("deletes a milestone through a typed DELETE route", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
@@ -588,6 +851,58 @@ describe("issues routes", () => {
     expect(res.status).toBe(200);
     expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
     await expect(res.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("sets and clears an issue milestone through the typed issue route", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")));
+
+    const set = await appFor(db).request("/api/v1/repos/owner/w/issues/7/milestone", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ id: 3 }),
+    });
+    const clear = await appFor(db).request("/api/v1/repos/owner/w/issues/7/milestone", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ id: null }),
+    });
+
+    expect(set.status).toBe(200);
+    expect(clear.status).toBe(200);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ milestone: 3 });
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({ milestone: 0 });
+  });
+
+  it("rejects PR numbers and backend sentinel ids on the typed issue milestone route", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+    const badId = await appFor(db).request("/api/v1/repos/owner/w/issues/7/milestone", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ id: 0 }),
+    });
+    expect(badId.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(ok(forgejoIssue(7, "PR", { isPr: true })));
+    const pr = await appFor(db).request("/api/v1/repos/owner/w/issues/7/milestone", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ id: 3 }),
+    });
+
+    expect(pr.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
   });
 
   it("rejects label/milestone mutations from a read-only user", async () => {

@@ -8,9 +8,11 @@ import { deletePage, indexPage } from "../indexer.js";
 import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
 import { notificationChannel, parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
-import { documentFormatFromTopics } from "../../shared/document-format.js";
+import { documentFormatFromTopics, type DocumentFormatId } from "../../shared/document-format.js";
+import { invalidateWorkspaceCaches } from "../middleware.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { ForgejoIssue } from "../forgejo.js";
+import { parsePositiveIntId } from "./query-params.js";
 import { bad, unauthorized } from "./responses.js";
 
 export const webhooks = new Hono<AppEnv>();
@@ -42,7 +44,6 @@ async function serializeWorkspace<T>(slug: string, work: () => Promise<T>): Prom
   }
 }
 
-
 webhooks.post("/forgejo", async (c) => {
   const config = c.get("config");
   const raw = await c.req.text();
@@ -67,12 +68,16 @@ webhooks.post("/forgejo", async (c) => {
   const db = c.get("db");
   const exists = db.prepare("SELECT 1 FROM webhook_log WHERE delivery_id = ?").get(deliveryId) as unknown;
   if (exists) return c.json({ ok: true, dedup: true });
-  let payload: Record<string, unknown>;
+  let parsedPayload: unknown;
   try {
-    payload = JSON.parse(raw) as Record<string, unknown>;
+    parsedPayload = JSON.parse(raw);
   } catch (_err) {
     return c.json(...bad("bad json"));
   }
+  if (!parsedPayload || typeof parsedPayload !== "object" || Array.isArray(parsedPayload)) {
+    return c.json(...bad("bad json"));
+  }
+  const payload = parsedPayload as Record<string, unknown>;
   // Webhook identity is the Forgejo `owner/repo` full name — the same string
   // the sidecar and SSE channels key off. Any owner is a valid tenant.
   const repoFullName = (payload.repository as { full_name?: string } | undefined)?.full_name ?? "";
@@ -88,22 +93,43 @@ webhooks.post("/forgejo", async (c) => {
   const fj = c.get("fjAdmin");
   const sse = c.get("sse");
 
+  const ws: { slug: string; defaultMdFormat?: DocumentFormatId } = { slug: workspaceSlug(owner, repoName) };
+
+  // Repository deletion events arrive after Forgejo has removed the repo, so
+  // they must not go through the existence check below. The event itself is the
+  // authoritative signal to wipe Cosheaf's rebuildable sidecar rows.
+  if (event === "repository" && String(payload.action ?? "") === "deleted") {
+    let deduped = false;
+    await serializeWorkspace(ws.slug, async () => {
+      const claim = db
+        .prepare(
+          "INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)",
+        )
+        .run(deliveryId, Date.now(), event);
+      if (claim.changes === 0) {
+        deduped = true;
+        return;
+      }
+      deleteSidecarForWorkspace(db, ws.slug);
+      invalidateRepoTrees(owner, repoName);
+      invalidateWorkspaceCaches(owner, repoName);
+      sse.publish(ws.slug, { type: "workspace_deleted" });
+    });
+    return c.json({ ok: true, ...(deduped ? { dedup: true } : {}) });
+  }
+
   // The repo must exist on our Forgejo; otherwise it's a webhook from a
-  // foreign target. Topics are only needed for push (to drive indexer
-  // format selection); fetch them in parallel with the existence check
-  // when we'll use them, otherwise skip the round-trip.
-  const needsFormat = event === "push";
-  const [repo, formatId] = await Promise.all([
-    fj.getRepo(owner, repoName),
-    needsFormat ? fj.listRepoTopics(owner, repoName).then(documentFormatFromTopics) : Promise.resolve(undefined),
-  ]);
+  // foreign target. Check existence before topic lookup: for a deleted/unknown
+  // repo, topics 404 and would otherwise bypass the intended ack path.
+  const repo = await fj.getRepo(owner, repoName);
   if (!repo) {
     db.prepare("INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)").run(
       deliveryId, Date.now(), event,
     );
     return c.json({ ok: true, ignored: "unknown_repo" });
   }
-  const ws = { slug: workspaceSlug(owner, repoName), defaultMdFormat: formatId };
+  const formatId = event === "push" ? await fj.listRepoTopics(owner, repoName).then(documentFormatFromTopics) : undefined;
+  ws.defaultMdFormat = formatId;
 
   let deduped = false;
   await serializeWorkspace(ws.slug, async () => {
@@ -160,17 +186,31 @@ webhooks.post("/forgejo", async (c) => {
           ),
         );
         const failures: string[] = [];
+        const indexed: Array<{ path: string; body: string }> = [];
         for (const r of results) {
           if (r.error) {
             failures.push(`${r.path}: ${r.error}`);
             continue;
           }
+          indexed.push({ path: r.path, body: r.body });
           indexPage(db, {
             workspaceSlug: ws.slug,
             filePath: r.path,
             bodyText: r.body,
             formatId: ws.defaultMdFormat,
           });
+        }
+        if (indexed.length > 1) {
+          // First pass makes all page ids/xref targets visible; the second pass
+          // resolves same-push links without depending on Forgejo's path order.
+          for (const r of indexed) {
+            indexPage(db, {
+              workspaceSlug: ws.slug,
+              filePath: r.path,
+              bodyText: r.body,
+              formatId: ws.defaultMdFormat,
+            });
+          }
         }
         if (failures.length > 0) {
           // Don't throw — that would unwind the dedupe row and provoke a Forgejo
@@ -185,9 +225,9 @@ webhooks.post("/forgejo", async (c) => {
       // PR state lives on Forgejo; we only ping clients to refetch.
       const pr = payload.pull_request as Record<string, unknown> | undefined;
       if (pr) {
-        const number = pr.number as number;
+        const number = parsePositiveIntId(pr.number);
         const action = String(payload.action ?? "");
-        sse.publish(ws.slug, { type: "pull", number, action });
+        if (number !== null) sse.publish(ws.slug, { type: "pull", number, action });
       }
     } else if (
       event === "pull_request_approved" ||
@@ -201,14 +241,14 @@ webhooks.post("/forgejo", async (c) => {
       // to the pull_reviewed SSE so open PR views can refetch.
       const pr = payload.pull_request as Record<string, unknown> | undefined;
       const review = payload.review as Record<string, unknown> | undefined;
-      const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
+      const number = parsePositiveIntId(pr?.number);
       const state =
         event === "pull_request_approved"
           ? "APPROVED"
           : event === "pull_request_rejected"
             ? "REQUEST_CHANGES"
             : String(review?.state ?? review?.type ?? "");
-      if (Number.isFinite(number) && state) {
+      if (number !== null && state) {
         sse.publish(ws.slug, { type: "pull_reviewed", number, state });
       }
     } else if (event === "pull_request_comment") {
@@ -216,33 +256,26 @@ webhooks.post("/forgejo", async (c) => {
       // payload review.type `pull_request_review_comment`). Ping open PR views to
       // refetch the comments.
       const pr = payload.pull_request as Record<string, unknown> | undefined;
-      const number = typeof pr?.number === "number" ? pr.number : Number(pr?.number);
-      if (Number.isFinite(number)) {
+      const number = parsePositiveIntId(pr?.number);
+      if (number !== null) {
         sse.publish(ws.slug, { type: "pull_commented", number });
       }
     } else if (event === "issues") {
       const issue = payload.issue as ForgejoIssue | undefined;
       const action = String(payload.action ?? "");
-      if (issue && !issue.pull_request) {
-        sse.publish(ws.slug, { type: "issue", number: issue.number, action });
+      const number = parsePositiveIntId(issue?.number);
+      if (issue && !issue.pull_request && number !== null) {
+        sse.publish(ws.slug, { type: "issue", number, action });
       }
     } else if (event === "issue_comment") {
       const issue = payload.issue as ForgejoIssue | undefined;
-      if (issue && !issue.pull_request) {
+      const number = parsePositiveIntId(issue?.number);
+      if (issue && !issue.pull_request && number !== null) {
         sse.publish(ws.slug, {
           type: "issue_comment",
-          number: issue.number,
+          number,
           action: String(payload.action ?? ""),
         });
-      }
-    } else if (event === "repository") {
-      // The repo this workspace is bound to was deleted on Forgejo (admin
-      // UI / tea / API). Wipe the sidecar rows so cosheaf stops surfacing
-      // a ghost workspace. The Forgejo side is already gone; there's
-      // nothing to roll back.
-      if (String(payload.action ?? "") === "deleted") {
-        deleteSidecarForWorkspace(db, ws.slug);
-        sse.publish(ws.slug, { type: "workspace_deleted" });
       }
     }
     // Home inbox liveness (#116): activity Forgejo turns into notifications

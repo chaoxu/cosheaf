@@ -609,7 +609,7 @@ export class Forgejo {
       sort: options.sort ?? "recentupdate",
       milestone: options.milestone,
       poster: options.poster,
-      labels: options.labels,
+      labels: options.labels?.join(","),
     });
   }
 
@@ -1054,6 +1054,7 @@ export class Forgejo {
   async markRepoNotificationsRead(owner: string, repo: string): Promise<void> {
     await this.req(this.repoPath(owner, repo, `notifications`), {
       method: "PUT",
+      query: { "status-types": "unread", "to-status": "read" },
       expectEmpty: true,
     });
   }

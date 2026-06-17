@@ -31,16 +31,22 @@ export interface Config {
   forgejoAdminToken: string;
   webhookSecret: string;
   webhookUrl: string;
+  // Canonical browser origin for CSRF checks, secure-cookie detection, and
+  // self-referential clone URLs. Set COSHEAF_PUBLIC_ORIGIN behind a reverse
+  // proxy so these browser decisions do not depend on client-controlled
+  // Forwarded headers.
+  publicOrigin: string | null;
   // Web self-service signup. false (default) makes GET/POST /register 404;
   // true enables anonymous account creation through the admin token. Set via
   // COSHEAF_REGISTRATION_MODE=open. This is the only request-path consumer of
   // forgejoAdminToken, so it stays off unless explicitly enabled.
   registrationOpen: boolean;
-  // Number of trusted reverse-proxy hops in front of cosheaf, used to pick the
-  // real client IP out of X-Forwarded-For for the registration rate limiter.
-  // 0 (default) trusts no proxy (dev / direct) and the limiter falls back to a
-  // single shared bucket; behind the lab's single Caddy set
-  // COSHEAF_TRUSTED_PROXY_HOPS=1 so the limiter keys on the real client.
+  // Number of trusted reverse-proxy hops in front of cosheaf. Used to pick the
+  // real client IP out of X-Forwarded-For for registration rate limiting and to
+  // trust the matching X-Forwarded-Proto/Host hop for CSRF origin checks,
+  // secure-cookie detection, and clone URLs. 0 (default) trusts no proxy
+  // (dev / direct) and the limiter falls back to a single shared bucket; behind
+  // the lab's single Caddy set COSHEAF_TRUSTED_PROXY_HOPS=1.
   trustedProxyHops: number;
   // Coverify chat-reply shell-out. The bot account is distinct from the human
   // user; coverify authenticates to the Cosheaf API with its own token and
@@ -52,7 +58,7 @@ export interface Config {
 }
 
 function required(name: string): string {
-  const v = process.env[name];
+  const v = optionalEnvValue(process.env[name]);
   if (!v) {
     console.error(
       `missing required env var: ${name}\n` +
@@ -65,22 +71,99 @@ function required(name: string): string {
 }
 
 function withDefault(name: string, fallback: string): string {
-  return process.env[name] ?? fallback;
+  return optionalEnvValue(process.env[name]) ?? fallback;
+}
+
+function optionalEnvValue(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  return value ? value : null;
+}
+
+export function normalizeOptionalOrigin(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("expected http or https URL");
+  }
+  return url.origin;
+}
+
+function optionalOrigin(name: string): string | null {
+  try {
+    return normalizeOptionalOrigin(process.env[name]);
+  } catch (_err) {
+    console.error(`invalid ${name}: expected an absolute http(s) URL origin`);
+    process.exit(1);
+  }
+}
+
+export function parseTrustedProxyHops(raw: string | undefined): number {
+  const value = optionalEnvValue(raw);
+  if (!value) return 0;
+  if (!/^\d+$/.test(value)) {
+    throw new Error("expected a non-negative integer");
+  }
+  return Number(value);
+}
+
+export function parsePort(raw: string | undefined, fallback: number): number {
+  const value = optionalEnvValue(raw);
+  if (!value) return fallback;
+  if (!/^\d+$/.test(value)) {
+    throw new Error("expected an integer TCP port");
+  }
+  const port = Number(value);
+  if (port > 65535) throw new Error("expected an integer TCP port");
+  return port;
+}
+
+function trustedProxyHops(): number {
+  try {
+    return parseTrustedProxyHops(process.env.COSHEAF_TRUSTED_PROXY_HOPS);
+  } catch (_err) {
+    console.error("invalid COSHEAF_TRUSTED_PROXY_HOPS: expected a non-negative integer");
+    process.exit(1);
+  }
+}
+
+function serverPort(): number {
+  try {
+    return parsePort(process.env.COSHEAF_PORT, 3030);
+  } catch (_err) {
+    console.error("invalid COSHEAF_PORT: expected an integer TCP port");
+    process.exit(1);
+  }
+}
+
+export function validateTrustedProxyOrigin(publicOrigin: string | null, trustedProxyHops: number): void {
+  if (trustedProxyHops > 0 && !publicOrigin) {
+    throw new Error("COSHEAF_PUBLIC_ORIGIN is required when COSHEAF_TRUSTED_PROXY_HOPS is greater than 0");
+  }
 }
 
 export function loadConfig(): Config {
-  const dataDir = process.env.COSHEAF_DATA_DIR ?? path.resolve(process.cwd(), "data");
+  const dataDir = withDefault("COSHEAF_DATA_DIR", path.resolve(process.cwd(), "data"));
   mkdirSync(dataDir, { recursive: true });
+  const publicOrigin = optionalOrigin("COSHEAF_PUBLIC_ORIGIN");
+  const proxyHops = trustedProxyHops();
+  try {
+    validateTrustedProxyOrigin(publicOrigin, proxyHops);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
   return {
     dataDir,
-    port: Number(process.env.COSHEAF_PORT ?? 3030),
+    port: serverPort(),
     forgejoUrl: withDefault("COSHEAF_FORGEJO_URL", "http://127.0.0.1:3002"),
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
     webhookSecret: required("COSHEAF_WEBHOOK_SECRET"),
     webhookUrl: withDefault("COSHEAF_WEBHOOK_URL", "http://127.0.0.1:3030/api/v1/webhooks/forgejo"),
+    publicOrigin,
     registrationOpen: withDefault("COSHEAF_REGISTRATION_MODE", "off") === "open",
-    trustedProxyHops: Number.parseInt(withDefault("COSHEAF_TRUSTED_PROXY_HOPS", "0"), 10) || 0,
+    trustedProxyHops: proxyHops,
     coverifyCmd: withDefault("COSHEAF_COVERIFY_CMD", "coverify"),
     coverifyApiUrl: withDefault("COSHEAF_COVERIFY_API_URL", "http://127.0.0.1:3030/api/v1"),
     coverifyBotToken: withDefault("COSHEAF_COVERIFY_BOT_TOKEN", ""),

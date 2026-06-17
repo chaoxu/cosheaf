@@ -11,6 +11,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { checkCoflatRef, checkDocPins, DEFAULT_COFLAT_REF } from "./check-coflat-ref.mjs";
+import { parseDotenvDev } from "./lib/env-dev.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REQUIRED_ENV = ["COSHEAF_FORGEJO_TOKEN", "COSHEAF_FORGEJO_ADMIN_TOKEN", "COSHEAF_WEBHOOK_SECRET"];
@@ -27,18 +28,6 @@ function tcpOpen(host, port, timeoutMs = 1000) {
     socket.once("timeout", () => done(false));
     socket.once("error", () => done(false));
   });
-}
-
-function parseEnvFile(path) {
-  const env = {};
-  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-  }
-  return env;
 }
 
 // Each check returns { ok, label, detail, required }.
@@ -67,13 +56,12 @@ function checkCoflat() {
   return { required: true, ok: true, label: "Coflat pin", detail: DEFAULT_COFLAT_REF };
 }
 
-function checkEnvDev() {
-  const path = resolve(REPO_ROOT, ".env.dev");
+export function checkEnvDev({ runtimeEnv = process.env, path = resolve(REPO_ROOT, ".env.dev") } = {}) {
   if (!existsSync(path)) {
     return { required: true, ok: false, label: ".env.dev", detail: "missing — run `cp .env.example .env.dev`" };
   }
-  const env = parseEnvFile(path);
-  const missing = REQUIRED_ENV.filter((key) => !env[key]);
+  const env = { ...parseDotenvDev(readFileSync(path, "utf8"), {}), ...runtimeEnv };
+  const missing = REQUIRED_ENV.filter((key) => !optionalEnv(env[key]));
   return {
     required: true,
     ok: missing.length === 0,
@@ -83,7 +71,12 @@ function checkEnvDev() {
   };
 }
 
-async function checkForgejo(env) {
+function optionalEnv(value) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+export async function checkForgejo(env, { tcpOpenFn = tcpOpen } = {}) {
   const url = env.COSHEAF_FORGEJO_URL ?? "http://127.0.0.1:3002";
   let host = "127.0.0.1";
   let port = 3002;
@@ -96,10 +89,66 @@ async function checkForgejo(env) {
   }
   return {
     required: false,
-    ok: await tcpOpen(host, port),
+    ok: await tcpOpenFn(host, port),
     label: "Forgejo reachable",
     detail: `${host}:${port} (start it before pnpm setup:dev / dev:all)`,
+    url,
   };
+}
+
+export async function checkForgejoRuntimeToken(env, { fetchImpl = fetch } = {}) {
+  const url = env.COSHEAF_FORGEJO_URL ?? "http://127.0.0.1:3002";
+  try {
+    const response = await fetchImpl(new URL("/api/v1/user", url), {
+      headers: { authorization: `token ${env.COSHEAF_FORGEJO_TOKEN}` },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { required: true, ok: false, label: "Forgejo runtime token", detail: "token rejected" };
+    }
+    if (!response.ok) {
+      return { required: true, ok: false, label: "Forgejo runtime token", detail: `unexpected ${response.status}` };
+    }
+    const user = await response.json();
+    if (user?.is_admin === true) {
+      return {
+        required: true,
+        ok: false,
+        label: "Forgejo runtime token",
+        detail: "COSHEAF_FORGEJO_TOKEN is site-admin; use COSHEAF_FORGEJO_ADMIN_TOKEN for admin scope",
+      };
+    }
+    return { required: true, ok: true, label: "Forgejo runtime token", detail: user?.login ?? "ok" };
+  } catch (err) {
+    return {
+      required: true,
+      ok: false,
+      label: "Forgejo runtime token",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export async function checkForgejoAdminToken(env, { fetchImpl = fetch } = {}) {
+  const url = env.COSHEAF_FORGEJO_URL ?? "http://127.0.0.1:3002";
+  try {
+    const response = await fetchImpl(new URL("/api/v1/admin/users?limit=1", url), {
+      headers: { authorization: `token ${env.COSHEAF_FORGEJO_ADMIN_TOKEN}` },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { required: true, ok: false, label: "Forgejo admin token", detail: "token rejected (not admin?)" };
+    }
+    if (!response.ok) {
+      return { required: true, ok: false, label: "Forgejo admin token", detail: `unexpected ${response.status}` };
+    }
+    return { required: true, ok: true, label: "Forgejo admin token", detail: "ok" };
+  } catch (err) {
+    return {
+      required: true,
+      ok: false,
+      label: "Forgejo admin token",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 async function runDoctor() {
@@ -108,7 +157,12 @@ async function runDoctor() {
   results.push(checkCoflat());
   const envCheck = checkEnvDev();
   results.push(envCheck);
-  results.push(await checkForgejo(envCheck.env ?? {}));
+  const forgejoCheck = await checkForgejo(envCheck.env ?? {});
+  results.push(forgejoCheck);
+  if (envCheck.ok && forgejoCheck.ok) {
+    results.push(await checkForgejoRuntimeToken(envCheck.env));
+    results.push(await checkForgejoAdminToken(envCheck.env));
+  }
 
   for (const r of results) {
     const mark = r.ok ? "✓" : r.required ? "✗" : "⚠";

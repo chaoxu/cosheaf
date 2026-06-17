@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 
-const webBase = "http://localhost:3030";
+const webBase = defaultWebUrl();
 const repoBase = `${webBase}/chao/flushing-coin`;
 
 test("account preferences are separate from repository settings", async ({ page }) => {

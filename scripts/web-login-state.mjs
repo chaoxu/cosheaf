@@ -2,8 +2,11 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "@playwright/test";
+import { defaultWebUrl, loadDotenvDev } from "./lib/env-dev.mjs";
 
-const baseUrl = process.env.COSHEAF_WEB_URL ?? "http://localhost:3030";
+loadDotenvDev();
+
+const baseUrl = defaultWebUrl();
 const username = process.env.COSHEAF_DEV_USER ?? "chao";
 const password = process.env.COSHEAF_DEV_PASSWORD ?? "Cosheaf123!";
 const out = process.env.COSHEAF_STORAGE_STATE ?? ".playwright/cosheaf-chao-state.json";

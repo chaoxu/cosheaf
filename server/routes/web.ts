@@ -14,7 +14,7 @@ import { FixedWindowRateLimiter } from "../rate-limit.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, positiveInt, redirect, repoHref, requestOrigin, safeWebRedirect, setAuthCookie, stringField } from "./web-context.js";
+import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField } from "./web-context.js";
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
@@ -110,6 +110,8 @@ web.get("/login", (c) => {
 });
 
 web.post("/login", async (c) => {
+  const crossOrigin = rejectCrossOriginMutation(c);
+  if (crossOrigin) return crossOrigin;
   const form = await c.req.parseBody();
   const username = stringField(form.username);
   const password = stringField(form.password);
@@ -126,6 +128,8 @@ web.post("/login", async (c) => {
 });
 
 web.post("/logout", (c) => {
+  const crossOrigin = rejectCrossOriginMutation(c);
+  if (crossOrigin) return crossOrigin;
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.redirect("/login", 303);
 });
@@ -157,13 +161,8 @@ web.post("/register", async (c) => {
   const config = c.get("config");
   if (!config.registrationOpen) return c.notFound();
 
-  // This is an unauthenticated, state-changing POST that creates a real Forgejo
-  // user via the site-admin token, so SameSite cookies give no protection.
-  // Reject a cross-site submit when the browser sends a mismatched Origin
-  // (absent on same-origin in some flows and in tests — only reject a present,
-  // mismatched value).
-  const origin = c.req.header("origin");
-  if (origin && origin !== requestOrigin(c)) return new Response("forbidden", { status: 403 });
+  const crossOrigin = rejectCrossOriginMutation(c);
+  if (crossOrigin) return crossOrigin;
 
   // Per-IP throttle (in-process). Counts every attempt, before validation, so a
   // flood of malformed requests can't bypass it. clientIp ignores a spoofable
@@ -214,14 +213,18 @@ web.post("/register", async (c) => {
 });
 
 web.get("/", globalRoute(async (c, auth) => {
-  const [repos, threads, avatarSrc] = await Promise.all([
+  const [repos, notificationResult, avatarSrc] = await Promise.all([
     configReposForUser(c),
     // Forgejo's account-level notifications are already cross-repo — the daily
     // "what needs my attention anywhere" inbox the per-repo tab can't give.
-    c.get("fjUser").listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] }).catch(() => []),
+    c
+      .get("fjUser")
+      .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
+      .then((threads) => ({ ok: true as const, threads }))
+      .catch(() => ({ ok: false as const })),
     currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken),
   ]);
-  const inbox = mapThreads(threads);
+  const inbox = notificationResult.ok ? mapThreads(notificationResult.threads) : null;
   const t = c.get("t");
   return htmlResponse(
     pageShell({
@@ -234,7 +237,7 @@ web.get("/", globalRoute(async (c, auth) => {
           <div class="page-title page-title--actions-only">
             <a class="button primary" href="/new" data-testid="new-repo">${t("home.new_repo")}</a>
           </div>
-          <div id="home-inbox-slot">${inboxSection(inbox, t)}</div>
+          <div id="home-inbox-slot">${inbox ? inboxSection(inbox, t) : inboxUnavailableSection()}</div>
           <div class="list">
             ${repos.length === 0
               ? html`<div class="empty">${t("home.no_repos")}</div>`
@@ -271,6 +274,12 @@ function inboxSection(rows: readonly NotificationRow[], t: T): Html {
     <div class="list">
       ${rows.map((row) => notificationRow(row, t))}
     </div>
+  </section>`;
+}
+
+function inboxUnavailableSection(): Html {
+  return html`<section class="inbox" data-testid="home-inbox-unavailable">
+    <div class="empty">Notifications are temporarily unavailable.</div>
   </section>`;
 }
 
@@ -324,21 +333,23 @@ function notificationsAccountPage(rows: readonly NotificationRow[], all: boolean
 web.get("/account/inbox", globalRoute(async (c) => {
   const threads = await c
     .get("fjUser")
-    .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] })
-    .catch(() => []);
+    .listNotifications({ statusTypes: ["unread"], subjectTypes: ["Issue", "Pull"] });
   return htmlResponse(String(inboxSection(mapThreads(threads), c.get("t"))));
 }));
 
-web.post("/account/notifications/:id/read", globalRoute(async (c) => {
+web.post("/account/notifications/:id/read", globalRoute(async (c, auth) => {
   const id = positiveInt(c.req.param("id"));
-  if (id) await c.get("fjUser").markNotificationRead(id).catch(() => {});
+  if (!id) return badRequestPage(auth.user.username, "Invalid notification.");
+  const thread = await c.get("fjUser").getNotificationThread(id).catch(() => null);
+  if (!thread) return notFoundPage(auth.user.username, "Notification not found");
+  await c.get("fjUser").markNotificationRead(id);
   // Home inbox forms omit `next` and fall back to "/"; the account
   // notifications page passes its own path so it returns there.
   return redirect(safeWebRedirect(stringField((await c.req.parseBody()).next)) ?? "/");
 }));
 
 web.post("/account/notifications/read-all", globalRoute(async (c) => {
-  await c.get("fjUser").markAllNotificationsRead().catch(() => {});
+  await c.get("fjUser").markAllNotificationsRead();
   return redirect(safeWebRedirect(stringField((await c.req.parseBody()).next)) ?? "/");
 }));
 
@@ -354,8 +365,7 @@ web.get("/account/notifications", globalRoute(async (c, auth) => {
       .listNotifications({
         statusTypes: all ? ["unread", "read", "pinned"] : ["unread"],
         subjectTypes: ["Issue", "Pull"],
-      })
-      .catch(() => []),
+      }),
     currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken),
   ]);
   const t = c.get("t");
@@ -464,7 +474,7 @@ web.get("/forge-avatars/*", async (c) => {
   if (ims) forward.set("if-modified-since", ims);
   let res: Response;
   try {
-    res = await fetch(`${c.get("config").forgejoUrl}/${rest}`, { headers: forward });
+    res = await fetch(`${c.get("config").forgejoUrl}/${rest}${new URL(c.req.url).search}`, { headers: forward });
   } catch (_err) {
     return c.body(null, 502);
   }
@@ -479,12 +489,25 @@ web.get("/forge-avatars/*", async (c) => {
 });
 
 const settingsError = (msg: string): Response => redirect(`/account/settings?error=${encodeURIComponent(msg)}`);
+const ALLOWED_AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const AVATAR_MAX_BYTES = 1_000_000;
+const AVATAR_MULTIPART_OVERHEAD_BYTES = 64 * 1024;
 
 web.post("/account/avatar", globalRoute(async (c, auth) => {
-  const file = (await c.req.parseBody()).avatar;
+  const contentLength = Number(c.req.header("content-length") ?? "");
+  if (Number.isFinite(contentLength) && contentLength > AVATAR_MAX_BYTES + AVATAR_MULTIPART_OVERHEAD_BYTES) {
+    return settingsError("Profile picture must be under 1 MB.");
+  }
+  let body: Awaited<ReturnType<typeof c.req.parseBody>>;
+  try {
+    body = await c.req.parseBody();
+  } catch (_err) {
+    return settingsError("Could not read profile picture upload.");
+  }
+  const file = body.avatar;
   if (!(file instanceof File) || file.size === 0) return settingsError("Choose an image to upload.");
-  if (!file.type.startsWith("image/")) return settingsError("Profile picture must be an image.");
-  if (file.size > 1_000_000) return settingsError("Profile picture must be under 1 MB.");
+  if (!ALLOWED_AVATAR_TYPES.has(file.type)) return settingsError("Profile picture must be PNG, JPEG, GIF, or WebP.");
+  if (file.size > AVATAR_MAX_BYTES) return settingsError("Profile picture must be under 1 MB.");
   const image = Buffer.from(await file.arrayBuffer()).toString("base64");
   try {
     await c.get("fjUser").setUserAvatar(image);

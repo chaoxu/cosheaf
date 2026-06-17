@@ -17,12 +17,11 @@ RUN if [ -n "$NPM_CONFIG_REGISTRY" ]; then npm config set registry "$NPM_CONFIG_
 
 FROM base AS build
 
-# Coflat is sourced from the lab Gitea (where the coflat agents push) so cosheaf
-# tracks the newest coflat. COFLAT_GIT_REF=main + the COSHEAF_GIT_SHA cache-bust
-# below means each cosheaf deploy re-fetches the latest coflat main. gitea.lab
-# uses the lab internal CA, so the fetch skips TLS verification (internal source).
+# Coflat is sourced from the lab Gitea at the same pinned ref used by local
+# setup/CI. Override COFLAT_GIT_REF explicitly for a deliberate Coflat bump.
+# gitea.lab uses the lab internal CA, so the fetch skips TLS verification.
 ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
-ARG COFLAT_GIT_REF=main
+ARG COFLAT_GIT_REF=caffb29cdb20f2125cb3cb177f44618936e15a0e
 ARG COSHEAF_GIT_SHA=unknown
 
 RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked \
@@ -48,7 +47,6 @@ RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
 RUN pnpm --dir cosheaf rebuild better-sqlite3 esbuild
 RUN pnpm --dir cosheaf build
 RUN pnpm --dir cosheaf build:server
-RUN cp cosheaf/server/schema.sql cosheaf/dist-server/server/schema.sql
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir cosheaf prune --prod --ignore-scripts
 

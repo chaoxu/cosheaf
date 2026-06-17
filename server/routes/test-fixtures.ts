@@ -84,6 +84,7 @@ export function testConfig(name: string, overrides: Partial<Config> = {}): Confi
     forgejoAdminToken: "admin-token",
     webhookSecret: "secret",
     webhookUrl: "http://cosheaf.test/webhook",
+    publicOrigin: null,
     registrationOpen: false,
     trustedProxyHops: 0,
     coverifyCmd: "coverify",
@@ -105,11 +106,12 @@ export function testApp(
   fjAdmin?: Forgejo,
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+  const sse = new SSEHub();
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
     c.set("fjAdmin", fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
-    c.set("sse", new SSEHub());
+    c.set("sse", sse);
     const locale = resolveLocale(c);
     c.set("locale", locale);
     c.set("t", makeT(locale));

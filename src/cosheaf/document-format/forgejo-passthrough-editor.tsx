@@ -14,6 +14,10 @@ type Store<T> = {
   subscribe(fn: (value: T) => void): () => void;
 };
 
+export function saveReasonCommits(reason: "manual" | "command" | "autosave"): boolean {
+  return reason !== "autosave";
+}
+
 interface Props {
   value: string;
   mode: "rich" | "source";
@@ -64,6 +68,7 @@ export function MarkdownEditor({
   );
 
   useEffect(() => {
+    if (value === localValueRef.current) return;
     setLocalValue(value);
     localValueRef.current = value;
     savedValueRef.current = value;
@@ -76,8 +81,10 @@ export function MarkdownEditor({
       statusEventsRef.current?.onSaveStart?.();
       const result = await saveHandlerRef.current?.save({ source, reason });
       if (result?.ok) {
-        savedValueRef.current = source;
-        statusEventsRef.current?.onDirtyChange?.(false);
+        if (saveReasonCommits(reason)) {
+          savedValueRef.current = source;
+          statusEventsRef.current?.onDirtyChange?.(false);
+        }
         statusEventsRef.current?.onSaveSucceeded?.();
       } else {
         statusEventsRef.current?.onSaveFailed?.({ error: result?.error ?? "no save handler" });
@@ -132,6 +139,7 @@ export function MarkdownEditor({
       spellCheck={false}
       onChange={(event) => {
         const next = event.target.value;
+        localValueRef.current = next;
         setLocalValue(next);
         onChange(next);
         const nextOutline = extractOutline(next);
@@ -143,8 +151,6 @@ export function MarkdownEditor({
           statusEventsRef.current?.onSaveStart?.();
           void saveHandlerRef.current?.save({ source: localValueRef.current, reason: "autosave" }).then((result) => {
             if (result?.ok) {
-              savedValueRef.current = localValueRef.current;
-              statusEventsRef.current?.onDirtyChange?.(false);
               statusEventsRef.current?.onSaveSucceeded?.();
             } else {
               statusEventsRef.current?.onSaveFailed?.({ error: result?.error ?? "no save handler" });

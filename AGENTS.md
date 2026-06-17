@@ -182,8 +182,9 @@ normal workflow needs an API surface, add a typed Cosheaf route.
 Typed routes are the public contract for Cosheaf document/index behavior:
 
 - Use `routes/files.ts` for page reads/writes that should synchronously apply
-  Coflat frontmatter/id handling, path validation, index updates, backlinks,
-  FTS, and browser events.
+  Coflat frontmatter/id handling, path validation, and browser events. The
+  sidecar index (backlinks, FTS, page metadata) mirrors `main`; branch writes
+  do not publish unmerged content into it.
 - Use typed search, backlinks, document-list, and event routes when callers
   need the SQLite sidecar index rather than raw backend repository contents.
 - Use typed branch, pull, issue, label, milestone, notification, and markdown
@@ -193,14 +194,16 @@ Typed routes are the public contract for Cosheaf document/index behavior:
 
 File-write boundary: a Markdown write made outside Cosheaf is an external
 repository write from Cosheaf's point of view. Webhooks and `pnpm cli workspace
-reindex <owner>/<repo>` reconcile those writes into SQLite. A Markdown write
-that needs immediate Cosheaf frontmatter/index/SSE behavior should go through
-the typed file route.
+reindex <owner>/<repo>` reconcile `main` into SQLite. A Markdown branch write
+that needs immediate Cosheaf frontmatter/SSE behavior should go through the
+typed file route; search/backlinks/doc metadata update after merge webhook or
+reindex.
 
 Cosheaf does not synchronously run the indexer or emit SSE on external backend
 writes. Reconciliation is webhook-only. Callers (including agents) that need
-read-after-write consistency through cosheaf's typed routes must use the typed
-file route in the first place.
+read-after-write consistency for branch file content should use the typed file
+route; callers that need sidecar search/backlink consistency must wait for the
+change to land on `main` and reconcile.
 
 Examples for agents using a Cosheaf API token (the workspace is the
 `chao/flushing-coin` repo):
@@ -231,11 +234,12 @@ Three common flows. Each works with `curl` against a running cosheaf
 (`pnpm dev:all`) using a Cosheaf API token as the Bearer token. Replace
 `$OWNER`, `$REPO`, `$PAT`, etc. (the dev fixture is `chao`/`flushing-coin`).
 
-**1. Add a page to main.** Use the typed file route so frontmatter is
-applied and the sidecar updates synchronously:
+**1. Add a page on a work branch.** Use the typed file route so frontmatter is
+applied immediately; open and merge a PR to land it on `main`, where the
+sidecar search/backlink index is reconciled by the merge push webhook:
 
 ```sh
-curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=main" \
+curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=agent/wip-1" \
   -H "Authorization: Bearer $PAT" \
   -H "content-type: application/json" \
   -d '{"content": "# New page\n\nbody."}'
@@ -249,7 +253,7 @@ curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/branches" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"name": "agent/wip-1"}'
 
-# Edit a file on the branch (typed route runs the indexer)
+# Edit a file on the branch (typed route applies frontmatter/id handling)
 curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=agent/wip-1" \
   -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
   -d '{"content": "# Updated\n\nbody."}'
@@ -292,7 +296,9 @@ Notes for agent retry logic:
 
 - Reading after an external backend write through cosheaf's typed routes is not
   immediately consistent — the webhook reconciles asynchronously. If you need
-  read-your-write, use the typed file route, which indexes synchronously.
+  branch file read-your-write, use the typed file route. If you need sidecar
+  search/backlink consistency, wait until the change lands on `main` and is
+  reconciled.
 - Typed `PUT /file`, `PATCH /issues/:n/state`, `DELETE /issues/:n/comments/:id`,
   and `DELETE /pulls/:n/comments/:id` are idempotent enough for normal
   client retry.
@@ -354,7 +360,7 @@ data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ```bash
 cd ..
 git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
-git -C coflat checkout 15d1ee4147da05600778aa7a800bbf2ce2056419
+git -C coflat checkout caffb29cdb20f2125cb3cb177f44618936e15a0e
 cd cosheaf
 pnpm setup:deps              # verify and build pinned sibling ../coflat
 pnpm install
@@ -416,7 +422,8 @@ Route owner map:
 - `public/cosheaf-web.css` — server-rendered chrome CSS only; Coflat documents
   own their rendering (see the boundary comment at the top of the file). The
   app is a fixed-frame layout: the window never scrolls, `.app-content` does.
-- `server/index.ts` — static assets, Vite/dev asset proxy, and route mounting.
+- `server/app.ts` — app assembly, static assets, Vite/dev asset proxy, and route mounting.
+- `server/index.ts` — runtime startup (`loadConfig`, DB, admin Forgejo client, `serve`).
 - `src/cosheaf/web-editor.tsx` — page editor island.
 - `src/cosheaf/web-reader.ts` — Coflat reader hydration island.
 - `server/routes/files.ts` — typed file/tree/search/backlink API.

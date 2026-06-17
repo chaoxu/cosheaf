@@ -1,7 +1,73 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+
+const dotenvDev = path.resolve(__dirname, ".env.dev");
+if (existsSync(dotenvDev)) process.loadEnvFile(dotenvDev);
+
+export function viteHostForOrigin(origin: string | undefined): string | undefined {
+  if (!origin) return undefined;
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname.replace(/^\[(.*)\]$/, "$1");
+  } catch (_err) {
+    return undefined;
+  }
+  if (["localhost", "127.0.0.1", "::1"].includes(hostname)) return undefined;
+  return "0.0.0.0";
+}
+
+function viteHost(): string | undefined {
+  return viteHostForOrigin(viteOrigin(process.env.COSHEAF_VITE_ORIGIN) ?? viteOriginFromWebUrl());
+}
+
+export function viteOriginFromWebUrl(webUrl = process.env.COSHEAF_WEB_URL, vitePort = process.env.COSHEAF_VITE_PORT ?? "5173"): string | undefined {
+  const normalizedWebUrl = optionalEnv(webUrl);
+  if (!normalizedWebUrl) return undefined;
+  const normalizedVitePort = envPort(vitePort, "COSHEAF_VITE_PORT", "5173");
+  try {
+    const url = new URL(normalizedWebUrl);
+    if (url.protocol !== "http:") return undefined;
+    url.port = normalizedVitePort;
+    url.pathname = "/";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch (_err) {
+    return undefined;
+  }
+}
+
+export function viteApiProxyTarget(serverUrl = process.env.COSHEAF_SERVER_URL, apiPort = process.env.COSHEAF_PORT): string {
+  return optionalEnv(serverUrl) ?? `http://localhost:${envPort(apiPort, "COSHEAF_PORT", "3030")}`;
+}
+
+function optionalEnv(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function envPort(value: string | undefined, name: string, fallback: string): string {
+  const port = optionalEnv(value) ?? fallback;
+  if (!/^\d+$/.test(port) || Number(port) > 65535) {
+    throw new Error(`${name} must be an integer TCP port`);
+  }
+  return port;
+}
+
+export function viteOrigin(value: string | undefined): string | undefined {
+  const origin = optionalEnv(value);
+  if (!origin) return undefined;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+    return url.origin;
+  } catch (_err) {
+    throw new Error("COSHEAF_VITE_ORIGIN must be a valid http(s) URL origin");
+  }
+}
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -81,9 +147,11 @@ export default defineConfig({
   },
   server: {
     hmr: false,
+    port: Number(envPort(process.env.COSHEAF_VITE_PORT, "COSHEAF_VITE_PORT", "5173")),
+    host: viteHost(),
     proxy: {
       "/api": {
-        target: process.env.COSHEAF_SERVER_URL ?? "http://localhost:3030",
+        target: viteApiProxyTarget(),
         changeOrigin: true,
       },
     },
