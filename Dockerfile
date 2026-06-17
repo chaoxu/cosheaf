@@ -31,20 +31,23 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
   && apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git python3 make g++ pkg-config rsync
 
-RUN echo "coflat ${COFLAT_GIT_REF} for cosheaf ${COSHEAF_GIT_SHA}" \
+RUN echo "coflat ${COFLAT_GIT_REF}" \
   && git init coflat \
   && git -C coflat remote add origin "$COFLAT_GIT_REPO" \
   && git -C coflat -c http.sslVerify=false fetch --depth 1 origin "$COFLAT_GIT_REF" \
   && git -C coflat checkout --detach FETCH_HEAD
 
-COPY . ./cosheaf
-
 RUN --mount=type=cache,id=coflat-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir coflat install --frozen-lockfile
 RUN pnpm --dir coflat build
+
+COPY package.json pnpm-lock.yaml ./cosheaf/
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir cosheaf install --frozen-lockfile --ignore-scripts
 RUN pnpm --dir cosheaf rebuild better-sqlite3 esbuild
+
+COPY . ./cosheaf
+RUN echo "cosheaf ${COSHEAF_GIT_SHA}"
 RUN pnpm --dir cosheaf build
 RUN pnpm --dir cosheaf build:server
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \

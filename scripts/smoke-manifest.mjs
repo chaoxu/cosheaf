@@ -10,6 +10,16 @@ export const smokeChecks = [
     covers: "login, workspace selection, page open, editor shell dimensions",
   },
   {
+    name: "repo-home",
+    command: "pnpm smoke:repo-home",
+    grep: "@smoke-repo-home",
+    script: "scripts/browser-repo-home.mjs",
+    seed: "basic",
+    destructive: false,
+    prod: true,
+    covers: "repository home/files page, visible SSH clone URL, copy and SSH key affordances",
+  },
+  {
     name: "issues-nav",
     command: "pnpm smoke:issues",
     grep: "@smoke-issues",

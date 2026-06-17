@@ -15,8 +15,13 @@
 ## Fast Checks
 
 - `pnpm check:local` runs the normal local gate: static checks, unit tests, Vite build, and server build.
+- `pnpm check:web:fast` runs the smaller server-rendered UI gate for low-risk
+  markup/CSS changes: types, focused web route tests, Vite build, and server
+  build.
 - `pnpm check:web` runs the full server-rendered web page flow and prints
   DevX failure artifact paths. Start `pnpm dev:all` first.
+- `pnpm smoke:repo-home` runs a focused browser check for the repository
+  home/files page, including the visible SSH clone URL.
 - `pnpm check:web:settings` runs only account/repository settings separation and
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).

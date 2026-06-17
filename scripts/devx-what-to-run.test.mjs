@@ -4,6 +4,7 @@ import { suggestChecks } from "./devx-what-to-run.mjs";
 describe("devx check suggestions", () => {
   it("maps web CSS changes to browser route checks", () => {
     const result = suggestChecks(["public/cosheaf-web.css"]);
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:web:fast");
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:web");
     expect(result.suggestions.map((item) => item.run)).toContain(
       "pnpm devx:verify-route -- --route /chao/flushing-coin/activity",
@@ -39,6 +40,7 @@ describe("devx check suggestions", () => {
     expect(result.suggestions.map((item) => item.run)).toContain(
       "pnpm exec vitest run server/routes/web-files.test.ts src/cosheaf/api.test.ts",
     );
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:repo-home");
   });
 
   it("maps dev URL helper changes to env normalization tests", () => {
