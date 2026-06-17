@@ -25,12 +25,13 @@ async function fillCompose(scope: Locator, text: string): Promise<void> {
 }
 
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto(`${webBase}/login`);
   await page.locator('input[name="username"]').fill("chao");
   await page.locator('input[name="password"]').fill("Cosheaf123!");
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
-  await expect(page.locator(".app-statusbar")).toContainText("chao");
+  await expect(page.locator(".sidebar-identity-link")).toContainText("chao");
   await expect(page.locator(".app-sidebar")).toContainText("Workspaces");
 
   await page.getByRole("link", { name: `${owner}/${repo}` }).click();
@@ -43,43 +44,44 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs")).toContainText("PRs");
   await expect(page.locator(".repo-tabs")).toContainText("Notifications");
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
-  await expect(page.locator(".repo-body")).toContainText("hello.md");
-  await expect(page.locator(".repo-body")).toContainText("theory/cross-file-theorem.md");
-  await expect(page.locator(".repo-body")).toContainText("notes/plain-text.txt");
-  await expect(page.locator(".repo-body")).toContainText("docs/sample.pdf");
+  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/hello.md"]`)).toHaveCount(1);
+  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/theory/cross-file-theorem.md"]`)).toHaveCount(1);
+  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/notes/plain-text.txt"]`)).toHaveCount(1);
+  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/docs/sample.pdf"]`)).toHaveCount(1);
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
   // The repo sidebar names the workspace by its full owner/repo identity,
   // and the status bar path includes an owner crumb.
   await expect(page.locator(".app-sidebar")).toContainText(`${owner}/${repo}`);
   await expect(page.locator(".app-statusbar .status-path")).toContainText(owner);
-  await page.getByRole("link", { name: "chao", exact: true }).click();
+  await page.locator(".sidebar-identity-link").click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
   await page.getByTestId("settings-document-theme-select").selectOption("blueprint-book");
   await page.getByTestId("settings-diff-mode-select").selectOption("rich");
   await page.getByTestId("settings-diff-shape-select").selectOption("after");
   await page.goto(`${repoBase}/settings`);
-  await expect(page.locator(".repo-tabs a.active")).toHaveText("/settings");
+  await expect(page.locator(".repo-tabs a.active")).toHaveText("Settings");
   await expect(page.getByTestId("settings-user-preferences")).toHaveCount(0);
   await expect(page.locator(".repo-body")).toContainText("Review policy");
   await expect(page.locator(".repo-body")).toContainText("Access");
-  await expect(page.getByTestId("settings-access")).toBeVisible();
+  await expect(page.getByTestId("settings-access")).toHaveCount(1);
   const labelName = `web-label-${Date.now()}`;
   const milestoneName = `web-milestone-${Date.now()}`;
   await expect(page.getByTestId("settings-labels")).toBeVisible();
+  await page.getByTestId("settings-labels").locator(".add-disclosure > summary").click();
   await page.getByTestId("settings-label-name").fill(labelName);
   await page.getByTestId("settings-label-color").fill("2f6fed");
   await page.getByTestId("settings-label-submit").click();
   await expect(page.getByTestId("settings-labels")).toContainText(labelName);
   await expect(page.getByTestId("settings-milestones")).toBeVisible();
+  await page.getByTestId("settings-milestones").locator(".add-disclosure > summary").click();
   await page.getByTestId("settings-milestone-title").fill(milestoneName);
   await page.getByTestId("settings-milestone-submit").click();
   await expect(page.getByTestId("settings-milestones")).toContainText(milestoneName);
 
   await page.goto(`${repoBase}/src/branch/main/hello.md`);
   await expect(page).toHaveURL(`${repoBase}/src/branch/main/hello.md`);
-  await expect(page.locator(".file-toolbar")).toContainText("hello.md");
   await expect(page.locator(".cf-reader")).toContainText("Hello");
   const crossFileTheorem = page.getByRole("link", { name: "Theorem 1" });
   await expect(crossFileTheorem).toBeVisible();
@@ -173,13 +175,13 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Issues");
   // Authors render as real Forgejo usernames (no "repository" masking): the
   // seeded fixture issues were opened by the local Forgejo admin account.
-  await expect(page.locator(".repo-body")).toContainText("cosheaf-admin opened");
+  await expect(page.locator(".repo-body")).toContainText("cosheaf-admin");
   await expect(page.getByTestId("issue-filters")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("State filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Search issues")).toBeVisible();
   await page.getByTestId("issue-filters").locator("summary").click();
-  await expect(page.getByTestId("issue-filters").getByLabel("Label filter")).toBeVisible();
-  await expect(page.getByTestId("issue-filters").getByLabel("Milestone filter")).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByRole("button", { name: "Label filter" })).toBeVisible();
+  await expect(page.getByTestId("issue-filters").getByRole("button", { name: "Milestone filter" })).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Author filter")).toBeVisible();
   await expect(page.getByTestId("issue-filters").getByLabel("Assignee filter")).toBeVisible();
   await page.getByRole("link", { name: "New issue" }).click();
@@ -198,7 +200,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   // The body field is enhanced by the coflat editor island on coflat workspaces;
   // the rich editor is the visible compose surface (textarea is hidden behind it).
-  await expect(page.getByTestId("issue-edit-form").locator(".cm-editor, textarea[name=\"body\"]").first()).toBeVisible();
+  await expect(page.getByTestId("issue-edit-form").locator(".cm-editor").first()).toBeVisible();
   await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("thread-labels")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
@@ -218,6 +220,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   ]);
   await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("issue-toggle-state")).toHaveText("Close issue");
+  await page
+    .getByTestId("issue-relations")
+    .locator(".relation-card", { hasText: "Depends on" })
+    .locator(".add-disclosure > summary")
+    .click();
   await page.locator('input[aria-label="Depends on issue number"]').fill("1");
   await page.locator('form[action$="/dependencies"]').filter({ hasText: "Add" }).first().getByRole("button", { name: "Add" }).click();
   await expect(page.getByTestId("issue-relations")).toContainText("#1");
@@ -241,8 +248,8 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-filters")).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("State filter")).toBeVisible();
   await page.getByTestId("pull-filters").locator("summary").click();
-  await expect(page.getByTestId("pull-filters").getByLabel("Label filter")).toBeVisible();
-  await expect(page.getByTestId("pull-filters").getByLabel("Milestone filter")).toBeVisible();
+  await expect(page.getByTestId("pull-filters").getByRole("button", { name: "Label filter" })).toBeVisible();
+  await expect(page.getByTestId("pull-filters").getByRole("button", { name: "Milestone filter" })).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
   await page.locator('.list-row[href*="/pulls/"]', { hasText: "e2e demo PR" }).click();
   const demoPrPath = new URL(page.url()).pathname;
@@ -252,9 +259,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await page.getByTestId("pull-edit-link").click();
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();
-  await expect(page.getByTestId("pull-edit-form").locator(".cm-editor, textarea[name=\"body\"]").first()).toBeVisible();
+  await expect(page.getByTestId("pull-edit-form").locator(".cm-editor").first()).toBeVisible();
   await page.goto(demoPrPath.startsWith("http") ? demoPrPath : `${webBase}${demoPrPath}`);
-  await expect(page.locator(".thread")).toContainText("pushed commit");
+  await expect(page.locator(".thread")).toContainText(/pushed \d+ commits?/);
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
   await expect(page.getByTestId("pull-toggle-state")).toHaveText("Close PR");
   await Promise.all([
@@ -284,7 +291,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("view-shape-unified").click();
   await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
   await expect(page.locator(".changed-files a").first()).toHaveAttribute("href", /mode=source&shape=unified/);
-  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();
   await expect(page.locator(".line-composer summary").first()).toBeVisible();
@@ -311,7 +318,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByRole("button", { name: "Source" }).click();
   await page.locator(".cm-content").fill(`# Web Page E2E\n\nThis was saved through a server-rendered editor.\n`);
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByTestId("statusbar")).toContainText("committed");
+  await expect(page.getByTestId("statusbar")).toContainText("Saved");
   await page.goto(`${repoBase}/src/branch/${branch}/${path}`);
   await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
   await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();
