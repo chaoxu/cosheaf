@@ -165,17 +165,20 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
-  // Coflat-rendered markdown gets a sticky table-of-contents rail (filled by the
-  // reader island from the document's headings). Only the coflat reader island
-  // runs, so the rail is gated on the coflat format. The nav stays hidden for
-  // docs with too few headings; the `:has(>.doc-toc[hidden])` CSS then collapses
-  // the grid to a single full-width column (no reserved track or gutter).
+  const renderedCoflatMarkdown = kind === "markdown" && !sourceView && rendered !== null && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  // Coflat-rendered markdown gets a shared document rail: view-switch actions
+  // at the top and the table of contents below. The reader island fills the TOC
+  // from Coflat's outline data, while the editor renders the same rail shape
+  // from its live outline.
   const preview = filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView });
   const docBody =
-    kind === "markdown" && !sourceView && rendered !== null && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
+    renderedCoflatMarkdown
       ? html`<div class="doc-with-toc">
           <div class="doc-main">${preview}</div>
-          <nav class="doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
+          <aside class="doc-rail" aria-label="Document tools">
+            ${documentRailActions(ctx, { branch: resolved.branch, rel, kind, active: "read", fileHref })}
+            <nav class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
+          </aside>
         </div>`
       : preview;
   // Page titles for the tree are only indexed for main (#168), mirroring fileList.
@@ -191,7 +194,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               kind === "markdown" && !sourceView ? emptyHtml : html`<h1>${rel}</h1>`
             }
           </div>
-          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha })}
+          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha, showEdit: !renderedCoflatMarkdown, showRepresentations: !renderedCoflatMarkdown })}
         </div>
         ${docBody}
       `, {
@@ -439,7 +442,7 @@ function rawFileHref(owner: string, repo: string, branch: string, rel: string): 
 // (#171). Extracted from the file-view handler (#24) to keep the handler legible.
 function fileToolbar(
   ctx: WebCtx,
-  opts: { branch: string; rel: string; kind: FileKind; fileHref: string; sourceView: boolean; sha: string },
+  opts: { branch: string; rel: string; kind: FileKind; fileHref: string; sourceView: boolean; sha: string; showEdit?: boolean; showRepresentations?: boolean },
 ): Html {
   const { owner, repo, user } = ctx;
   const role = ctx.ws.role;
@@ -451,13 +454,13 @@ function fileToolbar(
         : html`<a class="button" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(branch)}&base=main`}">Open PR</a>`
     }
     ${
-      role === "read"
+      role === "read" || opts.showEdit === false
         ? ""
         : editableFileKind(kind)
           ? html`<a class="button primary" href="${editHref(owner, repo, user, branch, rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
           : ""
     }
-    ${fileRepresentationMenu(owner, repo, branch, rel, kind, fileHref, sourceView)}
+    ${opts.showRepresentations === false ? emptyHtml : fileRepresentationMenu(owner, repo, branch, rel, kind, fileHref, sourceView)}
     ${
       role === "read" || branch === "main"
         ? ""
@@ -467,6 +470,17 @@ function fileToolbar(
             <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
           </form>`
     }
+  </div>`;
+}
+
+function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; kind: FileKind; active: "read" | "edit"; fileHref: string }): Html {
+  const read = readHref(ctx.owner, ctx.repo, opts.branch, opts.rel);
+  const edit = editableFileKind(opts.kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, opts.branch, opts.rel) : null;
+  return html`<div class="doc-view-switch" aria-label="View">
+    <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
+    ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
+    ${opts.kind === "markdown" ? html`<a href="${`${opts.fileHref}?view=source`}">Source</a>` : emptyHtml}
+    <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
   </div>`;
 }
 

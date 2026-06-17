@@ -627,10 +627,18 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             <div className="web-editor-loading">Loading editor...</div>
           )}
         </Suspense>
-        <aside className="web-editor-outline" aria-label="Outline">
-          <h2>Outline</h2>
+        <aside className="web-editor-outline doc-rail" aria-label="Document tools">
+          <div className="doc-view-switch" aria-label="View">
+            <a data-testid="editor-read-link" href={readHref}>
+              Read
+            </a>
+            <a className="active" href={window.location.href} aria-current="page">
+              Edit
+            </a>
+          </div>
+          <h2 className="doc-toc-title">On this page</h2>
           {outline.length ? (
-            <ol>
+            <ol className="doc-rail-outline">
               {outline.map((entry) => (
                 <li key={entry.key} style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 12}px` }}>
                   <button type="button" onClick={() => editorRef.current?.scrollToLine(entry.line, { center: true })}>
@@ -728,9 +736,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           <button type="button" data-testid="editor-upload-asset" onClick={() => assetInputRef.current?.click()} disabled={busy}>
             Upload
           </button>
-          <a className="web-editor-read" data-testid="editor-read-link" href={readHref}>
-            Read
-          </a>
           {branch && branch !== "main" ? (
             <>
               {config.role === "admin" ? (

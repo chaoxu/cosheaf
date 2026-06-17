@@ -124,12 +124,16 @@ describe("web file editor route", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
+    expect(body).toContain('<div class="doc-view-switch" aria-label="View">');
+    expect(body).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
+    expect(body).toContain('<a class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
+    expect(body).toContain('<a href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
+    expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
+    expect(body).toContain('class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
-    expect(body).toContain('<summary class="button">More</summary>');
-    expect(body).toContain('<a href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
-    expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
+    expect(body).not.toContain('<summary class="button">More</summary>');
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {
