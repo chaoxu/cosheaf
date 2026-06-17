@@ -28,7 +28,7 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
 # setup/CI. Override COFLAT_GIT_REF explicitly for a deliberate Coflat bump.
 # gitea.lab uses the lab internal CA, so the fetch skips TLS verification.
 ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
-ARG COFLAT_GIT_REF=e57b712c8d7bc346f88c71cc0b6a36d84f16a451
+ARG COFLAT_GIT_REF=fda257382ac1f34a75a3fc01b20c0f45e6e22146
 
 RUN echo "coflat ${COFLAT_GIT_REF}" \
   && git init coflat \
