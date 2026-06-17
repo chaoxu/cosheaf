@@ -69,6 +69,30 @@ describe("web pull request routes", () => {
     };
   }
 
+  it("adds user autocomplete to username filters", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/milestones", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/collaborators", () => Response.json([{ id: 1, login: "bob" }]));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/pulls", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('name="author"');
+    expect(body).toContain('data-user-autocomplete="/owner/w/user-suggestions"');
+    expect(body).toContain('/cosheaf-user-autocomplete.js');
+  });
+
   it("rejects malformed PR edit milestones before mutating the pull", async () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);

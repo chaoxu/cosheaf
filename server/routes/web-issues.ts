@@ -76,6 +76,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
         ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
+        <script src="/cosheaf-user-autocomplete.js" defer></script>
       `),
   );
 }));
@@ -463,9 +464,9 @@ function issueFilterForm(
             ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="created_by" value="${filters.createdBy}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Author filter"></label>
-        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Assignee filter"></label>
-        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Mentioned filter"></label>
+        <label>Author <input name="created_by" value="${filters.createdBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Author filter"></label>
+        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Assignee filter"></label>
+        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Mentioned filter"></label>
       </div>
     </details>
   </form>`;

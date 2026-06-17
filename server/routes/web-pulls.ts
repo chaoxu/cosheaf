@@ -103,6 +103,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
         ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.")}
+        <script src="/cosheaf-user-autocomplete.js" defer></script>
       `,
     ),
   );
@@ -646,7 +647,7 @@ function pullFilterForm(
             ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="author" value="${filters.author}" list="${USERNAME_DATALIST_ID}" placeholder="username" aria-label="Author filter"></label>
+        <label>Author <input name="author" value="${filters.author}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Author filter"></label>
       </div>
     </details>
   </form>`;

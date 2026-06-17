@@ -16,7 +16,7 @@ import { exchangeForgejoCredsForPat } from "./auth.js";
 import { registerAdminRoutes } from "./web-admin.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField } from "./web-context.js";
+import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField, webRoute } from "./web-context.js";
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
@@ -639,6 +639,23 @@ web.post("/new", globalRoute(async (c, auth) => {
     return badRequestPage(auth.user.username, `Could not create repository: ${(err as Error).message}`);
   }
   return redirect(repoHref(owner, slug));
+}));
+
+web.get("/:owner/:repo/user-suggestions", webRoute(async (c, ctx) => {
+  const q = c.req.query("q")?.trim() ?? "";
+  if (q.length < 1) return Response.json({ users: [] });
+  const [users, collaborators] = await Promise.all([
+    ctx.fj.searchUsers(q, 10).catch(() => []),
+    c.req.query("exclude") === "collaborators"
+      ? ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  const excluded = new Set(collaborators.map((user) => user.login));
+  const suggestions = users
+    .map((user) => user.login)
+    .filter((login) => login && !excluded.has(login))
+    .slice(0, 10);
+  return Response.json({ users: suggestions });
 }));
 
 registerFileRoutes(web);
