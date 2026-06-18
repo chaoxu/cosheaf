@@ -421,6 +421,30 @@ describe("files suggest route", () => {
     expect(body.suggestions[0]?.id).toBe("alpha-branch-local-extra-long");
     expect(body.suggestions).toHaveLength(10);
   });
+
+  it("uses the Coflat parser for branch-local page title suggestions", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", () =>
+        Response.json({ tree: [{ path: "draft.md", type: "blob", size: 200, sha: "draft-sha" }], truncated: false }),
+      );
+      forge.get("/api/v1/repos/owner/w/raw/draft.md", () =>
+        new Response("---\nid: branch-page\n---\n```md\n# Not The Title\n```\n\n# Real Branch Title\n"),
+      );
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=branch&branch=user%2Falice%2Fwip", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      suggestions: [
+        { id: "branch-page", insert: "branch-page]", display: "branch-page — Real Branch Title (draft.md)" },
+      ],
+    });
+  });
 });
 
 describe("files read route", () => {

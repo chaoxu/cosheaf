@@ -1,4 +1,8 @@
 import { Hono } from "hono";
+import {
+  extractFirstH1 as extractCoflatFirstH1,
+  parseFrontmatter as parseCoflatFrontmatter,
+} from "@chaoxu/coflat/parse";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
@@ -18,7 +22,6 @@ import { bad, conflict, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
 import { parseBoundedPositiveInt } from "./query-params.js";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
-import { extractFirstH1, parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -600,11 +603,12 @@ async function parseBranchRefs(
     if (!rel) continue;
     const source = await fj.getRawFile(owner, repo, branch, rel).catch(() => null);
     if (source === null) continue;
-    const parsed = parseFrontmatterYaml(source);
-    if (typeof parsed.frontmatter.id === "string") {
+    const parsed = parseCoflatFrontmatter(source);
+    const frontmatter = (parsed.frontmatter ?? {}) as Record<string, unknown>;
+    if (typeof frontmatter.id === "string") {
       entries.push({
-        id: parsed.frontmatter.id,
-        title: typeof parsed.frontmatter.title === "string" ? parsed.frontmatter.title : extractFirstH1(parsed.body),
+        id: frontmatter.id,
+        title: typeof frontmatter.title === "string" ? frontmatter.title : extractCoflatFirstH1(parsed.body),
         path: rel,
       });
     }

@@ -14,11 +14,14 @@ import {
   formatUploadedAssetMarkdown,
   renderInlineMarkdown,
 } from "@chaoxu/coflat";
+import {
+  extractFirstH1 as extractCoflatFirstH1,
+  parseFrontmatter as parseCoflatFrontmatter,
+} from "@chaoxu/coflat/parse";
 import { hydrateReferences, type DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
-import { extractFirstH1, parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { urlPath } from "../../shared/url";
 import {
@@ -88,6 +91,10 @@ function relativeAssetPath(documentPath: string, assetPath: string): string {
   return `${"../".repeat(dirDepth)}${assetPath}`;
 }
 
+function sizeAssetRejection(file: File): { reject: string } | null {
+  return file.size > MAX_ASSET_BYTES ? { reject: `asset exceeds ${MAX_ASSET_DISPLAY}` } : null;
+}
+
 // Fire an app-wide toast (cosheaf-toast.js, loaded by the page shell). A no-op
 // if the script hasn't loaded; toasts are for discrete events (merge/PR/errors/
 // upload), never for per-save feedback.
@@ -141,7 +148,8 @@ function readConfig(): { config: EditorConfig; content: string } {
 }
 
 function currentDocumentSuggestions(source: string, prefix: string): Suggestion[] {
-  const parsed = parseFrontmatterYaml(source);
+  const parsed = parseCoflatFrontmatter(source);
+  const frontmatter = (parsed.frontmatter ?? {}) as Record<string, unknown>;
   const suggestions: Suggestion[] = [];
   const add = (id: string, title: string | null, detail: string) => {
     if (!id || !matchesSuggestion(id, title, prefix)) return;
@@ -151,10 +159,10 @@ function currentDocumentSuggestions(source: string, prefix: string): Suggestion[
       display: title ? `${id} — ${title} (${detail})` : `${id} (${detail})`,
     });
   };
-  if (typeof parsed.frontmatter.id === "string") {
+  if (typeof frontmatter.id === "string") {
     add(
-      parsed.frontmatter.id,
-      typeof parsed.frontmatter.title === "string" ? parsed.frontmatter.title : extractFirstH1(parsed.body),
+      frontmatter.id,
+      typeof frontmatter.title === "string" ? frontmatter.title : extractCoflatFirstH1(parsed.body),
       "current page",
     );
   }
@@ -472,8 +480,12 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 
   const assetUploader = useMemo<EditorAssetUploader>(
     () => ({
-      accept: (file) =>
-        file.size > MAX_ASSET_BYTES ? { reject: `asset exceeds ${MAX_ASSET_DISPLAY}` } : null,
+      accept: (file) => {
+        const sizeRejection = sizeAssetRejection(file);
+        if (sizeRejection) return sizeRejection;
+        if (!file.type.startsWith("image/")) return { reject: "paste/drop upload currently accepts images only; use Upload for other files" };
+        return null;
+      },
       upload: async (file, env) => {
         const writeBranch = branchForWrite();
         try {
@@ -499,7 +511,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         const writeBranch = branchForWrite();
         const snippets: string[] = [];
         for (const file of picked) {
-          const rejection = assetUploader.accept?.(file);
+          const rejection = sizeAssetRejection(file);
           if (rejection?.reject) {
             toast(`Upload failed: ${rejection.reject}`, "error");
             continue;
