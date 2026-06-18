@@ -126,6 +126,9 @@ Already shared or recently aligned:
 - Reader HTML and editor inline DOM now share a Coflat reference route surface
   planner for citations, crossrefs, mixed clusters, unresolved refs, host refs,
   links, and per-item hover metadata.
+- Reader, editor preview, and editor registration now share Coflat's citation
+  collection policy for local-target precedence, locator-preserving clusters,
+  stable registration keys, and first-citation bibliography order.
 - Reader source-position attributes now go through a shared Coflat source-range
   surface helper that supports both HTML serialization and DOM dataset
   application.
@@ -289,6 +292,7 @@ Exit criterion:
 | Shared reference preview header/source helpers | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `reader-render.test.ts` |
 | Shared reference preview body planning | Fixed | `reference-preview-source.test.ts`; `hover-preview.render.test.ts`; `hover-preview.test.ts`; `reader-hydrate.test.ts`; `reader.crossref.test.ts` |
 | Shared reference route surface planning | Fixed | `reference-surface.test.ts`; `inline-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
+| Shared citation collection and bibliography ordering policy | Fixed | `citation-rendering.test.ts`; `citation-registration.test.ts`; `reader.citation.test.ts` |
 | Shared source-range surface attributes | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts` |
 | Shared outline entry planning | Fixed | `outline-surface.test.ts`; `per-file-panels.test.ts`; `reader-outline.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference target planning | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts`; `reader.crossref.test.ts`; `reader-render.test.ts`; `presentation.test.ts`; `crossref-resolver.test.ts` |
