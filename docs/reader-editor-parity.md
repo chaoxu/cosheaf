@@ -36,7 +36,11 @@ Already shared or recently aligned:
   numbering, hydration, or DOM/HTML emission.
 - Lists: reader and editor preview now consume a shared syntax-level render
   plan for ordered/unordered shape, looseness, task marker state, item marker
-  numbering, and tight-item paragraph unwrapping.
+  numbering, tight-item paragraph unwrapping, and trimmed task-item body
+  content.
+- Document traversal: reader and editor preview now share a document render
+  plan for frontmatter skipping, inter-block blank lines, trailing blank lines,
+  and reader-only leading title blocks.
 - Display math and fenced div blocks: reader and editor preview now share
   source-level plans for math labels/latex and semantic block attributes,
   titles, numbering presentation, body children, and preserved blank lines.
@@ -47,6 +51,11 @@ Already shared or recently aligned:
   through a code block render plan before emitting HTML or DOM.
 - Footnote definitions: reader and editor preview now share id/body extraction
   and inline fragment planning before emitting footnote entry surfaces.
+- Document assembly: reader and editor preview now share top-level renderable
+  block order, frontmatter skipping, inter-block blank ranges, and trailing
+  blank range planning before emitting HTML or DOM.
+- Task list items: reader and editor preview now share trimmed task content
+  ranges and markdown content before emitting list item bodies.
 - Inline surface policy: reader and editor preview now share a typed policy for
   link, reference, image, footnote, and hard-break behavior across document
   body, document-inline, table-preview, and UI-chrome inline surfaces.
@@ -169,11 +178,15 @@ Exit criterion:
 | Shared paragraph block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared heading / horizontal-rule / blockquote render plans | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-source-map.test.ts` |
 | Shared list render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
+| Shared task-item body normalization | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
+| Shared document traversal render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared display math render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
+| Shared document assembly render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `reader-outline.test.ts` |
+| Shared task-list content normalization | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
