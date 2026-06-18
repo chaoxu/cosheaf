@@ -50,6 +50,9 @@ Already shared or recently aligned:
 - Inline surface policy: reader and editor preview now share a typed policy for
   link, reference, image, footnote, and hard-break behavior across document
   body, document-inline, table-preview, and UI-chrome inline surfaces.
+- Document surface policy: reader and editor preview now share a typed policy
+  for semantic block disclosure interactivity, making reader interactive
+  disclosure and editor static preview an explicit surface choice.
 
 Still meaningfully split:
 
@@ -124,7 +127,8 @@ Policies should explicitly state:
 - References: resolved or inert.
 - Images: rendered or alt text.
 - Footnotes: numbered reference or raw superscript.
-- Interactivity: reader disclosure, editor widget, hover card, outline label.
+- Interactivity: reader disclosure vs static preview is explicit; editor
+  widgets, hover cards, and outline labels still need policy coverage.
 
 ### Phase 4: Corpus and Production Regression Expansion
 
@@ -168,4 +172,5 @@ Exit criterion:
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
-| Typed non-inline surface policies | Planned | Phase 3 |
+| Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
+| Typed non-inline surface policies for widgets/hover/outline | Planned | Phase 3 |
