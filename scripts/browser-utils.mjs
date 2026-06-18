@@ -5,16 +5,30 @@ import path from "node:path";
 import { defaultWebUrl, serverPort, vitePort } from "./lib/env-dev.mjs";
 
 const candidates = [
+  "@playwright/test",
   path.join(process.cwd(), "node_modules/playwright/index.js"),
 ];
 
 export async function loadChromium() {
-  const playwrightPath = candidates.find(existsSync);
-  if (!playwrightPath) {
+  for (const candidate of candidates) {
+    if (candidate.startsWith("@") || existsSync(candidate)) {
+      try {
+        const mod = await import(candidate);
+        const chromium = mod.chromium ?? mod.default?.chromium;
+        if (!chromium) {
+          throw new Error(`${candidate} did not export chromium`);
+        }
+        return chromium;
+      } catch (error) {
+        void error;
+        // Try the next candidate so older checkouts still get a useful error.
+      }
+    }
+  }
+  {
     console.error("playwright not found; run `pnpm install` and `pnpm exec playwright install chromium`");
     process.exit(1);
   }
-  return (await import(playwrightPath)).default.chromium;
 }
 
 export function attachPageListeners(page, { label = "", consoleSink, errorSink, badResponseSink }) {
