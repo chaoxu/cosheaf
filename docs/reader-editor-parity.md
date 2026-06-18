@@ -120,6 +120,9 @@ Already shared or recently aligned:
   application.
 - Reader and editor outlines now share Coflat's outline entry planner for the
   stable base entry shape and number omission rules.
+- Reader, editor, and the public parse API now share Coflat reference target
+  planning and duplicate-id indexes for heading, equation, and semantic block
+  targets.
 
 Still meaningfully split:
 
@@ -266,6 +269,7 @@ Exit criterion:
 | Shared reference route surface planning | Fixed | `reference-surface.test.ts`; `inline-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range surface attributes | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts` |
 | Shared outline entry planning | Fixed | `outline-surface.test.ts`; `per-file-panels.test.ts`; `reader-outline.test.ts`; `preview-reader-parity.test.ts` |
+| Shared reference target planning | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts`; `reader.crossref.test.ts`; `reader-render.test.ts`; `presentation.test.ts`; `crossref-resolver.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
