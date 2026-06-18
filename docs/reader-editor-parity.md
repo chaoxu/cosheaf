@@ -53,6 +53,9 @@ Already shared or recently aligned:
 - Document surface policy: reader and editor preview now share a typed policy
   for semantic block disclosure interactivity, making reader interactive
   disclosure and editor static preview an explicit surface choice.
+- Document surface policy now also owns inline-surface choices and reference
+  host routing for reader, editor, editor preview, hover preview, completion
+  preview, and outline labels.
 
 Still meaningfully split:
 
@@ -128,7 +131,8 @@ Policies should explicitly state:
 - Images: rendered or alt text.
 - Footnotes: numbered reference or raw superscript.
 - Interactivity: reader disclosure vs static preview is explicit; editor
-  widgets, hover cards, and outline labels still need policy coverage.
+  reference widgets, hover cards, completion previews, and outline labels now
+  use typed document-surface policies for presentation routing.
 
 ### Phase 4: Corpus and Production Regression Expansion
 
@@ -173,4 +177,4 @@ Exit criterion:
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
-| Typed non-inline surface policies for widgets/hover/outline | Planned | Phase 3 |
+| Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
