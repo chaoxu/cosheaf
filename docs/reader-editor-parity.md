@@ -180,6 +180,10 @@ Already shared or recently aligned:
   planner for reference registration, definition registration, numbering,
   section-entry projection, and truncation snapshots; reader still owns the
   policy decision of when to roll that state back for truncated blocks.
+- Reader and editor hover previews now share Coflat's reference preview content
+  plan for header text, body planning, cache keys, and source-fallback section
+  numbering policy; the reader still emits HTML hover bodies and the editor
+  still emits DOM/CM6 hover and completion bodies.
 
 Still meaningfully split:
 
@@ -351,6 +355,7 @@ Exit criterion:
 | Shared footnote index planning | Fixed | `footnote-plan.test.ts`; `footnote-slice.test.ts`; `window-extractor.test.ts`; `document.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared footnote extraction, section projection, and outline projection | Fixed | `footnote-extraction.test.ts`; `footnote-plan.test.ts`; `outline-plan.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reader emitted-footnote state and truncation snapshots | Fixed | `footnote-emission-state.test.ts`; `footnote-plan.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `preview-reader-parity.test.ts` |
+| Shared reference preview content planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
