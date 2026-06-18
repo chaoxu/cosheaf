@@ -529,7 +529,7 @@ files.get("/:owner/:repo/suggest", async (c) => {
       })),
     ];
   const branchSuggestions = branch !== "main" && supportsXrefs
-    ? await branchRefSuggestions(c, branch, prefix, limit, new Set())
+    ? await branchRefSuggestions(c, branch, prefix, limit)
     : [];
   return c.json({ suggestions: mergeSuggestions(branchSuggestions, mainSuggestions, limit) });
 });
@@ -558,7 +558,6 @@ async function branchRefSuggestions(
   branch: string,
   prefix: string,
   limit: number,
-  seen: Set<string>,
 ): Promise<RefSuggestion[]> {
   const { fj, owner, repo } = c.get("repoCtx");
   let tree = getCachedTree(owner, repo, branch);
@@ -581,6 +580,7 @@ async function branchRefSuggestions(
     setCachedBranchRefs(cacheKey, branchRefs);
   }
   const suggestions: RefSuggestion[] = [];
+  const seen = new Set<string>();
   for (const entry of branchRefs) {
     addBranchSuggestion(suggestions, seen, entry.id, entry.title, entry.path, prefix, limit);
     if (suggestions.length >= limit) break;

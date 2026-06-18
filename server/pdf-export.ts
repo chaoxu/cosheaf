@@ -139,17 +139,21 @@ function stringOption(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function withDefaultUnlessDocumentValue(
+  value: string | undefined,
+  nestedValue: string | undefined,
+  defaultValue: string | undefined,
+): string | undefined {
+  return stringOption(value) || stringOption(nestedValue) ? value : defaultValue;
+}
+
 function latexConfigWithDefaults(config: LatexConfig, defaults: ExportCoflatPdfOptions["defaults"]): LatexConfig {
   if (!defaults) return config;
   const latex = config.latex ?? {};
   return {
     ...config,
-    bibliography: stringOption(latex.bibliography) || stringOption(config.bibliography)
-      ? config.bibliography
-      : defaults.bibliography,
-    csl: stringOption(latex.csl) || stringOption(config.csl)
-      ? config.csl
-      : defaults.csl,
+    bibliography: withDefaultUnlessDocumentValue(config.bibliography, latex.bibliography, defaults.bibliography),
+    csl: withDefaultUnlessDocumentValue(config.csl, latex.csl, defaults.csl),
     latex: {
       ...latex,
       ...(!stringOption(latex.template) && defaults.template ? { template: defaults.template } : {}),
