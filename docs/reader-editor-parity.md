@@ -37,6 +37,9 @@ Already shared or recently aligned:
 - Lists: reader and editor preview now consume a shared syntax-level render
   plan for ordered/unordered shape, looseness, task marker state, item marker
   numbering, and tight-item paragraph unwrapping.
+- Display math and fenced div blocks: reader and editor preview now share
+  source-level plans for math labels/latex and semantic block attributes,
+  titles, numbering presentation, body children, and preserved blank lines.
 
 Still meaningfully split:
 
@@ -91,10 +94,8 @@ Start with low-risk blocks:
 
 Then move higher-risk blocks:
 
-- Fenced div theorem/proof blocks
 - Tables
 - Footnotes
-- Display math
 - Code blocks
 
 Verification:
@@ -151,5 +152,7 @@ Exit criterion:
 | Shared paragraph block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared heading / horizontal-rule / blockquote render plans | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-source-map.test.ts` |
 | Shared list render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
+| Shared display math render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
+| Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
 | Shared block render plan for higher-risk blocks | Planned | Phase 2 |
 | Typed surface policies | Planned | Phase 3 |
