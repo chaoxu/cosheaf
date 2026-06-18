@@ -26,13 +26,14 @@ Already shared or recently aligned:
 - Headings: shared heading surface, Setext handling, and closed-marker handling.
 - Footnotes: shared entry/reference surface and shared numbering in preview.
 - Outline labels: editor outline exposes rendered Coflat HTML and Cosheaf uses it.
+- Inline rendering: reader static and source-position inline rendering consume
+  the shared Coflat `InlineFragment` model, including source ranges for
+  hydration and selection metadata.
 
 Still meaningfully split:
 
 - `@chaoxu/coflat/src/reader/reader.ts` is a large HTML-string renderer.
 - `@chaoxu/coflat/src/editor/render/preview-block-renderer.ts` is a separate DOM renderer.
-- `@chaoxu/coflat/src/reader/reader.ts` still has its own inline node renderer.
-- `@chaoxu/coflat/src/editor/render/inline-render.ts` renders a separate `InlineFragment` model.
 - Reader-only behaviors include source-position attributes, truncation, reference-preview indexing, outline id generation, and disclosure hydration.
 - Editor-only behaviors include CM6 widgets, viewport mounting, editable/source transitions, and non-interactive preview rendering.
 
@@ -43,7 +44,7 @@ Still meaningfully split:
   Cogirth is an active production editing target, but it must not be the final
   parity regression because the document and branch are not permanent fixtures.
 - Coflat pin status: `pnpm coflat:status`
-- Production status: `pnpm coflat:status -- --prod`
+- Production status: `pnpm coflat:status --prod`
 
 ## Implementation Plan
 
@@ -138,6 +139,6 @@ Exit criterion:
 | Media loading/rendered surface | Fixed | `preview-reader-parity.test.ts` |
 | Footnote reference numbering | Fixed | `preview-reader-parity.test.ts` |
 | Editor outline raw crossref labels | Fixed | temporary `pnpm verify:cogirth-outline`; replace with fixture-backed check |
-| Unified inline renderer | Planned | Phase 1 |
+| Unified inline fragments for static + source-position reader inline rendering | Fixed | `inline-fragments.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared block render plan | Planned | Phase 2 |
 | Typed surface policies | Planned | Phase 3 |
