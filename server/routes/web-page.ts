@@ -7,7 +7,7 @@ import { type Panel, renderRegion } from "./web-panels.js";
 import { pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 import { backIcon } from "./icons.js";
 
-export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "settings";
+export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings";
 
 // A small "+ <label>" disclosure that keeps a durable add/create form closed by
 // default behind a native <details>, so a panel/section reads cleanly when
@@ -41,6 +41,7 @@ const REPO_TABS = [
   ["chat", "tab.chat", "/chat"],
   ["notifications", "nav.notifications", "/notifications"],
   ["activity", "tab.activity", "/activity"],
+  ["diagnostics", "tab.diagnostics", "/diagnostics"],
   ["settings", "settings.title", "/settings"],
 ] as const satisfies ReadonlyArray<readonly [string, MessageKey, string]>;
 

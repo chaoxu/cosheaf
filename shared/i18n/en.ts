@@ -51,6 +51,7 @@ export const en = {
   "tab.pulls": "PRs",
   "tab.chat": "Chat",
   "tab.activity": "Activity",
+  "tab.diagnostics": "Diagnostics",
   // common
   "common.private": "private",
   "common.public": "public",

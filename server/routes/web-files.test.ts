@@ -133,7 +133,7 @@ describe("web file editor route", () => {
     expect(body).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
     expect(body).toContain('<a class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
     expect(body).toContain('<a href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
-    expect(body).toContain('<a href="/owner/w/export/pdf/branch/main/notes.md">PDF</a>');
+    expect(body).toContain('<a href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
     expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).toContain('class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
@@ -202,6 +202,244 @@ describe("web file editor route", () => {
     expect(pandoc?.args.some((arg) => arg.startsWith("--lua-filter=") && arg.endsWith("/latex/filter.lua"))).toBe(true);
     expect(pandoc?.args.some((arg) => arg.startsWith("--csl=") && arg.endsWith("/latex/csl/ieee.csl"))).toBe(true);
     expect(pandoc?.args.some((arg) => arg.startsWith("--resource-path="))).toBe(true);
+  });
+
+  it("renders PDF export options from cosheaf.yaml defaults", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", (c) => {
+          expect(c.req.query("ref")).toBe("main");
+          return new Response("bibliography: refs/main.bib\ncsl: chicago-author-date\ntemplate: lipics\n");
+        });
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("not found", { status: 404 }));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/options/branch/main/docs/main.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="pdf-export-options"');
+    expect(body).toContain('action="/owner/w/export/pdf/branch/main/docs/main.md"');
+    expect(body).toContain('name="bibliography" placeholder="refs/main.bib"');
+    expect(body).toContain('name="csl" list="pdf-csl-options" placeholder="chicago-author-date"');
+    expect(body).toContain('name="template" list="pdf-template-options" placeholder="lipics"');
+    expect(body).not.toContain('name="bibliography" value=');
+    expect(body).not.toContain('name="csl" value=');
+    expect(body).not.toContain('name="template" value=');
+  });
+
+  it("uses cosheaf.yaml PDF defaults when document frontmatter is silent", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const commands: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    _setPdfExportCommandRunnerForTest(async (command, args, options) => {
+      commands.push({ command, args, cwd: options.cwd });
+      if (command !== "pandoc") return;
+      const outputArg = args.find((arg) => arg.startsWith("--output="));
+      if (outputArg) await writeFile(outputArg.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({
+            tree: [
+              { path: "docs/main.md", type: "blob" },
+              { path: "refs/main.bib", type: "blob" },
+            ],
+            truncated: false,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () => new Response("# Printable\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/main.bib", () => new Response("@book{x, title={X}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () => new Response("bibliography: refs/main.bib\ncsl: ieee\ntemplate: lipics\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const pandoc = commands.at(-1);
+    expect(pandoc?.args).toContain("--metadata=bibliography=refs/main.bib");
+    expect(pandoc?.args.some((arg) => arg.startsWith("--csl=") && arg.endsWith("/latex/csl/ieee.csl"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/latex/template/lipics.tex"))).toBe(true);
+  });
+
+  it("prefers cosheaf.yaml nested PDF defaults over top-level reader defaults for export", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const commands: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    _setPdfExportCommandRunnerForTest(async (command, args, options) => {
+      commands.push({ command, args, cwd: options.cwd });
+      if (command !== "pandoc") return;
+      const outputArg = args.find((arg) => arg.startsWith("--output="));
+      if (outputArg) await writeFile(outputArg.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({
+            tree: [
+              { path: "docs/main.md", type: "blob" },
+              { path: "refs/reader.bib", type: "blob" },
+              { path: "refs/export.bib", type: "blob" },
+            ],
+            truncated: false,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () => new Response("# Printable\n"));
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () =>
+          new Response([
+            "bibliography: refs/reader.bib",
+            "csl: styles/reader.csl",
+            "latex:",
+            "  bibliography: refs/export.bib",
+            "  csl: ieee",
+            "pdf:",
+            "  template: lipics",
+            "",
+          ].join("\n")),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/refs/reader.bib", () => new Response("@book{reader, title={Reader}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/export.bib", () => new Response("@book{export, title={Export}}\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const pandoc = commands.at(-1);
+    expect(pandoc?.args).toContain("--metadata=bibliography=refs/export.bib");
+    expect(pandoc?.args).not.toContain("--metadata=bibliography=refs/reader.bib");
+    expect(pandoc?.args.some((arg) => arg.startsWith("--csl=") && arg.endsWith("/latex/csl/ieee.csl"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/latex/template/lipics.tex"))).toBe(true);
+  });
+
+  it("lets document PDF frontmatter override cosheaf.yaml defaults", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const commands: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    _setPdfExportCommandRunnerForTest(async (command, args, options) => {
+      commands.push({ command, args, cwd: options.cwd });
+      if (command !== "pandoc") return;
+      const outputArg = args.find((arg) => arg.startsWith("--output="));
+      if (outputArg) await writeFile(outputArg.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({
+            tree: [
+              { path: "docs/main.md", type: "blob" },
+              { path: "refs/doc.bib", type: "blob" },
+              { path: "refs/repo.bib", type: "blob" },
+              { path: "styles/doc.csl", type: "blob" },
+              { path: "templates/doc.tex", type: "blob" },
+            ],
+            truncated: false,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () =>
+          new Response([
+            "---",
+            "bibliography: refs/doc.bib",
+            "latex:",
+            "  csl: styles/doc.csl",
+            "  template: templates/doc.tex",
+            "---",
+            "# Printable",
+            "",
+          ].join("\n")),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () => new Response("bibliography: refs/repo.bib\ncsl: ieee\ntemplate: lipics\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/doc.bib", () => new Response("@book{x, title={X}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/repo.bib", () => new Response("@book{y, title={Y}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/styles/doc.csl", () => new Response("<style></style>\n"));
+        forge.get("/api/v1/repos/owner/w/raw/templates/doc.tex", () => new Response("$body$\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const pandoc = commands.at(-1);
+    expect(pandoc?.args).toContain("--metadata=bibliography=refs/doc.bib");
+    expect(pandoc?.args).not.toContain("--metadata=bibliography=refs/repo.bib");
+    expect(pandoc?.args.some((arg) => arg.startsWith("--csl=") && arg.endsWith("/styles/doc.csl"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/templates/doc.tex"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/latex/template/lipics.tex"))).toBe(false);
+  });
+
+  it("keeps document PDF frontmatter when the options form submits untouched fields", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const commands: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    _setPdfExportCommandRunnerForTest(async (command, args, options) => {
+      commands.push({ command, args, cwd: options.cwd });
+      if (command !== "pandoc") return;
+      const outputArg = args.find((arg) => arg.startsWith("--output="));
+      if (outputArg) await writeFile(outputArg.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({
+            tree: [
+              { path: "docs/main.md", type: "blob" },
+              { path: "refs/doc.bib", type: "blob" },
+              { path: "refs/repo.bib", type: "blob" },
+              { path: "templates/doc.tex", type: "blob" },
+            ],
+            truncated: false,
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () =>
+          new Response([
+            "---",
+            "bibliography: refs/doc.bib",
+            "latex:",
+            "  template: templates/doc.tex",
+            "---",
+            "# Printable",
+            "",
+          ].join("\n")),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () => new Response("bibliography: refs/repo.bib\ntemplate: lipics\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/doc.bib", () => new Response("@book{x, title={X}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/repo.bib", () => new Response("@book{y, title={Y}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/templates/doc.tex", () => new Response("$body$\n"));
+      }),
+    );
+
+    const res = await appFor(db).request(
+      "/owner/w/export/pdf/branch/main/docs/main.md?bibliography=&csl=&template=",
+      { headers: authHeaders(token) },
+    );
+
+    expect(res.status).toBe(200);
+    const pandoc = commands.at(-1);
+    expect(pandoc?.args).toContain("--metadata=bibliography=refs/doc.bib");
+    expect(pandoc?.args).not.toContain("--metadata=bibliography=refs/repo.bib");
+    expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/templates/doc.tex"))).toBe(true);
+    expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/latex/template/lipics.tex"))).toBe(false);
   });
 
   it("rejects PDF export for non-Coflat markdown workspaces", async () => {

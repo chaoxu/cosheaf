@@ -20,6 +20,7 @@ import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, glo
 import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
+import { registerDiagnosticsRoutes } from "./web-diagnostics.js";
 import { registerIssueRoutes } from "./web-issues.js";
 import { avatarForUser, avatarLinkForUser, forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
 import { addDisclosure, userPreferencesSection, userProfileSection } from "./web-page.js";
@@ -827,5 +828,7 @@ registerPullRoutes(web);
 registerBranchRoutes(web);
 
 registerNotificationActivityRoutes(web);
+
+registerDiagnosticsRoutes(web);
 
 registerSettingsRoutes(web);

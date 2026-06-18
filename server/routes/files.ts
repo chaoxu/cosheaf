@@ -3,11 +3,11 @@ import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
 import { validBranchName } from "../branch-path.js";
-import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
-import { getDocumentFormat } from "../format-registry.js";
+import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
+import { workspaceSupportsXrefs, workspaceValidation } from "../workspace-validation.js";
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
@@ -17,11 +17,29 @@ import type { WorkspaceValidation } from "../../shared/validation.js";
 import { bad, conflict, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
 import { parseBoundedPositiveInt } from "./query-params.js";
+import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
+import { extractFirstH1, parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
 files.use("/:owner/:repo/*", requireMembership());
 files.use("/:owner/:repo/*", requireWriteOnMutation);
+
+interface RefSuggestion {
+  id: string;
+  insert: string;
+  display: string;
+}
+
+interface BranchRefEntry {
+  id: string;
+  title: string | null;
+  path: string;
+}
+
+const BRANCH_REF_CACHE_MAX = 128;
+const BRANCH_REF_CACHE_TTL_MS = 5 * 60_000;
+const branchRefCache = new Map<string, { expiresAt: number; entries: readonly BranchRefEntry[] }>();
 
 // Repository-relative path validator. Rejects absolute paths, traversal
 // segments (`.` or `..`), empty segments, backslashes (Forgejo treats `/` as the
@@ -52,8 +70,42 @@ function validRequestedBranch(branch: string): boolean {
   return branch === "main" || validBranchName(branch);
 }
 
-function workspaceSupportsXrefs(formatId: string | null | undefined): boolean {
-  return Boolean(getDocumentFormat(formatId).extractXrefTargets);
+function branchRefCacheKey(owner: string, repo: string, branch: string, tree: readonly { path: string; sha?: string; size?: number }[]): string {
+  return `${owner}|${repo}|${branch}|${tree.map((entry) => `${entry.path}:${entry.sha ?? ""}:${entry.size ?? ""}`).join("\n")}`;
+}
+
+function getCachedBranchRefs(key: string): readonly BranchRefEntry[] | null {
+  const cached = branchRefCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    branchRefCache.delete(key);
+    return null;
+  }
+  return cached.entries;
+}
+
+function setCachedBranchRefs(key: string, entries: readonly BranchRefEntry[]): void {
+  if (branchRefCache.size >= BRANCH_REF_CACHE_MAX) {
+    const first = branchRefCache.keys().next().value;
+    if (first) branchRefCache.delete(first);
+  }
+  branchRefCache.set(key, { expiresAt: Date.now() + BRANCH_REF_CACHE_TTL_MS, entries });
+}
+
+function invalidateBranchRefs(owner: string, repo: string, branch: string): void {
+  const prefix = `${owner}|${repo}|${branch}|`;
+  for (const key of branchRefCache.keys()) {
+    if (key.startsWith(prefix)) branchRefCache.delete(key);
+  }
+}
+
+function invalidateBranchReadCaches(owner: string, repo: string, branch: string): void {
+  invalidateBranchTree(owner, repo, branch);
+  invalidateBranchRefs(owner, repo, branch);
+}
+
+export function _clearBranchRefCacheForTests(): void {
+  branchRefCache.clear();
 }
 
 // A write that lost a branch-head race: Forgejo rejects a stale blob sha as
@@ -358,10 +410,10 @@ files.put("/:owner/:repo/file", async (c) => {
       try {
         await rollbackCreatedRenameDestination(fj, owner, repo, branch, rel, r.content?.sha);
       } catch (rollbackErr) {
-        invalidateBranchTree(owner, repo, branch);
+        invalidateBranchReadCaches(owner, repo, branch);
         throw new Error(`rename rollback failed for ${rel}: ${(rollbackErr as Error).message}`);
       }
-      invalidateBranchTree(owner, repo, branch);
+      invalidateBranchReadCaches(owner, repo, branch);
       return c.json(...(await staleShaConflict(fj, owner, repo, branch, previousRel as string, expectedSha)));
     }
   }
@@ -373,7 +425,7 @@ files.put("/:owner/:repo/file", async (c) => {
   // for this branch so the change is read-after-write consistent (the webhook
   // only reconciles main; external non-main pushes reconcile on reindex).
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
-  invalidateBranchTree(owner, repo, branch);
+  invalidateBranchReadCaches(owner, repo, branch);
   if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
   hub.publish(ws.slug, { type: "change", path: rel });
   const writtenSha = r.content?.sha ?? (await fj.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
@@ -403,32 +455,45 @@ files.post("/:owner/:repo/assets", async (c) => {
     return c.json(...bad(`asset exceeds ${MAX_ASSET_DISPLAY}`));
   const { fj, owner, repo } = c.get("repoCtx");
   await ensureBranch(c, branch);
-  // Random-prefixed under assets/ so two simultaneous uploads of the same
-  // filename don't collide. We don't try to dedupe by content hash here;
-  // git already deduplicates blobs server-side.
-  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-64) || "asset";
+  // Keep a readable basename plus a short random suffix so simultaneous uploads
+  // of the same filename don't collide. Git still deduplicates blobs server-side.
+  const safeName = predictableUploadName(file.name);
   const rand = Math.random().toString(36).slice(2, 10);
-  const assetPath = `assets/${rand}-${safeName}`;
+  const repoConfig = await loadRepoConfig(c.get("db"), fj, owner, repo, branch);
+  const assetPath = `${repoConfig.assetFolder}/${safeName.stem}-${rand}${safeName.ext}`;
   const bytes = Buffer.from(await file.arrayBuffer());
   await fj.putFileBytes(owner, repo, {
     branch,
     path: assetPath,
     content: bytes,
-    message: `upload ${safeName}`,
+    message: `upload ${safeName.stem}${safeName.ext}`,
   });
-  invalidateBranchTree(owner, repo, branch);
+  invalidateBranchReadCaches(owner, repo, branch);
   return c.json({ path: assetPath });
 });
 
-files.get("/:owner/:repo/suggest", (c) => {
+function predictableUploadName(name: string): { stem: string; ext: string } {
+  const clean = name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-96) || "asset";
+  const dot = clean.lastIndexOf(".");
+  if (dot <= 0 || dot === clean.length - 1) return { stem: clean.slice(0, 80) || "asset", ext: "" };
+  return {
+    stem: clean.slice(0, dot).slice(0, 80) || "asset",
+    ext: clean.slice(dot).slice(0, 16),
+  };
+}
+
+files.get("/:owner/:repo/suggest", async (c) => {
   const prefix = c.req.query("prefix")?.trim() ?? "";
   const trigger = c.req.query("trigger") ?? "[@";
   const limit = parseBoundedPositiveInt(c.req.query("limit"), 10, 20);
   const ws = c.get("workspace");
+  const branch = c.req.query("branch")?.trim() || "main";
+  if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
   // For `[@` trigger we suggest from doc_map (cross-ref ids + titles).
   // Other triggers return empty until we add e.g. tag completion.
   if (trigger !== "[@") return c.json({ suggestions: [] });
   const term = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+  const sqlLimit = branch !== "main" ? limit * 2 : limit;
   const pageRows = c
     .get("db")
     .prepare(
@@ -437,9 +502,10 @@ files.get("/:owner/:repo/suggest", (c) => {
         "(cosheaf_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') " +
         "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
     )
-    .all(ws.slug, term, term, limit) as Array<{ id: string; title: string | null }>;
-  const remaining = Math.max(0, limit - pageRows.length);
-  const xrefRows = remaining === 0 || !workspaceSupportsXrefs(ws.defaultMdFormat)
+    .all(ws.slug, term, term, sqlLimit) as Array<{ id: string; title: string | null }>;
+  const remaining = Math.max(0, sqlLimit - pageRows.length);
+  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
+  const xrefRows = remaining === 0 || !supportsXrefs
     ? []
     : c
         .get("db")
@@ -450,21 +516,126 @@ files.get("/:owner/:repo/suggest", (c) => {
             "ORDER BY length(target_id), target_id LIMIT ?",
         )
         .all(ws.slug, term, term, remaining) as Array<{ id: string; title: string; path: string }>;
-  return c.json({
-    suggestions: [
-      ...pageRows.map((r) => ({
+  const mainSuggestions: RefSuggestion[] = [
+      ...pageRows.map((r): RefSuggestion => ({
         id: r.id,
         insert: `${r.id}]`,
         display: r.title ? `${r.id} — ${r.title}` : r.id,
       })),
-      ...xrefRows.map((r) => ({
+      ...xrefRows.map((r): RefSuggestion => ({
         id: r.id,
         insert: `${r.id}]`,
         display: `${r.id} — ${r.title} (${r.path})`,
       })),
-    ],
-  });
+    ];
+  const branchSuggestions = branch !== "main" && supportsXrefs
+    ? await branchRefSuggestions(c, branch, prefix, limit, new Set())
+    : [];
+  return c.json({ suggestions: mergeSuggestions(branchSuggestions, mainSuggestions, limit) });
 });
+
+function mergeSuggestions(primary: readonly RefSuggestion[], secondary: readonly RefSuggestion[], limit: number): RefSuggestion[] {
+  const seen = new Set<string>();
+  const mergedPrimary: RefSuggestion[] = [];
+  const mergedSecondary: RefSuggestion[] = [];
+  for (const suggestion of primary) {
+    if (seen.has(suggestion.id)) continue;
+    seen.add(suggestion.id);
+    mergedPrimary.push(suggestion);
+  }
+  for (const suggestion of secondary) {
+    if (seen.has(suggestion.id)) continue;
+    seen.add(suggestion.id);
+    mergedSecondary.push(suggestion);
+  }
+  const sortSuggestions = (items: RefSuggestion[]) =>
+    items.sort((a, b) => a.id.length - b.id.length || a.id.localeCompare(b.id));
+  return [...sortSuggestions(mergedPrimary), ...sortSuggestions(mergedSecondary)].slice(0, limit);
+}
+
+async function branchRefSuggestions(
+  c: import("hono").Context<AppEnv>,
+  branch: string,
+  prefix: string,
+  limit: number,
+  seen: Set<string>,
+): Promise<RefSuggestion[]> {
+  const { fj, owner, repo } = c.get("repoCtx");
+  let tree = getCachedTree(owner, repo, branch);
+  if (!tree) {
+    try {
+      tree = await fj.getTree(owner, repo, branch, true);
+      setCachedTree(owner, repo, branch, tree);
+    } catch (err) {
+      if (err instanceof ForgejoError && (err.status === 404 || err.status === 400)) return [];
+      throw err;
+    }
+  }
+  const markdownFiles = tree
+    .filter((entry) => entry.type === "blob" && fileKindForPath(entry.path) === "markdown" && (entry.size ?? 0) <= 512_000)
+    .slice(0, 80);
+  const cacheKey = branchRefCacheKey(owner, repo, branch, markdownFiles);
+  let branchRefs = getCachedBranchRefs(cacheKey);
+  if (!branchRefs) {
+    branchRefs = await parseBranchRefs(c, branch, markdownFiles);
+    setCachedBranchRefs(cacheKey, branchRefs);
+  }
+  const suggestions: RefSuggestion[] = [];
+  for (const entry of branchRefs) {
+    addBranchSuggestion(suggestions, seen, entry.id, entry.title, entry.path, prefix, limit);
+    if (suggestions.length >= limit) break;
+  }
+  return suggestions.sort((a, b) => a.id.length - b.id.length || a.id.localeCompare(b.id)).slice(0, limit);
+}
+
+async function parseBranchRefs(
+  c: import("hono").Context<AppEnv>,
+  branch: string,
+  markdownFiles: readonly { path: string }[],
+): Promise<readonly BranchRefEntry[]> {
+  const { fj, owner, repo } = c.get("repoCtx");
+  const entries: BranchRefEntry[] = [];
+  for (const entry of markdownFiles) {
+    const rel = safeRel(entry.path);
+    if (!rel) continue;
+    const source = await fj.getRawFile(owner, repo, branch, rel).catch(() => null);
+    if (source === null) continue;
+    const parsed = parseFrontmatterYaml(source);
+    if (typeof parsed.frontmatter.id === "string") {
+      entries.push({
+        id: parsed.frontmatter.id,
+        title: typeof parsed.frontmatter.title === "string" ? parsed.frontmatter.title : extractFirstH1(parsed.body),
+        path: rel,
+      });
+    }
+    for (const target of extractCoflatXrefTargets(source)) entries.push({ id: target.id, title: target.label, path: rel });
+  }
+  return entries.sort((a, b) => a.id.length - b.id.length || a.id.localeCompare(b.id));
+}
+
+function addBranchSuggestion(
+  suggestions: RefSuggestion[],
+  seen: Set<string>,
+  id: string,
+  title: string | null,
+  path: string,
+  prefix: string,
+  limit: number,
+): void {
+  if (suggestions.length >= limit || seen.has(id) || !suggestionMatches(id, title, prefix)) return;
+  seen.add(id);
+  suggestions.push({
+    id,
+    insert: `${id}]`,
+    display: title ? `${id} — ${title} (${path})` : `${id} (${path})`,
+  });
+}
+
+function suggestionMatches(id: string, title: string | null, prefix: string): boolean {
+  const needle = prefix.trim().toLowerCase();
+  if (!needle) return true;
+  return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
+}
 
 files.get("/:owner/:repo/refs", (c) => {
   const ids = [
@@ -602,7 +773,7 @@ files.delete("/:owner/:repo/file", async (c) => {
   const db = c.get("db");
   const ws = c.get("workspace");
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
-  invalidateBranchTree(owner, repo, branch);
+  invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(ws.slug, { type: "change", path: rel });
   return c.json({ ok: true, branch });
 });
@@ -640,80 +811,7 @@ files.get("/:owner/:repo/backlinks", (c) => {
 
 files.get("/:owner/:repo/validation", (c) => {
   const ws = c.get("workspace");
-  const db = c.get("db");
-  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
-  const brokenRefs = db
-    .prepare(
-      `SELECT b.src_id AS source_id,
-              b.src_path AS source_path,
-              src.title AS source_title,
-              b.target_id AS target_id,
-              b.target_label AS target_label,
-              b.line AS line
-         FROM backlinks b
-         LEFT JOIN doc_map src
-           ON src.workspace_slug = b.workspace_slug
-          AND src.cosheaf_id = b.src_id
-        WHERE b.workspace_slug = ?
-          AND (
-            b.target_id IS NULL
-            OR (
-              NOT EXISTS (
-                SELECT 1 FROM doc_map target
-                 WHERE target.workspace_slug = b.workspace_slug
-                   AND target.cosheaf_id = b.target_id
-              )
-              ${supportsXrefs ? `AND NOT EXISTS (
-                SELECT 1 FROM xref_targets target
-                 WHERE target.workspace_slug = b.workspace_slug
-                   AND target.target_id = b.target_id
-              )` : ""}
-            )
-          )
-        ORDER BY b.src_path, b.line, b.target_label`,
-    )
-    .all(ws.slug) as WorkspaceValidation["broken_refs"];
-  const orphanLabels = db
-    .prepare(
-      `SELECT d.cosheaf_id AS id,
-              d.forgejo_id AS path,
-              d.title AS title
-         FROM doc_map d
-         LEFT JOIN backlinks b
-           ON b.workspace_slug = d.workspace_slug
-          AND b.target_id = d.cosheaf_id
-          AND b.src_id != d.cosheaf_id
-        WHERE d.workspace_slug = ?
-          AND b.src_id IS NULL
-        ORDER BY d.forgejo_id`,
-    )
-    .all(ws.slug) as WorkspaceValidation["orphan_labels"];
-  const duplicateXrefs = supportsXrefs
-    ? db
-        .prepare(
-          `SELECT id, group_concat(path_note, ', ') AS paths, sum(count) AS count
-             FROM (
-               SELECT target_id AS id, source_path AS path_note, 1 AS count
-                 FROM xref_targets
-                WHERE workspace_slug = ?
-                  AND NOT EXISTS (
-                    SELECT 1 FROM xref_target_duplicates duplicate
-                     WHERE duplicate.workspace_slug = xref_targets.workspace_slug
-                       AND duplicate.target_id = xref_targets.target_id
-                       AND duplicate.source_path = xref_targets.source_path
-                  )
-               UNION ALL
-               SELECT target_id AS id, source_path || ' (' || count || ' definitions)' AS path_note, count
-                 FROM xref_target_duplicates
-                WHERE workspace_slug = ?
-             )
-            GROUP BY id
-           HAVING sum(count) > 1
-            ORDER BY id`,
-        )
-        .all(ws.slug, ws.slug) as WorkspaceValidation["duplicate_xrefs"]
-    : [];
-  return c.json({ broken_refs: brokenRefs, duplicate_xrefs: duplicateXrefs, orphan_labels: orphanLabels } satisfies WorkspaceValidation);
+  return c.json(workspaceValidation(c.get("db"), ws.slug, ws.defaultMdFormat) satisfies WorkspaceValidation);
 });
 
 files.get("/:owner/:repo/events", (c) => streamHubChannel(c, c.get("sse"), c.get("workspace").slug));

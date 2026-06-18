@@ -6,7 +6,7 @@ import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { files, safeRel } from "./files.js";
+import { _clearBranchRefCacheForTests, files, safeRel } from "./files.js";
 import { COFLAT_FORMAT_ID, FORGEJO_PASSTHROUGH_FORMAT_ID } from "../../shared/document-format.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
@@ -28,6 +28,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   _resetMiddlewareCachesForTests();
+  _clearBranchRefCacheForTests();
   _clearTreeCacheForTests();
 });
 afterEach(() => {
@@ -345,6 +346,81 @@ describe("files suggest route", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ suggestions: [] });
   });
+
+  it("adds branch-local page ids and Coflat labels that are not indexed on main", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    let rawFetches = 0;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
+        expect(c.req.param("ref")).toBe("user/alice/wip");
+        return c.json({
+          tree: [
+            { path: "draft.md", type: "blob", size: 200, sha: "draft-sha" },
+            { path: "image.png", type: "blob", size: 20 },
+          ],
+          truncated: false,
+        });
+      });
+      forge.get("/api/v1/repos/owner/w/raw/draft.md", (c) => {
+        rawFetches++;
+        expect(c.req.query("ref")).toBe("user/alice/wip");
+        return c.text("---\nid: branch-page\ntitle: Branch Page\n---\n# Branch\n\n::: {#thm:branch .theorem}\nBranch theorem.\n:::\n");
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=branch&branch=user%2Falice%2Fwip", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      suggestions: [
+        { id: "branch-page", insert: "branch-page]", display: "branch-page — Branch Page (draft.md)" },
+      ],
+    });
+
+    const theoremRes = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=thm&branch=user%2Falice%2Fwip", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(theoremRes.status).toBe(200);
+    expect(await theoremRes.json()).toEqual({
+      suggestions: [
+        { id: "thm:branch", insert: "thm:branch]", display: "thm:branch — Theorem 1 (draft.md)" },
+      ],
+    });
+    expect(rawFetches).toBe(1);
+  });
+
+  it("does not let indexed main suggestions crowd out branch-local refs", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    for (let i = 0; i < 12; i += 1) {
+      indexPage(db, {
+        workspaceSlug: "owner/w",
+        filePath: `main-${i}.md`,
+        bodyText: `---\nid: alpha-main-${i}\n---\n# Alpha Main ${i}\n`,
+        formatId: COFLAT_FORMAT_ID,
+      });
+    }
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", () =>
+        Response.json({ tree: [{ path: "draft.md", type: "blob", size: 200, sha: "draft-sha" }], truncated: false }),
+      );
+      forge.get("/api/v1/repos/owner/w/raw/draft.md", () =>
+        new Response("---\nid: alpha-branch-local-extra-long\ntitle: Alpha Branch\n---\n# Branch\n"),
+      );
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=alpha&branch=user%2Falice%2Fwip&limit=10", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: Array<{ id: string }> };
+    expect(body.suggestions[0]?.id).toBe("alpha-branch-local-extra-long");
+    expect(body.suggestions).toHaveLength(10);
+  });
 });
 
 describe("files read route", () => {
@@ -585,6 +661,40 @@ describe("files mutation gates", () => {
       code: "validation",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uploads assets into the cosheaf.yaml asset folder with readable filenames", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    let uploadedPath = "";
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
+      forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", (c) => {
+        expect(c.req.query("ref")).toBe("user/alice/wip");
+        return c.text("assets: figures\n");
+      });
+      forge.post("/api/v1/repos/owner/w/contents/figures/:name", async (c) => {
+        uploadedPath = `figures/${c.req.param("name")}`;
+        const body = (await c.req.json()) as { message: string; content: string; branch: string };
+        expect(body.branch).toBe("user/alice/wip");
+        expect(body.message).toBe("upload diagram.png");
+        expect(Buffer.from(body.content, "base64").toString("utf8")).toBe("image-bytes");
+        return c.json({ commit: { sha: "asset-commit" }, content: { sha: "asset-sha" } });
+      });
+    }));
+    const form = new FormData();
+    form.set("file", new File(["image-bytes"], "diagram.png", { type: "image/png" }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/assets?branch=user%2Falice%2Fwip", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: form,
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { path: string };
+    expect(body.path).toMatch(/^figures\/diagram-[a-z0-9]+\.png$/);
+    expect(uploadedPath).toBe(body.path);
   });
 
   it("does not publish unmerged branch markdown saves into the main sidecar", async () => {

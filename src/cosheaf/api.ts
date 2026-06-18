@@ -1,3 +1,5 @@
+import type { WorkspaceValidation } from "../../shared/validation";
+
 interface PutFileResult {
   ok: true;
   branch: string;
@@ -114,14 +116,18 @@ export const api = {
     return (await res.json()) as { path: string };
   },
 
-  suggest: (owner: string, repo: string, params: { trigger: string; prefix: string; limit?: number }) =>
+  suggest: (owner: string, repo: string, params: { trigger: string; prefix: string; branch?: string; limit?: number }) =>
     jsonFetch<{ suggestions: Array<{ id: string; insert: string; display: string }> }>(
       `${workspaceApiPath(owner, repo)}/suggest${queryString({
         trigger: params.trigger,
         prefix: params.prefix,
+        branch: params.branch,
         limit: params.limit?.toString(),
       })}`,
     ),
+
+  validation: (owner: string, repo: string) =>
+    jsonFetch<WorkspaceValidation>(`${workspaceApiPath(owner, repo)}/validation`),
 
   openPull: (owner: string, repo: string, payload: { head: string; base?: string; title?: string; body?: string }) =>
     jsonFetch<OpenPullResult>(`${workspaceApiPath(owner, repo)}/pulls`, {

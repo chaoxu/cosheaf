@@ -5,6 +5,7 @@ import {
   resolveMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
+import ieeeCslXml from "@chaoxu/coflat/latex/csl/ieee.csl?raw";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { urlPath } from "../../shared/url";
 
@@ -28,6 +29,9 @@ export interface CoflatDocumentPayload {
    * server-side per branch. The document's own frontmatter `math:` overrides
    * these per key when the context is built. */
   mathMacros?: Record<string, string>;
+  /** Repo-wide paper defaults from cosheaf.yaml; document frontmatter wins. */
+  bibliography?: string;
+  csl?: string;
 }
 
 export interface CoflatDocumentRefs {
@@ -61,6 +65,10 @@ interface WorkspaceRef {
   fragment?: string;
   line?: number | null;
 }
+
+const BUILTIN_CSL_XML = new Map<string, string>([
+  ["ieee", ieeeCslXml],
+]);
 
 export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
   const clean = href.trim();
@@ -247,10 +255,14 @@ async function loadCitations(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<CoflatCitations | null> {
-  const bibliography = typeof frontmatter.bibliography === "string" ? frontmatter.bibliography : null;
+  const bibliography = typeof frontmatter.bibliography === "string"
+    ? frontmatter.bibliography
+    : payload.bibliography ?? null;
   if (!bibliography) return null;
   const bibText = await fetchBibliography(payload, bibliography);
   if (bibText === null) return null;
+  const csl = typeof frontmatter.csl === "string" ? frontmatter.csl : payload.csl ?? null;
+  const cslXml = csl ? BUILTIN_CSL_XML.get(csl) ?? await fetchProjectText(payload, csl) : null;
   try {
     // Coflat owns BibTeX parsing + CSL formatting (single source of truth); its
     // citeproc bundle (citation-js) loads only for documents with a bibliography.
@@ -263,7 +275,7 @@ async function loadCitations(
     // no inline marker and must not leave a dangling bibliography entry.
     const cited = bracketedCitationKeys(body).filter((key) => keys.has(key));
     if (cited.length === 0) return null;
-    const formatter = createCslCitationFormatter(await CslProcessor.create(items));
+    const formatter = createCslCitationFormatter(await CslProcessor.create(items, cslXml ?? undefined));
     // Register cited keys in document order so the IEEE numeric style assigns
     // [1], [2], … in appearance order (matching the rendered References list).
     formatter.registerCitations(cited.map((id) => ({ ids: [id] })));
@@ -277,9 +289,15 @@ async function loadCitations(
 // Fetch the raw .bib text, trying the document's branch then falling back to
 // main (the bib may only exist on main for a fresh edit branch).
 async function fetchBibliography(payload: CoflatDocumentPayload, bibliography: string): Promise<string | null> {
+  return fetchProjectText(payload, bibliography);
+}
+
+// Fetch a repo-relative text resource, trying the document's branch then
+// falling back to main (the file may only exist on main for a fresh edit branch).
+async function fetchProjectText(payload: CoflatDocumentPayload, relPath: string): Promise<string | null> {
   const rawUrls = [
-    payload.branchExists === false ? null : resolveRawRepoLink(payload, bibliography),
-    payload.branch === "main" ? null : resolveRawRepoLink({ ...payload, branch: "main" }, bibliography),
+    payload.branchExists === false ? null : resolveRawRepoLink(payload, relPath),
+    payload.branch === "main" ? null : resolveRawRepoLink({ ...payload, branch: "main" }, relPath),
   ].filter((value): value is string => Boolean(value));
   try {
     for (const url of rawUrls) {

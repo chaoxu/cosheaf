@@ -6,15 +6,29 @@ import { ForgejoError, type Forgejo } from "./forgejo.js";
 // `cosheaf.yaml`; SQLite only caches the parsed result (derived/rebuildable,
 // like doc_map). The webhook busts the cache on a cosheaf.yaml push and
 // `workspace reindex` clears it; the next render reloads from Forgejo. First and
-// only consumer so far: repo-wide math macros (#183).
+// main consumer was repo-wide math macros (#183); paper defaults and asset
+// placement now share the same branch-scoped config surface.
 export const REPO_CONFIG_PATH = "cosheaf.yaml";
 
 export interface RepoConfig {
   // KaTeX macro map from the file's `math:` key (e.g. { "\\R": "\\mathbb{R}" }).
   mathMacros: Record<string, string>;
+  // Repository-relative folder for pasted/uploaded assets.
+  assetFolder: string;
+  // Paper/export defaults. Document frontmatter or explicit export query params
+  // still win when present.
+  bibliography?: string;
+  csl?: string;
+  pdfBibliography?: string;
+  pdfCsl?: string;
+  pdfTemplate?: string;
+  // Parsed for visibility/future handoff; Coflat currently reads block config
+  // from document frontmatter, so Cosheaf does not inject these into the editor.
+  blockDefinitions: Record<string, unknown>;
 }
 
-const EMPTY: RepoConfig = { mathMacros: {} };
+const DEFAULT_ASSET_FOLDER = "assets";
+const EMPTY: RepoConfig = { mathMacros: {}, assetFolder: DEFAULT_ASSET_FOLDER, blockDefinitions: {} };
 
 function stringMap(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -23,6 +37,33 @@ function stringMap(value: unknown): Record<string, string> {
     if (typeof v === "string") out[k] = v;
   }
   return out;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function assetFolderFrom(raw: Record<string, unknown>): string {
+  const assets = raw.assets;
+  const folder = typeof assets === "string"
+    ? assets
+    : stringValue(recordValue(assets)?.folder ?? recordValue(assets)?.imageFolder ?? recordValue(assets)?.["image-folder"]);
+  const value = folder ?? stringValue(raw.imageFolder ?? raw["image-folder"]) ?? DEFAULT_ASSET_FOLDER;
+  return safeConfigFolder(value) ?? DEFAULT_ASSET_FOLDER;
+}
+
+function safeConfigFolder(value: string): string | null {
+  const clean = value.trim().replace(/^\/+|\/+$/g, "");
+  if (!clean || clean.startsWith(".") || clean.includes("\\") || clean.includes("//")) return null;
+  if (clean.split("/").some((part) => part === "." || part === ".." || part === "")) return null;
+  if (/%2e%2e|%2f|%5c/i.test(clean)) return null;
+  return clean;
 }
 
 // Parse the known keys out of a cosheaf.yaml document. Unknown keys are ignored
@@ -35,8 +76,25 @@ export function parseRepoConfig(yamlText: string): RepoConfig {
   } catch (_error) {
     return EMPTY;
   }
-  if (!doc || typeof doc !== "object") return EMPTY;
-  return { mathMacros: stringMap((doc as Record<string, unknown>).math) };
+  const raw = recordValue(doc);
+  if (!raw) return EMPTY;
+  const latex = recordValue(raw.latex);
+  const pdf = recordValue(raw.pdf);
+  const bibliography = stringValue(raw.bibliography);
+  const csl = stringValue(raw.csl);
+  const pdfBibliography = stringValue(pdf?.bibliography) ?? stringValue(latex?.bibliography) ?? bibliography;
+  const pdfCsl = stringValue(pdf?.csl) ?? stringValue(latex?.csl) ?? csl;
+  const pdfTemplate = stringValue(pdf?.template) ?? stringValue(latex?.template) ?? stringValue(raw.template);
+  return {
+    mathMacros: stringMap(raw.math),
+    assetFolder: assetFolderFrom(raw),
+    ...(bibliography ? { bibliography } : {}),
+    ...(csl ? { csl } : {}),
+    ...(pdfBibliography ? { pdfBibliography } : {}),
+    ...(pdfCsl ? { pdfCsl } : {}),
+    ...(pdfTemplate ? { pdfTemplate } : {}),
+    blockDefinitions: recordValue(raw.blocks) ?? {},
+  };
 }
 
 // Coalesce concurrent cold-cache loads for the same (slug, branch): a thread

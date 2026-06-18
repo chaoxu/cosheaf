@@ -111,4 +111,32 @@ describe("loadCoflatRefs", () => {
       href: "/chao/poa-network-game/src/branch/main/remote.md#page%3Aremote",
     });
   });
+
+  it("resolves built-in CSL names without fetching them as repo files", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/refs?ids=")) return new Response(JSON.stringify({ refs: [] }), { status: 200 });
+      if (url.endsWith("/refs.bib")) {
+        return new Response([
+          "@article{karger2000,",
+          "  author = {Karger, David R.},",
+          "  title = {Minimum Cuts},",
+          "  journal = {JACM},",
+          "  year = {2000}",
+          "}",
+        ].join("\n"));
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refs = await loadCoflatRefs({
+      ...payload,
+      bibliography: "refs.bib",
+      csl: "ieee",
+      source: "See [@karger2000].",
+    });
+
+    expect(refs.citations?.keys.has("karger2000")).toBe(true);
+    expect(fetchMock.mock.calls.map((call) => String(call[0])).some((url) => url.endsWith("/ieee"))).toBe(false);
+  });
 });

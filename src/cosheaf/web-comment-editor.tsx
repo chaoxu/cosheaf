@@ -1,10 +1,12 @@
-import { StrictMode, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { createRoot } from "react-dom/client";
+import { extractReferences } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
-import { MarkdownEditor } from "./editor";
+import { MarkdownEditor, type AutocompleteSource } from "./editor";
 import { readEditorMode } from "./document-theme";
-import { coflatLinkResolver } from "./coflat-document-context";
+import { coflatDocumentContext, coflatLinkResolver, loadCoflatRefs } from "./coflat-document-context";
+import { api } from "./api";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -22,20 +24,65 @@ interface ComposeConfig {
   branch: string;
 }
 
-// A link-only document context so relative `.md` links resolve in the rich
-// view. Building the full ref/citation context (loadCoflatRefs) means an async
-// fetch per transient compose field; the issue explicitly allows skipping it.
-// A synchronous link resolver keeps the island lightweight while still giving
-// rich markdown editing with working relative links.
 function composeContext(config: ComposeConfig): DocumentContext {
   const payload = { source: "", owner: config.owner, repo: config.repo, branch: config.branch, path: "" };
   return { linkResolver: coflatLinkResolver(payload) };
 }
 
+function referencedKeySignature(source: string): string {
+  return [
+    ...new Set(
+      extractReferences(source)
+        .filter((ref) => ref.kind === "crossref" && ref.key)
+        .map((ref) => ref.key as string),
+    ),
+  ].join("\n");
+}
+
 function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; config: ComposeConfig }): ReactElement {
   const [value, setValue] = useState(textarea.value);
   const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(document.body.dataset.cosheafUser));
-  const documentContext = useMemo(() => composeContext(config), [config]);
+  const [documentContext, setDocumentContext] = useState<DocumentContext>(() => composeContext(config));
+  const latestValueRef = useRef(value);
+  const refSignature = useMemo(() => referencedKeySignature(value), [value]);
+  useEffect(() => {
+    latestValueRef.current = value;
+  }, [value]);
+  useEffect(() => {
+    if (mode !== "rich" || !refSignature) {
+      setDocumentContext(composeContext(config));
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const payload = { source: latestValueRef.current, owner: config.owner, repo: config.repo, branch: config.branch, path: "" };
+      void loadCoflatRefs(payload).then((refs) => {
+        if (!cancelled) setDocumentContext(coflatDocumentContext(payload, refs));
+      }).catch(() => {
+        if (!cancelled) setDocumentContext(composeContext(config));
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [config, mode, refSignature]);
+  const autocompleteSources = useMemo<readonly AutocompleteSource[]>(
+    () => [
+      {
+        trigger: "[@",
+        suggest: async (prefix, env) => {
+          if (env.signal.aborted) return [];
+          try {
+            return (await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch: config.branch, limit: 10 })).suggestions;
+          } catch (_err) {
+            return [];
+          }
+        },
+      },
+    ],
+    [config],
+  );
   return (
     <div className="coflat-compose-editor cf-theme-scope">
       <div className="coflat-compose-toolbar">
@@ -50,6 +97,7 @@ function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; co
         value={value}
         mode={mode}
         documentContext={documentContext}
+        autocompleteSources={autocompleteSources}
         testId="comment-editor"
         onChange={(next) => {
           setValue(next);

@@ -31,6 +31,11 @@ interface ExportCoflatPdfOptions {
   readonly source: string;
   readonly sourcePath: string;
   readonly files: readonly PdfProjectFile[];
+  readonly defaults?: {
+    readonly bibliography?: string;
+    readonly csl?: string;
+    readonly template?: string;
+  };
   readonly flags?: {
     readonly bibliography?: unknown;
     readonly csl?: unknown;
@@ -84,7 +89,7 @@ export async function exportCoflatMarkdownPdf(options: ExportCoflatPdfOptions): 
     const outputFile = path.join(root, `${path.basename(sourceRel, path.extname(sourceRel))}.pdf`);
     const sourceDir = path.dirname(sourceFile);
     const latexDir = path.dirname(fileURLToPath(import.meta.resolve("@chaoxu/coflat/latex/filter.lua")));
-    const config = parseLatexFrontmatterConfig(options.source);
+    const config = latexConfigWithDefaults(parseLatexFrontmatterConfig(options.source), options.defaults);
     const exportOptions = resolveLatexExportOptions({ config, flags: options.flags ?? {} });
     const template = resolveTemplatePath(exportOptions.template, {
       latexDir,
@@ -118,6 +123,38 @@ export async function exportCoflatMarkdownPdf(options: ExportCoflatPdfOptions): 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+interface LatexConfig {
+  bibliography?: string;
+  csl?: string;
+  latex?: {
+    bibliography?: string;
+    csl?: string;
+    template?: string;
+  };
+}
+
+function stringOption(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function latexConfigWithDefaults(config: LatexConfig, defaults: ExportCoflatPdfOptions["defaults"]): LatexConfig {
+  if (!defaults) return config;
+  const latex = config.latex ?? {};
+  return {
+    ...config,
+    bibliography: stringOption(latex.bibliography) || stringOption(config.bibliography)
+      ? config.bibliography
+      : defaults.bibliography,
+    csl: stringOption(latex.csl) || stringOption(config.csl)
+      ? config.csl
+      : defaults.csl,
+    latex: {
+      ...latex,
+      ...(!stringOption(latex.template) && defaults.template ? { template: defaults.template } : {}),
+    },
+  };
 }
 
 async function checkPdfDependencies(cwd: string): Promise<void> {

@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { type FileKind, fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
-import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
+import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
@@ -35,6 +35,7 @@ import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
 import { branchIcon, chevronIcon } from "./icons.js";
+import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
 
 const PDF_EXPORT_MAX_FILES = 500;
 const PDF_EXPORT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
@@ -254,6 +255,57 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
   return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
 }));
 
+web.get("/:owner/:repo/export/pdf/options/branch/*", webRoute(async (c, ctx) => {
+  if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
+    return badRequestPage(ctx.user, "PDF export is only available for Coflat Markdown workspaces.");
+  }
+  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/options/branch/"));
+  if (!resolved?.path) return notFoundPage(ctx.user, "File not found");
+  const rel = safeRel(resolved.path);
+  if (!rel || fileKindForPath(rel) !== "markdown") {
+    return badRequestPage(ctx.user, "PDF export is only available for Markdown files.");
+  }
+  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
+  if (!meta) return notFoundPage(ctx.user, "File not found");
+  const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, resolved.branch);
+  return htmlResponse(
+    repoPageShell(ctx, "files", `PDF export - ${rel}`, html`
+      <div class="page-title compact">
+        <div>
+          <h1>PDF Export</h1>
+          <p class="muted">${rel} on ${resolved.branch}</p>
+        </div>
+      </div>
+      <section class="settings-section" data-testid="pdf-export-options">
+        <div class="settings-section-header">
+          <h2>Options</h2>
+          <p>Defaults come from cosheaf.yaml and can be overridden for this export.</p>
+        </div>
+        <form class="settings-form" method="get" action="${pdfExportHref(ctx.owner, ctx.repo, resolved.branch, rel)}">
+          <label class="settings-row">
+            <span>Bibliography</span>
+            <input name="bibliography" placeholder="${repoConfig.pdfBibliography ?? "refs.bib"}">
+          </label>
+          <label class="settings-row">
+            <span>CSL</span>
+            <input name="csl" list="pdf-csl-options" placeholder="${repoConfig.pdfCsl ?? "ieee"}">
+          </label>
+          <datalist id="pdf-csl-options">${[...LATEX_CSL_NAMES].sort().map((name) => html`<option value="${name}"></option>`)}</datalist>
+          <label class="settings-row">
+            <span>Template</span>
+            <input name="template" list="pdf-template-options" placeholder="${repoConfig.pdfTemplate ?? "article"}">
+          </label>
+          <datalist id="pdf-template-options">${[...LATEX_TEMPLATE_NAMES].sort().map((name) => html`<option value="${name}"></option>`)}</datalist>
+          <div class="settings-actions">
+            <button class="button primary" type="submit">Export PDF</button>
+            <a class="button subtle" href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}">Cancel</a>
+          </div>
+        </form>
+      </section>
+    `),
+  );
+}));
+
 web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
   if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
     return new Response("PDF export is only available for Coflat Markdown workspaces.", { status: 400 });
@@ -272,6 +324,7 @@ web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
     ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
     repoFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch),
   ]);
+  const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, resolved.branch);
 
   try {
     const projectFiles = await collectPdfProjectFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
@@ -279,10 +332,15 @@ web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
       source,
       sourcePath: rel,
       files: projectFiles,
+      defaults: {
+        bibliography: repoConfig.pdfBibliography,
+        csl: repoConfig.pdfCsl,
+        template: repoConfig.pdfTemplate,
+      },
       flags: {
-        bibliography: c.req.query("bibliography"),
-        csl: c.req.query("csl"),
-        template: c.req.query("template"),
+        bibliography: queryOverride(c, "bibliography"),
+        csl: queryOverride(c, "csl"),
+        template: queryOverride(c, "template"),
       },
     });
     return new Response(result.pdf, {
@@ -322,6 +380,9 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const baseSha = branchMeta?.sha ?? (!branchExists ? mainMeta?.sha : null) ?? null;
   const sourceSha = !branchMeta && branchExists ? (mainMeta?.sha ?? null) : null;
   const content = sourceRef ? await ctx.fj.getRawFile(ctx.owner, ctx.repo, sourceRef, rel) : "";
+  const repoConfig = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
+    ? await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, branchExists ? branch : "main")
+    : null;
   // The edit branch is created lazily on first save, so for a brand-new edit
   // branch the tree (file list) and Cancel target come from main instead.
   const treeBranch = branchExists ? branch : "main";
@@ -350,6 +411,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
             data-source-sha="${sourceSha ?? ""}"
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
+          <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
           ${webEditorAssets()}
           <noscript>${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, cancelHref })}</noscript>
         </section>
@@ -525,12 +587,21 @@ function editableFileKind(kind: FileKind): boolean {
   return kind === "markdown" || kind === "text";
 }
 
+function queryOverride(c: Context<AppEnv>, key: string): string | undefined {
+  const value = c.req.query(key)?.trim();
+  return value ? value : undefined;
+}
+
 function rawFileHref(owner: string, repo: string, branch: string, rel: string): string {
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
 function pdfExportHref(owner: string, repo: string, branch: string, rel: string): string {
   return `${repoHref(owner, repo, "/export/pdf/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
+}
+
+function pdfExportOptionsHref(owner: string, repo: string, branch: string, rel: string): string {
+  return `${repoHref(owner, repo, "/export/pdf/options/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
 // The per-file action toolbar on the file-view page: the primary write controls
@@ -577,7 +648,7 @@ function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; k
     <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
     ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
     ${opts.kind === "markdown" ? html`<a href="${`${opts.fileHref}?view=source`}">Source</a>` : emptyHtml}
-    ${opts.kind === "markdown" ? html`<a href="${pdfExportHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
+    ${opts.kind === "markdown" ? html`<a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
     <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
   </div>`;
 }

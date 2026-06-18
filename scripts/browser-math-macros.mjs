@@ -48,7 +48,7 @@ attachPageListeners(page, { consoleSink: consoleMessages, errorSink: pageErrors,
 
 async function jsonReq(method, p, data) {
   const res = await context.request[method](apiPath(p), {
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: new URL(WEB_URL).origin },
     ...(data ? { data } : {}),
   });
   return res.status();

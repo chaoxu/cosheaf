@@ -41,6 +41,15 @@ Forgejo-backed workspace.
    editor and indexer. It should cover project-level math macros, block
    definitions, bibliography defaults, CSL defaults, and image folder defaults.
 
+   Current Cosheaf spelling is `cosheaf.yaml`. Supported repo defaults:
+   `math:` for KaTeX macros, `assets:`/`imageFolder` for upload placement,
+   top-level `bibliography`/`csl` for reader citation defaults,
+   `pdf:`/`latex:` `bibliography`/`csl`/`template` for PDF defaults, and
+   `blocks:` as parsed metadata for future Coflat handoff. Coflat still applies
+   block definitions from document frontmatter; Cosheaf does not inject
+   repo-wide block definitions into the editor until the package exposes that
+   host API.
+
 2. Repo-aware assets
 
    Support image/PDF/binary assets as files in the Forgejo repo. The UI should
@@ -109,6 +118,9 @@ deployment.
 - Do not make export part of the minimum server startup path.
 - Do not require Pandoc, LaTeX, or desktop-native dependencies for ordinary
   page editing and review.
+- Do not add a backlinks or cited-by reader rail as part of the math QoL pass;
+  backlinks remain available through the typed API and diagnostics inputs until
+  a future workflow explicitly asks for a reader navigation surface.
 - Do not add a math-native theorem graph or proof dependency model.
 - Do not introduce additional document formats as part of this epic; Coflat
   operations should stay scoped to Coflat workspaces.

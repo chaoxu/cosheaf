@@ -47,6 +47,7 @@ export const zh = {
   "tab.pulls": "合并请求",
   "tab.chat": "对话",
   "tab.activity": "动态",
+  "tab.diagnostics": "诊断",
   // common
   "common.private": "私有",
   "common.public": "公开",

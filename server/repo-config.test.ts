@@ -15,6 +15,55 @@ describe("parseRepoConfig", () => {
     expect(parseRepoConfig(YAML_R).mathMacros).toEqual({ "\\R": "\\mathbb{R}" });
   });
 
+  it("extracts paper defaults and configured asset folder", () => {
+    expect(parseRepoConfig([
+      "assets:",
+      "  folder: figures",
+      "bibliography: refs/main.bib",
+      "csl: styles/journal.csl",
+      "template: templates/article.tex",
+      "blocks:",
+      "  claim:",
+      "    title: Claim",
+      "",
+    ].join("\n"))).toMatchObject({
+      assetFolder: "figures",
+      bibliography: "refs/main.bib",
+      csl: "styles/journal.csl",
+      pdfBibliography: "refs/main.bib",
+      pdfCsl: "styles/journal.csl",
+      pdfTemplate: "templates/article.tex",
+      blockDefinitions: { claim: { title: "Claim" } },
+    });
+  });
+
+  it("supports latex/pdf nested paper defaults and rejects unsafe asset folders", () => {
+    expect(parseRepoConfig("assets: ../escape\nlatex:\n  bibliography: refs/main.bib\npdf:\n  template: lipics\n")).toMatchObject({
+      assetFolder: "assets",
+      pdfBibliography: "refs/main.bib",
+      pdfTemplate: "lipics",
+    });
+  });
+
+  it("keeps reader defaults separate from PDF-specific defaults", () => {
+    expect(parseRepoConfig([
+      "bibliography: refs/reader.bib",
+      "csl: styles/reader.csl",
+      "latex:",
+      "  bibliography: refs/export.bib",
+      "  csl: ieee",
+      "pdf:",
+      "  template: lipics",
+      "",
+    ].join("\n"))).toMatchObject({
+      bibliography: "refs/reader.bib",
+      csl: "styles/reader.csl",
+      pdfBibliography: "refs/export.bib",
+      pdfCsl: "ieee",
+      pdfTemplate: "lipics",
+    });
+  });
+
   it("ignores non-string values, missing math, and empty input", () => {
     expect(parseRepoConfig("math:\n  R: 5\n").mathMacros).toEqual({});
     expect(parseRepoConfig("other: 1\n").mathMacros).toEqual({});

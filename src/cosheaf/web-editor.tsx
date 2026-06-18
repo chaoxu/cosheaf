@@ -17,6 +17,8 @@ import {
 import { hydrateReferences, type DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
+import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
+import { extractFirstH1, parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { urlPath } from "../../shared/url";
 import {
@@ -50,6 +52,27 @@ interface EditorConfig {
   formatId: DocumentFormatId;
   baseSha: string | null;
   sourceSha: string | null;
+  mathMacros: Record<string, string>;
+  bibliography?: string;
+  csl?: string;
+}
+
+interface EditorRepoConfigPayload {
+  mathMacros?: Record<string, string>;
+  bibliography?: string;
+  csl?: string;
+}
+
+interface ValidationSummary {
+  brokenRefs: number;
+  duplicateLabels: number;
+  orphanLabels: number;
+}
+
+interface Suggestion {
+  id: string;
+  insert: string;
+  display: string;
 }
 
 function shortId(): string {
@@ -91,7 +114,11 @@ function saveState(args: {
 function readConfig(): { config: EditorConfig; content: string } {
   const mount = document.getElementById("web-editor-root");
   const payload = document.getElementById("web-editor-content");
+  const repoConfigScript = document.getElementById("web-editor-repo-config");
   if (!mount || !payload) throw new Error("missing web editor mount payload");
+  const repoConfig = repoConfigScript?.textContent
+    ? JSON.parse(repoConfigScript.textContent) as EditorRepoConfigPayload
+    : {};
   return {
     config: {
       owner: mount.dataset.owner ?? "",
@@ -105,9 +132,45 @@ function readConfig(): { config: EditorConfig; content: string } {
       formatId: (mount.dataset.formatId ?? "forgejo-passthrough") as DocumentFormatId,
       baseSha: mount.dataset.baseSha || null,
       sourceSha: mount.dataset.sourceSha || null,
+      mathMacros: repoConfig.mathMacros ?? {},
+      ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
+      ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
     },
     content: JSON.parse(payload.textContent || "\"\"") as string,
   };
+}
+
+function currentDocumentSuggestions(source: string, prefix: string): Suggestion[] {
+  const parsed = parseFrontmatterYaml(source);
+  const suggestions: Suggestion[] = [];
+  const add = (id: string, title: string | null, detail: string) => {
+    if (!id || !matchesSuggestion(id, title, prefix)) return;
+    suggestions.push({
+      id,
+      insert: `${id}]`,
+      display: title ? `${id} — ${title} (${detail})` : `${id} (${detail})`,
+    });
+  };
+  if (typeof parsed.frontmatter.id === "string") {
+    add(
+      parsed.frontmatter.id,
+      typeof parsed.frontmatter.title === "string" ? parsed.frontmatter.title : extractFirstH1(parsed.body),
+      "current page",
+    );
+  }
+  for (const target of extractCoflatXrefTargets(source)) add(target.id, target.label, "current page");
+  const seen = new Set<string>();
+  return suggestions.filter((suggestion) => {
+    if (seen.has(suggestion.id)) return false;
+    seen.add(suggestion.id);
+    return true;
+  });
+}
+
+function matchesSuggestion(id: string, title: string | null, prefix: string): boolean {
+  const needle = prefix.trim().toLowerCase();
+  if (!needle) return true;
+  return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
 function InlineChromeHtml({
@@ -175,6 +238,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
+  const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
@@ -233,6 +297,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       branch,
       branchExists,
       path: currentPath.trim() || config.path,
+      mathMacros: config.mathMacros,
+      ...(config.bibliography ? { bibliography: config.bibliography } : {}),
+      ...(config.csl ? { csl: config.csl } : {}),
     };
     void loadCoflatRefs(payload).then((refs) => {
       if (cancelled) return;
@@ -243,7 +310,25 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     return () => {
       cancelled = true;
     };
-  }, [branch, branchExists, config.formatId, config.owner, config.path, config.repo, content, currentPath]);
+  }, [branch, branchExists, config.bibliography, config.csl, config.formatId, config.mathMacros, config.owner, config.path, config.repo, content, currentPath]);
+
+  useEffect(() => {
+    if (config.formatId !== COFLAT_FORMAT_ID) return;
+    let cancelled = false;
+    void api.validation(config.owner, config.repo).then((validation) => {
+      if (cancelled) return;
+      setValidationSummary({
+        brokenRefs: validation.broken_refs.length,
+        duplicateLabels: validation.duplicate_xrefs.length,
+        orphanLabels: validation.orphan_labels.length,
+      });
+    }).catch(() => {
+      if (!cancelled) setValidationSummary(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.formatId, config.owner, config.repo]);
 
   useEffect(() => {
     if (!documentContext) return;
@@ -460,16 +545,25 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               trigger: "[@",
               suggest: async (prefix, env) => {
                 if (env.signal.aborted) return [];
+                const local = currentDocumentSuggestions(editorRef.current?.getDoc() ?? content, prefix);
                 try {
-                  const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, limit: 10 });
-                  return result.suggestions;
+                  const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch, limit: 10 });
+                  const seen = new Set(local.map((suggestion) => suggestion.id));
+                  return [
+                    ...local,
+                    ...result.suggestions.filter((suggestion) => {
+                      if (seen.has(suggestion.id)) return false;
+                      seen.add(suggestion.id);
+                      return true;
+                    }),
+                  ].slice(0, 10);
                 } catch (_err) {
-                  return [];
+                  return local.slice(0, 10);
                 }
               },
             },
           ],
-    [config.owner, config.repo, config.formatId],
+    [branch, config.owner, config.repo, config.formatId, content],
   );
 
   const save = useCallback(() => {
@@ -655,6 +749,21 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               Edit
             </a>
           </div>
+          {config.formatId === COFLAT_FORMAT_ID ? (
+            <div
+              className={`editor-diagnostics ${validationSummary && validationSummary.brokenRefs + validationSummary.duplicateLabels > 0 ? "has-issues" : ""}`}
+              data-testid="editor-diagnostics"
+            >
+              <a href={`/${urlPath(config.owner)}/${urlPath(config.repo)}/diagnostics`}>Diagnostics</a>
+              {validationSummary ? (
+                <span>
+                  {validationSummary.brokenRefs + validationSummary.duplicateLabels} actionable, {validationSummary.orphanLabels} unreferenced
+                </span>
+              ) : (
+                <span>Unavailable</span>
+              )}
+            </div>
+          ) : null}
           <h2 className="doc-toc-title">On this page</h2>
           {outline.length ? (
             <ol className="doc-rail-outline">
