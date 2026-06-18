@@ -47,7 +47,7 @@ const rules = [
       command("pnpm exec vitest run server/routes/web-files.test.ts src/cosheaf/api.test.ts", "web file route and editor API contract coverage"),
       command("pnpm smoke:repo-home", "focused repo home/files page browser smoke"),
       command("pnpm smoke:edit", "server-rendered edit route and editor island"),
-      command("pnpm verify:cogirth-outline", "exact browser regression for resolved editor outline labels"),
+      command("pnpm smoke:reader-parity", "seeded Coflat outline/hover/geometry parity"),
       command("pnpm build", "production Vite manifest and island assets"),
       command("pnpm check:web", "full page-owned editor path"),
     ],
@@ -55,7 +55,7 @@ const rules = [
   {
     id: "coflat-parity",
     matches: [
-      /^scripts\/(?:browser-reader-editor-parity|verify-cogirth-outline|refresh-coflat|coflat-status)\.mjs$/,
+      /^scripts\/(?:browser-reader-editor-parity|refresh-coflat|coflat-status)\.mjs$/,
       /^scripts\/check-coflat-ref\.mjs$/,
       /^docs\/reader-editor-parity\.md$/,
       /^package\.json$/,
@@ -63,8 +63,7 @@ const rules = [
     ],
     commands: [
       command("pnpm coflat:status", "Coflat pin/local checkout status"),
-      command("pnpm smoke:reader-parity", "Coflat showcase reader/editor browser parity"),
-      command("pnpm verify:cogirth-outline", "exact Cogirth outline theorem-label regression"),
+      command("pnpm smoke:reader-parity", "Coflat showcase reader/editor outline, hover, and geometry parity"),
       command("pnpm exec vitest run scripts/check-coflat-ref.test.mjs scripts/devx-what-to-run.test.mjs", "Coflat pin and DevX suggestion coverage"),
     ],
   },

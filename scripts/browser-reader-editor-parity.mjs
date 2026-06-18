@@ -14,6 +14,8 @@ const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
+const OUTLINE_REFERENCE_LABEL = "Proof of Theorem 3";
+const OUTLINE_REFERENCE_RAW = "@thm:fundamental";
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -160,6 +162,20 @@ async function assertHoverPreview(selector, expectedText) {
   await tooltip.waitFor({ state: "hidden", timeout: 3000 }).catch(() => undefined);
 }
 
+async function assertResolvedOutlineLabel(surfaceName) {
+  await page.locator(".doc-rail-outline").waitFor({ state: "visible", timeout: 10000 });
+  const items = await page.locator(".doc-rail-outline a, .doc-rail-outline button").evaluateAll((nodes) =>
+    nodes.map((node) => node.textContent?.replace(/\s+/g, " ").trim() ?? ""),
+  );
+  if (!items.some((text) => text.includes(OUTLINE_REFERENCE_LABEL))) {
+    throw new Error(`${surfaceName} outline did not include ${JSON.stringify(OUTLINE_REFERENCE_LABEL)}: ${JSON.stringify(items)}`);
+  }
+  const rawHits = items.filter((text) => text.includes(OUTLINE_REFERENCE_RAW));
+  if (rawHits.length > 0) {
+    throw new Error(`${surfaceName} outline exposed raw reference text: ${JSON.stringify(rawHits)}`);
+  }
+}
+
 async function scrollEditorUntilMounted(selector) {
   const scroller = page.locator(".cm-scroller").first();
   await scroller.waitFor({ state: "visible", timeout: 10000 });
@@ -236,6 +252,7 @@ try {
   if (defaultReader.redSample.length !== 0) {
     throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
+  await assertResolvedOutlineLabel("reader");
   await assertHoverPreview(".cf-reader [data-ref-key=\"thm:hover-preview\"]", "Hover Preview Stress Test");
 
   await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
@@ -261,6 +278,7 @@ try {
     throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
   }
   assertReaderEditorParity(defaultReader, defaultEditor);
+  await assertResolvedOutlineLabel("editor");
   const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"]";
   await scrollEditorUntilMounted(editorHoverTarget);
   await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");

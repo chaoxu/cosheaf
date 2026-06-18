@@ -17,11 +17,9 @@
 - `pnpm refresh:coflat` builds `../coflat`, installs with lifecycle scripts
   disabled, and rebuilds native packages. It avoids the local lefthook
   `core.hooksPath` failure that made the old refresh path unreliable.
-- `pnpm verify:cogirth-outline` opens the Cogirth production edit page and
-  asserts the editor outline shows `Proof of Theorem 4`, not the raw
-  `@cor:rank-reduction-from-bounded-gap` source key. Production runs require
-  `COSHEAF_SMOKE_PASSWORD` or `COSHEAF_STORAGE_STATE`; local runs can use
-  `COSHEAF_VERIFY_URL=http://localhost:3030`.
+- `pnpm verify:cogirth-outline` is an optional live canary for the active
+  Cogirth editing target. It is not the standard parity gate; use the seeded
+  `pnpm smoke:reader-parity` fixture for durable outline/hover regressions.
 
 ## Fast Checks
 
@@ -33,9 +31,9 @@
   DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm smoke:repo-home` runs a focused browser check for the repository
   home/files page, including the visible SSH clone URL.
-- `pnpm smoke:reader-parity` runs the broad Coflat showcase reader/editor
-  parity browser check. Use it with `pnpm verify:cogirth-outline` for
-  Coflat/Cosheaf presentation fixes.
+- `pnpm smoke:reader-parity` runs the broad seeded Coflat showcase
+  reader/editor parity browser check, including outline labels, hover target
+  selection, typography, and geometry.
 - `pnpm check:web:settings` runs only account/repository settings separation and
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).
@@ -59,7 +57,7 @@ pnpm dev:login-state
 - Static asset serving and route mounting: `server/app.ts`
   - Verify with `pnpm build`, `pnpm check:web`, and `pnpm devx:verify-route`.
 - Page editor island: `src/cosheaf/web-editor.tsx`
-  - Verify with `pnpm smoke:edit`, `pnpm verify:cogirth-outline`, `pnpm build`, and `pnpm check:web`.
+  - Verify with `pnpm smoke:edit`, `pnpm smoke:reader-parity`, `pnpm build`, and `pnpm check:web`.
 - Coflat reader island: `src/cosheaf/web-reader.ts`
   - Verify with `pnpm smoke:rendering`, `pnpm smoke:reader-parity`, and `pnpm check:web`.
 - Coflat pin / package refresh: `scripts/check-coflat-ref.mjs`, `scripts/bump-coflat.mjs`, `scripts/refresh-coflat.mjs`

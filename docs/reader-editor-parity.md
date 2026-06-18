@@ -67,9 +67,9 @@ Still meaningfully split:
 ## Regression Commands
 
 - Broad local browser parity: `pnpm smoke:reader-parity`
-- Temporary live canary: `pnpm verify:cogirth-outline`. This is useful while
-  Cogirth is an active production editing target, but it must not be the final
-  parity regression because the document and branch are not permanent fixtures.
+- Optional live canary: `pnpm verify:cogirth-outline`. This is useful only
+  while Cogirth is an active production editing target; durable outline/hover
+  regressions live in the seeded `pnpm smoke:reader-parity` fixture.
 - Coflat pin status: `pnpm coflat:status`
 - Production status: `pnpm coflat:status --prod`
 
@@ -92,7 +92,6 @@ Verification:
 - Coflat: `src/editor/render/preview-reader-parity.test.ts`
 - Coflat: `src/editor/reader-render.test.ts`
 - Cosheaf: `pnpm smoke:reader-parity`
-- Cosheaf: `pnpm verify:cogirth-outline`
 
 ### Phase 2: Shared Block Render Plan
 
@@ -142,16 +141,16 @@ live production document.
 Add named checks for:
 
 - A stable Coflat fixture repo/page that covers the current Cogirth outline
-  theorem-label regression.
-- Reader hover card target selection.
-- Editor hover card target selection.
-- Reader/editor outline display equivalence.
-- Coflat showcase typography and geometry parity.
+  theorem-label regression. (done in `coflat-feature-showcase.md`)
+- Reader hover card target selection. (done in `pnpm smoke:reader-parity`)
+- Editor hover card target selection. (done in `pnpm smoke:reader-parity`)
+- Reader/editor outline display equivalence. (done in `pnpm smoke:reader-parity`)
+- Coflat showcase typography and geometry parity. (done in `pnpm smoke:reader-parity`)
 
 Exit criterion:
 
-- Retire `pnpm verify:cogirth-outline` from the standard parity gate once the
-  fixture-backed outline-label check exists and covers the same failure.
+- `pnpm verify:cogirth-outline` is retired from the standard parity gate and
+  remains only an optional live canary for the active Cogirth production doc.
 
 ## Ledger
 
@@ -165,7 +164,7 @@ Exit criterion:
 | Closed ATX heading markers | Fixed | `preview-reader-parity.test.ts` |
 | Media loading/rendered surface | Fixed | `preview-reader-parity.test.ts` |
 | Footnote reference numbering | Fixed | `preview-reader-parity.test.ts` |
-| Editor outline raw crossref labels | Fixed | temporary `pnpm verify:cogirth-outline`; replace with fixture-backed check |
+| Editor outline raw crossref labels | Fixed | seeded `pnpm smoke:reader-parity` outline-label check |
 | Unified inline fragments for static + source-position reader inline rendering | Fixed | `inline-fragments.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared paragraph block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared heading / horizontal-rule / blockquote render plans | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-source-map.test.ts` |
@@ -178,3 +177,4 @@ Exit criterion:
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
+| Stable fixture-backed outline/hover/geometry parity | Fixed | `pnpm smoke:reader-parity`; `devx-what-to-run.test.mjs` |

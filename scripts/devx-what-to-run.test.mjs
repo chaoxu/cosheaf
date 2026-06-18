@@ -41,7 +41,7 @@ describe("devx check suggestions", () => {
       "pnpm exec vitest run server/routes/web-files.test.ts src/cosheaf/api.test.ts",
     );
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:repo-home");
-    expect(result.suggestions.map((item) => item.run)).toContain("pnpm verify:cogirth-outline");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:reader-parity");
   });
 
   it("maps parity docs and Coflat tooling to parity-specific checks", () => {
@@ -49,7 +49,7 @@ describe("devx check suggestions", () => {
     expect(result.matchedRules).toContain("coflat-parity");
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm coflat:status");
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:reader-parity");
-    expect(result.suggestions.map((item) => item.run)).toContain("pnpm verify:cogirth-outline");
+    expect(result.suggestions.map((item) => item.run)).not.toContain("pnpm verify:cogirth-outline");
   });
 
   it("maps dev URL helper changes to env normalization tests", () => {
