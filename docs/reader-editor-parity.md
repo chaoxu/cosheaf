@@ -18,7 +18,9 @@ Markdown.
 
 Already shared or recently aligned:
 
-- Parser entry: both reader and editor preview use the shared Coflat Lezer parser.
+- Parser entry: reader, editor semantic analysis, and editor preview now use
+  the same configured Coflat Lezer parser profile; `semantic` and
+  `html-render` remain compatibility mode names over one parser instance.
 - Block dispatch: reader and editor preview classify Lezer block node names
   through the shared Coflat block render-kind helper and shared dispatch table
   before dispatching to surface emitters.
@@ -60,6 +62,9 @@ Already shared or recently aligned:
   the block.
 - Footnote definitions: reader and editor preview now share id/body extraction
   and inline fragment planning before emitting footnote entry surfaces.
+- Footnote sections: reader and editor preview now share footnote section
+  entry planning, encoded ids, backref hrefs, and section chrome before
+  emitting HTML or DOM bodies.
 - Document assembly: reader and editor preview now share top-level renderable
   block order, frontmatter skipping, inter-block blank ranges, and trailing
   blank range planning before emitting HTML or DOM.
@@ -222,10 +227,12 @@ Exit criterion:
 | Shared heading-anchor semantics | Fixed | `heading-anchors.test.ts`; `per-file-panels.test.ts`; `editor.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared equation-numbering semantics | Fixed | `equation-numbering.test.ts`; `equation-slice.test.ts`; `document.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared semantic block numbering state and primary-class normalization | Fixed | `block-render-plan.test.ts`; `document.test.ts`; `codemirror-source.incremental.test.ts`; `reader.crossref.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
+| Shared parser profile for reader/editor semantics/preview | Fixed | `parser-profile.test.ts`; `format-coverage.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Reader code-block overflow containment | Fixed | `theme-css-contract.test.ts`; `pnpm smoke:reader-parity` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
+| Shared footnote section planning and chrome | Fixed | `footnote-section-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared document assembly render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `reader-outline.test.ts` |
 | Shared task-list content normalization | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
