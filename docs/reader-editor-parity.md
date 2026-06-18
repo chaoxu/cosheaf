@@ -19,6 +19,9 @@ Markdown.
 Already shared or recently aligned:
 
 - Parser entry: both reader and editor preview use the shared Coflat Lezer parser.
+- Block dispatch: reader and editor preview classify Lezer block node names
+  through the shared Coflat block render-kind helper before dispatching to
+  surface emitters.
 - Tables: shared table and row surface helpers.
 - Media: shared image/loading surface helpers.
 - Math: shared inline/display math surface helpers.
@@ -48,7 +51,9 @@ Already shared or recently aligned:
 - Tables: reader and editor preview now share a table render plan for
   delimiter-derived alignments, header/body rows, cell nodes, ragged rows, and
   header-only tables before emitting HTML or DOM. Table cells now also carry
-  shared inline fragments, text, source ranges, and math state.
+  shared inline fragments, text, source ranges, and math state. Table plan
+  emission now also shares the table/header/body/row/cell skeleton for HTML and
+  DOM emitters.
 - Code blocks: reader and editor preview now share language/content extraction
   through a code block render plan before emitting HTML or DOM.
 - Footnote definitions: reader and editor preview now share id/body extraction
@@ -188,6 +193,7 @@ Exit criterion:
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
 | Shared fenced-div title inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
+| Shared block dispatch and table plan emission | Fixed | `block-render-plan.test.ts`; `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
