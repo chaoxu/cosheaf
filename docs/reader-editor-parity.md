@@ -34,6 +34,9 @@ Already shared or recently aligned:
 - Headings, horizontal rules, and blockquotes: reader and editor preview now
   consume shared syntax-level render plans before applying surface-specific
   numbering, hydration, or DOM/HTML emission.
+- Lists: reader and editor preview now consume a shared syntax-level render
+  plan for ordered/unordered shape, looseness, task marker state, item marker
+  numbering, and tight-item paragraph unwrapping.
 
 Still meaningfully split:
 
@@ -83,8 +86,8 @@ Start with low-risk blocks:
 - Paragraphs
 - Headings
 - Horizontal rules
-- Lists
 - Blockquotes
+- Lists
 
 Then move higher-risk blocks:
 
@@ -147,5 +150,6 @@ Exit criterion:
 | Unified inline fragments for static + source-position reader inline rendering | Fixed | `inline-fragments.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared paragraph block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared heading / horizontal-rule / blockquote render plans | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-source-map.test.ts` |
-| Shared block render plan for lists and higher-risk blocks | Planned | Phase 2 |
+| Shared list render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
+| Shared block render plan for higher-risk blocks | Planned | Phase 2 |
 | Typed surface policies | Planned | Phase 3 |
