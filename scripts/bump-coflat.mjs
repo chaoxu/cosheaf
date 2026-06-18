@@ -19,6 +19,7 @@ const SITES = [
   { file: "Dockerfile", re: /(ARG COFLAT_GIT_REF=)[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
   { file: "compose.yaml", re: /(COFLAT_GIT_REF: \$\{COFLAT_GIT_REF:-)[0-9a-f]{40}(\})/, repl: (sha) => `$1${sha}$2` },
   { file: ".github/workflows/ci.yml", re: /(COFLAT_REF: )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
+  { file: ".gitea/workflows/ci.yml", re: /(COFLAT_REF: )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
 ];
 
 export function bumpCoflat({ sha, repoRoot = process.cwd() }) {

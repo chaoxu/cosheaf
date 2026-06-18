@@ -18,7 +18,7 @@ export const DEFAULT_COFLAT_REF = "39e4a70da4c6dd93dbb9c0a207c7e69255eb39cd";
 
 // Files that pin the Coflat SHA. Keep these in sync with bump-coflat.mjs.
 export const DOC_PIN_FILES = ["README.md", "AGENTS.md"];
-export const CONFIG_PIN_FILES = ["Dockerfile", "compose.yaml", ".github/workflows/ci.yml"];
+export const CONFIG_PIN_FILES = ["Dockerfile", "compose.yaml", ".github/workflows/ci.yml", ".gitea/workflows/ci.yml"];
 
 function envCoflatRef(env = process.env) {
   const ref = env.COFLAT_REF?.trim();
@@ -30,7 +30,7 @@ function pinnedCoflatRef(rel, text) {
     ? [/ARG COFLAT_GIT_REF=([^\s]+)/]
     : rel === "compose.yaml"
       ? [/COFLAT_GIT_REF:\s*\$\{COFLAT_GIT_REF:-([^}]+)\}/]
-      : rel === ".github/workflows/ci.yml"
+      : rel === ".github/workflows/ci.yml" || rel === ".gitea/workflows/ci.yml"
         ? [/COFLAT_REF:\s*([^\s]+)/]
         : [/coflat checkout ([^\s]+)/];
   for (const pattern of patterns) {

@@ -153,16 +153,19 @@ describe("bumpCoflat", () => {
     const next = hex("c");
     mkdirSync(join(root, "scripts"), { recursive: true });
     mkdirSync(join(root, ".github/workflows"), { recursive: true });
+    mkdirSync(join(root, ".gitea/workflows"), { recursive: true });
     writeFileSync(join(root, "scripts/check-coflat-ref.mjs"), `export const DEFAULT_COFLAT_REF = "${old}";\n`);
     writeFileSync(join(root, "README.md"), `prose\ngit -C coflat checkout ${old}\nmore\n`);
     writeFileSync(join(root, "AGENTS.md"), `git -C coflat checkout ${old}\n`);
     writeFileSync(join(root, "Dockerfile"), `ARG COFLAT_GIT_REF=${old}\n`);
     writeFileSync(join(root, "compose.yaml"), `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${old}}\n`);
     writeFileSync(join(root, ".github/workflows/ci.yml"), `COFLAT_REF: ${old}\n`);
+    writeFileSync(join(root, ".gitea/workflows/ci.yml"), `COFLAT_REF: ${old}\n`);
 
     const updated = bumpCoflat({ sha: next, repoRoot: root });
 
     expect([...updated].sort()).toEqual([
+      ".gitea/workflows/ci.yml",
       ".github/workflows/ci.yml",
       "AGENTS.md",
       "Dockerfile",
