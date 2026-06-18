@@ -49,7 +49,6 @@ export const zh = {
   // common
   "common.private": "私有",
   "common.public": "公开",
-  "common.on": "开",
   "common.off": "关",
   // settings page
   "settings.account_settings": "账户设置",
@@ -59,8 +58,10 @@ export const zh = {
   "auth.sign_out": "退出登录",
   // preferences
   "prefs.language": "语言",
-  "prefs.heading": "用户偏好",
-  "prefs.desc": "这些设置会跟随你的浏览器会话，并应用于所有工作区。",
+  "prefs.group.appearance": "外观",
+  "prefs.group.documents": "文档",
+  "prefs.group.editing": "编辑",
+  "prefs.group.browser_only": "仅保存在此浏览器中，适用于所有工作区。",
   "prefs.color_scheme": "配色方案",
   "prefs.density": "显示密度",
   "prefs.reading_width": "阅读宽度",

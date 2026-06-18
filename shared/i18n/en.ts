@@ -53,7 +53,6 @@ export const en = {
   // common
   "common.private": "private",
   "common.public": "public",
-  "common.on": "On",
   "common.off": "Off",
   // settings page
   "settings.account_settings": "Account settings",
@@ -63,8 +62,10 @@ export const en = {
   "auth.sign_out": "Sign out",
   // preferences
   "prefs.language": "Language",
-  "prefs.heading": "User preferences",
-  "prefs.desc": "These settings follow your browser session and apply across workspaces.",
+  "prefs.group.appearance": "Appearance",
+  "prefs.group.documents": "Documents",
+  "prefs.group.editing": "Editing",
+  "prefs.group.browser_only": "Saved in this browser, across workspaces.",
   "prefs.color_scheme": "Color scheme",
   "prefs.density": "Display density",
   "prefs.reading_width": "Reading width",

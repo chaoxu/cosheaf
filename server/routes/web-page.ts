@@ -158,12 +158,20 @@ export function userPreferencesSection(user: string, locale: LocaleId, t: T): Ht
   // client-only (localStorage), so only their display text is translated — their
   // option values are unchanged.
   const langSelected = (id: LocaleId): Html => (locale === id ? raw(" selected") : emptyHtml);
-  return html`<section class="settings-section" data-testid="settings-user-preferences">
-    <div class="settings-section-header">
-      <h2>${t("prefs.heading")}</h2>
-      <p>${t("prefs.desc")}</p>
-    </div>
-    <div class="settings-form">
+  // Grouped into Appearance / Documents / Editing as peer sections (matching the
+  // Profile/Avatar/SSH/Session sections on the page). Every preference here is
+  // client-only (localStorage or the lang cookie), so each group repeats the
+  // "this browser only" hint so the contrast with account-backed sections is clear.
+  const group = (titleKey: MessageKey, testId: string, rows: Html): Html => html`
+    <section class="settings-section" data-testid="${testId}">
+      <div class="settings-section-header">
+        <h2>${t(titleKey)}</h2>
+        <p>${t("prefs.group.browser_only")}</p>
+      </div>
+      <div class="settings-form">${rows}</div>
+    </section>`;
+  return html`
+    ${group("prefs.group.appearance", "settings-user-preferences", html`
       <label class="settings-row">
         <span>${t("prefs.language")}</span>
         <select data-testid="settings-language-select" data-lang-select>
@@ -195,26 +203,17 @@ export function userPreferencesSection(user: string, locale: LocaleId, t: T): Ht
           <option value="normal">${t("prefs.opt.normal")}</option>
           <option value="wide">${t("prefs.opt.wide")}</option>
         </select>
-      </label>
+      </label>`)}
+    ${group("prefs.group.documents", "settings-doc-preferences", html`
       <label class="settings-row">
         <span>${t("prefs.section_numbering")}</span>
-        <select data-testid="settings-section-numbering-select" data-section-numbering-user="${user}">
-          <option value="on">${t("common.on")}</option>
-          <option value="off">${t("common.off")}</option>
-        </select>
+        <input type="checkbox" role="switch" class="settings-switch" data-testid="settings-section-numbering-toggle" data-section-numbering-user="${user}">
       </label>
       <label class="settings-row">
         <span>${t("prefs.file_labels")}</span>
         <select data-testid="settings-file-labels-select" data-file-labels-user="${user}">
           <option value="filename">${t("prefs.opt.filenames")}</option>
           <option value="title">${t("prefs.opt.markdown_titles")}</option>
-        </select>
-      </label>
-      <label class="settings-row">
-        <span>${t("prefs.open_files")}</span>
-        <select data-testid="settings-file-open-mode-select" data-file-open-mode-user="${user}">
-          <option value="edit">${t("prefs.opt.edit")}</option>
-          <option value="read">${t("prefs.opt.read")}</option>
         </select>
       </label>
       <label class="settings-row">
@@ -225,24 +224,18 @@ export function userPreferencesSection(user: string, locale: LocaleId, t: T): Ht
         </select>
       </label>
       <label class="settings-row">
-        <span>${t("prefs.diff_default_view")}</span>
-        <span class="settings-inline-controls">
-          <select data-testid="settings-diff-mode-select" data-diff-mode-user="${user}">
-            <option value="source">${t("prefs.opt.source")}</option>
-            <option value="rich">${t("prefs.opt.rich")}</option>
-          </select>
-          <select data-testid="settings-diff-shape-select" data-diff-shape-user="${user}">
-            <option value="unified">${t("prefs.opt.unified")}</option>
-            <option value="split">${t("prefs.opt.split")}</option>
-            <option value="after">${t("prefs.opt.after")}</option>
-          </select>
-        </span>
-      </label>
-      <label class="settings-row">
         <span>${t("prefs.date_format")}</span>
         <select data-testid="settings-time-format-select" data-cosheaf-time-user="${user}">
           <option value="relative">${t("prefs.opt.relative")}</option>
           <option value="absolute">${t("prefs.opt.absolute")}</option>
+        </select>
+      </label>`)}
+    ${group("prefs.group.editing", "settings-editing-preferences", html`
+      <label class="settings-row">
+        <span>${t("prefs.open_files")}</span>
+        <select data-testid="settings-file-open-mode-select" data-file-open-mode-user="${user}">
+          <option value="edit">${t("prefs.opt.edit")}</option>
+          <option value="read">${t("prefs.opt.read")}</option>
         </select>
       </label>
       <label class="settings-row">
@@ -262,8 +255,20 @@ export function userPreferencesSection(user: string, locale: LocaleId, t: T): Ht
           <option value="5000">${t("prefs.opt.every_5s")}</option>
         </select>
       </label>
-    </div>
-  </section>`;
+      <label class="settings-row">
+        <span>${t("prefs.diff_default_view")}</span>
+        <span class="settings-inline-controls">
+          <select data-testid="settings-diff-mode-select" data-diff-mode-user="${user}">
+            <option value="source">${t("prefs.opt.source")}</option>
+            <option value="rich">${t("prefs.opt.rich")}</option>
+          </select>
+          <select data-testid="settings-diff-shape-select" data-diff-shape-user="${user}">
+            <option value="unified">${t("prefs.opt.unified")}</option>
+            <option value="split">${t("prefs.opt.split")}</option>
+            <option value="after">${t("prefs.opt.after")}</option>
+          </select>
+        </span>
+      </label>`)}`;
 }
 
 // Profile editor backed by Forgejo's /user/settings. Username and email are

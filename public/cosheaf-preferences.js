@@ -70,16 +70,16 @@
 // Coflat (coflat#47) to hide heading numbers across reader/thread/diff; crossref
 // numbers are unaffected. Applies on the next reader render. Default: On.
 (() => {
-  const select = document.querySelector("[data-section-numbering-user]");
-  if (!(select instanceof HTMLSelectElement)) return;
+  const toggle = document.querySelector("[data-section-numbering-user]");
+  if (!(toggle instanceof HTMLInputElement)) return;
   const legacyKey = "cosheaf:section-numbering";
-  const user = select.dataset.sectionNumberingUser || "";
+  const user = toggle.dataset.sectionNumberingUser || "";
   const key = user ? `${legacyKey}:${user}` : legacyKey;
-  const normalize = (value) => (value === "off" ? "off" : "on");
-  select.value = normalize(localStorage.getItem(key) || localStorage.getItem(legacyKey));
-  select.addEventListener("change", () => {
-    localStorage.setItem(key, select.value);
-    localStorage.setItem(legacyKey, select.value);
+  toggle.checked = (localStorage.getItem(key) || localStorage.getItem(legacyKey)) !== "off";
+  toggle.addEventListener("change", () => {
+    const value = toggle.checked ? "on" : "off";
+    localStorage.setItem(key, value);
+    localStorage.setItem(legacyKey, value);
   });
 })();
 
