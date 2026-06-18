@@ -47,6 +47,9 @@ Already shared or recently aligned:
   through a code block render plan before emitting HTML or DOM.
 - Footnote definitions: reader and editor preview now share id/body extraction
   and inline fragment planning before emitting footnote entry surfaces.
+- Inline surface policy: reader and editor preview now share a typed policy for
+  link, reference, image, footnote, and hard-break behavior across document
+  body, document-inline, table-preview, and UI-chrome inline surfaces.
 
 Still meaningfully split:
 
@@ -117,10 +120,10 @@ Goal: replace ad hoc surface strings with typed policy objects.
 
 Policies should explicitly state:
 
-- Links: active, inert, or stripped.
-- References: resolved, inert, or source-like.
-- Images: rendered, loading placeholder, or alt text.
-- Footnotes: numbered reference, raw id, or omitted.
+- Links: active or inert.
+- References: resolved or inert.
+- Images: rendered or alt text.
+- Footnotes: numbered reference or raw superscript.
 - Interactivity: reader disclosure, editor widget, hover card, outline label.
 
 ### Phase 4: Corpus and Production Regression Expansion
@@ -164,4 +167,5 @@ Exit criterion:
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
-| Typed surface policies | Planned | Phase 3 |
+| Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
+| Typed non-inline surface policies | Planned | Phase 3 |
