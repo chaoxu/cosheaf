@@ -39,7 +39,9 @@ Still meaningfully split:
 ## Regression Commands
 
 - Broad local browser parity: `pnpm smoke:reader-parity`
-- Exact Cogirth outline regression: `pnpm verify:cogirth-outline`
+- Temporary live canary: `pnpm verify:cogirth-outline`. This is useful while
+  Cogirth is an active production editing target, but it must not be the final
+  parity regression because the document and branch are not permanent fixtures.
 - Coflat pin status: `pnpm coflat:status`
 - Production status: `pnpm coflat:status -- --prod`
 
@@ -106,15 +108,22 @@ Policies should explicitly state:
 
 ### Phase 4: Corpus and Production Regression Expansion
 
-Goal: make exact user regressions first-class checks.
+Goal: make exact user regressions first-class checks without depending on one
+live production document.
 
 Add named checks for:
 
-- Cogirth outline theorem labels.
+- A stable Coflat fixture repo/page that covers the current Cogirth outline
+  theorem-label regression.
 - Reader hover card target selection.
 - Editor hover card target selection.
 - Reader/editor outline display equivalence.
 - Coflat showcase typography and geometry parity.
+
+Exit criterion:
+
+- Retire `pnpm verify:cogirth-outline` from the standard parity gate once the
+  fixture-backed outline-label check exists and covers the same failure.
 
 ## Ledger
 
@@ -128,8 +137,7 @@ Add named checks for:
 | Closed ATX heading markers | Fixed | `preview-reader-parity.test.ts` |
 | Media loading/rendered surface | Fixed | `preview-reader-parity.test.ts` |
 | Footnote reference numbering | Fixed | `preview-reader-parity.test.ts` |
-| Editor outline raw crossref labels | Fixed | `pnpm verify:cogirth-outline` |
+| Editor outline raw crossref labels | Fixed | temporary `pnpm verify:cogirth-outline`; replace with fixture-backed check |
 | Unified inline renderer | Planned | Phase 1 |
 | Shared block render plan | Planned | Phase 2 |
 | Typed surface policies | Planned | Phase 3 |
-
