@@ -218,16 +218,22 @@ Already shared or recently aligned:
   chrome-slot planning for opener visibility, source-edit fallback, inline
   titles, inline body headers, active-shell body bounds, and below captions.
 
-Still meaningfully split:
+Intentionally still split:
 
 - `@chaoxu/coflat/src/reader/reader.ts` is a large HTML-string renderer.
 - `@chaoxu/coflat/src/editor/render/preview-block-renderer.ts` is a separate DOM renderer.
 - Reader-only behaviors include source-position attributes, truncation, reference-preview indexing, outline id generation, and disclosure hydration.
 - Editor-only behaviors include CM6 widgets, viewport mounting, editable/source transitions, and non-interactive preview rendering.
-- Remaining semantic-planner work: continue collapsing small surface-local
-  adapters where they still duplicate core reference, hover, and document
-  traversal products; keep reader truncation, HTML emission, hydration, and
-  editor CM6 viewport/widget behavior as explicit surface policies.
+
+Completion audit state:
+
+- The remaining reader/editor split is the intended emitter and runtime split:
+  reader HTML serialization, reader hydration and truncation, editor DOM/CM6
+  widgets, viewport behavior, and static editor preview policies.
+- No known reader/editor semantic interpretation remains intentionally
+  duplicated for references, outlines, fenced divs, lists, footnotes, source
+  ranges, or hover previews; those are covered by the shared Coflat planners
+  and the regression ledger below.
 
 ## Regression Commands
 
