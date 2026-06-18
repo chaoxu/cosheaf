@@ -184,6 +184,10 @@ Already shared or recently aligned:
   plan for header text, body planning, cache keys, and source-fallback section
   numbering policy; the reader still emits HTML hover bodies and the editor
   still emits DOM/CM6 hover and completion bodies.
+- Reader DOM range mapping and editor mouse-selection guards now share
+  Coflat's source carrier and math carrier helpers; the reader keeps exporting
+  the public `mapDomRangeToSource` API while the editor keeps CM6 selection
+  behavior surface-owned.
 
 Still meaningfully split:
 
@@ -351,6 +355,7 @@ Exit criterion:
 | Shared live editor list line and marker planning | Fixed | `list-surface.test.ts`; `container-attributes.test.ts`; `markdown-render.test.ts`; `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
 | Shared heading semantic planning | Fixed | `block-render-plan.test.ts`; `document.test.ts`; `heading-slice.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range parsing and indexed-preview body input | Fixed | `source-range-surface.test.ts`; `reference-preview-source.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `source-widget.test.ts`; `widget-stop-index.test.ts`; `preview-reader-parity.test.ts` |
+| Shared DOM source carrier and range mapping | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `math-render-widget.test.ts` |
 | Shared footnote definition semantics and section boundaries | Fixed | `block-render-plan.test.ts`; `section-boundaries.test.ts`; `document.test.ts`; `window-extractor.test.ts`; `footnote-slice.test.ts`; `heading-fold.test.ts`; `tree-to-ir.test.ts`; `preview-reader-parity.test.ts` |
 | Shared footnote index planning | Fixed | `footnote-plan.test.ts`; `footnote-slice.test.ts`; `window-extractor.test.ts`; `document.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared footnote extraction, section projection, and outline projection | Fixed | `footnote-extraction.test.ts`; `footnote-plan.test.ts`; `outline-plan.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
