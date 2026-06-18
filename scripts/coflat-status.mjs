@@ -29,11 +29,20 @@ function lockfileCoflatEntry() {
 }
 
 function deployedCosheafSha() {
+  const healthJson = output("curl", ["-fsS", "https://cosheaf.lab/api/v1/health"]);
+  if (healthJson) {
+    try {
+      const health = JSON.parse(healthJson);
+      if (typeof health.commit === "string" && /^[0-9a-f]{40}$/.test(health.commit)) return health.commit;
+    } catch (_err) {
+      // Fall through to the jupiter-side health check below.
+    }
+  }
   const cmd = [
     "cd /home/chaoxu/playground/cosheaf",
     "COSHEAF_JUPITER_LOCAL=1",
     "node /srv/fleet-infra/apps/cosheaf/scripts/jupiter-release.mjs health prod",
-  ].join(" ");
+  ].join(" && ");
   const result = output("ssh", ["jupiter", cmd]);
   if (!result) return null;
   const match = result.match(/\b[0-9a-f]{40}\b/);
@@ -81,4 +90,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     });
   program.parse();
 }
-
