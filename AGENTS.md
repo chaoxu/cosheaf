@@ -360,7 +360,7 @@ data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ```bash
 cd ..
 git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
-git -C coflat checkout 3b93f9eb54d77ffce8b4b4b778a4902bba0d47c9
+git -C coflat checkout a049e47e5ea8607bf82059ada17137b438f03d2a
 cd cosheaf
 pnpm setup:deps              # verify and build pinned sibling ../coflat
 pnpm install
