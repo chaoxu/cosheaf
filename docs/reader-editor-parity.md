@@ -123,6 +123,10 @@ Already shared or recently aligned:
 - Reader, editor, and the public parse API now share Coflat reference target
   planning and duplicate-id indexes for heading, equation, and semantic block
   targets.
+- Reader and editor hover previews now share Coflat reference preview body
+  planning for heading, equation, and semantic block targets; reader
+  in-document catalogs also use the same target preference rule as editor and
+  the public parse API when duplicate ids exist.
 
 Still meaningfully split:
 
@@ -208,7 +212,9 @@ live production document.
 Add named checks for:
 
 - A stable Coflat fixture repo/page that covers the current Cogirth outline
-  theorem-label regression. (done in `coflat-feature-showcase.md`)
+  theorem-label regression, including exact
+  `@cor:rank-reduction-from-bounded-gap` raw-key leakage. (done in
+  `coflat-feature-showcase.md` and `pnpm smoke:reader-parity`)
 - Reader hover card target selection. (done in `pnpm smoke:reader-parity`)
 - Editor hover card target selection. (done in `pnpm smoke:reader-parity`)
 - Reader/editor outline display equivalence. (done in `pnpm smoke:reader-parity`)
@@ -266,10 +272,12 @@ Exit criterion:
 | Shared reference presentation routing | Fixed | `presentation.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared table DOM attribute hooks | Fixed | `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-source-map.test.ts` |
 | Shared reference preview header/source helpers | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `reader-render.test.ts` |
+| Shared reference preview body planning | Fixed | `reference-preview-source.test.ts`; `hover-preview.render.test.ts`; `hover-preview.test.ts`; `reader-hydrate.test.ts`; `reader.crossref.test.ts` |
 | Shared reference route surface planning | Fixed | `reference-surface.test.ts`; `inline-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range surface attributes | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts` |
 | Shared outline entry planning | Fixed | `outline-surface.test.ts`; `per-file-panels.test.ts`; `reader-outline.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference target planning | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts`; `reader.crossref.test.ts`; `reader-render.test.ts`; `presentation.test.ts`; `crossref-resolver.test.ts` |
+| Reader duplicate-id catalog preference drift | Fixed | `reference-targets.test.ts`; `reader.crossref.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |

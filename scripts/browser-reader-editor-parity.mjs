@@ -16,6 +16,8 @@ const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coi
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
 const OUTLINE_REFERENCE_LABEL = "Proof of Theorem 3";
 const OUTLINE_REFERENCE_RAW = "@thm:fundamental";
+const COGIRTH_OUTLINE_REFERENCE_LABEL = "Proof of Theorem 4";
+const COGIRTH_OUTLINE_REFERENCE_RAW = "@cor:rank-reduction-from-bounded-gap";
 const DESKTOP_VIEWPORT = { width: 1440, height: 1000 };
 const RESPONSIVE_VIEWPORTS = [
   { name: "tablet-rail-boundary", width: 900, height: 800 },
@@ -415,6 +417,13 @@ async function assertResolvedOutlineLabel(surfaceName) {
   const rawHits = items.filter((text) => text.includes(OUTLINE_REFERENCE_RAW));
   if (rawHits.length > 0) {
     throw new Error(`${surfaceName} outline exposed raw reference text: ${JSON.stringify(rawHits)}`);
+  }
+  if (!items.some((text) => text.includes(COGIRTH_OUTLINE_REFERENCE_LABEL))) {
+    throw new Error(`${surfaceName} outline did not include ${JSON.stringify(COGIRTH_OUTLINE_REFERENCE_LABEL)}: ${JSON.stringify(items)}`);
+  }
+  const cogirthRawHits = items.filter((text) => text.includes(COGIRTH_OUTLINE_REFERENCE_RAW));
+  if (cogirthRawHits.length > 0) {
+    throw new Error(`${surfaceName} outline exposed Cogirth-shaped raw reference text: ${JSON.stringify(cogirthRawHits)}`);
   }
 }
 
