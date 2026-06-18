@@ -17,7 +17,7 @@ const SITES = [
   { file: "README.md", re: /(coflat checkout )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
   { file: "AGENTS.md", re: /(coflat checkout )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
   { file: "Dockerfile", re: /(ARG COFLAT_GIT_REF=)[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
-  { file: "compose.yaml", re: /(COFLAT_GIT_REF: \$\{COFLAT_GIT_REF:-)[0-9a-f]{40}(\})/, repl: (sha) => `$1${sha}$2` },
+  { file: "compose.yaml", re: /(COFLAT_GIT_REF: \$\{COFLAT_GIT_REF:-)[0-9a-f]{40}(\})/g, repl: (sha) => `$1${sha}$2` },
   { file: ".github/workflows/ci.yml", re: /(COFLAT_REF: )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
   { file: ".gitea/workflows/ci.yml", re: /(COFLAT_REF: )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
 ];

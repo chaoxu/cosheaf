@@ -68,12 +68,29 @@ describe("checkDocPins", () => {
       expectedRef: hex("a"),
       readFile: (p) => {
         if (p.endsWith("Dockerfile")) return `ARG COFLAT_GIT_REF=${hex("a")}`;
-        if (p.endsWith("compose.yaml")) return `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${hex("a")}}`;
+        if (p.endsWith("compose.yaml")) {
+          return [
+            `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${hex("a")}}`,
+            `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${hex("a")}}`,
+          ].join("\n");
+        }
         if (p.endsWith("ci.yml")) return `COFLAT_REF: ${hex("a")}`;
         return `git -C coflat checkout ${hex("a")}`;
       },
     });
     expect(drifted).toEqual([]);
+  });
+
+  it("flags a file when any repeated pin drifts", () => {
+    const drifted = checkDocPins({
+      expectedRef: hex("a"),
+      files: ["compose.yaml"],
+      readFile: () => [
+        `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${hex("a")}}`,
+        `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${hex("b")}}`,
+      ].join("\n"),
+    });
+    expect(drifted).toEqual([{ file: "compose.yaml", found: hex("b") }]);
   });
 
   it("flags Docker, Compose, and CI pins that drift", () => {
@@ -158,7 +175,11 @@ describe("bumpCoflat", () => {
     writeFileSync(join(root, "README.md"), `prose\ngit -C coflat checkout ${old}\nmore\n`);
     writeFileSync(join(root, "AGENTS.md"), `git -C coflat checkout ${old}\n`);
     writeFileSync(join(root, "Dockerfile"), `ARG COFLAT_GIT_REF=${old}\n`);
-    writeFileSync(join(root, "compose.yaml"), `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${old}}\n`);
+    writeFileSync(join(root, "compose.yaml"), [
+      `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${old}}`,
+      `COFLAT_GIT_REF: $\{COFLAT_GIT_REF:-${old}}`,
+      "",
+    ].join("\n"));
     writeFileSync(join(root, ".github/workflows/ci.yml"), `COFLAT_REF: ${old}\n`);
     writeFileSync(join(root, ".gitea/workflows/ci.yml"), `COFLAT_REF: ${old}\n`);
 
@@ -177,7 +198,9 @@ describe("bumpCoflat", () => {
     expect(readFileSync(join(root, "AGENTS.md"), "utf8")).toContain(`checkout ${next}`);
     expect(readFileSync(join(root, "scripts/check-coflat-ref.mjs"), "utf8")).toContain(`"${next}"`);
     expect(readFileSync(join(root, "Dockerfile"), "utf8")).toContain(`=${next}`);
-    expect(readFileSync(join(root, "compose.yaml"), "utf8")).toContain(`:-${next}`);
+    const compose = readFileSync(join(root, "compose.yaml"), "utf8");
+    expect(compose.match(new RegExp(next, "g"))).toHaveLength(2);
+    expect(compose).not.toContain(old);
     expect(readFileSync(join(root, ".github/workflows/ci.yml"), "utf8")).toContain(`COFLAT_REF: ${next}`);
   });
 

@@ -14,7 +14,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // docs (README, AGENTS) must agree with this; `checkDocPins` enforces it so a
 // `bump:coflat` that misses a doc site is caught by setup:deps, not by a
 // developer following a stale README into a failing checkout.
-export const DEFAULT_COFLAT_REF = "6ede3565cc3116c107995b9442733fe2dd9e405b";
+export const DEFAULT_COFLAT_REF = "20d2bfc284bd0330d715e04800c7023cac7211ad";
 
 // Files that pin the Coflat SHA. Keep these in sync with bump-coflat.mjs.
 export const DOC_PIN_FILES = ["README.md", "AGENTS.md"];
@@ -25,19 +25,21 @@ function envCoflatRef(env = process.env) {
   return ref || DEFAULT_COFLAT_REF;
 }
 
-function pinnedCoflatRef(rel, text) {
+function pinnedCoflatRefs(rel, text) {
   const patterns = rel === "Dockerfile"
-    ? [/ARG COFLAT_GIT_REF=([^\s]+)/]
+    ? [/ARG COFLAT_GIT_REF=(?!unknown\b)([^\s]+)/g]
     : rel === "compose.yaml"
-      ? [/COFLAT_GIT_REF:\s*\$\{COFLAT_GIT_REF:-([^}]+)\}/]
+      ? [/COFLAT_GIT_REF:\s*\$\{COFLAT_GIT_REF:-([^}]+)\}/g]
       : rel === ".github/workflows/ci.yml" || rel === ".gitea/workflows/ci.yml"
-        ? [/COFLAT_REF:\s*([^\s]+)/]
-        : [/coflat checkout ([^\s]+)/];
+        ? [/COFLAT_REF:\s*([^\s]+)/g]
+        : [/coflat checkout ([^\s]+)/g];
+  const refs = [];
   for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match[1];
+    for (const match of text.matchAll(pattern)) {
+      if (match[1]) refs.push(match[1]);
+    }
   }
-  return null;
+  return refs;
 }
 
 export function checkCoflatRef({
@@ -89,11 +91,15 @@ export function checkDocPins({
       // Missing doc (e.g. a partial checkout) is not a drift; skip it.
       continue;
     }
-    const found = pinnedCoflatRef(rel, text);
-    if (!found || (CONFIG_PIN_FILES.includes(rel) && !/^[0-9a-f]{40}$/.test(found))) {
-      drifted.push({ file: rel, found: found ?? "<missing>" });
-    } else if (found && found !== expectedRef) {
-      drifted.push({ file: rel, found });
+    const found = pinnedCoflatRefs(rel, text);
+    const invalid = CONFIG_PIN_FILES.includes(rel)
+      ? found.find((ref) => !/^[0-9a-f]{40}$/.test(ref))
+      : null;
+    const mismatch = found.find((ref) => ref !== expectedRef);
+    if (found.length === 0 || invalid) {
+      drifted.push({ file: rel, found: invalid ?? "<missing>" });
+    } else if (mismatch) {
+      drifted.push({ file: rel, found: mismatch });
     }
   }
   return drifted;
