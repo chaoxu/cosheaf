@@ -8,7 +8,7 @@ import type {
 } from "../editor";
 import type { MountedEditor } from "./coflat";
 
-type Outline = ReturnType<typeof extractOutline>;
+type Outline = ReturnType<typeof extractForgejoPassthroughOutline>;
 type Store<T> = {
   get(): T;
   subscribe(fn: (value: T) => void): () => void;
@@ -56,7 +56,7 @@ export function MarkdownEditor({
 
   const outline = useMemo<Store<Outline>>(
     () => ({
-      get: () => extractOutline(localValueRef.current),
+      get: () => extractForgejoPassthroughOutline(localValueRef.current),
       subscribe: (fn: (value: Outline) => void) => {
         outlineListenersRef.current.add(fn);
         return () => {
@@ -96,7 +96,7 @@ export function MarkdownEditor({
         localValueRef.current = doc;
         savedValueRef.current = doc;
         setLocalValue(doc);
-        for (const listener of outlineListenersRef.current) listener(extractOutline(doc));
+        for (const listener of outlineListenersRef.current) listener(extractForgejoPassthroughOutline(doc));
       },
       setContext: () => undefined,
       getMode: () => "source",
@@ -142,7 +142,7 @@ export function MarkdownEditor({
         localValueRef.current = next;
         setLocalValue(next);
         onChange(next);
-        const nextOutline = extractOutline(next);
+        const nextOutline = extractForgejoPassthroughOutline(next);
         for (const listener of outlineListenersRef.current) listener(nextOutline);
         statusEventsRef.current?.onDirtyChange?.(next !== savedValueRef.current);
       }}
@@ -170,26 +170,45 @@ function store<T>(get: () => T): Store<T> {
   };
 }
 
-function extractOutline(source: string) {
-  const out: Array<{ level: 1 | 2 | 3 | 4 | 5 | 6; text: string; markdown: string; html: string; line: number; from: number; key: string }> = [];
+export function extractForgejoPassthroughOutline(source: string) {
+  const out: Array<{ id: string; level: 1 | 2 | 3 | 4 | 5 | 6; text: string; markdown: string; html: string; line: number; from: number; key: string }> = [];
   const lines = source.split(/\n/);
+  const usedIds = new Set<string>();
   let from = 0;
   for (let i = 0; i < lines.length; i++) {
     const match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i] ?? "");
     if (match) {
+      const text = match[2];
       out.push({
+        id: uniqueHeadingId(text, usedIds),
         level: match[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        text: match[2],
-        markdown: match[2],
-        html: escapeHtml(match[2]),
+        text,
+        markdown: text,
+        html: escapeHtml(text),
         line: i + 1,
         from,
-        key: `${i + 1}:${match[2]}`,
+        key: `${i + 1}:${text}`,
       });
     }
     from += (lines[i]?.length ?? 0) + 1;
   }
   return out;
+}
+
+function uniqueHeadingId(text: string, usedIds: Set<string>): string {
+  const root = text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "section";
+  let id = root;
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${root}-${suffix++}`;
+  }
+  usedIds.add(id);
+  return id;
 }
 
 function escapeHtml(text: string): string {

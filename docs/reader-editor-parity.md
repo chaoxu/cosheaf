@@ -118,6 +118,8 @@ Already shared or recently aligned:
 - Reader source-position attributes now go through a shared Coflat source-range
   surface helper that supports both HTML serialization and DOM dataset
   application.
+- Reader and editor outlines now share Coflat's outline entry planner for the
+  stable base entry shape and number omission rules.
 
 Still meaningfully split:
 
@@ -263,6 +265,7 @@ Exit criterion:
 | Shared reference preview header/source helpers | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `reader-render.test.ts` |
 | Shared reference route surface planning | Fixed | `reference-surface.test.ts`; `inline-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range surface attributes | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts` |
+| Shared outline entry planning | Fixed | `outline-surface.test.ts`; `per-file-panels.test.ts`; `reader-outline.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
