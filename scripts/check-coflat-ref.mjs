@@ -14,7 +14,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // docs (README, AGENTS) must agree with this; `checkDocPins` enforces it so a
 // `bump:coflat` that misses a doc site is caught by setup:deps, not by a
 // developer following a stale README into a failing checkout.
-export const DEFAULT_COFLAT_REF = "3d85eae7c04c1e2d2d5b93417143ab608ee0226d";
+export const DEFAULT_COFLAT_REF = "fef469abc3f53581d6f4f1b03d5d3fe15e446b4d";
 
 // Files that pin the Coflat SHA. Keep these in sync with bump-coflat.mjs.
 export const DOC_PIN_FILES = ["README.md", "AGENTS.md"];

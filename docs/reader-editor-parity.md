@@ -155,6 +155,9 @@ Already shared or recently aligned:
   planning before emitting HTML or DOM content.
 - Live editor line decorations and marker rendering now use Coflat's shared
   list surface planning for ordered/unordered and task-item interpretation.
+- Reader and editor preview now consume Coflat's shared list surface emission
+  plan for list wrapper options, item options, marker numbers, and child
+  emission actions before emitting HTML or DOM.
 - Editor heading semantic extraction now uses Coflat's shared heading render
   plan for level, content range, text, id, and unnumbered interpretation.
 - Reader hydration, editor shell surfaces, live widgets, vertical keyboard
@@ -180,6 +183,10 @@ Already shared or recently aligned:
   planner for reference registration, definition registration, numbering,
   section-entry projection, and truncation snapshots; reader still owns the
   policy decision of when to roll that state back for truncated blocks.
+- Reader, editor preview, and collapsed editor sidenotes now share Coflat's
+  preserving footnote section projection, so numbered entries, backrefs,
+  definition offsets, and attached body/definition data are planned once before
+  HTML, DOM, or CM6 widget emission.
 - Reader and editor hover previews now share Coflat's reference preview content
   plan for header text, body planning, cache keys, and source-fallback section
   numbering policy; the reader still emits HTML hover bodies and the editor
@@ -363,6 +370,7 @@ Exit criterion:
 | Shared reference preview entry and body-source planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader.crossref.test.ts` |
 | Shared outline entry text and footnote section entry planning | Fixed | `outline-surface.test.ts`; `footnote-section-surface.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared live editor list line and marker planning | Fixed | `list-surface.test.ts`; `container-attributes.test.ts`; `markdown-render.test.ts`; `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
+| Shared list surface emission planning | Fixed | `list-emission-plan.test.ts`; `list-surface.test.ts`; `block-render-plan.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared heading semantic planning | Fixed | `block-render-plan.test.ts`; `document.test.ts`; `heading-slice.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range parsing and indexed-preview body input | Fixed | `source-range-surface.test.ts`; `reference-preview-source.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `source-widget.test.ts`; `widget-stop-index.test.ts`; `preview-reader-parity.test.ts` |
 | Shared DOM source carrier and range mapping | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `math-render-widget.test.ts` |
@@ -370,6 +378,7 @@ Exit criterion:
 | Shared footnote index planning | Fixed | `footnote-plan.test.ts`; `footnote-slice.test.ts`; `window-extractor.test.ts`; `document.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared footnote extraction, section projection, and outline projection | Fixed | `footnote-extraction.test.ts`; `footnote-plan.test.ts`; `outline-plan.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reader emitted-footnote state and truncation snapshots | Fixed | `footnote-emission-state.test.ts`; `footnote-plan.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `preview-reader-parity.test.ts` |
+| Shared preserving footnote section projection | Fixed | `footnote-section-surface.test.ts`; `footnote-plan.test.ts`; `footnote-emission-state.test.ts`; `sidenote-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference preview content planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts` |
 | Shared target-to-preview-entry planning | Fixed | `reference-preview-source.test.ts`; `reference-targets.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts` |
 | Shared reference target collection and mapping | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `reader.crossref.test.ts`; `editor-reference-catalog.test.ts` |
