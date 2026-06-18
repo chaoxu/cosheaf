@@ -29,4 +29,14 @@ describe("forgejo passthrough editor outline", () => {
       "methodes-results",
     ]);
   });
+
+  it("ignores heading-looking lines inside fenced code blocks", () => {
+    expect(extractForgejoPassthroughOutline([
+      "```md",
+      "# Fake",
+      "```",
+      "",
+      "# Real #",
+    ].join("\n")).map((entry) => entry.text)).toEqual(["Real"]);
+  });
 });

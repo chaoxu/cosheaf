@@ -58,4 +58,8 @@ describe("frontmatter", () => {
     expect(extractTitle("## Sub\n\n# Real")).toBe("Real");
     expect(extractTitle("no heading")).toBe(null);
   });
+
+  it("extractTitle ignores fenced code headings", () => {
+    expect(extractTitle(["```md", "# Fake", "```", "", "# Real"].join("\n"))).toBe("Real");
+  });
 });

@@ -47,6 +47,10 @@ describe("coflatMarkdownFormat", () => {
     expect(format.extractTitle("No H1 here")).toBeNull();
   });
 
+  it("extracts titles through the Coflat parser instead of code-fence text", () => {
+    expect(format.extractTitle(["```md", "# Fake Title", "```", "", "# Real Title"].join("\n"))).toBe("Real Title");
+  });
+
   it("extracts bracketed id references and markdown page links", () => {
     const links = format.extractLinks(
       "See [@target] and [plain](page.md) and [section](dir/page.md#frag).\n",

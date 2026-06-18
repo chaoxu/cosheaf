@@ -451,6 +451,12 @@ Route owner map:
   Docker Compose for container orchestration, Playwright Test for browser
   flows, DOMPurify/DOM APIs for sanitized HTML transforms, and package-exported
   types/manifests from `@chaoxu/coflat`.
+- Do not parse Coflat or Markdown document structure with ad hoc regex.
+  Headings, references, math, labels, frontmatter boundaries, fenced blocks,
+  tables, lists, footnotes, and generated outlines must come from Lezer,
+  `@chaoxu/coflat/parse`, or a parser-owned scanner/helper in Coflat. Regex is
+  still acceptable for validation, escaping, slug cleanup, tests, and as a
+  sieve over parser-identified plain text.
 - When transforming rendered HTML, sanitize to DOM and traverse nodes
   (`DocumentFragment`, `TreeWalker`, `querySelectorAll`). Do not regex over
   HTML strings except for narrow tests or pre-HTML source text.

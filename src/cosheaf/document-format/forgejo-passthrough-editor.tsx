@@ -7,6 +7,10 @@ import type {
   StatusEvents,
 } from "../editor";
 import type { MountedEditor } from "./coflat";
+import {
+  extractAtxHeadings,
+  parseFrontmatterYaml,
+} from "../../../shared/frontmatter-yaml";
 
 type Outline = ReturnType<typeof extractForgejoPassthroughOutline>;
 type Store<T> = {
@@ -172,27 +176,37 @@ function store<T>(get: () => T): Store<T> {
 
 export function extractForgejoPassthroughOutline(source: string) {
   const out: Array<{ id: string; level: 1 | 2 | 3 | 4 | 5 | 6; text: string; markdown: string; html: string; line: number; from: number; key: string }> = [];
-  const lines = source.split(/\n/);
   const usedIds = new Set<string>();
-  let from = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i] ?? "");
-    if (match) {
-      const text = match[2];
-      out.push({
-        id: uniqueHeadingId(text, usedIds),
-        level: match[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        text,
-        markdown: text,
-        html: escapeHtml(text),
-        line: i + 1,
-        from,
-        key: `${i + 1}:${text}`,
-      });
-    }
-    from += (lines[i]?.length ?? 0) + 1;
+  for (const heading of extractAtxHeadings(source)) {
+    out.push({
+      id: uniqueHeadingId(heading.text, usedIds),
+      level: heading.level,
+      text: heading.text,
+      markdown: heading.text,
+      html: escapeHtml(heading.text),
+      line: heading.line,
+      from: heading.from,
+      key: `${heading.line}:${heading.text}`,
+    });
   }
   return out;
+}
+
+function sourceLines(source: string): Array<{ text: string; from: number; number: number }> {
+  const lines: Array<{ text: string; from: number; number: number }> = [];
+  let number = 1;
+  let lineStart = 0;
+  while (lineStart <= source.length) {
+    const lineEnd = source.indexOf("\n", lineStart);
+    const end = lineEnd < 0 ? source.length : lineEnd;
+    let text = source.slice(lineStart, end);
+    if (text.endsWith("\r")) text = text.slice(0, -1);
+    lines.push({ text, from: lineStart, number });
+    if (lineEnd < 0) break;
+    lineStart = lineEnd + 1;
+    number++;
+  }
+  return lines;
 }
 
 function uniqueHeadingId(text: string, usedIds: Set<string>): string {
@@ -224,10 +238,40 @@ function escapeHtml(text: string): string {
 }
 
 function countDocument(source: string) {
-  const body = source.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  const words = body.trim() ? body.trim().split(/\s+/).length : 0;
-  const paragraphs = body.split(/\n{2,}/).filter((part) => part.trim().length > 0).length;
+  const body = parseFrontmatterYaml(source).body;
+  const words = countWords(body);
+  const paragraphs = countParagraphs(body);
   return { words, chars: body.length, paragraphs };
+}
+
+function countWords(body: string): number {
+  let words = 0;
+  let inWord = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i] ?? "";
+    const isWhitespace = ch === " " || ch === "\n" || ch === "\r" || ch === "\t" || ch === "\f" || ch === "\v";
+    if (isWhitespace) {
+      inWord = false;
+    } else if (!inWord) {
+      words++;
+      inWord = true;
+    }
+  }
+  return words;
+}
+
+function countParagraphs(body: string): number {
+  let paragraphs = 0;
+  let inParagraph = false;
+  for (const line of sourceLines(body)) {
+    if (line.text.trim().length === 0) {
+      inParagraph = false;
+    } else if (!inParagraph) {
+      paragraphs++;
+      inParagraph = true;
+    }
+  }
+  return paragraphs;
 }
 
 function offsetForLine(source: string, line: number): number {

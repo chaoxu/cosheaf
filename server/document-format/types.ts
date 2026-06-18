@@ -8,6 +8,7 @@ export interface DocumentLink {
   raw: string;
   from: number;
   to: number;
+  line?: number;
 }
 
 export interface DocumentXrefTarget {
@@ -24,6 +25,6 @@ export interface DocumentFormat {
   parseDocument(content: string): ParsedDocument;
   serializeDocument(frontmatter: Frontmatter, body: string): string;
   extractTitle(body: string): string | null;
-  extractLinks(body: string): DocumentLink[];
-  extractXrefTargets?(body: string): DocumentXrefTarget[];
+  extractLinks(source: string): DocumentLink[];
+  extractXrefTargets?(source: string): DocumentXrefTarget[];
 }

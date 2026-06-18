@@ -1,5 +1,12 @@
 import { renderInlineMarkdown } from "@chaoxu/coflat";
-import { renderToHtml, hydrateMath, hydrateReaderDisclosures, hydrateReaderHoverPreviews, type ReaderOutlineEntry } from "@chaoxu/coflat/reader";
+import {
+  hydrateMath,
+  hydrateReaderDisclosures,
+  hydrateReaderHoverPreviews,
+  hydrateReferences,
+  renderToHtml,
+  type ReaderOutlineEntry,
+} from "@chaoxu/coflat/reader";
 import { urlPath } from "../../shared/url";
 import {
   REF_BUTTON_CLASS,
@@ -9,7 +16,6 @@ import { readDocumentTheme, readSectionNumbering } from "./document-theme";
 import {
   coflatDocumentContext,
   loadCoflatRefs,
-  resolveRepoLink,
   resolveRawRepoLink,
   type CoflatDocumentPayload,
 } from "./coflat-document-context";
@@ -67,7 +73,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   });
   const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
-  rewriteRenderedRepoUrls(fragment, payload);
+  rewriteRenderedRepoImageUrls(fragment, payload);
   // Coflat needs the full source so frontmatter-controlled numbering (e.g.
   // `numbering: global`) and block config are visible to the reader. It also
   // renders the frontmatter title itself; hide that only for non-document
@@ -76,6 +82,11 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     fragment.querySelector(".cf-doc-title")?.remove();
   }
   root.replaceChildren(fragment);
+  hydrateReferences(root, ctx, {
+    documentPath: payload.path,
+    source: payload.source,
+    surface: "reader",
+  });
   // hydrateMath does NOT read the document — it needs the macros explicitly, or
   // any non-builtin (e.g. \DecRank) renders as "undefined control sequence" red.
   // result.mathMacros covers frontmatter/in-body macros from Coflat's render;
@@ -233,13 +244,12 @@ function applyDocumentTheme(root: HTMLElement): void {
   scope?.classList.toggle("cf-theme-blueprint-book", theme === "blueprint-book");
 }
 
-function rewriteRenderedRepoUrls(root: ParentNode, payload: CoflatDocumentPayload): void {
-  for (const el of root.querySelectorAll<HTMLAnchorElement | HTMLImageElement>("a[href], img[src]")) {
-    const attr = el instanceof HTMLImageElement ? "src" : "href";
-    const value = el.getAttribute(attr);
+function rewriteRenderedRepoImageUrls(root: ParentNode, payload: CoflatDocumentPayload): void {
+  for (const el of root.querySelectorAll<HTMLImageElement>("img[src]")) {
+    const value = el.getAttribute("src");
     if (!value) continue;
-    const resolved = el instanceof HTMLImageElement ? resolveRawRepoLink(payload, value) : resolveRepoLink(payload, value);
-    if (resolved) el.setAttribute(attr, resolved);
+    const resolved = resolveRawRepoLink(payload, value);
+    if (resolved) el.setAttribute("src", resolved);
   }
 }
 

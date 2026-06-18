@@ -4,7 +4,6 @@
 
 import path from "node:path";
 import type Database from "better-sqlite3";
-import { lineFromOffset } from "../shared/coflat-xrefs.js";
 import type { DocumentLink } from "./document-format/types.js";
 import { getDocumentFormat } from "./format-registry.js";
 import { generateDocId } from "./ids.js";
@@ -111,7 +110,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
       db,
       "INSERT OR IGNORE INTO xref_targets (workspace_slug, target_id, source_path, kind, display_label, line) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    const xrefTargets = format.extractXrefTargets?.(parsed.body) ?? [];
+    const xrefTargets = format.extractXrefTargets?.(p.bodyText) ?? [];
     const duplicateCounts = new Map<string, number>();
     for (const target of xrefTargets) duplicateCounts.set(target.id, (duplicateCounts.get(target.id) ?? 0) + 1);
     const insertXrefDuplicate = prep(
@@ -135,8 +134,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
       db,
       "INSERT OR IGNORE INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    const bodyStart = p.bodyText.length - parsed.body.length;
-    for (const link of format.extractLinks(parsed.body)) {
+    for (const link of format.extractLinks(p.bodyText)) {
       const targetId = resolveLinkTarget(db, p.workspaceSlug, p.filePath, link);
       insertBacklink.run(
         p.workspaceSlug,
@@ -144,7 +142,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
         p.filePath,
         targetId,
         link.raw,
-        lineFromOffset(p.bodyText, bodyStart + link.from),
+        link.line ?? lineFromOffset(p.bodyText, link.from),
       );
     }
     prep(db, "DELETE FROM page_tags WHERE workspace_slug = ? AND cosheaf_id = ?")
@@ -169,6 +167,15 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   }
 
   return { cosheafId, title, rewrittenContent: rewritten, commit };
+}
+
+function lineFromOffset(source: string, offset: number): number {
+  let line = 1;
+  const end = Math.max(0, Math.min(offset, source.length));
+  for (let i = 0; i < end; i += 1) {
+    if (source.charCodeAt(i) === 10) line += 1;
+  }
+  return line;
 }
 
 // Convenience for webhook-driven reindex where there's no Forgejo write to fail.

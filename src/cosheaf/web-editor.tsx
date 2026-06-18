@@ -10,8 +10,11 @@ import type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
 } from "@chaoxu/coflat";
-import { renderInlineMarkdown } from "@chaoxu/coflat";
-import type { DocumentContext } from "@chaoxu/coflat/reader";
+import {
+  formatUploadedAssetMarkdown,
+  renderInlineMarkdown,
+} from "@chaoxu/coflat";
+import { hydrateReferences, type DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
@@ -27,10 +30,8 @@ import type { DocumentThemeId } from "./document-theme";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import {
-  type CoflatLocalRefs,
   coflatDocumentContext,
   loadCoflatRefs,
-  resolveUnresolvedCoflatReferences,
 } from "./coflat-document-context";
 import { sanitizeAndRewriteRefsFragment } from "./ref-rewriter";
 import "@chaoxu/coflat/style.css";
@@ -62,16 +63,6 @@ function nowTime(): string {
 function relativeAssetPath(documentPath: string, assetPath: string): string {
   const dirDepth = documentPath.split("/").slice(0, -1).filter(Boolean).length;
   return `${"../".repeat(dirDepth)}${assetPath}`;
-}
-
-function markdownLabel(name: string): string {
-  return (name.replace(/\.[^.]+$/, "").trim() || "asset").replace(/[\\[\]]/g, "");
-}
-
-function uploadedAssetSnippet(file: File, path: string): string {
-  const label = markdownLabel(file.name);
-  const isImage = file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.name);
-  return isImage ? `![${label}](${path})` : `[${label}](${path})`;
 }
 
 // Fire an app-wide toast (cosheaf-toast.js, loaded by the page shell). A no-op
@@ -184,7 +175,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
-  const [coflatRefs, setCoflatRefs] = useState<CoflatLocalRefs | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
@@ -230,7 +220,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   useEffect(() => {
     if (config.formatId !== COFLAT_FORMAT_ID) {
       setDocumentContext(null);
-      setCoflatRefs(null);
       contextLoadedRef.current = true;
       setDocumentContextReady(true);
       return;
@@ -247,7 +236,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     };
     void loadCoflatRefs(payload).then((refs) => {
       if (cancelled) return;
-      setCoflatRefs(refs);
       setDocumentContext(coflatDocumentContext(payload, refs));
       contextLoadedRef.current = true;
       setDocumentContextReady(true);
@@ -258,13 +246,17 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   }, [branch, branchExists, config.formatId, config.owner, config.path, config.repo, content, currentPath]);
 
   useEffect(() => {
-    if (!coflatRefs) return;
+    if (!documentContext) return;
     const root = document.getElementById("web-editor-root");
     if (!root) return;
     let queued = false;
     const reconcile = () => {
       queued = false;
-      resolveUnresolvedCoflatReferences(root, coflatRefs);
+      hydrateReferences(root, documentContext, {
+        documentPath: currentPath.trim() || config.path,
+        source: content,
+        surface: "editor",
+      });
     };
     const schedule = () => {
       if (queued) return;
@@ -277,7 +269,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     return () => {
       observer.disconnect();
     };
-  }, [coflatRefs]);
+  }, [config.path, content, currentPath, documentContext]);
 
   const branchForWrite = useCallback(() => {
     const current = branchRef.current;
@@ -429,7 +421,13 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           }
           const uploaded = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
           const rel = relativeAssetPath(currentPathRef.current.trim() || config.path, uploaded.path);
-          snippets.push(uploadedAssetSnippet(file, rel));
+          snippets.push(
+            formatUploadedAssetMarkdown({
+              path: rel,
+              name: file.name,
+              mimeType: file.type,
+            }),
+          );
           toast(`Uploaded ${uploaded.path}`);
         }
         if (snippets.length > 0) {

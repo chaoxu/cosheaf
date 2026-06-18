@@ -19,12 +19,3 @@ export function extractCoflatXrefTargets(source: string): CoflatXrefTarget[] {
       line: target.line,
     }));
 }
-
-export function lineFromOffset(source: string, offset: number): number {
-  let line = 1;
-  const end = Math.max(0, Math.min(offset, source.length));
-  for (let i = 0; i < end; i += 1) {
-    if (source.charCodeAt(i) === 10) line += 1;
-  }
-  return line;
-}

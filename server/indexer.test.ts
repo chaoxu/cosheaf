@@ -199,6 +199,41 @@ describe("indexPage", () => {
     expect(db.prepare("SELECT count(*) AS c FROM xref_targets WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
   });
 
+  it("indexes xref target labels with Coflat frontmatter numbering", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "numbering.md",
+      bodyText: [
+        "---",
+        "numbering: global",
+        "---",
+        "",
+        "::: {.theorem #thm:first}",
+        "First.",
+        ":::",
+        "",
+        "::: {.table #tbl:apps}",
+        "table",
+        ":::",
+        "",
+        "::: {.theorem #thm:target}",
+        "Target.",
+        ":::",
+      ].join("\n"),
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const targets = db
+      .prepare("SELECT target_id, display_label FROM xref_targets WHERE workspace_slug = 'owner/w' ORDER BY target_id")
+      .all() as Array<{ target_id: string; display_label: string }>;
+    expect(targets).toEqual([
+      { target_id: "tbl:apps", display_label: "Table 2" },
+      { target_id: "thm:first", display_label: "Theorem 1" },
+      { target_id: "thm:target", display_label: "Theorem 3" },
+    ]);
+  });
+
   it("indexes with trigram tokenizer for CJK search", () => {
     const db = freshDb();
     indexPage(db, {

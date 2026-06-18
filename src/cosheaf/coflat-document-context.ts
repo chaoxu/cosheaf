@@ -1,7 +1,10 @@
-import type { DocumentContext } from "@chaoxu/coflat/reader";
 import type { CitationFormatter } from "@chaoxu/coflat/citeproc";
-import { extractReferences } from "@chaoxu/coflat/parse";
-import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
+import {
+  extractReferences,
+  parseFrontmatter,
+  resolveMarkdownReferencePathFromDocument,
+} from "@chaoxu/coflat/parse";
+import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { urlPath } from "../../shared/url";
 
@@ -27,8 +30,8 @@ export interface CoflatDocumentPayload {
   mathMacros?: Record<string, string>;
 }
 
-export interface CoflatLocalRefs {
-  crossrefs: Map<string, RenderedCrossref>;
+export interface CoflatDocumentRefs {
+  workspaceCrossrefs: Map<string, RenderedCrossref>;
   citations: CoflatCitations | null;
 }
 
@@ -83,8 +86,15 @@ export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string)
 }
 
 function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {
-  const baseDir = payload.path.includes("/") ? payload.path.slice(0, payload.path.lastIndexOf("/")) : "";
-  return new URL(href, `https://cosheaf.invalid/${baseDir ? `${baseDir}/` : ""}`).pathname.slice(1);
+  return resolveMarkdownReferencePathFromDocument(payload.path, decodeMarkdownPathHref(href));
+}
+
+function decodeMarkdownPathHref(href: string): string {
+  try {
+    return decodeURI(href);
+  } catch (_error) {
+    return href;
+  }
 }
 
 function isLineFragment(hash: string): boolean {
@@ -109,7 +119,7 @@ export function coflatLinkResolver(payload: CoflatDocumentPayload): DocumentCont
 // math render path, so passing the pre-merged result here makes repo macros work
 // on every surface (incl. comments) while a doc can still redefine one (#183).
 export function resolveMathMacros(payload: CoflatDocumentPayload): Record<string, string> {
-  const docMath = parseFrontmatterYaml(payload.source).frontmatter.math;
+  const docMath = parseFrontmatter(payload.source).frontmatter?.math;
   const doc: Record<string, string> = {};
   if (docMath && typeof docMath === "object" && !Array.isArray(docMath)) {
     for (const [k, v] of Object.entries(docMath as Record<string, unknown>)) {
@@ -119,14 +129,14 @@ export function resolveMathMacros(payload: CoflatDocumentPayload): Record<string
   return { ...(payload.mathMacros ?? {}), ...doc };
 }
 
-export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatLocalRefs): DocumentContext {
+export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatDocumentRefs): DocumentContext {
   const citations = refs.citations;
   const mathMacros = resolveMathMacros(payload);
   return {
     linkResolver: coflatLinkResolver(payload),
     refResolver: {
       resolve: (key, _mode, env) => {
-        const crossref = refs.crossrefs.get(key);
+        const crossref = refs.workspaceCrossrefs.get(key);
         if (crossref) {
           return {
             content: escapeHtml(crossref.label),
@@ -143,77 +153,29 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
     },
     // The reader resolves citations natively from these (inline label, hover,
     // and the References list); the refResolver branch above is the fallback
-    // path the editor surface still uses. Crossrefs are resolved by the reader's
-    // own catalog (renderToHtml resolveReferences), with refResolver as the
-    // fallback for cross-file workspace targets.
+    // path the editor surface still uses. Local crossrefs are resolved by
+    // Coflat's own catalog; the host resolver only carries cross-file workspace
+    // targets that Cosheaf's sidecar index knows about.
     ...(citations ? { citationFormatter: citations.formatter, citationKeys: citations.keys } : {}),
     ...(Object.keys(mathMacros).length ? { mathMacros } : {}),
   };
 }
 
-export function resolveUnresolvedCoflatReferences(root: ParentNode, refs: CoflatLocalRefs): void {
-  for (const el of root.querySelectorAll<HTMLElement>(".cf-crossref-unresolved, .cf-citation-unresolved")) {
-    const key = el.dataset.refKey ?? sourceReferenceKey(el.textContent ?? "");
-    if (!key) continue;
-    const crossref = refs.crossrefs.get(key);
-    if (crossref) {
-      rewriteReferenceElement(el, key, crossref.label, "cf-crossref", crossref.href);
-      continue;
-    }
-    if (refs.citations?.keys.has(key)) {
-      rewriteReferenceElement(el, key, refs.citations.formatter.cite([key], [undefined]), "cf-citation");
-    }
-  }
-}
-
-export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<CoflatLocalRefs> {
-  const parsed = parseFrontmatterYaml(payload.source);
-  const crossrefs = localCrossrefs(payload.source);
-  for (const [key, ref] of await workspaceCrossrefs(payload, payload.source)) {
-    if (!crossrefs.has(key)) crossrefs.set(key, ref);
-  }
+export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<CoflatDocumentRefs> {
+  const parsed = parseFrontmatter(payload.source);
+  const localKeys = new Set(extractCoflatXrefTargets(payload.source).map((target) => target.id));
   return {
-    crossrefs,
-    citations: await loadCitations(payload, parsed.frontmatter, parsed.body),
+    workspaceCrossrefs: await workspaceCrossrefs(payload, payload.source, localKeys),
+    citations: await loadCitations(
+      payload,
+      parsed.frontmatter ?? {},
+      parsed.body,
+    ),
   };
 }
 
-function sourceReferenceKey(value: string): string | null {
-  const bracketed = /^\s*\[@([^;\]\s]+)\]\s*$/.exec(value);
-  if (bracketed) return bracketed[1];
-  const narrative = /^\s*@([A-Za-z0-9:._-]+)\s*$/.exec(value);
-  return narrative?.[1] ?? null;
-}
-
-function rewriteReferenceElement(el: HTMLElement, key: string, text: string, className: string, href?: string): void {
-  el.classList.remove("cf-crossref-unresolved", "cf-citation-unresolved");
-  el.classList.add(className);
-  el.dataset.refKey = key;
-  if (!href) {
-    el.textContent = text;
-    return;
-  }
-  if (el instanceof HTMLAnchorElement) {
-    el.href = href;
-    el.textContent = text;
-    return;
-  }
-  const link = document.createElement("a");
-  link.href = href;
-  link.textContent = text;
-  el.replaceChildren(link);
-}
-
-function localCrossrefs(source: string): Map<string, RenderedCrossref> {
-  const refs = new Map<string, RenderedCrossref>();
-  for (const target of extractCoflatXrefTargets(source)) {
-    refs.set(target.id, { label: target.label, href: `#${encodeURIComponent(target.id)}` });
-  }
-  return refs;
-}
-
-async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string): Promise<Map<string, RenderedCrossref>> {
-  const keys = referencedKeys(source);
+async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string, localKeys: ReadonlySet<string>): Promise<Map<string, RenderedCrossref>> {
+  const keys = referencedKeys(source).filter((key) => !localKeys.has(key));
   if (keys.length === 0) return new Map();
   try {
     const response = await fetch(`/api/v1/repos/${encodeURIComponent(payload.owner)}/${encodeURIComponent(payload.repo)}/refs?ids=${encodeURIComponent(keys.join(","))}`, {

@@ -244,7 +244,7 @@ describe("files refs route", () => {
     expect(await res.json()).toEqual({
       refs: [
         { id: "target", path: "target.md", kind: "page", label: "Target" },
-        { id: "thm:target", path: "target.md", kind: "block", label: "Theorem 1", fragment: "thm:target", line: 3 },
+        { id: "thm:target", path: "target.md", kind: "block", label: "Theorem 1", fragment: "thm:target", line: 6 },
       ],
       ambiguous_refs: [],
     });
