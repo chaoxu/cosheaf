@@ -55,7 +55,9 @@ Already shared or recently aligned:
   emission now also shares the table/header/body/row/cell skeleton for HTML and
   DOM emitters.
 - Code blocks: reader and editor preview now share language/content extraction
-  through a code block render plan before emitting HTML or DOM.
+  through a code block render plan before emitting HTML or DOM. Reader code
+  blocks preserve `white-space: pre` while containing horizontal overflow inside
+  the block.
 - Footnote definitions: reader and editor preview now share id/body extraction
   and inline fragment planning before emitting footnote entry surfaces.
 - Document assembly: reader and editor preview now share top-level renderable
@@ -164,6 +166,8 @@ Add named checks for:
 - Coflat showcase typography and geometry parity. (done in `pnpm smoke:reader-parity`)
 - Tablet/mobile reader-editor document width and rail breakpoint parity. (done
   in `pnpm smoke:reader-parity`)
+- Non-default document theme and reading-width preference parity. (done in
+  `pnpm smoke:reader-parity`)
 
 Exit criterion:
 
@@ -196,6 +200,7 @@ Exit criterion:
 | Shared block dispatch and table plan emission | Fixed | `block-render-plan.test.ts`; `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
+| Reader code-block overflow containment | Fixed | `theme-css-contract.test.ts`; `pnpm smoke:reader-parity` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared document assembly render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `reader-outline.test.ts` |
 | Shared task-list content normalization | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
@@ -204,3 +209,4 @@ Exit criterion:
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
 | Stable fixture-backed outline/hover/geometry parity | Fixed | `pnpm smoke:reader-parity`; `devx-what-to-run.test.mjs` |
 | Responsive reader/editor rail breakpoint and width parity | Fixed | `pnpm smoke:reader-parity` |
+| Non-default theme and reading-width preference parity | Fixed | `pnpm smoke:reader-parity` |

@@ -173,6 +173,42 @@ async function editorCodeBlockStats() {
   });
 }
 
+async function readerLinkStats() {
+  return page.locator(".cf-reader .cf-doc-link").first().evaluate((el) => {
+    const styles = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return {
+      text: el.textContent?.trim() ?? "",
+      line: styles.textDecorationLine,
+      style: styles.textDecorationStyle,
+      thickness: styles.textDecorationThickness,
+      underlineOffset: styles.textUnderlineOffset,
+      color: styles.color,
+      display: styles.display,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  });
+}
+
+async function editorLinkStats() {
+  return page.locator(".cm-content .cf-doc-link").first().evaluate((el) => {
+    const styles = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return {
+      text: el.textContent?.trim() ?? "",
+      line: styles.textDecorationLine,
+      style: styles.textDecorationStyle,
+      thickness: styles.textDecorationThickness,
+      underlineOffset: styles.textUnderlineOffset,
+      color: styles.color,
+      display: styles.display,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  });
+}
+
 async function readerLayoutStats(viewportName) {
   return page.locator(".app-content").first().evaluate((appContent, name) => {
     const reader = appContent.querySelector(".cf-reader");
@@ -219,6 +255,31 @@ async function editorLayoutStats(viewportName) {
   }, viewportName);
 }
 
+function assertDesktopLayoutParity(readerLayout, editorLayout) {
+  const context = { readerLayout, editorLayout };
+  if (readerLayout.appScrollWidth > readerLayout.appWidth + 4) {
+    throw new Error(`desktop reader has horizontal overflow: ${JSON.stringify(context)}`);
+  }
+  if (editorLayout.appScrollWidth > editorLayout.appWidth + 4) {
+    throw new Error(`desktop editor has horizontal overflow: ${JSON.stringify(context)}`);
+  }
+  if (readerLayout.railDisplay === "none" || editorLayout.railDisplay === "none") {
+    throw new Error(`desktop reader/editor rail unexpectedly hidden: ${JSON.stringify(context)}`);
+  }
+  if (Math.abs(readerLayout.readerWidth - editorLayout.contentWidth) > 1) {
+    throw new Error(`desktop reader/editor content width mismatch: ${JSON.stringify(context)}`);
+  }
+  if (Math.abs(readerLayout.railWidth - editorLayout.railWidth) > 2) {
+    throw new Error(`desktop reader/editor rail width mismatch: ${JSON.stringify(context)}`);
+  }
+  if (Math.abs(readerLayout.readerLeft - editorLayout.contentLeft) > 40) {
+    throw new Error(`desktop reader/editor content left drift: ${JSON.stringify(context)}`);
+  }
+  if (Math.abs(readerLayout.readerRight - editorLayout.contentRight) > 40) {
+    throw new Error(`desktop reader/editor content right drift: ${JSON.stringify(context)}`);
+  }
+}
+
 function assertReaderEditorParity(reader, editor) {
   const comparable = ["paddingTop", "fontSize", "lineHeight"];
   for (const key of comparable) {
@@ -251,6 +312,29 @@ function assertReaderEditorParity(reader, editor) {
   }
   if (editor.listMarkers === 0) {
     throw new Error(`editor package list markers missing: ${JSON.stringify({ reader, editor })}`);
+  }
+}
+
+function assertLinkStyleParity(readerLink, editorLink) {
+  const context = { readerLink, editorLink };
+  if (!readerLink.text || !editorLink.text) {
+    throw new Error(`reader/editor link missing text: ${JSON.stringify(context)}`);
+  }
+  for (const [surface, link] of [["reader", readerLink], ["editor", editorLink]]) {
+    if (!link.line.includes("underline") || link.style !== "dotted") {
+      throw new Error(`${surface} link is not dotted underline: ${JSON.stringify(context)}`);
+    }
+    if (link.underlineOffset !== "2px") {
+      throw new Error(`${surface} link underline offset drift: ${JSON.stringify(context)}`);
+    }
+  }
+  for (const key of ["line", "style", "thickness", "underlineOffset", "display"]) {
+    if (readerLink[key] !== editorLink[key]) {
+      throw new Error(`reader/editor link ${key} mismatch: ${JSON.stringify(context)}`);
+    }
+  }
+  if (readerLink.color !== editorLink.color) {
+    throw new Error(`reader/editor link color mismatch: ${JSON.stringify(context)}`);
   }
 }
 
@@ -353,6 +437,7 @@ async function scrollEditorUntilMounted(selector) {
 async function gotoShowcaseReader() {
   await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
   await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".cf-reader .cf-doc-heading").first().waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function gotoShowcaseEditor() {
@@ -363,15 +448,49 @@ async function gotoShowcaseEditor() {
   await page.locator(".cm-content").waitFor({ state: "visible", timeout: 10000 });
 }
 
+async function setDocumentTheme(theme) {
+  await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
+  const themeSelect = page.getByTestId("settings-document-theme-select");
+  await themeSelect.waitFor({ state: "visible", timeout: 10000 });
+  await page.evaluate((value) => {
+    const select = document.querySelector("[data-document-theme-user]");
+    const legacyKey = "cosheaf:document-theme";
+    const user = select instanceof HTMLSelectElement ? select.dataset.documentThemeUser || "" : "";
+    const key = user ? `${legacyKey}:${user}` : legacyKey;
+    localStorage.setItem(key, value);
+    localStorage.setItem(legacyKey, value);
+  }, theme);
+  await themeSelect.selectOption(theme);
+}
+
+async function setReadingWidth(width) {
+  await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
+  const widthSelect = page.getByTestId("settings-reading-width-select");
+  await widthSelect.waitFor({ state: "visible", timeout: 10000 });
+  await page.evaluate((value) => {
+    const select = document.querySelector("[data-reading-width-user]");
+    const legacyKey = "cosheaf:reading-width";
+    const user = select instanceof HTMLSelectElement ? select.dataset.readingWidthUser || "" : "";
+    const key = user ? `${legacyKey}:${user}` : legacyKey;
+    localStorage.setItem(key, value);
+    localStorage.setItem(legacyKey, value);
+    document.documentElement.setAttribute("data-cosheaf-reading", value);
+  }, width);
+  await widthSelect.selectOption(width);
+}
+
 try {
   await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await ensureSignedIn();
+  await setDocumentTheme("default");
+  await setReadingWidth("normal");
   await gotoShowcaseReader();
   // Scope to the heading: the reader now renders an outline whose TOC link
   // carries the same text, so a bare getByText is ambiguous (strict-mode).
   await page.getByRole("heading", { name: "Frontmatter and Structure Editing" }).first().waitFor({ state: "visible", timeout: 10000 });
 
   const defaultReader = await readerStats();
+  const defaultReaderLayout = await readerLayoutStats("desktop");
   if (defaultReader.documentWidth < 900) {
     throw new Error(`document width too narrow: document=${defaultReader.documentWidth}`);
   }
@@ -422,28 +541,36 @@ try {
   if (defaultReader.redSample.length !== 0) {
     throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
+  const defaultReaderLink = await readerLinkStats();
   const defaultReaderCode = await readerCodeBlockStats();
   await assertResolvedOutlineLabel("reader");
   await assertHoverPreview(".cf-reader [data-ref-key=\"thm:hover-preview\"]", "Hover Preview Stress Test");
 
-  await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
-  const themeSelect = page.getByTestId("settings-document-theme-select");
-  await themeSelect.waitFor({ state: "visible", timeout: 10000 });
-  await themeSelect.selectOption("blueprint-book");
+  await setDocumentTheme("blueprint-book");
   await gotoShowcaseReader();
   const blueprintReader = await readerStats();
   if (!blueprintReader.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`settings-selected theme did not apply to reader: ${blueprintReader.rootClass}`);
   }
-  await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
-  await page.getByTestId("settings-document-theme-select").selectOption("default");
+  await gotoShowcaseEditor();
+  const blueprintEditor = await editorStats();
+  if (!blueprintEditor.rootClass.includes("cf-theme-blueprint-book")) {
+    throw new Error(`settings-selected theme did not apply to editor: ${blueprintEditor.rootClass}`);
+  }
+  assertReaderEditorParity(blueprintReader, blueprintEditor);
+  await setDocumentTheme("default");
 
   await gotoShowcaseEditor();
   const defaultEditor = await editorStats();
+  const defaultEditorLayout = await editorLayoutStats("desktop");
   if (defaultEditor.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
   }
   assertReaderEditorParity(defaultReader, defaultEditor);
+  assertDesktopLayoutParity(defaultReaderLayout, defaultEditorLayout);
+  await scrollEditorUntilMounted(".cm-content .cf-doc-link");
+  const defaultEditorLink = await editorLinkStats();
+  assertLinkStyleParity(defaultReaderLink, defaultEditorLink);
   await scrollEditorUntilMounted(".cf-codeblock-header, .cf-codeblock-body, .cf-codeblock-last");
   const defaultEditorCode = await editorCodeBlockStats();
   assertCodeBlockParity(defaultReaderCode, defaultEditorCode);
@@ -451,6 +578,25 @@ try {
   const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"]";
   await scrollEditorUntilMounted(editorHoverTarget);
   await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");
+
+  await setReadingWidth("wide");
+  await gotoShowcaseReader();
+  const wideReader = await readerStats();
+  const wideReaderLayout = await readerLayoutStats("desktop-wide");
+  await gotoShowcaseEditor();
+  const wideEditor = await editorStats();
+  const wideEditorLayout = await editorLayoutStats("desktop-wide");
+  assertReaderEditorParity(wideReader, wideEditor);
+  assertDesktopLayoutParity(wideReaderLayout, wideEditorLayout);
+  if (wideReader.width <= defaultReader.width || wideEditor.width <= defaultEditor.width) {
+    throw new Error(`wide reading-width did not widen both surfaces: ${JSON.stringify({
+      defaultReader,
+      defaultEditor,
+      wideReader,
+      wideEditor,
+    })}`);
+  }
+  await setReadingWidth("normal");
 
   const responsiveLayouts = [];
   for (const viewport of RESPONSIVE_VIEWPORTS) {
@@ -470,6 +616,16 @@ try {
     ok,
     defaultReader,
     defaultEditor,
+    blueprintReader,
+    blueprintEditor,
+    wideReader,
+    wideEditor,
+    defaultReaderLink,
+    defaultEditorLink,
+    defaultReaderLayout,
+    defaultEditorLayout,
+    wideReaderLayout,
+    wideEditorLayout,
     defaultReaderCode,
     defaultEditorCode,
     responsiveLayouts,
