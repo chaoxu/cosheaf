@@ -77,6 +77,8 @@ Already shared or recently aligned:
 - Document traversal emission: reader and editor preview now share child order,
   inter-block blank emission, trailing blank emission, and after-document hook
   ordering; reader truncation still owns its rollback policy.
+- Nested block emission: fenced div bodies and blockquotes now share the same
+  child-block plan shape and emission helper before reader/editor surface output.
 - Task list items: reader and editor preview now share trimmed task content
   ranges and markdown content before emitting list item bodies.
 - Inline surface policy: reader and editor preview now share a typed policy for
@@ -275,6 +277,7 @@ Exit criterion:
 | Shared footnote section planning and chrome | Fixed | `footnote-section-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared document assembly render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `reader-outline.test.ts` |
 | Shared document traversal emission | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-hydrate.test.ts`; `reader.crossref.test.ts` |
+| Shared nested child-block emission | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-hydrate.test.ts`; `reader.crossref.test.ts` |
 | Shared task-list content normalization | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
 | Shared list-item child emission planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared reference presentation routing | Fixed | `presentation.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
