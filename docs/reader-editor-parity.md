@@ -40,6 +40,9 @@ Already shared or recently aligned:
 - Display math and fenced div blocks: reader and editor preview now share
   source-level plans for math labels/latex and semantic block attributes,
   titles, numbering presentation, body children, and preserved blank lines.
+- Tables: reader and editor preview now share a table render plan for
+  delimiter-derived alignments, header/body rows, cell nodes, ragged rows, and
+  header-only tables before emitting HTML or DOM.
 
 Still meaningfully split:
 
@@ -94,7 +97,6 @@ Start with low-risk blocks:
 
 Then move higher-risk blocks:
 
-- Tables
 - Footnotes
 - Code blocks
 
@@ -154,5 +156,6 @@ Exit criterion:
 | Shared list render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
 | Shared display math render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
+| Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared block render plan for higher-risk blocks | Planned | Phase 2 |
 | Typed surface policies | Planned | Phase 3 |
