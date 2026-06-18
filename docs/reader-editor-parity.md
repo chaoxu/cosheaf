@@ -43,7 +43,8 @@ Already shared or recently aligned:
   and reader-only leading title blocks.
 - Display math and fenced div blocks: reader and editor preview now share
   source-level plans for math labels/latex and semantic block attributes,
-  titles, numbering presentation, body children, and preserved blank lines.
+  titles, title inline fragments, numbering presentation, body children, and
+  preserved blank lines.
 - Tables: reader and editor preview now share a table render plan for
   delimiter-derived alignments, header/body rows, cell nodes, ragged rows, and
   header-only tables before emitting HTML or DOM. Table cells now also carry
@@ -156,6 +157,8 @@ Add named checks for:
 - Editor hover card target selection. (done in `pnpm smoke:reader-parity`)
 - Reader/editor outline display equivalence. (done in `pnpm smoke:reader-parity`)
 - Coflat showcase typography and geometry parity. (done in `pnpm smoke:reader-parity`)
+- Tablet/mobile reader-editor document width and rail breakpoint parity. (done
+  in `pnpm smoke:reader-parity`)
 
 Exit criterion:
 
@@ -183,6 +186,7 @@ Exit criterion:
 | Shared document traversal render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared display math render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
+| Shared fenced-div title inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
@@ -193,3 +197,4 @@ Exit criterion:
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
 | Stable fixture-backed outline/hover/geometry parity | Fixed | `pnpm smoke:reader-parity`; `devx-what-to-run.test.mjs` |
+| Responsive reader/editor rail breakpoint and width parity | Fixed | `pnpm smoke:reader-parity` |

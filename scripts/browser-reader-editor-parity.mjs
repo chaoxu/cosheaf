@@ -16,9 +16,14 @@ const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coi
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
 const OUTLINE_REFERENCE_LABEL = "Proof of Theorem 3";
 const OUTLINE_REFERENCE_RAW = "@thm:fundamental";
+const DESKTOP_VIEWPORT = { width: 1440, height: 1000 };
+const RESPONSIVE_VIEWPORTS = [
+  { name: "tablet-rail-boundary", width: 900, height: 800 },
+  { name: "mobile", width: 390, height: 844 },
+];
 
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const context = await browser.newContext({ viewport: DESKTOP_VIEWPORT });
 const page = await context.newPage();
 const consoleMessages = [];
 const pageErrors = [];
@@ -168,6 +173,52 @@ async function editorCodeBlockStats() {
   });
 }
 
+async function readerLayoutStats(viewportName) {
+  return page.locator(".app-content").first().evaluate((appContent, name) => {
+    const reader = appContent.querySelector(".cf-reader");
+    const rail = appContent.querySelector(".doc-rail");
+    const doc = appContent.querySelector(".document");
+    const readerRect = reader?.getBoundingClientRect();
+    const appRect = appContent.getBoundingClientRect();
+    const docRect = doc?.getBoundingClientRect();
+    return {
+      viewportName: name,
+      viewportWidth: window.innerWidth,
+      appWidth: Math.round(appRect.width),
+      appScrollWidth: Math.round(appContent.scrollWidth),
+      documentWidth: docRect ? Math.round(docRect.width) : 0,
+      readerWidth: readerRect ? Math.round(readerRect.width) : 0,
+      readerLeft: readerRect ? Math.round(readerRect.left) : 0,
+      readerRight: readerRect ? Math.round(readerRect.right) : 0,
+      railDisplay: rail ? getComputedStyle(rail).display : null,
+      railWidth: rail ? Math.round(rail.getBoundingClientRect().width) : 0,
+    };
+  }, viewportName);
+}
+
+async function editorLayoutStats(viewportName) {
+  return page.locator(".app-content").first().evaluate((appContent, name) => {
+    const content = appContent.querySelector(".cm-content");
+    const scroller = appContent.querySelector(".cm-scroller");
+    const rail = appContent.querySelector(".web-editor-outline");
+    const appRect = appContent.getBoundingClientRect();
+    const contentRect = content?.getBoundingClientRect();
+    const scrollerStyles = scroller ? getComputedStyle(scroller) : null;
+    return {
+      viewportName: name,
+      viewportWidth: window.innerWidth,
+      appWidth: Math.round(appRect.width),
+      appScrollWidth: Math.round(appContent.scrollWidth),
+      contentWidth: contentRect ? Math.round(contentRect.width) : 0,
+      contentLeft: contentRect ? Math.round(contentRect.left) : 0,
+      contentRight: contentRect ? Math.round(contentRect.right) : 0,
+      scrollerPaddingRight: scrollerStyles?.paddingRight ?? null,
+      railDisplay: rail ? getComputedStyle(rail).display : null,
+      railWidth: rail ? Math.round(rail.getBoundingClientRect().width) : 0,
+    };
+  }, viewportName);
+}
+
 function assertReaderEditorParity(reader, editor) {
   const comparable = ["paddingTop", "fontSize", "lineHeight"];
   for (const key of comparable) {
@@ -200,6 +251,32 @@ function assertReaderEditorParity(reader, editor) {
   }
   if (editor.listMarkers === 0) {
     throw new Error(`editor package list markers missing: ${JSON.stringify({ reader, editor })}`);
+  }
+}
+
+function assertResponsiveLayoutParity(readerLayout, editorLayout) {
+  const context = { readerLayout, editorLayout };
+  if (readerLayout.appScrollWidth > readerLayout.appWidth + 4) {
+    throw new Error(`reader viewport has horizontal overflow: ${JSON.stringify(context)}`);
+  }
+  if (editorLayout.appScrollWidth > editorLayout.appWidth + 4) {
+    throw new Error(`editor viewport has horizontal overflow: ${JSON.stringify(context)}`);
+  }
+  if (readerLayout.readerWidth < 320 || editorLayout.contentWidth < 320) {
+    throw new Error(`reader/editor content width collapsed: ${JSON.stringify(context)}`);
+  }
+  if (readerLayout.readerRight > readerLayout.viewportWidth + 4 || editorLayout.contentRight > editorLayout.viewportWidth + 4) {
+    throw new Error(`reader/editor content overflows viewport: ${JSON.stringify(context)}`);
+  }
+  if (readerLayout.railDisplay !== editorLayout.railDisplay) {
+    throw new Error(`reader/editor rail breakpoint mismatch: ${JSON.stringify(context)}`);
+  }
+  if (readerLayout.railDisplay === "none" && editorLayout.scrollerPaddingRight !== "0px") {
+    throw new Error(`editor reserved hidden rail space: ${JSON.stringify(context)}`);
+  }
+  const maxDelta = readerLayout.railDisplay === "none" ? 12 : 260;
+  if (Math.abs(readerLayout.readerWidth - editorLayout.contentWidth) > maxDelta) {
+    throw new Error(`reader/editor responsive width mismatch: ${JSON.stringify(context)}`);
   }
 }
 
@@ -273,11 +350,23 @@ async function scrollEditorUntilMounted(selector) {
   throw new Error(`editor reference widget did not mount for ${selector}: ${JSON.stringify(visibleReferences)}`);
 }
 
+async function gotoShowcaseReader() {
+  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
+  await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
+}
+
+async function gotoShowcaseEditor() {
+  await page.goto(
+    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=main&path=${encodeURIComponent(SHOWCASE_PATH)}`,
+    { waitUntil: "domcontentloaded" },
+  );
+  await page.locator(".cm-content").waitFor({ state: "visible", timeout: 10000 });
+}
+
 try {
   await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await ensureSignedIn();
-  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
+  await gotoShowcaseReader();
   // Scope to the heading: the reader now renders an outline whose TOC link
   // carries the same text, so a bare getByText is ambiguous (strict-mode).
   await page.getByRole("heading", { name: "Frontmatter and Structure Editing" }).first().waitFor({ state: "visible", timeout: 10000 });
@@ -341,8 +430,7 @@ try {
   const themeSelect = page.getByTestId("settings-document-theme-select");
   await themeSelect.waitFor({ state: "visible", timeout: 10000 });
   await themeSelect.selectOption("blueprint-book");
-  await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
+  await gotoShowcaseReader();
   const blueprintReader = await readerStats();
   if (!blueprintReader.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`settings-selected theme did not apply to reader: ${blueprintReader.rootClass}`);
@@ -350,11 +438,7 @@ try {
   await page.goto(new URL("/account/settings", WEB_URL).toString(), { waitUntil: "domcontentloaded" });
   await page.getByTestId("settings-document-theme-select").selectOption("default");
 
-  await page.goto(
-    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=main&path=${encodeURIComponent(SHOWCASE_PATH)}`,
-    { waitUntil: "domcontentloaded" },
-  );
-  await page.locator(".cm-content").waitFor({ state: "visible", timeout: 10000 });
+  await gotoShowcaseEditor();
   const defaultEditor = await editorStats();
   if (defaultEditor.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
@@ -368,6 +452,18 @@ try {
   await scrollEditorUntilMounted(editorHoverTarget);
   await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");
 
+  const responsiveLayouts = [];
+  for (const viewport of RESPONSIVE_VIEWPORTS) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await gotoShowcaseReader();
+    const readerLayout = await readerLayoutStats(viewport.name);
+    await gotoShowcaseEditor();
+    const editorLayout = await editorLayoutStats(viewport.name);
+    assertResponsiveLayoutParity(readerLayout, editorLayout);
+    responsiveLayouts.push({ readerLayout, editorLayout });
+  }
+  await page.setViewportSize(DESKTOP_VIEWPORT);
+
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;
   console.log(JSON.stringify({
@@ -376,6 +472,7 @@ try {
     defaultEditor,
     defaultReaderCode,
     defaultEditorCode,
+    responsiveLayouts,
     consoleSample: consoleMessages.slice(-10),
     badResponses,
     pageErrors,
