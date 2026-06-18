@@ -157,6 +157,10 @@ Already shared or recently aligned:
   list surface planning for ordered/unordered and task-item interpretation.
 - Editor heading semantic extraction now uses Coflat's shared heading render
   plan for level, content range, text, id, and unnumbered interpretation.
+- Reader hydration, editor shell surfaces, live widgets, vertical keyboard
+  entry, and inline math interactions now share Coflat's source-range parsing
+  helpers for `data-source-*` and shell/widget range metadata. Reader indexed
+  hover previews also consume a shared preview-entry-to-body-input adapter.
 
 Still meaningfully split:
 
@@ -164,6 +168,11 @@ Still meaningfully split:
 - `@chaoxu/coflat/src/editor/render/preview-block-renderer.ts` is a separate DOM renderer.
 - Reader-only behaviors include source-position attributes, truncation, reference-preview indexing, outline id generation, and disclosure hydration.
 - Editor-only behaviors include CM6 widgets, viewport mounting, editable/source transitions, and non-interactive preview rendering.
+- Remaining semantic-planner work: build shared core planners for full
+  footnote refs/defs/ordered entries/body ranges and heading outline/section
+  boundaries, so reader rendering, editor analysis, sidenotes, folds, and IR
+  indexing consume the same semantic products instead of independently
+  advancing equivalent state.
 
 ## Regression Commands
 
@@ -319,6 +328,7 @@ Exit criterion:
 | Shared outline entry text and footnote section entry planning | Fixed | `outline-surface.test.ts`; `footnote-section-surface.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared live editor list line and marker planning | Fixed | `list-surface.test.ts`; `container-attributes.test.ts`; `markdown-render.test.ts`; `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
 | Shared heading semantic planning | Fixed | `block-render-plan.test.ts`; `document.test.ts`; `heading-slice.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `preview-reader-parity.test.ts` |
+| Shared source-range parsing and indexed-preview body input | Fixed | `source-range-surface.test.ts`; `reference-preview-source.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `source-widget.test.ts`; `widget-stop-index.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
