@@ -191,6 +191,13 @@ Already shared or recently aligned:
 - Reader preview-index entries now derive from the same Coflat document
   reference target objects that feed editor catalogs; only body ranges and
   heading level remain explicit reader walk context.
+- Reader first-walk catalog registration and editor catalog mapping now share
+  Coflat's core target collection, preferred-target, and position-mapping
+  helpers; reader preview-index updates remain a reader surface side effect.
+- Fenced-div render planning and editor incremental semantics now share one
+  Coflat fenced-div syntax plan for classes, ids, key/value titles, title
+  ranges, fence ranges, self-closing state, body ranges, and child blank-line
+  planning.
 
 Still meaningfully split:
 
@@ -365,6 +372,8 @@ Exit criterion:
 | Shared reader emitted-footnote state and truncation snapshots | Fixed | `footnote-emission-state.test.ts`; `footnote-plan.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference preview content planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts` |
 | Shared target-to-preview-entry planning | Fixed | `reference-preview-source.test.ts`; `reference-targets.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts` |
+| Shared reference target collection and mapping | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `reader.crossref.test.ts`; `editor-reference-catalog.test.ts` |
+| Shared fenced-div syntax planning | Fixed | `block-render-plan.test.ts`; `window-extractor.test.ts`; `fenced-div-slice.test.ts`; `document.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
