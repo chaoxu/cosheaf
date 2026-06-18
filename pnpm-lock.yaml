@@ -11,6 +11,15 @@ importers:
       '@chaoxu/coflat':
         specifier: file:../coflat
         version: file:../coflat(728294b3245655958fffa93c12a9669a)
+      '@citation-js/core':
+        specifier: ^0.7.21
+        version: 0.7.21
+      '@citation-js/plugin-bibtex':
+        specifier: ^0.7.21
+        version: 0.7.21(@citation-js/core@0.7.21)
+      '@citation-js/plugin-csl':
+        specifier: ^0.7.22
+        version: 0.7.22(@citation-js/core@0.7.21)
       '@codemirror/autocomplete':
         specifier: ^6.20.1
         version: 6.20.2
