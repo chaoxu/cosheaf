@@ -46,7 +46,8 @@ Already shared or recently aligned:
   titles, numbering presentation, body children, and preserved blank lines.
 - Tables: reader and editor preview now share a table render plan for
   delimiter-derived alignments, header/body rows, cell nodes, ragged rows, and
-  header-only tables before emitting HTML or DOM.
+  header-only tables before emitting HTML or DOM. Table cells now also carry
+  shared inline fragments, text, source ranges, and math state.
 - Code blocks: reader and editor preview now share language/content extraction
   through a code block render plan before emitting HTML or DOM.
 - Footnote definitions: reader and editor preview now share id/body extraction
@@ -183,6 +184,7 @@ Exit criterion:
 | Shared display math render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
+| Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared document assembly render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `reader-outline.test.ts` |
