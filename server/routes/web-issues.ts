@@ -478,13 +478,14 @@ function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyTex
       ? html`<div class="empty">${emptyText}</div>`
       : issues.map((issue) => {
           const hasMeta = Boolean(issue.milestone) || issue.labels.length > 0;
-          return html`<a class="list-row issue-row" href="${repoHref(owner, repo, `/issues/${issue.number}`)}">
+          const href = repoHref(owner, repo, `/issues/${issue.number}`);
+          return html`<div class="list-row issue-row">
       <span class="list-row-main">
-        <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></span>
+        <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><a class="list-row-title-link" href="${href}"><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></a></span>
         ${hasMeta ? html`<span class="list-meta">${issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : ""}${labelChips(issue.labels)}</span>` : ""}
       </span>
       ${listRowSide(issue.user, issue.created_at, issue.comments)}
-    </a>`;
+    </div>`;
         })
   }</div>`;
 }

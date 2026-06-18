@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { avatar } from "./avatar.js";
-import { bellIcon, homeIcon } from "./icons.js";
+import { bellIcon, homeIcon, settingsIcon } from "./icons.js";
 import { DEFAULT_LOCALE, localeDir, type LocaleId, makeT, type T } from "../../shared/i18n/index.js";
 import { viteDevOrigin } from "../vite-dev-origin.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
@@ -72,7 +72,7 @@ export function globalSidebar(
   t: T = enT,
   opts: { siteAdmin?: boolean } = {},
 ): Html {
-  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t)}
+  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account")}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
       ${opts.siteAdmin ? html`<a class="${active === "admin" ? "active" : ""}" href="/admin">Admin</a>` : emptyHtml}
@@ -80,16 +80,21 @@ export function globalSidebar(
 }
 
 // Signed-in identity at the top of the sidebar (#127): an initials avatar + the
-// username (linking to Account) plus a notifications bell (#167). The same block
-// renders in the global and repo sidebars so identity + notifications are always
-// visible. Logged-out chrome (only the pre-auth message pages) shows a sign-in
-// link instead — and no bell.
-export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT): Html {
+// username linking to the user's profile, plus notifications/settings icons.
+// The same block renders in the global and repo sidebars so identity + chrome
+// actions are always visible. Logged-out chrome (only the pre-auth message
+// pages) shows a sign-in link instead — and no action icons.
+export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT, settingsActive = false): Html {
   if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">${t("auth.sign_in")}</a></div>`;
   return html`<div class="sidebar-identity">
-    <a class="sidebar-identity-link" href="/account/settings" title="${t("nav.account")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
+    <a class="sidebar-identity-link" href="${profileHref(user)}" title="${t("nav.profile")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
     ${notificationsBell(notificationsActive, t)}
+    ${settingsGear(settingsActive, t)}
   </div>`;
+}
+
+function profileHref(user: string): string {
+  return `/users/${encodeURIComponent(user)}`;
 }
 
 // Persistent notifications entry point (#129, #167): a bell beside the username
@@ -101,6 +106,12 @@ export function notificationsBell(active = false, t: T = enT): Html {
   return html`<a class="notif-bell${active ? " active" : ""}" href="/account/notifications" aria-label="${t("nav.notifications")}" title="${t("nav.notifications")}">
     ${bellIcon({ size: 15 })}
     <span class="notif-badge" data-notif-badge hidden></span>
+  </a>`;
+}
+
+export function settingsGear(active = false, t: T = enT): Html {
+  return html`<a class="settings-gear${active ? " active" : ""}" href="/account/settings" aria-label="${t("settings.title")}" title="${t("settings.title")}">
+    ${settingsIcon({ size: 15 })}
   </a>`;
 }
 

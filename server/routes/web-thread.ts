@@ -12,7 +12,7 @@ import type {
   ForgejoUser,
 } from "../forgejo-types.js";
 import { toEpochMs } from "../forgejo-types.js";
-import { type AvatarUser, avatarForUser } from "./avatar.js";
+import { type AvatarUser, avatarLinkForUser } from "./avatar.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
 import {
@@ -448,7 +448,7 @@ export function listRowSide(
   comments: number | undefined,
 ): Html {
   return html`<span class="list-row-side">
-    ${avatarForUser(author)}<span class="row-who">${userLink(author?.login)}</span>
+    ${avatarLinkForUser(author)}<span class="row-who">${userLink(author?.login)}</span>
     <span class="row-sep">·</span>${timeEl(createdAt)}
     <span class="row-sep">·</span><span class="row-count" title="comments">(${comments ?? 0})</span>
   </span>`;
@@ -472,7 +472,7 @@ export function threadParticipantsBar(
   }
   const last = comments[comments.length - 1];
   return html`<div class="thread-bar" data-testid="thread-bar">
-    <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarForUser(user))}</span>
+    <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarLinkForUser(user))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
       last?.created_at ? html` · last ${timeEl(last.created_at)} by ${userLink(last.user?.login)}` : emptyHtml
     }</span>
@@ -579,7 +579,7 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
 // the hover edit affordance floated top-right.
 function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html }): Html {
   return html`<article class="comment" id="${opts.anchorId}">
-    <span class="comment-avatar">${avatarForUser(opts.author)}</span>
+    <span class="comment-avatar">${avatarLinkForUser(opts.author)}</span>
     <div class="comment-body">
       <div class="comment-byline"><span class="comment-who">${userLink(opts.author?.login)}</span> ${opts.whenHtml}</div>
       <div class="comment-text">${opts.body}</div>

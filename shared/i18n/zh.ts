@@ -7,6 +7,7 @@ export const zh = {
   "nav.workspaces": "工作区",
   "nav.notifications": "通知",
   "nav.account": "账户",
+  "nav.profile": "个人资料",
   "nav.home": "首页",
   // auth pages
   "auth.sign_in": "登录",

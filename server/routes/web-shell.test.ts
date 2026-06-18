@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { sidebarIdentity } from "./web-shell.js";
 
 // Narrow source cross-check (allowed per AGENTS.md: regex over source text in a
 // test). A page island only mounts in production if THREE things agree:
@@ -64,5 +65,20 @@ describe("shell preference wiring", () => {
     expect(css).toContain('html[data-cosheaf-file-labels="title"] .ftree-name{display:none}');
     expect(css).toContain('html[data-cosheaf-file-labels="title"] .ftree-title{display:inline}');
     expect(css).not.toContain("data-cosheaf-mode");
+  });
+});
+
+describe("sidebar identity chrome", () => {
+  it("links identity to the user profile and exposes notification/settings icons", () => {
+    const body = String(sidebarIdentity("alice", false, null));
+    expect(body).toContain('class="sidebar-identity-link" href="/users/alice"');
+    expect(body).toContain('class="notif-bell" href="/account/notifications"');
+    expect(body).toContain('class="settings-gear" href="/account/settings"');
+  });
+
+  it("marks the settings gear active on account pages without changing the bell", () => {
+    const body = String(sidebarIdentity("alice", false, null, undefined, true));
+    expect(body).toContain('class="settings-gear active"');
+    expect(body).toContain('class="notif-bell"');
   });
 });
