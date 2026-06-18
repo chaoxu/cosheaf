@@ -112,6 +112,9 @@ Already shared or recently aligned:
 - Reader and editor hover previews now share reference preview header labels,
   unresolved labels, and reader fallback source extraction helpers for headings,
   equations, and fenced divs.
+- Reader HTML and editor inline DOM now share a Coflat reference route surface
+  planner for citations, crossrefs, mixed clusters, unresolved refs, host refs,
+  links, and per-item hover metadata.
 - Reader source-position attributes now go through a shared Coflat source-range
   surface helper that supports both HTML serialization and DOM dataset
   application.
@@ -258,6 +261,7 @@ Exit criterion:
 | Shared reference presentation routing | Fixed | `presentation.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared table DOM attribute hooks | Fixed | `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-source-map.test.ts` |
 | Shared reference preview header/source helpers | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `reader-render.test.ts` |
+| Shared reference route surface planning | Fixed | `reference-surface.test.ts`; `inline-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range surface attributes | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
