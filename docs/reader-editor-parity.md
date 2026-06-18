@@ -53,6 +53,9 @@ Already shared or recently aligned:
 - Semantic fenced divs: reader and editor preview now share the fenced-div
   emission plan for inline-header, disclosure, self-closing title,
   standalone-title, QED-body, and caption-below decisions.
+- Semantic fenced divs also share the surface assembly plan for container
+  options, disclosure/plain-body routing, inline-heading insertion,
+  self-closing title paragraphs, QED placement, and caption-below attachment.
 - Tables: reader and editor preview now share a table render plan for
   delimiter-derived alignments, header/body rows, cell nodes, ragged rows, and
   header-only tables before emitting HTML or DOM. Table cells now also carry
@@ -252,6 +255,7 @@ Exit criterion:
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
 | Shared fenced-div title inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared fenced-div emission decisions | Fixed | `block-presentation.test.ts`; `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
+| Shared fenced-div surface assembly | Fixed | `fenced-div-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `reader.crossref.test.ts` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared block dispatch and table plan emission | Fixed | `block-render-plan.test.ts`; `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared block dispatch helper for reader/editor emitters | Fixed | `block-render-plan.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
