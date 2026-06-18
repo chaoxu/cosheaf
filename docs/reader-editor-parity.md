@@ -208,6 +208,9 @@ Already shared or recently aligned:
 - Reader and editor preview now share Coflat's fenced-div chrome slot plan for
   self-closing titles, standalone labels, plain bodies, inline headings,
   disclosure bodies, below captions, QED decoration, and initial-open state.
+- Reader, editor preview, and live editor fenced-div widgets now share core
+  chrome-slot planning for opener visibility, source-edit fallback, inline
+  titles, inline body headers, active-shell body bounds, and below captions.
 
 Still meaningfully split:
 
@@ -387,6 +390,7 @@ Exit criterion:
 | Shared reference target collection and mapping | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `reader.crossref.test.ts`; `editor-reference-catalog.test.ts` |
 | Shared fenced-div syntax planning | Fixed | `block-render-plan.test.ts`; `window-extractor.test.ts`; `fenced-div-slice.test.ts`; `document.test.ts`; `preview-reader-parity.test.ts` |
 | Shared fenced-div chrome slot planning | Fixed | `fenced-div-surface.test.ts`; `block-render-plan.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `reader.crossref.test.ts` |
+| Shared live editor fenced-div chrome planning | Fixed | `fenced-div-surface.test.ts`; `plugin-render.test.ts`; `figure-plugin.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
