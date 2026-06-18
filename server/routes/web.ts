@@ -21,7 +21,7 @@ import { mapThreads } from "./notifications.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
 import { registerIssueRoutes } from "./web-issues.js";
-import { avatarForUser, forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
+import { avatarForUser, avatarLinkForUser, forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
 import { addDisclosure, userPreferencesSection, userProfileSection } from "./web-page.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
@@ -408,7 +408,7 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
       body: html`<main class="page user-page" data-testid="user-page">
         <section class="settings-section user-profile-card">
           <div class="settings-section-header user-profile-header">
-            ${avatarForUser(profile)}
+            ${avatarLinkForUser(profile)}
             <div>
               <h1>${displayName}</h1>
               <p>${profile.login}</p>

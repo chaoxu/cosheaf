@@ -11,6 +11,7 @@ export const en = {
   "nav.workspaces": "Workspaces",
   "nav.notifications": "Notifications",
   "nav.account": "Account",
+  "nav.profile": "Profile",
   "nav.home": "Home",
   // auth pages
   "auth.sign_in": "Sign in",

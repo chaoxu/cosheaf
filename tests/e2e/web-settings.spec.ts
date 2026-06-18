@@ -4,6 +4,29 @@ import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 const webBase = defaultWebUrl();
 const repoBase = `${webBase}/chao/flushing-coin`;
 
+test("sidebar identity links to profiles and settings gear opens settings", async ({ page }) => {
+  await page.goto(`${webBase}/login`);
+  await page.locator('input[name="username"]').fill("chao");
+  await page.locator('input[name="password"]').fill("Cosheaf123!");
+  await page.locator('button:has-text("Sign in")').click();
+  await expect(page).toHaveURL(`${webBase}/`);
+
+  const identity = page.locator(".sidebar-identity-link");
+  await expect(identity).toContainText("chao");
+  await expect(identity).toHaveAttribute("href", "/users/chao");
+  await identity.locator(".avatar-chip").click();
+  await expect(page).toHaveURL(`${webBase}/users/chao`);
+  await expect(page.getByTestId("user-page")).toBeVisible();
+
+  const settingsGear = page.locator(".settings-gear");
+  await expect(settingsGear).toHaveAttribute("href", "/account/settings");
+  await page.setViewportSize({ width: 390, height: 760 });
+  await expect(settingsGear).toBeVisible();
+  await settingsGear.click();
+  await expect(page).toHaveURL(`${webBase}/account/settings`);
+  await expect(settingsGear).toHaveClass(/active/);
+});
+
 test("account preferences are separate from repository settings", async ({ page }) => {
   const css = await page.request.get(`${webBase}/cosheaf-web.css`);
   expect(css.ok()).toBe(true);
@@ -20,9 +43,18 @@ test("account preferences are separate from repository settings", async ({ page 
   await page.locator('button:has-text("Sign in")').click();
   await expect(page).toHaveURL(`${webBase}/`);
 
+  await expect(page.locator(".sidebar-identity-link")).toHaveAttribute("href", "/users/chao");
   await page.locator(".sidebar-identity-link").click();
+  await expect(page).toHaveURL(`${webBase}/users/chao`);
+  await expect(page.getByTestId("user-page")).toBeVisible();
+  await expect(page.locator(".settings-gear")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 760 });
+  await expect(page.locator(".settings-gear")).toBeVisible();
+  await page.locator(".settings-gear").click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
+  await expect(page.locator(".settings-gear")).toHaveClass(/active/);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 720 });
   await expect(page.getByTestId("settings-document-theme-select")).toBeVisible();
   await expect(page.getByTestId("settings-file-labels-select")).toBeVisible();
   await expect(page.getByTestId("settings-diff-mode-select")).toBeVisible();

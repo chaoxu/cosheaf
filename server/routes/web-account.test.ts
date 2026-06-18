@@ -118,6 +118,9 @@ describe("POST /account/settings (profile)", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-testid="profile-form"');
+    expect(body).toContain('class="sidebar-identity-link" href="/users/alice"');
+    expect(body).toContain('class="notif-bell" href="/account/notifications"');
+    expect(body).toContain('class="settings-gear active" href="/account/settings"');
     expect(body).toContain('value="Alice A"');
     expect(body).toContain('value="Mars"');
     // email is shown read-only
@@ -254,6 +257,7 @@ describe("GET /users/:username", () => {
     const body = await res.text();
     expect(body).toContain('data-testid="user-page"');
     expect(body).toContain("Bob Builder");
+    expect(body).toContain('class="avatar-link" href="/users/bob"');
     expect(body).toContain("Builds notes.");
     expect(body).toContain("https://example.test/bob");
     expect(body).toContain('href="/bob/notes"');

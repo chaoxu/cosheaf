@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
+import { avatarLinkForUser, forgeAvatarSrc, hasCustomAvatar, isForgeAvatarPath } from "./avatar.js";
 
 // The default identicon's avatar_url hash is md5(lowercase(email)); a real
 // upload uses a different (content-addressed) hash.
@@ -51,5 +51,19 @@ describe("isForgeAvatarPath", () => {
     for (const bad of ["avatars/..", "avatars/.", "avatars/../config", "avatars/a/b", "config", "user/login", "avatars/", "avatars/a b"]) {
       expect(isForgeAvatarPath(bad)).toBe(false);
     }
+  });
+});
+
+describe("avatarLinkForUser", () => {
+  it("links a valid user avatar to that user's profile", () => {
+    const body = String(avatarLinkForUser({ login: "alice", avatar_url: "", email: EMAIL }));
+    expect(body).toContain('class="avatar-link"');
+    expect(body).toContain('href="/users/alice"');
+    expect(body).toContain('aria-label="alice profile"');
+  });
+
+  it("does not link missing or deleted users", () => {
+    expect(String(avatarLinkForUser(null))).not.toContain('class="avatar-link"');
+    expect(String(avatarLinkForUser({ login: "(deleted)", avatar_url: "", email: EMAIL }))).not.toContain('class="avatar-link"');
   });
 });

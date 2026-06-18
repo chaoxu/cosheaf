@@ -660,13 +660,14 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
     const basesNonMain = pull.base.ref !== "main";
     const labels = pull.labels ?? [];
     const hasMeta = basesNonMain || Boolean(pull.milestone) || labels.length > 0;
-    return html`<a class="list-row pull-row" href="${repoHref(owner, repo, `/pulls/${pull.number}`)}">
+    const href = repoHref(owner, repo, `/pulls/${pull.number}`);
+    return html`<div class="list-row pull-row">
       <span class="list-row-main">
-        <span class="list-row-title"><span class="state ${state}">${state}</span><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></span>
+        <span class="list-row-title"><span class="state ${state}">${state}</span><a class="list-row-title-link" href="${href}"><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></a></span>
         ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
       </span>
       ${listRowSide(pull.user, pull.created_at, pull.comments)}
-    </a>`;
+    </div>`;
   });
   return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;
 }

@@ -6,6 +6,7 @@
 // chrome (web-shell/web-page) and the thread code can both import it without an
 // import cycle.
 import { createHash } from "node:crypto";
+import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
 import { DELETED_USER_LOGIN, type ForgejoUser } from "../forgejo-types.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 
@@ -74,6 +75,17 @@ export function isForgeAvatarPath(rest: string): boolean {
 // for free with no extra forge lookup (#177, folds in #174).
 export function avatarForUser(user: AvatarUser | null | undefined): Html {
   return avatar(user?.login, forgeAvatarSrc(user));
+}
+
+export function avatarLinkForUser(user: AvatarUser | null | undefined): Html {
+  const chipHtml = avatarForUser(user);
+  const href = userProfileHref(user?.login);
+  return href ? html`<a class="avatar-link" href="${href}" aria-label="${user?.login} profile">${chipHtml}</a>` : chipHtml;
+}
+
+function userProfileHref(login: string | null | undefined): string | null {
+  if (!login || login === DELETED_USER_LOGIN || !FORGEJO_NAME_RE.test(login)) return null;
+  return `/users/${encodeURIComponent(login)}`;
 }
 
 // First 1-2 alphanumerics of the login, for the initials avatar chip.
