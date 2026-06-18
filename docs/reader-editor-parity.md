@@ -30,6 +30,9 @@ Already shared or recently aligned:
 - Code blocks: shared code block surface.
 - Headings: shared heading surface, Setext handling, and closed-marker handling.
 - Footnotes: shared entry/reference surface and shared numbering in preview.
+- Footnote ordering: reader, editor preview, and editor incremental semantics
+  now share one core policy for first-reference numbering and orphan-definition
+  ordering.
 - Outline labels: editor outline exposes rendered Coflat HTML and Cosheaf uses it.
 - Inline rendering: reader static and source-position inline rendering consume
   the shared Coflat `InlineFragment` model, including source ranges for
@@ -249,6 +252,7 @@ Exit criterion:
 | Closed ATX heading markers | Fixed | `preview-reader-parity.test.ts` |
 | Media loading/rendered surface | Fixed | `preview-reader-parity.test.ts` |
 | Footnote reference numbering | Fixed | `preview-reader-parity.test.ts` |
+| Shared footnote ordering policy | Fixed | `footnote-ordering.test.ts`; `document.test.ts`; `footnote-slice.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Editor outline raw crossref labels | Fixed | seeded `pnpm smoke:reader-parity` outline-label check |
 | Unified inline fragments for static + source-position reader inline rendering | Fixed | `inline-fragments.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared paragraph block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
