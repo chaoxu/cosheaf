@@ -6,9 +6,10 @@ describe("healthPayload", () => {
   it("reports ok when the SQLite sidecar schema is queryable", () => {
     const db = freshTestDb("cosheaf-health-");
 
-    expect(healthPayload(db, "abc123")).toEqual({
+    expect(healthPayload(db, "abc123", "coflat123")).toEqual({
       ok: true,
       commit: "abc123",
+      coflat_ref: "coflat123",
       checks: { sqlite: "ok" },
     });
   });
@@ -20,9 +21,10 @@ describe("healthPayload", () => {
       },
     };
 
-    expect(healthPayload(db as never, "abc123")).toEqual({
+    expect(healthPayload(db as never, "abc123", "coflat123")).toEqual({
       ok: false,
       commit: "abc123",
+      coflat_ref: "coflat123",
       checks: { sqlite: "fail" },
       error: "database is locked",
     });
@@ -31,7 +33,7 @@ describe("healthPayload", () => {
 
 describe("healthStatus", () => {
   it("returns the HTTP status consumed by container healthchecks", () => {
-    expect(healthStatus({ ok: true, commit: "abc123", checks: { sqlite: "ok" } })).toBe(200);
-    expect(healthStatus({ ok: false, commit: "abc123", checks: { sqlite: "fail" } })).toBe(503);
+    expect(healthStatus({ ok: true, commit: "abc123", coflat_ref: "coflat123", checks: { sqlite: "ok" } })).toBe(200);
+    expect(healthStatus({ ok: false, commit: "abc123", coflat_ref: "coflat123", checks: { sqlite: "fail" } })).toBe(503);
   });
 });

@@ -12,8 +12,8 @@
   global-header scroll behavior, issue/PR filter visibility, asset 4xxs, and
   console errors. Defaults to the seeded activity/issues/pulls routes.
 - `pnpm coflat:status` prints the pinned Coflat SHA, sibling checkout SHA,
-  lockfile hash, and local Cosheaf SHA. Add `-- --prod` to also query the
-  deployed production Cosheaf SHA on `jupiter`.
+  lockfile hash, and local Cosheaf SHA. Add `--prod` to also query the
+  deployed production Cosheaf SHA and Coflat ref on `jupiter`.
 - `pnpm refresh:coflat` builds `../coflat`, installs with lifecycle scripts
   disabled, and rebuilds native packages. It avoids the local lefthook
   `core.hooksPath` failure that made the old refresh path unreliable.
@@ -33,7 +33,7 @@
   home/files page, including the visible SSH clone URL.
 - `pnpm smoke:reader-parity` runs the broad seeded Coflat showcase
   reader/editor parity browser check, including outline labels, hover target
-  selection, typography, and geometry.
+  selection, footnote sections, typography, and geometry.
 - `pnpm check:web:settings` runs only account/repository settings separation and
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).

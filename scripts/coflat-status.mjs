@@ -28,12 +28,12 @@ function lockfileCoflatEntry() {
   return match?.[1] ?? null;
 }
 
-function deployedCosheafSha() {
+function deployedHealth() {
   const healthJson = output("curl", ["-fsS", "https://cosheaf.lab/api/v1/health"]);
   if (healthJson) {
     try {
       const health = JSON.parse(healthJson);
-      if (typeof health.commit === "string" && /^[0-9a-f]{40}$/.test(health.commit)) return health.commit;
+      if (health && typeof health === "object") return health;
     } catch (_err) {
       // Fall through to the jupiter-side health check below.
     }
@@ -46,12 +46,13 @@ function deployedCosheafSha() {
   const result = output("ssh", ["jupiter", cmd]);
   if (!result) return null;
   const match = result.match(/\b[0-9a-f]{40}\b/);
-  return match?.[0] ?? null;
+  return match ? { commit: match[0] } : null;
 }
 
 export function coflatStatus({ prod = false } = {}) {
   const localHead = localCoflatHead();
   const docDrift = checkDocPins();
+  const health = prod ? deployedHealth() : null;
   return {
     expectedCoflatRef: DEFAULT_COFLAT_REF,
     localCoflatHead: localHead,
@@ -59,7 +60,10 @@ export function coflatStatus({ prod = false } = {}) {
     lockfileCoflatHash: lockfileCoflatEntry(),
     pinDrift: docDrift,
     localCosheafHead: localCosheafHead(),
-    ...(prod ? { deployedCosheafSha: deployedCosheafSha() } : {}),
+    ...(prod ? {
+      deployedCosheafSha: typeof health?.commit === "string" ? health.commit : null,
+      deployedCoflatRef: typeof health?.coflat_ref === "string" ? health.coflat_ref : null,
+    } : {}),
   };
 }
 
@@ -71,6 +75,7 @@ function printStatus(status) {
   console.log(`Cosheaf HEAD:      ${status.localCosheafHead ?? "<missing>"}`);
   if ("deployedCosheafSha" in status) {
     console.log(`prod Cosheaf SHA:  ${status.deployedCosheafSha ?? "<unavailable>"}`);
+    console.log(`prod Coflat ref:   ${status.deployedCoflatRef ?? "<unavailable>"}`);
   }
   if (status.pinDrift.length > 0) {
     console.log("pin drift:");

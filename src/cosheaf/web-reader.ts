@@ -67,7 +67,6 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   });
   const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
-  fixLabeledDisplayMath(fragment);
   rewriteRenderedRepoUrls(fragment, payload);
   // Coflat needs the full source so frontmatter-controlled numbering (e.g.
   // `numbering: global`) and block config are visible to the reader. It also
@@ -232,25 +231,6 @@ function applyDocumentTheme(root: HTMLElement): void {
   const theme = readDocumentTheme(document.body.dataset.cosheafUser);
   const scope = root.closest(".cf-theme-scope");
   scope?.classList.toggle("cf-theme-blueprint-book", theme === "blueprint-book");
-}
-
-function fixLabeledDisplayMath(root: ParentNode): void {
-  for (const el of root.querySelectorAll<HTMLElement>(".cf-doc-display-math[data-math]")) {
-    const raw = el.dataset.math ?? "";
-    const normalized = displayMathBody(raw);
-    if (normalized !== raw) {
-      el.dataset.math = normalized;
-      el.textContent = normalized;
-    }
-  }
-}
-
-function displayMathBody(raw: string): string {
-  const dollars = /^\$\$\s*\n?([\s\S]*?)\n?\$\$(?:\s*\{#[^}]+\})?\s*$/.exec(raw);
-  if (dollars) return dollars[1].trim();
-  const brackets = /^\\\[\s*\n?([\s\S]*?)\n?\\\](?:\s*\{#[^}]+\})?\s*$/.exec(raw);
-  if (brackets) return brackets[1].trim();
-  return raw;
 }
 
 function rewriteRenderedRepoUrls(root: ParentNode, payload: CoflatDocumentPayload): void {

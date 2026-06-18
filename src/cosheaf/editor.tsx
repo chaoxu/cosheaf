@@ -36,6 +36,7 @@ interface Props {
   assetUploader?: AssetUploader;
   /** Trigger-based suggestion sources, e.g. `[@`. */
   autocompleteSources?: readonly AutocompleteSource[];
+  sidenotesCollapsed?: boolean;
 }
 
 export function MarkdownEditor({
@@ -52,6 +53,7 @@ export function MarkdownEditor({
   statusEvents,
   assetUploader,
   autocompleteSources,
+  sidenotesCollapsed,
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MountedEditor | null>(null);
@@ -112,6 +114,7 @@ export function MarkdownEditor({
       ...(autocompleteSources && autocompleteSources.length > 0
         ? { autocompleteSources: autocompleteSources }
         : {}),
+      ...(sidenotesCollapsed !== undefined ? { sidenotesCollapsed } : {}),
     });
     editorRef.current = editor;
     onReady?.(editor);

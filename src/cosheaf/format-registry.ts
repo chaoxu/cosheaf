@@ -27,6 +27,7 @@ interface EditorProps {
   statusEvents?: EditorStatusEvents;
   assetUploader?: EditorAssetUploader;
   autocompleteSources?: readonly EditorAutocompleteSource[];
+  sidenotesCollapsed?: boolean;
 }
 
 interface ClientDocumentFormat {

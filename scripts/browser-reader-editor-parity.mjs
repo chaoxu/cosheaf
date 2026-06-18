@@ -211,6 +211,47 @@ async function editorLinkStats() {
   });
 }
 
+async function footnoteSectionStats(rootSelector) {
+  return page.locator(rootSelector).first().evaluate((el) => {
+    const section = el.querySelector(".cf-footnote-section");
+    const entries = section ? [...section.querySelectorAll(".cf-bibliography-entry")] : [];
+    const heading = section?.querySelector(".cf-bibliography-heading");
+    const rect = section?.getBoundingClientRect();
+    const styles = section ? getComputedStyle(section) : null;
+    return {
+      count: entries.length,
+      heading: heading?.textContent?.trim() ?? null,
+      numbers: entries.map((entry) => entry.querySelector(".cf-bibliography-entry-number")?.textContent?.trim() ?? ""),
+      hasBackrefs: entries.every((entry) => !!entry.querySelector(".cf-footnote-backref")),
+      hasMath: entries.some((entry) => !!entry.querySelector(".cf-doc-inline-math, .katex")),
+      text: section?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+      width: rect ? Math.round(rect.width) : 0,
+      display: styles?.display ?? null,
+    };
+  });
+}
+
+function assertFootnoteSectionParity(readerFootnotes, editorFootnotes) {
+  if (readerFootnotes.count < 2 || editorFootnotes.count < 2) {
+    throw new Error(`footnote sections missing entries: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
+  }
+  if (readerFootnotes.heading !== "Footnotes" || editorFootnotes.heading !== "Footnotes") {
+    throw new Error(`footnote section heading drift: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
+  }
+  if (readerFootnotes.numbers.join(",") !== editorFootnotes.numbers.join(",")) {
+    throw new Error(`footnote numbering drift: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
+  }
+  if (!readerFootnotes.hasBackrefs || !editorFootnotes.hasBackrefs) {
+    throw new Error(`footnote backrefs missing: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
+  }
+  if (!readerFootnotes.hasMath || !editorFootnotes.hasMath) {
+    throw new Error(`footnote math rendering missing: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
+  }
+  if (readerFootnotes.text !== editorFootnotes.text || !readerFootnotes.text.includes("This footnote has bold")) {
+    throw new Error(`footnote content drift: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
+  }
+}
+
 async function readerLayoutStats(viewportName) {
   return page.locator(".app-content").first().evaluate((appContent, name) => {
     const reader = appContent.querySelector(".cf-reader");
@@ -552,6 +593,7 @@ try {
   }
   const defaultReaderLink = await readerLinkStats();
   const defaultReaderCode = await readerCodeBlockStats();
+  const defaultReaderFootnotes = await footnoteSectionStats(".cf-reader");
   await assertResolvedOutlineLabel("reader");
   await assertHoverPreview(".cf-reader [data-ref-key=\"thm:hover-preview\"]", "Hover Preview Stress Test");
 
@@ -583,6 +625,9 @@ try {
   await scrollEditorUntilMounted(".cf-codeblock-header, .cf-codeblock-body, .cf-codeblock-last");
   const defaultEditorCode = await editorCodeBlockStats();
   assertCodeBlockParity(defaultReaderCode, defaultEditorCode);
+  await scrollEditorUntilMounted(".cf-footnote-section");
+  const defaultEditorFootnotes = await footnoteSectionStats(".cm-content");
+  assertFootnoteSectionParity(defaultReaderFootnotes, defaultEditorFootnotes);
   await assertResolvedOutlineLabel("editor");
   const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"]";
   await scrollEditorUntilMounted(editorHoverTarget);
@@ -637,6 +682,8 @@ try {
     wideEditorLayout,
     defaultReaderCode,
     defaultEditorCode,
+    defaultReaderFootnotes,
+    defaultEditorFootnotes,
     responsiveLayouts,
     consoleSample: consoleMessages.slice(-10),
     badResponses,

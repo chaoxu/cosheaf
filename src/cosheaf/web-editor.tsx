@@ -642,6 +642,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               statusEvents={statusEvents}
               assetUploader={assetUploader}
               autocompleteSources={autocompleteSources}
+              sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
             />
           ) : (
             <div className="web-editor-loading">Loading editor...</div>
