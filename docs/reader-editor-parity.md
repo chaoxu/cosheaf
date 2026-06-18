@@ -194,6 +194,9 @@ Already shared or recently aligned:
 - Reader indexed hover previews and editor hover previews now share Coflat's
   fenced-div preview body-input planning for render-plan body ranges, editor
   semantic fence ranges, full-block previews, and body-only previews.
+- Reader hover previews, editor hover previews, and editor completion previews
+  now share Coflat's reference-preview shell planning for header/body slot
+  order and completion metadata header styling.
 - Reader DOM range mapping and editor mouse-selection guards now share
   Coflat's source carrier and math carrier helpers; the reader keeps exporting
   the public `mapDomRangeToSource` API while the editor keeps CM6 selection
@@ -390,6 +393,7 @@ Exit criterion:
 | Shared preserving footnote section projection | Fixed | `footnote-section-surface.test.ts`; `footnote-plan.test.ts`; `footnote-emission-state.test.ts`; `sidenote-render.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference preview content planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts` |
 | Shared fenced-div preview body-input planning | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts`; `reader-hydrate.test.ts` |
+| Shared reference preview shell planning | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader-hydrate.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts`; `reference-autocomplete.test.ts` |
 | Shared target-to-preview-entry planning | Fixed | `reference-preview-source.test.ts`; `reference-targets.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts` |
 | Shared reference target collection and mapping | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `reader.crossref.test.ts`; `editor-reference-catalog.test.ts` |
 | Shared fenced-div syntax planning | Fixed | `block-render-plan.test.ts`; `window-extractor.test.ts`; `fenced-div-slice.test.ts`; `document.test.ts`; `preview-reader-parity.test.ts` |
