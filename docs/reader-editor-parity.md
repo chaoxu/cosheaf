@@ -100,6 +100,12 @@ Already shared or recently aligned:
   instead of maintaining its own mutable semantic-block counters, and reader,
   editor semantics, and editor preview share primary-class normalization for
   semantic fenced divs.
+- Reader and editor preview now share list-item child emission planning, so
+  task children, inline tight paragraphs, and nested block children are chosen
+  once before HTML or DOM emission.
+- Reader, editor preview, and editor reference widgets now share core reference
+  presentation routing for crossrefs, citations, clustered references, and
+  host-resolved references.
 
 Still meaningfully split:
 
@@ -239,6 +245,8 @@ Exit criterion:
 | Shared footnote section planning and chrome | Fixed | `footnote-section-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared document assembly render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `reader-outline.test.ts` |
 | Shared task-list content normalization | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
+| Shared list-item child emission planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
+| Shared reference presentation routing | Fixed | `presentation.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
