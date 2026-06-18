@@ -147,6 +147,9 @@ Already shared or recently aligned:
 - Reader and editor citation/hover paths now share common Coflat hover preview
   surface wrappers for text, single-body, custom-element, and unresolved
   previews.
+- Reader preview indexes and editor hover previews now share Coflat reference
+  preview entry construction and fenced-div body source/range planning for
+  headings, equations, and semantic blocks.
 
 Still meaningfully split:
 
@@ -305,6 +308,7 @@ Exit criterion:
 | Reader duplicate-id catalog preference drift | Fixed | `reference-targets.test.ts`; `reader.crossref.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts` |
 | Shared document-target to resolved-crossref mapping | Fixed | `reference-targets.test.ts`; `presentation.test.ts`; `crossref-resolver.test.ts`; `reader.crossref.test.ts`; `preview-reader-parity.test.ts` |
 | Shared hover preview wrapper assembly | Fixed | `hover-preview-surface.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader.crossref.test.ts` |
+| Shared reference preview entry and body-source planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader.crossref.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
