@@ -32,6 +32,7 @@ import {
   loadCoflatRefs,
   resolveUnresolvedCoflatReferences,
 } from "./coflat-document-context";
+import { sanitizeAndRewriteRefsFragment } from "./ref-rewriter";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -118,15 +119,34 @@ function readConfig(): { config: EditorConfig; content: string } {
   };
 }
 
-function InlineChromeMarkdown({ text, mathMacros }: { text: string; mathMacros?: Record<string, string> }): ReactNode {
+function InlineChromeHtml({
+  html,
+  fallback,
+  mathMacros,
+}: {
+  html?: string;
+  fallback: string;
+  mathMacros?: Record<string, string>;
+}): ReactNode {
   const ref = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.replaceChildren();
-    renderInlineMarkdown(el, text, mathMacros ?? {}, "ui-chrome-inline");
-  }, [text, mathMacros]);
-  return <span ref={ref}>{text}</span>;
+    if (!html) {
+      el.replaceChildren();
+      renderInlineMarkdown(el, fallback, mathMacros ?? {}, "ui-chrome-inline");
+      return;
+    }
+    const fragment = sanitizeAndRewriteRefsFragment(html);
+    for (const interactive of Array.from(fragment.querySelectorAll("a, button"))) {
+      const span = document.createElement("span");
+      span.className = interactive.className;
+      span.replaceChildren(...Array.from(interactive.childNodes));
+      interactive.replaceWith(span);
+    }
+    el.replaceChildren(fragment);
+  }, [html, fallback, mathMacros]);
+  return <span ref={ref}>{fallback}</span>;
 }
 
 function WebEditor({ config, initialContent }: { config: EditorConfig; initialContent: string }) {
@@ -643,7 +663,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
                 <li key={entry.key} style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 12}px` }}>
                   <button type="button" onClick={() => editorRef.current?.scrollToLine(entry.line, { center: true })}>
                     {entry.number ? `${entry.number} ` : ""}
-                    <InlineChromeMarkdown text={entry.markdown} mathMacros={outlineMathMacros} />
+                    <InlineChromeHtml
+                      html={(entry as OutlineEntry & { html?: string }).html}
+                      fallback={entry.markdown}
+                      mathMacros={outlineMathMacros}
+                    />
                   </button>
                 </li>
               ))}

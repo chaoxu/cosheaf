@@ -171,7 +171,7 @@ function store<T>(get: () => T): Store<T> {
 }
 
 function extractOutline(source: string) {
-  const out: Array<{ level: 1 | 2 | 3 | 4 | 5 | 6; text: string; markdown: string; line: number; from: number; key: string }> = [];
+  const out: Array<{ level: 1 | 2 | 3 | 4 | 5 | 6; text: string; markdown: string; html: string; line: number; from: number; key: string }> = [];
   const lines = source.split(/\n/);
   let from = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -181,6 +181,7 @@ function extractOutline(source: string) {
         level: match[1].length as 1 | 2 | 3 | 4 | 5 | 6,
         text: match[2],
         markdown: match[2],
+        html: escapeHtml(match[2]),
         line: i + 1,
         from,
         key: `${i + 1}:${match[2]}`,
@@ -189,6 +190,18 @@ function extractOutline(source: string) {
     from += (lines[i]?.length ?? 0) + 1;
   }
   return out;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case "\"": return "&quot;";
+      default: return "&#39;";
+    }
+  });
 }
 
 function countDocument(source: string) {
