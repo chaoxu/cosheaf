@@ -10,7 +10,10 @@ import type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
 } from "@chaoxu/coflat";
-import { renderInlineMarkdown } from "@chaoxu/coflat";
+import {
+  formatUploadedAssetMarkdown,
+  renderInlineMarkdown,
+} from "@chaoxu/coflat";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
@@ -62,16 +65,6 @@ function nowTime(): string {
 function relativeAssetPath(documentPath: string, assetPath: string): string {
   const dirDepth = documentPath.split("/").slice(0, -1).filter(Boolean).length;
   return `${"../".repeat(dirDepth)}${assetPath}`;
-}
-
-function markdownLabel(name: string): string {
-  return (name.replace(/\.[^.]+$/, "").trim() || "asset").replace(/[\\[\]]/g, "");
-}
-
-function uploadedAssetSnippet(file: File, path: string): string {
-  const label = markdownLabel(file.name);
-  const isImage = file.type.startsWith("image/") || /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.name);
-  return isImage ? `![${label}](${path})` : `[${label}](${path})`;
 }
 
 // Fire an app-wide toast (cosheaf-toast.js, loaded by the page shell). A no-op
@@ -429,7 +422,13 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           }
           const uploaded = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
           const rel = relativeAssetPath(currentPathRef.current.trim() || config.path, uploaded.path);
-          snippets.push(uploadedAssetSnippet(file, rel));
+          snippets.push(
+            formatUploadedAssetMarkdown({
+              path: rel,
+              name: file.name,
+              mimeType: file.type,
+            }),
+          );
           toast(`Uploaded ${uploaded.path}`);
         }
         if (snippets.length > 0) {
