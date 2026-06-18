@@ -74,6 +74,9 @@ Already shared or recently aligned:
 - Document surface policy now also owns inline-surface choices and reference
   host routing for reader, editor, editor preview, hover preview, completion
   preview, and outline labels.
+- Reader and editor preview now dispatch block nodes through one shared Coflat
+  handler table, so new block render kinds cannot be wired into one surface and
+  forgotten in the other.
 - Reader truncation line-cost planning now lives in Coflat's shared block
   render-plan module and consumes the same block plans used by reader/editor
   emitters.
