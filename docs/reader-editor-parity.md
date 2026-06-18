@@ -43,6 +43,10 @@ Already shared or recently aligned:
 - Tables: reader and editor preview now share a table render plan for
   delimiter-derived alignments, header/body rows, cell nodes, ragged rows, and
   header-only tables before emitting HTML or DOM.
+- Code blocks: reader and editor preview now share language/content extraction
+  through a code block render plan before emitting HTML or DOM.
+- Footnote definitions: reader and editor preview now share id/body extraction
+  and inline fragment planning before emitting footnote entry surfaces.
 
 Still meaningfully split:
 
@@ -97,8 +101,9 @@ Start with low-risk blocks:
 
 Then move higher-risk blocks:
 
-- Footnotes
-- Code blocks
+- Footnotes (done for definition body planning; document-order section policy
+  remains part of Phase 3 surface-policy work)
+- Code blocks (done for language/content planning)
 
 Verification:
 
@@ -157,5 +162,6 @@ Exit criterion:
 | Shared display math render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `test:e2e:corpus` |
 | Shared fenced div render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `hover-preview.render.test.ts`; `test:e2e:corpus` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
-| Shared block render plan for higher-risk blocks | Planned | Phase 2 |
+| Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
+| Shared footnote definition render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Typed surface policies | Planned | Phase 3 |
