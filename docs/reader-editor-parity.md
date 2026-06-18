@@ -20,8 +20,8 @@ Already shared or recently aligned:
 
 - Parser entry: both reader and editor preview use the shared Coflat Lezer parser.
 - Block dispatch: reader and editor preview classify Lezer block node names
-  through the shared Coflat block render-kind helper before dispatching to
-  surface emitters.
+  through the shared Coflat block render-kind helper and shared dispatch table
+  before dispatching to surface emitters.
 - Tables: shared table and row surface helpers.
 - Media: shared image/loading surface helpers.
 - Math: shared inline/display math surface helpers.
@@ -74,6 +74,9 @@ Already shared or recently aligned:
 - Document surface policy now also owns inline-surface choices and reference
   host routing for reader, editor, editor preview, hover preview, completion
   preview, and outline labels.
+- Reader truncation line-cost planning now lives in Coflat's shared block
+  render-plan module and consumes the same block plans used by reader/editor
+  emitters.
 
 Still meaningfully split:
 
@@ -198,6 +201,8 @@ Exit criterion:
 | Shared fenced-div title inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared table render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared block dispatch and table plan emission | Fixed | `block-render-plan.test.ts`; `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
+| Shared block dispatch helper for reader/editor emitters | Fixed | `block-render-plan.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
+| Shared truncation line-cost planning | Fixed | `block-render-plan.test.ts`; `reader-render.test.ts` |
 | Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Reader code-block overflow containment | Fixed | `theme-css-contract.test.ts`; `pnpm smoke:reader-parity` |
