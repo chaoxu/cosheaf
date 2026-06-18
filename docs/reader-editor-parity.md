@@ -109,6 +109,12 @@ Already shared or recently aligned:
 - Table surface emission now exposes matching table/row attribute hooks for
   HTML and DOM emitters, so source metadata or future row-level surface state
   can be attached without forking table skeleton emission.
+- Reader and editor hover previews now share reference preview header labels,
+  unresolved labels, and reader fallback source extraction helpers for headings,
+  equations, and fenced divs.
+- Reader source-position attributes now go through a shared Coflat source-range
+  surface helper that supports both HTML serialization and DOM dataset
+  application.
 
 Still meaningfully split:
 
@@ -251,6 +257,8 @@ Exit criterion:
 | Shared list-item child emission planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Shared reference presentation routing | Fixed | `presentation.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared table DOM attribute hooks | Fixed | `table-surface.test.ts`; `preview-reader-parity.test.ts`; `reader-source-map.test.ts` |
+| Shared reference preview header/source helpers | Fixed | `reference-preview-source.test.ts`; `hover-preview.test.ts`; `reader-render.test.ts` |
+| Shared source-range surface attributes | Fixed | `source-range-surface.test.ts`; `reader-source-map.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
