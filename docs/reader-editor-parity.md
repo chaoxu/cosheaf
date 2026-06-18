@@ -83,6 +83,11 @@ Already shared or recently aligned:
 - Reader and editor semantic analysis now share Coflat's heading-numbering
   helper, so section numbers and cross-reference labels advance from the same
   counter model.
+- Reader and editor outlines now share Coflat's heading-anchor helper, so
+  generated ids, explicit-id reservation, Unicode folding, and duplicate
+  suffixes match.
+- Reader and editor semantic analysis now share Coflat's equation-numbering
+  helper, so labeled display equations advance from the same counter model.
 
 Still meaningfully split:
 
@@ -210,6 +215,8 @@ Exit criterion:
 | Shared block dispatch helper for reader/editor emitters | Fixed | `block-render-plan.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared truncation line-cost planning | Fixed | `block-render-plan.test.ts`; `reader-render.test.ts` |
 | Shared heading-numbering semantics | Fixed | `heading-numbering.test.ts`; `section-counter.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
+| Shared heading-anchor semantics | Fixed | `heading-anchors.test.ts`; `per-file-panels.test.ts`; `editor.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
+| Shared equation-numbering semantics | Fixed | `equation-numbering.test.ts`; `equation-slice.test.ts`; `document.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts`; `test:e2e:corpus` |
 | Shared table-cell inline fragment planning | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Shared code block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
 | Reader code-block overflow containment | Fixed | `theme-css-contract.test.ts`; `pnpm smoke:reader-parity` |
