@@ -31,6 +31,9 @@ Already shared or recently aligned:
   hydration and selection metadata.
 - Paragraphs: reader and editor preview consume a shared paragraph render plan
   before emitting HTML or DOM.
+- Headings, horizontal rules, and blockquotes: reader and editor preview now
+  consume shared syntax-level render plans before applying surface-specific
+  numbering, hydration, or DOM/HTML emission.
 
 Still meaningfully split:
 
@@ -143,5 +146,6 @@ Exit criterion:
 | Editor outline raw crossref labels | Fixed | temporary `pnpm verify:cogirth-outline`; replace with fixture-backed check |
 | Unified inline fragments for static + source-position reader inline rendering | Fixed | `inline-fragments.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared paragraph block render plan | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts` |
-| Shared block render plan for remaining blocks | Planned | Phase 2 |
+| Shared heading / horizontal-rule / blockquote render plans | Fixed | `block-render-plan.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader-outline.test.ts`; `reader-source-map.test.ts` |
+| Shared block render plan for lists and higher-risk blocks | Planned | Phase 2 |
 | Typed surface policies | Planned | Phase 3 |
