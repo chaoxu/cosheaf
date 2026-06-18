@@ -141,6 +141,12 @@ Already shared or recently aligned:
   planning for heading, equation, and semantic block targets; reader
   in-document catalogs also use the same target preference rule as editor and
   the public parse API when duplicate ids exist.
+- Reader and editor now share Coflat's document-target-to-crossref mapping, so
+  block titles, heading titles, equation labels, and target numbers are carried
+  into resolved reference presentation from one core helper.
+- Reader and editor citation/hover paths now share common Coflat hover preview
+  surface wrappers for text, single-body, custom-element, and unresolved
+  previews.
 
 Still meaningfully split:
 
@@ -297,6 +303,8 @@ Exit criterion:
 | Shared outline entry planning | Fixed | `outline-surface.test.ts`; `per-file-panels.test.ts`; `reader-outline.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference target planning | Fixed | `reference-targets.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts`; `reader.crossref.test.ts`; `reader-render.test.ts`; `presentation.test.ts`; `crossref-resolver.test.ts` |
 | Reader duplicate-id catalog preference drift | Fixed | `reference-targets.test.ts`; `reader.crossref.test.ts`; `reference-catalog.test.ts`; `parse-reference-catalog.test.ts` |
+| Shared document-target to resolved-crossref mapping | Fixed | `reference-targets.test.ts`; `presentation.test.ts`; `crossref-resolver.test.ts`; `reader.crossref.test.ts`; `preview-reader-parity.test.ts` |
+| Shared hover preview wrapper assembly | Fixed | `hover-preview-surface.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader.crossref.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
