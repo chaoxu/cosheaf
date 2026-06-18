@@ -188,6 +188,9 @@ Already shared or recently aligned:
   Coflat's source carrier and math carrier helpers; the reader keeps exporting
   the public `mapDomRangeToSource` API while the editor keeps CM6 selection
   behavior surface-owned.
+- Reader preview-index entries now derive from the same Coflat document
+  reference target objects that feed editor catalogs; only body ranges and
+  heading level remain explicit reader walk context.
 
 Still meaningfully split:
 
@@ -361,6 +364,7 @@ Exit criterion:
 | Shared footnote extraction, section projection, and outline projection | Fixed | `footnote-extraction.test.ts`; `footnote-plan.test.ts`; `outline-plan.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reader emitted-footnote state and truncation snapshots | Fixed | `footnote-emission-state.test.ts`; `footnote-plan.test.ts`; `reader-render.test.ts`; `reader-source-map.test.ts`; `preview-reader-parity.test.ts` |
 | Shared reference preview content planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts` |
+| Shared target-to-preview-entry planning | Fixed | `reference-preview-source.test.ts`; `reference-targets.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
