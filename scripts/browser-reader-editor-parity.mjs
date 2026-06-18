@@ -115,6 +115,59 @@ async function editorStats() {
   });
 }
 
+async function readerCodeBlockStats() {
+  return page.locator(".cf-reader").first().evaluate((el) => {
+    const block = el.querySelector(".cf-doc-code-block");
+    const code = block?.querySelector("code") ?? null;
+    const language = block?.querySelector(".cf-codeblock-language") ?? null;
+    const blockStyles = block ? getComputedStyle(block) : null;
+    const codeStyles = code ? getComputedStyle(code) : null;
+    return {
+      count: el.querySelectorAll(".cf-doc-code-block").length,
+      languageText: language?.textContent?.trim() ?? null,
+      pre: blockStyles
+        ? {
+          whiteSpace: blockStyles.whiteSpace,
+          wordBreak: blockStyles.wordBreak,
+          overflowWrap: blockStyles.overflowWrap,
+          overflowX: blockStyles.overflowX,
+          fontFamily: blockStyles.fontFamily,
+        }
+        : null,
+      code: codeStyles
+        ? {
+          whiteSpace: codeStyles.whiteSpace,
+          wordBreak: codeStyles.wordBreak,
+          overflowWrap: codeStyles.overflowWrap,
+          display: codeStyles.display,
+          fontFamily: codeStyles.fontFamily,
+        }
+        : null,
+    };
+  });
+}
+
+async function editorCodeBlockStats() {
+  return page.locator(".cm-content").first().evaluate((el) => {
+    const lines = [...el.querySelectorAll(".cf-codeblock-header, .cf-codeblock-body, .cf-codeblock-last")];
+    return {
+      count: lines.length,
+      languageText: el.querySelector(".cf-codeblock-language")?.textContent?.trim() ?? null,
+      lines: lines.slice(0, 6).map((line) => {
+        const styles = getComputedStyle(line);
+        return {
+          className: line.className,
+          whiteSpace: styles.whiteSpace,
+          wordBreak: styles.wordBreak,
+          overflowWrap: styles.overflowWrap,
+          overflowX: styles.overflowX,
+          fontFamily: styles.fontFamily,
+        };
+      }),
+    };
+  });
+}
+
 function assertReaderEditorParity(reader, editor) {
   const comparable = ["paddingTop", "fontSize", "lineHeight"];
   for (const key of comparable) {
@@ -147,6 +200,34 @@ function assertReaderEditorParity(reader, editor) {
   }
   if (editor.listMarkers === 0) {
     throw new Error(`editor package list markers missing: ${JSON.stringify({ reader, editor })}`);
+  }
+}
+
+function assertCodeBlockParity(readerCode, editorCode) {
+  if (readerCode.count === 0) {
+    throw new Error(`reader code blocks missing: ${JSON.stringify(readerCode)}`);
+  }
+  if (editorCode.count === 0) {
+    throw new Error(`editor code block lines missing: ${JSON.stringify(editorCode)}`);
+  }
+  if (!readerCode.languageText || !editorCode.languageText) {
+    throw new Error(`code block language labels missing: ${JSON.stringify({ readerCode, editorCode })}`);
+  }
+  const readerSurfaces = [readerCode.pre, readerCode.code].filter(Boolean);
+  for (const surface of readerSurfaces) {
+    if (surface.whiteSpace !== "pre" || surface.wordBreak !== "normal" || surface.overflowWrap !== "normal") {
+      throw new Error(`reader code block wrapping drift: ${JSON.stringify(readerCode)}`);
+    }
+  }
+  for (const line of editorCode.lines) {
+    if (line.whiteSpace !== "pre" || line.wordBreak !== "normal" || line.overflowWrap !== "normal") {
+      throw new Error(`editor code block wrapping drift: ${JSON.stringify(editorCode)}`);
+    }
+  }
+  const readerCodeFont = readerCode.code?.fontFamily ?? readerCode.pre?.fontFamily ?? "";
+  const editorCodeFont = editorCode.lines[0]?.fontFamily ?? "";
+  if (!readerCodeFont.includes("monospace") || !editorCodeFont.includes("monospace")) {
+    throw new Error(`code block font drift: ${JSON.stringify({ readerCode, editorCode })}`);
   }
 }
 
@@ -252,6 +333,7 @@ try {
   if (defaultReader.redSample.length !== 0) {
     throw new Error(`reader still exposes unresolved/error markup: ${JSON.stringify(defaultReader)}`);
   }
+  const defaultReaderCode = await readerCodeBlockStats();
   await assertResolvedOutlineLabel("reader");
   await assertHoverPreview(".cf-reader [data-ref-key=\"thm:hover-preview\"]", "Hover Preview Stress Test");
 
@@ -278,6 +360,9 @@ try {
     throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
   }
   assertReaderEditorParity(defaultReader, defaultEditor);
+  await scrollEditorUntilMounted(".cf-codeblock-header, .cf-codeblock-body, .cf-codeblock-last");
+  const defaultEditorCode = await editorCodeBlockStats();
+  assertCodeBlockParity(defaultReaderCode, defaultEditorCode);
   await assertResolvedOutlineLabel("editor");
   const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"]";
   await scrollEditorUntilMounted(editorHoverTarget);
@@ -289,6 +374,8 @@ try {
     ok,
     defaultReader,
     defaultEditor,
+    defaultReaderCode,
+    defaultEditorCode,
     consoleSample: consoleMessages.slice(-10),
     badResponses,
     pageErrors,
