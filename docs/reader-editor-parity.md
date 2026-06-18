@@ -155,6 +155,8 @@ Already shared or recently aligned:
   planning before emitting HTML or DOM content.
 - Live editor line decorations and marker rendering now use Coflat's shared
   list surface planning for ordered/unordered and task-item interpretation.
+- Editor heading semantic extraction now uses Coflat's shared heading render
+  plan for level, content range, text, id, and unnumbered interpretation.
 
 Still meaningfully split:
 
@@ -316,6 +318,7 @@ Exit criterion:
 | Shared reference preview entry and body-source planning | Fixed | `reference-preview-source.test.ts`; `reader-render.test.ts`; `reader-hydrate.test.ts`; `hover-preview.test.ts`; `hover-preview.render.test.ts`; `reader.crossref.test.ts` |
 | Shared outline entry text and footnote section entry planning | Fixed | `outline-surface.test.ts`; `footnote-section-surface.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `reader-render.test.ts`; `preview-reader-parity.test.ts` |
 | Shared live editor list line and marker planning | Fixed | `list-surface.test.ts`; `container-attributes.test.ts`; `markdown-render.test.ts`; `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
+| Shared heading semantic planning | Fixed | `block-render-plan.test.ts`; `document.test.ts`; `heading-slice.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |

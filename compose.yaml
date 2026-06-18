@@ -5,7 +5,7 @@ x-cosheaf-app: &cosheaf-app
     args:
       COSHEAF_GIT_SHA: ${COSHEAF_GIT_SHA:-unknown}
       COFLAT_GIT_REPO: ${COFLAT_GIT_REPO:-https://gitea.lab/chaoxu/coflat.git}
-      COFLAT_GIT_REF: ${COFLAT_GIT_REF:-1975a40e9e7ec77f063509fddf7cd067f9071ada}
+      COFLAT_GIT_REF: ${COFLAT_GIT_REF:-be34829af053bd0204c2ae4dee608788af2b92e0}
       NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
   image: cosheaf:local
   init: true
