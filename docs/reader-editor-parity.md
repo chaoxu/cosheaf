@@ -168,6 +168,14 @@ Already shared or recently aligned:
 - Editor footnote semantic analysis now consumes Coflat's shared footnote
   index planner for refs, defs, by-position maps, number maps, and ordered
   entries.
+- Footnote reference/definition extraction now lives in Coflat core semantics
+  instead of editor-only window collectors, and reader/editor footnote sections
+  consume shared section-entry projections before emitting HTML, DOM, or CM6
+  widgets.
+- Reader and editor outlines now consume Coflat's shared heading outline
+  projection planner for anchor allocation, markdown-to-text conversion, number
+  omission, and base outline entry construction; reader still owns
+  truncation rollback and editor still adds line/key navigation metadata.
 
 Still meaningfully split:
 
@@ -175,10 +183,10 @@ Still meaningfully split:
 - `@chaoxu/coflat/src/editor/render/preview-block-renderer.ts` is a separate DOM renderer.
 - Reader-only behaviors include source-position attributes, truncation, reference-preview indexing, outline id generation, and disclosure hydration.
 - Editor-only behaviors include CM6 widgets, viewport mounting, editable/source transitions, and non-interactive preview rendering.
-- Remaining semantic-planner work: build shared core planners for full
-  reader footnote state and heading outline projections, so reader rendering,
-  editor analysis, sidenotes, and outline panels consume the same semantic
-  products instead of independently advancing equivalent state.
+- Remaining semantic-planner work: reduce the reader's render-time footnote
+  rollback state toward a core emitted-footnote state planner that can preserve
+  truncation semantics while sharing more of the same semantic product used by
+  editor analysis, sidenotes, and preview footnote sections.
 
 ## Regression Commands
 
@@ -337,6 +345,7 @@ Exit criterion:
 | Shared source-range parsing and indexed-preview body input | Fixed | `source-range-surface.test.ts`; `reference-preview-source.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `source-widget.test.ts`; `widget-stop-index.test.ts`; `preview-reader-parity.test.ts` |
 | Shared footnote definition semantics and section boundaries | Fixed | `block-render-plan.test.ts`; `section-boundaries.test.ts`; `document.test.ts`; `window-extractor.test.ts`; `footnote-slice.test.ts`; `heading-fold.test.ts`; `tree-to-ir.test.ts`; `preview-reader-parity.test.ts` |
 | Shared footnote index planning | Fixed | `footnote-plan.test.ts`; `footnote-slice.test.ts`; `window-extractor.test.ts`; `document.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
+| Shared footnote extraction, section projection, and outline projection | Fixed | `footnote-extraction.test.ts`; `footnote-plan.test.ts`; `outline-plan.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `sidenote-render.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
