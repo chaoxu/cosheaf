@@ -161,6 +161,10 @@ Already shared or recently aligned:
   entry, and inline math interactions now share Coflat's source-range parsing
   helpers for `data-source-*` and shell/widget range metadata. Reader indexed
   hover previews also consume a shared preview-entry-to-body-input adapter.
+- Reader footnote rendering and editor footnote semantic extraction now share
+  Coflat's footnote definition semantic plan for label, id, and trimmed body
+  ranges. Editor folding and IR section trees now share Coflat's heading
+  section-boundary helper for the "next equal-or-higher heading" rule.
 
 Still meaningfully split:
 
@@ -169,10 +173,9 @@ Still meaningfully split:
 - Reader-only behaviors include source-position attributes, truncation, reference-preview indexing, outline id generation, and disclosure hydration.
 - Editor-only behaviors include CM6 widgets, viewport mounting, editable/source transitions, and non-interactive preview rendering.
 - Remaining semantic-planner work: build shared core planners for full
-  footnote refs/defs/ordered entries/body ranges and heading outline/section
-  boundaries, so reader rendering, editor analysis, sidenotes, folds, and IR
-  indexing consume the same semantic products instead of independently
-  advancing equivalent state.
+  footnote refs/defs/ordered entries and heading outline projections, so
+  reader rendering, editor analysis, sidenotes, and outline panels consume the
+  same semantic products instead of independently advancing equivalent state.
 
 ## Regression Commands
 
@@ -329,6 +332,7 @@ Exit criterion:
 | Shared live editor list line and marker planning | Fixed | `list-surface.test.ts`; `container-attributes.test.ts`; `markdown-render.test.ts`; `block-render-plan.test.ts`; `preview-reader-parity.test.ts` |
 | Shared heading semantic planning | Fixed | `block-render-plan.test.ts`; `document.test.ts`; `heading-slice.test.ts`; `reader-outline.test.ts`; `per-file-panels.test.ts`; `preview-reader-parity.test.ts` |
 | Shared source-range parsing and indexed-preview body input | Fixed | `source-range-surface.test.ts`; `reference-preview-source.test.ts`; `reader-source-map.test.ts`; `reader-render.test.ts`; `math-interactions.test.ts`; `math-render-interaction.test.ts`; `source-widget.test.ts`; `widget-stop-index.test.ts`; `preview-reader-parity.test.ts` |
+| Shared footnote definition semantics and section boundaries | Fixed | `block-render-plan.test.ts`; `section-boundaries.test.ts`; `document.test.ts`; `window-extractor.test.ts`; `footnote-slice.test.ts`; `heading-fold.test.ts`; `tree-to-ir.test.ts`; `preview-reader-parity.test.ts` |
 | Typed inline surface policies | Fixed | `inline-surface-policy.test.ts`; `inline-render.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `test:e2e:corpus` |
 | Typed semantic block disclosure policy | Fixed | `document-surface-policy.test.ts`; `preview-reader-parity.test.ts`; `reader-render.test.ts`; `reader.crossref.test.ts` |
 | Typed document surface policies for reader/editor/hover/completion/outline routing | Fixed | `document-surface-policy.test.ts`; `inline-surface-policy.test.ts`; `inline-render.test.ts`; `document-surfaces.test.ts`; `per-file-panels.test.ts`; `test:e2e:corpus` |
