@@ -1302,6 +1302,61 @@ describe("files concurrent-write conflicts (#92)", () => {
     });
   });
 
+  it("resets a retired default edit branch before the fallback save", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const calls: string[] = [];
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/pulls", (c) => {
+        expect(c.req.query("state")).toBe("all");
+        calls.push("list-pulls");
+        return c.json([
+          { number: 7, state: "closed", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
+        ]);
+      });
+      forge.delete("/api/v1/repos/owner/w/branches/:name", (c) => {
+        expect(c.req.param("name")).toBe("user/alice/web-edit");
+        calls.push("delete-branch");
+        return new Response(null, { status: 204 });
+      });
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => {
+        expect(c.req.param("name")).toBe("user/alice/web-edit");
+        calls.push("get-branch");
+        return c.text("not found", 404);
+      });
+      forge.post("/api/v1/repos/owner/w/branches", async (c) => {
+        const body = (await c.req.json()) as { new_branch_name: string; old_branch_name: string };
+        expect(body).toMatchObject({ new_branch_name: "user/alice/web-edit", old_branch_name: "main" });
+        calls.push("create-branch");
+        return c.json({ name: "user/alice/web-edit" });
+      });
+      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => {
+        if (c.req.query("ref") === "main") return c.json({ sha: "main-loaded" });
+        expect(c.req.query("ref")).toBe("user/alice/web-edit");
+        return c.text("not found", 404);
+      });
+      forge.post("/api/v1/repos/owner/w/contents/notes.md", () => {
+        calls.push("write-file");
+        return Response.json({ commit: { sha: "new-commit" }, content: { sha: "new-blob" } });
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/web-edit", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        content: "# Notes\n",
+        expected_sha: null,
+        expected_source_sha: "main-loaded",
+        reset_edit_branch: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, commit: "new-commit", sha: "new-blob" });
+    expect(calls).toEqual(["list-pulls", "delete-branch", "get-branch", "create-branch", "write-file"]);
+  });
+
   it("compare-and-set: rejects malformed expected_sha instead of disabling CAS", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

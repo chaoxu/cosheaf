@@ -32,6 +32,15 @@ describe("putFileBody", () => {
       expected_source_sha: "main-sha",
     });
   });
+
+  it("sends the edit-branch reset flag only when requested", () => {
+    expect(putFileBody("# Notes\n", undefined, null, "main-sha", true)).toEqual({
+      content: "# Notes\n",
+      expected_sha: null,
+      expected_source_sha: "main-sha",
+      reset_edit_branch: true,
+    });
+  });
 });
 
 describe("api errors", () => {

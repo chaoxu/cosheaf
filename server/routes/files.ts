@@ -15,6 +15,7 @@ import { workspaceSupportsXrefs, workspaceValidation } from "../workspace-valida
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
+  userBranchPrefix,
 } from "../../shared/conventions.js";
 import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
@@ -187,6 +188,26 @@ async function ensureBranch(
   }
 }
 
+async function retiredDefaultEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
+  if (branch !== `${userBranchPrefix(c.get("user").username)}web-edit`) return false;
+  const { fj, owner, repo } = c.get("repoCtx");
+  const pulls = await fj.listPulls(owner, repo, "all").catch(() => []);
+  const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
+  return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
+}
+
+async function resetRetiredEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
+  if (!await retiredDefaultEditBranch(c, branch)) return false;
+  const { fj, owner, repo } = c.get("repoCtx");
+  try {
+    await fj.deleteBranch(owner, repo, branch);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+  }
+  invalidateBranchReadCaches(owner, repo, branch);
+  return true;
+}
+
 files.get("/:owner/:repo/tree", async (c) => {
   const ws = c.get("workspace");
   const { fj, owner, repo } = c.get("repoCtx");
@@ -295,6 +316,7 @@ files.put("/:owner/:repo/file", async (c) => {
     previous_path?: string;
     expected_sha?: string | null;
     expected_source_sha?: string;
+    reset_edit_branch?: boolean;
   } | null;
   if (body?.content === undefined)
     return c.json(...bad("content required"));
@@ -316,6 +338,9 @@ files.put("/:owner/:repo/file", async (c) => {
     expectedSourceSha = body.expected_source_sha;
   }
 
+  if (body.reset_edit_branch === true && !await resetRetiredEditBranch(c, branch)) {
+    return c.json(...conflict("edit branch is active; reload and retry"));
+  }
   await ensureBranch(c, branch);
   const { fj, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");

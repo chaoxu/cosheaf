@@ -554,6 +554,55 @@ describe("web file editor route", () => {
     expect(body).toContain("# Main Notes\\n");
   });
 
+  it("loads main content and marks the default edit branch for reset after a closed unmerged PR", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches/*", (c) => {
+          const branch = decodeURIComponent(c.req.path.split("/branches/")[1] ?? "");
+          if (branch === "main") return c.json({ name: "main", commit: { id: "main-head" } });
+          expect(branch).toBe("user/alice/web-edit");
+          return c.json({ name: branch, commit: { id: "stale-head" } });
+        });
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
+        forge.get("/api/v1/repos/owner/w/pulls", (c) => {
+          expect(c.req.query("state")).toBe("all");
+          return c.json([
+            { number: 7, state: "closed", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
+          ]);
+        });
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => {
+          expect(c.req.query("ref")).toBe("main-head");
+          return c.json({ sha: "main-sha" });
+        });
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", (c) => {
+          expect(c.req.query("ref")).toBe("main-head");
+          return c.text("# Main Notes\n");
+        });
+        forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
+          expect(c.req.param("ref")).toBe("main");
+          return c.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fweb-edit&path=notes.md", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-branch="user/alice/web-edit"');
+    expect(body).toContain('data-branch-exists="0"');
+    expect(body).toContain('data-read-branch="main"');
+    expect(body).toContain('data-base-sha="main-sha"');
+    expect(body).toContain('data-reset-edit-branch="1"');
+    expect(body).toContain("# Main Notes\\n");
+  });
+
   it("uses the main blob sha as CAS base when a missing edit branch will be created from main", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db);

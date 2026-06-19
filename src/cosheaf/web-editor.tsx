@@ -55,6 +55,7 @@ interface EditorConfig {
   formatId: DocumentFormatId;
   baseSha: string | null;
   sourceSha: string | null;
+  resetEditBranch: boolean;
   mathMacros: Record<string, string>;
   bibliography?: string;
   csl?: string;
@@ -139,6 +140,7 @@ function readConfig(): { config: EditorConfig; content: string } {
       formatId: (mount.dataset.formatId ?? "forgejo-passthrough") as DocumentFormatId,
       baseSha: mount.dataset.baseSha || null,
       sourceSha: mount.dataset.sourceSha || null,
+      resetEditBranch: mount.dataset.resetEditBranch === "1",
       mathMacros: repoConfig.mathMacros ?? {},
       ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
       ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
@@ -257,6 +259,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const savedPathRef = useRef(savedPath);
   const savedShaRef = useRef<string | null | undefined>(config.baseSha);
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
+  const resetEditBranchRef = useRef(config.resetEditBranch);
   const contextLoadedRef = useRef(config.formatId !== COFLAT_FORMAT_ID);
   branchRef.current = branch;
   currentPathRef.current = currentPath;
@@ -411,6 +414,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           previousPath !== nextPath ? previousPath : undefined,
           savedShaRef.current,
           sourceShaRef.current,
+          resetEditBranchRef.current,
         );
         // Reconcile the server's frontmatter id into the controlled editor. This
         // now happens only on an explicit commit (rare), never every autosave
@@ -422,6 +426,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         setSavedPath(nextPath);
         savedShaRef.current = result.sha;
         sourceShaRef.current = undefined;
+        resetEditBranchRef.current = false;
         setCurrentPath(nextPath);
         setPathDirty(false);
         setUncommitted(false);
