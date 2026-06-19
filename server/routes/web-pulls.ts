@@ -3,7 +3,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
-import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoBranch, ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment, ForgejoUser } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -69,6 +69,15 @@ async function pullCommentFor(
   commentId: number,
 ): Promise<ForgejoPullReviewComment | null> {
   const comments = await ctx.fj.listPullComments(ctx.owner, ctx.repo, pullNumber);
+  return comments.find((comment) => comment.id === commentId) ?? null;
+}
+
+async function pullIssueCommentFor(
+  ctx: WebCtx,
+  pullNumber: number,
+  commentId: number,
+): Promise<ForgejoIssueComment | null> {
+  const comments = await ctx.fj.listIssueComments(ctx.owner, ctx.repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
 
@@ -173,7 +182,8 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
 web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  const [reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
+  const [issueComments, reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
+    ctx.fj.listIssueComments(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number),
@@ -181,12 +191,13 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
     ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
     ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
-  const timelineHtml = await renderPullTimeline(ctx, pull.number, reviews, comments, timeline, commits);
+  const timelineHtml = await renderPullTimeline(ctx, pull.number, issueComments, reviews, comments, timeline, commits);
   // The participants bar must reflect the conversation the timeline shows —
-  // submitted reviews + inline review comments — not just the line comments, so
-  // its count, "last reply", and chips (incl. reviewers) match what's rendered
-  // below. Same review filter as renderPullTimeline; sorted so "last" is latest.
+  // issue-style PR replies, submitted reviews, and inline review comments — so
+  // its count, "last reply", and chips match what's rendered below. Same review
+  // filter as renderPullTimeline; sorted so "last" is latest.
   const conversation = [
+    ...issueComments.map((c) => ({ user: c.user, created_at: c.created_at })),
     ...reviews
       .filter(isVisibleReview)
       .map((r) => ({ user: r.user, created_at: r.submitted_at })),
@@ -351,6 +362,28 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRoute(async (c, c
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
   if (comment.pull_request_review_id !== reviewId) return badRequestPage(ctx.user, "Review id does not match comment.");
   await ctx.fj.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+}));
+
+web.post("/:owner/:repo/pulls/:number/issue-comments/:id/edit", webRoute(async (c, ctx) => {
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  const id = positiveInt(c.req.param("id"));
+  const body = stringField((await c.req.parseBody()).body);
+  if (!pull || !id) return notFoundPage(ctx.user, "Comment not found");
+  if (!body) return badRequestPage(ctx.user, "Comment body is required.");
+  const comment = await pullIssueCommentFor(ctx, pull.number, id);
+  if (!comment) return notFoundPage(ctx.user, "Comment not found");
+  await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
+  return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
+}));
+
+web.post("/:owner/:repo/pulls/:number/issue-comments/:id/delete", webRoute(async (c, ctx) => {
+  const pull = await pullForParam(ctx, c.req.param("number"));
+  const id = positiveInt(c.req.param("id"));
+  if (!pull || !id) return notFoundPage(ctx.user, "Comment not found");
+  const comment = await pullIssueCommentFor(ctx, pull.number, id);
+  if (!comment) return notFoundPage(ctx.user, "Comment not found");
+  await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 

@@ -69,6 +69,17 @@ describe("web pull request routes", () => {
     };
   }
 
+  function issueComment(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 234,
+      body: "plain PR reply",
+      user: { login: "carol" },
+      created_at: "2026-05-19T00:00:00Z",
+      updated_at: "2026-05-19T00:00:00Z",
+      ...overrides,
+    };
+  }
+
   it("adds user autocomplete to username filters", async () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);
@@ -255,12 +266,19 @@ describe("web pull request routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
+        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => new Response("down", { status: 503 }));
         forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/issues/7/timeline", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/pulls/7/commits", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/reviewers", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w" }));
+        forge.post("/api/v1/repos/owner/w/markdown", async (c) => {
+          const body = await c.req.json() as { text?: string };
+          return Response.json({ html: `<p>${body.text ?? ""}</p>` });
+        });
       }),
     );
 
@@ -272,6 +290,40 @@ describe("web pull request routes", () => {
     const body = await res.text();
     expect(body).toContain("backing forge failed");
     expect(body).not.toContain("Review me");
+  });
+
+  it("renders issue-style pull request conversation comments", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ ...forgejoPull(), comments: 1 }));
+        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment()]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/issues/7/timeline", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/commits", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/reviewers", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w" }));
+        forge.post("/api/v1/repos/owner/w/markdown", async (c) => {
+          const body = await c.req.json() as { text?: string };
+          return Response.json({ html: `<p>${body.text ?? ""}</p>` });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/pulls/7", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("plain PR reply");
+    expect(body).toContain("<strong>1</strong> reply");
+    expect(body).toContain("/owner/w/pulls/7/issue-comments/234/edit");
   });
 
   it("surfaces PR files review-comment failures instead of rendering no line comments", async () => {
@@ -387,5 +439,58 @@ describe("web pull request routes", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Review id does not match comment");
     expect(deleted).toBe(false);
+  });
+
+  it("does not edit issue-style PR comments outside the requested pull request", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let edited = false;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
+        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment({ id: 456 })]));
+        forge.patch("/api/v1/repos/owner/w/issues/comments/234", () => {
+          edited = true;
+          return Response.json(issueComment({ id: 234, body: "updated" }));
+        });
+      }),
+    );
+
+    const form = new URLSearchParams({ body: "updated" });
+    const res = await appFor(db).request("/owner/w/pulls/7/issue-comments/234/edit", {
+      method: "POST",
+      headers: formHeaders(token),
+      body: form.toString(),
+    });
+
+    expect(res.status).toBe(404);
+    expect(edited).toBe(false);
+  });
+
+  it("deletes issue-style PR comments through the PR route", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let deleted = false;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
+        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment({ id: 234 })]));
+        forge.delete("/api/v1/repos/owner/w/issues/comments/234", () => {
+          deleted = true;
+          return new Response(null, { status: 204 });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/pulls/7/issue-comments/234/delete", {
+      method: "POST",
+      headers: formHeaders(token),
+    });
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/owner/w/pulls/7");
+    expect(deleted).toBe(true);
   });
 });

@@ -403,6 +403,7 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
 
 type WebTimelineItem =
   | { kind: "comment"; ts: number; number: number; comment: ForgejoIssueComment }
+  | { kind: "pull-comment"; ts: number; number: number; comment: ForgejoIssueComment }
   | { kind: "event"; ts: number; event: ForgejoTimelineEvent }
   | { kind: "review"; ts: number; review: ForgejoReview }
   | { kind: "line-comment"; ts: number; number: number; comment: ForgejoPullReviewComment }
@@ -490,6 +491,7 @@ export function isVisibleReview(review: Pick<ForgejoReview, "state" | "body">): 
 export async function renderPullTimeline(
   ctx: WebCtx,
   number: number,
+  issueComments: readonly ForgejoIssueComment[],
   reviews: readonly ForgejoReview[],
   comments: readonly ForgejoPullReviewComment[],
   timeline: readonly ForgejoTimelineEvent[],
@@ -499,6 +501,12 @@ export async function renderPullTimeline(
     ...timeline
       .filter((event) => event.type !== "comment" && event.type !== "pull_push" && event.type !== "review")
       .map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event })),
+    ...issueComments.map((comment) => ({
+      kind: "pull-comment" as const,
+      ts: toEpochMs(comment.created_at),
+      number,
+      comment,
+    })),
     ...reviews
       .filter(isVisibleReview)
       .map((review) => ({ kind: "review" as const, ts: toEpochMs(review.submitted_at), review })),
@@ -575,6 +583,18 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
   });
 }
 
+function pullIssueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
+  if (ctx.ws.role === "read" && comment.user?.login !== ctx.user) return emptyHtml;
+  return commentActions({
+    ctx,
+    testId: "pull-issue-comment-actions",
+    formId: `pull-issue-comment-del-${comment.id}`,
+    editAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/issue-comments/${comment.id}/edit`),
+    deleteAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/issue-comments/${comment.id}/delete`),
+    body: comment.body,
+  });
+}
+
 // Compact comment: avatar gutter + a single (author · time) byline + body, with
 // the hover edit affordance floated top-right.
 function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html }): Html {
@@ -616,6 +636,15 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
       whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
       actions: issueCommentActions(ctx, item.number, item.comment),
+    });
+  }
+  if (item.kind === "pull-comment") {
+    return commentEntry({
+      author: item.comment.user,
+      anchorId: `comment-${item.comment.id}`,
+      whenHtml: timeEl(item.comment.created_at),
+      body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
+      actions: pullIssueCommentActions(ctx, item.number, item.comment),
     });
   }
   if (item.kind === "line-comment") {

@@ -3,7 +3,7 @@ import { parsePositiveIntId } from "./query-params.js";
 import { html, type Html } from "./web-html.js";
 
 export interface WebTimelineSortItem {
-  kind: "comment" | "event" | "review" | "line-comment" | "commit";
+  kind: "comment" | "pull-comment" | "event" | "review" | "line-comment" | "commit";
   ts: number;
   event?: Pick<ForgejoTimelineEvent, "id" | "type">;
   review?: { id: number };
@@ -86,6 +86,7 @@ function refIssueNumber(event: ForgejoTimelineEvent): number | null {
 function timelineTieRank(item: WebTimelineSortItem): number {
   if (item.kind === "commit") return 10;
   if (item.kind === "comment") return 20;
+  if (item.kind === "pull-comment") return 20;
   if (item.kind === "line-comment") return 30;
   if (item.kind === "review") return 40;
   if (item.kind === "event" && isTerminalTimelineEvent(item.event?.type)) return 60;
