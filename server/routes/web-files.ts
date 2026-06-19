@@ -36,6 +36,7 @@ import { branchOptions, repoPageShell } from "./web-page.js";
 import { webEditorAssets } from "./web-shell.js";
 import { branchIcon, chevronIcon } from "./icons.js";
 import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
+import { userBranchPrefix } from "../../shared/conventions.js";
 
 const PDF_EXPORT_MAX_FILES = 500;
 const PDF_EXPORT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
@@ -370,9 +371,10 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const kind = fileKindForPath(rel);
   if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
   const branchInfo = branch === "main" ? await ctx.fj.getBranch(ctx.owner, ctx.repo, "main") : await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
-  const branchExists = branch === "main" || Boolean(branchInfo);
+  const resetEditBranch = Boolean(branchInfo) && await retiredDefaultEditBranch(ctx, branch);
+  const branchExists = !resetEditBranch && (branch === "main" || Boolean(branchInfo));
   const branchRef = branchInfo?.commit?.id ?? branch;
-  const branchMeta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branchRef, rel);
+  const branchMeta = resetEditBranch ? null : await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branchRef, rel);
   const mainInfo = branchMeta ? null : await ctx.fj.getBranch(ctx.owner, ctx.repo, "main");
   const mainRef = mainInfo?.commit?.id ?? "main";
   const mainMeta = branchMeta ? null : await ctx.fj.getFileMeta(ctx.owner, ctx.repo, mainRef, rel);
@@ -409,6 +411,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
             data-format-id="${ctx.ws.defaultMdFormat}"
             data-base-sha="${baseSha ?? ""}"
             data-source-sha="${sourceSha ?? ""}"
+            data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
@@ -1152,6 +1155,13 @@ function pageIndex(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry
 function editBranchFor(username: string, requested: string | null | undefined): string {
   const trimmed = requested?.trim();
   return trimmed && trimmed !== "main" ? trimmed : `user/${username}/web-edit`;
+}
+
+async function retiredDefaultEditBranch(ctx: WebCtx, branch: string): Promise<boolean> {
+  if (branch !== `${userBranchPrefix(ctx.user)}web-edit`) return false;
+  const pulls = await ctx.fj.listPulls(ctx.owner, ctx.repo, "all").catch(() => []);
+  const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
+  return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
 }
 
 // The /_edit URL for a (branch, optional file) — co-locates the edit-branch

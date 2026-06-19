@@ -41,12 +41,19 @@ function queryString(params: Record<string, string | undefined>): string {
   return text ? `?${text}` : "";
 }
 
-export function putFileBody(content: string, previousPath?: string, expectedSha?: string | null, expectedSourceSha?: string): Record<string, unknown> {
+export function putFileBody(
+  content: string,
+  previousPath?: string,
+  expectedSha?: string | null,
+  expectedSourceSha?: string,
+  resetEditBranch?: boolean,
+): Record<string, unknown> {
   return {
     content,
     ...(previousPath !== undefined ? { previous_path: previousPath } : {}),
     ...(expectedSha !== undefined ? { expected_sha: expectedSha } : {}),
     ...(expectedSourceSha !== undefined ? { expected_source_sha: expectedSourceSha } : {}),
+    ...(resetEditBranch ? { reset_edit_branch: true } : {}),
   };
 }
 
@@ -85,10 +92,11 @@ export const api = {
     previousPath?: string,
     expectedSha?: string | null,
     expectedSourceSha?: string,
+    resetEditBranch?: boolean,
   ) =>
     jsonFetch<PutFileResult>(`${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`, {
       method: "PUT",
-      body: JSON.stringify(putFileBody(content, previousPath, expectedSha, expectedSourceSha)),
+      body: JSON.stringify(putFileBody(content, previousPath, expectedSha, expectedSourceSha, resetEditBranch)),
     }),
 
   uploadAsset: async (owner: string, repo: string, branch: string, file: File): Promise<{ path: string }> => {
