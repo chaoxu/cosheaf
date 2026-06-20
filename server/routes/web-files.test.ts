@@ -142,6 +142,17 @@ describe("web file editor route", () => {
     expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
     expect(body).not.toContain('<summary class="button">More</summary>');
+
+    const sourceRes = await appFor(db).request("/owner/w/src/branch/main/notes.md?view=source", { headers: authHeaders(token) });
+    expect(sourceRes.status).toBe(200);
+    const sourceBody = await sourceRes.text();
+    expect(sourceBody).toContain('<div class="doc-with-toc">');
+    expect(sourceBody).toContain('<div class="doc-main doc-main-source">');
+    expect(sourceBody).toContain('<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">');
+    expect(sourceBody).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
+    expect(sourceBody).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md?view=source" aria-current="page">Source</a>');
+    expect(sourceBody).not.toContain("<h1>notes.md</h1>");
+    expect(sourceBody).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
   });
 
   it("previews a small extensionless UTF-8 file as plain text", async () => {

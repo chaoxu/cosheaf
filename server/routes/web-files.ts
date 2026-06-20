@@ -182,7 +182,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const docBody =
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
-          <div class="doc-main">${preview}</div>
+          <div class="${sourceView ? "doc-main doc-main-source" : "doc-main"}">${preview}</div>
           <aside class="doc-rail" aria-label="Document tools">
             ${documentRailActions(ctx, { branch: resolved.branch, rel, kind, active: "read", fileHref, sourceView })}
             <nav class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
@@ -199,7 +199,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               // A rendered markdown page shows its own .cf-doc-title (and the
               // sidebar highlights the file), so the filename H1 + kind/size are
               // redundant noise; other kinds keep a filename header for identity.
-              kind === "markdown" && !sourceView ? emptyHtml : html`<h1>${rel}</h1>`
+              kind === "markdown" ? emptyHtml : html`<h1>${rel}</h1>`
             }
           </div>
           ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha, showEdit: !coflatMarkdownDocument, showRepresentations: !coflatMarkdownDocument })}
