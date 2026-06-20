@@ -157,7 +157,7 @@ function currentDocumentSuggestions(source: string, prefix: string): Suggestion[
     if (!id || !matchesSuggestion(id, title, prefix)) return;
     suggestions.push({
       id,
-      insert: `${id}]`,
+      insert: `[@${id}]`,
       display: title ? `${id} — ${title} (${detail})` : `${id} (${detail})`,
     });
   };
