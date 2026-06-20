@@ -578,7 +578,12 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
   );
 }));
 
-web.get("/account/settings", globalRoute(async (c, auth) => {
+interface AccountSettingsOptions {
+  apiToken?: string;
+  apiTokenError?: string;
+}
+
+async function accountSettingsResponse(c: Context<AppEnv>, auth: GlobalWebAuth, opts: AccountSettingsOptions = {}): Promise<Response> {
   const [me, sshKeys] = await Promise.all([
     c.get("fjUser").getCurrentUser(),
     c.get("fjUser").listUserSshKeys(),
@@ -587,7 +592,7 @@ web.get("/account/settings", globalRoute(async (c, auth) => {
   const keySaved = c.req.query("ssh_key") === "1";
   const error = c.req.query("error") ?? undefined;
   const t = c.get("t");
-  return htmlResponse(
+  return c.html(
     pageShell({
       title: t("settings.account_settings"),
       user: auth.user.username,
@@ -604,6 +609,7 @@ web.get("/account/settings", globalRoute(async (c, auth) => {
             </div>
             ${userProfileSection(me, { saved, error })}
             ${avatarSection(me)}
+            ${accountApiTokenSection(opts)}
             ${accountSshKeysSection(sshKeys, keySaved)}
             ${userPreferencesSection(auth.user.username, c.get("locale"), t)}
             ${accountSignOutSection(t)}
@@ -612,6 +618,28 @@ web.get("/account/settings", globalRoute(async (c, auth) => {
       `,
     }),
   );
+}
+
+web.get("/account/settings", globalRoute((c, auth) => accountSettingsResponse(c, auth)));
+
+web.post("/account/api-token", globalRoute(async (c, auth) => {
+  const form = await c.req.parseBody();
+  const password = stringField(form.password);
+  if (!password) return accountSettingsResponse(c, auth, { apiTokenError: "Enter your password to reveal an API token." });
+  const outcome = await exchangeForgejoCredsForPat(
+    c.get("db"),
+    c.get("config").forgejoUrl,
+    auth.user.username,
+    password,
+  );
+  if (outcome.kind === "bad_credentials") {
+    return accountSettingsResponse(c, auth, { apiTokenError: "Password did not match this account." });
+  }
+  if (outcome.kind === "upstream_unavailable") {
+    return accountSettingsResponse(c, auth, { apiTokenError: `Could not create an API token: ${outcome.detail}` });
+  }
+  setAuthCookie(c, outcome.pat);
+  return accountSettingsResponse(c, auth, { apiToken: outcome.pat });
 }));
 
 function normalizedExternalHref(raw: string): string | null {
@@ -636,6 +664,43 @@ function normalizeSshPublicKey(raw: string): string | null {
 function defaultSshKeyTitle(key: string): string {
   const comment = key.split(" ").slice(2).join(" ").trim();
   return comment || "Cosheaf SSH key";
+}
+
+function accountApiTokenSection(opts: AccountSettingsOptions): Html {
+  return html`<section class="settings-section" data-testid="settings-api-token">
+    <div class="settings-section-header">
+      <h2>Agent access</h2>
+      <p>Use a Cosheaf API token with agents and command-line tools.</p>
+    </div>
+    <div class="settings-form">
+      <form method="post" action="/account/api-token" data-testid="api-token-form">
+        <label class="settings-row">
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required data-testid="api-token-password">
+        </label>
+        <div class="settings-actions">
+          <button class="button" type="submit" data-testid="api-token-reveal">Reveal token</button>
+          ${opts.apiTokenError ? html`<p class="muted" role="alert" data-testid="api-token-error">${opts.apiTokenError}</p>` : emptyHtml}
+        </div>
+      </form>
+      ${
+        opts.apiToken
+          ? html`<div class="settings-note api-token-result" data-testid="api-token-result">
+              <label class="settings-row">
+                <span>Token</span>
+                <input readonly spellcheck="false" value="${opts.apiToken}" data-testid="api-token-value" onclick="this.select()">
+              </label>
+              <div class="settings-actions">
+                <button class="button" type="button" data-testid="api-token-copy" onclick="navigator.clipboard?.writeText(this.closest('[data-testid=api-token-result]')?.querySelector('[data-testid=api-token-value]')?.value ?? '')">Copy token</button>
+              </div>
+              <p>Send it as <code>Authorization: Bearer &lt;token&gt;</code>. Treat it like your password.</p>
+            </div>`
+          : html`<div class="settings-note">
+              <p>The token acts as you and can read or write repositories you can access.</p>
+            </div>`
+      }
+    </div>
+  </section>`;
 }
 
 function accountSshKeysSection(keys: ForgejoSshKey[], saved: boolean): Html {

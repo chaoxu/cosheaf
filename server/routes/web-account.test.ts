@@ -126,6 +126,9 @@ describe("POST /account/settings (profile)", () => {
     // email is shown read-only
     expect(body).toContain('value="a@x.test"');
     expect(body).toContain('data-testid="settings-ssh-keys"');
+    expect(body).toContain('data-testid="settings-api-token"');
+    expect(body).toContain('data-testid="api-token-password"');
+    expect(body).not.toContain('data-testid="api-token-value"');
     expect(body).toContain('<summary>+ Add SSH key</summary>');
     expect(body).toContain('<details class="add-disclosure">');
     expect(body).toContain('data-testid="ssh-key-form"');
@@ -207,6 +210,49 @@ describe("POST /account/settings (profile)", () => {
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/account/settings?ssh_key=1");
     expect(deleted).toEqual(["7"]);
+  });
+
+  it("reveals a Cosheaf API token after password verification", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.post("/api/v1/users/alice/tokens", (c) => c.json({ sha1: "pat-agent" }, 201 as 200));
+        forge.get("/api/v1/user", (c) => c.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/user/keys", () => Response.json([]));
+      }),
+    );
+
+    const res = await appFor(db).request("/account/api-token", form({ password: "secret" }, token));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("set-cookie")).toContain("cosheaf_pat=pat-agent");
+    const body = await res.text();
+    expect(body).toContain('data-testid="api-token-result"');
+    expect(body).toContain('data-testid="api-token-value"');
+    expect(body).toContain('value="pat-agent"');
+    expect(body).toContain("Authorization: Bearer");
+  });
+
+  it("does not reveal an API token when password verification fails", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.post("/api/v1/users/alice/tokens", (c) => c.text("bad", 401 as 200));
+        forge.get("/api/v1/user", (c) => c.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/user/keys", () => Response.json([]));
+      }),
+    );
+
+    const res = await appFor(db).request("/account/api-token", form({ password: "wrong" }, token));
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="api-token-error"');
+    expect(body).toContain("Password did not match this account.");
+    expect(body).not.toContain('data-testid="api-token-value"');
+    expect(body).not.toContain("pat-agent");
   });
 });
 
