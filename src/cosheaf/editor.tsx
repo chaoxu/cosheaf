@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
-import type { Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { Prec, type Extension } from "@codemirror/state";
+import { insertTab } from "@codemirror/commands";
+import { EditorView, keymap } from "@codemirror/view";
 import {
   type MountedEditor,
   type SaveHandler,
@@ -57,6 +58,7 @@ export function MarkdownEditor({
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MountedEditor | null>(null);
+  const modeRef = useRef(mode);
   const onChangeRef = useRef(onChange);
   // Host APIs are captured by refs and dispatched through stable wrappers,
   // so prop updates don't force a remount of the underlying editor.
@@ -65,6 +67,7 @@ export function MarkdownEditor({
   const assetRef = useRef(assetUploader);
   const autocompleteRef = useRef(autocompleteSources);
   onChangeRef.current = onChange;
+  modeRef.current = mode;
   saveRef.current = saveHandler;
   statusRef.current = statusEvents;
   assetRef.current = assetUploader;
@@ -72,7 +75,13 @@ export function MarkdownEditor({
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const mountExtensions: Extension[] = [...(extensions ?? [])];
+    const sourceModeTabExtension = Prec.highest(keymap.of([
+      {
+        key: "Tab",
+        run: (view) => modeRef.current === "source" && insertTab(view),
+      },
+    ]));
+    const mountExtensions: Extension[] = [sourceModeTabExtension, ...(extensions ?? [])];
     if (readOnly) mountExtensions.push(EditorView.editable.of(false));
 
     // Stable host-API wrappers that always read the latest prop value via ref.
