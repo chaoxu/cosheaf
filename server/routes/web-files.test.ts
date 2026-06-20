@@ -131,10 +131,9 @@ describe("web file editor route", () => {
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
     expect(body).toContain('<div class="doc-view-controls" aria-label="View">');
     expect(body).toContain('<div class="doc-view-group" aria-label="Mode">');
-    expect(body).toContain('<span class="doc-view-label">Format</span>');
-    expect(body).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
-    expect(body).toContain('<a class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
-    expect(body).toContain('<a class="" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
+    expect(body).toContain('<span class="doc-view-label">File</span>');
+    expect(body).toContain('<a data-doc-mode-link class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
+    expect(body).toContain('<a data-doc-mode-link class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
     expect(body).toContain('<a href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
     expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).toContain('class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden');
@@ -149,8 +148,8 @@ describe("web file editor route", () => {
     expect(sourceBody).toContain('<div class="doc-with-toc">');
     expect(sourceBody).toContain('<div class="doc-main doc-main-source">');
     expect(sourceBody).toContain('<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">');
-    expect(sourceBody).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
-    expect(sourceBody).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md?view=source" aria-current="page">Source</a>');
+    expect(sourceBody).toContain('<a data-doc-mode-link class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
+    expect(sourceBody).not.toContain('href="/owner/w/src/branch/main/notes.md?view=source"');
     expect(sourceBody).not.toContain("<h1>notes.md</h1>");
     expect(sourceBody).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
   });

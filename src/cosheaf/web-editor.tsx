@@ -42,7 +42,7 @@ import {
 } from "./coflat-document-context";
 import { renderInertChromeInline } from "./chrome-inline";
 import type { DocumentThemeId } from "./document-theme";
-import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
+import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import "@chaoxu/coflat/style.css";
@@ -267,6 +267,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   branchRef.current = branch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
+
+  const setEditorMode = useCallback((next: "rich" | "source") => {
+    setMode(next);
+    writeEditorMode(next, config.username);
+  }, [config.username]);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -806,22 +811,22 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             <div className="doc-view-group" aria-label="Mode">
               <span className="doc-view-label">Mode</span>
               <div className="doc-view-switch">
-                <a data-testid="editor-read-link" href={readHref}>
+                <a data-doc-mode-link data-testid="editor-read-link" href={readHref}>
                   Read
                 </a>
-                <a className="active" href={window.location.href} aria-current="page">
+                <a data-doc-mode-link className="active" href={window.location.href} aria-current="page">
                   Edit
                 </a>
               </div>
             </div>
             {config.formatId === COFLAT_FORMAT_ID ? (
-              <div className="doc-view-group" aria-label="Format">
-                <span className="doc-view-label">Format</span>
+              <div className="doc-view-group" aria-label="Editor">
+                <span className="doc-view-label">Editor</span>
                 <div className="doc-view-switch">
-                  <button type="button" className={mode === "rich" ? "active" : ""} aria-current={mode === "rich" ? "page" : undefined} onClick={() => setMode("rich")}>
+                  <button type="button" className={mode === "rich" ? "active" : ""} aria-current={mode === "rich" ? "page" : undefined} onClick={() => setEditorMode("rich")}>
                     Rich
                   </button>
-                  <button type="button" className={mode === "source" ? "active" : ""} aria-current={mode === "source" ? "page" : undefined} onClick={() => setMode("source")}>
+                  <button type="button" className={mode === "source" ? "active" : ""} aria-current={mode === "source" ? "page" : undefined} onClick={() => setEditorMode("source")}>
                     Source
                   </button>
                 </div>

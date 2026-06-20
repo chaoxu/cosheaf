@@ -649,20 +649,17 @@ function fileToolbar(
 function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; kind: FileKind; active: "read" | "edit"; fileHref: string; sourceView?: boolean }): Html {
   const read = readHref(ctx.owner, ctx.repo, opts.branch, opts.rel);
   const edit = editableFileKind(opts.kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, opts.branch, opts.rel) : null;
-  const isSource = opts.sourceView === true;
   return html`<div class="doc-view-controls" aria-label="View">
     <div class="doc-view-group" aria-label="Mode">
       <span class="doc-view-label">Mode</span>
       <div class="doc-view-switch">
-        <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
-        ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
+        <a data-doc-mode-link class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
+        ${edit ? html`<a data-doc-mode-link class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
       </div>
     </div>
-    <div class="doc-view-group" aria-label="Format">
-      <span class="doc-view-label">Format</span>
+    <div class="doc-view-group" aria-label="File">
+      <span class="doc-view-label">File</span>
       <div class="doc-view-switch">
-        ${opts.kind === "markdown" ? html`<a class="${!isSource ? "active" : ""}" href="${read}"${!isSource ? html` aria-current="page"` : emptyHtml}>Rendered</a>` : emptyHtml}
-        ${opts.kind === "markdown" ? html`<a class="${isSource ? "active" : ""}" href="${`${opts.fileHref}?view=source`}"${isSource ? html` aria-current="page"` : emptyHtml}>Source</a>` : emptyHtml}
         ${opts.kind === "markdown" ? html`<a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
         <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
       </div>
