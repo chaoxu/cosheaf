@@ -6,17 +6,25 @@ import { parseArgs } from "node:util";
 import { run } from "./lib/run.mjs";
 
 const DEFAULT_FLEET_INFRA = path.resolve(process.cwd(), "..", "fleet-infra");
-const fleetInfra = process.env.FLEET_INFRA_CHECKOUT ?? DEFAULT_FLEET_INFRA;
+const WORKTREE_FLEET_INFRA = path.resolve(process.cwd(), "..", "..", "..", "fleet-infra");
+const fleetInfra = process.env.FLEET_INFRA_CHECKOUT ?? firstExistingDir([DEFAULT_FLEET_INFRA, WORKTREE_FLEET_INFRA]) ?? DEFAULT_FLEET_INFRA;
 const helper = path.join(fleetInfra, "bin", "cosheaf-pluto-release");
 const actions = new Set(["release", "verify", "health", "doctor", "repo-check"]);
 
-const { positionals } = parseArgs({ allowPositionals: true });
+const { positionals } = parseArgs({ allowPositionals: true, strict: false });
 const [action = "release", ...rest] = positionals;
 
 if (!actions.has(action)) {
   console.error(`usage: prod-release <${[...actions].join("|")}>`);
   console.error("production deploys target Pluto: https://cosheaf.chaoxu.prof");
   process.exit(2);
+}
+
+if (action === "release" && process.env.COSHEAF_CONFIRM_PROD_RELEASE !== "1") {
+  console.error("Refusing production release without explicit confirmation.");
+  console.error("Production is the public Pluto instance with real users.");
+  console.error("After the user explicitly asks for production deploy, rerun with COSHEAF_CONFIRM_PROD_RELEASE=1.");
+  process.exit(1);
 }
 
 if (!existsSync(helper)) {
@@ -32,3 +40,7 @@ run(helper, [action, ...rest], {
     COSHEAF_CHECKOUT: process.env.COSHEAF_CHECKOUT ?? process.cwd(),
   },
 });
+
+function firstExistingDir(candidates) {
+  return candidates.find((candidate) => existsSync(candidate));
+}

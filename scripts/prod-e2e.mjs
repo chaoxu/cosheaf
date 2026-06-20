@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { run } from "./lib/run.mjs";
 import { smokeChecks } from "./smoke-manifest.mjs";
@@ -93,6 +94,32 @@ curl -fsS -X PUT \
   return password;
 }
 
+function removeProdSmokeAccess(target, username) {
+  const script = `
+SMOKE_USER=${shellQuote(username)}
+SMOKE_OWNER=${shellQuote(target.owner)}
+SMOKE_REPO=${shellQuote(target.slug)}
+` + String.raw`
+set -euo pipefail
+admin_token="$(sudo -n awk -F= '/^COSHEAF_FORGEJO_ADMIN_TOKEN=/{print substr($0, index($0, "=")+1)}' /srv/cosheaf/.env.prod | tail -1)"
+forge_url="$(sudo -n awk -F= '/^COSHEAF_FORGEJO_URL=/{print substr($0, index($0, "=")+1)}' /srv/cosheaf/.env.prod | tail -1)"
+if [ -z "$forge_url" ]; then
+  forge_url="http://127.0.0.1:3002"
+fi
+case "$forge_url" in
+  http://forgejo:*|https://forgejo:*)
+    forge_url="http://127.0.0.1:3002"
+    ;;
+esac
+if [ -n "$admin_token" ]; then
+  curl -fsS -X DELETE \
+    "$forge_url/api/v1/repos/$SMOKE_OWNER/$SMOKE_REPO/collaborators/$SMOKE_USER" \
+    -H "Authorization: token $admin_token" >/dev/null || true
+fi
+`;
+  run("ssh", prodSshArgs("bash -s"), { input: script, allowFailure: true });
+}
+
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: { destructive: { type: "boolean", default: false } },
@@ -127,7 +154,10 @@ if (!target.prod) {
   childEnv.COSHEAF_MERI_PASSWORD = process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
   childEnv.COSHEAF_VERA_PASSWORD = process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 }
-run("pnpm", ["exec", "playwright", "test", "--config", "playwright.smoke.config.ts", "--grep", grep], {
+const result = spawnSync("pnpm", ["exec", "playwright", "test", "--config", "playwright.smoke.config.ts", "--grep", grep], {
+  stdio: "inherit",
   env: childEnv,
 });
+if (target.prod) removeProdSmokeAccess(target, username);
+if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
 console.log(`\nE2E checks passed for ${target.url}`);

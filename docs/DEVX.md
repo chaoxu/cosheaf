@@ -13,8 +13,18 @@
   console errors. Defaults to the seeded activity/issues/pulls routes.
 - `pnpm prod:release` deploys Cosheaf production to Pluto
   (`https://cosheaf.chaoxu.prof`) through the fleet-infra Pluto release helper.
-  Follow with `pnpm prod:verify`, `pnpm prod:repo-check`, and
-  `pnpm prod:e2e -- prod`.
+  Do not run it during normal work; production has real users and should only
+  be deployed after the user explicitly asks. Normal live verification uses
+  `cosheaf-test.lab`.
+- `pnpm staging:deploy` deploys the current pushed commit to the isolated
+  `cosheaf-test.lab` staging instance on `jupiter`.
+- `pnpm staging:verify` checks staging health and fails if the deployed commit
+  is unknown.
+- `pnpm staging:e2e` runs stable non-destructive browser smoke against
+  `cosheaf-test.lab`, plus a focused reader/editor reference-hover canary.
+- `pnpm staging:refs` runs only the focused staging reference-hover canary.
+- `pnpm staging:gate` runs the local gate, deploys the current pushed commit to
+  staging, verifies health, and runs staging browser smoke.
 - `pnpm coflat:status` prints the pinned Coflat SHA, sibling checkout SHA,
   lockfile hash, and local Cosheaf SHA. Add `--prod` to also query the
   deployed production Cosheaf SHA and Coflat ref at
@@ -45,9 +55,42 @@
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).
 
+## Staging
+
+Staging is the normal live target for agents:
+
+- Web: `https://cosheaf-test.lab`
+- Host: `jupiter`
+- Compose profile: `test`
+- Data: isolated from production, including its own Forgejo backend
+
+Use staging for almost all live verification:
+
+```sh
+pnpm staging:deploy
+pnpm staging:verify
+pnpm staging:e2e
+pnpm staging:refs
+```
+
+For a full pre-merge/pre-release pass, use:
+
+```sh
+pnpm staging:gate
+```
+
+`staging:deploy` deploys the current committed `HEAD`; the commit must be
+pushed to `origin` first so `jupiter` can fetch it. It refuses dirty local
+trees because uncommitted changes cannot be represented on staging.
+
+Keep the broad seeded reader/editor parity suite local (`pnpm
+smoke:reader-parity`). Staging has persistent user data, so `staging:e2e` uses
+stable live canaries rather than assuming every local fixture detail exists
+there.
+
 ## Production
 
-Production always means Pluto:
+Production always means Pluto and has real users:
 
 - Web: `https://cosheaf.chaoxu.prof`
 - Git SSH: `ssh://git@cosheaf.chaoxu.prof:2223/<owner>/<repo>.git`
@@ -57,10 +100,16 @@ Use these repo-local commands:
 
 ```sh
 pnpm prod:status
-pnpm prod:release
 pnpm prod:verify
 pnpm prod:repo-check
 pnpm prod:e2e -- prod
+```
+
+Production deploy is intentionally not part of the normal DevX path. Only run
+it after the user explicitly asks for production deploy:
+
+```sh
+COSHEAF_CONFIRM_PROD_RELEASE=1 pnpm prod:release
 ```
 
 `pnpm pluto:*` aliases are equivalent. `pnpm jupiter:e2e` remains only as a

@@ -370,8 +370,13 @@ pnpm dev                  # Vite dev server for page islands on :5173
 pnpm server               # tsx watch on server/index.ts (port 3030 by default)
 pnpm dev:all              # API + Vite together with URL banner
 pnpm smoke                # headless browser smoke test; defaults to setup:dev fixture
+pnpm staging:deploy       # deploy current pushed commit to cosheaf-test.lab staging
+pnpm staging:verify       # verify cosheaf-test.lab health and deployed SHA
+pnpm staging:e2e          # browser smoke against cosheaf-test.lab
+pnpm staging:refs         # focused reader/editor reference-hover smoke on cosheaf-test.lab
+pnpm staging:gate         # local gate + staging deploy + staging verify + staging smoke
 pnpm prod:status          # local + deployed production SHA/ref; production is Pluto
-pnpm prod:release         # deploy origin/main to Pluto production
+COSHEAF_CONFIRM_PROD_RELEASE=1 pnpm prod:release # deploy origin/main to Pluto production, only when explicitly requested
 pnpm prod:verify          # health/avatar/git-SSH/doctor checks against Pluto
 pnpm prod:repo-check      # compare repo heads for Pluto production
 pnpm prod:e2e -- prod     # production-safe browser smoke against Pluto
@@ -401,8 +406,14 @@ on `ssh://git@cosheaf.chaoxu.prof:2223/<owner>/<repo>.git`. Do not treat
 
 Use the repo-local production commands by default:
 
-- `pnpm prod:release` packages `origin/main` and deploys it through
-  `fleet-infra/bin/cosheaf-pluto-release release`.
+- Normal live verification goes to `cosheaf-test.lab`, not production:
+  `pnpm staging:deploy`, `pnpm staging:verify`, `pnpm staging:e2e`, or
+  `pnpm staging:gate`.
+- Do not deploy Pluto production during normal work. Production has real users;
+  deploy only when the user explicitly asks for production.
+
+- `COSHEAF_CONFIRM_PROD_RELEASE=1 pnpm prod:release` packages `origin/main`
+  and deploys it through `fleet-infra/bin/cosheaf-pluto-release release`.
 - `pnpm prod:verify` runs the documented Pluto health/avatar/git-SSH/doctor
   checks.
 - `pnpm prod:repo-check` compares Pluto repository state with the source forge
