@@ -629,7 +629,7 @@ try {
   const defaultEditorFootnotes = await footnoteSectionStats(".cm-content");
   assertFootnoteSectionParity(defaultReaderFootnotes, defaultEditorFootnotes);
   await assertResolvedOutlineLabel("editor");
-  const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"]";
+  const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"], [data-reference-widget][data-ref-key=\"thm:hover-preview\"]";
   await scrollEditorUntilMounted(editorHoverTarget);
   await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");
 

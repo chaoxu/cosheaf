@@ -14,7 +14,11 @@ import {
   extractFirstH1 as extractCoflatFirstH1,
   parseFrontmatter as parseCoflatFrontmatter,
 } from "@chaoxu/coflat/parse";
-import { type DocumentContext, hydrateReferences } from "@chaoxu/coflat/reader";
+import {
+  type DocumentContext,
+  hydrateReaderHoverPreviews,
+  hydrateReferences,
+} from "@chaoxu/coflat/reader";
 import type { ReactNode } from "react";
 import { lazy, StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -100,6 +104,24 @@ function sizeAssetRejection(file: File): { reject: string } | null {
 // upload), never for per-save feedback.
 function toast(message: string, kind: "info" | "success" | "error" = "info"): void {
   (window as unknown as { cosheafToast?: (m: string, o?: { kind?: string }) => void }).cosheafToast?.(message, { kind });
+}
+
+function editorCitationClusterPreview(key: string, context: DocumentContext): HTMLElement | null {
+  const ids = key.split(";").map((id) => id.trim()).filter(Boolean);
+  if (ids.length < 2 || !context.citationFormatter || !context.citationKeys) return null;
+  const citationIds = ids.filter((id) => context.citationKeys?.has(id));
+  if (citationIds.length === 0) return null;
+  const entriesById = new Map(
+    context.citationFormatter.bibliographyEntries(citationIds).map((entry) => [entry.id, entry.html]),
+  );
+  const container = document.createElement("div");
+  container.className = "cf-hover-preview-citation-body";
+  for (const id of citationIds) {
+    const html = entriesById.get(id);
+    if (!html) continue;
+    container.appendChild(sanitizeAndRewriteRefsFragment(html));
+  }
+  return container.childNodes.length > 0 ? container : null;
 }
 
 // Persistent, glance-able save-state label + style class (#184), priority-ordered:
@@ -345,12 +367,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     const root = document.getElementById("web-editor-root");
     if (!root) return;
     let queued = false;
+    let cleanupHoverPreviews: (() => void) | null = null;
     const reconcile = () => {
       queued = false;
       hydrateReferences(root, documentContext, {
         documentPath: currentPath.trim() || config.path,
         source: content,
         surface: "editor",
+      });
+      cleanupHoverPreviews?.();
+      cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
+        source: content,
+        context: documentContext,
+        previewForReference: (key) => editorCitationClusterPreview(key, documentContext),
       });
     };
     const schedule = () => {
@@ -363,6 +392,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     observer.observe(root, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
+      cleanupHoverPreviews?.();
     };
   }, [config.path, content, currentPath, documentContext]);
 
