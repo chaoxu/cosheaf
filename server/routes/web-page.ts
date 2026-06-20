@@ -1,6 +1,6 @@
 import type { ForgejoBranch, ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
-import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
+import { repoHref, userHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, html, type Html, joinHtml, raw } from "./web-html.js";
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import { type Panel, renderRegion } from "./web-panels.js";
@@ -121,7 +121,7 @@ export function repoPage(opts: {
       <nav class="repo-tabs">${nav}</nav>
       ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
-      { label: opts.owner, cls: opts.wsTitle ? "status-owner" : undefined },
+      { label: opts.owner, href: userHref(opts.owner), cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
       ...(opts.statusOmitTab ? [] : [{ label: activeLabel.toLowerCase() }]),
       ...(opts.statusExtra ?? []),
