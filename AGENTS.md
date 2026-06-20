@@ -371,7 +371,7 @@ pnpm server               # tsx watch on server/index.ts (port 3030 by default)
 pnpm dev:all              # API + Vite together with URL banner
 pnpm smoke                # headless browser smoke test; defaults to setup:dev fixture
 pnpm staging:deploy       # deploy current pushed commit to cosheaf-test.lab staging
-pnpm staging:verify       # verify cosheaf-test.lab health and deployed SHA
+pnpm staging:verify       # verify cosheaf-test.lab health and current pushed SHA
 pnpm staging:e2e          # browser smoke against cosheaf-test.lab
 pnpm staging:refs         # focused reader/editor reference-hover smoke on cosheaf-test.lab
 pnpm staging:gate         # local gate + staging deploy + staging verify + staging smoke

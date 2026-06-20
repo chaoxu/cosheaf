@@ -18,8 +18,8 @@
   `cosheaf-test.lab`.
 - `pnpm staging:deploy` deploys the current pushed commit to the isolated
   `cosheaf-test.lab` staging instance on `jupiter`.
-- `pnpm staging:verify` checks staging health and fails if the deployed commit
-  is unknown.
+- `pnpm staging:verify` checks staging health and verifies that staging is
+  running the current pushed commit.
 - `pnpm staging:e2e` runs stable non-destructive browser smoke against
   `cosheaf-test.lab`, plus a focused reader/editor reference-hover canary.
 - `pnpm staging:refs` runs only the focused staging reference-hover canary.
@@ -82,6 +82,9 @@ pnpm staging:gate
 `staging:deploy` deploys the current committed `HEAD`; the commit must be
 pushed to `origin` first so `jupiter` can fetch it. It refuses dirty local
 trees because uncommitted changes cannot be represented on staging.
+`staging:verify` has the same clean/pushed commit requirement. Use
+`node scripts/staging-release.mjs health` when you only need to check that
+staging is healthy and reports some non-unknown commit.
 
 Keep the broad seeded reader/editor parity suite local (`pnpm
 smoke:reader-parity`). Staging has persistent user data, so `staging:e2e` uses

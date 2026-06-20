@@ -25,6 +25,8 @@ if (action === "gate") {
   run("pnpm", ["staging:e2e"]);
 } else if (action === "deploy") {
   deploy(resolveSha(explicitSha));
+} else if (action === "verify") {
+  await verify(resolveSha(explicitSha));
 } else {
   await verify(explicitSha);
 }

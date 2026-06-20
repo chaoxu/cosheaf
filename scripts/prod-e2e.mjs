@@ -46,7 +46,7 @@ function shellQuote(value) {
 
 function prodSmokePassword(target, username) {
   const provided = process.env.COSHEAF_SMOKE_PASSWORD;
-  if (provided) return provided;
+  if (provided) return { password: provided, provisionedAccess: false };
   const password = `CosheafSmoke-${randomBytes(18).toString("base64url")}!`;
   const script = `
 SMOKE_USER=${shellQuote(username)}
@@ -91,7 +91,7 @@ curl -fsS -X PUT \
 `;
   run("ssh", prodSshArgs("bash -s"), { input: script });
   console.log(`Provisioned production smoke user ${username} for ${target.owner}/${target.slug}`);
-  return password;
+  return { password, provisionedAccess: true };
 }
 
 function removeProdSmokeAccess(target, username) {
@@ -137,7 +137,8 @@ const destructive = values.destructive || process.env.COSHEAF_E2E_DESTRUCTIVE ==
 const checks = smokeChecks.filter((check) => (!target.prod || check.prod) && (!check.destructive || destructive));
 const grep = checks.map((check) => check.grep).join("|");
 const username = process.env.COSHEAF_SMOKE_USER ?? (target.prod ? "cosheaf-smoke" : "chao");
-const password = target.prod ? prodSmokePassword(target, username) : (process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!");
+const prodCredential = target.prod ? prodSmokePassword(target, username) : null;
+const password = prodCredential?.password ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const childEnv = {
   ...process.env,
   URL: target.url,
@@ -158,6 +159,6 @@ const result = spawnSync("pnpm", ["exec", "playwright", "test", "--config", "pla
   stdio: "inherit",
   env: childEnv,
 });
-if (target.prod) removeProdSmokeAccess(target, username);
+if (target.prod && prodCredential?.provisionedAccess) removeProdSmokeAccess(target, username);
 if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
 console.log(`\nE2E checks passed for ${target.url}`);

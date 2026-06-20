@@ -15,6 +15,7 @@ const env = {
   COSHEAF_SMOKE_PAGE_PATH: process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md",
   COSHEAF_SMOKE_USER: process.env.COSHEAF_SMOKE_USER ?? "chao",
   COSHEAF_SMOKE_PASSWORD: process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!",
+  COSHEAF_EXPECTED_CLONE_URL: process.env.COSHEAF_EXPECTED_CLONE_URL ?? "ssh://git@cosheaf-test.lab:2224/chao/flushing-coin.git",
   COSHEAF_ADMIN_PASSWORD: process.env.COSHEAF_ADMIN_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!",
   COSHEAF_MERI_PASSWORD: process.env.COSHEAF_MERI_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!",
   COSHEAF_VERA_PASSWORD: process.env.COSHEAF_VERA_PASSWORD ?? process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!",
