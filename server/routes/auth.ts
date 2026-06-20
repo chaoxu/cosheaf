@@ -2,12 +2,12 @@
 // doesn't hold passwords or sessions; the returned PAT supports API clients as
 // JSON and server-rendered pages as an HttpOnly cookie.
 
-import { Hono } from "hono";
-import type Database from "better-sqlite3";
-import { deleteCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
-import type { AppEnv } from "../types.js";
+import type Database from "better-sqlite3";
+import { Hono } from "hono";
+import { deleteCookie } from "hono/cookie";
 import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
+import type { AppEnv } from "../types.js";
 import { bad, unauthorized } from "./responses.js";
 import { rejectCrossOriginMutation, setAuthCookie } from "./web-context.js";
 
@@ -47,19 +47,25 @@ const TOKEN_MINT_ATTEMPTS = 3;
 interface CreateTokenResponse { sha1: string }
 interface ForgejoUserResponse { login?: string }
 interface CachedLoginToken {
+  username: string;
   pat: string;
   token_name: string;
   scopes: string | null;
 }
 
 export type LoginOutcome =
-  | { kind: "ok"; pat: string }
+  | { kind: "ok"; username: string; pat: string }
   | { kind: "bad_credentials" }
   | { kind: "upstream_unavailable"; detail: string };
 
 type CreateTokenOutcome =
   | { kind: "created"; pat: string }
   | { kind: "name_taken" }
+  | { kind: "bad_credentials" }
+  | { kind: "upstream_unavailable"; detail: string };
+
+type VerifyUserOutcome =
+  | { kind: "ok"; username: string }
   | { kind: "bad_credentials" }
   | { kind: "upstream_unavailable"; detail: string };
 
@@ -77,7 +83,8 @@ export async function exchangeForgejoCredsForPat(
   username: string,
   password: string,
 ): Promise<LoginOutcome> {
-  const previous = loginQueues.get(username) ?? Promise.resolve();
+  const queueKey = username.toLowerCase();
+  const previous = loginQueues.get(queueKey) ?? Promise.resolve();
   const run = (async (): Promise<LoginOutcome> => {
     await previous.catch(() => undefined);
     return exchangeForgejoCredsForPatRaw(db, baseUrl, username, password);
@@ -86,11 +93,11 @@ export async function exchangeForgejoCredsForPat(
     () => undefined,
     () => undefined,
   );
-  loginQueues.set(username, tail);
+  loginQueues.set(queueKey, tail);
   try {
     return await run;
   } finally {
-    if (loginQueues.get(username) === tail) loginQueues.delete(username);
+    if (loginQueues.get(queueKey) === tail) loginQueues.delete(queueKey);
   }
 }
 
@@ -101,8 +108,14 @@ async function exchangeForgejoCredsForPatRaw(
   password: string,
 ): Promise<LoginOutcome> {
   const cached = db
-    .prepare("SELECT pat, token_name, scopes FROM login_tokens WHERE username = ?")
-    .get(username) as CachedLoginToken | undefined;
+    .prepare(`
+      SELECT username, pat, token_name, scopes
+      FROM login_tokens
+      WHERE username = ? COLLATE NOCASE
+      ORDER BY username = ? DESC, updated_at DESC
+      LIMIT 1
+    `)
+    .get(username, username) as CachedLoginToken | undefined;
   if (cached) {
     // The scope set changed since this token was minted (or the row predates
     // scope-versioning, scopes === null). Serving it would 403 on routes that
@@ -117,14 +130,17 @@ async function exchangeForgejoCredsForPatRaw(
       return credentialCheck;
     }
     if (credentialCheck.kind === "created") {
-      storeLoginToken(db, username, credentialCheck.pat, cached.token_name);
-      return { kind: "ok", pat: credentialCheck.pat };
+      return storeVerifiedLoginToken(db, baseUrl, username, credentialCheck.pat, cached.token_name);
     }
 
     const patCheck = await verifyStoredPat(baseUrl, username, cached.pat);
-    if (patCheck.kind === "ok") return { kind: "ok", pat: cached.pat };
+    if (patCheck.kind === "ok") {
+      storeLoginToken(db, patCheck.username, cached.pat, cached.token_name);
+      deleteLoginTokenAliases(db, patCheck.username);
+      return { kind: "ok", username: patCheck.username, pat: cached.pat };
+    }
     if (patCheck.kind !== "bad_credentials") return patCheck;
-    db.prepare("DELETE FROM login_tokens WHERE username = ?").run(username);
+    db.prepare("DELETE FROM login_tokens WHERE username = ?").run(cached.username);
 
     const reminted = await mintAndStoreLoginToken(db, baseUrl, username, password);
     if (reminted.kind === "ok") return reminted;
@@ -147,8 +163,7 @@ async function mintAndStoreLoginToken(
     const tokenName = `${TOKEN_NAME_PREFIX}-${randomUUID()}`;
     const created = await createForgejoToken(baseUrl, username, password, tokenName);
     if (created.kind === "created") {
-      storeLoginToken(db, username, created.pat, tokenName);
-      return { kind: "ok", pat: created.pat };
+      return storeVerifiedLoginToken(db, baseUrl, username, created.pat, tokenName);
     }
     if (created.kind !== "name_taken") return created;
   }
@@ -189,6 +204,20 @@ async function createForgejoToken(
   return { kind: "created", pat: parsed.sha1 };
 }
 
+async function storeVerifiedLoginToken(
+  db: Database.Database,
+  baseUrl: string,
+  submittedUsername: string,
+  pat: string,
+  tokenName: string,
+): Promise<LoginOutcome> {
+  const verified = await verifyStoredPat(baseUrl, submittedUsername, pat);
+  if (verified.kind !== "ok") return verified;
+  storeLoginToken(db, verified.username, pat, tokenName);
+  deleteLoginTokenAliases(db, verified.username);
+  return { kind: "ok", username: verified.username, pat };
+}
+
 function storeLoginToken(
   db: Database.Database,
   username: string,
@@ -207,11 +236,16 @@ function storeLoginToken(
   `).run(username, pat, tokenName, TOKEN_SCOPES_SIGNATURE, now, now);
 }
 
+function deleteLoginTokenAliases(db: Database.Database, canonicalUsername: string): void {
+  db.prepare("DELETE FROM login_tokens WHERE username = ? COLLATE NOCASE AND username <> ?")
+    .run(canonicalUsername, canonicalUsername);
+}
+
 async function verifyStoredPat(
   baseUrl: string,
   username: string,
   pat: string,
-): Promise<LoginOutcome> {
+): Promise<VerifyUserOutcome> {
   return verifyForgejoUser(baseUrl, username, `token ${pat}`);
 }
 
@@ -219,7 +253,7 @@ async function verifyForgejoUser(
   baseUrl: string,
   username: string,
   authorization: string,
-): Promise<LoginOutcome> {
+): Promise<VerifyUserOutcome> {
   let res: Response;
   try {
     res = await fetch(`${baseUrl}/api/v1/user`, {
@@ -235,8 +269,8 @@ async function verifyForgejoUser(
   if (!res.ok) return { kind: "upstream_unavailable", detail: `forgejo ${res.status}` };
 
   const parsed = (await res.json().catch(() => null)) as ForgejoUserResponse | null;
-  if (parsed?.login !== username) return { kind: "bad_credentials" };
-  return { kind: "ok", pat: "" };
+  if (!parsed?.login || parsed.login.toLowerCase() !== username.toLowerCase()) return { kind: "bad_credentials" };
+  return { kind: "ok", username: parsed.login };
 }
 
 auth.post("/login", async (c) => {
@@ -265,7 +299,7 @@ auth.post("/login", async (c) => {
     );
   }
   setAuthCookie(c, outcome.pat);
-  return c.json({ username: body.username, pat: outcome.pat });
+  return c.json({ username: outcome.username, pat: outcome.pat });
 });
 
 // Logout clears the browser cookie. We deliberately do NOT revoke the cached

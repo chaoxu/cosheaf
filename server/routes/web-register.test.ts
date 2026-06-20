@@ -1,10 +1,10 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppEnv } from "../types.js";
 import { setRegistrationOpen } from "../site-admin.js";
-import { web } from "./web.js";
+import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, testApp, testConfig } from "./test-fixtures.js";
+import { web } from "./web.js";
 
 // trustedProxyHops: 1 makes clientIp honor the per-request X-Forwarded-For we
 // set below, so each test keys the rate limiter on its own IP (no cross-test
@@ -81,6 +81,7 @@ describe("web /register", () => {
           return c.json({ id: 1, login: "newbie" }, 201 as 200);
         });
         forge.post("/api/v1/users/:username/tokens", (c) => c.json({ sha1: "newpat" }));
+        forge.get("/api/v1/user", (c) => c.json({ login: "newbie" }));
       }),
     );
 

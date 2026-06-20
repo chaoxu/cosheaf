@@ -1,6 +1,6 @@
 // Auth route tests. Stubs global fetch so we exercise the PAT-exchange
-// flow without a live Forgejo. Login does not touch the database: it returns
-// { username, pat } for API clients and also sets an HttpOnly cookie so
+// flow without a live Forgejo. Login returns { username, pat } for API clients
+// and also sets an HttpOnly cookie so
 // server-rendered web pages can authenticate normal GET requests.
 
 import type Database from "better-sqlite3";
@@ -35,6 +35,12 @@ const ok = (body: unknown, status = 201): Response =>
 const failure = (status: number, body: unknown = {}): Response =>
   new Response(JSON.stringify(body), { status });
 
+function mintOk(pat: string, username: string): void {
+  fetchMock
+    .mockResolvedValueOnce(ok({ sha1: pat }))
+    .mockResolvedValueOnce(ok({ login: username }, 200));
+}
+
 function login(db: Database.Database, username: string, password: string) {
   return appFor(db).request("/api/v1/login", {
     method: "POST",
@@ -54,7 +60,7 @@ async function waitForFetchCalls(count: number): Promise<void> {
 describe("POST /api/v1/login", () => {
   it("201 from Forgejo → returns { username, pat } and sets the web auth cookie", async () => {
     const db = freshDb();
-    fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-aaa" }));
+    mintOk("pat-aaa", "alice");
     const res = await login(db, "alice", "secret");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ username: "alice", pat: "pat-aaa" });
@@ -75,7 +81,7 @@ describe("POST /api/v1/login", () => {
 
   it("sets Secure on the login cookie when the configured public origin is https", async () => {
     const db = freshDb();
-    fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-secure" }));
+    mintOk("pat-secure", "alice");
 
     const res = await appFor(db, publicOriginConfig).request("/api/v1/login", {
       method: "POST",
@@ -106,7 +112,7 @@ describe("POST /api/v1/login", () => {
 
   it("allows originless API login clients", async () => {
     const db = freshDb();
-    fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-api" }));
+    mintOk("pat-api", "alice");
 
     const res = await appFor(db).request("/api/v1/login", {
       method: "POST",
@@ -148,12 +154,13 @@ describe("POST /api/v1/login", () => {
     const db = freshDb();
     fetchMock
       .mockResolvedValueOnce(failure(status, { message }))
-      .mockResolvedValueOnce(ok({ sha1: "pat-carol" }));
+      .mockResolvedValueOnce(ok({ sha1: "pat-carol" }))
+      .mockResolvedValueOnce(ok({ login: "carol" }, 200));
 
     const res = await login(db, "carol", "secret");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ username: "carol", pat: "pat-carol" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const firstName = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name;
     const secondName = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name;
     expect(secondName).not.toBe(firstName);
@@ -194,6 +201,7 @@ describe("POST /api/v1/login", () => {
       .mockImplementationOnce(
         () => new Promise<Response>((resolve) => { resolveFirst = resolve; }),
       )
+      .mockResolvedValueOnce(ok({ login: "gwen" }, 200))
       .mockResolvedValueOnce(failure(401, { message: "bad" }));
 
     const a = login(db, "gwen", "secret");
@@ -204,13 +212,14 @@ describe("POST /api/v1/login", () => {
     const [ra, rb] = await Promise.all([a, b]);
     expect(ra.status).toBe(200);
     expect(rb.status).toBe(401);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("reuses a cached PAT after revalidating the password", async () => {
     const db = freshDb();
     fetchMock
       .mockResolvedValueOnce(ok({ sha1: "pat-hen" }))
+      .mockResolvedValueOnce(ok({ login: "hen" }, 200))
       .mockResolvedValueOnce(failure(400, { message: "access token name has been used already" }))
       .mockResolvedValueOnce(ok({ login: "hen" }, 200));
 
@@ -220,21 +229,59 @@ describe("POST /api/v1/login", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual({ username: "hen", pat: "pat-hen" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name)
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string).name)
       .toBe(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name);
-    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/user");
-    expect(((fetchMock.mock.calls[2][1] as RequestInit).headers as Record<string, string>).authorization)
+    expect(String(fetchMock.mock.calls[3][0])).toBe("http://forgejo.test/api/v1/user");
+    expect(((fetchMock.mock.calls[3][1] as RequestInit).headers as Record<string, string>).authorization)
       .toBe("token pat-hen");
+  });
+
+  it("stores login PATs under Forgejo's canonical username casing", async () => {
+    const db = freshDb();
+    fetchMock
+      .mockResolvedValueOnce(ok({ sha1: "pat-chao" }))
+      .mockResolvedValueOnce(ok({ login: "chao" }, 200));
+
+    const res = await login(db, "Chao", "secret");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ username: "chao", pat: "pat-chao" });
+    const rows = db.prepare("SELECT username, pat FROM login_tokens WHERE username = ? COLLATE NOCASE")
+      .all("chao") as Array<{ username: string; pat: string }>;
+    expect(rows).toEqual([{ username: "chao", pat: "pat-chao" }]);
+  });
+
+  it("removes stale case aliases after verifying a cached PAT", async () => {
+    const db = freshDb();
+    db.prepare(`
+      INSERT INTO login_tokens (username, pat, token_name, scopes, created_at, updated_at)
+      VALUES
+        ('Chao', 'pat-old', 'cosheaf-old', ?, 1, 1),
+        ('chao', 'pat-current', 'cosheaf-current', ?, 2, 2)
+    `).run("read:repository", "read:repository");
+    fetchMock
+      .mockResolvedValueOnce(ok({ sha1: "pat-new" }))
+      .mockResolvedValueOnce(ok({ login: "chao" }, 200));
+
+    const res = await login(db, "Chao", "secret");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ username: "chao", pat: "pat-new" });
+    const rows = db.prepare("SELECT username, pat FROM login_tokens WHERE username = ? COLLATE NOCASE ORDER BY username")
+      .all("chao") as Array<{ username: string; pat: string }>;
+    expect(rows).toEqual([{ username: "chao", pat: "pat-new" }]);
   });
 
   it("re-mints a cached PAT when Forgejo reports the stored PAT was revoked", async () => {
     const db = freshDb();
     fetchMock
       .mockResolvedValueOnce(ok({ sha1: "pat-old" }))
+      .mockResolvedValueOnce(ok({ login: "hen" }, 200))
       .mockResolvedValueOnce(failure(400, { message: "access token name has been used already" }))
       .mockResolvedValueOnce(failure(401, { message: "revoked" }))
-      .mockResolvedValueOnce(ok({ sha1: "pat-new" }));
+      .mockResolvedValueOnce(ok({ sha1: "pat-new" }))
+      .mockResolvedValueOnce(ok({ login: "hen" }, 200));
 
     const first = await login(db, "hen", "secret");
     const second = await login(db, "hen", "secret");
@@ -242,15 +289,15 @@ describe("POST /api/v1/login", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual({ username: "hen", pat: "pat-new" });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
 
     const firstTokenName = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name;
-    const cachedTokenName = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name;
-    const remintedTokenName = JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string).name;
+    const cachedTokenName = JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string).name;
+    const remintedTokenName = JSON.parse((fetchMock.mock.calls[4][1] as RequestInit).body as string).name;
     expect(cachedTokenName).toBe(firstTokenName);
     expect(remintedTokenName).not.toBe(firstTokenName);
-    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/user");
-    expect(((fetchMock.mock.calls[2][1] as RequestInit).headers as Record<string, string>).authorization)
+    expect(String(fetchMock.mock.calls[3][0])).toBe("http://forgejo.test/api/v1/user");
+    expect(((fetchMock.mock.calls[3][1] as RequestInit).headers as Record<string, string>).authorization)
       .toBe("token pat-old");
 
     const row = db.prepare("SELECT pat, token_name FROM login_tokens WHERE username = 'hen'")
@@ -262,7 +309,9 @@ describe("POST /api/v1/login", () => {
     const db = freshDb();
     fetchMock
       .mockResolvedValueOnce(ok({ sha1: "pat-old" }))
-      .mockResolvedValueOnce(ok({ sha1: "pat-new" }));
+      .mockResolvedValueOnce(ok({ login: "hen" }, 200))
+      .mockResolvedValueOnce(ok({ sha1: "pat-new" }))
+      .mockResolvedValueOnce(ok({ login: "hen" }, 200));
 
     const first = await login(db, "hen", "secret");
     const second = await login(db, "hen", "secret");
@@ -270,9 +319,9 @@ describe("POST /api/v1/login", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual({ username: "hen", pat: "pat-new" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const firstTokenName = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name;
-    const recreatedTokenName = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name;
+    const recreatedTokenName = JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string).name;
     expect(recreatedTokenName).toBe(firstTokenName);
     const row = db.prepare("SELECT pat, token_name FROM login_tokens WHERE username = 'hen'")
       .get() as { pat: string; token_name: string };
@@ -283,6 +332,7 @@ describe("POST /api/v1/login", () => {
     const db = freshDb();
     fetchMock
       .mockResolvedValueOnce(ok({ sha1: "pat-ivy" }))
+      .mockResolvedValueOnce(ok({ login: "ivy" }, 200))
       .mockResolvedValueOnce(failure(401, { message: "bad" }));
 
     const first = await login(db, "ivy", "secret");
@@ -290,9 +340,9 @@ describe("POST /api/v1/login", () => {
 
     expect(first.status).toBe(200);
     expect(res.status).toBe(401);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toBe("http://forgejo.test/api/v1/users/ivy/tokens");
-    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name)
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe("http://forgejo.test/api/v1/users/ivy/tokens");
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string).name)
       .toBe(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name);
   });
 
@@ -303,14 +353,14 @@ describe("POST /api/v1/login", () => {
       INSERT INTO login_tokens (username, pat, token_name, scopes, created_at, updated_at)
       VALUES ('jon', 'pat-old', 'cosheaf-stale', 'read:repository', 1, 1)
     `).run();
-    fetchMock.mockResolvedValueOnce(ok({ sha1: "pat-new" }));
+    mintOk("pat-new", "jon");
 
     const res = await login(db, "jon", "secret");
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ username: "jon", pat: "pat-new" });
-    // One mint call — the stale PAT is not revalidated/served, it's replaced.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // One mint call plus canonical user verification — the stale PAT is not served.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/users/jon/tokens");
     // The row now records the current full scope signature.
     const row = db.prepare("SELECT pat, scopes FROM login_tokens WHERE username = 'jon'")
