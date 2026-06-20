@@ -142,6 +142,35 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
   const mathMacros = resolveMathMacros(payload);
   return {
     linkResolver: coflatLinkResolver(payload),
+    fileSystem: {
+      listTree: async () => ({ name: "", path: "", isDirectory: true, children: [] }),
+      readFile: async () => {
+        throw new Error("Reader context does not provide text file reads.");
+      },
+      writeFile: async () => {
+        throw new Error("Reader context is read-only.");
+      },
+      createFile: async () => {
+        throw new Error("Reader context is read-only.");
+      },
+      exists: async () => false,
+      renameFile: async () => {
+        throw new Error("Reader context is read-only.");
+      },
+      createDirectory: async () => {
+        throw new Error("Reader context is read-only.");
+      },
+      deleteFile: async () => {
+        throw new Error("Reader context is read-only.");
+      },
+      writeFileBinary: async () => {
+        throw new Error("Reader context is read-only.");
+      },
+      readFileBinary: async () => {
+        throw new Error("Reader context does not provide binary file reads.");
+      },
+      resolveAssetUrl: (path) => resolveRawRepoLink(payload, path) ?? path,
+    },
     refResolver: {
       resolve: (key, _mode, env) => {
         const crossref = refs.workspaceCrossrefs.get(key);

@@ -121,7 +121,7 @@ export function repoPage(opts: {
       <nav class="repo-tabs">${nav}</nav>
       ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
-      { label: opts.owner, cls: opts.wsTitle ? "status-owner" : undefined },
+      { label: opts.owner, href: `/users/${encodeURIComponent(opts.owner)}`, cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
       ...(opts.statusOmitTab ? [] : [{ label: activeLabel.toLowerCase() }]),
       ...(opts.statusExtra ?? []),

@@ -173,18 +173,18 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
-  const renderedCoflatMarkdown = kind === "markdown" && !sourceView && rendered !== null && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
   // Coflat-rendered markdown gets a shared document rail: view-switch actions
   // at the top and the table of contents below. The reader island fills the TOC
   // from Coflat's outline data, while the editor renders the same rail shape
   // from its live outline.
   const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
   const docBody =
-    renderedCoflatMarkdown
+    coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
           <div class="doc-main">${preview}</div>
           <aside class="doc-rail" aria-label="Document tools">
-            ${documentRailActions(ctx, { branch: resolved.branch, rel, kind, active: "read", fileHref })}
+            ${documentRailActions(ctx, { branch: resolved.branch, rel, kind, active: "read", fileHref, sourceView })}
             <nav class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
           </aside>
         </div>`
@@ -202,7 +202,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
               kind === "markdown" && !sourceView ? emptyHtml : html`<h1>${rel}</h1>`
             }
           </div>
-          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha, showEdit: !renderedCoflatMarkdown, showRepresentations: !renderedCoflatMarkdown })}
+          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha, showEdit: !coflatMarkdownDocument, showRepresentations: !coflatMarkdownDocument })}
         </div>
         ${docBody}
       `, {
@@ -646,15 +646,27 @@ function fileToolbar(
   </div>`;
 }
 
-function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; kind: FileKind; active: "read" | "edit"; fileHref: string }): Html {
+function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; kind: FileKind; active: "read" | "edit"; fileHref: string; sourceView?: boolean }): Html {
   const read = readHref(ctx.owner, ctx.repo, opts.branch, opts.rel);
   const edit = editableFileKind(opts.kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, opts.branch, opts.rel) : null;
-  return html`<div class="doc-view-switch" aria-label="View">
-    <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
-    ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
-    ${opts.kind === "markdown" ? html`<a href="${`${opts.fileHref}?view=source`}">Source</a>` : emptyHtml}
-    ${opts.kind === "markdown" ? html`<a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
-    <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
+  const isSource = opts.sourceView === true;
+  return html`<div class="doc-view-controls" aria-label="View">
+    <div class="doc-view-group" aria-label="Mode">
+      <span class="doc-view-label">Mode</span>
+      <div class="doc-view-switch">
+        <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
+        ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
+      </div>
+    </div>
+    <div class="doc-view-group" aria-label="Format">
+      <span class="doc-view-label">Format</span>
+      <div class="doc-view-switch">
+        ${opts.kind === "markdown" ? html`<a class="${!isSource ? "active" : ""}" href="${read}"${!isSource ? html` aria-current="page"` : emptyHtml}>Rendered</a>` : emptyHtml}
+        ${opts.kind === "markdown" ? html`<a class="${isSource ? "active" : ""}" href="${`${opts.fileHref}?view=source`}"${isSource ? html` aria-current="page"` : emptyHtml}>Source</a>` : emptyHtml}
+        ${opts.kind === "markdown" ? html`<a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
+        <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
+      </div>
+    </div>
   </div>`;
 }
 

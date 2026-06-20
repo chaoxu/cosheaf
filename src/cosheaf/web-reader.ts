@@ -1,4 +1,3 @@
-import { renderInlineMarkdown } from "@chaoxu/coflat";
 import {
   hydrateMath,
   hydrateReaderDisclosures,
@@ -6,14 +5,15 @@ import {
   hydrateReferences,
   type ReaderOutlineEntry,
   renderToHtml,
+  sourceRangeFromDataset,
 } from "@chaoxu/coflat/reader";
 import { urlPath } from "../../shared/url";
 import {
   type CoflatDocumentPayload,
   loadCoflatDocumentContext,
-  resolveRawRepoLink,
 } from "./coflat-document-context";
 import { readDocumentTheme, readSectionNumbering } from "./document-theme";
+import { renderInertChromeInline } from "./chrome-inline";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
@@ -25,27 +25,6 @@ function readPayload(root: HTMLElement): CoflatDocumentPayload | null {
   const script = root.querySelector<HTMLScriptElement>('script[type="application/json"]');
   if (!script?.textContent) return null;
   return JSON.parse(script.textContent) as CoflatDocumentPayload;
-}
-
-function renderChromeInline(container: HTMLElement, text: string, mathMacros?: Record<string, string>): void {
-  container.replaceChildren();
-  renderInlineMarkdown(container, text, mathMacros ?? {}, "ui-chrome-inline");
-}
-
-function renderChromeHtmlInline(container: HTMLElement, html: string | undefined, fallback: string, mathMacros?: Record<string, string>): void {
-  if (!html) {
-    renderChromeInline(container, fallback, mathMacros);
-    return;
-  }
-  const fragment = sanitizeAndRewriteRefsFragment(html);
-  for (const interactive of Array.from(fragment.querySelectorAll("a, button"))) {
-    const span = document.createElement("span");
-    span.className = interactive.className;
-    span.replaceChildren(...Array.from(interactive.childNodes));
-    interactive.replaceWith(span);
-  }
-  container.replaceChildren(fragment);
-  hydrateMath(container, { mathMacros: mathMacros ?? {} });
 }
 
 async function renderIsland(root: HTMLElement): Promise<void> {
@@ -71,7 +50,6 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   });
   const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
-  rewriteRenderedRepoImageUrls(fragment, payload);
   // Coflat needs the full source so frontmatter-controlled numbering (e.g.
   // `numbering: global`) and block config are visible to the reader. It also
   // renders the frontmatter title itself; hide that only for non-document
@@ -119,11 +97,11 @@ async function renderIsland(root: HTMLElement): Promise<void> {
 // whole containing block.
 function markChangedBlocks(root: HTMLElement, marked: ReadonlySet<number>): void {
   for (const el of root.querySelectorAll<HTMLElement>("[data-source-line],[data-source-from]")) {
-    const from = Number(el.dataset.sourceFrom ?? el.dataset.sourceLine);
-    if (!Number.isFinite(from)) continue;
-    const to = Number(el.dataset.sourceTo ?? el.dataset.sourceLine ?? el.dataset.sourceFrom);
-    const hi = Number.isFinite(to) ? to : from;
-    for (let line = from; line <= hi; line++) {
+    const range =
+      sourceRangeFromDataset(el.dataset, "sourceFrom", "sourceTo", { defaultToFrom: true }) ??
+      sourceRangeFromDataset(el.dataset, "sourceLine", "sourceLine", { defaultToFrom: true });
+    if (!range) continue;
+    for (let line = range.from; line <= range.to; line++) {
       if (marked.has(line)) {
         el.classList.add("marked");
         break;
@@ -230,7 +208,7 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Rec
     const link = document.createElement("a");
     link.href = `#${item.id}`;
     link.className = `doc-toc-link lvl-${item.level - minLevel}`;
-    renderChromeHtmlInline(link, item.html, item.text, mathMacros);
+    renderInertChromeInline(link, { html: item.html, fallback: item.text, mathMacros });
     slot.appendChild(link);
   }
   slot.hidden = false;
@@ -240,15 +218,6 @@ function applyDocumentTheme(root: HTMLElement): void {
   const theme = readDocumentTheme(document.body.dataset.cosheafUser);
   const scope = root.closest(".cf-theme-scope");
   scope?.classList.toggle("cf-theme-blueprint-book", theme === "blueprint-book");
-}
-
-function rewriteRenderedRepoImageUrls(root: ParentNode, payload: CoflatDocumentPayload): void {
-  for (const el of root.querySelectorAll<HTMLImageElement>("img[src]")) {
-    const value = el.getAttribute("src");
-    if (!value) continue;
-    const resolved = resolveRawRepoLink(payload, value);
-    if (resolved) el.setAttribute("src", resolved);
-  }
 }
 
 function installRefNavigation(): void {

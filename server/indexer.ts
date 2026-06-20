@@ -2,7 +2,7 @@
 // need for fast read paths (FTS, backlinks, tags) and for keeping cosheaf doc
 // ids stable across rebuilds.
 
-import path from "node:path";
+import { resolveMarkdownReferencePathFromDocument } from "@chaoxu/coflat/parse";
 import type Database from "better-sqlite3";
 import { extractBibTeXCitationKeys } from "./citations.js";
 import type { DocumentLink } from "./document-format/types.js";
@@ -247,8 +247,7 @@ function resolveLinkTarget(
   }
   const [linkPath] = link.ref.split("#", 1);
   if (!linkPath) return null;
-  const dir = path.posix.dirname(srcPath);
-  const resolved = path.posix.normalize(path.posix.join(dir, linkPath));
+  const resolved = resolveMarkdownReferencePathFromDocument(srcPath, linkPath);
   const row = prep(
     db,
     "SELECT cosheaf_id FROM doc_map WHERE workspace_slug = ? AND forgejo_id = ?",

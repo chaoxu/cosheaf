@@ -8,14 +8,17 @@ import type {
 } from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,
-  renderInlineMarkdown,
 } from "@chaoxu/coflat";
 import {
   extractFirstH1 as extractCoflatFirstH1,
   parseFrontmatter as parseCoflatFrontmatter,
+  relativeMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import {
   type DocumentContext,
+  type FileEntry,
+  type FileSystem,
+  createReaderCitationClusterPreviewBody,
   hydrateReaderHoverPreviews,
   hydrateReferences,
 } from "@chaoxu/coflat/reader";
@@ -37,11 +40,11 @@ import { ApiError, api } from "./api";
 import {
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
+import { renderInertChromeInline } from "./chrome-inline";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
-import { sanitizeAndRewriteRefsFragment } from "./ref-rewriter";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -91,8 +94,17 @@ function nowTime(): string {
 }
 
 function relativeAssetPath(documentPath: string, assetPath: string): string {
-  const dirDepth = documentPath.split("/").slice(0, -1).filter(Boolean).length;
-  return `${"../".repeat(dirDepth)}${assetPath}`;
+  return relativeMarkdownReferencePathFromDocument(documentPath, assetPath);
+}
+
+function rawRepoFileHref(owner: string, repo: string, branch: string, path: string): string {
+  return `/${urlPath(owner)}/${urlPath(repo)}/raw/branch/${urlPath(branch)}/${urlPath(path)}`;
+}
+
+async function fetchRawRepoFile(owner: string, repo: string, branch: string, path: string): Promise<Response> {
+  const res = await fetch(rawRepoFileHref(owner, repo, branch, path), { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`Unable to read ${path}: HTTP ${res.status}`);
+  return res;
 }
 
 function sizeAssetRejection(file: File): { reject: string } | null {
@@ -104,24 +116,6 @@ function sizeAssetRejection(file: File): { reject: string } | null {
 // upload), never for per-save feedback.
 function toast(message: string, kind: "info" | "success" | "error" = "info"): void {
   (window as unknown as { cosheafToast?: (m: string, o?: { kind?: string }) => void }).cosheafToast?.(message, { kind });
-}
-
-function editorCitationClusterPreview(key: string, context: DocumentContext): HTMLElement | null {
-  const ids = key.split(";").map((id) => id.trim()).filter(Boolean);
-  if (ids.length < 2 || !context.citationFormatter || !context.citationKeys) return null;
-  const citationIds = ids.filter((id) => context.citationKeys?.has(id));
-  if (citationIds.length === 0) return null;
-  const entriesById = new Map(
-    context.citationFormatter.bibliographyEntries(citationIds).map((entry) => [entry.id, entry.html]),
-  );
-  const container = document.createElement("div");
-  container.className = "cf-hover-preview-citation-body";
-  for (const id of citationIds) {
-    const html = entriesById.get(id);
-    if (!html) continue;
-    container.appendChild(sanitizeAndRewriteRefsFragment(html));
-  }
-  return container.childNodes.length > 0 ? container : null;
 }
 
 // Persistent, glance-able save-state label + style class (#184), priority-ordered:
@@ -217,19 +211,7 @@ function InlineChromeHtml({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (!html) {
-      el.replaceChildren();
-      renderInlineMarkdown(el, fallback, mathMacros ?? {}, "ui-chrome-inline");
-      return;
-    }
-    const fragment = sanitizeAndRewriteRefsFragment(html);
-    for (const interactive of Array.from(fragment.querySelectorAll("a, button"))) {
-      const span = document.createElement("span");
-      span.className = interactive.className;
-      span.replaceChildren(...Array.from(interactive.childNodes));
-      interactive.replaceWith(span);
-    }
-    el.replaceChildren(fragment);
+    renderInertChromeInline(el, { html, fallback, mathMacros });
   }, [html, fallback, mathMacros]);
   return <span ref={ref}>{fallback}</span>;
 }
@@ -370,7 +352,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     const cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
       source: content,
       context: documentContext,
-      previewForReference: (key) => editorCitationClusterPreview(key, documentContext),
+      previewForReference: (key) => createReaderCitationClusterPreviewBody(key, documentContext),
     });
     const reconcile = () => {
       queued = false;
@@ -399,6 +381,40 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     if (current && current !== "main") return current;
     return `${userBranchPrefix(config.username)}wip-${shortId()}`;
   }, [config.username]);
+
+  const fileSystem = useMemo<FileSystem | undefined>(() => {
+    if (config.formatId !== COFLAT_FORMAT_ID) return undefined;
+    const readBranch = () => branchRef.current || config.branch || "main";
+    const readFile = async (path: string): Promise<string> =>
+      fetchRawRepoFile(config.owner, config.repo, readBranch(), path).then((res) => res.text());
+    const readFileBinary = async (path: string): Promise<Uint8Array> => {
+      const buffer = await fetchRawRepoFile(config.owner, config.repo, readBranch(), path).then((res) => res.arrayBuffer());
+      return new Uint8Array(buffer);
+    };
+    const unsupportedWrite = async (): Promise<void> => {
+      throw new Error("Repository writes must go through Cosheaf save or upload actions.");
+    };
+    return {
+      listTree: async (): Promise<FileEntry> => ({ name: "", path: "", isDirectory: true, children: [] }),
+      readFile,
+      writeFile: unsupportedWrite,
+      createFile: unsupportedWrite,
+      exists: async (path: string): Promise<boolean> => {
+        try {
+          await fetchRawRepoFile(config.owner, config.repo, readBranch(), path);
+          return true;
+        } catch (_error) {
+          return false;
+        }
+      },
+      renameFile: unsupportedWrite,
+      createDirectory: unsupportedWrite,
+      deleteFile: unsupportedWrite,
+      writeFileBinary: unsupportedWrite,
+      readFileBinary,
+      resolveAssetUrl: (path: string): string => rawRepoFileHref(config.owner, config.repo, readBranch(), path),
+    };
+  }, [config.branch, config.formatId, config.owner, config.repo]);
 
   // Autosave (#162): persist the in-progress source to a local draft. No
   // network, no commit, no branch creation — so it can never clobber the
@@ -762,6 +778,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               mode={mode}
               from={currentPath}
               documentContext={documentContext ?? undefined}
+              fileSystem={fileSystem}
               testId="editor"
               onReady={(editor) => {
                 outlineUnsubscribeRef.current?.();
@@ -785,13 +802,31 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           )}
         </Suspense>
         <aside className="web-editor-outline doc-rail" aria-label="Document tools">
-          <div className="doc-view-switch" aria-label="View">
-            <a data-testid="editor-read-link" href={readHref}>
-              Read
-            </a>
-            <a className="active" href={window.location.href} aria-current="page">
-              Edit
-            </a>
+          <div className="doc-view-controls" aria-label="View">
+            <div className="doc-view-group" aria-label="Mode">
+              <span className="doc-view-label">Mode</span>
+              <div className="doc-view-switch">
+                <a data-testid="editor-read-link" href={readHref}>
+                  Read
+                </a>
+                <a className="active" href={window.location.href} aria-current="page">
+                  Edit
+                </a>
+              </div>
+            </div>
+            {config.formatId === COFLAT_FORMAT_ID ? (
+              <div className="doc-view-group" aria-label="Format">
+                <span className="doc-view-label">Format</span>
+                <div className="doc-view-switch">
+                  <button type="button" className={mode === "rich" ? "active" : ""} aria-current={mode === "rich" ? "page" : undefined} onClick={() => setMode("rich")}>
+                    Rich
+                  </button>
+                  <button type="button" className={mode === "source" ? "active" : ""} aria-current={mode === "source" ? "page" : undefined} onClick={() => setMode("source")}>
+                    Source
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
           {config.formatId === COFLAT_FORMAT_ID ? (
             <div
@@ -893,11 +928,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               </span>
             );
           })()}
-          {config.formatId === COFLAT_FORMAT_ID ? (
-            <button type="button" data-testid="editor-mode-toggle" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
-              {mode === "rich" ? "Source" : "Rich"}
-            </button>
-          ) : null}
           <button type="button" onClick={save} disabled={(!uncommitted && !pathDirty) || busy}>
             Save
           </button>
