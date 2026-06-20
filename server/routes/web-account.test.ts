@@ -5,8 +5,8 @@ import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { handleAppError } from "./error-handler.js";
-import { web } from "./web.js";
 import { fakeForgejo, freshTestDb, testApp, testConfig } from "./test-fixtures.js";
+import { web } from "./web.js";
 
 const config = testConfig("web-account");
 
@@ -218,6 +218,37 @@ describe("GET /users/:username", () => {
     _resetMiddlewareCachesForTests();
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it("lists Forgejo users at /users/", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/users/search", () =>
+          Response.json({
+            ok: true,
+            data: [
+              { id: 2, login: "bob", full_name: "Bob Builder", description: "Builds notes." },
+              { id: 1, login: "alice", full_name: "Alice" },
+            ],
+          }),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/users/", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="users-page"');
+    expect(body).toContain('href="/users/alice"');
+    expect(body).toContain('href="/users/bob"');
+    expect(body).toContain("Bob Builder");
+    expect(body).toContain("Builds notes.");
+  });
 
   it("renders a Forgejo-backed user profile page with visible repositories", async () => {
     const db = freshTestDb("cosheaf-account-");

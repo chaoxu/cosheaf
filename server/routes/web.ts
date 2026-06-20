@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { compress } from "hono/compress";
 import { deleteCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
@@ -31,6 +31,8 @@ import { globalSidebar, pageShell } from "./web-shell.js";
 
 export const web = new Hono<AppEnv>();
 web.use("*", compress());
+
+type GlobalWebAuth = Parameters<Parameters<typeof globalRoute>[0]>[1];
 
 // Shared chrome for the sign-in / sign-up cards: the same `.auth-page` >
 // `.auth-card` shell with a username + password pair; only the action, button
@@ -467,6 +469,53 @@ web.get("/account/notifications", globalRoute(async (c, auth) => {
     }),
   );
 }));
+
+web.get("/users", globalRoute(async (c, auth) => usersIndexResponse(c, auth)));
+web.get("/users/", globalRoute(async (c, auth) => usersIndexResponse(c, auth)));
+
+async function usersIndexResponse(c: Context<AppEnv>, auth: GlobalWebAuth): Promise<Response> {
+  const fj = c.get("fjUser");
+  const [users, avatarSrc] = await Promise.all([
+    fj.listUsers(),
+    currentUserAvatarSrc(fj, auth.forgejoToken),
+  ]);
+  const sorted = [...users].sort((a, b) => a.login.localeCompare(b.login, undefined, { sensitivity: "base" }));
+  return htmlResponse(
+    pageShell({
+      title: "Users",
+      user: auth.user.username,
+      locale: c.get("locale"),
+      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, c.get("t")),
+      statusPath: [{ label: "users" }],
+      body: usersIndexPage(sorted),
+    }),
+  );
+}
+
+function usersIndexPage(users: readonly ForgejoUser[]): Html {
+  return html`<main class="page users-page" data-testid="users-page">
+    <div class="page-title">
+      <h1>Users</h1>
+    </div>
+    ${
+      users.length === 0
+        ? html`<div class="empty">No users found.</div>`
+        : html`<div class="list users-list">
+          ${users.map((user) => {
+            const displayName = user.full_name?.trim() || user.login;
+            return html`<a class="list-row user-row" href="${`/users/${encodeURIComponent(user.login)}`}">
+              ${avatarForUser(user)}
+              <span class="list-row-main">
+                <strong>${displayName}</strong>
+                <small>${user.login}</small>
+                ${user.description ? html`<span class="muted">${user.description}</span>` : emptyHtml}
+              </span>
+            </a>`;
+          })}
+        </div>`
+    }
+  </main>`;
+}
 
 web.get("/users/:username", globalRoute(async (c, auth) => {
   const username = c.req.param("username");

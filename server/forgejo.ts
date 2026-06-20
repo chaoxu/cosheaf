@@ -244,6 +244,20 @@ export class Forgejo {
     return result.data ?? [];
   }
 
+  async listUsers(): Promise<ForgejoUser[]> {
+    const out: ForgejoUser[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const result = await this.req<ForgejoUserSearchResponse>("/api/v1/users/search", {
+        query: { q: "", page, limit: 50 },
+      });
+      const batch = result.data ?? [];
+      if (batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < 50) break;
+    }
+    return out;
+  }
+
   // Set the authenticated user's avatar (#150). `image` is the base64 of the
   // raw image bytes (no data: prefix); the cosheaf PAT carries write:user.
   async setUserAvatar(image: string): Promise<void> {
@@ -1097,24 +1111,24 @@ function encodeFilePath(p: string): string {
 // Type definitions live in forgejo-types.ts; re-export so existing
 // `import { ForgejoIssue, ... } from "./forgejo.js"` call sites keep working.
 export type {
-  ForgejoIssue,
-  ForgejoIssueComment,
-  ForgejoCommit,
-  ForgejoLabel,
-  ForgejoMilestone,
   ForgejoActivity,
-  ForgejoTimelineEvent,
-  ForgejoUser,
-  ForgejoRepo,
-  ForgejoNotificationThread,
   ForgejoBranch,
   ForgejoBranchProtection,
-  ForgejoHook,
+  ForgejoCommit,
   ForgejoContent,
   ForgejoFileResponse,
-  ForgejoTreeEntry,
+  ForgejoHook,
+  ForgejoIssue,
+  ForgejoIssueComment,
+  ForgejoLabel,
+  ForgejoMilestone,
+  ForgejoNotificationThread,
   ForgejoPull,
   ForgejoPullFile,
   ForgejoPullReviewComment,
+  ForgejoRepo,
   ForgejoReview,
+  ForgejoTimelineEvent,
+  ForgejoTreeEntry,
+  ForgejoUser,
 } from "./forgejo-types.js";
