@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { avatar } from "./avatar.js";
-import { bellIcon, homeIcon, settingsIcon } from "./icons.js";
-import { DEFAULT_LOCALE, localeDir, type LocaleId, makeT, type T } from "../../shared/i18n/index.js";
+import { DEFAULT_LOCALE, type LocaleId, localeDir, makeT, type T } from "../../shared/i18n/index.js";
 import { viteDevOrigin } from "../vite-dev-origin.js";
-import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
+import { avatar } from "./avatar.js";
+import { bellIcon, helpIcon, homeIcon, settingsIcon } from "./icons.js";
+import { emptyHtml, type Html, html, jsonScript, raw } from "./web-html.js";
 
 // English-bound translate, used as the default for chrome helpers whose call
 // sites haven't been threaded the request `t` yet (incremental rollout). Wired
@@ -66,13 +66,13 @@ function cosheafWebCssVersion(): string {
 }
 
 export function globalSidebar(
-  active: "workspaces" | "account" | "notifications" | "admin",
+  active: "workspaces" | "account" | "notifications" | "admin" | "help",
   user?: string,
   avatarSrc: string | null = null,
   t: T = enT,
   opts: { siteAdmin?: boolean } = {},
 ): Html {
-  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account")}
+  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account", active === "help")}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
       ${opts.siteAdmin ? html`<a class="${active === "admin" ? "active" : ""}" href="/admin">Admin</a>` : emptyHtml}
@@ -84,11 +84,12 @@ export function globalSidebar(
 // The same block renders in the global and repo sidebars so identity + chrome
 // actions are always visible. Logged-out chrome (only the pre-auth message
 // pages) shows a sign-in link instead — and no action icons.
-export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT, settingsActive = false): Html {
+export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT, settingsActive = false, helpActive = false): Html {
   if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">${t("auth.sign_in")}</a></div>`;
   return html`<div class="sidebar-identity">
     <a class="sidebar-identity-link" href="${profileHref(user)}" title="${t("nav.profile")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
     ${notificationsBell(notificationsActive, t)}
+    ${helpCircle(helpActive, t)}
     ${settingsGear(settingsActive, t)}
   </div>`;
 }
@@ -106,6 +107,12 @@ export function notificationsBell(active = false, t: T = enT): Html {
   return html`<a class="notif-bell${active ? " active" : ""}" href="/account/notifications" aria-label="${t("nav.notifications")}" title="${t("nav.notifications")}">
     ${bellIcon({ size: 15 })}
     <span class="notif-badge" data-notif-badge hidden></span>
+  </a>`;
+}
+
+export function helpCircle(active = false, t: T = enT): Html {
+  return html`<a class="help-circle${active ? " active" : ""}" href="/help" aria-label="${t("nav.help")}" title="${t("nav.help")}">
+    ${helpIcon({ size: 15 })}
   </a>`;
 }
 

@@ -25,6 +25,9 @@ itself stays outside this repo.
 
 ## What it gives you
 
+- **A teachable repository model** — users work with accounts, workspaces,
+  pages, branches, pull requests, issues, reviews, and agents. The in-app Help
+  page and [user guide](./docs/USER_GUIDE.md) explain what each object means.
 - **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
   math, `[@id]` cross-references and citations - see
   [Coflat `FORMAT.md`](https://github.com/chaoxu/coflat/blob/main/FORMAT.md)
@@ -120,6 +123,7 @@ src/cosheaf/   Page islands for the editor/reader plus their small fetch client
 scripts/       dev:all spawner, lefthook checks, Forgejo issue + worker-branch tools
 FORMAT.md      Cosheaf-specific notes and pointer to the Coflat format spec
 API.md         HTTP API contract (v1) — endpoints, error codes, SSE shape
+docs/USER_GUIDE.md  User-facing mental model and common workflows
 AGENTS.md      Repository conventions, commands, debug helpers
 DESIGN.md      Product philosophy and trust model
 ```

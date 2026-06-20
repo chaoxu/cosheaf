@@ -9,6 +9,7 @@ export const zh = {
   "nav.account": "账户",
   "nav.profile": "个人资料",
   "nav.home": "首页",
+  "nav.help": "帮助",
   // auth pages
   "auth.sign_in": "登录",
   "auth.username": "用户名",

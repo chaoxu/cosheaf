@@ -14,6 +14,7 @@ export const chevronIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons
 export const homeIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.home, opts));
 export const backIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.back, opts));
 export const bellIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.bell, opts));
+export const helpIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.help, opts));
 export const editIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.pencil, opts));
 export const eyeIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.eye, opts));
 export const settingsIcon = (opts?: IconOpts): Html => raw(iconMarkup(lucideIcons.settings, opts));

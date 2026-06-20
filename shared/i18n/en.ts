@@ -13,6 +13,7 @@ export const en = {
   "nav.account": "Account",
   "nav.profile": "Profile",
   "nav.home": "Home",
+  "nav.help": "Help",
   // auth pages
   "auth.sign_in": "Sign in",
   "auth.username": "Username",
