@@ -3,7 +3,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { Command } from "commander";
-import { DEFAULT_COFLAT_REF, checkDocPins } from "./check-coflat-ref.mjs";
+import { checkDocPins, DEFAULT_COFLAT_REF } from "./check-coflat-ref.mjs";
+
+const prodUrl = process.env.COSHEAF_PROD_URL ?? "https://cosheaf.chaoxu.prof";
 
 function output(command, args, options = {}) {
   try {
@@ -29,24 +31,16 @@ function lockfileCoflatEntry() {
 }
 
 function deployedHealth() {
-  const healthJson = output("curl", ["-fsS", "https://cosheaf.lab/api/v1/health"]);
+  const healthJson = output("curl", ["-fsS", `${prodUrl.replace(/\/+$/, "")}/api/v1/health`]);
   if (healthJson) {
     try {
       const health = JSON.parse(healthJson);
       if (health && typeof health === "object") return health;
     } catch (_err) {
-      // Fall through to the jupiter-side health check below.
+      return null;
     }
   }
-  const cmd = [
-    "cd /home/chaoxu/playground/cosheaf",
-    "COSHEAF_JUPITER_LOCAL=1",
-    "node /srv/fleet-infra/apps/cosheaf/scripts/jupiter-release.mjs health prod",
-  ].join(" && ");
-  const result = output("ssh", ["jupiter", cmd]);
-  if (!result) return null;
-  const match = result.match(/\b[0-9a-f]{40}\b/);
-  return match ? { commit: match[0] } : null;
+  return null;
 }
 
 export function coflatStatus({ prod = false } = {}) {
@@ -85,7 +79,7 @@ function printStatus(status) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const program = new Command("coflat-status")
-    .option("--prod", "also query jupiter production container state", false)
+    .option("--prod", "also query production container state", false)
     .option("--json", "print machine-readable JSON", false)
     .action((opts) => {
       const status = coflatStatus({ prod: opts.prod });

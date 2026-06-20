@@ -11,9 +11,16 @@
 - `pnpm devx:verify-route` opens real browser pages and checks HTTP status,
   global-header scroll behavior, issue/PR filter visibility, asset 4xxs, and
   console errors. Defaults to the seeded activity/issues/pulls routes.
+- `pnpm prod:release` deploys Cosheaf production to Pluto
+  (`https://cosheaf.chaoxu.prof`) through the fleet-infra Pluto release helper.
+  Follow with `pnpm prod:verify`, `pnpm prod:repo-check`, and
+  `pnpm prod:e2e -- prod`.
 - `pnpm coflat:status` prints the pinned Coflat SHA, sibling checkout SHA,
   lockfile hash, and local Cosheaf SHA. Add `--prod` to also query the
-  deployed production Cosheaf SHA and Coflat ref on `jupiter`.
+  deployed production Cosheaf SHA and Coflat ref at
+  `https://cosheaf.chaoxu.prof` on `pluto`. Set `COSHEAF_PROD_HOST`,
+  `COSHEAF_PROD_SSH_JUMP`, or `COSHEAF_PROD_URL` to override the public
+  deployment defaults.
 - `pnpm refresh:coflat` builds `../coflat`, installs with lifecycle scripts
   disabled, and rebuilds native packages. It avoids the local lefthook
   `core.hooksPath` failure that made the old refresh path unreliable.
@@ -37,6 +44,27 @@
 - `pnpm check:web:settings` runs only account/repository settings separation and
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).
+
+## Production
+
+Production always means Pluto:
+
+- Web: `https://cosheaf.chaoxu.prof`
+- Git SSH: `ssh://git@cosheaf.chaoxu.prof:2223/<owner>/<repo>.git`
+- Release helper: `fleet-infra/bin/cosheaf-pluto-release`
+
+Use these repo-local commands:
+
+```sh
+pnpm prod:status
+pnpm prod:release
+pnpm prod:verify
+pnpm prod:repo-check
+pnpm prod:e2e -- prod
+```
+
+`pnpm pluto:*` aliases are equivalent. `pnpm jupiter:e2e` remains only as a
+deprecated compatibility shim; do not use it for new production work.
 
 Useful overrides for `pnpm dev:login-state`:
 

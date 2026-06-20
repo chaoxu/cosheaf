@@ -370,6 +370,11 @@ pnpm dev                  # Vite dev server for page islands on :5173
 pnpm server               # tsx watch on server/index.ts (port 3030 by default)
 pnpm dev:all              # API + Vite together with URL banner
 pnpm smoke                # headless browser smoke test; defaults to setup:dev fixture
+pnpm prod:status          # local + deployed production SHA/ref; production is Pluto
+pnpm prod:release         # deploy origin/main to Pluto production
+pnpm prod:verify          # health/avatar/git-SSH/doctor checks against Pluto
+pnpm prod:repo-check      # compare repo heads for Pluto production
+pnpm prod:e2e -- prod     # production-safe browser smoke against Pluto
 pnpm dev:worktree -- <name> [--base origin/main --fetch]
 pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
 pnpm issue -- mine
@@ -387,6 +392,26 @@ pnpm check:stability      # unit/API tests + browser smoke flows
 pnpm test                 # vitest
 pnpm build                # vite build
 ```
+
+## Production DevX
+
+Production means `pluto`: `https://cosheaf.chaoxu.prof`, with public git SSH
+on `ssh://git@cosheaf.chaoxu.prof:2223/<owner>/<repo>.git`. Do not treat
+`jupiter` or `cosheaf.lab` as production deploy targets.
+
+Use the repo-local production commands by default:
+
+- `pnpm prod:release` packages `origin/main` and deploys it through
+  `fleet-infra/bin/cosheaf-pluto-release release`.
+- `pnpm prod:verify` runs the documented Pluto health/avatar/git-SSH/doctor
+  checks.
+- `pnpm prod:repo-check` compares Pluto repository state with the source forge
+  baseline.
+- `pnpm prod:e2e -- prod` runs the production-safe browser smoke matrix against
+  Pluto.
+
+Override only when debugging infrastructure itself: `COSHEAF_PROD_HOST`,
+`COSHEAF_PROD_SSH_JUMP`, `COSHEAF_PROD_URL`, and `FLEET_INFRA_CHECKOUT`.
 
 ## DevX quick map
 
