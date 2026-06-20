@@ -13,6 +13,11 @@ export interface DocumentRailGroup {
   controls: readonly DocumentRailControl[];
 }
 
+export interface DocumentRailModel {
+  groups: readonly DocumentRailGroup[];
+  outline: readonly DocumentRailOutlineItem[];
+}
+
 export interface DocumentRailOutlineInput {
   key: string;
   level: number;
@@ -33,6 +38,21 @@ export const DOCUMENT_RAIL_SWITCH_CLASS = "doc-view-switch";
 export const DOCUMENT_RAIL_OUTLINE_CLASS = "doc-rail-outline doc-toc";
 export const DOCUMENT_RAIL_OUTLINE_LABEL = "On this page";
 export const DOCUMENT_RAIL_OUTLINE_TITLE_CLASS = "doc-toc-title";
+
+export function documentRailModel(opts: {
+  mode: DocumentRailMode;
+  readHref: string;
+  editHref?: string | null;
+  fileControls?: readonly DocumentRailControl[];
+  editorMode?: "rich" | "source";
+  outline: readonly DocumentRailOutlineInput[];
+  maxOutlineLevel?: number;
+}): DocumentRailModel {
+  return {
+    groups: documentRailGroups(opts),
+    outline: documentRailOutline(opts.outline, { maxLevel: opts.maxOutlineLevel }),
+  };
+}
 
 export function documentRailGroups(opts: {
   mode: DocumentRailMode;

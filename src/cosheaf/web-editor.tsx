@@ -33,8 +33,7 @@ import {
   userBranchPrefix,
 } from "../../shared/conventions";
 import {
-  documentRailGroups,
-  documentRailOutline,
+  documentRailModel,
 } from "../../shared/document-rail";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
@@ -747,26 +746,26 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // path that was never written.
   const readHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(savedReadBranch)}/${urlPath(savedPath)}`;
   const outlineMathMacros = documentContext?.mathMacros;
-  const railGroups = documentRailGroups({
+  const railModel = documentRailModel({
     mode: "edit",
     readHref,
     editHref: window.location.href,
     editorMode: config.formatId === COFLAT_FORMAT_ID ? mode : undefined,
+    outline: outline.map((entry) => ({
+      key: entry.key,
+      level: entry.level,
+      label: entry.markdown,
+      html: (entry as OutlineEntry & { html?: string }).html,
+      line: entry.line,
+    })),
   });
-  const railOutlineItems = documentRailOutline(outline.map((entry) => ({
-    key: entry.key,
-    level: entry.level,
-    label: entry.markdown,
-    html: (entry as OutlineEntry & { html?: string }).html,
-    line: entry.line,
-  })));
 
   useEffect(() => {
     const rail = railRef.current;
     if (!rail) return;
     renderDocumentRail(
       rail,
-      { groups: railGroups, outline: railOutlineItems, mathMacros: outlineMathMacros },
+      { ...railModel, mathMacros: outlineMathMacros },
       {
         onControl: (control) => {
           if (control.label === "Source") setEditorMode("source");
@@ -777,7 +776,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         },
       },
     );
-  }, [outlineMathMacros, railGroups, railOutlineItems, setEditorMode]);
+  }, [outlineMathMacros, railModel, setEditorMode]);
 
   return (
     <div className={readerClass}>

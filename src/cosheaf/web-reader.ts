@@ -14,8 +14,7 @@ import {
 } from "./coflat-document-context";
 import {
   type DocumentRailControl,
-  documentRailGroups,
-  documentRailOutline,
+  documentRailModel,
 } from "../../shared/document-rail";
 import { readDocumentTheme, readSectionNumbering } from "./document-theme";
 import { renderDocumentRail } from "./document-rail-dom";
@@ -187,31 +186,31 @@ function installReaderHashHistory(): void {
   });
 }
 
-// Fill the file reader's table-of-contents rail from Coflat's outline (#117).
+// Fill the file reader's document rail from Coflat's outline (#117).
 // renderToHtml({outline:true}) emits stable, deduplicated heading ids on the
 // rendered HTML and returns these entries, so there is no client-side heading
-// scan or slug regex. Only the file-reader page provides a [data-reader-toc]
-// slot, so this is a no-op for issue/comment/PR readers.
+// scan or slug regex. Only file-reader pages provide a [data-document-rail]
+// mount, so this is a no-op for issue/comment/PR readers.
 function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>): void {
   const rail = document.querySelector<HTMLElement>("[data-document-rail]");
   if (!rail) return;
   const fileControls: DocumentRailControl[] = [];
   if (rail.dataset.pdfHref) fileControls.push({ kind: "link", label: "PDF", href: rail.dataset.pdfHref });
   if (rail.dataset.rawHref) fileControls.push({ kind: "link", label: "Raw", href: rail.dataset.rawHref });
-  const items = documentRailOutline(outline.map((entry) => ({
-    key: entry.id,
-    level: entry.level,
-    label: entry.text,
-    html: entry.html,
-  })));
+  const model = documentRailModel({
+    mode: "read",
+    readHref: rail.dataset.readHref ?? window.location.href,
+    editHref: rail.dataset.editHref || null,
+    fileControls,
+    outline: outline.map((entry) => ({
+      key: entry.id,
+      level: entry.level,
+      label: entry.text,
+      html: entry.html,
+    })),
+  });
   renderDocumentRail(rail, {
-    groups: documentRailGroups({
-      mode: "read",
-      readHref: rail.dataset.readHref ?? window.location.href,
-      editHref: rail.dataset.editHref || null,
-      fileControls,
-    }),
-    outline: items,
+    ...model,
     mathMacros,
   });
 }

@@ -8,14 +8,13 @@ import {
   DOCUMENT_RAIL_OUTLINE_TITLE_CLASS,
   DOCUMENT_RAIL_SWITCH_CLASS,
   type DocumentRailControl,
+  type DocumentRailModel,
   type DocumentRailGroup,
   type DocumentRailOutlineItem,
 } from "../../shared/document-rail";
 import { renderInertChromeInline } from "./chrome-inline";
 
-export interface DocumentRailRenderModel {
-  groups: readonly DocumentRailGroup[];
-  outline: readonly DocumentRailOutlineItem[];
+export interface DocumentRailRenderModel extends DocumentRailModel {
   mathMacros?: Record<string, string>;
 }
 
