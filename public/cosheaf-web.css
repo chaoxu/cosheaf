@@ -70,6 +70,8 @@ input,textarea,select{border:1px solid var(--cf-border);border-radius:var(--cf-r
 /* file reader table-of-contents rail (filled by the reader island) */
 .cosheaf-document-reader.cf-theme-scope:not(.cf-theme-blueprint-book),.web-editor-shell.cf-theme-scope:not(.cf-theme-blueprint-book){--cf-color-link:#18181b}
 html[data-cosheaf-color-scheme="dark"] .cosheaf-document-reader.cf-theme-scope:not(.cf-theme-blueprint-book),html[data-cosheaf-color-scheme="dark"] .web-editor-shell.cf-theme-scope:not(.cf-theme-blueprint-book){--cf-color-link:#fafafa}
+.app-content:has(.doc-with-toc) .repo-page{padding:0 12px}
+.app-content:has(.doc-with-toc) .repo-body{padding-bottom:0}
 .doc-with-toc{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:28px;align-items:start}
 .doc-main{min-width:0;padding-left:1.9em}.doc-main-source{padding-left:0}.doc-main :where(h1,h2,h3){scroll-margin-top:14px}
 .doc-rail{--cf-font-sans:var(--cosheaf-chrome-font-sans);--cf-font-mono:var(--cosheaf-chrome-font-mono);--cf-bg:var(--cosheaf-chrome-bg);--cf-fg:var(--cosheaf-chrome-fg);--cf-muted:var(--cosheaf-chrome-muted);--cf-border:var(--cosheaf-chrome-border);--cf-hover:var(--cosheaf-chrome-hover);--cf-accent:var(--cosheaf-chrome-accent);--cf-accent-fg:var(--cosheaf-chrome-accent-fg);position:sticky;top:6px;max-height:84vh;overflow:auto;padding-left:14px;border-left:1px solid var(--cf-border);background:transparent;color:var(--cf-fg);font:14px/1.5 var(--cf-font-sans)}

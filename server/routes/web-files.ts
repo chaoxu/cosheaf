@@ -198,21 +198,17 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       : preview;
   // Page titles for the tree are only indexed for main (#168), mirroring fileList.
   const fileTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
+  const pageBody = coflatMarkdownDocument
+    ? docBody
+    : html`<div class="file-toolbar">
+      <div>
+        ${kind === "markdown" ? emptyHtml : html`<h1>${rel}</h1>`}
+      </div>
+      ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha })}
+    </div>
+    ${docBody}`;
   return htmlResponse(
-    repoPageShell(ctx, "files", `${rel} - ${repo}`, html`
-        <div class="file-toolbar">
-          <div>
-            ${
-              // A rendered markdown page shows its own .cf-doc-title (and the
-              // sidebar highlights the file), so the filename H1 + kind/size are
-              // redundant noise; other kinds keep a filename header for identity.
-              kind === "markdown" ? emptyHtml : html`<h1>${rel}</h1>`
-            }
-          </div>
-          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha, showEdit: !coflatMarkdownDocument, showRepresentations: !coflatMarkdownDocument })}
-        </div>
-        ${docBody}
-      `, {
+    repoPageShell(ctx, "files", `${rel} - ${repo}`, pageBody, {
         readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
         sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles, branches, user, ws.role !== "read")],
       }),
