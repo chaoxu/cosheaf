@@ -290,6 +290,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await page.getByTestId("view-mode-source").click();
   await page.getByTestId("view-shape-unified").click();
   await expect(page.getByTestId("diff-pane-unified")).toBeVisible();
+  await expect(page.locator(".diff-change-nav")).toBeVisible();
+  await page.locator(".patch tr.add, .patch tr.del").last().scrollIntoViewIfNeeded();
+  await expect(page.locator(".diff-change-nav")).toBeInViewport();
   await expect(page.locator(".changed-files a").first()).toHaveAttribute("href", /mode=source&shape=unified/);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
   await page.getByTestId("view-shape-split").click();
