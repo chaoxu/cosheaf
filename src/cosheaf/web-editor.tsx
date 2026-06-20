@@ -367,19 +367,17 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     const root = document.getElementById("web-editor-root");
     if (!root) return;
     let queued = false;
-    let cleanupHoverPreviews: (() => void) | null = null;
+    const cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
+      source: content,
+      context: documentContext,
+      previewForReference: (key) => editorCitationClusterPreview(key, documentContext),
+    });
     const reconcile = () => {
       queued = false;
       hydrateReferences(root, documentContext, {
         documentPath: currentPath.trim() || config.path,
         source: content,
         surface: "editor",
-      });
-      cleanupHoverPreviews?.();
-      cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
-        source: content,
-        context: documentContext,
-        previewForReference: (key) => editorCitationClusterPreview(key, documentContext),
       });
     };
     const schedule = () => {
@@ -392,7 +390,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     observer.observe(root, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
-      cleanupHoverPreviews?.();
+      cleanupHoverPreviews();
     };
   }, [config.path, content, currentPath, documentContext]);
 
