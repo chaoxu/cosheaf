@@ -328,9 +328,10 @@ describe("files suggest route", () => {
       });
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { suggestions: Array<{ id: string }> };
+      const body = (await res.json()) as { suggestions: Array<{ id: string; insert: string }> };
       expect(body.suggestions).toHaveLength(10);
       expect(body.suggestions[0].id).toBe("alpha-0");
+      expect(body.suggestions[0].insert).toBe("[@alpha-0]");
     }
   });
 
@@ -376,7 +377,7 @@ describe("files suggest route", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       suggestions: [
-        { id: "branch-page", insert: "branch-page]", display: "branch-page — Branch Page (draft.md)" },
+        { id: "branch-page", insert: "[@branch-page]", display: "branch-page — Branch Page (draft.md)" },
       ],
     });
 
@@ -386,7 +387,7 @@ describe("files suggest route", () => {
     expect(theoremRes.status).toBe(200);
     expect(await theoremRes.json()).toEqual({
       suggestions: [
-        { id: "thm:branch", insert: "thm:branch]", display: "thm:branch — Theorem 1 (draft.md)" },
+        { id: "thm:branch", insert: "[@thm:branch]", display: "thm:branch — Theorem 1 (draft.md)" },
       ],
     });
     expect(rawFetches).toBe(1);
@@ -441,7 +442,7 @@ describe("files suggest route", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       suggestions: [
-        { id: "branch-page", insert: "branch-page]", display: "branch-page — Real Branch Title (draft.md)" },
+        { id: "branch-page", insert: "[@branch-page]", display: "branch-page — Real Branch Title (draft.md)" },
       ],
     });
   });

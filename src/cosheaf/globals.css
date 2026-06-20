@@ -42,3 +42,42 @@ body {
 .cm-scroller {
   overflow: auto;
 }
+
+.cf-default-autocomplete {
+  min-width: 220px;
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--cf-border);
+  background: var(--cf-bg);
+  color: var(--cf-fg);
+  box-shadow: var(--cf-shadow-pop);
+  font: 13px/1.35 var(--cf-ui-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+}
+
+.cf-default-autocomplete__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.cf-default-autocomplete__item--selected {
+  background: var(--cf-hover);
+}
+
+.cf-default-autocomplete__item__label {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-default-autocomplete__item__description {
+  flex: 1 0 100%;
+  color: var(--cf-muted);
+  font-size: 12px;
+}

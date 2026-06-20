@@ -547,12 +547,12 @@ files.get("/:owner/:repo/suggest", async (c) => {
   const mainSuggestions: RefSuggestion[] = [
       ...pageRows.map((r): RefSuggestion => ({
         id: r.id,
-        insert: `${r.id}]`,
+        insert: `[@${r.id}]`,
         display: r.title ? `${r.id} — ${r.title}` : r.id,
       })),
       ...xrefRows.map((r): RefSuggestion => ({
         id: r.id,
-        insert: `${r.id}]`,
+        insert: `[@${r.id}]`,
         display: `${r.id} — ${r.title} (${r.path})`,
       })),
     ];
@@ -655,7 +655,7 @@ function addBranchSuggestion(
   seen.add(id);
   suggestions.push({
     id,
-    insert: `${id}]`,
+    insert: `[@${id}]`,
     display: title ? `${id} — ${title} (${path})` : `${id} (${path})`,
   });
 }
