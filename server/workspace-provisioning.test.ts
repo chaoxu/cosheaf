@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_DOCUMENT_FORMAT_ID } from "../shared/document-format.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
-import { DEFAULT_DOCUMENT_FORMAT_ID } from "../shared/document-format.js";
 import {
   provisionWorkspace,
   reindexWorkspaceFromForgejo,
@@ -199,5 +199,22 @@ describe("workspace provisioning", () => {
     expect(count).toBe(1);
     expect(db.prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = 'owner/w' ORDER BY forgejo_id").all())
       .toEqual([{ forgejo_id: "keep.md" }]);
+  });
+
+  it("reindex rebuilds BibTeX citation keys and removes stale citation files", async () => {
+    const db = freshDb();
+    const forgejo = fakeForgejo({
+      "keep.md": "# Keep\n\nSee [@BoysenKW19].\n",
+      "refs/main.bib": "@article{BoysenKW19, title={Valid citation}}\n",
+    });
+    db.prepare(
+      "INSERT INTO citation_targets (workspace_slug, target_id, source_path) VALUES ('owner/w', 'gone', 'refs/gone.bib')",
+    ).run();
+
+    const count = await reindexWorkspaceFromForgejo(db, forgejo, { owner: "owner", repo: "w", slug: "owner/w", defaultMdFormat: "coflat" });
+
+    expect(count).toBe(1);
+    expect(db.prepare("SELECT target_id, source_path FROM citation_targets WHERE workspace_slug = 'owner/w'").all())
+      .toEqual([{ target_id: "BoysenKW19", source_path: "refs/main.bib" }]);
   });
 });

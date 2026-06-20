@@ -1,11 +1,4 @@
 import type Database from "better-sqlite3";
-import { isCoverifyChatEnabled } from "./coverify-cli.js";
-import type { Config } from "./db.js";
-import type { Forgejo } from "./forgejo.js";
-import { ForgejoError } from "./forgejo.js";
-import { deletePage, indexPage } from "./indexer.js";
-import { clearRepoConfig } from "./repo-config.js";
-import type { User } from "./users.js";
 import { workspaceSlug } from "../shared/conventions.js";
 import {
   DEFAULT_CREATE_FORMAT_ID,
@@ -15,6 +8,13 @@ import {
   normalizeDocumentFormatId,
   topicForDocumentFormat,
 } from "../shared/document-format.js";
+import { isCoverifyChatEnabled } from "./coverify-cli.js";
+import type { Config } from "./db.js";
+import type { Forgejo } from "./forgejo.js";
+import { ForgejoError } from "./forgejo.js";
+import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./indexer.js";
+import { clearRepoConfig } from "./repo-config.js";
+import type { User } from "./users.js";
 
 // Forgejo events we subscribe to. The cosheaf webhook handler in
 // `server/routes/webhooks.ts` switches on these exact strings — if you
@@ -322,13 +322,17 @@ export async function reindexWorkspaceFromForgejo(
   forgejo: Forgejo,
   workspace: { owner: string; repo: string; slug: string; defaultMdFormat?: DocumentFormatId },
 ): Promise<number> {
-  const seen = new Set<string>();
+  const seenMarkdown = new Set<string>();
+  const seenCitations = new Set<string>();
   // #182: drop cached cosheaf.yaml config so it rebuilds from Forgejo on next
   // render (the file is authoritative; the sidecar only caches it).
   clearRepoConfig(db, workspace.slug);
   const tree = await forgejo.getTree(workspace.owner, workspace.repo, "main", true);
   const mdPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
+    .map((e) => e.path);
+  const bibPaths = tree
+    .filter((e) => e.type === "blob" && e.path.endsWith(".bib"))
     .map((e) => e.path);
   // Fetch all markdown bodies in parallel — each getRawFile is independent
   // and the indexPage write that follows is local.
@@ -339,6 +343,21 @@ export async function reindexWorkspaceFromForgejo(
         .then((body) => ({ path, body })),
     ),
   );
+  const bibBodies = await Promise.all(
+    bibPaths.map((path) =>
+      forgejo
+        .getRawFile(workspace.owner, workspace.repo, "main", path)
+        .then((body) => ({ path, body })),
+    ),
+  );
+  for (const { path, body } of bibBodies) {
+    indexCitationFile(db, {
+      workspaceSlug: workspace.slug,
+      filePath: path,
+      bodyText: body,
+    });
+    seenCitations.add(path);
+  }
   for (const { path, body } of bodies) {
     indexPage(db, {
       workspaceSlug: workspace.slug,
@@ -346,14 +365,20 @@ export async function reindexWorkspaceFromForgejo(
       bodyText: body,
       formatId: workspace.defaultMdFormat,
     });
-    seen.add(path);
+    seenMarkdown.add(path);
   }
 
   const indexed = db
     .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = ?")
     .all(workspace.slug) as Array<{ forgejo_id: string }>;
   for (const row of indexed) {
-    if (!seen.has(row.forgejo_id)) deletePage(db, workspace.slug, row.forgejo_id);
+    if (!seenMarkdown.has(row.forgejo_id)) deletePage(db, workspace.slug, row.forgejo_id);
   }
-  return seen.size;
+  const indexedCitations = db
+    .prepare("SELECT source_path FROM citation_targets WHERE workspace_slug = ? GROUP BY source_path")
+    .all(workspace.slug) as Array<{ source_path: string }>;
+  for (const row of indexedCitations) {
+    if (!seenCitations.has(row.source_path)) deleteCitationFile(db, workspace.slug, row.source_path);
+  }
+  return seenMarkdown.size;
 }

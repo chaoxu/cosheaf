@@ -1,11 +1,11 @@
 import type { CitationFormatter } from "@chaoxu/coflat/citeproc";
+import ieeeCslXml from "@chaoxu/coflat/latex/csl/ieee.csl?raw";
 import {
   extractReferences,
   parseFrontmatter,
   resolveMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
-import ieeeCslXml from "@chaoxu/coflat/latex/csl/ieee.csl?raw";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { urlPath } from "../../shared/url";
 
@@ -167,6 +167,10 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
     ...(citations ? { citationFormatter: citations.formatter, citationKeys: citations.keys } : {}),
     ...(Object.keys(mathMacros).length ? { mathMacros } : {}),
   };
+}
+
+export async function loadCoflatDocumentContext(payload: CoflatDocumentPayload): Promise<DocumentContext> {
+  return coflatDocumentContext(payload, await loadCoflatRefs(payload));
 }
 
 export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<CoflatDocumentRefs> {

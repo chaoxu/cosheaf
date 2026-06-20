@@ -1,12 +1,12 @@
-import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement } from "react";
-import { createRoot } from "react-dom/client";
 import { extractReferences } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
-import { MarkdownEditor, type AutocompleteSource } from "./editor";
-import { readEditorMode } from "./document-theme";
-import { coflatDocumentContext, coflatLinkResolver, loadCoflatRefs } from "./coflat-document-context";
+import type { ReactElement } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
 import { api } from "./api";
+import { coflatLinkResolver, loadCoflatDocumentContext } from "./coflat-document-context";
+import { readEditorMode } from "./document-theme";
+import { type AutocompleteSource, MarkdownEditor } from "./editor";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -56,8 +56,8 @@ function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; co
     let cancelled = false;
     const timer = window.setTimeout(() => {
       const payload = { source: latestValueRef.current, owner: config.owner, repo: config.repo, branch: config.branch, path: "" };
-      void loadCoflatRefs(payload).then((refs) => {
-        if (!cancelled) setDocumentContext(coflatDocumentContext(payload, refs));
+      void loadCoflatDocumentContext(payload).then((ctx) => {
+        if (!cancelled) setDocumentContext(ctx);
       }).catch(() => {
         if (!cancelled) setDocumentContext(composeContext(config));
       });

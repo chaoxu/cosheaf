@@ -4,21 +4,20 @@ import {
   hydrateReaderDisclosures,
   hydrateReaderHoverPreviews,
   hydrateReferences,
-  renderToHtml,
   type ReaderOutlineEntry,
+  renderToHtml,
 } from "@chaoxu/coflat/reader";
 import { urlPath } from "../../shared/url";
+import {
+  type CoflatDocumentPayload,
+  loadCoflatDocumentContext,
+  resolveRawRepoLink,
+} from "./coflat-document-context";
+import { readDocumentTheme, readSectionNumbering } from "./document-theme";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
-import { readDocumentTheme, readSectionNumbering } from "./document-theme";
-import {
-  coflatDocumentContext,
-  loadCoflatRefs,
-  resolveRawRepoLink,
-  type CoflatDocumentPayload,
-} from "./coflat-document-context";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 
@@ -53,8 +52,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const payload = readPayload(root);
   if (!payload) return;
   applyDocumentTheme(root);
-  const refs = await loadCoflatRefs(payload);
-  const ctx = coflatDocumentContext(payload, refs);
+  const ctx = await loadCoflatDocumentContext(payload);
   // outline:true makes coflat emit stable, collision-free heading ids on the
   // rendered HTML (so deep-link anchors and #114's hash-scroll work without any
   // client-side slugging) and return the outline for the TOC rail (#117).

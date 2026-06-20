@@ -4,6 +4,7 @@
 
 import path from "node:path";
 import type Database from "better-sqlite3";
+import { extractBibTeXCitationKeys } from "./citations.js";
 import type { DocumentLink } from "./document-format/types.js";
 import { getDocumentFormat } from "./format-registry.js";
 import { generateDocId } from "./ids.js";
@@ -203,6 +204,28 @@ export function deletePage(db: Database.Database, workspaceSlug: string, filePat
   ).get(workspaceSlug, filePath) as { cosheaf_id: string } | undefined;
   if (!row) return;
   db.transaction(() => deletePageRows(db, workspaceSlug, row.cosheaf_id))();
+}
+
+export function indexCitationFile(
+  db: Database.Database,
+  p: { workspaceSlug: string; filePath: string; bodyText: string },
+): number {
+  const keys = extractBibTeXCitationKeys(p.bodyText);
+  db.transaction(() => {
+    prep(db, "DELETE FROM citation_targets WHERE workspace_slug = ? AND source_path = ?")
+      .run(p.workspaceSlug, p.filePath);
+    const insertCitation = prep(
+      db,
+      "INSERT OR IGNORE INTO citation_targets (workspace_slug, target_id, source_path) VALUES (?, ?, ?)",
+    );
+    for (const key of keys) insertCitation.run(p.workspaceSlug, key, p.filePath);
+  })();
+  return keys.length;
+}
+
+export function deleteCitationFile(db: Database.Database, workspaceSlug: string, filePath: string): void {
+  prep(db, "DELETE FROM citation_targets WHERE workspace_slug = ? AND source_path = ?")
+    .run(workspaceSlug, filePath);
 }
 
 function resolveLinkTarget(

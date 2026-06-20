@@ -3,16 +3,17 @@
 // AGENTS.md's "Core principles" section. New tables outside the list need a
 // design decision recorded there (and probably a thumbs-down).
 
-import { describe, expect, it } from "vitest";
-import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { describe, expect, it } from "vitest";
 
 const ALLOWED_TABLES = new Set([
   // Derived document index from Forgejo content (rebuildable via reindex)
   "doc_map",
   "backlinks",
   "xref_targets",
+  "citation_targets",
   "xref_target_duplicates",
   "page_tags",
   // Parsed cosheaf.yaml cached per branch (#182). Derived/rebuildable from the

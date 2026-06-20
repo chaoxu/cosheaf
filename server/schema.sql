@@ -102,6 +102,18 @@ CREATE TABLE IF NOT EXISTS xref_targets (
 CREATE INDEX IF NOT EXISTS idx_xref_targets_id ON xref_targets (workspace_slug, target_id);
 CREATE INDEX IF NOT EXISTS idx_xref_targets_path ON xref_targets (workspace_slug, source_path);
 
+-- Derived bibliography citation keys from BibTeX companion files. These are
+-- rebuildable from Forgejo .bib files and let diagnostics distinguish paper
+-- citations such as `[@knuth1984]` from missing page ids or Coflat labels.
+CREATE TABLE IF NOT EXISTS citation_targets (
+  workspace_slug TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  source_path TEXT NOT NULL,
+  PRIMARY KEY (workspace_slug, target_id, source_path)
+);
+CREATE INDEX IF NOT EXISTS idx_citation_targets_id ON citation_targets (workspace_slug, target_id);
+CREATE INDEX IF NOT EXISTS idx_citation_targets_path ON citation_targets (workspace_slug, source_path);
+
 -- Same-file duplicate cross-reference ids cannot be represented by
 -- xref_targets' unique row shape. Keep a rebuildable validation table so
 -- `[@id]` never silently resolves when the source defines it twice.

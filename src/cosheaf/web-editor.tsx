@@ -1,14 +1,10 @@
-import { StrictMode, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { createRoot } from "react-dom/client";
 import type {
   AssetUploader as EditorAssetUploader,
   AutocompleteSource as EditorAutocompleteSource,
-  MountedEditor,
-  OutlineEntry,
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
+  MountedEditor,
+  OutlineEntry,
 } from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,
@@ -18,26 +14,29 @@ import {
   extractFirstH1 as extractCoflatFirstH1,
   parseFrontmatter as parseCoflatFrontmatter,
 } from "@chaoxu/coflat/parse";
-import { hydrateReferences, type DocumentContext } from "@chaoxu/coflat/reader";
-import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
-import { isEditableTextFile } from "../../shared/file-kind";
+import { type DocumentContext, hydrateReferences } from "@chaoxu/coflat/reader";
+import type { ReactNode } from "react";
+import { lazy, StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
-import { iconMarkup, lucideIcons } from "../../shared/lucide";
-import { urlPath } from "../../shared/url";
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
   userBranchPrefix,
 } from "../../shared/conventions";
+import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+import { isEditableTextFile } from "../../shared/file-kind";
+import { iconMarkup, lucideIcons } from "../../shared/lucide";
+import { urlPath } from "../../shared/url";
 import { ApiError, api } from "./api";
-import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
+import {
+  loadCoflatDocumentContext,
+} from "./coflat-document-context";
 import type { DocumentThemeId } from "./document-theme";
+import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
-import {
-  coflatDocumentContext,
-  loadCoflatRefs,
-} from "./coflat-document-context";
 import { sanitizeAndRewriteRefsFragment } from "./ref-rewriter";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
@@ -312,9 +311,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       ...(config.bibliography ? { bibliography: config.bibliography } : {}),
       ...(config.csl ? { csl: config.csl } : {}),
     };
-    void loadCoflatRefs(payload).then((refs) => {
+    void loadCoflatDocumentContext(payload).then((ctx) => {
       if (cancelled) return;
-      setDocumentContext(coflatDocumentContext(payload, refs));
+      setDocumentContext(ctx);
       contextLoadedRef.current = true;
       setDocumentContextReady(true);
     });

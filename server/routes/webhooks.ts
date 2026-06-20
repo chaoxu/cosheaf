@@ -1,17 +1,17 @@
 // Forgejo webhook receiver. Verifies HMAC, dedupes by delivery id, updates the
-// sidecar (FTS, backlinks, doc_map), and fans out to SSE.
+// sidecar (FTS, backlinks, doc_map, citation keys), and fans out to SSE.
 
-import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import type { AppEnv } from "../types.js";
-import { deletePage, indexPage } from "../indexer.js";
-import { REPO_CONFIG_PATH, bustRepoConfig } from "../repo-config.js";
-import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
+import { Hono } from "hono";
 import { notificationChannel, parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
-import { documentFormatFromTopics, type DocumentFormatId } from "../../shared/document-format.js";
-import { invalidateWorkspaceCaches } from "../middleware.js";
-import { invalidateRepoTrees } from "../tree-cache.js";
+import { type DocumentFormatId, documentFormatFromTopics } from "../../shared/document-format.js";
 import type { ForgejoIssue } from "../forgejo.js";
+import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "../indexer.js";
+import { invalidateWorkspaceCaches } from "../middleware.js";
+import { bustRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
+import { invalidateRepoTrees } from "../tree-cache.js";
+import type { AppEnv } from "../types.js";
+import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
 import { parsePositiveIntId } from "./query-params.js";
 import { bad, unauthorized } from "./responses.js";
 
@@ -174,6 +174,7 @@ webhooks.post("/forgejo", async (c) => {
           bustRepoConfig(db, ws.slug, "main");
         }
         const mdPaths = [...touched].filter((p) => p.endsWith(".md"));
+        const bibPaths = [...touched].filter((p) => p.endsWith(".bib"));
         // Parallel fetch — each Forgejo getRawFile is independent and the
         // indexPage write is local; sequential blew up the tail when a
         // push touched many notes.
@@ -185,7 +186,26 @@ webhooks.post("/forgejo", async (c) => {
             ),
           ),
         );
+        const bibResults = await Promise.all(
+          bibPaths.map((path) =>
+            fj.getRawFile(owner, repoName, "main", path).then(
+              (body) => ({ path, body, error: null as string | null }),
+              (err: unknown) => ({ path, body: "", error: (err as Error).message }),
+            ),
+          ),
+        );
         const failures: string[] = [];
+        for (const r of bibResults) {
+          if (r.error) {
+            failures.push(`${r.path}: ${r.error}`);
+            continue;
+          }
+          indexCitationFile(db, {
+            workspaceSlug: ws.slug,
+            filePath: r.path,
+            bodyText: r.body,
+          });
+        }
         const indexed: Array<{ path: string; body: string }> = [];
         for (const r of results) {
           if (r.error) {
@@ -211,6 +231,9 @@ webhooks.post("/forgejo", async (c) => {
               formatId: ws.defaultMdFormat,
             });
           }
+        }
+        for (const path of removed) {
+          if (path.endsWith(".bib")) deleteCitationFile(db, ws.slug, path);
         }
         if (failures.length > 0) {
           // Don't throw — that would unwind the dedupe row and provoke a Forgejo

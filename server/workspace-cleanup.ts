@@ -12,6 +12,7 @@ export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: 
   db.prepare("DELETE FROM backlinks WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM xref_targets WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM xref_target_duplicates WHERE workspace_slug = ?").run(workspaceSlug);
+  db.prepare("DELETE FROM citation_targets WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM page_tags WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM issue_claims WHERE workspace_slug = ?").run(workspaceSlug);
   clearRepoConfig(db, workspaceSlug);

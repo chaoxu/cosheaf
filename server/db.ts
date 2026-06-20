@@ -283,7 +283,7 @@ function migrateDropWorkspacesTable(db: Database.Database): void {
 // (`pnpm cli workspace reindex <owner>/<repo>` or rm db.sqlite + setup:dev).
 function migrateOwnerQualifySlugs(db: Database.Database): void {
   const legacyOwner = process.env.COSHEAF_FORGEJO_OWNER ?? "cosheaf-admin";
-  const tables = ["doc_map", "backlinks", "xref_targets", "xref_target_duplicates", "page_tags", "notes_fts"];
+  const tables = ["doc_map", "backlinks", "xref_targets", "xref_target_duplicates", "citation_targets", "page_tags", "notes_fts"];
   const existing = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as Array<{ name: string }>)
       .map((t) => t.name),

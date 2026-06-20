@@ -1,15 +1,15 @@
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { indexPage } from "../indexer.js";
+import { COFLAT_FORMAT_ID, FORGEJO_PASSTHROUGH_FORMAT_ID } from "../../shared/document-format.js";
+import type { WorkspaceValidation } from "../../shared/validation.js";
+import { indexCitationFile, indexPage } from "../indexer.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { _clearBranchRefCacheForTests, files, safeRel } from "./files.js";
-import { COFLAT_FORMAT_ID, FORGEJO_PASSTHROUGH_FORMAT_ID } from "../../shared/document-format.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
-import type { WorkspaceValidation } from "../../shared/validation.js";
 
 const config = testConfig("files");
 
@@ -141,6 +141,56 @@ describe("files validation route", () => {
         { id: "source", path: "source.md", title: "Source" },
       ],
     });
+  });
+
+  it("does not report citations whose keys exist in a BibTeX companion file", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    indexCitationFile(db, {
+      workspaceSlug: "owner/w",
+      filePath: "refs/main.bib",
+      bodyText: "@article{BoysenKW19, title={Valid citation}}\n",
+    });
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "source.md",
+      bodyText: [
+        "---",
+        "id: source",
+        "bibliography: refs/main.bib",
+        "---",
+        "# Source",
+        "",
+        "See [@BoysenKW19], [@missing-page], and [@thm:missing].",
+        "",
+      ].join("\n"),
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as WorkspaceValidation;
+    expect(body.broken_refs).toEqual([
+      {
+        source_id: "source",
+        source_path: "source.md",
+        source_title: "Source",
+        target_id: "missing-page",
+        target_label: "[@missing-page]",
+        line: 7,
+      },
+      {
+        source_id: "source",
+        source_path: "source.md",
+        source_title: "Source",
+        target_id: "thm:missing",
+        target_label: "[@thm:missing]",
+        line: 7,
+      },
+    ]);
   });
 
   it("reports duplicate Coflat xref ids", async () => {

@@ -37,6 +37,11 @@ export function workspaceValidation(
                 SELECT 1 FROM xref_targets target
                  WHERE target.workspace_slug = b.workspace_slug
                    AND target.target_id = b.target_id
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM citation_targets target
+                 WHERE target.workspace_slug = b.workspace_slug
+                   AND target.target_id = b.target_id
               )` : ""}
             )
           )

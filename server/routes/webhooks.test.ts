@@ -3,11 +3,11 @@ import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Forgejo } from "../forgejo.js";
-import { SSEHub, type SSEEvent } from "../sse.js";
+import { type SSEEvent, SSEHub } from "../sse.js";
 import { _clearTreeCacheForTests, getCachedTree, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { webhooks } from "./webhooks.js";
 import { freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { webhooks } from "./webhooks.js";
 
 const config = testConfig("webhook", { forgejoToken: "token" });
 
@@ -371,6 +371,22 @@ describe("forgejo webhooks", () => {
       });
     });
 
+    it("UPDATE: a push that modifies refs.bib updates citation keys", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({ "refs.bib": "@article{BoysenKW19, title={Valid citation}}\n" });
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/w" },
+        commits: [{ modified: ["refs.bib"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "bib-update-1"));
+      expect(res.status).toBe(200);
+      expect(db.prepare("SELECT target_id, source_path FROM citation_targets WHERE workspace_slug = 'owner/w'").all()).toEqual([
+        { target_id: "BoysenKW19", source_path: "refs.bib" },
+      ]);
+    });
+
     it("DELETE: a push that removes foo.md drops the doc_map row and emits SSE remove", async () => {
       const db = freshDb();
       db.prepare(
@@ -385,6 +401,22 @@ describe("forgejo webhooks", () => {
       const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "delete-1"));
       expect(res.status).toBe(200);
       expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+    });
+
+    it("DELETE: a push that removes refs.bib drops citation keys", async () => {
+      const db = freshDb();
+      db.prepare(
+        "INSERT INTO citation_targets (workspace_slug, target_id, source_path) VALUES ('owner/w', 'BoysenKW19', 'refs.bib')",
+      ).run();
+      const app = appFor(db, {} as Forgejo);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/w" },
+        commits: [{ removed: ["refs.bib"] }],
+      });
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "bib-delete-1"));
+      expect(res.status).toBe(200);
+      expect(db.prepare("SELECT count(*) AS c FROM citation_targets WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
     });
 
     it("RENAME (Forgejo's removed+added): old row goes, new row comes in", async () => {

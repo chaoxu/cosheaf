@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { deletePage, indexPage } from "./indexer.js";
-import { parseDocument } from "./frontmatter.js";
 import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
+import { parseDocument } from "./frontmatter.js";
+import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./indexer.js";
 import { freshTestDb } from "./routes/test-fixtures.js";
 
 function freshDb(): Database.Database {
@@ -197,6 +197,34 @@ describe("indexPage", () => {
 
     deletePage(db, "owner/w", "theory.md");
     expect(db.prepare("SELECT count(*) AS c FROM xref_targets WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
+  });
+
+  it("indexes and deletes BibTeX citation keys", () => {
+    const db = freshDb();
+    const count = indexCitationFile(db, {
+      workspaceSlug: "owner/w",
+      filePath: "refs/main.bib",
+      bodyText: [
+        "@article{BoysenKW19,",
+        "  title={A paper}",
+        "}",
+        "@book{RatliffR83,",
+        "  title={A book}",
+        "}",
+      ].join("\n"),
+    });
+
+    expect(count).toBe(2);
+    const keys = db
+      .prepare("SELECT target_id, source_path FROM citation_targets WHERE workspace_slug = 'owner/w' ORDER BY target_id")
+      .all() as Array<{ target_id: string; source_path: string }>;
+    expect(keys).toEqual([
+      { target_id: "BoysenKW19", source_path: "refs/main.bib" },
+      { target_id: "RatliffR83", source_path: "refs/main.bib" },
+    ]);
+
+    deleteCitationFile(db, "owner/w", "refs/main.bib");
+    expect(db.prepare("SELECT count(*) AS c FROM citation_targets WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
   });
 
   it("indexes xref target labels with Coflat frontmatter numbering", () => {
