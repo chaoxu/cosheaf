@@ -1,5 +1,5 @@
-import type Database from "better-sqlite3";
 import { readFile, writeFile } from "node:fs/promises";
+import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
@@ -140,6 +140,59 @@ describe("web file editor route", () => {
     expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
     expect(body).not.toContain('<summary class="button">More</summary>');
+  });
+
+  it("previews a small extensionless UTF-8 file as plain text", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({ tree: [{ path: ".gitignore", type: "blob", size: 18 }], truncated: false }),
+        );
+        forge.get("/api/v1/repos/owner/w/contents/.gitignore", () => Response.json({ sha: "ignore-sha", size: 18 }));
+        forge.get("/api/v1/repos/owner/w/raw/.gitignore", () => new Response("node_modules\n.env\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/src/branch/main/.gitignore", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="file-preview-text"');
+    expect(body).toContain('data-testid="file-preview-text-raw" data="/owner/w/raw/branch/main/.gitignore" type="text/plain"');
+    expect(body).not.toContain("No inline preview is available");
+    expect(body).not.toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=.gitignore"');
+  });
+
+  it("does not fetch large unknown files only to sniff a text preview", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let rawFetched = false;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({ tree: [{ path: "big-data", type: "blob", size: 300_000 }], truncated: false }),
+        );
+        forge.get("/api/v1/repos/owner/w/contents/big-data", () => Response.json({ sha: "big-sha", size: 300_000 }));
+        forge.get("/api/v1/repos/owner/w/raw/big-data", () => {
+          rawFetched = true;
+          return new Response("large text\n");
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/src/branch/main/big-data", { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="file-preview-raw"');
+    expect(body).toContain("No inline preview is available");
+    expect(rawFetched).toBe(false);
   });
 
   it("exports a Coflat markdown file as PDF through the shared Latex contract", async () => {

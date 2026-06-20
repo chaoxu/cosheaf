@@ -1,45 +1,46 @@
+import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
 import type { Context, Hono } from "hono";
+import { userBranchPrefix } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { type FileKind, fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
-import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
-import { repositoryRawHeadersForPath } from "../content-type.js";
+import { isLikelyTextContent, repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { planIndexPage } from "../indexer.js";
 import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageExcerpts, workspacePageTitles } from "../page-search.js";
 import { exportCoflatMarkdownPdf, PdfExportError, type PdfProjectFile } from "../pdf-export.js";
+import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
+import { branchIcon, chevronIcon } from "./icons.js";
 import {
   badRequestPage,
   displayLogin,
   forbiddenPage,
-  timeEl,
   htmlResponse,
   notFoundPage,
   redirect,
   repoHref,
   stringField,
   textField,
+  timeEl,
   urlPath,
+  type WebCtx,
   webRoute,
   webRouteForWrite,
-  type WebCtx,
 } from "./web-context.js";
-import { emptyHtml, html, type Html, jsonScript } from "./web-html.js";
-import { type Panel, panel } from "./web-panels.js";
+import { emptyHtml, type Html, html, jsonScript } from "./web-html.js";
 import { markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
+import { type Panel, panel } from "./web-panels.js";
 import { webEditorAssets } from "./web-shell.js";
-import { branchIcon, chevronIcon } from "./icons.js";
-import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
-import { userBranchPrefix } from "../../shared/conventions.js";
 
 const PDF_EXPORT_MAX_FILES = 500;
 const PDF_EXPORT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
+const INLINE_TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -166,6 +167,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const kind = fileKindForPath(rel);
   const sourceView = c.req.query("view") === "source";
   const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const previewKind = await previewKindForFile(fj, owner, repo, resolved.branch, rel, kind, meta.size);
   const rendered =
     kind === "markdown" && content !== null && !sourceView
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true })
@@ -176,7 +178,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   // at the top and the table of contents below. The reader island fills the TOC
   // from Coflat's outline data, while the editor renders the same rail shape
   // from its live outline.
-  const preview = filePreview(ctx, resolved.branch, rel, kind, { rendered, source: content, sourceView });
+  const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
   const docBody =
     renderedCoflatMarkdown
       ? html`<div class="doc-with-toc">
@@ -715,6 +717,20 @@ function filePreview(
     <p>No inline preview is available for this file type.</p>
     <a class="button" href="${rawHref}">Open raw file</a>
   </article>`;
+}
+
+async function previewKindForFile(
+  fj: Forgejo,
+  owner: string,
+  repo: string,
+  branch: string,
+  rel: string,
+  kind: FileKind,
+  size: number,
+): Promise<FileKind> {
+  if (kind !== "binary" || size > INLINE_TEXT_PREVIEW_MAX_BYTES) return kind;
+  const content = await fj.getRawFileBytes(owner, repo, branch, rel);
+  return isLikelyTextContent(content) ? "text" : kind;
 }
 
 function sourceFilePreview(content: string): Html {
