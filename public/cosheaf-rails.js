@@ -1,4 +1,6 @@
 (function () {
+  var observing = false;
+
   function setCollapsed(side, collapsed) {
     var attr = side === "left" ? "data-cosheaf-left-rail" : "data-cosheaf-right-rail";
     var key = side === "left" ? "cosheaf:left-rail" : "cosheaf:right-rail";
@@ -39,8 +41,17 @@
 
   function boot() {
     installToggle(document.querySelector(".app-sidebar"), "left");
-    var rightRail = document.querySelector(".web-editor-outline, .doc-rail, .thread-rail");
-    installToggle(rightRail, "right");
+    document.querySelectorAll(".web-editor-outline, .doc-rail, .thread-rail").forEach(function (rightRail) {
+      installToggle(rightRail, "right");
+    });
+    if (!observing && "MutationObserver" in window && document.body) {
+      observing = true;
+      new MutationObserver(function () {
+        document.querySelectorAll(".web-editor-outline, .doc-rail, .thread-rail").forEach(function (rightRail) {
+          installToggle(rightRail, "right");
+        });
+      }).observe(document.body, { childList: true, subtree: true });
+    }
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
