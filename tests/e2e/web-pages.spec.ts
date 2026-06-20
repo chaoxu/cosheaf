@@ -1,4 +1,8 @@
 import { expect, type Locator, test } from "@playwright/test";
+import {
+  COFLAT_BROWSER_ATTRIBUTES as CFA,
+  COFLAT_BROWSER_SELECTORS as CF,
+} from "@chaoxu/coflat/browser-test-utils";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 
 const webBase = defaultWebUrl();
@@ -13,7 +17,7 @@ const repoBase = `${webBase}/${owner}/${repo}`;
 async function fillCompose(scope: Locator, text: string): Promise<void> {
   const compose = scope.locator("[data-coflat-compose]").first();
   if (await compose.count()) {
-    const content = compose.locator(".cm-content");
+    const content = compose.locator(CF.editorContent);
     await content.waitFor({ state: "visible" });
     await content.click();
     await content.fill(text);
@@ -82,7 +86,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/src/branch/main/hello.md`);
   await expect(page).toHaveURL(`${repoBase}/src/branch/main/hello.md`);
-  await expect(page.locator(".cf-reader")).toContainText("Hello");
+  await expect(page.locator(CF.reader)).toContainText("Hello");
   const crossFileTheorem = page.getByRole("link", { name: "Theorem 1" });
   await expect(crossFileTheorem).toBeVisible();
   await expect(crossFileTheorem).toHaveAttribute(
@@ -93,7 +97,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   await page.goto(`${repoBase}/_edit?branch=main&path=hello.md`);
   await expect(page.getByTestId("editor")).toBeVisible();
-  const editorCrossFileTheorem = page.locator('.cm-content [data-ref-key="thm:coin-conservation"]');
+  const editorCrossFileTheorem = page.locator(`${CF.editorContent} [${CFA.referenceKey}="thm:coin-conservation"]`);
   await expect(editorCrossFileTheorem).toContainText("Theorem 1");
   await expect(editorCrossFileTheorem.locator("a").first()).toHaveAttribute(
     "href",
@@ -105,22 +109,24 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     .poll(async () =>
       // CodeMirror virtualizes content, so scan the document instead of relying
       // on a fixed scroll offset (the showcase layout shifts as it evolves).
-      page.evaluate(async () => {
-        const scroller = document.querySelector(".cm-scroller");
+      page.evaluate(async (selector) => {
+        const scroller = document.querySelector(selector.editorScroller);
         if (!scroller) return { unresolved: -1, tableText: "" };
         const step = Math.max(400, Math.floor(scroller.clientHeight / 2));
         let tableText = "";
         for (let top = 0; top <= scroller.scrollHeight; top += step) {
           scroller.scrollTop = top;
           await new Promise((resolve) => window.setTimeout(resolve, 150));
-          tableText = [...document.querySelectorAll(".cf-table-widget")].map((el) => el.textContent ?? "").join("\n");
+          tableText = [...document.querySelectorAll(selector.tableWidget)].map((el) => el.textContent ?? "").join("\n");
           if (tableText.includes("[1]")) break;
         }
         return {
-          unresolved: document.querySelectorAll(".cm-content .cf-crossref-unresolved, .cm-content .cf-citation-unresolved").length,
+          unresolved: document.querySelectorAll(
+            `${selector.editorContent} ${selector.unresolvedCrossref}, ${selector.editorContent} ${selector.unresolvedCitation}`,
+          ).length,
           tableText,
         };
-      }),
+      }, CF),
     )
     .toEqual(expect.objectContaining({ unresolved: 0, tableText: expect.stringContaining("[1]") }));
 
@@ -131,7 +137,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   const plainTextRaw = await page.request.get(plainTextRawHref);
   expect(plainTextRaw.ok()).toBe(true);
   expect(await plainTextRaw.text()).toContain("intentionally not Markdown");
-  await expect(page.locator(".cf-reader")).toHaveCount(0);
+  await expect(page.locator(CF.reader)).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Edit text" })).toBeVisible();
 
   await page.goto(`${repoBase}/src/branch/main/docs/sample.pdf`);
@@ -200,7 +206,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   // The body field is enhanced by the coflat editor island on coflat workspaces;
   // the rich editor is the visible compose surface (textarea is hidden behind it).
-  await expect(page.getByTestId("issue-edit-form").locator(".cm-editor").first()).toBeVisible();
+  await expect(page.getByTestId("issue-edit-form").locator(CF.editorRoot).first()).toBeVisible();
   await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("thread-labels")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
@@ -259,7 +265,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await page.getByTestId("pull-edit-link").click();
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();
-  await expect(page.getByTestId("pull-edit-form").locator(".cm-editor").first()).toBeVisible();
+  await expect(page.getByTestId("pull-edit-form").locator(CF.editorRoot).first()).toBeVisible();
   await page.goto(demoPrPath.startsWith("http") ? demoPrPath : `${webBase}${demoPrPath}`);
   await expect(page.locator(".thread")).toContainText(/pushed \d+ commits?/);
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();
@@ -319,11 +325,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("editor")).toBeVisible();
   await expect(page.getByTestId("document-theme-select")).toHaveCount(0);
   await page.getByRole("button", { name: "Source" }).click();
-  await page.locator(".cm-content").fill(`# Web Page E2E\n\nThis was saved through a server-rendered editor.\n`);
+  await page.locator(CF.editorContent).fill(`# Web Page E2E\n\nThis was saved through a server-rendered editor.\n`);
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByTestId("statusbar")).toContainText("Saved");
   await page.goto(`${repoBase}/src/branch/${branch}/${path}`);
-  await expect(page.locator(".cf-reader")).toContainText("Web Page E2E");
+  await expect(page.locator(CF.reader)).toContainText("Web Page E2E");
   await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();
   await page.getByRole("link", { name: "Open PR" }).click();
   await expect(page.getByTestId("pull-create-form")).toBeVisible();
