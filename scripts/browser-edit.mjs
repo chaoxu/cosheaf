@@ -48,15 +48,20 @@ try {
     const statusbar = document.querySelector('[data-testid="statusbar"]');
     const breadcrumb = document.querySelector(".app-statusbar .status-path");
     const pathInput = document.querySelector('[data-testid="editor-path-input"]');
+    const title = document.querySelector(".cf-doc-title");
     const rect = (el) => {
       if (!el) return null;
       const box = el.getBoundingClientRect();
       return { w: Math.round(box.width), h: Math.round(box.height) };
     };
+    const titleStyle = title ? window.getComputedStyle(title) : null;
     return {
       editor: rect(editor),
       codeMirror: rect(cm),
       outline: rect(outline),
+      title: rect(title),
+      titleText: title?.textContent?.trim() ?? "",
+      titleUserSelect: titleStyle?.userSelect ?? "",
       statusbar: statusbar?.textContent ?? "",
       breadcrumb: breadcrumb?.textContent ?? "",
       path: pathInput instanceof HTMLInputElement ? pathInput.value : "",
@@ -69,6 +74,13 @@ try {
   }
   if (!stats.codeMirror || stats.codeMirror.h < 400) {
     throw new Error(`CodeMirror did not mount correctly: ${JSON.stringify(stats.codeMirror)}`);
+  }
+  if (!stats.title || !stats.titleText || stats.titleUserSelect === "none") {
+    throw new Error(`first rendered editor title line is not selectable: ${JSON.stringify({
+      title: stats.title,
+      text: stats.titleText,
+      userSelect: stats.titleUserSelect,
+    })}`);
   }
   // The branch lives in the breadcrumb now (#164); the filename is the rename
   // input, and the editor action slot no longer duplicates either.

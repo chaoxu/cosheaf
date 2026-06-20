@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
@@ -42,6 +42,19 @@ export function viteOriginFromWebUrl(webUrl = process.env.COSHEAF_WEB_URL, viteP
 
 export function viteApiProxyTarget(serverUrl = process.env.COSHEAF_SERVER_URL, apiPort = process.env.COSHEAF_PORT): string {
   return optionalEnv(serverUrl) ?? `http://localhost:${envPort(apiPort, "COSHEAF_PORT", "3030")}`;
+}
+
+export function viteFsAllow(repoRoot = __dirname): string[] {
+  const allow = new Set<string>([repoRoot]);
+  const nodeModulesPath = path.resolve(repoRoot, "node_modules");
+  if (existsSync(nodeModulesPath)) {
+    try {
+      allow.add(realpathSync(nodeModulesPath));
+    } catch (_err) {
+      allow.add(nodeModulesPath);
+    }
+  }
+  return [...allow];
 }
 
 function optionalEnv(value: string | undefined): string | undefined {
@@ -148,6 +161,9 @@ export default defineConfig({
     hmr: false,
     port: Number(envPort(process.env.COSHEAF_VITE_PORT, "COSHEAF_VITE_PORT", "5173")),
     host: viteHost(),
+    fs: {
+      allow: viteFsAllow(),
+    },
     proxy: {
       "/api": {
         target: viteApiProxyTarget(),

@@ -1,5 +1,8 @@
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { viteApiProxyTarget, viteHostForOrigin, viteOrigin, viteOriginFromWebUrl } from "../vite.config.js";
+import { viteApiProxyTarget, viteFsAllow, viteHostForOrigin, viteOrigin, viteOriginFromWebUrl } from "../vite.config.js";
 
 describe("vite dev server remote origin helpers", () => {
   it("binds externally for non-local Vite origins", () => {
@@ -60,5 +63,28 @@ describe("vite dev server remote origin helpers", () => {
     expect(viteApiProxyTarget("http://jupiter:3030", "abc")).toBe("http://jupiter:3030");
     expect(() => viteApiProxyTarget(" ", "abc")).toThrow(/COSHEAF_PORT/);
     expect(() => viteApiProxyTarget(" ", "65536")).toThrow(/COSHEAF_PORT/);
+  });
+
+  it("allows the repo root for Vite file-system asset URLs", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cosheaf-vite-root-"));
+    try {
+      expect(viteFsAllow(root)).toEqual([root]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a symlinked node_modules target for Vite file-system asset URLs", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "cosheaf-vite-root-"));
+    const shared = mkdtempSync(path.join(tmpdir(), "cosheaf-vite-shared-"));
+    try {
+      mkdirSync(path.join(shared, "node_modules"));
+      symlinkSync(path.join(shared, "node_modules"), path.join(root, "node_modules"));
+
+      expect(viteFsAllow(root)).toEqual([root, realpathSync(path.join(shared, "node_modules"))]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(shared, { recursive: true, force: true });
+    }
   });
 });

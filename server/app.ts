@@ -91,6 +91,13 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
         headers: { "content-type": response.headers.get("content-type") ?? contentTypeForPath(c.req.path) },
       });
     });
+    app.get("/@fs/*", async (c) => {
+      const response = await fetch(new URL(c.req.path, viteDevOrigin()));
+      return new Response(response.body, {
+        status: response.status,
+        headers: { "content-type": response.headers.get("content-type") ?? contentTypeForPath(c.req.path) },
+      });
+    });
   }
 
   app.use("/assets/*", compress());

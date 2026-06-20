@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { seedAuthUser } from "./test-helpers.js";
 import { freshTestDb, testConfig } from "./routes/test-fixtures.js";
 
 describe("createApp API route assembly", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("mounts the cookie API CSRF guard before typed API mutations", async () => {
     const config = testConfig("app-assembly");
     const db = freshTestDb("cosheaf-app-assembly-");
@@ -55,5 +59,27 @@ describe("createApp API route assembly", () => {
     });
 
     expect(res.status).toBe(404);
+  });
+
+  it("proxies Vite file-system asset URLs in development", async () => {
+    const config = testConfig("app-assembly");
+    const db = freshTestDb("cosheaf-app-assembly-");
+    const app = createApp({ config, db });
+    const fetchMock = vi.fn(async (_input: string | URL | Request) =>
+      new Response("font", {
+        status: 200,
+        headers: { "content-type": "font/woff2" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await app.request("/@fs/Users/example/node_modules/@chaoxu/coflat/dist/fonts/KaTeX_Main-Regular.woff2");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("font/woff2");
+    expect(await res.text()).toBe("font");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "http://localhost:5173/@fs/Users/example/node_modules/@chaoxu/coflat/dist/fonts/KaTeX_Main-Regular.woff2",
+    );
   });
 });
