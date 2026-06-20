@@ -12,6 +12,11 @@ import {
   type CoflatDocumentPayload,
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
+import {
+  DOCUMENT_RAIL_OUTLINE_TITLE_CLASS,
+  DOCUMENT_RAIL_OUTLINE_LABEL,
+  documentRailOutline,
+} from "../../shared/document-rail";
 import { readDocumentTheme, readSectionNumbering } from "./document-theme";
 import { renderInertChromeInline } from "./chrome-inline";
 import {
@@ -193,22 +198,26 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Rec
   // sidebar. File pages render exactly one slot and one reader island.
   const slot = document.querySelector<HTMLElement>("[data-reader-toc]");
   if (!slot) return;
-  const items = outline.filter((entry) => entry.level <= 3);
+  const items = documentRailOutline(outline.map((entry) => ({
+    key: entry.id,
+    level: entry.level,
+    label: entry.text,
+    html: entry.html,
+  })));
   // Render the rail whenever the document has at least one h1–h3 heading.
   // The previous >=2 threshold hid the outline for simple/few-heading docs
   // (#125); a single-heading doc still gets a usable "On this page" entry.
   if (items.length < 1) return;
-  const minLevel = Math.min(...items.map((item) => item.level));
   slot.replaceChildren();
   const title = document.createElement("p");
-  title.className = "doc-toc-title";
-  title.textContent = "On this page";
+  title.className = DOCUMENT_RAIL_OUTLINE_TITLE_CLASS;
+  title.textContent = DOCUMENT_RAIL_OUTLINE_LABEL;
   slot.appendChild(title);
   for (const item of items) {
     const link = document.createElement("a");
-    link.href = `#${item.id}`;
-    link.className = `doc-toc-link lvl-${item.level - minLevel}`;
-    renderInertChromeInline(link, { html: item.html, fallback: item.text, mathMacros });
+    link.href = `#${item.key}`;
+    link.className = item.className;
+    renderInertChromeInline(link, { html: item.html, fallback: item.label, mathMacros });
     slot.appendChild(link);
   }
   slot.hidden = false;

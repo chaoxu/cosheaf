@@ -32,6 +32,19 @@ import {
   MAX_ASSET_DISPLAY,
   userBranchPrefix,
 } from "../../shared/conventions";
+import {
+  DOCUMENT_RAIL_CONTROLS_CLASS,
+  DOCUMENT_RAIL_CONTROLS_LABEL,
+  DOCUMENT_RAIL_GROUP_CLASS,
+  DOCUMENT_RAIL_LABEL_CLASS,
+  DOCUMENT_RAIL_OUTLINE_CLASS,
+  DOCUMENT_RAIL_OUTLINE_LABEL,
+  DOCUMENT_RAIL_OUTLINE_TITLE_CLASS,
+  DOCUMENT_RAIL_SWITCH_CLASS,
+  type DocumentRailControl,
+  documentRailGroups,
+  documentRailOutline,
+} from "../../shared/document-rail";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
@@ -214,6 +227,30 @@ function InlineChromeHtml({
     renderInertChromeInline(el, { html, fallback, mathMacros });
   }, [html, fallback, mathMacros]);
   return <span ref={ref}>{fallback}</span>;
+}
+
+function DocumentRailControlView({
+  control,
+  onEditorMode,
+}: {
+  control: DocumentRailControl;
+  onEditorMode: (mode: "rich" | "source") => void;
+}): ReactNode {
+  const className = control.active ? "active" : undefined;
+  const ariaCurrent = control.active ? "page" : undefined;
+  if (control.kind === "button") {
+    const editorMode = control.label === "Source" ? "source" : "rich";
+    return (
+      <button type="button" className={className} aria-current={ariaCurrent} onClick={() => onEditorMode(editorMode)}>
+        {control.label}
+      </button>
+    );
+  }
+  return (
+    <a data-doc-mode-link={control.modeLink ? true : undefined} className={className} href={control.href ?? "#"} aria-current={ariaCurrent}>
+      {control.label}
+    </a>
+  );
 }
 
 function WebEditor({ config, initialContent }: { config: EditorConfig; initialContent: string }) {
@@ -760,6 +797,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // path that was never written.
   const readHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(savedReadBranch)}/${urlPath(savedPath)}`;
   const outlineMathMacros = documentContext?.mathMacros;
+  const railGroups = documentRailGroups({
+    mode: "edit",
+    readHref,
+    editHref: window.location.href,
+    editorMode: config.formatId === COFLAT_FORMAT_ID ? mode : undefined,
+  });
+  const railOutlineItems = documentRailOutline(outline.map((entry) => ({
+    key: entry.key,
+    level: entry.level,
+    label: entry.markdown,
+    html: (entry as OutlineEntry & { html?: string }).html,
+    line: entry.line,
+  })));
 
   return (
     <div className={readerClass}>
@@ -807,31 +857,17 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           )}
         </Suspense>
         <aside className="web-editor-outline doc-rail" aria-label="Document tools">
-          <div className="doc-view-controls" aria-label="View">
-            <div className="doc-view-group" aria-label="Mode">
-              <span className="doc-view-label">Mode</span>
-              <div className="doc-view-switch">
-                <a data-doc-mode-link data-testid="editor-read-link" href={readHref}>
-                  Read
-                </a>
-                <a data-doc-mode-link className="active" href={window.location.href} aria-current="page">
-                  Edit
-                </a>
-              </div>
-            </div>
-            {config.formatId === COFLAT_FORMAT_ID ? (
-              <div className="doc-view-group" aria-label="Editor">
-                <span className="doc-view-label">Editor</span>
-                <div className="doc-view-switch">
-                  <button type="button" className={mode === "rich" ? "active" : ""} aria-current={mode === "rich" ? "page" : undefined} onClick={() => setEditorMode("rich")}>
-                    Rich
-                  </button>
-                  <button type="button" className={mode === "source" ? "active" : ""} aria-current={mode === "source" ? "page" : undefined} onClick={() => setEditorMode("source")}>
-                    Source
-                  </button>
+          <div className={DOCUMENT_RAIL_CONTROLS_CLASS} aria-label={DOCUMENT_RAIL_CONTROLS_LABEL}>
+            {railGroups.map((group) => (
+              <div className={DOCUMENT_RAIL_GROUP_CLASS} aria-label={group.label} key={group.label}>
+                <span className={DOCUMENT_RAIL_LABEL_CLASS}>{group.label}</span>
+                <div className={DOCUMENT_RAIL_SWITCH_CLASS}>
+                  {group.controls.map((control) => (
+                    <DocumentRailControlView key={control.label} control={control} onEditorMode={setEditorMode} />
+                  ))}
                 </div>
               </div>
-            ) : null}
+            ))}
           </div>
           {config.formatId === COFLAT_FORMAT_ID ? (
             <div
@@ -848,25 +884,23 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               )}
             </div>
           ) : null}
-          <h2 className="doc-toc-title">On this page</h2>
-          {outline.length ? (
-            <ol className="doc-rail-outline">
-              {outline.map((entry) => (
-                <li key={entry.key} style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 12}px` }}>
-                  <button type="button" onClick={() => editorRef.current?.scrollToLine(entry.line, { center: true })}>
-                    {entry.number ? `${entry.number} ` : ""}
-                    <InlineChromeHtml
-                      html={(entry as OutlineEntry & { html?: string }).html}
-                      fallback={entry.markdown}
-                      mathMacros={outlineMathMacros}
-                    />
-                  </button>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p>No headings.</p>
-          )}
+          <nav className={DOCUMENT_RAIL_OUTLINE_CLASS} aria-label={DOCUMENT_RAIL_OUTLINE_LABEL} hidden={railOutlineItems.length < 1}>
+            <p className={DOCUMENT_RAIL_OUTLINE_TITLE_CLASS}>{DOCUMENT_RAIL_OUTLINE_LABEL}</p>
+            {railOutlineItems.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                className={entry.className}
+                onClick={() => typeof entry.line === "number" ? editorRef.current?.scrollToLine(entry.line, { center: true }) : undefined}
+              >
+                <InlineChromeHtml
+                  html={entry.html}
+                  fallback={entry.label}
+                  mathMacros={outlineMathMacros}
+                />
+              </button>
+            ))}
+          </nav>
         </aside>
       </div>
       {renderEditorChrome(

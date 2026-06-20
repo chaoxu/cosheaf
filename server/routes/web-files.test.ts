@@ -133,7 +133,7 @@ describe("web file editor route", () => {
     expect(body).toContain('<div class="doc-view-group" aria-label="Mode">');
     expect(body).toContain('<span class="doc-view-label">File</span>');
     expect(body).toContain('<a data-doc-mode-link class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
-    expect(body).toContain('<a data-doc-mode-link class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
+    expect(body).toContain('<a data-doc-mode-link href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
     expect(body).toContain('<a href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
     expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).toContain('class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden');
