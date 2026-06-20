@@ -33,15 +33,6 @@ import {
   userBranchPrefix,
 } from "../../shared/conventions";
 import {
-  DOCUMENT_RAIL_CONTROLS_CLASS,
-  DOCUMENT_RAIL_CONTROLS_LABEL,
-  DOCUMENT_RAIL_GROUP_CLASS,
-  DOCUMENT_RAIL_LABEL_CLASS,
-  DOCUMENT_RAIL_OUTLINE_CLASS,
-  DOCUMENT_RAIL_OUTLINE_LABEL,
-  DOCUMENT_RAIL_OUTLINE_TITLE_CLASS,
-  DOCUMENT_RAIL_SWITCH_CLASS,
-  type DocumentRailControl,
   documentRailGroups,
   documentRailOutline,
 } from "../../shared/document-rail";
@@ -53,7 +44,7 @@ import { ApiError, api } from "./api";
 import {
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
-import { renderInertChromeInline } from "./chrome-inline";
+import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
@@ -211,48 +202,6 @@ function matchesSuggestion(id: string, title: string | null, prefix: string): bo
   return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
-function InlineChromeHtml({
-  html,
-  fallback,
-  mathMacros,
-}: {
-  html?: string;
-  fallback: string;
-  mathMacros?: Record<string, string>;
-}): ReactNode {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    renderInertChromeInline(el, { html, fallback, mathMacros });
-  }, [html, fallback, mathMacros]);
-  return <span ref={ref}>{fallback}</span>;
-}
-
-function DocumentRailControlView({
-  control,
-  onEditorMode,
-}: {
-  control: DocumentRailControl;
-  onEditorMode: (mode: "rich" | "source") => void;
-}): ReactNode {
-  const className = control.active ? "active" : undefined;
-  const ariaCurrent = control.active ? "page" : undefined;
-  if (control.kind === "button") {
-    const editorMode = control.label === "Source" ? "source" : "rich";
-    return (
-      <button type="button" className={className} aria-current={ariaCurrent} onClick={() => onEditorMode(editorMode)}>
-        {control.label}
-      </button>
-    );
-  }
-  return (
-    <a data-doc-mode-link={control.modeLink ? true : undefined} className={className} href={control.href ?? "#"} aria-current={ariaCurrent}>
-      {control.label}
-    </a>
-  );
-}
-
 function WebEditor({ config, initialContent }: { config: EditorConfig; initialContent: string }) {
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(config.formatId).editor),
@@ -291,6 +240,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
   const assetInputRef = useRef<HTMLInputElement | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -811,6 +761,24 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     line: entry.line,
   })));
 
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    renderDocumentRail(
+      rail,
+      { groups: railGroups, outline: railOutlineItems, mathMacros: outlineMathMacros },
+      {
+        onControl: (control) => {
+          if (control.label === "Source") setEditorMode("source");
+          else if (control.label === "Rich") setEditorMode("rich");
+        },
+        onOutlineItem: (entry) => {
+          if (typeof entry.line === "number") editorRef.current?.scrollToLine(entry.line, { center: true });
+        },
+      },
+    );
+  }, [outlineMathMacros, railGroups, railOutlineItems, setEditorMode]);
+
   return (
     <div className={readerClass}>
       {pendingDraft ? (
@@ -856,52 +824,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             <div className="web-editor-loading">Loading editor...</div>
           )}
         </Suspense>
-        <aside className="web-editor-outline doc-rail" aria-label="Document tools">
-          <div className={DOCUMENT_RAIL_CONTROLS_CLASS} aria-label={DOCUMENT_RAIL_CONTROLS_LABEL}>
-            {railGroups.map((group) => (
-              <div className={DOCUMENT_RAIL_GROUP_CLASS} aria-label={group.label} key={group.label}>
-                <span className={DOCUMENT_RAIL_LABEL_CLASS}>{group.label}</span>
-                <div className={DOCUMENT_RAIL_SWITCH_CLASS}>
-                  {group.controls.map((control) => (
-                    <DocumentRailControlView key={control.label} control={control} onEditorMode={setEditorMode} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          {config.formatId === COFLAT_FORMAT_ID ? (
-            <div
-              className={`editor-diagnostics ${validationSummary && validationSummary.brokenRefs + validationSummary.duplicateLabels > 0 ? "has-issues" : ""}`}
-              data-testid="editor-diagnostics"
-            >
-              <a href={`/${urlPath(config.owner)}/${urlPath(config.repo)}/diagnostics`}>Diagnostics</a>
-              {validationSummary ? (
-                <span>
-                  {validationSummary.brokenRefs + validationSummary.duplicateLabels} actionable, {validationSummary.orphanLabels} unreferenced
-                </span>
-              ) : (
-                <span>Unavailable</span>
-              )}
-            </div>
-          ) : null}
-          <nav className={DOCUMENT_RAIL_OUTLINE_CLASS} aria-label={DOCUMENT_RAIL_OUTLINE_LABEL} hidden={railOutlineItems.length < 1}>
-            <p className={DOCUMENT_RAIL_OUTLINE_TITLE_CLASS}>{DOCUMENT_RAIL_OUTLINE_LABEL}</p>
-            {railOutlineItems.map((entry) => (
-              <button
-                key={entry.key}
-                type="button"
-                className={entry.className}
-                onClick={() => typeof entry.line === "number" ? editorRef.current?.scrollToLine(entry.line, { center: true }) : undefined}
-              >
-                <InlineChromeHtml
-                  html={entry.html}
-                  fallback={entry.label}
-                  mathMacros={outlineMathMacros}
-                />
-              </button>
-            ))}
-          </nav>
-        </aside>
+        <aside ref={railRef} className="web-editor-outline doc-rail" aria-label="Document tools" data-document-rail />
       </div>
       {renderEditorChrome(
         <>
@@ -954,6 +877,22 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </span>
         </>,
         <>
+          {config.formatId === COFLAT_FORMAT_ID ? (() => {
+            const actionable = validationSummary ? validationSummary.brokenRefs + validationSummary.duplicateLabels : null;
+            const label = actionable === null ? "Problems -" : `Problems ${actionable}`;
+            const detail = validationSummary
+              ? `${actionable} actionable, ${validationSummary.orphanLabels} unreferenced`
+              : "Diagnostics unavailable";
+            return (
+              <a
+                className={`web-editor-problems ${actionable && actionable > 0 ? "has-issues" : ""}`}
+                href={`/${urlPath(config.owner)}/${urlPath(config.repo)}/diagnostics`}
+                title={detail}
+              >
+                {label}
+              </a>
+            );
+          })() : null}
           {(() => {
             // Glance-able, paired with the dirty-dot. title surfaces the full error.
             const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty, lastSavedAt });

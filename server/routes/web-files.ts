@@ -1,15 +1,6 @@
 import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
 import type { Context, Hono } from "hono";
 import { userBranchPrefix } from "../../shared/conventions.js";
-import {
-  DOCUMENT_RAIL_CONTROLS_CLASS,
-  DOCUMENT_RAIL_CONTROLS_LABEL,
-  DOCUMENT_RAIL_GROUP_CLASS,
-  DOCUMENT_RAIL_LABEL_CLASS,
-  DOCUMENT_RAIL_SWITCH_CLASS,
-  type DocumentRailControl,
-  documentRailGroups,
-} from "../../shared/document-rail.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { type FileKind, fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
@@ -192,9 +183,16 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
           <div class="${sourceView ? "doc-main doc-main-source" : "doc-main"}">${preview}</div>
-          <aside class="doc-rail" aria-label="Document tools">
-            ${documentRailActions(ctx, { branch: resolved.branch, rel, kind, active: "read", fileHref, sourceView })}
-            <nav class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
+          <aside
+            class="doc-rail"
+            aria-label="Document tools"
+            data-document-rail
+            data-doc-mode="read"
+            data-read-href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
+            data-edit-href="${editableFileKind(kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, resolved.branch, rel) : ""}"
+            data-pdf-href="${kind === "markdown" ? pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel) : ""}"
+            data-raw-href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
+          >
           </aside>
         </div>`
       : preview;
@@ -652,38 +650,6 @@ function fileToolbar(
             <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
           </form>`
     }
-  </div>`;
-}
-
-function renderDocumentRailControl(control: DocumentRailControl): Html {
-  const activeClass = control.active ? html` class="active"` : emptyHtml;
-  const current = control.active ? html` aria-current="page"` : emptyHtml;
-  const modeLink = control.modeLink ? html` data-doc-mode-link` : emptyHtml;
-  if (control.kind === "button") {
-    return html`<button type="button"${activeClass}${current}>${control.label}</button>`;
-  }
-  return html`<a${modeLink}${activeClass} href="${control.href ?? "#"}"${current}>${control.label}</a>`;
-}
-
-function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; kind: FileKind; active: "read" | "edit"; fileHref: string; sourceView?: boolean }): Html {
-  const read = readHref(ctx.owner, ctx.repo, opts.branch, opts.rel);
-  const edit = editableFileKind(opts.kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, opts.branch, opts.rel) : null;
-  const groups = documentRailGroups({
-    mode: opts.active,
-    readHref: read,
-    editHref: edit,
-    fileControls: [
-      ...(opts.kind === "markdown"
-        ? [{ kind: "link" as const, label: "PDF", href: pdfExportOptionsHref(ctx.owner, ctx.repo, opts.branch, opts.rel) }]
-        : []),
-      { kind: "link" as const, label: "Raw", href: rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel) },
-    ],
-  });
-  return html`<div class="${DOCUMENT_RAIL_CONTROLS_CLASS}" aria-label="${DOCUMENT_RAIL_CONTROLS_LABEL}">
-    ${groups.map((group) => html`<div class="${DOCUMENT_RAIL_GROUP_CLASS}" aria-label="${group.label}">
-      <span class="${DOCUMENT_RAIL_LABEL_CLASS}">${group.label}</span>
-      <div class="${DOCUMENT_RAIL_SWITCH_CLASS}">${group.controls.map(renderDocumentRailControl)}</div>
-    </div>`)}
   </div>`;
 }
 

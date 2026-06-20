@@ -13,12 +13,12 @@ import {
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
 import {
-  DOCUMENT_RAIL_OUTLINE_TITLE_CLASS,
-  DOCUMENT_RAIL_OUTLINE_LABEL,
+  type DocumentRailControl,
+  documentRailGroups,
   documentRailOutline,
 } from "../../shared/document-rail";
 import { readDocumentTheme, readSectionNumbering } from "./document-theme";
-import { renderInertChromeInline } from "./chrome-inline";
+import { renderDocumentRail } from "./document-rail-dom";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
@@ -193,34 +193,27 @@ function installReaderHashHistory(): void {
 // scan or slug regex. Only the file-reader page provides a [data-reader-toc]
 // slot, so this is a no-op for issue/comment/PR readers.
 function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>): void {
-  // Find the TOC fill slot by its stable attribute regardless of region (#120),
-  // not via the .doc-with-toc grid — so the TOC could live in the rail or the
-  // sidebar. File pages render exactly one slot and one reader island.
-  const slot = document.querySelector<HTMLElement>("[data-reader-toc]");
-  if (!slot) return;
+  const rail = document.querySelector<HTMLElement>("[data-document-rail]");
+  if (!rail) return;
+  const fileControls: DocumentRailControl[] = [];
+  if (rail.dataset.pdfHref) fileControls.push({ kind: "link", label: "PDF", href: rail.dataset.pdfHref });
+  if (rail.dataset.rawHref) fileControls.push({ kind: "link", label: "Raw", href: rail.dataset.rawHref });
   const items = documentRailOutline(outline.map((entry) => ({
     key: entry.id,
     level: entry.level,
     label: entry.text,
     html: entry.html,
   })));
-  // Render the rail whenever the document has at least one h1–h3 heading.
-  // The previous >=2 threshold hid the outline for simple/few-heading docs
-  // (#125); a single-heading doc still gets a usable "On this page" entry.
-  if (items.length < 1) return;
-  slot.replaceChildren();
-  const title = document.createElement("p");
-  title.className = DOCUMENT_RAIL_OUTLINE_TITLE_CLASS;
-  title.textContent = DOCUMENT_RAIL_OUTLINE_LABEL;
-  slot.appendChild(title);
-  for (const item of items) {
-    const link = document.createElement("a");
-    link.href = `#${item.key}`;
-    link.className = item.className;
-    renderInertChromeInline(link, { html: item.html, fallback: item.label, mathMacros });
-    slot.appendChild(link);
-  }
-  slot.hidden = false;
+  renderDocumentRail(rail, {
+    groups: documentRailGroups({
+      mode: "read",
+      readHref: rail.dataset.readHref ?? window.location.href,
+      editHref: rail.dataset.editHref || null,
+      fileControls,
+    }),
+    outline: items,
+    mathMacros,
+  });
 }
 
 function applyDocumentTheme(root: HTMLElement): void {
