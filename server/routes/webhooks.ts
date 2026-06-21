@@ -12,6 +12,7 @@ import { bustRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
+import { getWorkspaceMarkdownDrift, reindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
 import { parsePositiveIntId } from "./query-params.js";
 import { bad, unauthorized } from "./responses.js";
 
@@ -237,8 +238,33 @@ webhooks.post("/forgejo", async (c) => {
         }
         if (failures.length > 0) {
           // Don't throw — that would unwind the dedupe row and provoke a Forgejo
-          // retry storm. Log; an operator can rerun `pnpm cli workspace reindex`.
+          // retry storm. The repair path below reconciles from the authoritative
+          // Forgejo tree when possible.
           console.warn(`webhook reindex partial failure (delivery=${deliveryId}): ${failures.join("; ")}`);
+        }
+        const totalCommits = typeof payload.total_commits === "number" ? payload.total_commits : commits.length;
+        let needsFullReindex =
+          failures.length > 0 ||
+          commits.length === 0 ||
+          totalCommits > commits.length ||
+          (touched.size === 0 && removed.size === 0);
+        try {
+          if (!needsFullReindex) {
+            const drift = await getWorkspaceMarkdownDrift(db, fj, { owner, repo: repoName, slug: ws.slug });
+            needsFullReindex = drift.onlySidecar.length > 0 || drift.onlyForgejo.length > 0;
+          }
+          if (needsFullReindex) {
+            await reindexWorkspaceFromForgejo(db, fj, {
+              owner,
+              repo: repoName,
+              slug: ws.slug,
+              defaultMdFormat: ws.defaultMdFormat,
+            });
+          }
+        } catch (err) {
+          console.warn(
+            `webhook reconcile check failed (delivery=${deliveryId}, workspace=${ws.slug}): ${(err as Error).message}`,
+          );
         }
         // Per-path events let the frontend reload only the open file when needed.
         for (const path of touched) sse.publish(ws.slug, { type: "change", path });

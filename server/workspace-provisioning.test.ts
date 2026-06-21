@@ -201,6 +201,21 @@ describe("workspace provisioning", () => {
       .toEqual([{ forgejo_id: "keep.md" }]);
   });
 
+  it("reindex resolves cross-file links independent of Forgejo tree order", async () => {
+    const db = freshDb();
+    const forgejo = fakeForgejo({
+      "a.md": "---\nid: a\n---\n# A\n\n[B](b.md)\n",
+      "b.md": "---\nid: b\n---\n# B\n",
+    });
+
+    const count = await reindexWorkspaceFromForgejo(db, forgejo, { owner: "owner", repo: "w", slug: "owner/w", defaultMdFormat: "coflat" });
+
+    expect(count).toBe(2);
+    expect(
+      db.prepare("SELECT target_id FROM backlinks WHERE workspace_slug = 'owner/w' AND src_path = 'a.md'").get(),
+    ).toEqual({ target_id: "b" });
+  });
+
   it("reindex rebuilds BibTeX citation keys and removes stale citation files", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo({

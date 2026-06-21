@@ -34,6 +34,9 @@ function withRepoDefaults(forgejo: Forgejo): Forgejo {
   if (typeof f.listRepoTopics !== "function") {
     f.listRepoTopics = vi.fn(async () => [] as string[]);
   }
+  if (typeof f.getTree !== "function") {
+    f.getTree = vi.fn(async () => [] as Array<{ path: string; type: "blob" }>);
+  }
   return forgejo;
 }
 
@@ -259,6 +262,7 @@ describe("forgejo webhooks", () => {
     const db = freshDb();
     const forgejo = {
       getRawFile: vi.fn(async () => "---\nid: foo-1\n---\n# Foo\n"),
+      getTree: vi.fn(async () => [{ path: "foo.md", type: "blob" as const }]),
     } as unknown as Forgejo;
     const app = appFor(db, forgejo);
     // Repo name "w" exists under both owners; "someone-else/w" is its own
@@ -308,6 +312,10 @@ describe("forgejo webhooks", () => {
           if (!(path in returnBodyFor)) throw new Error(`unexpected getRawFile for ${path}`);
           return returnBodyFor[path];
         }),
+        getTree: vi.fn(async () =>
+          Object.keys(returnBodyFor).map((path) => ({ path, type: "blob" as const })),
+        ),
+        listRepoTopics: vi.fn(async () => [] as string[]),
       } as unknown as Forgejo;
     }
 
@@ -326,6 +334,47 @@ describe("forgejo webhooks", () => {
         "SELECT cosheaf_id, forgejo_id, title FROM doc_map WHERE workspace_slug = 'owner/w'",
       ).get();
       expect(row).toMatchObject({ cosheaf_id: "foo-1", forgejo_id: "foo.md", title: "Foo" });
+      expect(vi.mocked(fj.getRawFile)).toHaveBeenCalledTimes(1);
+    });
+
+    it("full-reconciles after a main push even when the payload omits changed markdown paths", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({ "foo.md": "---\nid: foo-1\n---\n# Foo\n" });
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/w" },
+        commits: [{ added: [] }],
+      });
+
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "payload-omits-md-1"));
+
+      expect(res.status).toBe(200);
+      expect(db.prepare("SELECT forgejo_id, title FROM doc_map WHERE workspace_slug = 'owner/w'").all()).toEqual([
+        { forgejo_id: "foo.md", title: "Foo" },
+      ]);
+    });
+
+    it("full-reconciles omitted linked markdown paths with resolved backlinks", async () => {
+      const db = freshDb();
+      const fj = mockedForgejo({
+        "a.md": "---\nid: a\n---\n# A\n\n[B](b.md)\n",
+        "b.md": "---\nid: b\n---\n# B\n",
+      });
+      vi.mocked(fj.listRepoTopics).mockResolvedValue(["cosheaf-format-coflat"]);
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/w" },
+        commits: [{ added: [] }],
+      });
+
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "payload-omits-linked-md-1"));
+
+      expect(res.status).toBe(200);
+      expect(
+        db.prepare("SELECT target_id FROM backlinks WHERE workspace_slug = 'owner/w' AND src_path = 'a.md'").get(),
+      ).toEqual({ target_id: "b" });
     });
 
     it("resolves backlinks between markdown files added in the same push", async () => {

@@ -367,6 +367,18 @@ export async function reindexWorkspaceFromForgejo(
     });
     seenMarkdown.add(path);
   }
+  if (bodies.length > 1) {
+    // First pass makes every page id/xref target visible; the second pass
+    // resolves cross-file links independently of Forgejo tree order.
+    for (const { path, body } of bodies) {
+      indexPage(db, {
+        workspaceSlug: workspace.slug,
+        filePath: path,
+        bodyText: body,
+        formatId: workspace.defaultMdFormat,
+      });
+    }
+  }
 
   const indexed = db
     .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = ?")
