@@ -6,6 +6,9 @@ x-cosheaf-app: &cosheaf-app
       COSHEAF_GIT_SHA: ${COSHEAF_GIT_SHA:-unknown}
       COFLAT_GIT_REPO: ${COFLAT_GIT_REPO:-https://gitea.lab/chaoxu/coflat.git}
       COFLAT_GIT_REF: ${COFLAT_GIT_REF:-e5a223117c12c35d92dcdc28120f8576327dcf98}
+      COSHEAF_BUILD_DEPS: ${COSHEAF_BUILD_DEPS:-full}
+      COSHEAF_RUNTIME_BASE: ${COSHEAF_RUNTIME_BASE:-node:24-bookworm-slim}
+      COSHEAF_RUNTIME_DEPS: ${COSHEAF_RUNTIME_DEPS:-install}
       NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-}
   image: cosheaf:local
   init: true
