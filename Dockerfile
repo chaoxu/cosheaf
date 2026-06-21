@@ -67,6 +67,11 @@ ENV COSHEAF_DATA_DIR=/var/lib/cosheaf
 
 WORKDIR /app
 
+# Cross-architecture builds on jupiter use QEMU for Pluto's amd64 image.
+# Keep the heavy apt phases serial; concurrent emulated dpkg runs have failed
+# with transient shared-library mapping errors.
+COPY --from=build /workspace/cosheaf/package.json /tmp/.cosheaf-build-complete
+
 RUN --mount=type=cache,id=cosheaf-runtime-apt-cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,id=cosheaf-runtime-apt-lib,target=/var/lib/apt,sharing=locked \
   rm -f /etc/apt/apt.conf.d/docker-clean \
