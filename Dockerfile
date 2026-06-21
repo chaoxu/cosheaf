@@ -45,13 +45,19 @@ RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir cosheaf install --frozen-lockfile --ignore-scripts
 RUN pnpm --dir cosheaf rebuild better-sqlite3 esbuild
 
-COPY . ./cosheaf
-ARG COSHEAF_GIT_SHA=unknown
-RUN echo "cosheaf ${COSHEAF_GIT_SHA}"
+COPY vite.config.ts tsconfig.json ./cosheaf/
+COPY src ./cosheaf/src
+COPY shared ./cosheaf/shared
+COPY public ./cosheaf/public
 RUN pnpm --dir cosheaf build
+
+COPY server ./cosheaf/server
+COPY scripts/check-server-build-output.mjs ./cosheaf/scripts/
 RUN pnpm --dir cosheaf build:server
 RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
   pnpm --dir cosheaf prune --prod --ignore-scripts
+ARG COSHEAF_GIT_SHA=unknown
+RUN echo "cosheaf ${COSHEAF_GIT_SHA}"
 
 FROM node:24-bookworm-slim AS runtime
 
