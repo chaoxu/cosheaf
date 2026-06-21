@@ -186,7 +186,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const docBody =
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
-          <div class="${sourceView ? "doc-main doc-main-source" : "doc-main"}">${preview}</div>
+          <div class="doc-main">${preview}</div>
           <aside
             class="doc-rail"
             aria-label="Document tools"

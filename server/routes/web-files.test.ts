@@ -147,7 +147,7 @@ describe("web file editor route", () => {
     expect(sourceRes.status).toBe(200);
     const sourceBody = await sourceRes.text();
     expect(sourceBody).toContain('<div class="doc-with-toc">');
-    expect(sourceBody).toContain('<div class="doc-main doc-main-source">');
+    expect(sourceBody).toContain('<div class="doc-main">');
     expect(sourceBody).toContain('<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">');
     expect(sourceBody).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
     expect(sourceBody).toContain('/src/cosheaf/web-reader.ts');

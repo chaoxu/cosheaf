@@ -791,38 +791,40 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </button>
         </div>
       ) : null}
-      <div className="web-editor-main">
-        <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
-          {documentContextReady ? (
-            <ActiveMarkdownEditor
-              key={savedPath}
-              value={content}
-              mode={mode}
-              from={currentPath}
-              documentContext={documentContext ?? undefined}
-              fileSystem={fileSystem}
-              testId="editor"
-              onReady={(editor) => {
-                outlineUnsubscribeRef.current?.();
-                editorRef.current = editor;
-                setOutline(editor.outline.get());
-                outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
-              }}
-              onChange={(next) => {
-                setContent(next);
-                setUncommitted(true);
-                setSaveError(null);
-              }}
-              saveHandler={saveHandler}
-              statusEvents={statusEvents}
-              assetUploader={assetUploader}
-              autocompleteSources={autocompleteSources}
-              sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
-            />
-          ) : (
-            <div className="web-editor-loading">Loading editor...</div>
-          )}
-        </Suspense>
+      <div className="doc-with-toc">
+        <div className="doc-main">
+          <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
+            {documentContextReady ? (
+              <ActiveMarkdownEditor
+                key={savedPath}
+                value={content}
+                mode={mode}
+                from={currentPath}
+                documentContext={documentContext ?? undefined}
+                fileSystem={fileSystem}
+                testId="editor"
+                onReady={(editor) => {
+                  outlineUnsubscribeRef.current?.();
+                  editorRef.current = editor;
+                  setOutline(editor.outline.get());
+                  outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
+                }}
+                onChange={(next) => {
+                  setContent(next);
+                  setUncommitted(true);
+                  setSaveError(null);
+                }}
+                saveHandler={saveHandler}
+                statusEvents={statusEvents}
+                assetUploader={assetUploader}
+                autocompleteSources={autocompleteSources}
+                sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
+              />
+            ) : (
+              <div className="web-editor-loading">Loading editor...</div>
+            )}
+          </Suspense>
+        </div>
         <aside ref={railRef} className="web-editor-outline doc-rail" aria-label="Document tools" data-document-rail />
       </div>
       {renderEditorChrome(
