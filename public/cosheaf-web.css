@@ -68,7 +68,7 @@ input,textarea,select{border:1px solid var(--cf-border);border-radius:var(--cf-r
 .inbox-link{display:flex;align-items:center;gap:8px;min-width:0;flex:1;text-decoration:none;color:inherit}.inbox-link strong{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.inbox-link small{color:var(--cf-muted);font-family:var(--cf-font-mono,monospace);white-space:nowrap}
 .inbox-kind{font:10px/1 var(--cf-font-mono,monospace);text-transform:uppercase;padding:2px 5px;border-radius:var(--cf-radius-xs);border:1px solid var(--cf-border);color:var(--cf-muted);flex:0 0 auto}.inbox-kind.pr{border-color:var(--cf-accent);color:var(--cf-accent)}
 /* file reader table-of-contents rail (filled by the reader island) */
-.cosheaf-document-reader.cf-theme-scope:not(.cf-theme-blueprint-book),.web-editor-shell.cf-theme-scope:not(.cf-theme-blueprint-book){--cf-color-link:#18181b}
+.cosheaf-document-reader.cf-theme-scope:not(.cf-theme-blueprint-book),.web-editor-shell.cf-theme-scope:not(.cf-theme-blueprint-book){--cf-color-link:#18181b;--cf-color-code-bg:var(--cf-hover)}
 html[data-cosheaf-color-scheme="dark"] .cosheaf-document-reader.cf-theme-scope:not(.cf-theme-blueprint-book),html[data-cosheaf-color-scheme="dark"] .web-editor-shell.cf-theme-scope:not(.cf-theme-blueprint-book){--cf-color-link:#fafafa}
 .app-content:has(.doc-with-toc){display:flex;flex-direction:column;overflow:hidden}.app-content:has(.doc-with-toc) .repo-page{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 12px}.app-content:has(.doc-with-toc) .repo-body{flex:1;min-height:0;display:flex;flex-direction:column;padding-bottom:0}
 .doc-with-toc{min-height:0;flex:1;display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:28px;align-items:stretch;overflow:hidden;margin:0 -12px}

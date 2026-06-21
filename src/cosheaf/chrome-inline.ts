@@ -9,6 +9,7 @@ export function renderInertChromeInline(
   container.replaceChildren();
   if (!opts.html) {
     renderInlineMarkdown(container, opts.fallback, opts.mathMacros ?? {}, "ui-chrome-inline");
+    normalizeChromeInline(container);
     return;
   }
   const fragment = sanitizeAndRewriteRefsFragment(opts.html);
@@ -20,4 +21,11 @@ export function renderInertChromeInline(
   }
   container.replaceChildren(fragment);
   hydrateMath(container, { mathMacros: opts.mathMacros ?? {} });
+  normalizeChromeInline(container);
+}
+
+function normalizeChromeInline(container: HTMLElement): void {
+  for (const link of Array.from(container.querySelectorAll(".cf-doc-link, .cf-link-rendered"))) {
+    link.replaceWith(document.createTextNode(link.textContent ?? ""));
+  }
 }
