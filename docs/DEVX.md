@@ -110,6 +110,11 @@ pnpm prod:build-check
 pnpm prod:e2e -- prod
 ```
 
+`pnpm prod:status` checks the deployed Cosheaf SHA and deployed Coflat ref
+against this checkout. It still prints the local `../coflat` HEAD, but a local
+Coflat mismatch is informational in `--prod` mode because production uses the
+pinned release ref.
+
 Production deploy is intentionally not part of the normal DevX path. Only run
 it after the user explicitly asks for production deploy:
 

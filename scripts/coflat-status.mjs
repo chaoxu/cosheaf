@@ -47,16 +47,21 @@ export function coflatStatus({ prod = false } = {}) {
   const localHead = localCoflatHead();
   const docDrift = checkDocPins();
   const health = prod ? deployedHealth() : null;
+  const localCosheaf = localCosheafHead();
+  const deployedCosheafSha = typeof health?.commit === "string" ? health.commit : null;
+  const deployedCoflatRef = typeof health?.coflat_ref === "string" ? health.coflat_ref : null;
   return {
     expectedCoflatRef: DEFAULT_COFLAT_REF,
     localCoflatHead: localHead,
     localCoflatMatchesPin: localHead === DEFAULT_COFLAT_REF,
     lockfileCoflatHash: lockfileCoflatEntry(),
     pinDrift: docDrift,
-    localCosheafHead: localCosheafHead(),
+    localCosheafHead: localCosheaf,
     ...(prod ? {
-      deployedCosheafSha: typeof health?.commit === "string" ? health.commit : null,
-      deployedCoflatRef: typeof health?.coflat_ref === "string" ? health.coflat_ref : null,
+      deployedCosheafSha,
+      deployedCoflatRef,
+      deployedCosheafMatchesLocal: deployedCosheafSha === localCosheaf,
+      deployedCoflatMatchesPin: deployedCoflatRef === DEFAULT_COFLAT_REF,
     } : {}),
   };
 }
@@ -70,11 +75,21 @@ function printStatus(status) {
   if ("deployedCosheafSha" in status) {
     console.log(`prod Cosheaf SHA:  ${status.deployedCosheafSha ?? "<unavailable>"}`);
     console.log(`prod Coflat ref:   ${status.deployedCoflatRef ?? "<unavailable>"}`);
+    console.log(`prod SHA match:    ${status.deployedCosheafMatchesLocal ? "yes" : "no"}`);
+    console.log(`prod ref match:    ${status.deployedCoflatMatchesPin ? "yes" : "no"}`);
   }
   if (status.pinDrift.length > 0) {
     console.log("pin drift:");
     for (const item of status.pinDrift) console.log(`  - ${item.file}: ${item.found}`);
   }
+}
+
+export function statusExitOk(status, { prod = false } = {}) {
+  return prod
+    ? status.pinDrift.length === 0 &&
+        status.deployedCosheafMatchesLocal &&
+        status.deployedCoflatMatchesPin
+    : status.localCoflatMatchesPin && status.pinDrift.length === 0;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -85,7 +100,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const status = coflatStatus({ prod: opts.prod });
       if (opts.json) console.log(JSON.stringify(status, null, 2));
       else printStatus(status);
-      process.exitCode = status.localCoflatMatchesPin && status.pinDrift.length === 0 ? 0 : 1;
+      process.exitCode = statusExitOk(status, { prod: opts.prod }) ? 0 : 1;
     });
   program.parse();
 }
