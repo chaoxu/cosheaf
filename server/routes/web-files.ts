@@ -33,7 +33,7 @@ import {
   webRouteForWrite,
 } from "./web-context.js";
 import { emptyHtml, type Html, html, jsonScript } from "./web-html.js";
-import { markdownSurface, renderMarkdown } from "./web-markdown.js";
+import { coflatReaderPayload, markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { type Panel, panel } from "./web-panels.js";
 import { webEditorAssets } from "./web-shell.js";
@@ -179,6 +179,10 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   // from Coflat's outline data, while the editor renders the same rail shape
   // from its live outline.
   const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
+  const sourceRailPayload =
+    coflatMarkdownDocument && sourceView && content !== null
+      ? coflatReaderPayload(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true }, await loadRepoConfig(ctx.db, ctx.fj, owner, repo, resolved.branch))
+      : null;
   const docBody =
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
@@ -193,6 +197,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             data-pdf-href="${kind === "markdown" ? pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel) : ""}"
             data-raw-href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
           >
+            ${sourceRailPayload ? html`<script type="application/json" data-document-rail-source>${jsonScript(sourceRailPayload)}</script>` : emptyHtml}
           </aside>
         </div>`
       : preview;

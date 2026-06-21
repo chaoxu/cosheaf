@@ -191,8 +191,8 @@ function installReaderHashHistory(): void {
 // rendered HTML and returns these entries, so there is no client-side heading
 // scan or slug regex. Only file-reader pages provide a [data-document-rail]
 // mount, so this is a no-op for issue/comment/PR readers.
-function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>): void {
-  const rail = document.querySelector<HTMLElement>("[data-document-rail]");
+function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>, mount?: HTMLElement): void {
+  const rail = mount ?? document.querySelector<HTMLElement>("[data-document-rail]");
   if (!rail) return;
   const fileControls: DocumentRailControl[] = [];
   if (rail.dataset.pdfHref) fileControls.push({ kind: "link", label: "PDF", href: rail.dataset.pdfHref });
@@ -213,6 +213,24 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Rec
     ...model,
     mathMacros,
   });
+}
+
+async function renderStandaloneRail(): Promise<void> {
+  const rail = document.querySelector<HTMLElement>("[data-document-rail]");
+  if (!rail) return;
+  const payload = readPayload(rail);
+  if (!payload) {
+    buildReaderToc([], undefined, rail);
+    return;
+  }
+  const ctx = await loadCoflatDocumentContext(payload);
+  const result = renderToHtml(payload.source, ctx, {
+    outline: true,
+    referencePreviews: true,
+    resolveReferences: true,
+    sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
+  });
+  buildReaderToc(result.outline ?? [], { ...ctx.mathMacros, ...result.mathMacros }, rail);
 }
 
 function applyDocumentTheme(root: HTMLElement): void {
@@ -255,7 +273,7 @@ function hydrateIslandsIn(scope: ParentNode): void {
 }
 
 hydrateIslandsIn(document);
-if (!document.querySelector(".coflat-reader-island")) buildReaderToc([]);
+if (!document.querySelector(".coflat-reader-island")) void renderStandaloneRail();
 
 // Islands inserted after initial load — e.g. the chat thread swapping in new
 // turns on a live update — must hydrate too, so watch for them rather than

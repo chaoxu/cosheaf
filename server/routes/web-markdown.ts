@@ -46,8 +46,8 @@ export async function renderMarkdownSurface(ctx: WebCtx, source: string, opts: S
   return markdownSurface(ctx, rendered, opts.surface ?? "document");
 }
 
-function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): Html {
-  const payload = {
+export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>) {
+  return {
     source,
     owner: ctx.owner,
     repo: ctx.repo,
@@ -63,6 +63,10 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repo
     ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
     ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
   };
+}
+
+function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): Html {
+  const payload = coflatReaderPayload(ctx, source, opts, repoConfig);
   const className = ["cf-reader", "cf-doc-surface", "cf-doc-flow", "coflat-reader-island", coflatSurfaceClass(opts.surface ?? "document")]
     .filter(Boolean)
     .join(" ");
