@@ -9,6 +9,7 @@ import {
   exportDependencyTools,
   LATEX_CSL_NAMES,
   LATEX_TEMPLATE_NAMES,
+  latexConfigWithDefaults,
   parseLatexFrontmatterConfig,
   preprocessWithReadFile,
   resolveLatexCslPath,
@@ -123,42 +124,6 @@ export async function exportCoflatMarkdownPdf(options: ExportCoflatPdfOptions): 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-}
-
-interface LatexConfig {
-  bibliography?: string;
-  csl?: string;
-  latex?: {
-    bibliography?: string;
-    csl?: string;
-    template?: string;
-  };
-}
-
-function stringOption(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function withDefaultUnlessDocumentValue(
-  value: string | undefined,
-  nestedValue: string | undefined,
-  defaultValue: string | undefined,
-): string | undefined {
-  return stringOption(value) || stringOption(nestedValue) ? value : defaultValue;
-}
-
-function latexConfigWithDefaults(config: LatexConfig, defaults: ExportCoflatPdfOptions["defaults"]): LatexConfig {
-  if (!defaults) return config;
-  const latex = config.latex ?? {};
-  return {
-    ...config,
-    bibliography: withDefaultUnlessDocumentValue(config.bibliography, latex.bibliography, defaults.bibliography),
-    csl: withDefaultUnlessDocumentValue(config.csl, latex.csl, defaults.csl),
-    latex: {
-      ...latex,
-      ...(!stringOption(latex.template) && defaults.template ? { template: defaults.template } : {}),
-    },
-  };
 }
 
 async function checkPdfDependencies(cwd: string): Promise<void> {

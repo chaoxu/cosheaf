@@ -1,4 +1,3 @@
-import { renderInlineMarkdown } from "@chaoxu/coflat";
 import {
   hydrateMath,
   hydrateReaderDisclosures,
@@ -6,14 +5,19 @@ import {
   hydrateReferences,
   type ReaderOutlineEntry,
   renderToHtml,
+  sourceRangeFromDataset,
 } from "@chaoxu/coflat/reader";
 import { urlPath } from "../../shared/url";
 import {
   type CoflatDocumentPayload,
   loadCoflatDocumentContext,
-  resolveRawRepoLink,
 } from "./coflat-document-context";
+import {
+  type DocumentRailControl,
+  documentRailModel,
+} from "../../shared/document-rail";
 import { readDocumentTheme, readSectionNumbering } from "./document-theme";
+import { renderDocumentRail } from "./document-rail-dom";
 import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
@@ -25,27 +29,6 @@ function readPayload(root: HTMLElement): CoflatDocumentPayload | null {
   const script = root.querySelector<HTMLScriptElement>('script[type="application/json"]');
   if (!script?.textContent) return null;
   return JSON.parse(script.textContent) as CoflatDocumentPayload;
-}
-
-function renderChromeInline(container: HTMLElement, text: string, mathMacros?: Record<string, string>): void {
-  container.replaceChildren();
-  renderInlineMarkdown(container, text, mathMacros ?? {}, "ui-chrome-inline");
-}
-
-function renderChromeHtmlInline(container: HTMLElement, html: string | undefined, fallback: string, mathMacros?: Record<string, string>): void {
-  if (!html) {
-    renderChromeInline(container, fallback, mathMacros);
-    return;
-  }
-  const fragment = sanitizeAndRewriteRefsFragment(html);
-  for (const interactive of Array.from(fragment.querySelectorAll("a, button"))) {
-    const span = document.createElement("span");
-    span.className = interactive.className;
-    span.replaceChildren(...Array.from(interactive.childNodes));
-    interactive.replaceWith(span);
-  }
-  container.replaceChildren(fragment);
-  hydrateMath(container, { mathMacros: mathMacros ?? {} });
 }
 
 async function renderIsland(root: HTMLElement): Promise<void> {
@@ -71,7 +54,6 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   });
   const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
-  rewriteRenderedRepoImageUrls(fragment, payload);
   // Coflat needs the full source so frontmatter-controlled numbering (e.g.
   // `numbering: global`) and block config are visible to the reader. It also
   // renders the frontmatter title itself; hide that only for non-document
@@ -119,11 +101,11 @@ async function renderIsland(root: HTMLElement): Promise<void> {
 // whole containing block.
 function markChangedBlocks(root: HTMLElement, marked: ReadonlySet<number>): void {
   for (const el of root.querySelectorAll<HTMLElement>("[data-source-line],[data-source-from]")) {
-    const from = Number(el.dataset.sourceFrom ?? el.dataset.sourceLine);
-    if (!Number.isFinite(from)) continue;
-    const to = Number(el.dataset.sourceTo ?? el.dataset.sourceLine ?? el.dataset.sourceFrom);
-    const hi = Number.isFinite(to) ? to : from;
-    for (let line = from; line <= hi; line++) {
+    const range =
+      sourceRangeFromDataset(el.dataset, "sourceFrom", "sourceTo", { defaultToFrom: true }) ??
+      sourceRangeFromDataset(el.dataset, "sourceLine", "sourceLine", { defaultToFrom: true });
+    if (!range) continue;
+    for (let line = range.from; line <= range.to; line++) {
       if (marked.has(line)) {
         el.classList.add("marked");
         break;
@@ -204,51 +186,57 @@ function installReaderHashHistory(): void {
   });
 }
 
-// Fill the file reader's table-of-contents rail from Coflat's outline (#117).
+// Fill the file reader's document rail from Coflat's outline (#117).
 // renderToHtml({outline:true}) emits stable, deduplicated heading ids on the
 // rendered HTML and returns these entries, so there is no client-side heading
-// scan or slug regex. Only the file-reader page provides a [data-reader-toc]
-// slot, so this is a no-op for issue/comment/PR readers.
-function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>): void {
-  // Find the TOC fill slot by its stable attribute regardless of region (#120),
-  // not via the .doc-with-toc grid — so the TOC could live in the rail or the
-  // sidebar. File pages render exactly one slot and one reader island.
-  const slot = document.querySelector<HTMLElement>("[data-reader-toc]");
-  if (!slot) return;
-  const items = outline.filter((entry) => entry.level <= 3);
-  // Render the rail whenever the document has at least one h1–h3 heading.
-  // The previous >=2 threshold hid the outline for simple/few-heading docs
-  // (#125); a single-heading doc still gets a usable "On this page" entry.
-  if (items.length < 1) return;
-  const minLevel = Math.min(...items.map((item) => item.level));
-  slot.replaceChildren();
-  const title = document.createElement("p");
-  title.className = "doc-toc-title";
-  title.textContent = "On this page";
-  slot.appendChild(title);
-  for (const item of items) {
-    const link = document.createElement("a");
-    link.href = `#${item.id}`;
-    link.className = `doc-toc-link lvl-${item.level - minLevel}`;
-    renderChromeHtmlInline(link, item.html, item.text, mathMacros);
-    slot.appendChild(link);
+// scan or slug regex. Only file-reader pages provide a [data-document-rail]
+// mount, so this is a no-op for issue/comment/PR readers.
+function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>, mount?: HTMLElement): void {
+  const rail = mount ?? document.querySelector<HTMLElement>("[data-document-rail]");
+  if (!rail) return;
+  const fileControls: DocumentRailControl[] = [];
+  if (rail.dataset.pdfHref) fileControls.push({ kind: "link", label: "PDF", href: rail.dataset.pdfHref });
+  if (rail.dataset.rawHref) fileControls.push({ kind: "link", label: "Raw", href: rail.dataset.rawHref });
+  const model = documentRailModel({
+    mode: "read",
+    readHref: rail.dataset.readHref ?? window.location.href,
+    editHref: rail.dataset.editHref || null,
+    fileControls,
+    outline: outline.map((entry) => ({
+      key: entry.id,
+      level: entry.level,
+      label: entry.text,
+      html: entry.html,
+    })),
+  });
+  renderDocumentRail(rail, {
+    ...model,
+    mathMacros,
+  });
+}
+
+async function renderStandaloneRail(): Promise<void> {
+  const rail = document.querySelector<HTMLElement>("[data-document-rail]");
+  if (!rail) return;
+  const payload = readPayload(rail);
+  if (!payload) {
+    buildReaderToc([], undefined, rail);
+    return;
   }
-  slot.hidden = false;
+  const ctx = await loadCoflatDocumentContext(payload);
+  const result = renderToHtml(payload.source, ctx, {
+    outline: true,
+    referencePreviews: true,
+    resolveReferences: true,
+    sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
+  });
+  buildReaderToc(result.outline ?? [], { ...ctx.mathMacros, ...result.mathMacros }, rail);
 }
 
 function applyDocumentTheme(root: HTMLElement): void {
   const theme = readDocumentTheme(document.body.dataset.cosheafUser);
   const scope = root.closest(".cf-theme-scope");
   scope?.classList.toggle("cf-theme-blueprint-book", theme === "blueprint-book");
-}
-
-function rewriteRenderedRepoImageUrls(root: ParentNode, payload: CoflatDocumentPayload): void {
-  for (const el of root.querySelectorAll<HTMLImageElement>("img[src]")) {
-    const value = el.getAttribute("src");
-    if (!value) continue;
-    const resolved = resolveRawRepoLink(payload, value);
-    if (resolved) el.setAttribute("src", resolved);
-  }
 }
 
 function installRefNavigation(): void {
@@ -285,6 +273,7 @@ function hydrateIslandsIn(scope: ParentNode): void {
 }
 
 hydrateIslandsIn(document);
+if (!document.querySelector(".coflat-reader-island")) void renderStandaloneRail();
 
 // Islands inserted after initial load — e.g. the chat thread swapping in new
 // turns on a live update — must hydrate too, so watch for them rather than

@@ -5,11 +5,11 @@ export const REF_PAGE_CLASS = "cosheaf-ref-page";
 export const REF_BUTTON_CLASS = "cosheaf-ref-button";
 
 // Cosheaf refs layered on top of rendered markdown text:
-//   - [@page-id] opens a workspace page
 //   - path.md#L5-12 opens a file/line range
 //   - #42 opens an issue
+// Coflat owns [@...] cross-reference/citation rendering and hover behavior.
 const BARE_REF_RE =
-  /(^|[\s(])(\[@([\w.:-]+)\]|[\w./-]+\.md(?:#L\d+(?:-\d+)?|#[\w-]+)?|#\d+)(?=\b|[\s).,;:!?]|$)/g;
+  /(^|[\s(])([\w./-]+\.md(?:#L\d+(?:-\d+)?|#[\w-]+)?|#\d+)(?=\b|[\s).,;:!?]|$)/g;
 
 export function sanitizeAndRewriteRefs(rendered: string): string {
   return fragmentToHtml(sanitizeAndRewriteRefsFragment(rendered));
@@ -64,27 +64,15 @@ function rewriteRefTextNode(node: Text): DocumentFragment | null {
   while ((m = BARE_REF_RE.exec(textRun)) !== null) {
     const lead = m[1];
     const ref = m[2];
-    const pageKey = m[3];
     const matchStart = m.index + lead.length;
     if (matchStart > cursor) fragment.append(document.createTextNode(textRun.slice(cursor, matchStart)));
-    fragment.append(pageKey ? pageRefButton(ref, pageKey) : ref.startsWith("#") ? issueRefButton(ref) : pathRefButton(ref));
+    fragment.append(ref.startsWith("#") ? issueRefButton(ref) : pathRefButton(ref));
     cursor = m.index + lead.length + ref.length;
     changed = true;
   }
   if (!changed) return null;
   if (cursor < textRun.length) fragment.append(document.createTextNode(textRun.slice(cursor)));
   return fragment;
-}
-
-function pageRefButton(ref: string, key: string): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `${REF_PAGE_CLASS} ${REF_BUTTON_CLASS}`;
-  button.dataset.refKind = "page";
-  button.dataset.refKey = key;
-  button.dataset.testid = `ref-page-${key}`;
-  button.textContent = ref;
-  return button;
 }
 
 function issueRefButton(ref: string): HTMLButtonElement {

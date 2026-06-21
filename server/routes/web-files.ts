@@ -33,7 +33,7 @@ import {
   webRouteForWrite,
 } from "./web-context.js";
 import { emptyHtml, type Html, html, jsonScript } from "./web-html.js";
-import { markdownSurface, renderMarkdown } from "./web-markdown.js";
+import { coflatReaderPayload, markdownSurface, renderMarkdown } from "./web-markdown.js";
 import { branchOptions, repoPageShell } from "./web-page.js";
 import { type Panel, panel } from "./web-panels.js";
 import { webEditorAssets } from "./web-shell.js";
@@ -173,40 +173,48 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
-  const renderedCoflatMarkdown = kind === "markdown" && !sourceView && rendered !== null && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
   // Coflat-rendered markdown gets a shared document rail: view-switch actions
   // at the top and the table of contents below. The reader island fills the TOC
   // from Coflat's outline data, while the editor renders the same rail shape
   // from its live outline.
   const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
+  const sourceRailPayload =
+    coflatMarkdownDocument && sourceView && content !== null
+      ? coflatReaderPayload(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true }, await loadRepoConfig(ctx.db, ctx.fj, owner, repo, resolved.branch))
+      : null;
   const docBody =
-    renderedCoflatMarkdown
+    coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
           <div class="doc-main">${preview}</div>
-          <aside class="doc-rail" aria-label="Document tools">
-            ${documentRailActions(ctx, { branch: resolved.branch, rel, kind, active: "read", fileHref })}
-            <nav class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden></nav>
+          <aside
+            class="doc-rail"
+            aria-label="Document tools"
+            data-document-rail
+            data-doc-mode="read"
+            data-read-href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
+            data-edit-href="${editableFileKind(kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, resolved.branch, rel) : ""}"
+            data-pdf-href="${kind === "markdown" ? pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel) : ""}"
+            data-raw-href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
+          >
+            ${sourceRailPayload ? html`<script type="application/json" data-document-rail-source>${jsonScript(sourceRailPayload)}</script>` : emptyHtml}
           </aside>
         </div>`
       : preview;
   // Page titles for the tree are only indexed for main (#168), mirroring fileList.
   const fileTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
+  const pageBody = coflatMarkdownDocument
+    ? docBody
+    : html`<div class="file-toolbar">
+      <div>
+        ${kind === "markdown" ? emptyHtml : html`<h1>${rel}</h1>`}
+      </div>
+      ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha })}
+    </div>
+    ${docBody}`;
   return htmlResponse(
-    repoPageShell(ctx, "files", `${rel} - ${repo}`, html`
-        <div class="file-toolbar">
-          <div>
-            ${
-              // A rendered markdown page shows its own .cf-doc-title (and the
-              // sidebar highlights the file), so the filename H1 + kind/size are
-              // redundant noise; other kinds keep a filename header for identity.
-              kind === "markdown" && !sourceView ? emptyHtml : html`<h1>${rel}</h1>`
-            }
-          </div>
-          ${fileToolbar(ctx, { branch: resolved.branch, rel, kind, fileHref, sourceView, sha: meta.sha, showEdit: !renderedCoflatMarkdown, showRepresentations: !renderedCoflatMarkdown })}
-        </div>
-        ${docBody}
-      `, {
-        readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+    repoPageShell(ctx, "files", `${rel} - ${repo}`, pageBody, {
+        readerAssets: coflatMarkdownDocument,
         sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles, branches, user, ws.role !== "read")],
       }),
   );
@@ -643,18 +651,6 @@ function fileToolbar(
             <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
           </form>`
     }
-  </div>`;
-}
-
-function documentRailActions(ctx: WebCtx, opts: { branch: string; rel: string; kind: FileKind; active: "read" | "edit"; fileHref: string }): Html {
-  const read = readHref(ctx.owner, ctx.repo, opts.branch, opts.rel);
-  const edit = editableFileKind(opts.kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, opts.branch, opts.rel) : null;
-  return html`<div class="doc-view-switch" aria-label="View">
-    <a class="${opts.active === "read" ? "active" : ""}" href="${read}"${opts.active === "read" ? html` aria-current="page"` : emptyHtml}>Read</a>
-    ${edit ? html`<a class="${opts.active === "edit" ? "active" : ""}" href="${edit}"${opts.active === "edit" ? html` aria-current="page"` : emptyHtml}>Edit</a>` : emptyHtml}
-    ${opts.kind === "markdown" ? html`<a href="${`${opts.fileHref}?view=source`}">Source</a>` : emptyHtml}
-    ${opts.kind === "markdown" ? html`<a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">PDF</a>` : emptyHtml}
-    <a href="${rawFileHref(ctx.owner, ctx.repo, opts.branch, opts.rel)}">Raw</a>
   </div>`;
 }
 

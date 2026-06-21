@@ -529,6 +529,7 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
   if (!profile) return notFoundPage(auth.user.username, "User not found");
   const website = profile.website ? normalizedExternalHref(profile.website) : null;
   const displayName = profile.full_name?.trim() || profile.login;
+  const repoCount = repos.length;
   return htmlResponse(
     pageShell({
       title: `${displayName} - Cosheaf`,
@@ -543,7 +544,13 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
             <div>
               <h1>${displayName}</h1>
               <p>${profile.login}</p>
+              <div class="profile-badges">
+                <span>${repoCount} ${repoCount === 1 ? "repository" : "repositories"}</span>
+                ${profile.active === false ? html`<span>Inactive</span>` : html`<span>Active</span>`}
+                ${profile.is_admin ? html`<span>Site admin</span>` : emptyHtml}
+              </div>
             </div>
+            ${profile.login === auth.user.username ? html`<a class="button" href="/account/settings">Edit profile</a>` : emptyHtml}
           </div>
           ${profile.description ? html`<p>${profile.description}</p>` : emptyHtml}
           ${
@@ -558,7 +565,7 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
         <section class="settings-section">
           <div class="settings-section-header">
             <h2>Repositories</h2>
-            <p>Forgejo repositories visible to you.</p>
+            <p>${repoCount} Forgejo ${repoCount === 1 ? "repository" : "repositories"} visible to you.</p>
           </div>
           ${
             repos.length === 0
@@ -566,8 +573,9 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
               : html`<div class="list">${repos.map((repo) => html`
                 <a class="list-row" href="${repoHref(repo.owner.login, repo.name)}">
                   <span class="list-row-main">
-                    <strong>${repo.name}</strong>
+                    <strong>${repo.full_name || `${repo.owner.login}/${repo.name}`}</strong>
                     ${repo.description ? html`<span class="muted">${repo.description}</span>` : emptyHtml}
+                    <small>${repo.private ? "Private" : "Visible"}${repo.default_branch ? ` · ${repo.default_branch}` : ""}</small>
                   </span>
                 </a>
               `)}</div>`

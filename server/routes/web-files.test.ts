@@ -129,17 +129,32 @@ describe("web file editor route", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
-    expect(body).toContain('<div class="doc-view-switch" aria-label="View">');
-    expect(body).toContain('<a class="active" href="/owner/w/src/branch/main/notes.md" aria-current="page">Read</a>');
-    expect(body).toContain('<a class="" href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md">Edit</a>');
-    expect(body).toContain('<a href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
-    expect(body).toContain('<a href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
-    expect(body).toContain('<a href="/owner/w/raw/branch/main/notes.md">Raw</a>');
-    expect(body).toContain('class="doc-rail-outline doc-toc" data-reader-toc aria-label="On this page" hidden');
+    expect(body).toContain('class="doc-rail"');
+    expect(body).toContain("data-document-rail");
+    expect(body).toContain('data-doc-mode="read"');
+    expect(body).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
+    expect(body).toContain('data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
+    expect(body).toContain('data-pdf-href="/owner/w/export/pdf/options/branch/main/notes.md"');
+    expect(body).toContain('data-raw-href="/owner/w/raw/branch/main/notes.md"');
+    expect(body).not.toContain('data-reader-toc');
+    expect(body).not.toContain('<div class="doc-view-controls" aria-label="View">');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
     expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
     expect(body).not.toContain('<summary class="button">More</summary>');
+
+    const sourceRes = await appFor(db).request("/owner/w/src/branch/main/notes.md?view=source", { headers: authHeaders(token) });
+    expect(sourceRes.status).toBe(200);
+    const sourceBody = await sourceRes.text();
+    expect(sourceBody).toContain('<div class="doc-with-toc">');
+    expect(sourceBody).toContain('<div class="doc-main">');
+    expect(sourceBody).toContain('<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">');
+    expect(sourceBody).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
+    expect(sourceBody).toContain('/src/cosheaf/web-reader.ts');
+    expect(sourceBody).toContain("data-document-rail-source");
+    expect(sourceBody).not.toContain('href="/owner/w/src/branch/main/notes.md?view=source"');
+    expect(sourceBody).not.toContain("<h1>notes.md</h1>");
+    expect(sourceBody).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
   });
 
   it("previews a small extensionless UTF-8 file as plain text", async () => {

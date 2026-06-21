@@ -12,7 +12,7 @@ import {
   type AutocompleteSource,
   mountEditor,
 } from "@chaoxu/coflat";
-import type { DocumentContext } from "@chaoxu/coflat/reader";
+import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
 export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource };
 
 interface Props {
@@ -29,6 +29,8 @@ interface Props {
   from?: string;
   /** Reader-compatible link/ref/citation resolver context. */
   documentContext?: DocumentContext;
+  /** Repository-backed file I/O for local media previews. */
+  fileSystem?: FileSystem;
   /** Cmd-S / autosave / triggerSave dispatch. */
   saveHandler?: SaveHandler;
   /** Fire-and-forget lifecycle events (save, dirty, asset upload). */
@@ -50,6 +52,7 @@ export function MarkdownEditor({
   readOnly,
   from,
   documentContext,
+  fileSystem,
   saveHandler,
   statusEvents,
   assetUploader,
@@ -117,6 +120,7 @@ export function MarkdownEditor({
       onChange: (next) => onChangeRef.current(next),
       ...(from ? { from } : {}),
       ...(documentContext ? { context: documentContext } : {}),
+      ...(fileSystem ? { fileSystem } : {}),
       ...(saveHandler ? { saveHandler: stableSaveHandler } : {}),
       ...(statusEvents ? { statusEvents: stableStatusEvents } : {}),
       ...(assetUploader ? { assetUploader: stableAssetUploader } : {}),

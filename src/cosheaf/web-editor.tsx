@@ -8,14 +8,17 @@ import type {
 } from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,
-  renderInlineMarkdown,
 } from "@chaoxu/coflat";
 import {
   extractFirstH1 as extractCoflatFirstH1,
   parseFrontmatter as parseCoflatFrontmatter,
+  relativeMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import {
   type DocumentContext,
+  type FileEntry,
+  type FileSystem,
+  createReaderCitationClusterPreviewBody,
   hydrateReaderHoverPreviews,
   hydrateReferences,
 } from "@chaoxu/coflat/reader";
@@ -29,6 +32,9 @@ import {
   MAX_ASSET_DISPLAY,
   userBranchPrefix,
 } from "../../shared/conventions";
+import {
+  documentRailModel,
+} from "../../shared/document-rail";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
@@ -37,11 +43,11 @@ import { ApiError, api } from "./api";
 import {
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
+import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
-import { readAutosave, readDocumentTheme, readEditorMode } from "./document-theme";
+import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
-import { sanitizeAndRewriteRefsFragment } from "./ref-rewriter";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -91,8 +97,17 @@ function nowTime(): string {
 }
 
 function relativeAssetPath(documentPath: string, assetPath: string): string {
-  const dirDepth = documentPath.split("/").slice(0, -1).filter(Boolean).length;
-  return `${"../".repeat(dirDepth)}${assetPath}`;
+  return relativeMarkdownReferencePathFromDocument(documentPath, assetPath);
+}
+
+function rawRepoFileHref(owner: string, repo: string, branch: string, path: string): string {
+  return `/${urlPath(owner)}/${urlPath(repo)}/raw/branch/${urlPath(branch)}/${urlPath(path)}`;
+}
+
+async function fetchRawRepoFile(owner: string, repo: string, branch: string, path: string): Promise<Response> {
+  const res = await fetch(rawRepoFileHref(owner, repo, branch, path), { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`Unable to read ${path}: HTTP ${res.status}`);
+  return res;
 }
 
 function sizeAssetRejection(file: File): { reject: string } | null {
@@ -104,24 +119,6 @@ function sizeAssetRejection(file: File): { reject: string } | null {
 // upload), never for per-save feedback.
 function toast(message: string, kind: "info" | "success" | "error" = "info"): void {
   (window as unknown as { cosheafToast?: (m: string, o?: { kind?: string }) => void }).cosheafToast?.(message, { kind });
-}
-
-function editorCitationClusterPreview(key: string, context: DocumentContext): HTMLElement | null {
-  const ids = key.split(";").map((id) => id.trim()).filter(Boolean);
-  if (ids.length < 2 || !context.citationFormatter || !context.citationKeys) return null;
-  const citationIds = ids.filter((id) => context.citationKeys?.has(id));
-  if (citationIds.length === 0) return null;
-  const entriesById = new Map(
-    context.citationFormatter.bibliographyEntries(citationIds).map((entry) => [entry.id, entry.html]),
-  );
-  const container = document.createElement("div");
-  container.className = "cf-hover-preview-citation-body";
-  for (const id of citationIds) {
-    const html = entriesById.get(id);
-    if (!html) continue;
-    container.appendChild(sanitizeAndRewriteRefsFragment(html));
-  }
-  return container.childNodes.length > 0 ? container : null;
 }
 
 // Persistent, glance-able save-state label + style class (#184), priority-ordered:
@@ -204,36 +201,6 @@ function matchesSuggestion(id: string, title: string | null, prefix: string): bo
   return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
-function InlineChromeHtml({
-  html,
-  fallback,
-  mathMacros,
-}: {
-  html?: string;
-  fallback: string;
-  mathMacros?: Record<string, string>;
-}): ReactNode {
-  const ref = useRef<HTMLSpanElement | null>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (!html) {
-      el.replaceChildren();
-      renderInlineMarkdown(el, fallback, mathMacros ?? {}, "ui-chrome-inline");
-      return;
-    }
-    const fragment = sanitizeAndRewriteRefsFragment(html);
-    for (const interactive of Array.from(fragment.querySelectorAll("a, button"))) {
-      const span = document.createElement("span");
-      span.className = interactive.className;
-      span.replaceChildren(...Array.from(interactive.childNodes));
-      interactive.replaceWith(span);
-    }
-    el.replaceChildren(fragment);
-  }, [html, fallback, mathMacros]);
-  return <span ref={ref}>{fallback}</span>;
-}
-
 function WebEditor({ config, initialContent }: { config: EditorConfig; initialContent: string }) {
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(config.formatId).editor),
@@ -272,6 +239,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
+  const railRef = useRef<HTMLElement | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
   const assetInputRef = useRef<HTMLInputElement | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -285,6 +253,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   branchRef.current = branch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
+
+  const setEditorMode = useCallback((next: "rich" | "source") => {
+    setMode(next);
+    writeEditorMode(next, config.username);
+  }, [config.username]);
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -370,7 +343,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     const cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
       source: content,
       context: documentContext,
-      previewForReference: (key) => editorCitationClusterPreview(key, documentContext),
+      previewForReference: (key) => createReaderCitationClusterPreviewBody(key, documentContext),
     });
     const reconcile = () => {
       queued = false;
@@ -399,6 +372,40 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     if (current && current !== "main") return current;
     return `${userBranchPrefix(config.username)}wip-${shortId()}`;
   }, [config.username]);
+
+  const fileSystem = useMemo<FileSystem | undefined>(() => {
+    if (config.formatId !== COFLAT_FORMAT_ID) return undefined;
+    const readBranch = () => branchRef.current || config.branch || "main";
+    const readFile = async (path: string): Promise<string> =>
+      fetchRawRepoFile(config.owner, config.repo, readBranch(), path).then((res) => res.text());
+    const readFileBinary = async (path: string): Promise<Uint8Array> => {
+      const buffer = await fetchRawRepoFile(config.owner, config.repo, readBranch(), path).then((res) => res.arrayBuffer());
+      return new Uint8Array(buffer);
+    };
+    const unsupportedWrite = async (): Promise<void> => {
+      throw new Error("Repository writes must go through Cosheaf save or upload actions.");
+    };
+    return {
+      listTree: async (): Promise<FileEntry> => ({ name: "", path: "", isDirectory: true, children: [] }),
+      readFile,
+      writeFile: unsupportedWrite,
+      createFile: unsupportedWrite,
+      exists: async (path: string): Promise<boolean> => {
+        try {
+          await fetchRawRepoFile(config.owner, config.repo, readBranch(), path);
+          return true;
+        } catch (_error) {
+          return false;
+        }
+      },
+      renameFile: unsupportedWrite,
+      createDirectory: unsupportedWrite,
+      deleteFile: unsupportedWrite,
+      writeFileBinary: unsupportedWrite,
+      readFileBinary,
+      resolveAssetUrl: (path: string): string => rawRepoFileHref(config.owner, config.repo, readBranch(), path),
+    };
+  }, [config.branch, config.formatId, config.owner, config.repo]);
 
   // Autosave (#162): persist the in-progress source to a local draft. No
   // network, no commit, no branch creation — so it can never clobber the
@@ -739,6 +746,37 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // path that was never written.
   const readHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(savedReadBranch)}/${urlPath(savedPath)}`;
   const outlineMathMacros = documentContext?.mathMacros;
+  const railModel = documentRailModel({
+    mode: "edit",
+    readHref,
+    editHref: window.location.href,
+    editorMode: config.formatId === COFLAT_FORMAT_ID ? mode : undefined,
+    outline: outline.map((entry) => ({
+      key: entry.key,
+      level: entry.level,
+      label: entry.markdown,
+      html: (entry as OutlineEntry & { html?: string }).html,
+      line: entry.line,
+    })),
+  });
+
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    renderDocumentRail(
+      rail,
+      { ...railModel, mathMacros: outlineMathMacros },
+      {
+        onControl: (control) => {
+          if (control.label === "Source") setEditorMode("source");
+          else if (control.label === "Rich") setEditorMode("rich");
+        },
+        onOutlineItem: (entry) => {
+          if (typeof entry.line === "number") editorRef.current?.scrollToLine(entry.line, { center: true });
+        },
+      },
+    );
+  }, [outlineMathMacros, railModel, setEditorMode]);
 
   return (
     <div className={readerClass}>
@@ -753,81 +791,41 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </button>
         </div>
       ) : null}
-      <div className="web-editor-main">
-        <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
-          {documentContextReady ? (
-            <ActiveMarkdownEditor
-              key={savedPath}
-              value={content}
-              mode={mode}
-              from={currentPath}
-              documentContext={documentContext ?? undefined}
-              testId="editor"
-              onReady={(editor) => {
-                outlineUnsubscribeRef.current?.();
-                editorRef.current = editor;
-                setOutline(editor.outline.get());
-                outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
-              }}
-              onChange={(next) => {
-                setContent(next);
-                setUncommitted(true);
-                setSaveError(null);
-              }}
-              saveHandler={saveHandler}
-              statusEvents={statusEvents}
-              assetUploader={assetUploader}
-              autocompleteSources={autocompleteSources}
-              sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
-            />
-          ) : (
-            <div className="web-editor-loading">Loading editor...</div>
-          )}
-        </Suspense>
-        <aside className="web-editor-outline doc-rail" aria-label="Document tools">
-          <div className="doc-view-switch" aria-label="View">
-            <a data-testid="editor-read-link" href={readHref}>
-              Read
-            </a>
-            <a className="active" href={window.location.href} aria-current="page">
-              Edit
-            </a>
-          </div>
-          {config.formatId === COFLAT_FORMAT_ID ? (
-            <div
-              className={`editor-diagnostics ${validationSummary && validationSummary.brokenRefs + validationSummary.duplicateLabels > 0 ? "has-issues" : ""}`}
-              data-testid="editor-diagnostics"
-            >
-              <a href={`/${urlPath(config.owner)}/${urlPath(config.repo)}/diagnostics`}>Diagnostics</a>
-              {validationSummary ? (
-                <span>
-                  {validationSummary.brokenRefs + validationSummary.duplicateLabels} actionable, {validationSummary.orphanLabels} unreferenced
-                </span>
-              ) : (
-                <span>Unavailable</span>
-              )}
-            </div>
-          ) : null}
-          <h2 className="doc-toc-title">On this page</h2>
-          {outline.length ? (
-            <ol className="doc-rail-outline">
-              {outline.map((entry) => (
-                <li key={entry.key} style={{ paddingLeft: `${Math.max(0, entry.level - 1) * 12}px` }}>
-                  <button type="button" onClick={() => editorRef.current?.scrollToLine(entry.line, { center: true })}>
-                    {entry.number ? `${entry.number} ` : ""}
-                    <InlineChromeHtml
-                      html={(entry as OutlineEntry & { html?: string }).html}
-                      fallback={entry.markdown}
-                      mathMacros={outlineMathMacros}
-                    />
-                  </button>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p>No headings.</p>
-          )}
-        </aside>
+      <div className="doc-with-toc">
+        <div className="doc-main">
+          <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
+            {documentContextReady ? (
+              <ActiveMarkdownEditor
+                key={savedPath}
+                value={content}
+                mode={mode}
+                from={currentPath}
+                documentContext={documentContext ?? undefined}
+                fileSystem={fileSystem}
+                testId="editor"
+                onReady={(editor) => {
+                  outlineUnsubscribeRef.current?.();
+                  editorRef.current = editor;
+                  setOutline(editor.outline.get());
+                  outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
+                }}
+                onChange={(next) => {
+                  setContent(next);
+                  setUncommitted(true);
+                  setSaveError(null);
+                }}
+                saveHandler={saveHandler}
+                statusEvents={statusEvents}
+                assetUploader={assetUploader}
+                autocompleteSources={autocompleteSources}
+                sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
+              />
+            ) : (
+              <div className="web-editor-loading">Loading editor...</div>
+            )}
+          </Suspense>
+        </div>
+        <aside ref={railRef} className="web-editor-outline doc-rail" aria-label="Document tools" data-document-rail />
       </div>
       {renderEditorChrome(
         <>
@@ -880,6 +878,22 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </span>
         </>,
         <>
+          {config.formatId === COFLAT_FORMAT_ID ? (() => {
+            const actionable = validationSummary ? validationSummary.brokenRefs + validationSummary.duplicateLabels : null;
+            const label = actionable === null ? "Problems -" : `Problems ${actionable}`;
+            const detail = validationSummary
+              ? `${actionable} actionable, ${validationSummary.orphanLabels} unreferenced`
+              : "Diagnostics unavailable";
+            return (
+              <a
+                className={`web-editor-problems ${actionable && actionable > 0 ? "has-issues" : ""}`}
+                href={`/${urlPath(config.owner)}/${urlPath(config.repo)}/diagnostics`}
+                title={detail}
+              >
+                {label}
+              </a>
+            );
+          })() : null}
           {(() => {
             // Glance-able, paired with the dirty-dot. title surfaces the full error.
             const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty, lastSavedAt });
@@ -893,11 +907,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               </span>
             );
           })()}
-          {config.formatId === COFLAT_FORMAT_ID ? (
-            <button type="button" data-testid="editor-mode-toggle" onClick={() => setMode((value) => (value === "rich" ? "source" : "rich"))}>
-              {mode === "rich" ? "Source" : "Rich"}
-            </button>
-          ) : null}
           <button type="button" onClick={save} disabled={(!uncommitted && !pathDirty) || busy}>
             Save
           </button>

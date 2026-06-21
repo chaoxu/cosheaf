@@ -1,4 +1,5 @@
 import { expect, type Locator, test } from "@playwright/test";
+import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 
 const webBase = defaultWebUrl();
@@ -74,11 +75,11 @@ test("account preferences are separate from repository settings", async ({ page 
   await expect(page.locator('link[href*="/vendor/coflat/"]')).not.toHaveCount(0);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md`);
-  await expect(page.locator(".cf-doc-block--theorem .cf-block-header-rendered").filter({ hasText: "Theorem 1" }).first()).toBeVisible();
+  await expect(page.locator(`${CF.theoremBlock} ${CF.blockHeaderRendered}`).filter({ hasText: "Theorem 1" }).first()).toBeVisible();
   await expect(
-    page.locator(".cf-doc-block--theorem .cf-block-attr-title").filter({ hasText: "Hover Preview Stress Test" }).first(),
+    page.locator(`${CF.theoremBlock} ${CF.blockAttrTitle}`).filter({ hasText: "Hover Preview Stress Test" }).first(),
   ).toBeVisible();
-  await expect(page.locator(".cf-doc-block--theorem > .cf-block-header")).toHaveCount(0);
+  await expect(page.locator(`${CF.theoremBlock} > ${CF.blockHeader}`)).toHaveCount(0);
   const showcaseImage = page.locator('img[src*="/raw/branch/main/showcase/hover-preview-figure.svg"]').first();
   await expect(showcaseImage).toBeVisible();
   const showcaseImageSrc = await showcaseImage.getAttribute("src");

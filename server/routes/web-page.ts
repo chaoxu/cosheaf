@@ -38,7 +38,6 @@ const REPO_TABS = [
   ["files", "tab.files", ""],
   ["issues", "tab.issues", "/issues"],
   ["pulls", "tab.pulls", "/pulls"],
-  ["chat", "tab.chat", "/chat"],
   ["notifications", "nav.notifications", "/notifications"],
   ["activity", "tab.activity", "/activity"],
   ["diagnostics", "tab.diagnostics", "/diagnostics"],
@@ -121,7 +120,7 @@ export function repoPage(opts: {
       <nav class="repo-tabs">${nav}</nav>
       ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
-      { label: opts.owner, cls: opts.wsTitle ? "status-owner" : undefined },
+      { label: opts.owner, href: `/users/${encodeURIComponent(opts.owner)}`, cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
       ...(opts.statusOmitTab ? [] : [{ label: activeLabel.toLowerCase() }]),
       ...(opts.statusExtra ?? []),

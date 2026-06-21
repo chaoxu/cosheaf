@@ -165,6 +165,36 @@ describe("indexPage", () => {
     expect(labels).toEqual(["[@targetid]", "[link](other.md)"]);
   });
 
+  it("resolves document-relative and root-relative markdown backlinks with Coflat path semantics", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "docs/target.md",
+      bodyText: "---\nid: nested\n---\n# Nested\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "target.md",
+      bodyText: "---\nid: root\n---\n# Root\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "docs/source.md",
+      bodyText: "# Source\n\n[near](./target.md)\n[root](/target.md)\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    const links = db
+      .prepare("SELECT target_label, target_id FROM backlinks WHERE workspace_slug = 'owner/w' AND src_path = 'docs/source.md' ORDER BY target_label")
+      .all() as Array<{ target_label: string; target_id: string }>;
+    expect(links).toEqual([
+      { target_label: "[near](./target.md)", target_id: "nested" },
+      { target_label: "[root](/target.md)", target_id: "root" },
+    ]);
+  });
+
   it("indexes Coflat cross-reference targets for cross-file resolution", () => {
     const db = freshDb();
     indexPage(db, {

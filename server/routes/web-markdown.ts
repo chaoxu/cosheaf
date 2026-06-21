@@ -28,7 +28,6 @@ function coflatSurfaceClass(surface: MarkdownSurface): string {
 }
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
-  const { body } = parseFrontmatterYaml(source);
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
     // Repo-wide math macros (#183) live in cosheaf.yaml (#182), cached per
     // branch; thread them into every coflat surface via the island payload so
@@ -36,6 +35,7 @@ export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceO
     const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, opts.branch ?? "main");
     return coflatReaderIsland(ctx, source, opts, repoConfig);
   }
+  const { body } = parseFrontmatterYaml(source);
   // Forgejo's repo-scoped /markdown endpoint returns sanitized HTML; it is
   // the rendered document, not text content.
   return raw(await ctx.fj.renderMarkdown(ctx.owner, ctx.repo, body));
@@ -46,8 +46,8 @@ export async function renderMarkdownSurface(ctx: WebCtx, source: string, opts: S
   return markdownSurface(ctx, rendered, opts.surface ?? "document");
 }
 
-function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): Html {
-  const payload = {
+export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>) {
+  return {
     source,
     owner: ctx.owner,
     repo: ctx.repo,
@@ -63,6 +63,10 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repo
     ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
     ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
   };
+}
+
+function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): Html {
+  const payload = coflatReaderPayload(ctx, source, opts, repoConfig);
   const className = ["cf-reader", "cf-doc-surface", "cf-doc-flow", "coflat-reader-island", coflatSurfaceClass(opts.surface ?? "document")]
     .filter(Boolean)
     .join(" ");

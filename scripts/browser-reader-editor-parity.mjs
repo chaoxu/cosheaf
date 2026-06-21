@@ -1,6 +1,10 @@
 // Browser regression for the server-rendered Coflat full reader surface.
 
 import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
+import {
+  COFLAT_BROWSER_ATTRIBUTES as CFA,
+  COFLAT_BROWSER_SELECTORS as CF,
+} from "@chaoxu/coflat/browser-test-utils";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -44,14 +48,14 @@ async function ensureSignedIn() {
 }
 
 async function readerStats() {
-  return page.locator(".cf-reader").first().evaluate((el) => {
-    const h = el.querySelector(".cf-doc-heading, h1, h2");
-    const paragraph = el.querySelector(".cf-doc-paragraph, p");
-    const ul = el.querySelector(".cf-doc-list--unordered, ul");
-    const displayMath = el.querySelector(".cf-doc-display-math");
-    const katex = displayMath?.querySelector(".katex");
-    const katexDisplay = displayMath?.querySelector(".katex-display");
-    const root = el.closest(".cf-theme-scope");
+  return page.locator(CF.reader).first().evaluate((el, selector) => {
+    const h = el.querySelector(`${selector.heading}, h1, h2`);
+    const paragraph = el.querySelector(selector.paragraphOrNative);
+    const ul = el.querySelector(selector.unorderedListOrNative);
+    const displayMath = el.querySelector(selector.displayMath);
+    const katex = displayMath?.querySelector(selector.katex);
+    const katexDisplay = displayMath?.querySelector(selector.katexDisplay);
+    const root = el.closest(selector.themeScope);
     const document = el.closest(".document");
     const styles = getComputedStyle(el);
     return {
@@ -70,33 +74,33 @@ async function readerStats() {
       katexDisplayMargin: katexDisplay ? getComputedStyle(katexDisplay).margin : null,
       headingSize: h ? getComputedStyle(h).fontSize : null,
       paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
-      headingNumber: h?.getAttribute("data-section-number") ?? null,
-      headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
+      headingNumber: h?.getAttribute(selector.attr.sectionNumber) ?? null,
+      headingNumbers: [...el.querySelectorAll(selector.heading)]
         .slice(0, 8)
-        .map((node) => node.getAttribute("data-section-number")),
+        .map((node) => node.getAttribute(selector.attr.sectionNumber)),
       listStyle: ul ? getComputedStyle(ul).listStyleType : null,
-      listMarkers: el.querySelectorAll(".cf-list-bullet, .cf-list-number").length,
-      mathErrors: el.querySelectorAll(".cf-math-error").length,
-      unresolvedCrossrefs: [...el.querySelectorAll(".cf-crossref-unresolved[data-ref-key]")].map((node) =>
-        node.getAttribute("data-ref-key")
+      listMarkers: el.querySelectorAll(selector.listMarker).length,
+      mathErrors: el.querySelectorAll(selector.mathError).length,
+      unresolvedCrossrefs: [...el.querySelectorAll(`${selector.unresolvedCrossref}${selector.referenceKey}`)].map((node) =>
+        node.getAttribute(selector.attr.referenceKey)
       ),
-      citations: [...el.querySelectorAll(".cf-citation")].slice(0, 5).map((node) => node.textContent ?? ""),
+      citations: [...el.querySelectorAll(selector.citation)].slice(0, 5).map((node) => node.textContent ?? ""),
       redSample: [...el.querySelectorAll('[class*="error"], [class*="unresolved"]')]
         .slice(0, 8)
         .map((node) => node.textContent?.slice(0, 80) ?? ""),
       text: el.textContent?.slice(0, 160) ?? "",
     };
-  });
+  }, { ...CF, attr: CFA });
 }
 
 async function editorStats() {
-  return page.locator(".cm-content").first().evaluate((el) => {
-    const h = el.querySelector(".cf-doc-heading, h1, h2");
-    const ul = el.querySelector(".cf-doc-list--unordered, ul");
-    const displayMath = el.querySelector(".cf-doc-display-math");
-    const katex = displayMath?.querySelector(".katex");
-    const katexDisplay = displayMath?.querySelector(".katex-display");
-    const root = el.closest(".cf-theme-scope");
+  return page.locator(CF.editorContent).first().evaluate((el, selector) => {
+    const h = el.querySelector(`${selector.heading}, h1, h2`);
+    const ul = el.querySelector(selector.unorderedListOrNative);
+    const displayMath = el.querySelector(selector.displayMath);
+    const katex = displayMath?.querySelector(selector.katex);
+    const katexDisplay = displayMath?.querySelector(selector.katexDisplay);
+    const root = el.closest(selector.themeScope);
     const styles = getComputedStyle(el);
     return {
       rootClass: root?.className ?? "",
@@ -111,26 +115,26 @@ async function editorStats() {
       displayMathSize: displayMath ? getComputedStyle(displayMath).fontSize : null,
       katexSize: katex ? getComputedStyle(katex).fontSize : null,
       katexDisplayMargin: katexDisplay ? getComputedStyle(katexDisplay).margin : null,
-      headingNumber: h?.getAttribute("data-section-number") ?? null,
-      headingNumbers: [...el.querySelectorAll(".cf-doc-heading")]
+      headingNumber: h?.getAttribute(selector.attr.sectionNumber) ?? null,
+      headingNumbers: [...el.querySelectorAll(selector.heading)]
         .slice(0, 8)
-        .map((node) => node.getAttribute("data-section-number")),
+        .map((node) => node.getAttribute(selector.attr.sectionNumber)),
       listStyle: ul ? getComputedStyle(ul).listStyleType : null,
-      listMarkers: el.querySelectorAll(".cf-list-bullet, .cf-list-number").length,
+      listMarkers: el.querySelectorAll(selector.listMarker).length,
       text: el.textContent?.slice(0, 160) ?? "",
     };
-  });
+  }, { ...CF, attr: CFA });
 }
 
 async function readerCodeBlockStats() {
-  return page.locator(".cf-reader").first().evaluate((el) => {
-    const block = el.querySelector(".cf-doc-code-block");
+  return page.locator(CF.reader).first().evaluate((el, selector) => {
+    const block = el.querySelector(selector.codeBlock);
     const code = block?.querySelector("code") ?? null;
-    const language = block?.querySelector(".cf-codeblock-language") ?? null;
+    const language = block?.querySelector(selector.codeLanguage) ?? null;
     const blockStyles = block ? getComputedStyle(block) : null;
     const codeStyles = code ? getComputedStyle(code) : null;
     return {
-      count: el.querySelectorAll(".cf-doc-code-block").length,
+      count: el.querySelectorAll(selector.codeBlock).length,
       languageText: language?.textContent?.trim() ?? null,
       pre: blockStyles
         ? {
@@ -151,15 +155,15 @@ async function readerCodeBlockStats() {
         }
         : null,
     };
-  });
+  }, CF);
 }
 
 async function editorCodeBlockStats() {
-  return page.locator(".cm-content").first().evaluate((el) => {
-    const lines = [...el.querySelectorAll(".cf-codeblock-header, .cf-codeblock-body, .cf-codeblock-last")];
+  return page.locator(CF.editorContent).first().evaluate((el, selector) => {
+    const lines = [...el.querySelectorAll(selector.editorCodeLine)];
     return {
       count: lines.length,
-      languageText: el.querySelector(".cf-codeblock-language")?.textContent?.trim() ?? null,
+      languageText: el.querySelector(selector.codeLanguage)?.textContent?.trim() ?? null,
       lines: lines.slice(0, 6).map((line) => {
         const styles = getComputedStyle(line);
         return {
@@ -172,11 +176,11 @@ async function editorCodeBlockStats() {
         };
       }),
     };
-  });
+  }, CF);
 }
 
 async function readerLinkStats() {
-  return page.locator(".cf-reader .cf-doc-link").first().evaluate((el) => {
+  return page.locator(`${CF.reader} ${CF.link}`).first().evaluate((el) => {
     const styles = getComputedStyle(el);
     const rect = el.getBoundingClientRect();
     return {
@@ -194,7 +198,7 @@ async function readerLinkStats() {
 }
 
 async function editorLinkStats() {
-  return page.locator(".cm-content .cf-doc-link").first().evaluate((el) => {
+  return page.locator(`${CF.editorContent} ${CF.link}`).first().evaluate((el) => {
     const styles = getComputedStyle(el);
     const rect = el.getBoundingClientRect();
     return {
@@ -212,23 +216,23 @@ async function editorLinkStats() {
 }
 
 async function footnoteSectionStats(rootSelector) {
-  return page.locator(rootSelector).first().evaluate((el) => {
-    const section = el.querySelector(".cf-footnote-section");
-    const entries = section ? [...section.querySelectorAll(".cf-bibliography-entry")] : [];
-    const heading = section?.querySelector(".cf-bibliography-heading");
+  return page.locator(rootSelector).first().evaluate((el, selector) => {
+    const section = el.querySelector(selector.footnoteSection);
+    const entries = section ? [...section.querySelectorAll(selector.bibliographyEntry)] : [];
+    const heading = section?.querySelector(selector.bibliographyHeading);
     const rect = section?.getBoundingClientRect();
     const styles = section ? getComputedStyle(section) : null;
     return {
       count: entries.length,
       heading: heading?.textContent?.trim() ?? null,
-      numbers: entries.map((entry) => entry.querySelector(".cf-bibliography-entry-number")?.textContent?.trim() ?? ""),
-      hasBackrefs: entries.every((entry) => !!entry.querySelector(".cf-footnote-backref")),
-      hasMath: entries.some((entry) => !!entry.querySelector(".cf-doc-inline-math, .katex")),
+      numbers: entries.map((entry) => entry.querySelector(selector.bibliographyEntryNumber)?.textContent?.trim() ?? ""),
+      hasBackrefs: entries.every((entry) => !!entry.querySelector(selector.footnoteBackref)),
+      hasMath: entries.some((entry) => !!entry.querySelector(selector.inlineMathOrKatex)),
       text: section?.textContent?.replace(/\s+/g, " ").trim() ?? "",
       width: rect ? Math.round(rect.width) : 0,
       display: styles?.display ?? null,
     };
-  });
+  }, CF);
 }
 
 function assertFootnoteSectionParity(readerFootnotes, editorFootnotes) {
@@ -253,8 +257,9 @@ function assertFootnoteSectionParity(readerFootnotes, editorFootnotes) {
 }
 
 async function readerLayoutStats(viewportName) {
-  return page.locator(".app-content").first().evaluate((appContent, name) => {
-    const reader = appContent.querySelector(".cf-reader");
+  return page.locator(".app-content").first().evaluate((appContent, arg) => {
+    const { name, selector } = arg;
+    const reader = appContent.querySelector(selector.reader);
     const rail = appContent.querySelector(".doc-rail");
     const doc = appContent.querySelector(".document");
     const readerRect = reader?.getBoundingClientRect();
@@ -272,13 +277,14 @@ async function readerLayoutStats(viewportName) {
       railDisplay: rail ? getComputedStyle(rail).display : null,
       railWidth: rail ? Math.round(rail.getBoundingClientRect().width) : 0,
     };
-  }, viewportName);
+  }, { name: viewportName, selector: CF });
 }
 
 async function editorLayoutStats(viewportName) {
-  return page.locator(".app-content").first().evaluate((appContent, name) => {
-    const content = appContent.querySelector(".cm-content");
-    const scroller = appContent.querySelector(".cm-scroller");
+  return page.locator(".app-content").first().evaluate((appContent, arg) => {
+    const { name, selector } = arg;
+    const content = appContent.querySelector(selector.editorContent);
+    const scroller = appContent.querySelector(selector.editorScroller);
     const rail = appContent.querySelector(".web-editor-outline");
     const appRect = appContent.getBoundingClientRect();
     const contentRect = content?.getBoundingClientRect();
@@ -295,7 +301,7 @@ async function editorLayoutStats(viewportName) {
       railDisplay: rail ? getComputedStyle(rail).display : null,
       railWidth: rail ? Math.round(rail.getBoundingClientRect().width) : 0,
     };
-  }, viewportName);
+  }, { name: viewportName, selector: CF });
 }
 
 function assertDesktopLayoutParity(readerLayout, editorLayout) {
@@ -436,7 +442,7 @@ function assertCodeBlockParity(readerCode, editorCode) {
 }
 
 async function assertHoverPreview(selector, expectedText) {
-  const tooltip = page.locator(".cf-hover-preview-tooltip[data-visible=\"true\"]");
+  const tooltip = page.locator(CF.hoverPreviewTooltip);
   await page.locator(selector).first().hover();
   await tooltip.waitFor({ state: "visible", timeout: 3000 });
   const text = await tooltip.textContent();
@@ -478,7 +484,7 @@ async function scrollEditorUntilMounted(selector) {
     }, step);
     await page.waitForTimeout(150);
   }
-  const visibleReferences = await page.locator("[data-reference-widget]").evaluateAll((nodes) =>
+  const visibleReferences = await page.locator(CF.referenceWidget).evaluateAll((nodes) =>
     nodes.slice(0, 12).map((node) => node.textContent ?? ""),
   );
   throw new Error(`editor reference widget did not mount for ${selector}: ${JSON.stringify(visibleReferences)}`);
@@ -486,8 +492,8 @@ async function scrollEditorUntilMounted(selector) {
 
 async function gotoShowcaseReader() {
   await page.goto(`${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 10000 });
-  await page.locator(".cf-reader .cf-doc-heading").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(CF.reader).waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(`${CF.reader} ${CF.heading}`).first().waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function gotoShowcaseEditor() {
@@ -495,7 +501,7 @@ async function gotoShowcaseEditor() {
     `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=main&path=${encodeURIComponent(SHOWCASE_PATH)}`,
     { waitUntil: "domcontentloaded" },
   );
-  await page.locator(".cm-content").waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(CF.editorContent).waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function setDocumentTheme(theme) {
@@ -593,9 +599,9 @@ try {
   }
   const defaultReaderLink = await readerLinkStats();
   const defaultReaderCode = await readerCodeBlockStats();
-  const defaultReaderFootnotes = await footnoteSectionStats(".cf-reader");
+  const defaultReaderFootnotes = await footnoteSectionStats(CF.reader);
   await assertResolvedOutlineLabel("reader");
-  await assertHoverPreview(".cf-reader [data-ref-key=\"thm:hover-preview\"]", "Hover Preview Stress Test");
+  await assertHoverPreview(`${CF.reader} [${CFA.referenceKey}="thm:hover-preview"]`, "Hover Preview Stress Test");
 
   await setDocumentTheme("blueprint-book");
   await gotoShowcaseReader();
@@ -619,17 +625,17 @@ try {
   }
   assertReaderEditorParity(defaultReader, defaultEditor);
   assertDesktopLayoutParity(defaultReaderLayout, defaultEditorLayout);
-  await scrollEditorUntilMounted(".cm-content .cf-doc-link");
+  await scrollEditorUntilMounted(`${CF.editorContent} ${CF.link}`);
   const defaultEditorLink = await editorLinkStats();
   assertLinkStyleParity(defaultReaderLink, defaultEditorLink);
-  await scrollEditorUntilMounted(".cf-codeblock-header, .cf-codeblock-body, .cf-codeblock-last");
+  await scrollEditorUntilMounted(CF.editorCodeLine);
   const defaultEditorCode = await editorCodeBlockStats();
   assertCodeBlockParity(defaultReaderCode, defaultEditorCode);
-  await scrollEditorUntilMounted(".cf-footnote-section");
-  const defaultEditorFootnotes = await footnoteSectionStats(".cm-content");
+  await scrollEditorUntilMounted(CF.footnoteSection);
+  const defaultEditorFootnotes = await footnoteSectionStats(CF.editorContent);
   assertFootnoteSectionParity(defaultReaderFootnotes, defaultEditorFootnotes);
   await assertResolvedOutlineLabel("editor");
-  const editorHoverTarget = "[data-reference-widget] [data-ref-id=\"thm:hover-preview\"], [data-reference-widget][data-ref-key=\"thm:hover-preview\"]";
+  const editorHoverTarget = `${CF.referenceWidget} [${CFA.referenceId}="thm:hover-preview"], ${CF.referenceWidget}[${CFA.referenceKey}="thm:hover-preview"]`;
   await scrollEditorUntilMounted(editorHoverTarget);
   await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");
 

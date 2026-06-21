@@ -83,7 +83,7 @@ export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Prom
 }
 
 export function chatIssueReadOnlyPage(user: string): Response {
-  return badRequestPage(user, "Chat-backed issues are read-only from the issue UI. Continue the transcript from the Chat tab.");
+  return badRequestPage(user, "Chat-backed issues are read-only from the issue UI.");
 }
 
 export function issueRelationsPanel(

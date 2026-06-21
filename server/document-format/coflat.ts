@@ -1,7 +1,6 @@
 import {
-  buildReferenceCatalog,
+  extractDocumentReferences,
   extractFirstH1,
-  extractReferences,
   parseFrontmatter as parseCoflatFrontmatter,
   serializeFrontmatter as serializeCoflatFrontmatter,
 } from "@chaoxu/coflat/parse";
@@ -54,26 +53,12 @@ function trimLeadingLineFeeds(body: string): string {
 }
 
 function extractLinks(source: string): DocumentLink[] {
-  const out: DocumentLink[] = [];
-  for (const ref of buildReferenceCatalog(source).references) {
-    if (!ref.bracketed) continue;
-    for (const id of ref.ids) {
-      out.push({ kind: "id", ref: id, raw: `[@${id}]`, from: ref.from, to: ref.to, line: ref.line });
-    }
-  }
-  for (const ref of extractReferences(source)) {
-    if (ref.kind === "crossref" && ref.bracketed && ref.key) {
-      continue;
-    } else if (ref.kind === "link" && ref.href) {
-      if (!isMarkdownPageHref(ref.href)) continue;
-      out.push({ kind: "path", ref: ref.href, raw: ref.raw, from: ref.from, to: ref.to });
-    }
-  }
-  return out;
-}
-
-function isMarkdownPageHref(href: string): boolean {
-  const hash = href.indexOf("#");
-  const path = hash < 0 ? href : href.slice(0, hash);
-  return path.toLowerCase().endsWith(".md");
+  return extractDocumentReferences(source).map((ref) => ({
+    kind: ref.kind,
+    ref: ref.ref,
+    raw: ref.raw,
+    from: ref.from,
+    to: ref.to,
+    line: ref.line,
+  }));
 }

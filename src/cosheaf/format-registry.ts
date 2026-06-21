@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { DocumentContext } from "@chaoxu/coflat/reader";
+import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
 import {
   COFLAT_FORMAT_ID,
   DEFAULT_DOCUMENT_FORMAT_ID,
@@ -23,6 +23,7 @@ interface EditorProps {
   readOnly?: boolean;
   from?: string;
   documentContext?: DocumentContext;
+  fileSystem?: FileSystem;
   saveHandler?: EditorSaveHandler;
   statusEvents?: EditorStatusEvents;
   assetUploader?: EditorAssetUploader;

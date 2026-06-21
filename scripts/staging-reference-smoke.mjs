@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -31,8 +32,11 @@ try {
 
   const readerUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL).toString();
   await page.goto(readerUrl, { waitUntil: "domcontentloaded" });
-  await page.locator(".cf-reader").waitFor({ state: "visible", timeout: 15000 });
-  const readerPreview = await hoverPreviewText(page, ".cf-reader [data-ref-key], .cf-reader [data-reference-widget] [data-ref-id]");
+  await page.locator(CF.reader).waitFor({ state: "visible", timeout: 15000 });
+  const readerPreview = await hoverPreviewText(
+    page,
+    `${CF.reader} ${CF.referenceKey}, ${CF.reader} ${CF.referenceWidget} ${CF.referenceWidgetId}`,
+  );
 
   const editUrl = new URL(
     `/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=${encodeURIComponent(BRANCH)}&path=${encodeURIComponent(PAGE_PATH)}`,
@@ -40,7 +44,10 @@ try {
   ).toString();
   await page.goto(editUrl, { waitUntil: "domcontentloaded" });
   await page.getByTestId("editor").waitFor({ state: "visible", timeout: 15000 });
-  const editorPreview = await hoverPreviewText(page, ".cm-content [data-reference-widget][data-ref-key], .cm-content [data-reference-widget] [data-ref-id]");
+  const editorPreview = await hoverPreviewText(
+    page,
+    `${CF.referenceWidget}${CF.referenceKey}, ${CF.referenceWidget} ${CF.referenceWidgetId}`,
+  );
 
   if (badResponses.length > 0 || pageErrors.length > 0) {
     throw new Error("reference smoke emitted browser errors");
@@ -76,10 +83,11 @@ try {
 
 async function hoverPreviewText(page, selector) {
   const target = page.locator(selector).first();
-  await target.waitFor({ state: "visible", timeout: 15000 });
+  await target.waitFor({ state: "attached", timeout: 15000 });
   await target.scrollIntoViewIfNeeded();
+  await target.waitFor({ state: "visible", timeout: 5000 });
   await target.hover();
-  const tooltip = page.locator(".cf-hover-preview-tooltip[data-visible=\"true\"]").first();
+  const tooltip = page.locator(CF.hoverPreviewTooltip).first();
   await tooltip.waitFor({ state: "visible", timeout: 5000 });
   const text = (await tooltip.textContent())?.trim() ?? "";
   if (text.length < 20) throw new Error(`hover preview was too short for ${selector}: ${JSON.stringify(text)}`);

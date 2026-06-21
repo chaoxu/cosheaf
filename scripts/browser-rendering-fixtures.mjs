@@ -1,6 +1,7 @@
 // Browser smoke for seeded long-form Markdown issue and PR rendering.
 
 import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
+import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -79,12 +80,12 @@ try {
   await showcaseView.getByText("Frontmatter and Structure Editing").waitFor({ state: "visible", timeout: 10000 });
   await showcaseView.getByText("Labeled Display Math and Equation References").waitFor({ state: "visible", timeout: 10000 });
   await showcaseView.getByText("Rich table for edit/display parity").waitFor({ state: "visible", timeout: 10000 });
-  const readerSurface = await showcaseView.locator(".cf-doc-surface").count();
+  const readerSurface = await showcaseView.locator(CF.readerSurface).count();
   if (readerSurface === 0) {
     throw new Error("coflat showcase issue did not use a Coflat reader surface");
   }
-  const showcaseIssueStats = await showcaseView.locator(".cf-reader-compact").first().evaluate((el) => {
-    const paragraph = el.querySelector(".cf-doc-paragraph, p");
+  const showcaseIssueStats = await showcaseView.locator(CF.compactReader).first().evaluate((el, selector) => {
+    const paragraph = el.querySelector(selector.paragraphOrNative);
     const styles = getComputedStyle(el);
     const parent = el.parentElement;
     return {
@@ -94,9 +95,9 @@ try {
       paddingInline: [styles.paddingLeft, styles.paddingRight],
       paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
     };
-  });
-  // The issue/PR thread reader renders a compact, bounded prose column
-  // (cf-reader-compact). Assert the invariant — a finite reading measure that
+  }, CF);
+  // The issue/PR thread reader renders a compact, bounded prose column.
+  // Assert the invariant — a finite reading measure that
   // fits its container, zero horizontal padding, normal whitespace — rather
   // than coflat's exact default measure (it owns that and may tune it).
   if (!isBoundedProseColumn(showcaseIssueStats, showcaseIssueStats.availableWidth)) {
@@ -113,8 +114,8 @@ try {
   // so assert rendered text content (matching richSurfaceText below) rather
   // than visibility of deep body content, and don't pin "Review focus" to a
   // heading role — the fixture owns whether it is a heading.
-  await prHeader.locator(".cf-doc-surface").first().waitFor({ state: "visible", timeout: 10000 });
-  const prBodyText = await prHeader.locator(".cf-doc-surface").first().evaluate((el) => el.textContent ?? "");
+  await prHeader.locator(CF.readerSurface).first().waitFor({ state: "visible", timeout: 10000 });
+  const prBodyText = await prHeader.locator(CF.readerSurface).first().evaluate((el) => el.textContent ?? "");
   if (!prBodyText.includes("Review focus") || !prBodyText.includes("rich diff rendering")) {
     throw new Error(`PR description did not render expected body content: ${prBodyText.slice(0, 200)}`);
   }
@@ -144,10 +145,10 @@ try {
   await page.getByTestId("diff-pane-after").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-mode-rich").waitFor({ state: "visible", timeout: 10000 });
   await page.getByTestId("view-shape-after").waitFor({ state: "visible", timeout: 10000 });
-  const richAfterStats = await page.getByTestId("diff-pane-after").evaluate((el) => {
-    const reader = el.querySelector(".cf-reader");
+  const richAfterStats = await page.getByTestId("diff-pane-after").evaluate((el, selector) => {
+    const reader = el.querySelector(selector.reader);
     if (!reader) return null;
-    const paragraph = reader.querySelector(".cf-doc-paragraph, p");
+    const paragraph = reader.querySelector(selector.paragraphOrNative);
     const styles = getComputedStyle(reader);
     return {
       paneWidth: Math.round(el.getBoundingClientRect().width),
@@ -156,7 +157,7 @@ try {
       paddingInline: [styles.paddingLeft, styles.paddingRight],
       paragraphWhiteSpace: paragraph ? getComputedStyle(paragraph).whiteSpace : null,
     };
-  });
+  }, CF);
   if (!richAfterStats || !isBoundedProseColumn(richAfterStats, richAfterStats.paneWidth)) {
     throw new Error(`rich after reader is not using a bounded document layout: ${JSON.stringify(richAfterStats)}`);
   }
@@ -165,20 +166,20 @@ try {
   await page.getByText("This is the default development page").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("This branch version of the Flushing Coin hello page").waitFor({ state: "visible", timeout: 10000 });
   await page.getByText("sideBySideFixture").waitFor({ state: "visible", timeout: 10000 });
-  const richDiffStats = await page.getByTestId("diff-pane-split").evaluate((el) => {
-    const katex = el.querySelector(".katex");
-    const reader = el.querySelector(".cf-reader");
-    const richSurface = el.querySelector(".cf-reader");
+  const richDiffStats = await page.getByTestId("diff-pane-split").evaluate((el, selector) => {
+    const katex = el.querySelector(selector.katex);
+    const reader = el.querySelector(selector.reader);
+    const richSurface = el.querySelector(selector.reader);
     return {
-      katexCount: el.querySelectorAll(".katex").length,
+      katexCount: el.querySelectorAll(selector.katex).length,
       katexDisplay: katex ? getComputedStyle(katex).display : null,
       katexFont: katex ? getComputedStyle(katex).fontFamily : null,
-      richSurfaceCount: el.querySelectorAll(".cf-reader").length,
+      richSurfaceCount: el.querySelectorAll(selector.reader).length,
       readerWidth: reader ? Math.round(reader.getBoundingClientRect().width) : 0,
       richSurfaceText: richSurface?.textContent?.slice(0, 240) ?? "",
       paneWidth: Math.round(el.getBoundingClientRect().width),
     };
-  });
+  }, CF);
   if (richDiffStats.richSurfaceCount === 0 || !richDiffStats.richSurfaceText.includes("Hello")) {
     throw new Error(`rich PR diff did not render document surfaces: ${JSON.stringify(richDiffStats)}`);
   }
