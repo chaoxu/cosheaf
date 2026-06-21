@@ -7,8 +7,8 @@ import type { DocumentFormatId } from "../shared/document-format.js";
 import type { User } from "./users.js";
 import {
   ensureWorkspaceFile,
+  lockedReindexWorkspaceFromForgejo,
   provisionWorkspace,
-  reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
 import {
   COFLAT_SHOWCASE_BIB,
@@ -264,7 +264,7 @@ export async function seedWorkspace(args: {
     const created = await ensureWorkspaceFile(forgejo, workspace.owner, workspace.repo, file);
     if (created) console.log(`created ${file.path}`);
   }
-  await reindexWorkspaceFromForgejo(db, forgejo, workspace);
+  await lockedReindexWorkspaceFromForgejo(db, forgejo, workspace);
   if (profileIncludes(options.profile, "large-doc")) {
     await ensureCoflatShowcaseIssue(forgejo, workspace.owner, workspace.repo, options.workspaceName);
   }

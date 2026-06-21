@@ -20,6 +20,7 @@ x-cosheaf-app: &cosheaf-app
     COSHEAF_DATA_DIR: /var/lib/cosheaf
     COSHEAF_GIT_SHA: ${COSHEAF_GIT_SHA:-unknown}
     COFLAT_GIT_REF: ${COFLAT_GIT_REF:-e5a223117c12c35d92dcdc28120f8576327dcf98}
+    COSHEAF_RECONCILE_INTERVAL_MS: ${COSHEAF_RECONCILE_INTERVAL_MS:-600000}
   healthcheck:
     test:
       [

@@ -143,7 +143,7 @@ pnpm build            # Vite production build for page islands
 pnpm preview          # Preview built island assets on 0.0.0.0
 pnpm test             # vitest run
 pnpm check:stability  # unit/API tests plus server-rendered browser flows
-pnpm check:pre-push   # Types + lint gates (also run by lefthook on push)
+pnpm check:pre-push   # Types + lint gates; falls back to pinned Coflat worktrees
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```
 

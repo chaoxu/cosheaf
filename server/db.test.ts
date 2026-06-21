@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, normalizeOptionalOrigin, parsePort, parseTrustedProxyHops, validateTrustedProxyOrigin } from "./db.js";
+import { loadConfig, normalizeOptionalOrigin, parseNonNegativeInteger, parsePort, parseTrustedProxyHops, validateTrustedProxyOrigin } from "./db.js";
 
 const ENV_KEYS = [
   "COSHEAF_DATA_DIR",
@@ -19,6 +19,7 @@ const ENV_KEYS = [
   "COSHEAF_COVERIFY_API_URL",
   "COSHEAF_COVERIFY_BOT_TOKEN",
   "COSHEAF_COVERIFY_BOT_LOGIN",
+  "COSHEAF_RECONCILE_INTERVAL_MS",
 ] as const;
 
 let cleanupDir: string | null = null;
@@ -109,6 +110,24 @@ describe("parsePort", () => {
   });
 });
 
+describe("parseNonNegativeInteger", () => {
+  it("defaults missing and blank values to the supplied fallback", () => {
+    expect(parseNonNegativeInteger(undefined, 600000)).toBe(600000);
+    expect(parseNonNegativeInteger("  ", 600000)).toBe(600000);
+  });
+
+  it("accepts non-negative integers without partial parsing", () => {
+    expect(parseNonNegativeInteger("0", 600000)).toBe(0);
+    expect(parseNonNegativeInteger("600000", 0)).toBe(600000);
+  });
+
+  it("rejects invalid values", () => {
+    expect(() => parseNonNegativeInteger("-1", 0)).toThrow();
+    expect(() => parseNonNegativeInteger("1.5", 0)).toThrow();
+    expect(() => parseNonNegativeInteger("1junk", 0)).toThrow();
+  });
+});
+
 describe("loadConfig", () => {
   it("treats blank defaulted env vars as unset", () => {
     cleanupDir = mkdtempSync(path.join(tmpdir(), "cosheaf-config-"));
@@ -135,6 +154,7 @@ describe("loadConfig", () => {
     expect(config.coverifyApiUrl).toBe("http://127.0.0.1:3030/api/v1");
     expect(config.coverifyBotToken).toBe("");
     expect(config.coverifyBotLogin).toBe("coverify");
+    expect(config.reconcileIntervalMs).toBe(0);
   });
 });
 

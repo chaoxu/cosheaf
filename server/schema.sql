@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS site_settings (
   updated_by TEXT
 );
 
+CREATE TABLE IF NOT EXISTS workspace_locks (
+  workspace_slug TEXT PRIMARY KEY,
+  holder TEXT NOT NULL,
+  acquired_at INTEGER NOT NULL
+);
+
 -- No workspaces table. The workspace slug IS the Forgejo `owner/repo` full
 -- name, the display name comes from the Forgejo repo description, and the
 -- workspace's default markdown format lives in a Forgejo repo topic

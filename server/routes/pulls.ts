@@ -43,7 +43,7 @@ import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js
 import { safeRel } from "./files.js";
 import { validBranchName } from "../branch-path.js";
 import { allDocumentFormats } from "../format-registry.js";
-import { reindexWorkspaceFromForgejo, setWorkspaceFormatTopic } from "../workspace-provisioning.js";
+import { lockedReindexWorkspaceFromForgejo, setWorkspaceFormatTopic } from "../workspace-provisioning.js";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { MergeFailure, MergeFailureReason, PrMeta, PrFileStatus, PrState } from "../../shared/review.js";
@@ -901,7 +901,7 @@ pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
       // Format storage is a Forgejo repo topic. Update the topic before
       // re-indexing so the reindex picks up the new format.
       await setWorkspaceFormatTopic(fj, owner, repo, defaultMdFormat);
-      await reindexWorkspaceFromForgejo(c.get("db"), fj, {
+      await lockedReindexWorkspaceFromForgejo(c.get("db"), fj, {
         owner,
         repo,
         slug: c.get("workspace").slug,

@@ -55,6 +55,7 @@ export interface Config {
   coverifyApiUrl: string;
   coverifyBotToken: string;
   coverifyBotLogin: string;
+  reconcileIntervalMs: number;
 }
 
 function required(name: string): string {
@@ -118,6 +119,15 @@ export function parsePort(raw: string | undefined, fallback: number): number {
   return port;
 }
 
+export function parseNonNegativeInteger(raw: string | undefined, fallback: number): number {
+  const value = optionalEnvValue(raw);
+  if (!value) return fallback;
+  if (!/^\d+$/.test(value)) {
+    throw new Error("expected a non-negative integer");
+  }
+  return Number(value);
+}
+
 function trustedProxyHops(): number {
   try {
     return parseTrustedProxyHops(process.env.COSHEAF_TRUSTED_PROXY_HOPS);
@@ -132,6 +142,15 @@ function serverPort(): number {
     return parsePort(process.env.COSHEAF_PORT, 3030);
   } catch (_err) {
     console.error("invalid COSHEAF_PORT: expected an integer TCP port");
+    process.exit(1);
+  }
+}
+
+function reconcileIntervalMs(): number {
+  try {
+    return parseNonNegativeInteger(process.env.COSHEAF_RECONCILE_INTERVAL_MS, 0);
+  } catch (_err) {
+    console.error("invalid COSHEAF_RECONCILE_INTERVAL_MS: expected a non-negative integer");
     process.exit(1);
   }
 }
@@ -169,6 +188,7 @@ export function loadConfig(): Config {
     coverifyApiUrl: withDefault("COSHEAF_COVERIFY_API_URL", "http://127.0.0.1:3030/api/v1"),
     coverifyBotToken: withDefault("COSHEAF_COVERIFY_BOT_TOKEN", ""),
     coverifyBotLogin: withDefault("COSHEAF_COVERIFY_BOT_LOGIN", "coverify"),
+    reconcileIntervalMs: reconcileIntervalMs(),
   };
 }
 

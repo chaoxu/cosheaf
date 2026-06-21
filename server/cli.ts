@@ -11,10 +11,11 @@ import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ROLES, type Role } from "../shared/roles.js";
 import {
   getWorkspaceMarkdownDrift,
+  lockedReindexWorkspaceFromForgejo,
   readWorkspaceFormatFromTopics,
-  reindexWorkspaceFromForgejo,
 } from "./workspace-provisioning.js";
 import { invalidateWorkspaceCaches } from "./middleware.js";
+import { reconcileAllCoflatWorkspaces, summarizeReconcileResults } from "./sidecar-reconciler.js";
 import { deleteSidecarForWorkspace } from "./workspace-cleanup.js";
 import { invalidateRepoTrees } from "./tree-cache.js";
 import { listVisibleWorkspaceRepos } from "./workspace-discovery.js";
@@ -273,9 +274,24 @@ async function workspaceRm(workspaceArg: string): Promise<void> {
 
 async function workspaceReindex(workspaceArg: string): Promise<void> {
   await withWorkspace(workspaceArg, async ({ db, forgejo, workspace: ws }) => {
-    const count = await reindexWorkspaceFromForgejo(db, forgejo, ws);
+    const count = await lockedReindexWorkspaceFromForgejo(db, forgejo, ws);
     console.log(`reindexed ${count} markdown file${count === 1 ? "" : "s"} in workspace ${ws.slug}`);
   });
+}
+
+async function workspaceReconcile(): Promise<void> {
+  const { db, forgejo } = ctx();
+  const results = await reconcileAllCoflatWorkspaces(db, forgejo);
+  const summary = summarizeReconcileResults(results);
+  for (const result of results) {
+    if (result.status === "skipped") continue;
+    const label = result.status === "failed" ? "FAILED" : "reindexed";
+    console.log(`${label} ${result.slug}: ${result.detail}`);
+  }
+  console.log(
+    `reconcile complete: ${summary.reindexed} reindexed, ${summary.skipped} skipped, ${summary.failed} failed, ${summary.pages} markdown files`,
+  );
+  if (summary.failed > 0) process.exit(1);
 }
 
 async function workspaceMember(workspaceArg: string, username: string, role: Role): Promise<void> {
@@ -695,6 +711,10 @@ function buildProgram(): Command {
     .command("reindex <workspace>")
     .description("rebuild the SQLite sidecar from Forgejo main for <owner>/<repo>")
     .action(workspaceReindex);
+  workspace
+    .command("reconcile")
+    .description("rebuild all Coflat workspace sidecars from Forgejo main")
+    .action(workspaceReconcile);
   workspace
     .command("rm <workspace>")
     .description("delete the Forgejo repo and the SQLite sidecar for <owner>/<repo>")

@@ -379,6 +379,7 @@ pnpm prod:status          # local + deployed production SHA/ref; production is P
 COSHEAF_CONFIRM_PROD_RELEASE=1 pnpm prod:release # deploy origin/main to Pluto production, only when explicitly requested
 pnpm prod:verify          # health/avatar/git-SSH/doctor checks against Pluto
 pnpm prod:repo-check      # compare repo heads for Pluto production
+pnpm prod:build-check     # build the production image on jupiter without deploying
 pnpm prod:e2e -- prod     # production-safe browser smoke against Pluto
 pnpm dev:worktree -- <name> [--base origin/main --fetch]
 pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
@@ -387,6 +388,7 @@ pnpm cli user add <name>  # create a user (interactive password prompt)
 pnpm cli seed --user <name> --password <pw> --workspace <owner>/<repo> --workspace-name <name>
 pnpm cli workspace member <owner>/<repo> <user> <admin|write|read>
 pnpm cli workspace reindex <owner>/<repo>   # rebuild page index from Forgejo main
+pnpm cli workspace reconcile                # rebuild all Coflat sidecars from Forgejo main
 pnpm typecheck            # tsc --noEmit (root)
 pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
 pnpm check:types          # both
@@ -414,10 +416,13 @@ Use the repo-local production commands by default:
 
 - `COSHEAF_CONFIRM_PROD_RELEASE=1 pnpm prod:release` packages `origin/main`
   and deploys it through `fleet-infra/bin/cosheaf-pluto-release release`.
+  The production Docker image is built on `jupiter`, then copied to Pluto.
 - `pnpm prod:verify` runs the documented Pluto health/avatar/git-SSH/doctor
   checks.
 - `pnpm prod:repo-check` compares Pluto repository state with the source forge
   baseline.
+- `pnpm prod:build-check` builds the production image on `jupiter` without
+  copying anything to Pluto or restarting production.
 - `pnpm prod:e2e -- prod` runs the production-safe browser smoke matrix against
   Pluto.
 
@@ -517,6 +522,9 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 - `notes_fts` — FTS5 virtual table over title + body, keyed by `workspace_slug`.
 - `page_tags(workspace_slug, cosheaf_id, tag)`
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
+- `workspace_locks(workspace_slug, holder, acquired_at)` — ephemeral
+  cross-process lock rows for sidecar rebuilds; disposable coordination state,
+  not durable knowledge.
 - `issue_claims(id, workspace_slug, issue_number, runner_name, purpose, holder_username, created_at, heartbeat_at, expires_at)` — optional live-work leases (#95). Ephemeral coordination state with no Forgejo source; rows expire and are disposable (like `webhook_log`). NOT durable knowledge — issues/PRs stay the only durable state on Forgejo.
 
 `workspace_slug` column values are the Forgejo `owner/repo` full name

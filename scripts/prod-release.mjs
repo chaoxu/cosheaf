@@ -9,7 +9,7 @@ const DEFAULT_FLEET_INFRA = path.resolve(process.cwd(), "..", "fleet-infra");
 const WORKTREE_FLEET_INFRA = path.resolve(process.cwd(), "..", "..", "..", "fleet-infra");
 const fleetInfra = process.env.FLEET_INFRA_CHECKOUT ?? firstExistingDir([DEFAULT_FLEET_INFRA, WORKTREE_FLEET_INFRA]) ?? DEFAULT_FLEET_INFRA;
 const helper = path.join(fleetInfra, "bin", "cosheaf-pluto-release");
-const actions = new Set(["release", "verify", "health", "doctor", "repo-check"]);
+const actions = new Set(["release", "verify", "health", "doctor", "repo-check", "build-check"]);
 
 const { positionals } = parseArgs({ allowPositionals: true, strict: false });
 const [action = "release", ...rest] = positionals;

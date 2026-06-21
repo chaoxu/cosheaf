@@ -33,6 +33,9 @@ const ALLOWED_TABLES = new Set([
   // Cosheaf-owned site controls: global admin bootstrap and registration gate.
   "site_admins",
   "site_settings",
+  // Ephemeral process coordination for sidecar rebuilds. Rows are disposable
+  // locks, not knowledge or Forgejo workflow mirrors.
+  "workspace_locks",
   // Optional live-work leases (#95): ephemeral coordination state, no Forgejo
   // source. Disposable like webhook_log — rows expire; NOT durable knowledge,
   // and issues/PRs stay the only durable state on Forgejo.

@@ -12,6 +12,7 @@
   global-header scroll behavior, issue/PR filter visibility, asset 4xxs, and
   console errors. Defaults to the seeded activity/issues/pulls routes.
 - `pnpm prod:release` deploys Cosheaf production to Pluto
+- `pnpm prod:build-check` builds the production image on `jupiter` without deploying
   (`https://cosheaf.chaoxu.prof`) through the fleet-infra Pluto release helper.
   Do not run it during normal work; production has real users and should only
   be deployed after the user explicitly asks. Normal live verification uses
@@ -105,6 +106,7 @@ Use these repo-local commands:
 pnpm prod:status
 pnpm prod:verify
 pnpm prod:repo-check
+pnpm prod:build-check
 pnpm prod:e2e -- prod
 ```
 

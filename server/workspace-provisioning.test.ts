@@ -35,6 +35,7 @@ const config: Config = {
   coverifyApiUrl: "http://cosheaf.test/api/v1",
   coverifyBotToken: "",
   coverifyBotLogin: "coverify",
+  reconcileIntervalMs: 0,
 };
 
 function fakeForgejo(files: Record<string, string> = {}): Forgejo {

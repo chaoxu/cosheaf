@@ -12,7 +12,9 @@ import { bustRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
-import { getWorkspaceMarkdownDrift, reindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
+import { withWorkspaceSidecarLock } from "../workspace-lock.js";
+import { getWorkspaceMarkdownDrift, lockedReindexWorkspaceFromForgejo } from "../workspace-provisioning.js";
+import { serializeWorkspace } from "../workspace-queue.js";
 import { parsePositiveIntId } from "./query-params.js";
 import { bad, unauthorized } from "./responses.js";
 
@@ -30,20 +32,6 @@ const NOTIFY_EVENTS = new Set([
   "pull_request_review",
   "pull_request_comment",
 ]);
-
-const workspaceQueues = new Map<string, Promise<void>>();
-
-async function serializeWorkspace<T>(slug: string, work: () => Promise<T>): Promise<T> {
-  const previous = workspaceQueues.get(slug) ?? Promise.resolve();
-  const run = previous.catch(() => undefined).then(work);
-  const current = run.then(() => undefined, () => undefined);
-  workspaceQueues.set(slug, current);
-  try {
-    return await run;
-  } finally {
-    if (workspaceQueues.get(slug) === current) workspaceQueues.delete(slug);
-  }
-}
 
 webhooks.post("/forgejo", async (c) => {
   const config = c.get("config");
@@ -101,7 +89,7 @@ webhooks.post("/forgejo", async (c) => {
   // authoritative signal to wipe Cosheaf's rebuildable sidecar rows.
   if (event === "repository" && String(payload.action ?? "") === "deleted") {
     let deduped = false;
-    await serializeWorkspace(ws.slug, async () => {
+    await serializeWorkspace(ws.slug, () => withWorkspaceSidecarLock(db, ws.slug, async () => {
       const claim = db
         .prepare(
           "INSERT OR IGNORE INTO webhook_log (delivery_id, delivered_at, event_type) VALUES (?, ?, ?)",
@@ -115,7 +103,7 @@ webhooks.post("/forgejo", async (c) => {
       invalidateRepoTrees(owner, repoName);
       invalidateWorkspaceCaches(owner, repoName);
       sse.publish(ws.slug, { type: "workspace_deleted" });
-    });
+    }));
     return c.json({ ok: true, ...(deduped ? { dedup: true } : {}) });
   }
 
@@ -133,7 +121,7 @@ webhooks.post("/forgejo", async (c) => {
   ws.defaultMdFormat = formatId;
 
   let deduped = false;
-  await serializeWorkspace(ws.slug, async () => {
+  await serializeWorkspace(ws.slug, () => withWorkspaceSidecarLock(db, ws.slug, async () => {
     // Claim the delivery id first. Any later failure leaves the dedupe row in
     // place so Forgejo's webhook retry doesn't stampede us — at-most-once
     // beats a retry storm that re-runs the side effects. Per-path failures
@@ -254,7 +242,7 @@ webhooks.post("/forgejo", async (c) => {
             needsFullReindex = drift.onlySidecar.length > 0 || drift.onlyForgejo.length > 0;
           }
           if (needsFullReindex) {
-            await reindexWorkspaceFromForgejo(db, fj, {
+            await lockedReindexWorkspaceFromForgejo(db, fj, {
               owner,
               repo: repoName,
               slug: ws.slug,
@@ -347,7 +335,7 @@ webhooks.post("/forgejo", async (c) => {
         `webhook handler error (delivery=${deliveryId}, event=${event}): ${(err as Error).message}`,
       );
     }
-  });
+  }));
   if (deduped) return c.json({ ok: true, dedup: true });
   return c.json({ ok: true });
 });

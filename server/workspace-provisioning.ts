@@ -15,6 +15,7 @@ import { ForgejoError } from "./forgejo.js";
 import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./indexer.js";
 import { clearRepoConfig } from "./repo-config.js";
 import type { User } from "./users.js";
+import { withWorkspaceSidecarLock } from "./workspace-lock.js";
 
 // Forgejo events we subscribe to. The cosheaf webhook handler in
 // `server/routes/webhooks.ts` switches on these exact strings — if you
@@ -156,7 +157,7 @@ export async function provisionWorkspace(
   }
 
   try {
-    await reindexWorkspaceFromForgejo(db, forgejo, workspace);
+    await lockedReindexWorkspaceFromForgejo(db, forgejo, workspace);
   } catch (err) {
     console.warn(`workspace reindex failed: ${(err as Error).message}`);
   }
@@ -393,4 +394,12 @@ export async function reindexWorkspaceFromForgejo(
     if (!seenCitations.has(row.source_path)) deleteCitationFile(db, workspace.slug, row.source_path);
   }
   return seenMarkdown.size;
+}
+
+export async function lockedReindexWorkspaceFromForgejo(
+  db: Database.Database,
+  forgejo: Forgejo,
+  workspace: { owner: string; repo: string; slug: string; defaultMdFormat?: DocumentFormatId },
+): Promise<number> {
+  return withWorkspaceSidecarLock(db, workspace.slug, () => reindexWorkspaceFromForgejo(db, forgejo, workspace));
 }
