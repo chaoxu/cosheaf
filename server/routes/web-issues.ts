@@ -181,7 +181,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
             </div>
             <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.user?.login)} - ${timeEl(issue.created_at)}</p>
           </header>
-          ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI. Continue the transcript from the Chat tab.</div>` : ""}
+          ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI.</div>` : ""}
           ${threadLayout(main, railPanels)}
         </article>
       `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
