@@ -1,5 +1,6 @@
 // Browser regression for the server-rendered Coflat full reader surface.
 
+import { writeFileSync } from "node:fs";
 import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
 import {
   assertCoflatCodeBlockParity,
@@ -17,11 +18,28 @@ const chromium = await loadChromium();
 
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-reader-editor-parity.png";
+const REPORT = process.env.REPORT ?? "/tmp/cosheaf-reader-editor-parity.json";
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
 const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
 const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
+const SHOWCASE_BIB_PATH = "reference.bib";
+const SHOWCASE_IMAGE_PATH = "showcase/hover-preview-figure.svg";
+const EDIT_BRANCH = process.env.COSHEAF_REFERENCE_SMOKE_BRANCH ?? `user/${USERNAME}/web-edit`;
+const FORGEJO_URL = process.env.COSHEAF_FORGEJO_URL ?? "http://127.0.0.1:3002";
+const FORGEJO_TOKEN = process.env.COSHEAF_FORGEJO_ADMIN_TOKEN ?? process.env.COSHEAF_FORGEJO_TOKEN;
+const FALLBACK_SHOWCASE_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140" role="img" aria-labelledby="title desc">
+  <title id="title">Generated showcase figure</title>
+  <desc id="desc">A small generated vector illustration for public demo coverage.</desc>
+  <rect width="240" height="140" fill="#fff6f6" />
+  <rect x="14" y="14" width="212" height="112" rx="12" fill="#ffffff" stroke="#d33" stroke-width="4" />
+  <path d="M34 102 C62 58, 82 52, 110 86 S164 122, 206 42" fill="none" stroke="#d33" stroke-width="6" stroke-linecap="round" />
+  <circle cx="66" cy="72" r="10" fill="#ffb3b3" stroke="#d33" stroke-width="3" />
+  <circle cx="150" cy="84" r="8" fill="#ffd8d8" stroke="#d33" stroke-width="3" />
+  <text x="34" y="42" font-size="18" font-family="Georgia, serif" fill="#7a1111">Coflat demo asset</text>
+</svg>
+`;
 const OUTLINE_REFERENCE_LABEL = "Proof of Theorem 3";
 const OUTLINE_REFERENCE_RAW = "@thm:fundamental";
 const COGIRTH_OUTLINE_REFERENCE_LABEL = "Proof of Theorem 4";
@@ -39,6 +57,95 @@ const consoleMessages = [];
 const pageErrors = [];
 const badResponses = [];
 attachPageListeners(page, { consoleSink: consoleMessages, errorSink: pageErrors, badResponseSink: badResponses });
+
+function isLocalWebUrl(value) {
+  const { hostname } = new URL(value);
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function repoApiPath(suffix) {
+  return `/api/v1/repos/${encodeURIComponent(OWNER)}/${encodeURIComponent(WORKSPACE_SLUG)}/${suffix}`;
+}
+
+function encodeFilePath(path) {
+  return path.split("/").map((part) => encodeURIComponent(part)).join("/");
+}
+
+async function forgejoRequest(path, { method = "GET", body, raw = false, okStatuses = [200, 201, 204] } = {}) {
+  if (!FORGEJO_TOKEN) throw new Error("COSHEAF_FORGEJO_ADMIN_TOKEN or COSHEAF_FORGEJO_TOKEN is required to prepare smoke fixtures");
+  const headers = {
+    authorization: `token ${FORGEJO_TOKEN}`,
+    accept: raw ? "text/plain,*/*" : "application/json",
+  };
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const response = await fetch(new URL(path, FORGEJO_URL), {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!okStatuses.includes(response.status)) {
+    const text = await response.text();
+    throw new Error(`forgejo ${method} ${path} -> ${response.status}: ${text.slice(0, 200)}`);
+  }
+  if (response.status === 204) return null;
+  return raw ? response.text() : response.json();
+}
+
+async function forgejoRequestOrNull(path, opts) {
+  const response = await fetch(new URL(path, FORGEJO_URL), {
+    method: opts?.method ?? "GET",
+    headers: {
+      authorization: `token ${FORGEJO_TOKEN}`,
+      accept: opts?.raw ? "text/plain,*/*" : "application/json",
+      ...(opts?.body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    body: opts?.body === undefined ? undefined : JSON.stringify(opts.body),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`forgejo ${opts?.method ?? "GET"} ${path} -> ${response.status}: ${text.slice(0, 200)}`);
+  }
+  return opts?.raw ? response.text() : response.json();
+}
+
+async function prepareLocalShowcaseFixtures() {
+  if (!isLocalWebUrl(WEB_URL)) return { skipped: "non-local URL" };
+  if (!FORGEJO_TOKEN) return { skipped: "missing Forgejo token" };
+
+  const branchPath = repoApiPath(`branches/${encodeURIComponent(EDIT_BRANCH)}`);
+  const branch = await forgejoRequestOrNull(branchPath);
+  if (!branch) {
+    await forgejoRequest(repoApiPath("branches"), {
+      method: "POST",
+      body: { new_branch_name: EDIT_BRANCH, old_branch_name: "main" },
+    });
+  }
+
+  const repairs = [];
+  for (const path of [SHOWCASE_PATH, SHOWCASE_BIB_PATH, SHOWCASE_IMAGE_PATH]) {
+    const filePath = encodeFilePath(path);
+    const mainContent = await forgejoRequestOrNull(repoApiPath(`raw/${filePath}?ref=main`), { raw: true })
+      ?? (path === SHOWCASE_IMAGE_PATH ? FALLBACK_SHOWCASE_IMAGE : null);
+    if (mainContent === null) continue;
+    const meta = await forgejoRequestOrNull(repoApiPath(`contents/${filePath}?ref=${encodeURIComponent(EDIT_BRANCH)}`));
+    const branchContent = meta
+      ? await forgejoRequestOrNull(repoApiPath(`raw/${filePath}?ref=${encodeURIComponent(EDIT_BRANCH)}`), { raw: true })
+      : null;
+    if (branchContent === mainContent) continue;
+    await forgejoRequest(repoApiPath(`contents/${filePath}`), {
+      method: meta ? "PUT" : "POST",
+      body: {
+        branch: EDIT_BRANCH,
+        content: Buffer.from(mainContent, "utf8").toString("base64"),
+        message: `${meta ? "Update" : "Add"} showcase smoke fixture ${path}`,
+        ...(meta?.sha ? { sha: meta.sha } : {}),
+      },
+    });
+    repairs.push({ path, action: meta ? "updated" : "created" });
+  }
+  return { branch: EDIT_BRANCH, repairs };
+}
 
 async function ensureSignedIn() {
   const signIn = page.locator('button:has-text("Sign in")');
@@ -395,7 +502,7 @@ async function gotoShowcaseReader() {
 
 async function gotoShowcaseEditor() {
   await page.goto(
-    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=main&path=${encodeURIComponent(SHOWCASE_PATH)}`,
+    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=${encodeURIComponent(EDIT_BRANCH)}&path=${encodeURIComponent(SHOWCASE_PATH)}`,
     { waitUntil: "domcontentloaded" },
   );
   await page.locator(CF.editorContent).waitFor({ state: "visible", timeout: 10000 });
@@ -433,6 +540,7 @@ async function setReadingWidth(width) {
 }
 
 try {
+  const fixturePrep = await prepareLocalShowcaseFixtures();
   await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await ensureSignedIn();
   await setDocumentTheme("default");
@@ -554,8 +662,9 @@ try {
 
   await page.screenshot({ path: SCREENSHOT, fullPage: false });
   const ok = pageErrors.length === 0 && badResponses.length === 0;
-  console.log(JSON.stringify({
+  const result = {
     ok,
+    fixturePrep,
     defaultReader,
     defaultEditor,
     blueprintReader,
@@ -577,12 +686,32 @@ try {
     badResponses,
     pageErrors,
     screenshot: SCREENSHOT,
+    report: REPORT,
+  };
+  writeFileSync(REPORT, JSON.stringify(result, null, 2));
+  console.log(JSON.stringify({
+    ok,
+    fixturePrep,
+    defaultReaderWidth: defaultReader.width,
+    defaultEditorWidth: defaultEditor.width,
+    wideReaderWidth: wideReader.width,
+    wideEditorWidth: wideEditor.width,
+    responsiveViewports: responsiveLayouts.map(({ readerLayout, editorLayout }) => ({
+      name: readerLayout.viewportName,
+      readerWidth: readerLayout.readerWidth,
+      editorWidth: editorLayout.contentWidth,
+      railDisplay: readerLayout.railDisplay,
+    })),
+    badResponses,
+    pageErrors,
+    screenshot: SCREENSHOT,
+    report: REPORT,
   }, null, 2));
   await browser.close();
   process.exit(ok ? 0 : 1);
 } catch (err) {
   await page.screenshot({ path: SCREENSHOT, fullPage: false }).catch(() => undefined);
-  console.log(JSON.stringify({
+  const result = {
     ok: false,
     error: err instanceof Error ? err.message : String(err),
     url: page.url(),
@@ -590,7 +719,10 @@ try {
     badResponses,
     pageErrors,
     screenshot: SCREENSHOT,
-  }, null, 2));
+    report: REPORT,
+  };
+  writeFileSync(REPORT, JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result, null, 2));
   await browser.close();
   process.exit(1);
 }

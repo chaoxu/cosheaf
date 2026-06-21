@@ -16,6 +16,29 @@ describe("checkCoflatRef", () => {
     expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF });
   });
 
+  it("does not leak outer hook Git environment into the nested checkout", () => {
+    let childEnv;
+    const result = checkCoflatRef({
+      coflatDir: ".",
+      env: {
+        ...process.env,
+        GIT_DIR: "/tmp/wrong-repo/.git",
+        GIT_WORK_TREE: "/tmp/wrong-repo",
+        GIT_INDEX_FILE: "/tmp/wrong-index",
+        PATH: process.env.PATH,
+      },
+      execFile: (_cmd, _args, opts) => {
+        childEnv = opts.env;
+        return `${DEFAULT_COFLAT_REF}\n`;
+      },
+    });
+    expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF });
+    expect(childEnv.GIT_DIR).toBeUndefined();
+    expect(childEnv.GIT_WORK_TREE).toBeUndefined();
+    expect(childEnv.GIT_INDEX_FILE).toBeUndefined();
+    expect(childEnv.PATH).toBe(process.env.PATH);
+  });
+
   it("treats a blank COFLAT_REF env override as unset", () => {
     const previous = process.env.COFLAT_REF;
     process.env.COFLAT_REF = "  ";

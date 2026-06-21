@@ -25,6 +25,14 @@ function envCoflatRef(env = process.env) {
   return ref || DEFAULT_COFLAT_REF;
 }
 
+function nestedGitEnv(env = process.env) {
+  const next = { ...env };
+  for (const key of Object.keys(next)) {
+    if (key.startsWith("GIT_")) delete next[key];
+  }
+  return next;
+}
+
 function pinnedCoflatRefs(rel, text) {
   const patterns = rel === "Dockerfile"
     ? [/ARG COFLAT_GIT_REF=(?!unknown\b)([^\s]+)/g]
@@ -46,6 +54,7 @@ export function checkCoflatRef({
   coflatDir = resolve(REPO_ROOT, "..", "coflat"),
   expectedRef = envCoflatRef(),
   execFile = execFileSync,
+  env = process.env,
 } = {}) {
   if (!existsSync(coflatDir)) {
     return {
@@ -56,7 +65,10 @@ export function checkCoflatRef({
 
   let actualRef = "";
   try {
-    actualRef = execFile("git", ["-C", coflatDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    actualRef = execFile("git", ["-C", coflatDir, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+      env: nestedGitEnv(env),
+    }).trim();
   } catch (err) {
     return {
       ok: false,
