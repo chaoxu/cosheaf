@@ -209,7 +209,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     ${docBody}`;
   return htmlResponse(
     repoPageShell(ctx, "files", `${rel} - ${repo}`, pageBody, {
-        readerAssets: kind === "markdown" && !sourceView && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+        readerAssets: coflatMarkdownDocument,
         sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, rel, fileTitles, branches, user, ws.role !== "read")],
       }),
   );

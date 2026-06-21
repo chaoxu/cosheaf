@@ -255,6 +255,7 @@ function hydrateIslandsIn(scope: ParentNode): void {
 }
 
 hydrateIslandsIn(document);
+if (!document.querySelector(".coflat-reader-island")) buildReaderToc([]);
 
 // Islands inserted after initial load — e.g. the chat thread swapping in new
 // turns on a live update — must hydrate too, so watch for them rather than

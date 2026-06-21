@@ -150,6 +150,7 @@ describe("web file editor route", () => {
     expect(sourceBody).toContain('<div class="doc-main doc-main-source">');
     expect(sourceBody).toContain('<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">');
     expect(sourceBody).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
+    expect(sourceBody).toContain('/src/cosheaf/web-reader.ts');
     expect(sourceBody).not.toContain('href="/owner/w/src/branch/main/notes.md?view=source"');
     expect(sourceBody).not.toContain("<h1>notes.md</h1>");
     expect(sourceBody).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
