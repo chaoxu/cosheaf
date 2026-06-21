@@ -36,7 +36,7 @@ export const DOCUMENT_RAIL_GROUP_CLASS = "doc-view-group";
 export const DOCUMENT_RAIL_LABEL_CLASS = "doc-view-label";
 export const DOCUMENT_RAIL_SWITCH_CLASS = "doc-view-switch";
 export const DOCUMENT_RAIL_OUTLINE_CLASS = "doc-rail-outline doc-toc";
-export const DOCUMENT_RAIL_OUTLINE_LABEL = "On this page";
+export const DOCUMENT_RAIL_OUTLINE_LABEL = "Outline";
 export const DOCUMENT_RAIL_OUTLINE_TITLE_CLASS = "doc-toc-title";
 
 export function documentRailModel(opts: {
