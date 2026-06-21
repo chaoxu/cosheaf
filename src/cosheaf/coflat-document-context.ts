@@ -49,7 +49,7 @@ export interface CoflatDocumentRefs {
 // formatter's registration order.
 export interface CoflatCitations {
   formatter: CitationFormatter;
-  keys: Set<string>;
+  keys: ReadonlySet<string>;
 }
 
 export interface RenderedCrossref {
@@ -205,12 +205,15 @@ export async function loadCoflatDocumentContext(payload: CoflatDocumentPayload):
 export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<CoflatDocumentRefs> {
   const parsed = parseFrontmatter(payload.source);
   const localKeys = new Set(extractCoflatXrefTargets(payload.source).map((target) => target.id));
+  const workspaceRefs = await workspaceCrossrefs(payload, payload.source, localKeys);
+  const citationLocalTargets = new Set([...localKeys, ...workspaceRefs.keys()]);
   return {
-    workspaceCrossrefs: await workspaceCrossrefs(payload, payload.source, localKeys),
+    workspaceCrossrefs: workspaceRefs,
     citations: await loadCitations(
       payload,
       parsed.frontmatter ?? {},
-      parsed.body,
+      payload.source,
+      (id) => citationLocalTargets.has(id),
     ),
   };
 }
@@ -248,19 +251,6 @@ function referencedKeys(source: string): string[] {
   ];
 }
 
-// Citation keys written as bracketed [@key] (not bare narrative @key), in
-// first-appearance order — the form the reader resolves to an inline [N], and
-// thus the set the References list and citeproc numbering register from.
-function bracketedCitationKeys(source: string): string[] {
-  return [
-    ...new Set(
-      extractReferences(source)
-        .filter((ref) => ref.kind === "crossref" && ref.key && ref.bracketed === true)
-        .map((ref) => ref.key as string),
-    ),
-  ];
-}
-
 function refHref(payload: CoflatDocumentPayload, ref: WorkspaceRef): string {
   const fragment = ref.fragment ? `#${encodeURIComponent(ref.fragment)}` : "";
   return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(ref.path)}${fragment}`;
@@ -286,7 +276,8 @@ function escapeHtml(value: string): string {
 async function loadCitations(
   payload: CoflatDocumentPayload,
   frontmatter: Record<string, unknown>,
-  body: string,
+  source: string,
+  isLocalTarget: (id: string) => boolean,
 ): Promise<CoflatCitations | null> {
   const bibliography = typeof frontmatter.bibliography === "string"
     ? frontmatter.bibliography
@@ -297,22 +288,17 @@ async function loadCitations(
   const csl = typeof frontmatter.csl === "string" ? frontmatter.csl : payload.csl ?? null;
   const cslXml = csl ? BUILTIN_CSL_XML.get(csl) ?? await fetchProjectText(payload, csl) : null;
   try {
-    // Coflat owns BibTeX parsing + CSL formatting (single source of truth); its
-    // citeproc bundle (citation-js) loads only for documents with a bibliography.
-    const { parseBibTeX, CslProcessor, createCslCitationFormatter } = await import("@chaoxu/coflat/citeproc");
-    const items = parseBibTeX(bibText);
-    if (items.length === 0) return null;
-    const keys = new Set(items.map((item) => item.id));
-    // Only bracketed [@key] citations get an inline [N] from the reader, so the
-    // References list is built from those — a narrative-only @key would render
-    // no inline marker and must not leave a dangling bibliography entry.
-    const cited = bracketedCitationKeys(body).filter((key) => keys.has(key));
-    if (cited.length === 0) return null;
-    const formatter = createCslCitationFormatter(await CslProcessor.create(items, cslXml ?? undefined));
-    // Register cited keys in document order so the IEEE numeric style assigns
-    // [1], [2], … in appearance order (matching the rendered References list).
-    formatter.registerCitations(cited.map((id) => ({ ids: [id] })));
-    return { formatter, keys };
+    // Coflat owns BibTeX parsing, citation/crossref precedence, cluster
+    // registration order, and CSL formatting. Cosheaf only fetches repo files.
+    const { prepareCitationFormatterFromSource } = await import("@chaoxu/coflat/citeproc");
+    const prepared = await prepareCitationFormatterFromSource({
+      source,
+      bibText,
+      cslXml: cslXml ?? undefined,
+      isLocalTarget,
+    });
+    if (!prepared) return null;
+    return { formatter: prepared.formatter, keys: prepared.keys };
   } catch (_error) {
     // A citeproc/bibliography failure must never break the rest of the render.
     return null;

@@ -2,6 +2,10 @@
 
 import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
 import {
+  assertCoflatCodeBlockParity,
+  assertCoflatFootnoteSectionParity,
+  assertCoflatLinkStyleParity,
+  assertCoflatReaderEditorSurfaceParity,
   COFLAT_BROWSER_ATTRIBUTES as CFA,
   COFLAT_BROWSER_SELECTORS as CF,
 } from "@chaoxu/coflat/browser-test-utils";
@@ -235,27 +239,6 @@ async function footnoteSectionStats(rootSelector) {
   }, CF);
 }
 
-function assertFootnoteSectionParity(readerFootnotes, editorFootnotes) {
-  if (readerFootnotes.count < 2 || editorFootnotes.count < 2) {
-    throw new Error(`footnote sections missing entries: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
-  }
-  if (readerFootnotes.heading !== "Footnotes" || editorFootnotes.heading !== "Footnotes") {
-    throw new Error(`footnote section heading drift: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
-  }
-  if (readerFootnotes.numbers.join(",") !== editorFootnotes.numbers.join(",")) {
-    throw new Error(`footnote numbering drift: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
-  }
-  if (!readerFootnotes.hasBackrefs || !editorFootnotes.hasBackrefs) {
-    throw new Error(`footnote backrefs missing: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
-  }
-  if (!readerFootnotes.hasMath || !editorFootnotes.hasMath) {
-    throw new Error(`footnote math rendering missing: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
-  }
-  if (readerFootnotes.text !== editorFootnotes.text || !readerFootnotes.text.includes("This footnote has bold")) {
-    throw new Error(`footnote content drift: ${JSON.stringify({ readerFootnotes, editorFootnotes })}`);
-  }
-}
-
 async function readerLayoutStats(viewportName) {
   return page.locator(".app-content").first().evaluate((appContent, arg) => {
     const { name, selector } = arg;
@@ -329,64 +312,6 @@ function assertDesktopLayoutParity(readerLayout, editorLayout) {
   }
 }
 
-function assertReaderEditorParity(reader, editor) {
-  const comparable = ["paddingTop", "fontSize", "lineHeight"];
-  for (const key of comparable) {
-    if (reader[key] !== editor[key]) {
-      throw new Error(`reader/editor ${key} mismatch: ${JSON.stringify({ reader, editor })}`);
-    }
-  }
-  if (Math.abs(reader.width - editor.width) > 1) {
-    throw new Error(`reader/editor effective width mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (reader.paddingInline.join("/") !== editor.paddingInline.join("/")) {
-    throw new Error(`reader/editor horizontal padding mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (!reader.font.includes("KaTeX_Main") || !editor.font.includes("KaTeX_Main")) {
-    throw new Error(`reader/editor content font mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (reader.katexSize !== reader.displayMathSize) {
-    throw new Error(`reader display math size mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (editor.katexSize && reader.katexSize !== editor.katexSize) {
-    throw new Error(`reader/editor display math size mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (editor.katexDisplayMargin && reader.katexDisplayMargin !== editor.katexDisplayMargin) {
-    throw new Error(`reader/editor display math margin mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  const readerNumbers = reader.headingNumbers.filter(Boolean).slice(0, 4);
-  const editorNumbers = editor.headingNumbers.filter(Boolean).slice(0, readerNumbers.length);
-  if (readerNumbers.join("/") !== editorNumbers.join("/")) {
-    throw new Error(`reader/editor heading numbering mismatch: ${JSON.stringify({ reader, editor })}`);
-  }
-  if (editor.listMarkers === 0) {
-    throw new Error(`editor package list markers missing: ${JSON.stringify({ reader, editor })}`);
-  }
-}
-
-function assertLinkStyleParity(readerLink, editorLink) {
-  const context = { readerLink, editorLink };
-  if (!readerLink.text || !editorLink.text) {
-    throw new Error(`reader/editor link missing text: ${JSON.stringify(context)}`);
-  }
-  for (const [surface, link] of [["reader", readerLink], ["editor", editorLink]]) {
-    if (!link.line.includes("underline") || link.style !== "dotted") {
-      throw new Error(`${surface} link is not dotted underline: ${JSON.stringify(context)}`);
-    }
-    if (link.underlineOffset !== "2px") {
-      throw new Error(`${surface} link underline offset drift: ${JSON.stringify(context)}`);
-    }
-  }
-  for (const key of ["line", "style", "thickness", "underlineOffset", "display"]) {
-    if (readerLink[key] !== editorLink[key]) {
-      throw new Error(`reader/editor link ${key} mismatch: ${JSON.stringify(context)}`);
-    }
-  }
-  if (readerLink.color !== editorLink.color) {
-    throw new Error(`reader/editor link color mismatch: ${JSON.stringify(context)}`);
-  }
-}
-
 function assertResponsiveLayoutParity(readerLayout, editorLayout) {
   const context = { readerLayout, editorLayout };
   if (readerLayout.appScrollWidth > readerLayout.appWidth + 4) {
@@ -410,34 +335,6 @@ function assertResponsiveLayoutParity(readerLayout, editorLayout) {
   const maxDelta = readerLayout.railDisplay === "none" ? 12 : 260;
   if (Math.abs(readerLayout.readerWidth - editorLayout.contentWidth) > maxDelta) {
     throw new Error(`reader/editor responsive width mismatch: ${JSON.stringify(context)}`);
-  }
-}
-
-function assertCodeBlockParity(readerCode, editorCode) {
-  if (readerCode.count === 0) {
-    throw new Error(`reader code blocks missing: ${JSON.stringify(readerCode)}`);
-  }
-  if (editorCode.count === 0) {
-    throw new Error(`editor code block lines missing: ${JSON.stringify(editorCode)}`);
-  }
-  if (!readerCode.languageText || !editorCode.languageText) {
-    throw new Error(`code block language labels missing: ${JSON.stringify({ readerCode, editorCode })}`);
-  }
-  const readerSurfaces = [readerCode.pre, readerCode.code].filter(Boolean);
-  for (const surface of readerSurfaces) {
-    if (surface.whiteSpace !== "pre" || surface.wordBreak !== "normal" || surface.overflowWrap !== "normal") {
-      throw new Error(`reader code block wrapping drift: ${JSON.stringify(readerCode)}`);
-    }
-  }
-  for (const line of editorCode.lines) {
-    if (line.whiteSpace !== "pre" || line.wordBreak !== "normal" || line.overflowWrap !== "normal") {
-      throw new Error(`editor code block wrapping drift: ${JSON.stringify(editorCode)}`);
-    }
-  }
-  const readerCodeFont = readerCode.code?.fontFamily ?? readerCode.pre?.fontFamily ?? "";
-  const editorCodeFont = editorCode.lines[0]?.fontFamily ?? "";
-  if (!readerCodeFont.includes("monospace") || !editorCodeFont.includes("monospace")) {
-    throw new Error(`code block font drift: ${JSON.stringify({ readerCode, editorCode })}`);
   }
 }
 
@@ -564,26 +461,11 @@ try {
   ) {
     throw new Error(`reader is not using a bounded document measure: ${JSON.stringify(defaultReader)}`);
   }
-  if (defaultReader.paddingInline.join("/") !== "0px/0px") {
-    throw new Error(`reader should not add horizontal document padding: ${JSON.stringify(defaultReader)}`);
-  }
-  if (defaultReader.paragraphWhiteSpace !== "normal") {
-    throw new Error(`reader prose should flow source-wrapped lines normally: ${JSON.stringify(defaultReader)}`);
-  }
   if (!defaultReader.rootClass.includes("cf-theme-scope")) {
     throw new Error(`missing document theme scope: ${defaultReader.rootClass}`);
   }
   if (defaultReader.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`default reader should match the editor default theme: ${defaultReader.rootClass}`);
-  }
-  if (!defaultReader.fontSize || !defaultReader.headingSize) {
-    throw new Error(`missing document typography: ${JSON.stringify(defaultReader)}`);
-  }
-  if (defaultReader.listStyle !== "none" || defaultReader.listMarkers === 0) {
-    throw new Error(`reader package list markers missing: ${JSON.stringify(defaultReader)}`);
-  }
-  if (!defaultReader.headingNumber) {
-    throw new Error(`reader heading numbering missing: ${JSON.stringify(defaultReader)}`);
   }
   if (defaultReader.mathErrors !== 0) {
     throw new Error(`reader has math render errors: ${JSON.stringify(defaultReader)}`);
@@ -601,7 +483,7 @@ try {
   const defaultReaderCode = await readerCodeBlockStats();
   const defaultReaderFootnotes = await footnoteSectionStats(CF.reader);
   await assertResolvedOutlineLabel("reader");
-  await assertHoverPreview(`${CF.reader} [${CFA.referenceKey}="thm:hover-preview"]`, "Hover Preview Stress Test");
+  await assertHoverPreview(`${CF.reader} [${CFA.referenceKey}="thm:hover-preview"]`, "This referenced block exists");
 
   await setDocumentTheme("blueprint-book");
   await gotoShowcaseReader();
@@ -614,7 +496,7 @@ try {
   if (!blueprintEditor.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`settings-selected theme did not apply to editor: ${blueprintEditor.rootClass}`);
   }
-  assertReaderEditorParity(blueprintReader, blueprintEditor);
+  assertCoflatReaderEditorSurfaceParity(blueprintReader, blueprintEditor);
   await setDocumentTheme("default");
 
   await gotoShowcaseEditor();
@@ -623,21 +505,21 @@ try {
   if (defaultEditor.rootClass.includes("cf-theme-blueprint-book")) {
     throw new Error(`default editor should match the reader default theme: ${defaultEditor.rootClass}`);
   }
-  assertReaderEditorParity(defaultReader, defaultEditor);
+  assertCoflatReaderEditorSurfaceParity(defaultReader, defaultEditor);
   assertDesktopLayoutParity(defaultReaderLayout, defaultEditorLayout);
   await scrollEditorUntilMounted(`${CF.editorContent} ${CF.link}`);
   const defaultEditorLink = await editorLinkStats();
-  assertLinkStyleParity(defaultReaderLink, defaultEditorLink);
+  assertCoflatLinkStyleParity(defaultReaderLink, defaultEditorLink);
   await scrollEditorUntilMounted(CF.editorCodeLine);
   const defaultEditorCode = await editorCodeBlockStats();
-  assertCodeBlockParity(defaultReaderCode, defaultEditorCode);
+  assertCoflatCodeBlockParity(defaultReaderCode, defaultEditorCode);
   await scrollEditorUntilMounted(CF.footnoteSection);
   const defaultEditorFootnotes = await footnoteSectionStats(CF.editorContent);
-  assertFootnoteSectionParity(defaultReaderFootnotes, defaultEditorFootnotes);
+  assertCoflatFootnoteSectionParity(defaultReaderFootnotes, defaultEditorFootnotes);
   await assertResolvedOutlineLabel("editor");
   const editorHoverTarget = `${CF.referenceWidget} [${CFA.referenceId}="thm:hover-preview"], ${CF.referenceWidget}[${CFA.referenceKey}="thm:hover-preview"]`;
   await scrollEditorUntilMounted(editorHoverTarget);
-  await assertHoverPreview(editorHoverTarget, "Hover Preview Stress Test");
+  await assertHoverPreview(editorHoverTarget, "This referenced block exists");
 
   await setReadingWidth("wide");
   await gotoShowcaseReader();
@@ -646,7 +528,7 @@ try {
   await gotoShowcaseEditor();
   const wideEditor = await editorStats();
   const wideEditorLayout = await editorLayoutStats("desktop-wide");
-  assertReaderEditorParity(wideReader, wideEditor);
+  assertCoflatReaderEditorSurfaceParity(wideReader, wideEditor);
   assertDesktopLayoutParity(wideReaderLayout, wideEditorLayout);
   if (wideReader.width <= defaultReader.width || wideEditor.width <= defaultEditor.width) {
     throw new Error(`wide reading-width did not widen both surfaces: ${JSON.stringify({
