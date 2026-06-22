@@ -9,7 +9,7 @@ import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { planIndexPage } from "../indexer.js";
 import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
-import { invalidateBranchTree } from "../tree-cache.js";
+import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
 import { branchIcon } from "./icons.js";
@@ -353,7 +353,11 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
 }
 
 async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
-  const tree = await fj.getTree(owner, repo, ref, true);
+  let tree = getCachedTree(owner, repo, ref);
+  if (!tree) {
+    tree = await fj.getTree(owner, repo, ref, true);
+    setCachedTree(owner, repo, ref, tree);
+  }
   return tree
     .filter((entry) => entry.type === "blob")
     .sort((a, b) => a.path.localeCompare(b.path));

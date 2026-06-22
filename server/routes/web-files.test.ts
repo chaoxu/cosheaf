@@ -7,6 +7,7 @@ import { indexPage } from "../indexer.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { _resetPdfExportLimiterForTest, _setPdfExportCommandRunnerForTest, _setPdfExportLimiterConfigForTest } from "../pdf-export.js";
 import { seedAuthUser } from "../test-helpers.js";
+import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 import { registerBranchRoutes } from "./web-branches.js";
@@ -44,6 +45,7 @@ describe("web file editor route", () => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     _resetMiddlewareCachesForTests();
+    _clearTreeCacheForTests();
   });
 
   afterEach(() => {
@@ -165,6 +167,37 @@ describe("web file editor route", () => {
     expect(sourceBody).not.toContain('href="/owner/w/src/branch/main/notes.md?view=source"');
     expect(sourceBody).not.toContain("<h1>notes.md</h1>");
     expect(sourceBody).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
+  });
+
+  it("reuses the cached Forgejo tree across server-rendered file pages", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let treeCalls = 0;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => {
+          treeCalls += 1;
+          return Response.json({
+            tree: [
+              { path: "a.md", type: "blob" },
+              { path: "b.md", type: "blob" },
+            ],
+            truncated: false,
+          });
+        });
+        forge.get("/api/v1/repos/owner/w/contents/:path", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/raw/:path", (c) => new Response(`# ${c.req.param("path")}\n`));
+      }),
+    );
+
+    const first = await appFor(db).request("/owner/w/src/branch/main/a.md", { headers: authHeaders(token) });
+    const second = await appFor(db).request("/owner/w/src/branch/main/b.md", { headers: authHeaders(token) });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(treeCalls).toBe(1);
   });
 
   it("previews a small extensionless UTF-8 file as plain text", async () => {
