@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS site_settings (
   updated_by TEXT
 );
 
+CREATE TABLE IF NOT EXISTS registration_invites (
+  token_hash TEXT PRIMARY KEY,
+  created_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  used_by TEXT,
+  used_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS workspace_locks (
   workspace_slug TEXT PRIMARY KEY,
   holder TEXT NOT NULL,

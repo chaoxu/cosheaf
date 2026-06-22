@@ -10,7 +10,7 @@ import type { ForgejoSshKey, ForgejoUser } from "../forgejo-types.js";
 import { allDocumentFormats } from "../format-registry.js";
 import { AUTH_COOKIE } from "../middleware.js";
 import { FixedWindowRateLimiter } from "../rate-limit.js";
-import { effectiveRegistrationOpen, isSiteAdmin } from "../site-admin.js";
+import { effectiveRegistrationOpen, isSiteAdmin, registrationInviteForToken, releaseRegistrationInvite, reserveRegistrationInvite } from "../site-admin.js";
 import type { AppEnv } from "../types.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
@@ -51,6 +51,7 @@ function authPage(opts: {
   locale: LocaleId;
   notice?: Html;
   altLink?: Html;
+  hiddenFields?: Html;
 }): Response {
   return htmlResponse(
     pageShell({
@@ -63,6 +64,7 @@ function authPage(opts: {
             ${opts.notice ?? emptyHtml}
             <label>${opts.t("auth.username")} <input name="username" autocomplete="username" required></label>
             <label>${opts.t("auth.password")} <input name="password" type="password" autocomplete="${opts.passwordAutocomplete}" required></label>
+            ${opts.hiddenFields ?? emptyHtml}
             <button type="submit">${opts.submitLabel}</button>
             ${opts.altLink ?? emptyHtml}
           </form>
@@ -80,6 +82,7 @@ const REGISTER_ERROR_KEYS: Record<string, MessageKey> = {
   taken: "err.register.taken",
   rate: "err.register.rate",
   upstream: "err.register.upstream",
+  invalid_invite: "err.register.invalid_invite",
 };
 const LOGIN_ERROR_KEYS: Record<string, MessageKey> = {
   missing: "err.login.missing",
@@ -90,6 +93,22 @@ const LOGIN_ERROR_KEYS: Record<string, MessageKey> = {
 // 5 account creations per 10 minutes. In-process (one cosheaf process); paired
 // with the same-origin check it blunts trivial signup abuse.
 const registerRateLimiter = new FixedWindowRateLimiter(5, 10 * 60 * 1000);
+
+function registerErrorLocation(error: string, inviteToken: string | null): string {
+  const query = new URLSearchParams({ error });
+  if (inviteToken) query.set("invite", inviteToken);
+  return `/register?${query}`;
+}
+
+function requestInviteToken(c: Context<AppEnv>, formInvite?: string | null): string | null {
+  const token = formInvite ?? c.req.query("invite");
+  const trimmed = token?.trim();
+  return trimmed || null;
+}
+
+function canShowRegister(c: Context<AppEnv>, inviteToken: string | null): boolean {
+  return effectiveRegistrationOpen(c.get("db"), c.get("config")) || Boolean(registrationInviteForToken(c.get("db"), inviteToken));
+}
 
 web.get("/login", (c) => {
   const t = c.get("t");
@@ -141,56 +160,70 @@ web.post("/logout", (c) => {
 });
 
 // Self-service signup. Disabled unless COSHEAF_REGISTRATION_MODE=open
-// (config.registrationOpen) — both handlers 404 otherwise so the form isn't
-// even discoverable. Account creation IS a Forgejo operation: we create the
-// Forgejo user with the site-admin client, then mint the same cosheaf PAT
-// /login mints and drop the user straight into a session. No cosheaf users
-// table — identity stays {username} from the PAT.
+// (config.registrationOpen) or a global admin issued an invite link. Account
+// creation IS a Forgejo operation: we create the Forgejo user with the
+// site-admin client, then mint the same cosheaf PAT /login mints and drop the
+// user straight into a session. No cosheaf users table — identity stays
+// {username} from the PAT.
 web.get("/register", (c) => {
-  if (!effectiveRegistrationOpen(c.get("db"), c.get("config"))) return c.notFound();
+  const inviteToken = requestInviteToken(c);
+  if (!canShowRegister(c, inviteToken)) return c.notFound();
   const t = c.get("t");
   const error = c.req.query("error");
   const errorKey = error ? REGISTER_ERROR_KEYS[error] : undefined;
+  const action = inviteToken ? `/register?invite=${encodeURIComponent(inviteToken)}` : "/register";
   return authPage({
     title: t("auth.create_account"),
-    action: "/register",
+    action,
     submitLabel: t("auth.create_account"),
     passwordAutocomplete: "new-password",
     t,
     locale: c.get("locale"),
     notice: error ? authNotice(errorKey ? t(errorKey) : t("err.register.failed"), "error") : undefined,
     altLink: html`<p class="auth-alt">${t("auth.have_account")} <a href="/login">${t("auth.sign_in")}</a></p>`,
+    hiddenFields: inviteToken ? html`<input type="hidden" name="invite" value="${inviteToken}">` : undefined,
   });
 });
 
 web.post("/register", async (c) => {
   const config = c.get("config");
-  if (!effectiveRegistrationOpen(c.get("db"), config)) return c.notFound();
+  const db = c.get("db");
 
   const crossOrigin = rejectCrossOriginMutation(c);
   if (crossOrigin) return crossOrigin;
+
+  const form = await c.req.parseBody();
+  const inviteToken = requestInviteToken(c, stringField(form.invite));
+  const registrationOpen = effectiveRegistrationOpen(db, config);
+  const invite = registrationInviteForToken(db, inviteToken);
+  if (!registrationOpen && !invite) return c.notFound();
 
   // Per-IP throttle (in-process). Counts every attempt, before validation, so a
   // flood of malformed requests can't bypass it. clientIp ignores a spoofable
   // X-Forwarded-For unless a trusted-proxy hop count is configured.
   if (!registerRateLimiter.tryAcquire(clientIp(c, config.trustedProxyHops))) {
-    return redirect("/register?error=rate");
+    return redirect(registerErrorLocation("rate", inviteToken));
   }
 
-  const form = await c.req.parseBody();
   const username = stringField(form.username);
   const password = stringField(form.password);
-  if (!username || !password) return redirect("/register?error=missing");
+  if (!username || !password) return redirect(registerErrorLocation("missing", inviteToken));
   // A name Forgejo might accept but that fails FORGEJO_NAME_RE would create an
   // account unusable as a workspace owner segment, so gate on it up front. 40 is
   // Forgejo's username cap — reject longer up front so an over-long name never
   // reaches the admin-token round-trip.
-  if (username.length > 40 || !FORGEJO_NAME_RE.test(username)) return redirect("/register?error=invalid");
+  if (username.length > 40 || !FORGEJO_NAME_RE.test(username)) return redirect(registerErrorLocation("invalid", inviteToken));
 
   const fjAdmin = c.get("fjAdmin");
   // Friendly duplicate check before the create (createUser otherwise throws on
   // collision). Racy, so the create still maps a 409/422 below.
-  if (await fjAdmin.getUserByName(username)) return redirect("/register?error=taken");
+  if (await fjAdmin.getUserByName(username)) return redirect(registerErrorLocation("taken", inviteToken));
+
+  let inviteReserved = false;
+  if (invite && inviteToken) {
+    inviteReserved = reserveRegistrationInvite(db, inviteToken, username);
+    if (!inviteReserved && !registrationOpen) return c.notFound();
+  }
 
   try {
     // Email is synthesized (no form field, nothing stored locally) — matches
@@ -198,17 +231,18 @@ web.post("/register", async (c) => {
     // Forgejo email confirmation is turned on.
     await fjAdmin.createUser({ username, email: `${username}@cosheaf.local`, password });
   } catch (err) {
+    if (inviteReserved && inviteToken) releaseRegistrationInvite(db, inviteToken, username);
     if (err instanceof ForgejoError) {
       if (err.status === 409 || (err.status === 422 && /exist|already|taken/i.test(err.bodyText))) {
-        return redirect("/register?error=taken");
+        return redirect(registerErrorLocation("taken", inviteToken));
       }
-      if (err.status === 400 || err.status === 422) return redirect("/register?error=invalid");
+      if (err.status === 400 || err.status === 422) return redirect(registerErrorLocation("invalid", inviteToken));
     }
-    return redirect("/register?error=upstream");
+    return redirect(registerErrorLocation("upstream", inviteToken));
   }
 
   // Log the new user straight in with the same PAT mint /login uses.
-  const outcome = await exchangeForgejoCredsForPat(c.get("db"), config.forgejoUrl, username, password);
+  const outcome = await exchangeForgejoCredsForPat(db, config.forgejoUrl, username, password);
   if (outcome.kind !== "ok") {
     // The account was created but the immediate mint couldn't complete (e.g. a
     // Forgejo signup gate). Don't fail a successful signup — send them to sign in.

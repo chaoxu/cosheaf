@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { effectiveRegistrationOpen, isSiteAdmin, setRegistrationOpen } from "../site-admin.js";
-import { currentUserAvatarSrc, globalRoute, htmlResponse, notFoundPage, redirect, stringField } from "./web-context.js";
+import { createRegistrationInvite, effectiveRegistrationOpen, isSiteAdmin, setRegistrationOpen } from "../site-admin.js";
+import { currentUserAvatarSrc, globalRoute, htmlResponse, notFoundPage, redirect, rejectCrossOriginMutation, requestOrigin, stringField } from "./web-context.js";
 import { pageShell, globalSidebar } from "./web-shell.js";
 import { emptyHtml, html } from "./web-html.js";
 
@@ -13,6 +13,8 @@ export function registerAdminRoutes(web: Hono<AppEnv>): void {
 
     const registrationOpen = effectiveRegistrationOpen(db, c.get("config"));
     const saved = c.req.query("saved") === "1";
+    const invite = c.req.query("invite");
+    const inviteLink = invite ? `${requestOrigin(c)}/register?invite=${encodeURIComponent(invite)}` : null;
     const avatarSrc = await currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken);
     return htmlResponse(
       pageShell({
@@ -48,6 +50,25 @@ export function registerAdminRoutes(web: Hono<AppEnv>): void {
                   </div>
                 </form>
               </section>
+              <section class="settings-section" data-testid="site-registration-invites">
+                <div class="settings-section-header">
+                  <h2>Registration invites</h2>
+                  <p>Create one-time registration links for people who should be able to sign up while public registration is closed.</p>
+                </div>
+                <form class="settings-form" method="post" action="/admin/registration-invites">
+                  <div class="settings-actions">
+                    <button class="button primary" type="submit">Create invite link</button>
+                  </div>
+                </form>
+                ${
+                  inviteLink
+                    ? html`<div class="settings-row" data-testid="registration-invite-link">
+                        <span>Invite link</span>
+                        <input readonly value="${inviteLink}" onclick="this.select()" aria-label="Registration invite link">
+                      </div>`
+                    : emptyHtml
+                }
+              </section>
             </div>
           </main>
         `,
@@ -56,6 +77,9 @@ export function registerAdminRoutes(web: Hono<AppEnv>): void {
   }));
 
   web.post("/admin/registration", globalRoute(async (c, auth) => {
+    const crossOrigin = rejectCrossOriginMutation(c);
+    if (crossOrigin) return crossOrigin;
+
     const db = c.get("db");
     const username = auth.user.username;
     if (!isSiteAdmin(db, username)) return notFoundPage(username, "Not found");
@@ -65,5 +89,17 @@ export function registerAdminRoutes(web: Hono<AppEnv>): void {
     if (mode !== "open" && mode !== "closed") return redirect("/admin");
     setRegistrationOpen(db, mode === "open", username);
     return redirect("/admin?saved=1");
+  }));
+
+  web.post("/admin/registration-invites", globalRoute(async (c, auth) => {
+    const crossOrigin = rejectCrossOriginMutation(c);
+    if (crossOrigin) return crossOrigin;
+
+    const db = c.get("db");
+    const username = auth.user.username;
+    if (!isSiteAdmin(db, username)) return notFoundPage(username, "Not found");
+
+    const token = createRegistrationInvite(db, username);
+    return redirect(`/admin?invite=${encodeURIComponent(token)}`);
   }));
 }

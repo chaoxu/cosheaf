@@ -31,6 +31,7 @@ export const en = {
   "err.register.taken": "That username is already taken.",
   "err.register.rate": "Too many attempts. Please wait a few minutes and try again.",
   "err.register.upstream": "Registration is temporarily unavailable. Please try again shortly.",
+  "err.register.invalid_invite": "That registration link is invalid or has already been used.",
   "err.register.failed": "Registration failed. Please try again.",
   // home
   "home.title": "Repositories",

@@ -27,6 +27,7 @@ export const zh = {
   "err.register.taken": "该用户名已被占用。",
   "err.register.rate": "尝试次数过多，请稍等几分钟后再试。",
   "err.register.upstream": "注册暂时不可用，请稍后重试。",
+  "err.register.invalid_invite": "注册链接无效或已被使用。",
   "err.register.failed": "注册失败，请重试。",
   // home
   "home.title": "仓库",

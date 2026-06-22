@@ -33,6 +33,7 @@ const ALLOWED_TABLES = new Set([
   // Cosheaf-owned site controls: global admin bootstrap and registration gate.
   "site_admins",
   "site_settings",
+  "registration_invites",
   // Ephemeral process coordination for sidecar rebuilds. Rows are disposable
   // locks, not knowledge or Forgejo workflow mirrors.
   "workspace_locks",

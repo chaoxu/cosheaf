@@ -55,6 +55,7 @@ describe("web /admin", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-testid="site-registration"');
+    expect(body).toContain('data-testid="site-registration-invites"');
     expect(body).toContain('href="/admin"');
   });
 
@@ -78,6 +79,48 @@ describe("web /admin", () => {
     const closed = await appFor(db).request("/admin/registration", form(token, { registration_open: "closed" }));
     expect(closed.status).toBe(303);
     expect(effectiveRegistrationOpen(db, config)).toBe(false);
+  });
+
+  it("lets a global admin create a registration invite link", async () => {
+    const db = freshTestDb("cosheaf-admin-");
+    db.prepare("INSERT INTO site_admins (username, created_at) VALUES (?, ?)").run("chao", Date.now());
+    const token = seedAuthUser(db, config, { username: "chao" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/user", (c) => c.json({ id: 1, login: "chao" }));
+    }));
+
+    const created = await appFor(db).request("/admin/registration-invites", form(token, {}));
+
+    expect(created.status).toBe(303);
+    const location = created.headers.get("location");
+    expect(location).toMatch(/^\/admin\?invite=[A-Za-z0-9_-]+$/);
+    const row = db.prepare("SELECT created_by, used_by, used_at FROM registration_invites").get() as {
+      created_by: string;
+      used_by: string | null;
+      used_at: number | null;
+    };
+    expect(row).toMatchObject({ created_by: "chao", used_by: null, used_at: null });
+
+    const rendered = await appFor(db).request(location ?? "/admin", { headers: authHeaders(token) });
+    expect(rendered.status).toBe(200);
+    expect(await rendered.text()).toContain("/register?invite=");
+  });
+
+  it("rejects cross-origin registration admin posts", async () => {
+    const db = freshTestDb("cosheaf-admin-");
+    db.prepare("INSERT INTO site_admins (username, created_at) VALUES (?, ?)").run("chao", Date.now());
+    const token = seedAuthUser(db, config, { username: "chao" });
+
+    const res = await appFor(db).request("/admin/registration-invites", {
+      ...form(token, {}),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: "http://evil.test",
+        ...authHeaders(token),
+      },
+    });
+
+    expect(res.status).toBe(403);
   });
 });
 

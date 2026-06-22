@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setRegistrationOpen } from "../site-admin.js";
+import { createRegistrationInvite, setRegistrationOpen } from "../site-admin.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, testApp, testConfig } from "./test-fixtures.js";
 import { web } from "./web.js";
@@ -57,6 +57,92 @@ describe("web /register", () => {
       form({ username: "newbie", password: "secret123" }, "10.0.0.1"),
     );
     expect(postRes.status).toBe(404);
+  });
+
+  it("allows a one-time invite to register while public registration is off", async () => {
+    const db = freshTestDb("cosheaf-register-");
+    const invite = createRegistrationInvite(db, "chao");
+    let createBody: { username?: string; email?: string } | null = null;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/users/:username", (c) => c.text("not found", 404 as 200));
+        forge.post("/api/v1/admin/users", async (c) => {
+          createBody = await c.req.json();
+          return c.json({ id: 1, login: "invitee" }, 201 as 200);
+        });
+        forge.post("/api/v1/users/:username/tokens", (c) => c.json({ sha1: "invitepat" }));
+        forge.get("/api/v1/user", (c) => c.json({ login: "invitee" }));
+      }),
+    );
+
+    const getRes = await appFor(db, false).request(`/register?invite=${invite}`);
+    expect(getRes.status).toBe(200);
+    const body = await getRes.text();
+    expect(body).toContain(`action="/register?invite=${invite}"`);
+    expect(body).toContain(`name="invite" value="${invite}"`);
+
+    const postRes = await appFor(db, false).request(
+      `/register?invite=${invite}`,
+      form({ username: "invitee", password: "secret123", invite }, "10.0.0.10"),
+    );
+
+    expect(postRes.status).toBe(303);
+    expect(postRes.headers.get("location")).toBe("/");
+    expect(postRes.headers.get("set-cookie")).toMatch(/cosheaf_pat=invitepat/);
+    expect(createBody).toMatchObject({ username: "invitee", email: "invitee@cosheaf.local" });
+    const row = db.prepare("SELECT used_by, used_at FROM registration_invites").get() as { used_by: string; used_at: number };
+    expect(row.used_by).toBe("invitee");
+    expect(row.used_at).toBeGreaterThan(0);
+
+    const reused = await appFor(db, false).request(`/register?invite=${invite}`);
+    expect(reused.status).toBe(404);
+  });
+
+  it("does not allow concurrent registrations to reuse the same invite", async () => {
+    const db = freshTestDb("cosheaf-register-");
+    const invite = createRegistrationInvite(db, "chao");
+    const app = appFor(db, false);
+    let createCalls = 0;
+    let releaseCreate = (): void => {};
+    const createStarted = new Promise<void>((resolve) => {
+      fetchMock.mockImplementation(
+        fakeForgejo((forge) => {
+          forge.get("/api/v1/users/:username", (c) => c.text("not found", 404 as 200));
+          forge.post("/api/v1/admin/users", async (c) => {
+            createCalls += 1;
+            resolve();
+            if (createCalls === 1) await new Promise<void>((release) => { releaseCreate = release; });
+            return c.json({ id: createCalls, login: "invitee" }, 201 as 200);
+          });
+          forge.post("/api/v1/users/:username/tokens", (c) => c.json({ sha1: "invitepat" }));
+          forge.get("/api/v1/user", (c) => c.json({ login: "invitee" }));
+        }),
+      );
+    });
+
+    const first = app.request(
+      `/register?invite=${invite}`,
+      form({ username: "invitee", password: "secret123", invite }, "10.0.0.12"),
+    );
+    await createStarted;
+
+    const second = await app.request(
+      `/register?invite=${invite}`,
+      form({ username: "other", password: "secret123", invite }, "10.0.0.13"),
+    );
+    expect(second.status).toBe(404);
+    expect(createCalls).toBe(1);
+
+    releaseCreate();
+    const firstRes = await first;
+    expect(firstRes.status).toBe(303);
+    expect(firstRes.headers.get("location")).toBe("/");
+  });
+
+  it("does not allow an invalid invite while public registration is off", async () => {
+    const db = freshTestDb("cosheaf-register-");
+    const res = await appFor(db, false).request("/register?invite=missing");
+    expect(res.status).toBe(404);
   });
 
   it("uses the site-admin registration setting over the environment default", async () => {
@@ -146,6 +232,17 @@ describe("web /register", () => {
     const res = await appFor(db).request("/register", form({ username: "newbie" }, "10.0.0.5"));
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/register?error=missing");
+  });
+
+  it("preserves an invite token across registration validation errors", async () => {
+    const db = freshTestDb("cosheaf-register-");
+    const invite = createRegistrationInvite(db, "chao");
+    const res = await appFor(db, false).request(
+      "/register",
+      form({ username: "bad name", password: "secret123", invite }, "10.0.0.11"),
+    );
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(`/register?error=invalid&invite=${invite}`);
   });
 
   it("redirects with error=invalid for a username Forgejo names reject", async () => {
