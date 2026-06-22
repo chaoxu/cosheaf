@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { onForgejo404 } from "../forgejo-errors.js";
-import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue, stripChatMetadata } from "./web-chat.js";
@@ -27,7 +27,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
+import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, sortField, stateToggle } from "./web-page.js";
 import { webCommentEditorAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
@@ -52,7 +52,7 @@ async function rejectMissingIssueComment(ctx: WebCtx, number: number, id: number
 export function registerIssueRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
   const filters = parseIssueListFilters(c);
-  const [issues, labels, milestones, collaborators] = await Promise.all([
+  const [issues, labels, milestones] = await Promise.all([
     ctx.fj.listIssues(ctx.owner, ctx.repo, {
       state: filters.state,
       limit: 50,
@@ -66,7 +66,6 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
     }),
     ctx.fj.listLabels(ctx.owner, ctx.repo),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
-    ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "issues", `Issues - ${ctx.repo}`, html`
@@ -74,7 +73,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
           <div><h1>Issues</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
-        ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
+        ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
         ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
         <script src="/cosheaf-user-autocomplete.js" defer></script>
       `),
@@ -435,11 +434,10 @@ function issueFilterForm(
   filters: IssueListFilters,
   labels: readonly ForgejoLabel[],
   milestones: readonly ForgejoMilestone[],
-  collaborators: readonly ForgejoUser[],
 ): Html {
   const action = repoHref(owner, repo, "/issues");
   return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters" data-list-prefs="issues">
-    ${usernameDatalist(collaborators)}
+    <datalist id="${USERNAME_DATALIST_ID}"></datalist>
     <div class="filter-basic">
       ${stateToggle(filters.state)}
       <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search issues"></label>

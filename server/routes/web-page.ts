@@ -24,13 +24,8 @@ export function addDisclosure(label: string, form: Html): Html {
   </details>`;
 }
 
-// Shared <datalist> of repo collaborators for the filter-bar username inputs
-// (Author/Assignee/Mentioned). Native datalist gives type-to-filter with no
-// island; the fields stay free-text for usernames not in the collaborator set.
+// Shared <datalist> id used by on-demand username autocomplete fields.
 export const USERNAME_DATALIST_ID = "repo-usernames";
-export function usernameDatalist(collaborators: readonly ForgejoUser[]): Html {
-  return html`<datalist id="${USERNAME_DATALIST_ID}">${collaborators.map((u) => html`<option value="${u.login}"></option>`)}</datalist>`;
-}
 
 // [id, message key, url suffix]. Labels resolve through t() at render time so
 // the repo nav translates without REPO_TABS holding pre-baked English.

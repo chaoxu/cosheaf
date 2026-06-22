@@ -43,11 +43,10 @@ import { webEditorAssets } from "./web-shell.js";
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
     const { owner, repo, fj, ws, user } = ctx;
-    const [files, branches, repoMeta, openPulls] = await Promise.all([
+    const [files, branches, repoMeta] = await Promise.all([
       repoFiles(fj, owner, repo, "main").catch(() => []),
       fj.listBranches(owner, repo).catch(() => []),
       fj.getRepo(owner, repo).catch(() => null),
-      fj.listPulls(owner, repo, "open").catch(() => []),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
     const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
@@ -56,7 +55,6 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
       branches: branches.length,
       openIssues: repoMeta?.open_issues_count ?? 0,
-      openPrs: openPulls.length,
       updated: repoMeta?.updated_at,
       description: repoMeta?.description,
     };

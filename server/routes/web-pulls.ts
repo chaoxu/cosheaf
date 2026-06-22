@@ -3,7 +3,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
-import type { ForgejoBranch, ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoBranch, ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -46,7 +46,7 @@ import {
   renderPrFileView,
   splitDiffByFile,
 } from "./web-pulls-diff.js";
-import { USERNAME_DATALIST_ID, branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle, usernameDatalist } from "./web-page.js";
+import { USERNAME_DATALIST_ID, branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle } from "./web-page.js";
 import {
   isVisibleReview,
   labelSelectionPatch,
@@ -84,7 +84,7 @@ async function pullIssueCommentFor(
 export function registerPullRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
   const filters = parsePullListFilters(c);
-  const [pulls, labels, milestones, collaborators] = await Promise.all([
+  const [pulls, labels, milestones] = await Promise.all([
     ctx.fj.listPulls(ctx.owner, ctx.repo, {
       state: filters.state,
       labels: filters.labels.length > 0 ? filters.labels : undefined,
@@ -94,7 +94,6 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
     }),
     ctx.fj.listLabels(ctx.owner, ctx.repo),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
-    ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
   ]);
   // Forgejo's /pulls has no title-search param, so filter the fetched page in
   // memory (a thin pass-through, not a SQLite mirror).
@@ -110,7 +109,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
           <div><h1>PRs</h1></div>
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New PR</a>`}
         </div>
-        ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones, collaborators)}
+        ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
         ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.")}
         <script src="/cosheaf-user-autocomplete.js" defer></script>
       `,
@@ -652,11 +651,10 @@ function pullFilterForm(
   filters: PullListFilters,
   labels: readonly ForgejoLabel[],
   milestones: readonly ForgejoMilestone[],
-  collaborators: readonly ForgejoUser[],
 ): Html {
   const action = repoHref(owner, repo, "/pulls");
   return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters" data-list-prefs="pulls">
-    ${usernameDatalist(collaborators)}
+    <datalist id="${USERNAME_DATALIST_ID}"></datalist>
     <div class="filter-basic">
       ${stateToggle(filters.state)}
       <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search pull requests"></label>

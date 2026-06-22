@@ -48,12 +48,16 @@ describe("web issue routes", () => {
     const db = freshTestDb("cosheaf-web-issues-");
     seedTestWorkspace(db);
     const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    let listedCollaborators = false;
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/issues", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/milestones", () => Response.json([]));
-        forge.get("/api/v1/repos/owner/w/collaborators", () => Response.json([{ id: 1, login: "bob" }]));
+        forge.get("/api/v1/repos/owner/w/collaborators", () => {
+          listedCollaborators = true;
+          return Response.json([{ id: 1, login: "bob" }]);
+        });
       }),
     );
 
@@ -66,6 +70,7 @@ describe("web issue routes", () => {
     expect(body).toContain('name="created_by"');
     expect(body).toContain('data-user-autocomplete="/owner/w/user-suggestions"');
     expect(body).toContain('/cosheaf-user-autocomplete.js');
+    expect(listedCollaborators).toBe(false);
   });
 
   it("preserves multiple labels from the inline label form", async () => {

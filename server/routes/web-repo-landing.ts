@@ -32,7 +32,6 @@ export interface RepoHomeStats {
   pages: number;
   branches: number;
   openIssues: number;
-  openPrs: number;
   updated?: string;
   description?: string;
 }
@@ -54,7 +53,6 @@ export function repoHomeHeader(ctx: WebCtx, owner: string, repo: string, stats: 
       ${stat(stats.pages, stats.pages === 1 ? "page" : "pages")}
       ${stat(stats.branches, stats.branches === 1 ? "branch" : "branches", repoHref(owner, repo, "/branches"))}
       ${stat(stats.openIssues, "open issues", repoHref(owner, repo, "/issues"))}
-      ${stat(stats.openPrs, "open PRs", repoHref(owner, repo, "/pulls"))}
       ${stats.updated ? html`<div class="repo-stat"><span class="repo-stat-num">${timeEl(stats.updated)}</span><span class="repo-stat-label">updated</span></div>` : ""}
     </div>
   </header>`;

@@ -64,6 +64,7 @@ describe("web file editor route", () => {
       formatId: COFLAT_FORMAT_ID,
     });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let listedPulls = false;
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
@@ -88,12 +89,13 @@ describe("web file editor route", () => {
           }),
         );
         forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "draft" }]));
-        forge.get("/api/v1/repos/owner/w/pulls", () =>
-          Response.json([
+        forge.get("/api/v1/repos/owner/w/pulls", () => {
+          listedPulls = true;
+          return Response.json([
             { number: 1, title: "One", state: "open", head: { ref: "draft" }, base: { ref: "main" }, user: { login: "alice" } },
             { number: 2, title: "Two", state: "open", head: { ref: "other" }, base: { ref: "main" }, user: { login: "bob" } },
-          ]),
-        );
+          ]);
+        });
         forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Read Me\n"));
       }),
     );
@@ -107,7 +109,7 @@ describe("web file editor route", () => {
     expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">pages</span>');
     expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">branches</span>');
     expect(body).toContain('<span class="repo-stat-num">3</span><span class="repo-stat-label">open issues</span>');
-    expect(body).toContain('<span class="repo-stat-num">2</span><span class="repo-stat-label">open PRs</span>');
+    expect(body).not.toContain("open PRs");
     expect(body).toContain('data-testid="repo-clone"');
     expect(body).toContain('aria-label="SSH clone URL"');
     expect(body).toContain('data-testid="repo-readme"');
@@ -118,6 +120,7 @@ describe("web file editor route", () => {
     expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md"');
     expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md" data-read-href="/owner/w/src/branch/main/notes/a.md"');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
+    expect(listedPulls).toBe(false);
   });
 
   it("keeps the rendered file reader available without a Branches toolbar button", async () => {

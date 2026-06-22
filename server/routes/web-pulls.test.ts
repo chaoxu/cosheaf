@@ -84,12 +84,16 @@ describe("web pull request routes", () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);
     const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    let listedCollaborators = false;
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
         forge.get("/api/v1/repos/owner/w/milestones", () => Response.json([]));
-        forge.get("/api/v1/repos/owner/w/collaborators", () => Response.json([{ id: 1, login: "bob" }]));
+        forge.get("/api/v1/repos/owner/w/collaborators", () => {
+          listedCollaborators = true;
+          return Response.json([{ id: 1, login: "bob" }]);
+        });
       }),
     );
 
@@ -102,6 +106,7 @@ describe("web pull request routes", () => {
     expect(body).toContain('name="author"');
     expect(body).toContain('data-user-autocomplete="/owner/w/user-suggestions"');
     expect(body).toContain('/cosheaf-user-autocomplete.js');
+    expect(listedCollaborators).toBe(false);
   });
 
   it("lets read users submit PR review comments through Forgejo", async () => {
