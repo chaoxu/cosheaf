@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
-import { fileTreePanel } from "./web-files.js";
+import { fileTreePanel } from "./web-file-tree.js";
 import { html } from "./web-html.js";
 import { panel, renderRegion } from "./web-panels.js";
 import { threadLayout } from "./web-thread.js";

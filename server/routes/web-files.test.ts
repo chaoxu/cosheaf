@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { indexPage } from "../indexer.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
-import { _setPdfExportCommandRunnerForTest } from "../pdf-export.js";
+import { _resetPdfExportLimiterForTest, _setPdfExportCommandRunnerForTest, _setPdfExportLimiterConfigForTest } from "../pdf-export.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
-import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
+import { registerBranchRoutes } from "./web-branches.js";
+import { registerFileRoutes } from "./web-files.js";
 
 const config = testConfig("web-files");
 
@@ -28,6 +29,14 @@ function formHeaders(token: string, contentType = "application/x-www-form-urlenc
   return { ...authHeaders(token), "content-type": contentType, origin: "http://localhost" };
 }
 
+async function writeFakePdf(args: readonly string[]): Promise<void> {
+  const outputIndex = args.indexOf("-o");
+  const outputArg = args.find((arg) => arg.startsWith("--output="));
+  const outputFile = outputArg?.slice("--output=".length) ?? (outputIndex >= 0 ? args[outputIndex + 1] : null);
+  if (!outputFile) throw new Error("missing pandoc output path");
+  await writeFile(outputFile, Buffer.from("%PDF-1.4\n"));
+}
+
 describe("web file editor route", () => {
   const fetchMock = vi.fn();
 
@@ -39,6 +48,7 @@ describe("web file editor route", () => {
 
   afterEach(() => {
     _setPdfExportCommandRunnerForTest(null);
+    _resetPdfExportLimiterForTest();
     vi.unstubAllGlobals();
   });
 
@@ -581,6 +591,121 @@ describe("web file editor route", () => {
 
     expect(res.status).toBe(503);
     expect(await res.text()).toContain("PDF export requires xelatex.");
+  });
+
+  it("rejects PDF export when the render queue is full", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const secondToken = seedAuthUser(db, config, { username: "bob", role: "write" });
+    _setPdfExportLimiterConfigForTest({ concurrency: 1, queueLimit: 0, cooldownMs: 0 });
+    let releasePandoc: (() => void) | undefined;
+    let branchReads = 0;
+    let rawReads = 0;
+    const pandocStarted = new Promise<void>((resolve) => {
+      _setPdfExportCommandRunnerForTest(async (command, args) => {
+        if (command !== "pandoc" || !args.some((arg) => arg.startsWith("--output="))) return;
+        resolve();
+        await new Promise<void>((release) => {
+          releasePandoc = release;
+        });
+        await writeFakePdf(args);
+      });
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => {
+          branchReads += 1;
+          return Response.json([{ name: "main" }]);
+        });
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => {
+          rawReads += 1;
+          return new Response("# Notes\n");
+        });
+      }),
+    );
+
+    const first = appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+    await pandocStarted;
+    const second = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(secondToken) });
+    if (!releasePandoc) throw new Error("pandoc did not start");
+    releasePandoc();
+    const firstRes = await first;
+
+    expect(second.status).toBe(503);
+    expect(await second.text()).toContain("PDF export queue is full");
+    expect(firstRes.status).toBe(200);
+    expect(branchReads).toBe(1);
+    expect(rawReads).toBe(1);
+  });
+
+  it("throttles repeated PDF export requests from the same user and client IP", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    _setPdfExportLimiterConfigForTest({ concurrency: 1, queueLimit: 1, cooldownMs: 60_000 });
+    _setPdfExportCommandRunnerForTest(async (command, args) => {
+      if (command === "pandoc" && args.some((arg) => arg.startsWith("--output="))) await writeFakePdf(args);
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+      }),
+    );
+
+    const first = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+    const second = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    expect(await second.text()).toContain("PDF export is already running or was requested recently.");
+  });
+
+  it("rejects duplicate PDF exports before branch resolution while one is active", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    _setPdfExportLimiterConfigForTest({ concurrency: 1, queueLimit: 4, cooldownMs: 0 });
+    let releasePandoc: (() => void) | undefined;
+    let branchReads = 0;
+    const pandocStarted = new Promise<void>((resolve) => {
+      _setPdfExportCommandRunnerForTest(async (command, args) => {
+        if (command !== "pandoc" || !args.some((arg) => arg.startsWith("--output="))) return;
+        resolve();
+        await new Promise<void>((release) => {
+          releasePandoc = release;
+        });
+        await writeFakePdf(args);
+      });
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => {
+          branchReads += 1;
+          return Response.json([{ name: "main" }]);
+        });
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+      }),
+    );
+
+    const first = appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+    await pandocStarted;
+    const second = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
+    if (!releasePandoc) throw new Error("pandoc did not start");
+    releasePandoc();
+    const firstRes = await first;
+
+    expect(second.status).toBe(429);
+    expect(await second.text()).toContain("PDF export is already running or was requested recently.");
+    expect(firstRes.status).toBe(200);
+    expect(branchReads).toBe(1);
   });
 
   it("uses source freshness when an existing edit branch lacks the file and falls back to main content", async () => {

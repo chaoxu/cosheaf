@@ -11,6 +11,7 @@ describe("healthPayload", () => {
       commit: "abc123",
       coflat_ref: "coflat123",
       checks: { sqlite: "ok" },
+      pdf_export: { active: 0, queued: 0, concurrency: 1, queue_limit: 4 },
     });
   });
 
@@ -26,6 +27,7 @@ describe("healthPayload", () => {
       commit: "abc123",
       coflat_ref: "coflat123",
       checks: { sqlite: "fail" },
+      pdf_export: { active: 0, queued: 0, concurrency: 1, queue_limit: 4 },
       error: "database is locked",
     });
   });
@@ -33,7 +35,8 @@ describe("healthPayload", () => {
 
 describe("healthStatus", () => {
   it("returns the HTTP status consumed by container healthchecks", () => {
-    expect(healthStatus({ ok: true, commit: "abc123", coflat_ref: "coflat123", checks: { sqlite: "ok" } })).toBe(200);
-    expect(healthStatus({ ok: false, commit: "abc123", coflat_ref: "coflat123", checks: { sqlite: "fail" } })).toBe(503);
+    const pdf_export = { active: 0, queued: 0, concurrency: 1, queue_limit: 4 };
+    expect(healthStatus({ ok: true, commit: "abc123", coflat_ref: "coflat123", checks: { sqlite: "ok" }, pdf_export })).toBe(200);
+    expect(healthStatus({ ok: false, commit: "abc123", coflat_ref: "coflat123", checks: { sqlite: "fail" }, pdf_export })).toBe(503);
   });
 });

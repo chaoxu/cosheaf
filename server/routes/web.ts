@@ -18,10 +18,11 @@ import { avatarForUser, avatarLinkForUser, forgeAvatarSrc, hasCustomAvatar, isFo
 import { mapThreads } from "./notifications.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerAdminRoutes } from "./web-admin.js";
+import { registerBranchRoutes } from "./web-branches.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
 import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField, textField, webRoute } from "./web-context.js";
 import { registerDiagnosticsRoutes } from "./web-diagnostics.js";
-import { registerBranchRoutes, registerFileRoutes } from "./web-files.js";
+import { registerFileRoutes } from "./web-files.js";
 import { emptyHtml, type Html, html } from "./web-html.js";
 import { registerIssueRoutes } from "./web-issues.js";
 import { addDisclosure, userPreferencesSection, userProfileSection } from "./web-page.js";

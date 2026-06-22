@@ -29,9 +29,8 @@
 - `pnpm coflat:status` prints the pinned Coflat SHA, sibling checkout SHA,
   lockfile hash, and local Cosheaf SHA. Add `--prod` to also query the
   deployed production Cosheaf SHA and Coflat ref at
-  `https://cosheaf.chaoxu.prof` on `pluto`. Set `COSHEAF_PROD_HOST`,
-  `COSHEAF_PROD_SSH_JUMP`, or `COSHEAF_PROD_URL` to override the public
-  deployment defaults.
+  `https://cosheaf.chaoxu.prof` on `pluto`. Set `COSHEAF_PROD_URL` to query a
+  different production-compatible health endpoint.
 - `pnpm refresh:coflat` builds `../coflat`, installs with lifecycle scripts
   disabled, and rebuilds native packages. It avoids the local lefthook
   `core.hooksPath` failure that made the old refresh path unreliable.
@@ -137,8 +136,16 @@ pnpm dev:login-state
 
 ## Route-To-File Map
 
-- Server-rendered web pages: `server/routes/web.ts`
+- Server-rendered web route assembly: `server/routes/web.ts`
   - Verify with `pnpm check:web` and `pnpm devx:verify-route`.
+- Repository file/read/edit pages: `server/routes/web-files.ts`
+  - Verify with `pnpm exec vitest run server/routes/web-files.test.ts`, `pnpm check:web`, and `pnpm devx:verify-route`.
+- Branch and commit pages: `server/routes/web-branches.ts`
+  - Verify with `pnpm exec vitest run server/routes/web-files.test.ts` and `pnpm devx:verify-route -- --route /chao/flushing-coin/branches`.
+- PDF export pages: `server/routes/web-pdf-export.ts`
+  - Verify with `pnpm exec vitest run server/routes/web-files.test.ts server/async-job-limiter.test.ts`.
+- File links and file tree panels: `server/routes/web-file-links.ts`, `server/routes/web-file-tree.ts`
+  - Verify with `pnpm exec vitest run server/routes/web-files.test.ts server/routes/web-panels.test.ts`.
 - Server-rendered web CSS: `public/cosheaf-web.css`
   - Verify with `pnpm check:web` and `pnpm devx:verify-route -- --route /chao/flushing-coin/activity`.
 - Static asset serving and route mounting: `server/app.ts`

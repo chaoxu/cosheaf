@@ -5,7 +5,6 @@ import {
   hydrateReferences,
   type ReaderOutlineEntry,
   renderToHtml,
-  sourceRangeFromDataset,
 } from "@chaoxu/coflat/reader";
 import { urlPath } from "../../shared/url";
 import {
@@ -22,6 +21,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
+import { markChangedBlocks } from "./reader-diff-marking";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 
@@ -92,26 +92,6 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // rendered document in, so it missed; re-apply it now that the heading exists
   // (#114). Scrolls within .app-content, the only scroll container.
   applyHashScroll(root);
-}
-
-// Highlight rendered blocks whose source-line range intersects the changed
-// lines on this side of a PR diff (#113). sourceLineAttribution emits
-// data-source-line (single) or data-source-from/-to (a range) on block
-// elements; rich rendering is block-structured, so a changed line marks its
-// whole containing block.
-function markChangedBlocks(root: HTMLElement, marked: ReadonlySet<number>): void {
-  for (const el of root.querySelectorAll<HTMLElement>("[data-source-line],[data-source-from]")) {
-    const range =
-      sourceRangeFromDataset(el.dataset, "sourceFrom", "sourceTo", { defaultToFrom: true }) ??
-      sourceRangeFromDataset(el.dataset, "sourceLine", "sourceLine", { defaultToFrom: true });
-    if (!range) continue;
-    for (let line = range.from; line <= range.to; line++) {
-      if (marked.has(line)) {
-        el.classList.add("marked");
-        break;
-      }
-    }
-  }
 }
 
 // Re-scroll to a heading-fragment deep link after the island renders. The
@@ -272,22 +252,24 @@ function hydrateIslandsIn(scope: ParentNode): void {
   for (const root of scope.querySelectorAll<HTMLElement>(".coflat-reader-island")) void renderIsland(root);
 }
 
-hydrateIslandsIn(document);
-if (!document.querySelector(".coflat-reader-island")) void renderStandaloneRail();
+if (typeof document !== "undefined") {
+  hydrateIslandsIn(document);
+  if (!document.querySelector(".coflat-reader-island")) void renderStandaloneRail();
 
-// Islands inserted after initial load — e.g. the chat thread swapping in new
-// turns on a live update — must hydrate too, so watch for them rather than
-// scanning only once. renderIsland is a no-op on an already-hydrated island
-// (its JSON payload script is gone), so re-notification is harmless.
-new MutationObserver((mutations) => {
-  for (const mutation of mutations) {
-    for (const node of mutation.addedNodes) {
-      if (!(node instanceof HTMLElement)) continue;
-      if (node.matches(".coflat-reader-island")) void renderIsland(node);
-      hydrateIslandsIn(node);
+  // Islands inserted after initial load — e.g. the chat thread swapping in new
+  // turns on a live update — must hydrate too, so watch for them rather than
+  // scanning only once. renderIsland is a no-op on an already-hydrated island
+  // (its JSON payload script is gone), so re-notification is harmless.
+  new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (!(node instanceof HTMLElement)) continue;
+        if (node.matches(".coflat-reader-island")) void renderIsland(node);
+        hydrateIslandsIn(node);
+      }
     }
-  }
-}).observe(document.body, { childList: true, subtree: true });
+  }).observe(document.body, { childList: true, subtree: true });
 
-installRefNavigation();
-installReaderHashHistory();
+  installRefNavigation();
+  installReaderHashHistory();
+}

@@ -121,6 +121,20 @@ export function clientIp(c: Context<AppEnv>, trustedProxyHops: number): string {
   return parts[parts.length - trustedProxyHops];
 }
 
+export function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {
+  const path = c.req.path;
+  const prefix = repoHref(owner, repo, suffix);
+  return path.startsWith(prefix) ? decodePathPart(path.slice(prefix.length)) : "";
+}
+
+function decodePathPart(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch (_err) {
+    return "";
+  }
+}
+
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {
   const auth = await resolveAuth(c);
   if (!auth) return null;

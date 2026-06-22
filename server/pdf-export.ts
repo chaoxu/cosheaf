@@ -16,6 +16,7 @@ import {
   resolveLatexExportOptions,
   resolveLatexTemplatePath,
 } from "@chaoxu/coflat/latex";
+import { AsyncJobLimiter, type AsyncJobLimiterConfig } from "./async-job-limiter.js";
 import { safeRel } from "./routes/files.js";
 
 export interface PdfProjectFile {
@@ -32,6 +33,7 @@ interface ExportCoflatPdfOptions {
   readonly source: string;
   readonly sourcePath: string;
   readonly files: readonly PdfProjectFile[];
+  readonly rateLimitKey?: string;
   readonly defaults?: {
     readonly bibliography?: string;
     readonly csl?: string;
@@ -52,13 +54,39 @@ interface CommandOptions {
 type CommandRunner = (command: string, args: readonly string[], options: CommandOptions) => Promise<void>;
 
 let commandRunnerForTest: CommandRunner | null = null;
+let limiterConfigForTest: AsyncJobLimiterConfig | null = null;
 
 const DEPENDENCY_CHECK_TIMEOUT_MS = 10_000;
 const PDF_EXPORT_TIMEOUT_MS = 120_000;
 const MAX_PDF_OUTPUT_BYTES = 100 * 1024 * 1024;
+const DEFAULT_PDF_EXPORT_CONCURRENCY = 1;
+const DEFAULT_PDF_EXPORT_QUEUE_LIMIT = 4;
+const DEFAULT_PDF_EXPORT_COOLDOWN_MS = 30_000;
+
+export interface PdfExportMetrics {
+  readonly active: number;
+  readonly queued: number;
+  readonly concurrency: number;
+  readonly queue_limit: number;
+}
+
+const pdfExportLimiter = new AsyncJobLimiter<PdfExportError>({
+  config: pdfExportLimiterConfig,
+  duplicateError: () => new PdfExportError(429, "PDF export is already running or was requested recently."),
+  queueFullError: () => new PdfExportError(503, "PDF export queue is full. Try again shortly."),
+});
 
 export function _setPdfExportCommandRunnerForTest(runner: CommandRunner | null): void {
   commandRunnerForTest = runner;
+}
+
+export function _setPdfExportLimiterConfigForTest(config: AsyncJobLimiterConfig | null): void {
+  limiterConfigForTest = config;
+}
+
+export function _resetPdfExportLimiterForTest(): void {
+  pdfExportLimiter.reset();
+  limiterConfigForTest = null;
 }
 
 export class PdfExportError extends Error {
@@ -72,6 +100,25 @@ export class PdfExportError extends Error {
 }
 
 export async function exportCoflatMarkdownPdf(options: ExportCoflatPdfOptions): Promise<PdfExportResult> {
+  if (!options.rateLimitKey) return exportCoflatMarkdownPdfUnbounded(options);
+  return pdfExportLimiter.run(options.rateLimitKey, () => exportCoflatMarkdownPdfUnbounded(options));
+}
+
+export async function withPdfExportLimit<T>(rateLimitKey: string | undefined, run: () => Promise<T>): Promise<T> {
+  return pdfExportLimiter.run(rateLimitKey, run);
+}
+
+export function pdfExportMetrics(): PdfExportMetrics {
+  const metrics = pdfExportLimiter.metrics();
+  return {
+    active: metrics.active,
+    queued: metrics.queued,
+    concurrency: metrics.concurrency,
+    queue_limit: metrics.queueLimit,
+  };
+}
+
+async function exportCoflatMarkdownPdfUnbounded(options: ExportCoflatPdfOptions): Promise<PdfExportResult> {
   const sourceRel = safeRel(options.sourcePath);
   if (!sourceRel) {
     throw new PdfExportError(400, "Invalid document path.");
@@ -124,6 +171,23 @@ export async function exportCoflatMarkdownPdf(options: ExportCoflatPdfOptions): 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+function pdfExportLimiterConfig(): AsyncJobLimiterConfig {
+  if (limiterConfigForTest) return limiterConfigForTest;
+  return {
+    concurrency: positiveIntEnv("COSHEAF_PDF_EXPORT_CONCURRENCY", DEFAULT_PDF_EXPORT_CONCURRENCY, { min: 1 }),
+    queueLimit: positiveIntEnv("COSHEAF_PDF_EXPORT_QUEUE_LIMIT", DEFAULT_PDF_EXPORT_QUEUE_LIMIT),
+    cooldownMs: positiveIntEnv("COSHEAF_PDF_EXPORT_COOLDOWN_MS", DEFAULT_PDF_EXPORT_COOLDOWN_MS),
+  };
+}
+
+function positiveIntEnv(name: string, fallback: number, options: { min?: number } = {}): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  const min = options.min ?? 0;
+  return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
 async function checkPdfDependencies(cwd: string): Promise<void> {

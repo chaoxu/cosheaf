@@ -1,46 +1,44 @@
-import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
-import type { Context, Hono } from "hono";
-import { userBranchPrefix } from "../../shared/conventions.js";
+import type { Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { type FileKind, fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
+import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
-import { isLikelyTextContent, repositoryRawHeadersForPath } from "../content-type.js";
+import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
-import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
+import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { planIndexPage } from "../indexer.js";
-import { type PageSearchResult, type SnippetPart, searchWorkspacePages, workspacePageExcerpts, workspacePageTitles } from "../page-search.js";
-import { exportCoflatMarkdownPdf, PdfExportError, type PdfProjectFile } from "../pdf-export.js";
+import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
-import { invalidateBranchTree, invalidateRepoTrees } from "../tree-cache.js";
+import { invalidateBranchTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
-import { branchIcon, chevronIcon } from "./icons.js";
+import { branchIcon } from "./icons.js";
+import { editBranchFor, editHref, newFileControl, rawFileHref, readHref, userDefaultEditBranch } from "./web-file-links.js";
+import { editableFileKind, filePreview, previewKindForFile } from "./web-file-preview.js";
+import { fileToolbar } from "./web-file-toolbar.js";
+import { fileTreePanel } from "./web-file-tree.js";
 import {
   badRequestPage,
-  displayLogin,
   forbiddenPage,
   htmlResponse,
   notFoundPage,
   redirect,
   repoHref,
+  routeRest,
   stringField,
   textField,
-  timeEl,
   urlPath,
   type WebCtx,
   webRoute,
   webRouteForWrite,
 } from "./web-context.js";
 import { emptyHtml, type Html, html, jsonScript } from "./web-html.js";
-import { coflatReaderPayload, markdownSurface, renderMarkdown } from "./web-markdown.js";
-import { branchOptions, repoPageShell } from "./web-page.js";
-import { type Panel, panel } from "./web-panels.js";
+import { coflatReaderPayload, renderMarkdown } from "./web-markdown.js";
+import { repoPageShell } from "./web-page.js";
+import { pdfExportOptionsHref, registerPdfExportRoutes } from "./web-pdf-export.js";
+import { clonePanel, sshCloneUrl } from "./web-repo-clone.js";
+import { pageSearchForm, repoHomeHeader, repoLanding, searchResultRow } from "./web-repo-landing.js";
 import { webEditorAssets } from "./web-shell.js";
-
-const PDF_EXPORT_MAX_FILES = 500;
-const PDF_EXPORT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
-const INLINE_TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -79,28 +77,6 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       }),
     );
   }));
-
-// Git clone affordance. SSH goes straight to Forgejo's restricted git-over-SSH
-// endpoint; Cosheaf only helps users add keys from account settings.
-function clonePanel(cloneUrl: string): Html {
-  return html`<section class="repo-clone" data-testid="repo-clone">
-    <div class="repo-clone-label">
-      <strong>Clone</strong>
-      <span>SSH</span>
-    </div>
-    <div class="repo-clone-row">
-      <input class="clone-url" readonly value="${cloneUrl}" aria-label="SSH clone URL" onclick="this.select()">
-      <button class="button" type="button" onclick="navigator.clipboard?.writeText(this.previousElementSibling.value)">Copy</button>
-      <a class="button" href="/account/settings">SSH keys</a>
-    </div>
-  </section>`;
-}
-
-function sshCloneUrl(forgejoUrl: string, owner: string, repo: string, forgejoSshUrl?: string): string {
-  if (forgejoSshUrl) return forgejoSshUrl;
-  const host = new URL(forgejoUrl).hostname;
-  return `git@${host}:${owner}/${repo}.git`;
-}
 
 // Full-text page search over the workspace's indexed pages (the SQLite FTS
 // sidecar) — the knowledge-base capability a plain forge doesn't have. Reads
@@ -266,111 +242,7 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
   return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
 }));
 
-web.get("/:owner/:repo/export/pdf/options/branch/*", webRoute(async (c, ctx) => {
-  if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
-    return badRequestPage(ctx.user, "PDF export is only available for Coflat Markdown workspaces.");
-  }
-  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/options/branch/"));
-  if (!resolved?.path) return notFoundPage(ctx.user, "File not found");
-  const rel = safeRel(resolved.path);
-  if (!rel || fileKindForPath(rel) !== "markdown") {
-    return badRequestPage(ctx.user, "PDF export is only available for Markdown files.");
-  }
-  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
-  if (!meta) return notFoundPage(ctx.user, "File not found");
-  const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, resolved.branch);
-  return htmlResponse(
-    repoPageShell(ctx, "files", `PDF export - ${rel}`, html`
-      <div class="page-title compact">
-        <div>
-          <h1>PDF Export</h1>
-          <p class="muted">${rel} on ${resolved.branch}</p>
-        </div>
-      </div>
-      <section class="settings-section" data-testid="pdf-export-options">
-        <div class="settings-section-header">
-          <h2>Options</h2>
-          <p>Defaults come from cosheaf.yaml and can be overridden for this export.</p>
-        </div>
-        <form class="settings-form" method="get" action="${pdfExportHref(ctx.owner, ctx.repo, resolved.branch, rel)}">
-          <label class="settings-row">
-            <span>Bibliography</span>
-            <input name="bibliography" placeholder="${repoConfig.pdfBibliography ?? "refs.bib"}">
-          </label>
-          <label class="settings-row">
-            <span>CSL</span>
-            <input name="csl" list="pdf-csl-options" placeholder="${repoConfig.pdfCsl ?? "ieee"}">
-          </label>
-          <datalist id="pdf-csl-options">${[...LATEX_CSL_NAMES].sort().map((name) => html`<option value="${name}"></option>`)}</datalist>
-          <label class="settings-row">
-            <span>Template</span>
-            <input name="template" list="pdf-template-options" placeholder="${repoConfig.pdfTemplate ?? "article"}">
-          </label>
-          <datalist id="pdf-template-options">${[...LATEX_TEMPLATE_NAMES].sort().map((name) => html`<option value="${name}"></option>`)}</datalist>
-          <div class="settings-actions">
-            <button class="button primary" type="submit">Export PDF</button>
-            <a class="button subtle" href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}">Cancel</a>
-          </div>
-        </form>
-      </section>
-    `),
-  );
-}));
-
-web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
-  if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
-    return new Response("PDF export is only available for Coflat Markdown workspaces.", { status: 400 });
-  }
-  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/branch/"));
-  if (!resolved?.path) return new Response("not found", { status: 404 });
-  const rel = safeRel(resolved.path);
-  if (!rel) return new Response("not found", { status: 404 });
-  if (fileKindForPath(rel) !== "markdown") {
-    return new Response("PDF export is only available for Markdown files.", { status: 400 });
-  }
-  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
-  if (!meta) return new Response("not found", { status: 404 });
-
-  const [source, files] = await Promise.all([
-    ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
-    repoFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch),
-  ]);
-  const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, resolved.branch);
-
-  try {
-    const projectFiles = await collectPdfProjectFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
-    const result = await exportCoflatMarkdownPdf({
-      source,
-      sourcePath: rel,
-      files: projectFiles,
-      defaults: {
-        bibliography: repoConfig.pdfBibliography,
-        csl: repoConfig.pdfCsl,
-        template: repoConfig.pdfTemplate,
-      },
-      flags: {
-        bibliography: queryOverride(c, "bibliography"),
-        csl: queryOverride(c, "csl"),
-        template: queryOverride(c, "template"),
-      },
-    });
-    return new Response(result.pdf, {
-      headers: {
-        "cache-control": "no-store",
-        "content-disposition": `inline; filename="${httpQuotedString(result.filename)}"`,
-        "content-type": "application/pdf",
-      },
-    });
-  } catch (error) {
-    if (error instanceof PdfExportError) {
-      return new Response(error.detail ? `${error.publicMessage}\n${error.detail}` : error.publicMessage, {
-        status: error.status,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
-    }
-    throw error;
-  }
-}));
+registerPdfExportRoutes(web);
 
 web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const branch = editBranchFor(ctx.user, c.req.query("branch"));
@@ -480,282 +352,11 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
 }));
 }
 
-export function registerBranchRoutes(web: Hono<AppEnv>): void {
-web.get("/:owner/:repo/branches", webRoute(async (_c, ctx) => {
-  const [branches, pulls] = await Promise.all([
-    ctx.fj.listBranches(ctx.owner, ctx.repo),
-    ctx.fj.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
-  ]);
-  const openHeads = new Set(pulls.map((pull) => pull.head.ref));
-  return htmlResponse(
-    repoPageShell(ctx, "files", `Branches - ${ctx.repo}`, html`
-        <div class="page-title compact"><h1>Branches</h1></div>
-        ${branchCreatePanel(ctx, branches)}
-        ${branchList(ctx, branches, openHeads)}
-      `),
-  );
-}));
-
-web.post("/:owner/:repo/branches/new", webRouteForWrite(async (c, ctx) => {
-  const form = await c.req.parseBody();
-  const name = stringField(form.name);
-  const base = stringField(form.base) ?? "main";
-  if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
-  if (!validBranchName(base)) return badRequestPage(ctx.user, "Valid base branch is required.");
-  try {
-    await ctx.fj.createBranch(ctx.owner, ctx.repo, { newBranchName: name, oldBranchName: base });
-  } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409) {
-      return badRequestPage(ctx.user, "Branch already exists.");
-    }
-    throw err;
-  }
-  invalidateRepoTrees(ctx.owner, ctx.repo);
-  return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(name)}`);
-}));
-
-web.post("/:owner/:repo/branches/delete", webRouteForWrite(async (c, ctx) => {
-  const name = stringField((await c.req.parseBody()).name);
-  if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
-  try {
-    await ctx.fj.deleteBranch(ctx.owner, ctx.repo, name);
-  } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
-  }
-  invalidateRepoTrees(ctx.owner, ctx.repo);
-  return redirect(repoHref(ctx.owner, ctx.repo, "/branches"));
-}));
-
-web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
-  const sha = c.req.param("sha");
-  if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
-  const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch(onForgejo404(null));
-  if (!commit) return notFoundPage(ctx.user, "Commit not found");
-  return htmlResponse(
-    repoPageShell(ctx, "activity", `${commit.sha.slice(0, 10)} - ${ctx.repo}`, html`
-        <div class="page-title compact">
-          <div>
-            <p class="eyebrow">Commit</p>
-            <h1>${commit.sha.slice(0, 10)}</h1>
-          </div>
-        </div>
-        <div class="commit-card">
-          <pre>${commit.commit.message.trim() || "(no commit message)"}</pre>
-          <p>${displayLogin(commit.commit.author?.name ?? commit.author?.login)} - ${timeEl(commit.commit.author?.date)}</p>
-          <code>${commit.sha}</code>
-        </div>
-      `),
-  );
-}));
-}
-
 async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
   const tree = await fj.getTree(owner, repo, ref, true);
   return tree
     .filter((entry) => entry.type === "blob")
     .sort((a, b) => a.path.localeCompare(b.path));
-}
-
-async function collectPdfProjectFiles(
-  fj: Forgejo,
-  owner: string,
-  repo: string,
-  branch: string,
-  sourceRel: string,
-  source: string,
-  files: readonly ForgejoTreeEntry[],
-): Promise<PdfProjectFile[]> {
-  if (files.length > PDF_EXPORT_MAX_FILES) {
-    throw new PdfExportError(413, `PDF export is limited to ${PDF_EXPORT_MAX_FILES} repository files.`);
-  }
-  const out: PdfProjectFile[] = [];
-  let totalBytes = 0;
-  for (const file of files) {
-    const rel = safeRel(file.path);
-    if (!rel) continue;
-    if (typeof file.size === "number" && totalBytes + file.size > PDF_EXPORT_MAX_PROJECT_BYTES) {
-      throw new PdfExportError(413, "PDF export project files are too large.");
-    }
-    const content = rel === sourceRel
-      ? Buffer.from(source, "utf8")
-      : await fj.getRawFileBytes(owner, repo, branch, rel);
-    totalBytes += content.byteLength;
-    if (totalBytes > PDF_EXPORT_MAX_PROJECT_BYTES) {
-      throw new PdfExportError(413, "PDF export project files are too large.");
-    }
-    out.push({ path: rel, content });
-  }
-  if (!out.some((file) => file.path === sourceRel)) {
-    const content = Buffer.from(source, "utf8");
-    totalBytes += content.byteLength;
-    if (totalBytes > PDF_EXPORT_MAX_PROJECT_BYTES) {
-      throw new PdfExportError(413, "PDF export project files are too large.");
-    }
-    out.push({ path: sourceRel, content });
-  }
-  return out;
-}
-
-function editableFileKind(kind: FileKind): boolean {
-  return kind === "markdown" || kind === "text";
-}
-
-function queryOverride(c: Context<AppEnv>, key: string): string | undefined {
-  const value = c.req.query(key)?.trim();
-  return value ? value : undefined;
-}
-
-function rawFileHref(owner: string, repo: string, branch: string, rel: string): string {
-  return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
-}
-
-function pdfExportHref(owner: string, repo: string, branch: string, rel: string): string {
-  return `${repoHref(owner, repo, "/export/pdf/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
-}
-
-function pdfExportOptionsHref(owner: string, repo: string, branch: string, rel: string): string {
-  return `${repoHref(owner, repo, "/export/pdf/options/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
-}
-
-// The per-file action toolbar on the file-view page: the primary write controls
-// stay visible; secondary representations (Raw, Source/Rendered) sit in a small
-// menu so the reader's top row stays about the document.
-// (#171). Extracted from the file-view handler (#24) to keep the handler legible.
-function fileToolbar(
-  ctx: WebCtx,
-  opts: { branch: string; rel: string; kind: FileKind; fileHref: string; sourceView: boolean; sha: string; showEdit?: boolean; showRepresentations?: boolean },
-): Html {
-  const { owner, repo, user } = ctx;
-  const role = ctx.ws.role;
-  const { branch, rel, kind, fileHref, sourceView } = opts;
-  return html`<div class="toolbar-actions">
-    ${
-      role === "read" || branch === "main"
-        ? ""
-        : html`<a class="button" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(branch)}&base=main`}">Open PR</a>`
-    }
-    ${
-      role === "read" || opts.showEdit === false
-        ? ""
-        : editableFileKind(kind)
-          ? html`<a class="button primary" href="${editHref(owner, repo, user, branch, rel)}">${kind === "markdown" ? "Edit" : "Edit text"}</a>`
-          : ""
-    }
-    ${opts.showRepresentations === false ? emptyHtml : fileRepresentationMenu(owner, repo, branch, rel, kind, fileHref, sourceView)}
-    ${
-      role === "read" || branch === "main"
-        ? ""
-        : html`<form class="inline-form" method="post" action="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">
-            <input type="hidden" name="action" value="delete">
-            <input type="hidden" name="expected_sha" value="${opts.sha}">
-            <button class="button danger" type="submit" data-testid="file-delete">Delete</button>
-          </form>`
-    }
-  </div>`;
-}
-
-function fileRepresentationMenu(
-  owner: string,
-  repo: string,
-  branch: string,
-  rel: string,
-  kind: FileKind,
-  fileHref: string,
-  sourceView: boolean,
-): Html {
-  return html`<details class="action-menu">
-    <summary class="button">More</summary>
-    <div class="action-menu-popover">
-      ${
-        kind === "markdown"
-          ? sourceView
-            ? html`<a href="${fileHref}">Rendered</a>`
-            : html`<a href="${`${fileHref}?view=source`}">Source</a>`
-          : emptyHtml
-      }
-      <a href="${`${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`}">Raw</a>
-    </div>
-  </details>`;
-}
-
-function filePreview(
-  ctx: WebCtx,
-  branch: string,
-  rel: string,
-  kind: FileKind,
-  view: { rendered: Html | null; source: string | null; sourceView: boolean },
-): Html {
-  const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
-  if (view.sourceView && view.source !== null) return sourceFilePreview(view.source);
-  if (kind === "markdown") {
-    return markdownArticle(ctx, view.rendered ?? emptyHtml, "file-preview-markdown");
-  }
-  if (kind === "text") {
-    return html`<article class="file-preview file-preview-embed" data-testid="file-preview-text">
-      <object data-testid="file-preview-text-raw" data="${rawHref}" type="text/plain">
-        <p>Text preview is not available in this browser. <a class="inline-link" href="${rawHref}">Open the raw file.</a></p>
-      </object>
-    </article>`;
-  }
-  if (kind === "pdf") {
-    return html`<article class="file-preview file-preview-embed">
-      <object data-testid="file-preview-pdf" data="${rawHref}" type="application/pdf">
-        <p>PDF preview is not available in this browser. <a class="inline-link" href="${rawHref}">Open the raw file.</a></p>
-      </object>
-    </article>`;
-  }
-  if (kind === "image") {
-    return html`<article class="file-preview file-preview-image">
-      <img data-testid="file-preview-image" src="${rawHref}" alt="${rel}">
-    </article>`;
-  }
-  return html`<article class="file-preview file-preview-fallback" data-testid="file-preview-raw">
-    <p>No inline preview is available for this file type.</p>
-    <a class="button" href="${rawHref}">Open raw file</a>
-  </article>`;
-}
-
-async function previewKindForFile(
-  fj: Forgejo,
-  owner: string,
-  repo: string,
-  branch: string,
-  rel: string,
-  kind: FileKind,
-  size: number,
-): Promise<FileKind> {
-  if (kind !== "binary" || size > INLINE_TEXT_PREVIEW_MAX_BYTES) return kind;
-  const content = await fj.getRawFileBytes(owner, repo, branch, rel);
-  return isLikelyTextContent(content) ? "text" : kind;
-}
-
-function sourceFilePreview(content: string): Html {
-  const lines = content.split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return html`<article class="file-preview file-preview-source-lines" data-testid="file-preview-source">
-    <table class="source-lines"><tbody>${lines.map((line, index) => {
-      const lineNo = index + 1;
-      return html`<tr id="L${lineNo}" data-testid="source-line-${lineNo}">
-          <td class="line-action"></td>
-          <td><a href="#L${lineNo}">${lineNo}</a></td>
-          <td><pre>${line}</pre></td>
-        </tr>`;
-    })}</tbody></table>
-    <script>
-      (() => {
-        const match = /^#L(\\d+)(?:-(?:L)?(\\d+))?$/.exec(window.location.hash);
-        if (!match) return;
-        const first = Number(match[1]);
-        const last = Number(match[2] || match[1]);
-        const start = Math.max(1, Math.min(first, last));
-        const end = Math.max(first, last);
-        for (let line = start; line <= end; line += 1) {
-          document.getElementById("L" + line)?.classList.add("marked");
-        }
-        document.getElementById("L" + start)?.scrollIntoView({ block: "center" });
-      })();
-    </script>
-  </article>`;
 }
 
 // The non-island /_edit fallback form (the markdown editor's <noscript> and the
@@ -890,183 +491,6 @@ async function writeFile(
   invalidateBranchTree(ctx.owner, ctx.repo, branch);
 }
 
-function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Html {
-  if (ctx.ws.role === "read") return emptyHtml;
-  return html`<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
-    <label>New branch
-      <input name="name" placeholder="user/${ctx.user}/work" required data-testid="branch-create-name">
-    </label>
-    <label>Base
-      <select name="base" data-testid="branch-create-base" data-option-icon="branch">
-        ${branchOptions(branches, "main")}
-      </select>
-    </label>
-    <div class="filter-actions">
-      <button class="button primary" type="submit">Create branch</button>
-    </div>
-  </form>`;
-}
-
-function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: ReadonlySet<string>): Html {
-  if (branches.length === 0) return html`<div class="list"><div class="empty">No branches.</div></div>`;
-  return html`<div class="list">${branches.map((branch) => {
-    const hasOpenPr = openHeads.has(branch.name);
-    return html`<div class="list-row branch-row">
-        <a class="inline-link branch-ref" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}`}">${branchIcon({ size: 13 })}<strong>${branch.name}</strong></a>
-        <span>${branch.commit.id.slice(0, 10)}${hasOpenPr ? html` <span class="meta-pill">open PR</span>` : ""}</span>
-        ${
-          ctx.ws.role === "read" || branch.name === "main" || hasOpenPr
-            ? html`<span></span>`
-            : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
-                <input type="hidden" name="name" value="${branch.name}">
-                <button class="button danger" type="submit" data-testid="branch-delete">Delete</button>
-              </form>`
-        }
-      </div>`;
-  })}</div>`;
-}
-
-
-function pageSearchForm(owner: string, repo: string): Html {
-  return html`<form class="page-search" method="get" action="${repoHref(owner, repo, "/search")}">
-    <input name="q" placeholder="Search pages" aria-label="Search pages" data-testid="page-search-box">
-  </form>`;
-}
-
-function renderSnippet(parts: readonly SnippetPart[]): Html {
-  return html`${parts.map((p) => (p.match ? html`<mark>${p.text}</mark>` : p.text))}`;
-}
-
-function searchResultRow(ctx: WebCtx, r: PageSearchResult): Html {
-  return html`<a class="list-row search-result" ${defaultFileLinkAttrs(ctx.owner, ctx.repo, ctx.user, "main", r.path, ctx.ws.role !== "read")}>
-    <span class="search-result-head"><strong>${r.title || r.path}</strong> <small class="muted">${r.path}</small></span>
-    <span class="search-snippet">${renderSnippet(r.snippet)}</span>
-  </a>`;
-}
-
-// Nested, collapsible branch file tree for the left sidebar on /files pages
-// (#119). Built from the flat blob list already fetched for the page — no extra
-// round-trip. Directories are native <details> (collapsible like any file
-// explorer); the active file is highlighted and its ancestor folders auto-open.
-interface FileTreeNode {
-  dirs: Map<string, FileTreeNode>;
-  files: Array<{ name: string; path: string }>;
-}
-
-function buildFileTree(files: readonly ForgejoTreeEntry[]): FileTreeNode {
-  const root: FileTreeNode = { dirs: new Map(), files: [] };
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let node = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const seg = parts[i];
-      let child = node.dirs.get(seg);
-      if (!child) {
-        child = { dirs: new Map(), files: [] };
-        node.dirs.set(seg, child);
-      }
-      node = child;
-    }
-    node.files.push({ name: parts[parts.length - 1], path: file.path });
-  }
-  return root;
-}
-
-function renderFileTreeLevel(
-  node: FileTreeNode,
-  prefix: string,
-  owner: string,
-  repo: string,
-  branch: string,
-  activeRel: string | null,
-  titles: Map<string, string> | undefined,
-  user: string | undefined,
-  editByDefault: boolean,
-): Html {
-  const dirs = [...node.dirs.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, child]) => {
-      const dirPath = prefix ? `${prefix}/${name}` : name;
-      const open = activeRel === dirPath || (activeRel?.startsWith(`${dirPath}/`) ?? false);
-      return html`<details class="ftree-dir"${open ? " open" : ""}>
-        <summary>${chevronIcon({ size: 11, class: "disclosure-chevron" })}${name}</summary>
-        <div class="ftree-children">${renderFileTreeLevel(child, dirPath, owner, repo, branch, activeRel, titles, user, editByDefault)}</div>
-      </details>`;
-    });
-  const fileRows = node.files.map((file) => {
-    // Titled Markdown leaves render both labels; the user's file-label
-    // preference chooses whether the visible label is the indexed Markdown
-    // title or the storage filename. `title=` keeps the filename on hover.
-    const title = file.path.endsWith(".md") ? titles?.get(file.path) : undefined;
-    const label = title
-      ? html`<span class="ftree-title">${title}</span><span class="ftree-name">${file.name}</span>`
-      : file.name;
-    return html`<a class="ftree-file${file.path === activeRel ? " active" : ""}" ${defaultFileLinkAttrs(owner, repo, user, branch, file.path, editByDefault)} title="${file.name}">${label}</a>`;
-  });
-  return html`${dirs}${fileRows}`;
-}
-
-// Branch indicator + switcher in the file-tree header: shows the current branch
-// and, when more than one exists, a <select> that navigates to that branch's
-// files. An empty `branches` (the edit page) renders just the label — no
-// navigate-away mid-edit. cosheaf-select.js styles the select and fires the
-// native `change` the inline handler listens for; with JS off the native select
-// still navigates.
-function branchSwitcher(owner: string, repo: string, branch: string, branches: readonly ForgejoBranch[]): Html {
-  const names = branches.map((b) => b.name);
-  if (!names.includes(branch)) names.unshift(branch);
-  // The switcher carries its own external icon span (the #185 canonical fix):
-  // it must show even in the single-branch case below, which renders no <select>
-  // for the widget to enhance, and its option values are URLs, not branch names.
-  // So it does NOT use the form selects' data-option-icon="branch" hook (#187) —
-  // that would render a second icon on the enhanced trigger.
-  const icon = html`<span class="ftree-branch-icon">${branchIcon({ size: 13 })}</span>`;
-  if (names.length <= 1) {
-    return html`<span class="ftree-branch">${icon}<span class="ftree-branch-name">${branch}</span></span>`;
-  }
-  return html`<span class="ftree-branch">${icon}<select class="ftree-branch-select" aria-label="Switch branch" onchange="if(this.value)location.assign(this.value)">${names.map(
-    (name) => html`<option value="${`${repoHref(owner, repo, "/src/branch")}/${urlPath(name)}`}"${name === branch ? " selected" : ""}>${name}</option>`,
-  )}</select></span>`;
-}
-
-function fileTreeSidebar(
-  owner: string,
-  repo: string,
-  branch: string,
-  files: readonly ForgejoTreeEntry[],
-  activeRel: string | null,
-  titles: Map<string, string> | undefined,
-  branches: readonly ForgejoBranch[],
-  user?: string,
-  editByDefault = false,
-): Html {
-  if (files.length === 0) return emptyHtml;
-  return html`<nav class="file-tree" aria-label="Files">
-    <div class="file-tree-head">${branchSwitcher(owner, repo, branch, branches)}</div>
-    ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles, user, editByDefault)}
-  </nav>`;
-}
-
-// Portable Panel unit (#120) for the branch file tree. The panel owns only its
-// own <nav class="file-tree">; the host page places it into a region (the left
-// sidebar today), so it could move to another region unchanged. `titles` is the
-// workspace page-title map (main branch only — the index tracks main); leaves
-// render titles where present (#168). `branches` feeds the header switcher
-// (empty = label only).
-export function fileTreePanel(
-  owner: string,
-  repo: string,
-  branch: string,
-  files: readonly ForgejoTreeEntry[],
-  activeRel: string | null,
-  titles?: Map<string, string>,
-  branches: readonly ForgejoBranch[] = [],
-  user?: string,
-  editByDefault = false,
-): Panel {
-  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches, user, editByDefault));
-}
-
 // README at the repo root, rendered for the /files landing (#136). The nav tree
 // owns navigation; the main panel shows the README when present so it adds value
 // instead of repeating the file list. Case-insensitive `README.md` at the root.
@@ -1079,147 +503,9 @@ async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTr
   return { path: readme.path, rendered };
 }
 
-// The /files main panel (#136): the README when present, otherwise a title-first
-// reading index of the workspace's pages. Either way it complements the nav tree
-// rather than duplicating it — the tree carries navigation over every file; the
-// landing reads the workspace's knowledge.
-// The repo-overview header: a clear "this is the repo, not a file" identity
-// band + a few glanceable stats, shown above the README so the landing reads as
-// an overview rather than just another rendered file.
-interface RepoHomeStats {
-  pages: number;
-  branches: number;
-  openIssues: number;
-  openPrs: number;
-  updated?: string;
-  description?: string;
-}
-function repoHomeHeader(ctx: WebCtx, owner: string, repo: string, stats: RepoHomeStats): Html {
-  const stat = (value: Html | string | number, label: string, href?: string) => {
-    const inner = html`<span class="repo-stat-num">${value}</span><span class="repo-stat-label">${label}</span>`;
-    return href ? html`<a class="repo-stat" href="${href}">${inner}</a>` : html`<div class="repo-stat">${inner}</div>`;
-  };
-  const format = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? "Coflat" : "Markdown";
-  return html`<header class="repo-home" data-testid="repo-home-header">
-    <div class="repo-home-id">
-      <h1 class="repo-home-name">${repo}</h1>
-      <span class="repo-home-owner">${owner}</span>
-      <span class="repo-home-badge">${format}</span>
-    </div>
-    ${stats.description ? html`<p class="repo-home-desc">${stats.description}</p>` : ""}
-    <div class="repo-home-stats">
-      ${stat(stats.pages, stats.pages === 1 ? "page" : "pages")}
-      ${stat(stats.branches, stats.branches === 1 ? "branch" : "branches", repoHref(owner, repo, "/branches"))}
-      ${stat(stats.openIssues, "open issues", repoHref(owner, repo, "/issues"))}
-      ${stat(stats.openPrs, "open PRs", repoHref(owner, repo, "/pulls"))}
-      ${stats.updated ? html`<div class="repo-stat"><span class="repo-stat-num">${timeEl(stats.updated)}</span><span class="repo-stat-label">updated</span></div>` : ""}
-    </div>
-  </header>`;
-}
-
-function repoLanding(
-  ctx: WebCtx,
-  branch: string,
-  files: readonly ForgejoTreeEntry[],
-  titles: Map<string, string>,
-  readme: { path: string; rendered: Html } | null,
-): Html {
-  // Label the README so it's clear the overview is showing README.md (not the
-  // whole repo or an arbitrary file); the rendered README follows below it.
-  if (readme)
-    return html`<section class="repo-readme" data-testid="repo-readme">
-      <div class="repo-readme-label">${readme.path}</div>
-      ${markdownArticle(ctx, readme.rendered, "files-readme")}
-    </section>`;
-  return pageIndex(ctx, branch, files, titles);
-}
-
-// The shared reader-surface shell for a rendered markdown document: the file
-// preview and the /files README landing render the same article.
-function markdownArticle(ctx: WebCtx, rendered: Html, testId: string): Html {
-  return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="${testId}">
-    ${markdownSurface(ctx, rendered)}
-  </article>`;
-}
-
-// Reading-oriented page index for the /files landing when there is no README:
-// the workspace's markdown pages as title-first reading entries with a one-line
-// body excerpt (#136). Distinct from the nav tree by scope (pages only, not
-// every file) and form (titles + descriptions, not a compact file list).
-function pageIndex(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry[], titles: Map<string, string>): Html {
-  const pages = files.filter((file) => fileKindForPath(file.path) === "markdown");
-  if (pages.length === 0) return html`<div class="list"><div class="empty">No pages yet.</div></div>`;
-  // Titles + excerpts come from the sidecar, which only indexes main.
-  const excerpts = branch === "main" ? workspacePageExcerpts(ctx.db, ctx.ws.slug) : new Map<string, string>();
-  return html`<div class="files-landing" data-testid="files-page-index">
-    <p class="files-landing-hint muted">Pages in this workspace. The file tree (left) navigates every file.</p>
-    <div class="list">${pages.map((file) => {
-      const title = titles.get(file.path) || file.path;
-      const excerpt = excerpts.get(file.path);
-      return html`<a class="list-row page-row" ${defaultFileLinkAttrs(ctx.owner, ctx.repo, ctx.user, branch, file.path, ctx.ws.role !== "read")}>
-          <span class="list-row-main"><strong>${title}</strong>${excerpt ? html`<span class="page-row-excerpt">${excerpt}</span>` : emptyHtml}<small>${file.path}</small></span>
-        </a>`;
-    })}</div>
-  </div>`;
-}
-
-
-function editBranchFor(username: string, requested: string | null | undefined): string {
-  const trimmed = requested?.trim();
-  return trimmed && trimmed !== "main" ? trimmed : `user/${username}/web-edit`;
-}
-
 async function retiredDefaultEditBranch(ctx: WebCtx, branch: string): Promise<boolean> {
-  if (branch !== `${userBranchPrefix(ctx.user)}web-edit`) return false;
+  if (branch !== userDefaultEditBranch(ctx.user)) return false;
   const pulls = await ctx.fj.listPulls(ctx.owner, ctx.repo, "all").catch(() => []);
   const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
   return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
-}
-
-// The /_edit URL for a (branch, optional file) — co-locates the edit-branch
-// convention (editBranchFor) and the query encoding. Mirrors rawFileHref.
-function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
-  const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}`;
-  return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
-}
-
-function readHref(owner: string, repo: string, branch: string, rel: string): string {
-  return `${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
-}
-
-function defaultFileLinkAttrs(owner: string, repo: string, user: string | undefined, branch: string, rel: string, canEdit: boolean): Html {
-  const read = readHref(owner, repo, branch, rel);
-  if (!canEdit || !user || !isEditableTextFile(rel)) return html`href="${read}"`;
-  const edit = editHref(owner, repo, user, branch, rel);
-  return html`href="${edit}" data-file-open-link data-edit-href="${edit}" data-read-href="${read}"`;
-}
-
-// "New file" as a name-it-first control: a GET form whose `path` routes to
-// /_edit, which picks the Markdown or plain-text editor from the extension — so
-// you can create a `.bib` (or .csv, .tex, …), not only `.md`. Blank submits as
-// `new.md`, preserving the old one-click create-a-page behavior.
-function newFileControl(owner: string, repo: string, user: string, branch: string): Html {
-  return html`<form class="newfile" action="${repoHref(owner, repo, "/_edit")}" method="get">
-    <input type="hidden" name="branch" value="${editBranchFor(user, branch)}">
-    <input class="newfile-path" name="path" placeholder="new.md" aria-label="New file name" autocomplete="off" spellcheck="false">
-    <button class="button" type="submit">New file</button>
-  </form>`;
-}
-
-function routeRest(c: Context<AppEnv>, owner: string, repo: string, suffix: string): string {
-  const path = c.req.path;
-  const prefix = repoHref(owner, repo, suffix);
-  return path.startsWith(prefix) ? decodePathPart(path.slice(prefix.length)) : "";
-}
-
-function decodePathPart(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch (_err) {
-    return "";
-  }
-}
-
-function httpQuotedString(value: string): string {
-  return value.replaceAll(/["\\\r\n]/g, "_");
 }

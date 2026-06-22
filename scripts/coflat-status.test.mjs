@@ -34,4 +34,25 @@ describe("coflat status exit decision", () => {
       deployedCoflatMatchesPin: true,
     }, { prod: true })).toBe(false);
   });
+
+  it("fails prod status when deployed Coflat does not match the pin", () => {
+    expect(statusExitOk({
+      ...baseStatus,
+      deployedCosheafSha: "cosheaf-sha",
+      deployedCoflatRef: "older-coflat",
+      deployedCosheafMatchesLocal: true,
+      deployedCoflatMatchesPin: false,
+    }, { prod: true })).toBe(false);
+  });
+
+  it("fails prod status when documented Coflat pins drift", () => {
+    expect(statusExitOk({
+      ...baseStatus,
+      pinDrift: [{ file: "AGENTS.md", found: "older-coflat" }],
+      deployedCosheafSha: "cosheaf-sha",
+      deployedCoflatRef: "pin",
+      deployedCosheafMatchesLocal: true,
+      deployedCoflatMatchesPin: true,
+    }, { prod: true })).toBe(false);
+  });
 });
