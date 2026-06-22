@@ -48,10 +48,11 @@ describe("web user suggestions", () => {
     expect(await res.json()).toEqual({ users: ["bob", "carol"] });
   });
 
-  it("can exclude existing collaborators for access grants", async () => {
+  it("does not fetch collaborators while suggesting access-grant users", async () => {
     const db = freshTestDb("cosheaf-user-suggestions-");
     seedTestWorkspace(db);
     const token = seedAuthUser(db, config, { username: "alice", role: "admin" });
+    let listedCollaborators = false;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/users/search", () => Response.json({
         ok: true,
@@ -60,7 +61,10 @@ describe("web user suggestions", () => {
           { id: 2, login: "existing" },
         ],
       }));
-      forge.get("/api/v1/repos/owner/w/collaborators", () => Response.json([{ id: 2, login: "existing" }]));
+      forge.get("/api/v1/repos/owner/w/collaborators", () => {
+        listedCollaborators = true;
+        return Response.json([{ id: 2, login: "existing" }]);
+      });
     }));
 
     const res = await appFor(db).request("/owner/w/user-suggestions?q=b&exclude=collaborators", {
@@ -68,6 +72,7 @@ describe("web user suggestions", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ users: ["bob"] });
+    expect(await res.json()).toEqual({ users: ["bob", "existing"] });
+    expect(listedCollaborators).toBe(false);
   });
 });

@@ -326,6 +326,74 @@ describe("web pull request routes", () => {
     expect(body).toContain("/owner/w/pulls/7/issue-comments/234/edit");
   });
 
+  it("does not fetch available reviewers when the viewer cannot request review", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    let fetchedReviewers = false;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ ...forgejoPull(), comments: 1 }));
+        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment()]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/issues/7/timeline", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/commits", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/reviewers", () => {
+          fetchedReviewers = true;
+          return Response.json([]);
+        });
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w" }));
+        forge.post("/api/v1/repos/owner/w/markdown", async (c) => {
+          const body = await c.req.json() as { text?: string };
+          return Response.json({ html: `<p>${body.text ?? ""}</p>` });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/pulls/7", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchedReviewers).toBe(false);
+  });
+
+  it("does not fetch available reviewers for closed pull requests", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let fetchedReviewers = false;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ ...forgejoPull(), state: "closed", comments: 1 }));
+        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment()]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/issues/7/timeline", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/pulls/7/commits", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/reviewers", () => {
+          fetchedReviewers = true;
+          return Response.json([]);
+        });
+        forge.get("/api/v1/repos/owner/w/labels", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w" }));
+        forge.post("/api/v1/repos/owner/w/markdown", async (c) => {
+          const body = await c.req.json() as { text?: string };
+          return Response.json({ html: `<p>${body.text ?? ""}</p>` });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/pulls/7", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain("Request reviewers");
+    expect(fetchedReviewers).toBe(false);
+  });
+
   it("surfaces PR files review-comment failures instead of rendering no line comments", async () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);

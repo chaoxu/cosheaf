@@ -118,7 +118,7 @@ describe("web repository settings", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('data-user-autocomplete="/owner/w/user-suggestions?exclude=collaborators"');
+    expect(body).toContain('data-user-autocomplete="/owner/w/user-suggestions"');
     expect(body).toContain('list="settings-access-usernames"');
     expect(body).toContain('id="settings-access-usernames"');
     expect(body).toContain('/cosheaf-user-autocomplete.js');

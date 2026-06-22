@@ -182,13 +182,14 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
 web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  const canRequestReview = ctx.ws.role !== "read" && pull.state !== "closed";
   const [issueComments, reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number),
-    ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []),
+    canRequestReview ? ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
     ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const timelineHtml = await renderPullTimeline(ctx, pull.number, issueComments, reviews, comments, timeline, commits);

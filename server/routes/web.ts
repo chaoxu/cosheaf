@@ -1041,16 +1041,10 @@ web.post("/new", globalRoute(async (c, auth) => {
 web.get("/:owner/:repo/user-suggestions", webRoute(async (c, ctx) => {
   const q = c.req.query("q")?.trim() ?? "";
   if (q.length < 1) return Response.json({ users: [] });
-  const [users, collaborators] = await Promise.all([
-    ctx.fj.searchUsers(q, 10).catch(() => []),
-    c.req.query("exclude") === "collaborators"
-      ? ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => [])
-      : Promise.resolve([]),
-  ]);
-  const excluded = new Set(collaborators.map((user) => user.login));
+  const users = await ctx.fj.searchUsers(q, 10).catch(() => []);
   const suggestions = users
     .map((user) => user.login)
-    .filter((login) => login && !excluded.has(login))
+    .filter(Boolean)
     .slice(0, 10);
   return Response.json({ users: suggestions });
 }));

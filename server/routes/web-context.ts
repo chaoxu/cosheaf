@@ -7,7 +7,6 @@ import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
 import type { Role } from "../../shared/roles.js";
-import { indexPage } from "../indexer.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
@@ -179,18 +178,7 @@ async function resolveWorkspaceDisplayTitle(
   fj: Forgejo,
   ws: WorkspaceContext,
 ): Promise<string> {
-  try {
-    const readme = await fj.getRawFile(ws.owner, ws.repo, "main", "README.md");
-    const indexed = indexPage(db, {
-      workspaceSlug: ws.slug,
-      filePath: "README.md",
-      bodyText: readme,
-      formatId: ws.defaultMdFormat,
-    });
-    return indexed.title?.trim() || workspaceReadmeTitle(db, ws.slug) || await resolveWorkspaceTitle(fj, ws.owner, ws.repo);
-  } catch (_err) {
-    return workspaceReadmeTitle(db, ws.slug) || await resolveWorkspaceTitle(fj, ws.owner, ws.repo);
-  }
+  return workspaceReadmeTitle(db, ws.slug) || await resolveWorkspaceTitle(fj, ws.owner, ws.repo);
 }
 
 // resolveWebRepo plus a role gate. A caller whose role fails `allow` gets the

@@ -457,7 +457,7 @@ function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], acces
       ${addDisclosure("Add collaborator", html`<form class="settings-form compact-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/access")}" data-testid="settings-access">
         <label class="settings-row">
           <span>Username</span>
-          <input name="username" data-testid="settings-access-username" autocomplete="off" list="settings-access-usernames" data-user-autocomplete="${repoHref(ctx.owner, ctx.repo, "/user-suggestions?exclude=collaborators")}" required>
+          <input name="username" data-testid="settings-access-username" autocomplete="off" list="settings-access-usernames" data-user-autocomplete="${repoHref(ctx.owner, ctx.repo, "/user-suggestions")}" required>
           <datalist id="settings-access-usernames"></datalist>
         </label>
         <label class="settings-row">

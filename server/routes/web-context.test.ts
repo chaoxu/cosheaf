@@ -145,26 +145,43 @@ describe("web role gates pass through on sufficient role", () => {
 });
 
 describe("web workspace title", () => {
-  it("refreshes stale indexed README title from Forgejo before falling back to the repo description", async () => {
+  it("uses the indexed README title without reindexing during repo resolution", async () => {
     const db = freshTestDb("cosheaf-webctx-");
     seedTestWorkspace(db);
     db.prepare("INSERT INTO doc_map (workspace_slug, cosheaf_id, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run("owner/w", "readme", "README.md", "Old Sidecar Title", "2026-06-16T00:00:00Z");
+      .run("owner/w", "readme", "README.md", "Indexed Sidecar Title", "2026-06-16T00:00:00Z");
     const token = seedAuthUser(db, config, { username: "writer", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/user", () => Response.json({ id: 1, login: "writer" }));
         forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w", full_name: "owner/w", description: "Old Repo Description" }));
-        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("---\ntitle: Fresh Project Title\n---\n# Old heading\n"));
       }),
     );
 
     const res = await get(appFor(db), "/owner/w/probe-title", token);
 
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("Fresh Project Title");
+    expect(await res.text()).toBe("Indexed Sidecar Title");
     expect(db.prepare("SELECT title FROM doc_map WHERE workspace_slug = ? AND forgejo_id = ?").get("owner/w", "README.md"))
-      .toEqual({ title: "Fresh Project Title" });
+      .toEqual({ title: "Indexed Sidecar Title" });
+  });
+
+  it("falls back to Forgejo repo metadata when no README title is indexed", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "writer", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "writer" }));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w", full_name: "owner/w", description: "Repo Description" }));
+      }),
+    );
+
+    const res = await get(appFor(db), "/owner/w/probe-title", token);
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("Repo Description");
+    expect(fetchMock.mock.calls.map((call) => String(call[0])).some((url) => url.includes("/raw/README.md"))).toBe(false);
   });
 });
 
