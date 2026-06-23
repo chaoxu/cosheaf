@@ -6,7 +6,7 @@ import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js"
 import { ForgejoError } from "../forgejo.js";
 import { invalidateWorkspacePermissionCache, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
-import { provisionWorkspace } from "../workspace-provisioning.js";
+import { provisionWorkspace, type WorkspaceVisibility } from "../workspace-provisioning.js";
 import { setWorkspaceMember } from "../workspace-members.js";
 import {
   documentFormatFromTopics,
@@ -17,6 +17,24 @@ import { bad, conflict, notFound } from "./responses.js";
 
 export const workspaces = new Hono<AppEnv>();
 workspaces.use("*", requireAuth);
+
+function parseVisibility(value: unknown): WorkspaceVisibility | null {
+  if (value === undefined) return "private";
+  if (value === "private" || value === "public") return value;
+  return null;
+}
+
+function parseRequiredApprovals(value: unknown): number | null {
+  if (value === undefined) return 1;
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 workspaces.get("/", async (c) => {
   // Workspaces are repos with a `cosheaf-format-*` topic, discovered across
@@ -49,11 +67,15 @@ workspaces.post("/", async (c) => {
     slug?: string;
     name?: string;
     default_md_format?: string;
+    visibility?: unknown;
+    required_approvals?: unknown;
   } | null;
   const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const owner = body?.owner === undefined ? undefined : typeof body.owner === "string" ? body.owner.trim() : null;
   const defaultMdFormat = body?.default_md_format;
+  const visibility = parseVisibility(body?.visibility);
+  const requiredApprovals = parseRequiredApprovals(body?.required_approvals);
   if (!slug || !name)
     return c.json(...bad("slug and name required"));
   if (!WORKSPACE_SLUG_RE.test(slug))
@@ -62,6 +84,10 @@ workspaces.post("/", async (c) => {
     return c.json(...bad("invalid owner"));
   if (defaultMdFormat !== undefined && !isDocumentFormatId(defaultMdFormat))
     return c.json(...bad("invalid default_md_format"));
+  if (visibility === null)
+    return c.json(...bad("invalid visibility"));
+  if (requiredApprovals === null)
+    return c.json(...bad("required_approvals must be a non-negative integer"));
 
   const db = c.get("db");
   const config = c.get("config");
@@ -85,6 +111,8 @@ workspaces.post("/", async (c) => {
       provisionVia: "user-pat",
       rollbackCreatedRepoOnLocalFailure: true,
       defaultMdFormat,
+      visibility,
+      requiredApprovals,
     });
     return c.json(
       {
@@ -94,6 +122,8 @@ workspaces.post("/", async (c) => {
         name,
         role: "admin",
         default_md_format: normalizeDocumentFormatId(workspace.defaultMdFormat),
+        visibility,
+        required_approvals: requiredApprovals,
       },
       201,
     );

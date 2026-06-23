@@ -50,6 +50,8 @@ export interface WorkspaceMarkdownDrift {
   inSync: number;
 }
 
+export type WorkspaceVisibility = "private" | "public";
+
 export interface ProvisionWorkspaceOptions {
   owner: string;
   repo: string;
@@ -64,6 +66,8 @@ export interface ProvisionWorkspaceOptions {
   allowExistingLocal?: boolean;
   rollbackCreatedRepoOnLocalFailure?: boolean;
   defaultMdFormat?: string;
+  visibility?: WorkspaceVisibility;
+  requiredApprovals?: number;
 }
 
 export interface ProvisionWorkspaceResult {
@@ -89,7 +93,7 @@ export async function provisionWorkspace(
     const repoOpts = {
       name: repoName,
       description: options.name,
-      private: true,
+      private: options.visibility !== "public",
       auto_init: true,
       default_branch: "main",
     };
@@ -136,7 +140,16 @@ export async function provisionWorkspace(
       options.provisionVia === "admin"
         ? (await forgejo.getCurrentUser()).login
         : options.forgejoUsername;
-    await ensureWorkspacePermissions(forgejo, config, owner, repoName, options.forgejoUsername, committer);
+    await ensureWorkspacePermissions(
+      forgejo,
+      config,
+      owner,
+      repoName,
+      options.forgejoUsername,
+      committer,
+      options.requiredApprovals ?? 1,
+      createdRepo,
+    );
     // Webhook registration is needed only for workspaces whose sidecar we
     // reconcile from Forgejo events. Passthrough workspaces don't index
     // into the sidecar (no doc_map / FTS / backlinks usage), so there's
@@ -226,6 +239,8 @@ export async function ensureWorkspacePermissions(
   repoName: string,
   forgejoUsername: string,
   committer: string = forgejoUsername,
+  requiredApprovals = 1,
+  requireBranchProtection = false,
 ): Promise<void> {
   if (forgejoUsername !== owner) {
     try {
@@ -262,7 +277,7 @@ export async function ensureWorkspacePermissions(
     if (!existing) {
       await forgejo.createBranchProtection(owner, repoName, {
         branch_name: "main",
-        required_approvals: 1,
+        required_approvals: requiredApprovals,
         push_whitelist_usernames: whitelist,
       });
     } else {
@@ -270,6 +285,7 @@ export async function ensureWorkspacePermissions(
     }
   } catch (err) {
     console.warn(`branch protection setup failed: ${(err as Error).message}`);
+    if (requireBranchProtection) throw err;
   }
 }
 

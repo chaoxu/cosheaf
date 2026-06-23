@@ -256,6 +256,89 @@ describe("POST /account/settings (profile)", () => {
   });
 });
 
+describe("GET/POST /new", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    _resetMiddlewareCachesForTests();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("renders repository creation settings with safe defaults", async () => {
+    const db = freshTestDb("cosheaf-new-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+      }),
+    );
+
+    const res = await appFor(db).request("/new", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="new-repo-visibility"');
+    expect(body).toContain('<option value="private" selected>Private</option>');
+    expect(body).toContain('<option value="public">Public</option>');
+    expect(body).toContain('data-testid="new-repo-required-approvals"');
+    expect(body).toContain('name="required_approvals" type="number" min="0" value="1"');
+  });
+
+  it("creates a public repository with the requested initial approval policy", async () => {
+    const db = freshTestDb("cosheaf-new-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    let createBody: unknown = null;
+    let protectionBody: unknown = null;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/alice/public-ws", () => new Response("", { status: 404 }));
+        forge.post("/api/v1/user/repos", async (c) => {
+          createBody = await c.req.json();
+          return c.json({
+            id: 9,
+            name: "public-ws",
+            full_name: "alice/public-ws",
+            default_branch: "main",
+            description: "Public workspace",
+            owner: { id: 1, login: "alice" },
+          });
+        });
+        forge.get("/api/v1/repos/alice/public-ws/topics", () => Response.json({ topics: [] }));
+        forge.put("/api/v1/repos/alice/public-ws/topics", () => new Response(null, { status: 204 }));
+        forge.get("/api/v1/repos/alice/public-ws/branch_protections/main", () => new Response("", { status: 404 }));
+        forge.post("/api/v1/repos/alice/public-ws/branch_protections", async (c) => {
+          protectionBody = await c.req.json();
+          return c.json({ branch_name: "main", required_approvals: 2 });
+        });
+        forge.get("/api/v1/repos/alice/public-ws/hooks", () => Response.json([]));
+        forge.post("/api/v1/repos/alice/public-ws/hooks", () => Response.json({ id: 1, type: "forgejo", events: ["push"] }));
+        forge.get("/api/v1/repos/alice/public-ws/contents/*", () => new Response("", { status: 404 }));
+        forge.get("/api/v1/repos/alice/public-ws/git/trees/:ref", () => Response.json({ tree: [] }));
+        forge.all("*", () => Response.json({}));
+      }),
+    );
+
+    const res = await appFor(db).request(
+      "/new",
+      form({
+        slug: "public-ws",
+        description: "Public workspace",
+        visibility: "public",
+        default_md_format: "coflat",
+        required_approvals: "2",
+      }, token),
+    );
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/alice/public-ws");
+    expect(createBody).toMatchObject({ name: "public-ws", private: false });
+    expect(protectionBody).toMatchObject({ branch_name: "main", required_approvals: 2 });
+  });
+});
+
 describe("GET /users/:username", () => {
   const fetchMock = vi.fn();
   beforeEach(() => {

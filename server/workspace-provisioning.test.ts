@@ -101,11 +101,20 @@ describe("workspace provisioning", () => {
     expect(result.workspace.repo).toBe("notes");
     expect(result.workspace.slug).toBe("owner/notes");
     expect(result.workspace.defaultMdFormat).toBe("coflat");
+    expect(forgejo.createRepoForUser).toHaveBeenCalledWith(
+      "owner",
+      expect.objectContaining({ name: "notes", private: true }),
+    );
     expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "chao", "admin");
     expect(forgejo.addCollaborator).not.toHaveBeenCalledWith("owner", "notes", "coverify", "write");
     expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_slug = ?").get(result.workspace.slug))
       .toEqual({ path: "readme.md" });
     expect(forgejo.createBranchProtection).toHaveBeenCalledOnce();
+    expect(forgejo.createBranchProtection).toHaveBeenCalledWith(
+      "owner",
+      "notes",
+      expect.objectContaining({ branch_name: "main", required_approvals: 1 }),
+    );
     expect(forgejo.createRepoHook).toHaveBeenCalledOnce();
     expect(forgejo.createRepoHook).toHaveBeenCalledWith(
       "owner",
@@ -119,6 +128,52 @@ describe("workspace provisioning", () => {
       "notes",
       expect.objectContaining({ path: ".gitattributes" }),
     );
+  });
+
+  it("can provision a public workspace with a custom initial approval count", async () => {
+    const db = freshDb();
+    const forgejo = fakeForgejo();
+    const user = { username: "chao" };
+
+    await provisionWorkspace(db, forgejo, config, {
+      owner: "owner",
+      repo: "public-notes",
+      name: "Public notes",
+      user,
+      forgejoUsername: "chao",
+      provisionVia: "admin",
+      visibility: "public",
+      requiredApprovals: 2,
+    });
+
+    expect(forgejo.createRepoForUser).toHaveBeenCalledWith(
+      "owner",
+      expect.objectContaining({ name: "public-notes", private: false }),
+    );
+    expect(forgejo.createBranchProtection).toHaveBeenCalledWith(
+      "owner",
+      "public-notes",
+      expect.objectContaining({ branch_name: "main", required_approvals: 2 }),
+    );
+  });
+
+  it("rolls back a newly created repo when branch protection cannot be created", async () => {
+    const db = freshDb();
+    const forgejo = fakeForgejo();
+    vi.mocked(forgejo.createBranchProtection).mockRejectedValueOnce(new Error("protection rejected"));
+    const user = { username: "chao" };
+
+    await expect(provisionWorkspace(db, forgejo, config, {
+      owner: "owner",
+      repo: "notes",
+      name: "Notes",
+      user,
+      forgejoUsername: "chao",
+      provisionVia: "admin",
+      rollbackCreatedRepoOnLocalFailure: true,
+    })).rejects.toThrow("protection rejected");
+
+    expect(forgejo.deleteRepo).toHaveBeenCalledWith("owner", "notes");
   });
 
   it("adds the Coverify bot only when chat replies are configured", async () => {

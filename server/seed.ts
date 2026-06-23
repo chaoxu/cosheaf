@@ -255,6 +255,7 @@ export async function seedWorkspace(args: {
     forgejoUsername: options.user,
     provisionVia: "admin",
     allowExistingLocal: true,
+    rollbackCreatedRepoOnLocalFailure: true,
     defaultMdFormat: options.defaultMdFormat,
   });
   console.log(`${createdRepo ? "created" : "ensured"} workspace ${workspace.slug}`);

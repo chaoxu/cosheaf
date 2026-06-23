@@ -20,7 +20,7 @@ import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerAdminRoutes } from "./web-admin.js";
 import { registerBranchRoutes } from "./web-branches.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField, textField, webRoute } from "./web-context.js";
+import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, invalidateCurrentUserAvatar, nonNegativeInt, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField, textField, webRoute } from "./web-context.js";
 import { registerDiagnosticsRoutes } from "./web-diagnostics.js";
 import { registerFileRoutes } from "./web-files.js";
 import { emptyHtml, type Html, html } from "./web-html.js";
@@ -983,12 +983,23 @@ web.get("/new", globalRoute(async (c, auth) => {
                   <input name="description" data-testid="new-repo-description" placeholder="Optional">
                 </label>
                 <label class="settings-row">
+                  <span>Visibility</span>
+                  <select name="visibility" data-testid="new-repo-visibility">
+                    <option value="private" selected>Private</option>
+                    <option value="public">Public</option>
+                  </select>
+                </label>
+                <label class="settings-row">
                   <span>Document format</span>
                   <select name="default_md_format" data-testid="new-repo-format">
                     ${allDocumentFormats().map(
                       (f) => html`<option value="${f.id}" ${f.id === DEFAULT_CREATE_FORMAT_ID ? "selected" : ""}>${f.id}</option>`,
                     )}
                   </select>
+                </label>
+                <label class="settings-row">
+                  <span>Required approvals</span>
+                  <input name="required_approvals" type="number" min="0" value="1" data-testid="new-repo-required-approvals">
                 </label>
                 <div class="settings-actions">
                   <button class="button primary" type="submit" data-testid="new-repo-submit">Create repository</button>
@@ -1011,10 +1022,18 @@ web.post("/new", globalRoute(async (c, auth) => {
   // name on the workspace list.
   const description = stringField(form.description)?.trim() ?? "";
   const formatRaw = stringField(form.default_md_format) ?? undefined;
+  const visibility = stringField(form.visibility) ?? "private";
+  const requiredApprovals = nonNegativeInt(stringField(form.required_approvals) ?? "1");
   if (!slug) return redirect("/new?error=repository+name+required");
   if (!WORKSPACE_SLUG_RE.test(slug)) return redirect("/new?error=invalid+repository+name");
   if (formatRaw !== undefined && !isDocumentFormatId(formatRaw)) {
     return redirect("/new?error=invalid+format");
+  }
+  if (visibility !== "private" && visibility !== "public") {
+    return redirect("/new?error=invalid+visibility");
+  }
+  if (requiredApprovals === null) {
+    return redirect("/new?error=invalid+required+approvals");
   }
   const owner = auth.user.username;
   const fj = c.get("fjUser");
@@ -1031,6 +1050,8 @@ web.post("/new", globalRoute(async (c, auth) => {
       provisionVia: "user-pat",
       rollbackCreatedRepoOnLocalFailure: true,
       defaultMdFormat: formatRaw,
+      visibility,
+      requiredApprovals,
     });
   } catch (err) {
     return badRequestPage(auth.user.username, `Could not create repository: ${(err as Error).message}`);

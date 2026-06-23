@@ -94,16 +94,19 @@ describe("POST /api/v1/workspaces", () => {
     const token = seedAuthUser(db, config, { username: "chao" });
 
     let topicPutBody: unknown = null;
+    let createBody: unknown = null;
+    let protectionBody: unknown = null;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       // existence pre-check: repo does not yet exist (owner defaults to the caller)
       forge.get("/api/v1/repos/chao/new-ws", (c) => c.text("", 404));
-      forge.post("/api/v1/user/repos", (c) =>
-        c.json({
+      forge.post("/api/v1/user/repos", async (c) => {
+        createBody = await c.req.json();
+        return c.json({
           id: 99, name: "new-ws", full_name: "chao/new-ws",
           default_branch: "main", description: "New workspace",
           owner: { id: 1, login: "chao" },
-        }),
-      );
+        });
+      });
       forge.get("/api/v1/repos/chao/new-ws/topics", (c) => c.json({ topics: [] }));
       forge.put("/api/v1/repos/chao/new-ws/topics", async (c) => {
         topicPutBody = await c.req.json();
@@ -111,6 +114,11 @@ describe("POST /api/v1/workspaces", () => {
       });
       // permissions / branch protection / hooks / .gitattributes / reindex tree
       forge.put("/api/v1/repos/chao/new-ws/collaborators/:username", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/chao/new-ws/branch_protections/main", (c) => c.text("", 404));
+      forge.post("/api/v1/repos/chao/new-ws/branch_protections", async (c) => {
+        protectionBody = await c.req.json();
+        return c.json({ branch_name: "main", required_approvals: 1 });
+      });
       forge.get("/api/v1/repos/chao/new-ws/hooks", (c) => c.json([]));
       forge.post("/api/v1/repos/chao/new-ws/hooks", (c) => c.json({ id: 1, type: "forgejo", events: ["push"] }));
       forge.get("/api/v1/repos/chao/new-ws/contents/*", (c) => c.text("", 404));
@@ -132,6 +140,9 @@ describe("POST /api/v1/workspaces", () => {
     expect(body.name).toBe("New workspace");
     // Workspaces created through cosheaf default to coflat (DEFAULT_CREATE_FORMAT_ID).
     expect(body.default_md_format).toBe("coflat");
+    expect(body).toMatchObject({ visibility: "private", required_approvals: 1 });
+    expect(createBody).toMatchObject({ name: "new-ws", private: true });
+    expect(protectionBody).toMatchObject({ branch_name: "main", required_approvals: 1 });
     expect(topicPutBody).toEqual({ topics: ["cosheaf-format-coflat"] });
   });
 
@@ -140,6 +151,7 @@ describe("POST /api/v1/workspaces", () => {
     const token = seedAuthUser(db, config, { username: "chao" });
 
     let orgCreateBody: unknown = null;
+    let protectionBody: unknown = null;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/the-org/new-ws", (c) => c.text("", 404));
       forge.post("/api/v1/orgs/the-org/repos", async (c) => {
@@ -153,6 +165,11 @@ describe("POST /api/v1/workspaces", () => {
       forge.get("/api/v1/repos/the-org/new-ws/topics", (c) => c.json({ topics: [] }));
       forge.put("/api/v1/repos/the-org/new-ws/topics", (c) => c.body(null, 204));
       forge.put("/api/v1/repos/the-org/new-ws/collaborators/:username", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/the-org/new-ws/branch_protections/main", (c) => c.text("", 404));
+      forge.post("/api/v1/repos/the-org/new-ws/branch_protections", async (c) => {
+        protectionBody = await c.req.json();
+        return c.json({ branch_name: "main", required_approvals: 2 });
+      });
       forge.get("/api/v1/repos/the-org/new-ws/hooks", (c) => c.json([]));
       forge.post("/api/v1/repos/the-org/new-ws/hooks", (c) => c.json({ id: 1, type: "forgejo", events: ["push"] }));
       forge.get("/api/v1/repos/the-org/new-ws/contents/*", (c) => c.text("", 404));
@@ -163,14 +180,15 @@ describe("POST /api/v1/workspaces", () => {
     const res = await app.request("/api/v1/workspaces", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ owner: " the-org ", slug: " new-ws ", name: " New workspace " }),
+      body: JSON.stringify({ owner: " the-org ", slug: " new-ws ", name: " New workspace ", visibility: "public", required_approvals: 2 }),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { owner: string; full_name: string; name: string };
     expect(body.owner).toBe("the-org");
     expect(body.full_name).toBe("the-org/new-ws");
     expect(body.name).toBe("New workspace");
-    expect(orgCreateBody).toMatchObject({ name: "new-ws" });
+    expect(orgCreateBody).toMatchObject({ name: "new-ws", private: false });
+    expect(protectionBody).toMatchObject({ required_approvals: 2 });
   });
 
   it("creates a coflat workspace when requested", async () => {
@@ -268,6 +286,62 @@ describe("POST /api/v1/workspaces", () => {
       body: JSON.stringify({ slug: "new-ws", name: "x", default_md_format: "plain" }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects invalid create-time repository settings before contacting Forgejo", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao" });
+
+    for (const payload of [
+      { slug: "new-ws", name: "x", visibility: "internal" },
+      { slug: "new-ws", name: "x", required_approvals: -1 },
+      { slug: "new-ws", name: "x", required_approvals: "1e2" },
+      { slug: "new-ws", name: "x", required_approvals: "999999999999999999999999999999" },
+    ]) {
+      fetchMock.mockClear();
+      const res = await app.request("/api/v1/workspaces", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      expect(res.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not report workspace creation success when branch protection setup fails", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao" });
+    let deleted = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/chao/new-ws", (c) => c.text("", 404));
+      forge.post("/api/v1/user/repos", (c) =>
+        c.json({
+          id: 99, name: "new-ws", full_name: "chao/new-ws",
+          default_branch: "main", description: "New workspace",
+          owner: { id: 1, login: "chao" },
+        }),
+      );
+      forge.get("/api/v1/repos/chao/new-ws/topics", (c) => c.json({ topics: [] }));
+      forge.put("/api/v1/repos/chao/new-ws/topics", (c) => c.body(null, 204));
+      forge.put("/api/v1/repos/chao/new-ws/collaborators/:username", (c) => c.body(null, 204));
+      forge.get("/api/v1/repos/chao/new-ws/branch_protections/main", (c) => c.text("", 404));
+      forge.post("/api/v1/repos/chao/new-ws/branch_protections", (c) => c.text("rejected", 500));
+      forge.delete("/api/v1/repos/chao/new-ws", () => {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      });
+    }));
+
+    const res = await app.request("/api/v1/workspaces", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ slug: "new-ws", name: "New workspace" }),
+    });
+
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toMatchObject({ code: "internal" });
+    expect(deleted).toBe(true);
   });
 
   it("returns 409 when the slug already exists in Forgejo", async () => {

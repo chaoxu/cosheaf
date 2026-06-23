@@ -14,6 +14,7 @@ import {
   displayLogin,
   htmlResponse,
   notFoundPage,
+  nonNegativeInt,
   positiveInt,
   redirect,
   repoHref,
@@ -90,13 +91,6 @@ web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
   else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
   return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
-
-function nonNegativeInt(raw: string | null): number | null {
-  const trimmed = raw?.trim();
-  if (!trimmed || !/^\d+$/.test(trimmed)) return null;
-  const value = Number(trimmed);
-  return Number.isInteger(value) ? value : null;
-}
 
 web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
   const form = await c.req.parseBody();

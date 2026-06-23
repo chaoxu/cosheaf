@@ -328,6 +328,13 @@ export function positiveInt(raw: string | undefined): number | null {
   return parsePositiveIntId(raw);
 }
 
+export function nonNegativeInt(raw: string | null): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return null;
+  const value = Number(trimmed);
+  return Number.isInteger(value) ? value : null;
+}
+
 export function stringField(value: unknown): string | null {
   if (typeof value !== "string") return null;
   return value.trim().length > 0 ? value : null;
