@@ -4,6 +4,7 @@ import type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
   MountedEditor,
+  MountedDocumentChange,
   OutlineEntry,
 } from "@chaoxu/coflat";
 import {
@@ -46,6 +47,7 @@ import {
 import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
+import { liveEditorSource, routeEditorChangeHandlers } from "./editor-change-routing";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import "@chaoxu/coflat/style.css";
@@ -259,6 +261,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     writeEditorMode(next, config.username);
   }, [config.username]);
 
+  const handleEditorStringChange = useCallback((next: string) => {
+    setContent(next);
+    setUncommitted(true);
+    setSaveError(null);
+  }, []);
+
+  const handleCoflatDocumentChange = useCallback((_change: MountedDocumentChange) => {
+    // Keep Coflat's hot edit path metadata-only. Operations that require source
+    // text (save/upload/autocomplete/PR) read from the mounted editor handle.
+    setUncommitted(true);
+    setSaveError(null);
+  }, []);
+
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (!uncommitted && !pathDirty) return;
@@ -453,7 +468,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         // Reconcile the server's frontmatter id into the controlled editor. This
         // now happens only on an explicit commit (rare), never every autosave
         // tick — so it no longer resets the doc and clobbers the selection (#161).
-        if (result.content !== undefined) setContent(result.content);
+        setContent(result.content ?? source);
         setBranch(result.branch);
         setBranchExists(true);
         setSavedReadBranch(result.branch);
@@ -567,7 +582,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           toast(`Uploaded ${uploaded.path}`);
         }
         if (snippets.length > 0) {
-          const source = editorRef.current?.getDoc() ?? content;
+          const source = liveEditorSource(editorRef.current, content);
           const separator = source.length === 0 ? "" : source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
           const next = `${source}${separator}${snippets.join("\n")}\n`;
           setContent(next);
@@ -596,7 +611,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
               trigger: "[@",
               suggest: async (prefix, env) => {
                 if (env.signal.aborted) return [];
-                const local = currentDocumentSuggestions(editorRef.current?.getDoc() ?? content, prefix);
+                const local = currentDocumentSuggestions(liveEditorSource(editorRef.current, content), prefix);
                 try {
                   const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch, limit: 10 });
                   const seen = new Set(local.map((suggestion) => suggestion.id));
@@ -631,7 +646,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     setBusy(true);
     setSaveError(null);
     lastReasonRef.current = "manual";
-    void commitSource(content).then((result) => {
+    void commitSource(liveEditorSource(editorRef.current, content)).then((result) => {
       setBusy(false);
       if (result.ok) setLastSavedAt(nowTime());
       else {
@@ -689,7 +704,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         let reviewBranch = branch;
         let reviewPath = currentPathRef.current.trim();
         if (needsCommit) {
-          const committed = await commitSource(editor?.getDoc() ?? content);
+          const committed = await commitSource(liveEditorSource(editor, content));
           if (!committed.ok) {
             setSaveError(committed.error);
             toast(`Save failed: ${committed.error}`, "error");
@@ -809,11 +824,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
                   setOutline(editor.outline.get());
                   outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
                 }}
-                onChange={(next) => {
-                  setContent(next);
-                  setUncommitted(true);
-                  setSaveError(null);
-                }}
+                {...routeEditorChangeHandlers(config.formatId, {
+                  onStringChange: handleEditorStringChange,
+                  onDocumentChange: handleCoflatDocumentChange,
+                })}
                 saveHandler={saveHandler}
                 statusEvents={statusEvents}
                 assetUploader={assetUploader}

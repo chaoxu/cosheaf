@@ -5,4 +5,5 @@ export type {
   StatusEvents as EditorStatusEvents,
   AssetUploader as EditorAssetUploader,
   AutocompleteSource as EditorAutocompleteSource,
+  MountedDocumentChange as EditorDocumentChange,
 } from "../editor";

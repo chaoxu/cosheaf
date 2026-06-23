@@ -5,6 +5,7 @@ import type {
   AssetUploader,
   SaveHandler,
   StatusEvents,
+  MountedDocumentChange,
 } from "../editor";
 import type { MountedEditor } from "./coflat";
 import {
@@ -25,7 +26,8 @@ export function saveReasonCommits(reason: "manual" | "command" | "autosave"): bo
 interface Props {
   value: string;
   mode: "rich" | "source";
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
+  onDocumentChange?: (change: MountedDocumentChange) => void;
   onReady?: (editor: MountedEditor) => void;
   testId?: string;
   readOnly?: boolean;
@@ -145,7 +147,7 @@ export function MarkdownEditor({
         const next = event.target.value;
         localValueRef.current = next;
         setLocalValue(next);
-        onChange(next);
+        onChange?.(next);
         const nextOutline = extractForgejoPassthroughOutline(next);
         for (const listener of outlineListenersRef.current) listener(nextOutline);
         statusEventsRef.current?.onDirtyChange?.(next !== savedValueRef.current);

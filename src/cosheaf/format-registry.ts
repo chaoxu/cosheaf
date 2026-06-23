@@ -9,6 +9,7 @@ import {
 import type {
   EditorAssetUploader,
   EditorAutocompleteSource,
+  EditorDocumentChange,
   EditorSaveHandler,
   EditorStatusEvents,
   MountedEditor,
@@ -17,7 +18,8 @@ import type {
 interface EditorProps {
   value: string;
   mode: "rich" | "source";
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
+  onDocumentChange?: (change: EditorDocumentChange) => void;
   onReady?: (editor: MountedEditor) => void;
   testId?: string;
   readOnly?: boolean;

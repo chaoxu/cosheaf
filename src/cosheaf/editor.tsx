@@ -5,6 +5,7 @@ import { insertTab } from "@codemirror/commands";
 import { EditorView, keymap } from "@codemirror/view";
 import {
   type MountedEditor,
+  type MountedDocumentChange,
   type SaveHandler,
   type StandaloneEditorMode,
   type StatusEvents,
@@ -13,12 +14,13 @@ import {
   mountEditor,
 } from "@chaoxu/coflat";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
-export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource };
+export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource, MountedDocumentChange };
 
 interface Props {
   value: string;
   mode: StandaloneEditorMode;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
+  onDocumentChange?: (change: MountedDocumentChange) => void;
   onReady?: (editor: MountedEditor) => void;
   testId?: string;
   // Mount-time only — changes after mount are ignored. The component must
@@ -46,6 +48,7 @@ export function MarkdownEditor({
   value,
   mode,
   onChange,
+  onDocumentChange,
   onReady,
   testId,
   extensions,
@@ -63,6 +66,7 @@ export function MarkdownEditor({
   const editorRef = useRef<MountedEditor | null>(null);
   const modeRef = useRef(mode);
   const onChangeRef = useRef(onChange);
+  const onDocumentChangeRef = useRef(onDocumentChange);
   // Host APIs are captured by refs and dispatched through stable wrappers,
   // so prop updates don't force a remount of the underlying editor.
   const saveRef = useRef(saveHandler);
@@ -70,6 +74,7 @@ export function MarkdownEditor({
   const assetRef = useRef(assetUploader);
   const autocompleteRef = useRef(autocompleteSources);
   onChangeRef.current = onChange;
+  onDocumentChangeRef.current = onDocumentChange;
   modeRef.current = mode;
   saveRef.current = saveHandler;
   statusRef.current = statusEvents;
@@ -117,7 +122,10 @@ export function MarkdownEditor({
       doc: value,
       mode,
       extensions: mountExtensions,
-      onChange: (next) => onChangeRef.current(next),
+      ...(onChange ? { onChange: (next) => onChangeRef.current?.(next) } : {}),
+      ...(onDocumentChange
+        ? { onDocumentChange: (change) => onDocumentChangeRef.current?.(change) }
+        : {}),
       ...(from ? { from } : {}),
       ...(documentContext ? { context: documentContext } : {}),
       ...(fileSystem ? { fileSystem } : {}),
