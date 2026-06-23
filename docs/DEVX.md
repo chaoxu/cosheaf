@@ -41,6 +41,10 @@
 ## Fast Checks
 
 - `pnpm check:local` runs the normal local gate: static checks, unit tests, Vite build, and server build.
+  `pnpm typecheck` and anything that depends on it require `../coflat` to match
+  the pinned Coflat ref. If the sibling checkout is dirty or on another branch,
+  save that work before switching it, or use `pnpm check:pre-push` for the
+  isolated pinned type/lint gate.
 - `pnpm check:web:fast` runs the smaller server-rendered UI gate for low-risk
   markup/CSS changes: types, focused web route tests, Vite build, and server
   build.

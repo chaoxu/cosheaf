@@ -34,7 +34,7 @@
     "build": "vite build",
     "build:server": "rm -rf dist-server && tsc -p server/tsconfig.build.json && mkdir -p dist-server/server && cp server/schema.sql dist-server/server/schema.sql && node scripts/check-server-build-output.mjs",
     "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/check-coflat-ref.mjs && tsc --noEmit",
     "typecheck:server": "tsc --noEmit -p server/tsconfig.json",
     "typecheck:tooling": "tsc --noEmit -p tsconfig.tooling.json",
     "typecheck:watch": "tsc --noEmit --watch",

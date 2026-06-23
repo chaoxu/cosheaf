@@ -77,9 +77,22 @@ export function checkCoflatRef({
   }
 
   if (actualRef !== expectedRef) {
+    let dirty = false;
+    try {
+      dirty = execFile("git", ["-C", coflatDir, "status", "--porcelain"], {
+        encoding: "utf8",
+        env: nestedGitEnv(env),
+      }).trim().length > 0;
+    } catch (_err) {
+      // The revision read already proved this is a Git checkout; if status cannot
+      // be read, keep the older actionable message.
+    }
+    const switchCommand = `git -C ${coflatDir} fetch origin ${expectedRef} && git -C ${coflatDir} checkout ${expectedRef}`;
     return {
       ok: false,
-      message: `Coflat checkout is ${actualRef}, expected ${expectedRef}. Run: git -C ${coflatDir} fetch origin ${expectedRef} && git -C ${coflatDir} checkout ${expectedRef}`,
+      message: dirty
+        ? `Coflat checkout is ${actualRef}, expected ${expectedRef}, and ${coflatDir} has local changes. Do not switch it in place unless that work is saved. For an isolated pinned check, run: pnpm check:pre-push. To fix a clean checkout, run: ${switchCommand}`
+        : `Coflat checkout is ${actualRef}, expected ${expectedRef}. Run: ${switchCommand}`,
     };
   }
 

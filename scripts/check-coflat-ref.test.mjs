@@ -58,10 +58,22 @@ describe("checkCoflatRef", () => {
     const result = checkCoflatRef({
       coflatDir: ".",
       expectedRef: "expected",
-      execFile: () => "actual\n",
+      execFile: (_cmd, args) => (args.includes("status") ? "" : "actual\n"),
     });
     expect(result.ok).toBe(false);
     expect(result.message).toContain("expected expected");
+    expect(result.message).toContain("Run: git -C . fetch origin expected && git -C . checkout expected");
+  });
+
+  it("warns before switching a dirty mismatched sibling checkout", () => {
+    const result = checkCoflatRef({
+      coflatDir: ".",
+      expectedRef: "expected",
+      execFile: (_cmd, args) => (args.includes("status") ? " M src/file.ts\n" : "actual\n"),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("has local changes");
+    expect(result.message).toContain("pnpm check:pre-push");
   });
 
   it("reports a non-git sibling checkout", () => {
