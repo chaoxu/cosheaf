@@ -84,12 +84,11 @@ web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
   if (approvals === null) {
     return badRequestPage(ctx.user, "Required approvals must be a non-negative integer.");
   }
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
-  if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
-  else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, async () => {
+    const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
+    if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
+    else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
+  });
 }));
 
 web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
@@ -100,10 +99,7 @@ web.post("/:owner/:repo/settings/labels", webRouteForAdmin(async (c, ctx) => {
   const exclusive = stringField(form.exclusive) === "on";
   if (!name) return badRequestPage(ctx.user, "Label name is required.");
   if (color === null) return badRequestPage(ctx.user, "Label color must be six hex digits.");
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  await ctx.fj.createLabel(ctx.owner, ctx.repo, { name, color, description, exclusive });
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, () => ctx.fj.createLabel(ctx.owner, ctx.repo, { name, color, description, exclusive }));
 }));
 
 web.post("/:owner/:repo/settings/milestones", webRouteForAdmin(async (c, ctx) => {
@@ -111,10 +107,7 @@ web.post("/:owner/:repo/settings/milestones", webRouteForAdmin(async (c, ctx) =>
   const title = stringField(form.title);
   const description = textField(form.description) ?? "";
   if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  await ctx.fj.createMilestone(ctx.owner, ctx.repo, { title, description });
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, () => ctx.fj.createMilestone(ctx.owner, ctx.repo, { title, description }));
 }));
 
 web.post("/:owner/:repo/settings/labels/:id/edit", webRouteForAdmin(async (c, ctx) => {
@@ -125,28 +118,26 @@ web.post("/:owner/:repo/settings/labels/:id/edit", webRouteForAdmin(async (c, ct
   const color = normalizeLabelColor(stringField(form.color) ?? "");
   if (!name) return badRequestPage(ctx.user, "Label name is required.");
   if (color === null) return badRequestPage(ctx.user, "Label color must be six hex digits.");
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  await ctx.fj.editLabel(ctx.owner, ctx.repo, id, {
-    name,
-    color,
-    description: textField(form.description) ?? "",
-    exclusive: stringField(form.exclusive) === "on",
-  });
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, () =>
+    ctx.fj.editLabel(ctx.owner, ctx.repo, id, {
+      name,
+      color,
+      description: textField(form.description) ?? "",
+      exclusive: stringField(form.exclusive) === "on",
+    }),
+  );
 }));
 
 web.post("/:owner/:repo/settings/labels/:id/delete", webRouteForAdmin(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return badRequestPage(ctx.user, "Invalid label.");
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  try {
-    await ctx.fj.deleteLabel(ctx.owner, ctx.repo, id);
-  } catch (err) {
-    if (!is404(err)) throw err;
-  }
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, async () => {
+    try {
+      await ctx.fj.deleteLabel(ctx.owner, ctx.repo, id);
+    } catch (err) {
+      if (!is404(err)) throw err;
+    }
+  });
 }));
 
 web.post("/:owner/:repo/settings/milestones/:id/edit", webRouteForAdmin(async (c, ctx) => {
@@ -156,27 +147,25 @@ web.post("/:owner/:repo/settings/milestones/:id/edit", webRouteForAdmin(async (c
   const title = stringField(form.title);
   if (!title) return badRequestPage(ctx.user, "Milestone title is required.");
   const stateRaw = stringField(form.state);
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  await ctx.fj.editMilestone(ctx.owner, ctx.repo, id, {
-    title,
-    description: textField(form.description) ?? "",
-    state: stateRaw === "open" || stateRaw === "closed" ? stateRaw : undefined,
-  });
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, () =>
+    ctx.fj.editMilestone(ctx.owner, ctx.repo, id, {
+      title,
+      description: textField(form.description) ?? "",
+      state: stateRaw === "open" || stateRaw === "closed" ? stateRaw : undefined,
+    }),
+  );
 }));
 
 web.post("/:owner/:repo/settings/milestones/:id/delete", webRouteForAdmin(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return badRequestPage(ctx.user, "Invalid milestone.");
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  try {
-    await ctx.fj.deleteMilestone(ctx.owner, ctx.repo, id);
-  } catch (err) {
-    if (!is404(err)) throw err;
-  }
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
+  return runFreshAdminSettingsAction(ctx, async () => {
+    try {
+      await ctx.fj.deleteMilestone(ctx.owner, ctx.repo, id);
+    } catch (err) {
+      if (!is404(err)) throw err;
+    }
+  });
 }));
 
 web.post("/:owner/:repo/settings/access", webRouteForAdmin(async (c, ctx) => {
@@ -186,20 +175,22 @@ web.post("/:owner/:repo/settings/access", webRouteForAdmin(async (c, ctx) => {
   if (!username || !FORGEJO_NAME_RE.test(username) || !role || !(ROLES as readonly string[]).includes(role)) {
     return htmlResponse(pageShell({ title: "Bad request", body: html`<main class="auth-page"><p>Invalid access update.</p></main>` }), 400);
   }
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-
-  // The caller is repo admin (gated above) — their own PAT carries the
-  // collaborator-management rights; no admin token needed.
-  await setWorkspaceMember({
-    forgejo: ctx.fj,
-    owner: ctx.owner,
-    repo: ctx.repo,
-    username,
-    role: role as Role,
-  });
-  invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
-  return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`${username} · ${role}`)}`);
+  return runFreshAdminSettingsAction(
+    ctx,
+    async () => {
+      // The caller is repo admin (gated above) — their own PAT carries the
+      // collaborator-management rights; no admin token needed.
+      await setWorkspaceMember({
+        forgejo: ctx.fj,
+        owner: ctx.owner,
+        repo: ctx.repo,
+        username,
+        role: role as Role,
+      });
+      invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
+    },
+    `${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`${username} · ${role}`)}`,
+  );
 }));
 
 // Repository metadata: description + visibility (private/public). Forgejo
@@ -209,36 +200,38 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
   const description = textField(form.description) ?? "";
   const visibility = stringField(form.visibility);
   const defaultBranch = stringField(form.default_branch) ?? undefined;
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  await ctx.fj.editRepo(ctx.owner, ctx.repo, {
-    description,
-    private: visibility === "private" ? true : visibility === "public" ? false : undefined,
-    default_branch: defaultBranch,
+  return runFreshAdminSettingsAction(ctx, async () => {
+    await ctx.fj.editRepo(ctx.owner, ctx.repo, {
+      description,
+      private: visibility === "private" ? true : visibility === "public" ? false : undefined,
+      default_branch: defaultBranch,
+    });
+    invalidateWorkspaceTitleCache(ctx.owner, ctx.repo);
+    // Topics: the user edits only the free topics; the cosheaf-format-* topic is
+    // managed by the document format and must survive a topics edit.
+    if (form.topics !== undefined) {
+      const existing = await ctx.fj.listRepoTopics(ctx.owner, ctx.repo).catch(() => []);
+      await ctx.fj.replaceRepoTopics(ctx.owner, ctx.repo, mergeRepoTopics(existing, stringField(form.topics) ?? ""));
+    }
   });
-  invalidateWorkspaceTitleCache(ctx.owner, ctx.repo);
-  // Topics: the user edits only the free topics; the cosheaf-format-* topic is
-  // managed by the document format and must survive a topics edit.
-  if (form.topics !== undefined) {
-    const existing = await ctx.fj.listRepoTopics(ctx.owner, ctx.repo).catch(() => []);
-    await ctx.fj.replaceRepoTopics(ctx.owner, ctx.repo, mergeRepoTopics(existing, stringField(form.topics) ?? ""));
-  }
-  return redirect(repoHref(ctx.owner, ctx.repo, "/settings"));
 }));
 
 web.post("/:owner/:repo/settings/access/remove", webRouteForAdmin(async (c, ctx) => {
   const username = stringField((await c.req.parseBody()).username)?.trim();
   if (!username) return badRequestPage(ctx.user, "Username is required.");
   if (!FORGEJO_NAME_RE.test(username)) return badRequestPage(ctx.user, "Invalid username.");
-  const freshAdmin = await requireFreshAdminPage(ctx);
-  if (freshAdmin) return freshAdmin;
-  try {
-    await ctx.fj.removeCollaborator(ctx.owner, ctx.repo, username);
-  } catch (err) {
-    if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
-  }
-  invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
-  return redirect(`${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`removed ${username}`)}`);
+  return runFreshAdminSettingsAction(
+    ctx,
+    async () => {
+      try {
+        await ctx.fj.removeCollaborator(ctx.owner, ctx.repo, username);
+      } catch (err) {
+        if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
+      }
+      invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
+    },
+    `${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`removed ${username}`)}`,
+  );
 }));
 
 // Repository deletion. Destructive and irreversible, so we re-check admin
@@ -270,6 +263,17 @@ async function requireFreshAdminPage(ctx: WebCtx): Promise<Response | null> {
   const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   return null;
+}
+
+async function runFreshAdminSettingsAction(
+  ctx: WebCtx,
+  action: () => Promise<unknown>,
+  redirectTo = repoHref(ctx.owner, ctx.repo, "/settings"),
+): Promise<Response> {
+  const freshAdmin = await requireFreshAdminPage(ctx);
+  if (freshAdmin) return freshAdmin;
+  await action();
+  return redirect(redirectTo);
 }
 
 function cleanupDeletedWorkspace(ctx: WebCtx): void {

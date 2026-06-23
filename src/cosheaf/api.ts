@@ -1,4 +1,5 @@
 import type { WorkspaceValidation } from "../../shared/validation";
+import { queryString, workspaceApiPath } from "../../shared/url";
 
 interface PutFileResult {
   ok: true;
@@ -28,19 +29,6 @@ export class ApiError extends Error {
   }
 }
 
-function workspaceApiPath(owner: string, repo: string): string {
-  return `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-}
-
-function queryString(params: Record<string, string | undefined>): string {
-  const q = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) q.set(key, value);
-  }
-  const text = q.toString();
-  return text ? `?${text}` : "";
-}
-
 export function putFileBody(
   content: string,
   previousPath?: string,
@@ -67,19 +55,23 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as ErrorBody;
-    if (
-      res.status === 401 &&
-      (body.code === "pat_invalid" || body.code === "unauthorized") &&
-      typeof window !== "undefined"
-    ) {
-      window.location.assign("/login");
-    }
-    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`, body.code, body.details);
+    throw await apiErrorFromResponse(res, `HTTP ${res.status}`);
   }
   if (res.status === 204 || res.status === 304) return undefined as T;
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
+}
+
+async function apiErrorFromResponse(res: Response, fallback: string): Promise<ApiError> {
+  const body = (await res.json().catch(() => ({}))) as ErrorBody;
+  if (
+    res.status === 401 &&
+    (body.code === "pat_invalid" || body.code === "unauthorized") &&
+    typeof window !== "undefined"
+  ) {
+    window.location.assign("/login");
+  }
+  return new ApiError(res.status, body.error ?? fallback, body.code, body.details);
 }
 
 export const api = {
@@ -108,18 +100,7 @@ export const api = {
       credentials: "same-origin",
     });
     if (!res.ok) {
-      let msg = `asset upload ${res.status}`;
-      let code: string | undefined;
-      let details: Record<string, unknown> | undefined;
-      try {
-        const data = (await res.json()) as ErrorBody;
-        if (data.error) msg = data.error;
-        code = data.code;
-        details = data.details;
-      } catch (_err) {
-        /* body was not JSON; keep the status message */
-      }
-      throw new ApiError(res.status, msg, code, details);
+      throw await apiErrorFromResponse(res, `asset upload ${res.status}`);
     }
     return (await res.json()) as { path: string };
   },
@@ -130,7 +111,7 @@ export const api = {
         trigger: params.trigger,
         prefix: params.prefix,
         branch: params.branch,
-        limit: params.limit?.toString(),
+        limit: params.limit,
       })}`,
     ),
 

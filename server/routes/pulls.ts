@@ -48,7 +48,7 @@ import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { MergeFailure, MergeFailureReason, PrMeta, PrFileStatus, PrState } from "../../shared/review.js";
 import { parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
-import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, requireCommentBody } from "./query-params.js";
+import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
 
 export const pulls = new Hono<AppEnv>();
 pulls.use("*", requireAuth);
@@ -295,25 +295,21 @@ pulls.get("/:owner/:repo/pulls/:n", async (c) => {
 });
 
 pulls.post("/:owner/:repo/pulls", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
-    head?: string;
-    base?: string;
-    title?: string;
-    body?: string;
-  };
-  if (!body.head) return c.json(...bad("head required"));
-  if (!validBranchName(body.head)) return c.json(...bad("valid head branch name required"));
-  const base = body.base ?? "main";
+  const body = await readJsonObject(c.req);
+  if (body.head === undefined || body.head === null || body.head === "") return c.json(...bad("head required"));
+  const head = typeof body.head === "string" ? body.head : "";
+  if (!validBranchName(head)) return c.json(...bad("valid head branch name required"));
+  const base = body.base === undefined || body.base === null ? "main" : typeof body.base === "string" ? body.base : "";
   if (!validBranchName(base)) return c.json(...bad("valid base branch name required"));
   if (body.title !== undefined && typeof body.title !== "string") return c.json(...bad("title must be a string"));
   if (body.body !== undefined && typeof body.body !== "string") return c.json(...bad("body must be a string"));
   const { fj, owner, repo } = c.get("repoCtx");
   try {
     const pr = await fj.createPull(owner, repo, {
-      head: body.head,
+      head,
       base,
-      title: body.title ?? body.head,
-      body: body.body ?? "",
+      title: typeof body.title === "string" ? body.title : head,
+      body: typeof body.body === "string" ? body.body : "",
     });
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
     return c.json(prMeta(pr), 201);
@@ -335,7 +331,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
         console.error(`[${c.get("requestId") ?? ""}] dedup listPulls failed for ${owner}/${repo}: ${e instanceof Error ? e.message : String(e)}`);
         return [];
       });
-      const existing = all.find((p) => p.head.ref === body.head && p.base.ref === base && !p.merged);
+      const existing = all.find((p) => p.head.ref === head && p.base.ref === base && !p.merged);
       if (existing) return c.json(prMeta(existing), 200);
       return c.json(...conflict("Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid."));
     }
@@ -346,7 +342,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
 pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const parsed = parseTitleBodyPatch(await c.req.json().catch(() => null));
+  const parsed = parseTitleBodyPatch(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.editPull(owner, repo, n, parsed.patch);
@@ -357,8 +353,8 @@ pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
 pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const body = (await c.req.json().catch(() => null)) as { labels?: unknown } | null;
-  const labelIds = parsePositiveLabelIds(body?.labels);
+  const body = await readJsonObject(c.req);
+  const labelIds = parsePositiveLabelIds(body.labels);
   if (labelIds === null) {
     return c.json(...bad("labels must be positive integer ids"));
   }
@@ -379,14 +375,15 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
 pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const body = (await c.req.json().catch(() => ({}))) as {
-    Do?: "squash" | "merge" | "rebase";
-    force?: boolean;
-  };
+  const body = await readJsonObject(c.req);
   const { fj, owner, repo } = c.get("repoCtx");
   // Admins can bypass the required-approvals branch protection rule by
   // passing `force: true`. Callers default to false (normal review flow).
-  const result = await mergeWithRetry(fj, owner, repo, n, { Do: body.Do, force: body.force });
+  if (body.Do !== undefined && body.Do !== "squash" && body.Do !== "merge" && body.Do !== "rebase") {
+    return c.json(...bad("Do must be squash, merge, or rebase"));
+  }
+  const mergeMethod = body.Do;
+  const result = await mergeWithRetry(fj, owner, repo, n, { Do: mergeMethod, force: body.force === true });
   if (!result.ok) {
     // Capture Forgejo's raw reason server-side (it carries internal URLs we must
     // not leak to the client) so a failure can be debugged by request id.
@@ -527,10 +524,11 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
 pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const payload = (await c.req.json().catch(() => ({}))) as { event?: string; body?: string | null };
-  const event = payload.event as keyof typeof EVENT_MAP | undefined;
+  const payload = await readJsonObject(c.req);
+  const event = typeof payload.event === "string" ? payload.event : undefined;
   if (!event || !Object.hasOwn(EVENT_MAP, event))
     return c.json(...bad("event must be APPROVE|REQUEST_CHANGES|COMMENT"));
+  const reviewEvent = event as keyof typeof EVENT_MAP;
   const reviewBody = parseOptionalReviewBody(payload.body);
   if (!reviewBody.ok) return c.json(...bad(reviewBody.message));
 
@@ -538,12 +536,12 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  if (EVENT_MAP[event] !== "COMMENT" && pull.user?.login === c.get("user").username)
+  if (EVENT_MAP[reviewEvent] !== "COMMENT" && pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
   await fj.createReview(owner, repo, n, {
-    event: EVENT_MAP[event],
+    event: EVENT_MAP[reviewEvent],
     body: reviewBody.body,
   });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reviewed" });
@@ -578,8 +576,8 @@ pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
 pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const body = (await c.req.json().catch(() => null)) as { reviewers?: unknown } | null;
-  const reviewers = parseReviewers(body?.reviewers);
+  const body = await readJsonObject(c.req);
+  const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.createPullReviewRequests(owner, repo, n, reviewers);
@@ -592,8 +590,8 @@ pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
 pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const body = (await c.req.json().catch(() => null)) as { reviewers?: unknown } | null;
-  const reviewers = parseReviewers(body?.reviewers);
+  const body = await readJsonObject(c.req);
+  const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
   const { fj, owner, repo } = c.get("repoCtx");
   await fj.deletePullReviewRequests(owner, repo, n, reviewers);
@@ -680,7 +678,7 @@ pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   // Validate the body BEFORE touching Forgejo so malformed requests don't
   // burn a getPull call.
-  const input = parseCommentInput(await c.req.json().catch(() => null));
+  const input = parseCommentInput(await readJsonBody(c.req));
   if (!input)
     return c.json(
       {
@@ -711,7 +709,7 @@ pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   const cid = parsePositiveIntId(c.req.param("cid"));
   if (n === null) return c.json(...bad("bad pull number"));
   if (cid === null) return c.json(...bad("bad comment id"));
-  const parsed = requireCommentBody(await c.req.json().catch(() => null));
+  const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
   const { fj, owner, repo } = c.get("repoCtx");
@@ -794,7 +792,7 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
   const rid = parsePositiveIntId(c.req.param("rid"));
   if (n === null || rid === null) return c.json(...bad("bad ids"));
   const ws = c.get("workspace");
-  const input = parseCommentInput(await c.req.json().catch(() => null));
+  const input = parseCommentInput(await readJsonBody(c.req));
   if (!input) return c.json(...bad("path, line, side, body required"));
   const { fj, owner, repo } = c.get("repoCtx");
   const review = await requireOwnPendingReview(c, n, rid);
@@ -814,20 +812,18 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   const rid = parsePositiveIntId(c.req.param("rid"));
   if (n === null || rid === null) return c.json(...bad("bad ids"));
-  const body = (await c.req.json().catch(() => null)) as {
-    event?: "approve" | "request_changes" | "comment";
-    body?: string;
-  } | null;
-  if (!body?.event) return c.json(...bad("event required"));
+  const body = await readJsonObject(c.req);
+  const event = typeof body.event === "string" ? body.event : undefined;
+  if (!event) return c.json(...bad("event required"));
   const eventMap = { approve: "APPROVED", request_changes: "REQUEST_CHANGES", comment: "COMMENT" } as const;
-  if (!Object.hasOwn(eventMap, body.event)) return c.json(...bad("invalid event"));
+  if (!Object.hasOwn(eventMap, event)) return c.json(...bad("invalid event"));
   const reviewBody = parseOptionalReviewBody(body.body);
   if (!reviewBody.ok) return c.json(...bad(reviewBody.message));
   const { fj, owner, repo } = c.get("repoCtx");
   const review = await requireOwnPendingReview(c, n, rid);
   if (review instanceof Response) return review;
   await fj.submitPullReview(owner, repo, n, rid, {
-    event: eventMap[body.event],
+    event: eventMap[event as keyof typeof eventMap],
     body: reviewBody.body,
   });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "reviewed" });
@@ -861,7 +857,7 @@ pulls.get("/:owner/:repo/settings", async (c) => {
 // payload (idempotent), then optionally `pnpm cli workspace reindex <slug>`
 // if the format topic advanced but the indexer crashed mid-walk.
 pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
-  const body = await c.req.json().catch(() => null);
+  const body = await readJsonBody(c.req);
   if (!isSettingsPayload(body))
     return c.json(...bad("settings payload required"));
   if (body.min_approvals !== undefined && (!Number.isInteger(body.min_approvals) || body.min_approvals < 0)) {

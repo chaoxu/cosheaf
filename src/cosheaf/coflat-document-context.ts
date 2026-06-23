@@ -8,7 +8,7 @@ import {
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
-import { urlPath } from "../../shared/url";
+import { rawRepoBranchFileHref, repoBranchFileHref } from "../../shared/url";
 
 export interface CoflatDocumentPayload {
   source: string;
@@ -80,7 +80,7 @@ export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): s
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
   const sourceView = isLineFragment(hash) ? "?view=source" : "";
-  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${sourceView}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `${repoBranchFileHref(payload.owner, payload.repo, payload.branch, normalized)}${sourceView}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
@@ -91,7 +91,7 @@ export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string)
   const [withoutHash, hash = ""] = clean.split("#", 2);
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
-  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/raw/branch/${urlPath(payload.branch)}/${urlPath(normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {
@@ -253,7 +253,7 @@ function referencedKeys(source: string): string[] {
 
 function refHref(payload: CoflatDocumentPayload, ref: WorkspaceRef): string {
   const fragment = ref.fragment ? `#${encodeURIComponent(ref.fragment)}` : "";
-  return `/${urlPath(payload.owner)}/${urlPath(payload.repo)}/src/branch/${urlPath(payload.branch)}/${urlPath(ref.path)}${fragment}`;
+  return `${repoBranchFileHref(payload.owner, payload.repo, payload.branch, ref.path)}${fragment}`;
 }
 
 function escapeHtml(value: string): string {

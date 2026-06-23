@@ -39,7 +39,7 @@ import {
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
-import { urlPath } from "../../shared/url";
+import { rawRepoBranchFileHref, repoBranchFileHref, repoHref } from "../../shared/url";
 import { ApiError, api } from "./api";
 import {
   loadCoflatDocumentContext,
@@ -107,7 +107,7 @@ function relativeAssetPath(documentPath: string, assetPath: string): string {
 }
 
 function rawRepoFileHref(owner: string, repo: string, branch: string, path: string): string {
-  return `/${urlPath(owner)}/${urlPath(repo)}/raw/branch/${urlPath(branch)}/${urlPath(path)}`;
+  return rawRepoBranchFileHref(owner, repo, branch, path);
 }
 
 async function fetchRawRepoFile(owner: string, repo: string, branch: string, path: string): Promise<Response> {
@@ -764,16 +764,16 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           // dead-ending on a toast.
           try {
             await api.mergePull(config.owner, config.repo, pr.number, { Do: "squash" });
-            window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/main/${urlPath(reviewPath)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
+            window.location.href = `${repoBranchFileHref(config.owner, config.repo, "main", reviewPath)}?toast=${encodeURIComponent("Merged to main")}&toastKind=success`;
           } catch (mergeErr) {
             const reason = mergeErr instanceof ApiError ? mergeErr.message : "Couldn't merge to main";
-            window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}?toast=${encodeURIComponent(reason)}&toastKind=error`;
+            window.location.href = `${repoHref(config.owner, config.repo, `/pulls/${pr.number}`)}?toast=${encodeURIComponent(reason)}&toastKind=error`;
           }
           return;
         }
         // #181: openPull returns the existing PR when one is already open for
         // this branch, so this navigates to it instead of erroring on a dup.
-        window.location.href = `/${urlPath(config.owner)}/${urlPath(config.repo)}/pulls/${pr.number}?toast=${encodeURIComponent(`PR #${pr.number} opened`)}&toastKind=success`;
+        window.location.href = `${repoHref(config.owner, config.repo, `/pulls/${pr.number}`)}?toast=${encodeURIComponent(`PR #${pr.number} opened`)}&toastKind=success`;
       } catch (err) {
         toast(err instanceof ApiError ? err.message : "Open pull request failed", "error");
       } finally {
@@ -792,7 +792,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // a lazy edit branch, that may still be main until the first successful save.
   // Uses the last-saved path so discarded in-progress renames do not point at a
   // path that was never written.
-  const readHref = `/${urlPath(config.owner)}/${urlPath(config.repo)}/src/branch/${urlPath(savedReadBranch)}/${urlPath(savedPath)}`;
+  const readHref = repoBranchFileHref(config.owner, config.repo, savedReadBranch, savedPath);
   const outlineMathMacros = documentContext?.mathMacros;
   const railModel = documentRailModel({
     mode: "edit",
@@ -934,7 +934,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             return (
               <a
                 className={`web-editor-problems ${actionable && actionable > 0 ? "has-issues" : ""}`}
-                href={`/${urlPath(config.owner)}/${urlPath(config.repo)}/diagnostics`}
+                href={repoHref(config.owner, config.repo, "/diagnostics")}
                 title={detail}
               >
                 {label}

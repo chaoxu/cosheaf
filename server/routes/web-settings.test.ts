@@ -303,6 +303,31 @@ describe("web repository settings", () => {
     expect(collaboratorMutated).toBe(false);
   });
 
+  it("fresh-checks label creation before mutating repository labels", async () => {
+    const db = freshTestDb("cosheaf-web-settings-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "admin" });
+    let labelMutated = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/:user/permission", () => Response.json({ permission: "write" }));
+      forge.post("/api/v1/repos/owner/w/labels", () => {
+        labelMutated = true;
+        return Response.json({ id: 1, name: "triage", color: "71717a" });
+      });
+    }));
+
+    const form = new URLSearchParams({ name: "triage", color: "71717a" });
+    const res = await appFor(db).request("/owner/w/settings/labels", {
+      method: "POST",
+      headers: { ...authHeaders(token), "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: form.toString(),
+    });
+
+    expect(res.status).toBe(404);
+    expect(await res.text()).toContain("Repository not found");
+    expect(labelMutated).toBe(false);
+  });
+
   it("rejects invalid web access usernames before mutating collaborators", async () => {
     const db = freshTestDb("cosheaf-web-settings-");
     seedTestWorkspace(db);

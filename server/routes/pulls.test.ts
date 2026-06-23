@@ -890,6 +890,23 @@ describe("pulls + branches routes", () => {
   });
 
   describe("merge with retry", () => {
+    it("POST /pulls/:n/merge rejects invalid merge methods before calling Forgejo merge", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock.mockResolvedValueOnce(ok({ permission: "admin" })); // requireAdminFresh
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "typo" }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ error: "Do must be squash, merge, or rebase" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("POST /pulls/:n/merge retries on Forgejo 405 'try again later' and eventually succeeds", async () => {
       const db = freshDb();
       seedWorkspace(db);

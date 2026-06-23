@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { Context } from "hono";
 import { setCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
+import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import { Forgejo } from "../forgejo.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
@@ -363,15 +364,7 @@ export function positiveIntFields(value: unknown): number[] | null {
   return [...ids];
 }
 
-export function repoHref(owner: string, repo: string, suffix = ""): string {
-  return `/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
-}
-
-export function userHref(login: string): string {
-  return `/users/${encodeURIComponent(login)}`;
-}
-
-export { urlPath } from "../../shared/url.js";
+export { repoHref, urlPath, userHref };
 
 export function displayLogin(login: string | null | undefined): string {
   return login || DELETED_USER_LOGIN;

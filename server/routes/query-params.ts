@@ -3,6 +3,15 @@
 
 export type ListState = "open" | "closed" | "all";
 
+export async function readJsonBody(req: { json(): Promise<unknown> }, fallback: unknown = null): Promise<unknown> {
+  return req.json().catch(() => fallback);
+}
+
+export async function readJsonObject(req: { json(): Promise<unknown> }): Promise<Record<string, unknown>> {
+  const raw = await readJsonBody(req, {});
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
 export function parseListState(value: string | undefined): ListState {
   return value === "closed" || value === "all" ? value : "open";
 }
