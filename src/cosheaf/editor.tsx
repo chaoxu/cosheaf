@@ -64,6 +64,7 @@ export function MarkdownEditor({
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MountedEditor | null>(null);
+  const lastValueRef = useRef(value);
   const modeRef = useRef(mode);
   const onChangeRef = useRef(onChange);
   const onDocumentChangeRef = useRef(onDocumentChange);
@@ -150,7 +151,8 @@ export function MarkdownEditor({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (editor.getDoc() === value) return;
+    if (lastValueRef.current === value) return;
+    lastValueRef.current = value;
     editor.setDoc(value);
   }, [value]);
 
