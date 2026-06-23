@@ -90,13 +90,14 @@ export function checkCoflatRef({
     const switchCommand = `git -C ${coflatDir} fetch origin ${expectedRef} && git -C ${coflatDir} checkout ${expectedRef}`;
     return {
       ok: false,
+      expectedRef,
       message: dirty
         ? `Coflat checkout is ${actualRef}, expected ${expectedRef}, and ${coflatDir} has local changes. Do not switch it in place unless that work is saved. For an isolated pinned check, run: pnpm check:pre-push. To fix a clean checkout, run: ${switchCommand}`
         : `Coflat checkout is ${actualRef}, expected ${expectedRef}. Run: ${switchCommand}`,
     };
   }
 
-  return { ok: true, actualRef };
+  return { ok: true, actualRef, expectedRef };
 }
 
 // Returns the doc files whose pinned coflat SHA disagrees with `expectedRef`.

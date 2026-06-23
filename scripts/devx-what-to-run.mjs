@@ -158,13 +158,17 @@ function addSuggestion(suggestions, cmd, file, ruleId) {
   suggestions.push({ ...cmd, files: [file], rules: [ruleId] });
 }
 
-function changedFiles(base) {
-  if (base) return git(["diff", "--name-only", `${base}...HEAD`]);
-  return [
-    ...git(["diff", "--name-only", "HEAD"]),
-    ...git(["diff", "--name-only", "--cached"]),
-    ...git(["ls-files", "--others", "--exclude-standard"]),
+export function changedFiles(base, gitFn = git, gitOneFn = gitOne) {
+  if (base) return gitFn(["diff", "--name-only", `${base}...HEAD`]);
+  const workingTreeFiles = [
+    ...gitFn(["diff", "--name-only", "HEAD"]),
+    ...gitFn(["diff", "--name-only", "--cached"]),
+    ...gitFn(["ls-files", "--others", "--exclude-standard"]),
   ];
+  if (workingTreeFiles.length > 0) return workingTreeFiles;
+  const upstream = gitOneFn(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+  if (!upstream || gitFn(["log", "--oneline", `${upstream}..HEAD`]).length === 0) return [];
+  return gitFn(["diff", "--name-only", `${upstream}...HEAD`]);
 }
 
 function git(args) {
@@ -176,6 +180,10 @@ function git(args) {
   } catch (_error) {
     return [];
   }
+}
+
+function gitOne(args) {
+  return git(args)[0] ?? "";
 }
 
 function printText(result) {

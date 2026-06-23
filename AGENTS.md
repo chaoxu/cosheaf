@@ -394,7 +394,10 @@ pnpm typecheck:server     # tsc --noEmit -p server/tsconfig.json
 pnpm check:types          # both
 pnpm check:lint           # bare-catch + boundary lints + biome
 pnpm check:static         # lint + types + knip (unused)
+pnpm check:pinned         # full local gate with an isolated pinned Coflat fallback
 pnpm check:pre-push       # fast local gate (run by lefthook)
+pnpm devx:pending         # unpushed/dirty work summary + suggested checks
+pnpm devx:review-prompt   # reviewer prompt from pending work + verification notes
 pnpm check:stability      # unit/API tests + browser smoke flows
 pnpm test                 # vitest
 pnpm build                # vite build

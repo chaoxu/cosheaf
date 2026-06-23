@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { suggestChecks } from "./devx-what-to-run.mjs";
+import { changedFiles, suggestChecks } from "./devx-what-to-run.mjs";
 
 describe("devx check suggestions", () => {
   it("maps web CSS changes to browser route checks", () => {
@@ -58,5 +58,36 @@ describe("devx check suggestions", () => {
     expect(result.suggestions.map((item) => item.run)).toContain(
       "pnpm exec vitest run scripts/devx.test.mjs scripts/browser-utils.test.mjs server/vite-dev-origin.test.ts server/vite-config.test.ts",
     );
+  });
+});
+
+describe("changed file detection", () => {
+  it("uses dirty working tree files before unpushed commits", () => {
+    const seen = [];
+    const files = changedFiles(null, (args) => {
+      seen.push(args.join(" "));
+      if (args.join(" ") === "diff --name-only HEAD") return ["server/routes/web-files.ts"];
+      if (args.join(" ") === "diff --name-only --cached") return ["server/routes/web-pulls.ts"];
+      return [];
+    }, () => "origin/main");
+    expect(files).toEqual(["server/routes/web-files.ts", "server/routes/web-pulls.ts"]);
+    expect(seen).not.toContain("diff --name-only origin/main...HEAD");
+  });
+
+  it("uses unpushed commits when the working tree is clean", () => {
+    const files = changedFiles(null, (args) => {
+      if (args.join(" ") === "log --oneline origin/main..HEAD") return ["abc1234 Update"];
+      if (args.join(" ") === "diff --name-only origin/main...HEAD") return ["scripts/pre-push-check.mjs"];
+      return [];
+    }, () => "origin/main");
+    expect(files).toEqual(["scripts/pre-push-check.mjs"]);
+  });
+
+  it("does not report upstream-only changes when the branch is only behind", () => {
+    const files = changedFiles(null, (args) => {
+      if (args.join(" ") === "diff --name-only origin/main...HEAD") return ["server/routes/web-files.ts"];
+      return [];
+    }, () => "origin/main");
+    expect(files).toEqual([]);
   });
 });

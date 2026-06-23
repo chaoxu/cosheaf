@@ -13,7 +13,7 @@ describe("checkCoflatRef", () => {
       coflatDir: ".",
       execFile: () => `${DEFAULT_COFLAT_REF}\n`,
     });
-    expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF });
+    expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF, expectedRef: DEFAULT_COFLAT_REF });
   });
 
   it("does not leak outer hook Git environment into the nested checkout", () => {
@@ -32,7 +32,7 @@ describe("checkCoflatRef", () => {
         return `${DEFAULT_COFLAT_REF}\n`;
       },
     });
-    expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF });
+    expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF, expectedRef: DEFAULT_COFLAT_REF });
     expect(childEnv.GIT_DIR).toBeUndefined();
     expect(childEnv.GIT_WORK_TREE).toBeUndefined();
     expect(childEnv.GIT_INDEX_FILE).toBeUndefined();
@@ -47,7 +47,7 @@ describe("checkCoflatRef", () => {
         coflatDir: ".",
         execFile: () => `${DEFAULT_COFLAT_REF}\n`,
       });
-      expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF });
+      expect(result).toEqual({ ok: true, actualRef: DEFAULT_COFLAT_REF, expectedRef: DEFAULT_COFLAT_REF });
     } finally {
       if (previous === undefined) delete process.env.COFLAT_REF;
       else process.env.COFLAT_REF = previous;

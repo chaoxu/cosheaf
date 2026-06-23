@@ -143,6 +143,7 @@ pnpm build            # Vite production build for page islands
 pnpm preview          # Preview built island assets on 0.0.0.0
 pnpm test             # vitest run
 pnpm check:stability  # unit/API tests plus server-rendered browser flows
+pnpm check:pinned     # full local gate in an isolated pinned Coflat worktree if needed
 pnpm check:pre-push   # Types + lint gates; falls back to pinned Coflat worktrees
 pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 ```
@@ -151,6 +152,8 @@ pnpm cli              # See `pnpm cli` for user/workspace/seed subcommands
 
 ```bash
 pnpm dev:worktree -- <name> [--base origin/main --fetch]
+pnpm devx:pending
+pnpm devx:review-prompt
 pnpm merge-task -- --branch <worker-branch> --check "rtk pnpm test"
 pnpm issue -- mine
 pnpm issue -- verify-close <number> --commit <sha> --verify "pnpm test"

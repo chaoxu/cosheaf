@@ -6,8 +6,14 @@
   runs the manual seed, starts `pnpm dev:all` if needed, writes Playwright login
   state, and prints route targets plus focused checks.
 - `pnpm devx:what-to-run` inspects changed files and prints the smallest useful
-  verification set. Pass explicit files to bypass git detection, or `--json`
-  when another script should consume the result.
+  verification set. It considers dirty files first, then unpushed commits
+  against the upstream branch. Pass explicit files to bypass git detection, or
+  `--json` when another script should consume the result.
+- `pnpm devx:pending` summarizes dirty/unpushed work, touched files, suggested
+  checks, and push readiness.
+- `pnpm devx:review-prompt` prints a reviewer prompt from the pending work. Add
+  `--verification "..."` or `--verification-file <path>` to include checks
+  already run.
 - `pnpm devx:verify-route` opens real browser pages and checks HTTP status,
   global-header scroll behavior, issue/PR filter visibility, asset 4xxs, and
   console errors. Defaults to the seeded activity/issues/pulls routes.
@@ -41,10 +47,13 @@
 ## Fast Checks
 
 - `pnpm check:local` runs the normal local gate: static checks, unit tests, Vite build, and server build.
-  `pnpm typecheck` and anything that depends on it require `../coflat` to match
-  the pinned Coflat ref. If the sibling checkout is dirty or on another branch,
-  save that work before switching it, or use `pnpm check:pre-push` for the
-  isolated pinned type/lint gate.
+  If `../coflat` is dirty or on another branch, it runs that gate in an
+  isolated copy of the current Cosheaf working tree with a pinned Coflat
+  worktree. Use `pnpm check:local:direct` only when you specifically want the
+  raw local sequence.
+- `pnpm check:pinned` is an explicit alias for the pinned-aware full local gate.
+- `pnpm check:pre-push` runs the faster type/lint gate and uses the same shared
+  pinned-Coflat fallback against committed `HEAD`.
 - `pnpm check:web:fast` runs the smaller server-rendered UI gate for low-risk
   markup/CSS changes: types, focused web route tests, Vite build, and server
   build.
