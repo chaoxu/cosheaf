@@ -139,4 +139,43 @@ describe("loadCoflatRefs", () => {
     expect(refs.citations?.keys.has("karger2000")).toBe(true);
     expect(fetchMock.mock.calls.map((call) => String(call[0])).some((url) => url.endsWith("/ieee"))).toBe(false);
   });
+
+  it("registers CSL citations in document order for numeric labels and bibliography entries", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/refs?ids=")) return new Response(JSON.stringify({ refs: [] }), { status: 200 });
+      if (url.endsWith("/refs.bib")) {
+        return new Response([
+          "@article{alpha2020,",
+          "  author = {Alpha, Alice},",
+          "  title = {First Paper},",
+          "  journal = {JACM},",
+          "  year = {2020}",
+          "}",
+          "",
+          "@article{beta2021,",
+          "  author = {Beta, Bob},",
+          "  title = {Second Paper},",
+          "  journal = {SICOMP},",
+          "  year = {2021}",
+          "}",
+        ].join("\n"));
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refs = await loadCoflatRefs({
+      ...payload,
+      bibliography: "refs.bib",
+      csl: "ieee",
+      source: "See [@beta2021] before [@alpha2020].",
+    });
+
+    expect(refs.citations?.formatter.cite(["beta2021"], [undefined])).toContain("[1]");
+    expect(refs.citations?.formatter.cite(["alpha2020"], [undefined])).toContain("[2]");
+    const bibliography = refs.citations?.formatter.bibliographyEntries(["beta2021", "alpha2020"]);
+    expect(bibliography?.map((entry) => entry.id)).toEqual(["beta2021", "alpha2020"]);
+    expect(bibliography?.[0]?.html).toContain("Second Paper");
+    expect(bibliography?.[1]?.html).toContain("First Paper");
+  });
 });

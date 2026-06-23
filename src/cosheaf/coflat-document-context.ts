@@ -1,6 +1,7 @@
 import type { CitationFormatter } from "@chaoxu/coflat/citeproc";
 import ieeeCslXml from "@chaoxu/coflat/latex/csl/ieee.csl?raw";
 import {
+  analyzeReferences,
   extractReferences,
   parseFrontmatter,
   resolveMarkdownReferencePathFromDocument,
@@ -212,7 +213,6 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
     citations: await loadCitations(
       payload,
       parsed.frontmatter ?? {},
-      payload.source,
       (id) => citationLocalTargets.has(id),
     ),
   };
@@ -276,7 +276,6 @@ function escapeHtml(value: string): string {
 async function loadCitations(
   payload: CoflatDocumentPayload,
   frontmatter: Record<string, unknown>,
-  source: string,
   isLocalTarget: (id: string) => boolean,
 ): Promise<CoflatCitations | null> {
   const bibliography = typeof frontmatter.bibliography === "string"
@@ -290,19 +289,40 @@ async function loadCitations(
   try {
     // Coflat owns BibTeX parsing, citation/crossref precedence, cluster
     // registration order, and CSL formatting. Cosheaf only fetches repo files.
-    const { prepareCitationFormatterFromSource } = await import("@chaoxu/coflat/citeproc");
-    const prepared = await prepareCitationFormatterFromSource({
-      source,
-      bibText,
-      cslXml: cslXml ?? undefined,
-      isLocalTarget,
-    });
-    if (!prepared) return null;
-    return { formatter: prepared.formatter, keys: prepared.keys };
+    const { CslProcessor, createCslCitationFormatter, parseBibTeX } = await import("@chaoxu/coflat/citeproc");
+    const entries = parseBibTeX(bibText).filter((entry) => !isLocalTarget(entry.id));
+    if (entries.length === 0) return null;
+    const processor = await CslProcessor.create(entries, cslXml ?? undefined);
+    const keys = new Set(entries.map((entry) => entry.id));
+    const formatter = createCslCitationFormatter(processor);
+    formatter.registerCitations(citationClusters(payload.source, keys, isLocalTarget));
+    return {
+      formatter,
+      keys,
+    };
   } catch (_error) {
     // A citeproc/bibliography failure must never break the rest of the render.
     return null;
   }
+}
+
+function citationClusters(
+  source: string,
+  keys: ReadonlySet<string>,
+  isLocalTarget: (id: string) => boolean,
+): Array<{ ids: string[]; locators: Array<string | undefined> }> {
+  const clusters: Array<{ ids: string[]; locators: Array<string | undefined> }> = [];
+  for (const ref of analyzeReferences(source).references) {
+    const ids: string[] = [];
+    const locators: Array<string | undefined> = [];
+    ref.ids.forEach((id, index) => {
+      if (!keys.has(id) || isLocalTarget(id)) return;
+      ids.push(id);
+      locators.push(ref.locators[index]);
+    });
+    if (ids.length > 0) clusters.push({ ids, locators });
+  }
+  return clusters;
 }
 
 // Fetch the raw .bib text, trying the document's branch then falling back to
