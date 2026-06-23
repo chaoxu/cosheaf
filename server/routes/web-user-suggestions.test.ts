@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
-import { seedAuthUser } from "../test-helpers.js";
+import { authHeaders, seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { web } from "./web.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
@@ -11,10 +11,6 @@ const config = testConfig("web-user-suggestions");
 
 function appFor(db: Database.Database): Hono<AppEnv> {
   return testApp(db, config, (app) => app.route("/", web));
-}
-
-function authHeaders(token: string): Record<string, string> {
-  return { cookie: `cosheaf_pat=${token}` };
 }
 
 describe("web user suggestions", () => {

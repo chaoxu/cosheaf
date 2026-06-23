@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { bootstrapSiteAdmins, effectiveRegistrationOpen, isSiteAdmin } from "../site-admin.js";
-import { seedAuthUser } from "../test-helpers.js";
+import { authHeaders, seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { handleAppError } from "./error-handler.js";
 import { web } from "./web.js";
@@ -15,10 +15,6 @@ function appFor(db: Database.Database): Hono<AppEnv> {
   const app = testApp(db, config, (hono) => hono.route("/", web));
   app.onError(handleAppError);
   return app;
-}
-
-function authHeaders(token: string): Record<string, string> {
-  return { cookie: `cosheaf_pat=${token}` };
 }
 
 function form(token: string, fields: Record<string, string>): RequestInit {

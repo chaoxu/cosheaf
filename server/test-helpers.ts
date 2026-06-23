@@ -33,3 +33,11 @@ export function seedAuthUser(
   }
   return token;
 }
+
+export function authHeaders(token: string): Record<string, string> {
+  return { cookie: `cosheaf_pat=${token}` };
+}
+
+export function formHeaders(token: string, contentType = "application/x-www-form-urlencoded"): Record<string, string> {
+  return { ...authHeaders(token), "content-type": contentType, origin: "http://localhost" };
+}

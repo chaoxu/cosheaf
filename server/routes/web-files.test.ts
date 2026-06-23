@@ -6,7 +6,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { indexPage } from "../indexer.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { _resetPdfExportLimiterForTest, _setPdfExportCommandRunnerForTest, _setPdfExportLimiterConfigForTest } from "../pdf-export.js";
-import { seedAuthUser } from "../test-helpers.js";
+import { authHeaders, formHeaders, seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
@@ -20,14 +20,6 @@ function appFor(db: Database.Database): Hono<AppEnv> {
     registerFileRoutes(app);
     registerBranchRoutes(app);
   });
-}
-
-function authHeaders(token: string): Record<string, string> {
-  return { cookie: `cosheaf_pat=${token}` };
-}
-
-function formHeaders(token: string, contentType = "application/x-www-form-urlencoded"): Record<string, string> {
-  return { ...authHeaders(token), "content-type": contentType, origin: "http://localhost" };
 }
 
 async function writeFakePdf(args: readonly string[]): Promise<void> {

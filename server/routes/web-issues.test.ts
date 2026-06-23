@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
-import { seedAuthUser } from "../test-helpers.js";
+import { formHeaders, seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 import { registerIssueRoutes } from "./web-issues.js";
@@ -11,14 +11,6 @@ const config = testConfig("web-issues");
 
 function appFor(db: Database.Database): Hono<AppEnv> {
   return testApp(db, config, (app) => registerIssueRoutes(app));
-}
-
-function formHeaders(token: string): Record<string, string> {
-  return {
-    cookie: `cosheaf_pat=${token}`,
-    "content-type": "application/x-www-form-urlencoded",
-    origin: "http://localhost",
-  };
 }
 
 const fetchMock = vi.fn();

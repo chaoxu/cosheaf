@@ -7,7 +7,7 @@ import {
   _resetMiddlewareCachesForTests,
   _seedTitleCacheForTests,
 } from "../middleware.js";
-import { seedAuthUser } from "../test-helpers.js";
+import { authHeaders, seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 import { mergeRepoTopics, registerSettingsRoutes } from "./web-settings.js";
@@ -16,10 +16,6 @@ const config = testConfig("web-settings");
 
 function appFor(db: Database.Database): Hono<AppEnv> {
   return testApp(db, config, (app) => registerSettingsRoutes(app));
-}
-
-function authHeaders(token: string): Record<string, string> {
-  return { cookie: `cosheaf_pat=${token}` };
 }
 
 const fetchMock = vi.fn();
