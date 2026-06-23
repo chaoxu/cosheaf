@@ -47,7 +47,11 @@ import {
 import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
-import { liveEditorSource, routeEditorChangeHandlers } from "./editor-change-routing";
+import {
+  IncrementalSourceCache,
+  liveEditorSource,
+  routeEditorChangeHandlers,
+} from "./editor-change-routing";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import "@chaoxu/coflat/style.css";
@@ -209,6 +213,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     [config.formatId],
   );
   const [content, setContent] = useState(initialContent);
+  const [contextSource, setContextSource] = useState(initialContent);
   const [currentPath, setCurrentPath] = useState(config.path);
   const [savedPath, setSavedPath] = useState(config.path);
   const [branch, setBranch] = useState(config.branch);
@@ -244,6 +249,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const railRef = useRef<HTMLElement | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
   const assetInputRef = useRef<HTMLInputElement | null>(null);
+  const sourceCacheRef = useRef(new IncrementalSourceCache(initialContent));
+  const contextSourceTimerRef = useRef<number | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const branchRef = useRef(branch);
   const currentPathRef = useRef(currentPath);
@@ -261,18 +268,43 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     writeEditorMode(next, config.username);
   }, [config.username]);
 
-  const handleEditorStringChange = useCallback((next: string) => {
+  const setEditorContent = useCallback((next: string) => {
+    sourceCacheRef.current.reset(next);
     setContent(next);
-    setUncommitted(true);
-    setSaveError(null);
+    setContextSource(next);
   }, []);
 
-  const handleCoflatDocumentChange = useCallback((_change: MountedDocumentChange) => {
-    // Keep Coflat's hot edit path metadata-only. Operations that require source
-    // text (save/upload/autocomplete/PR) read from the mounted editor handle.
+  const scheduleContextSourceSync = useCallback(() => {
+    if (contextSourceTimerRef.current !== null) window.clearTimeout(contextSourceTimerRef.current);
+    contextSourceTimerRef.current = window.setTimeout(() => {
+      contextSourceTimerRef.current = null;
+      setContextSource(sourceCacheRef.current.source());
+    }, 700);
+  }, []);
+
+  const handleEditorStringChange = useCallback((next: string) => {
+    setEditorContent(next);
     setUncommitted(true);
     setSaveError(null);
-  }, []);
+  }, [setEditorContent]);
+
+  const handleCoflatDocumentChange = useCallback((change: MountedDocumentChange) => {
+    // Keep Coflat's hot edit path metadata-only. Operations that require source
+    // text (save/upload/autocomplete/PR) read from the mounted editor handle.
+    // The document-context source is refreshed from an incremental Text cache
+    // after typing pauses, without calling editor.getDoc().
+    sourceCacheRef.current.apply(change);
+    scheduleContextSourceSync();
+    setUncommitted(true);
+    setSaveError(null);
+  }, [scheduleContextSourceSync]);
+
+  useEffect(
+    () => () => {
+      if (contextSourceTimerRef.current !== null) window.clearTimeout(contextSourceTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
@@ -310,8 +342,9 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     }
     let cancelled = false;
     if (!contextLoadedRef.current) setDocumentContextReady(false);
+    const sourceVersion = sourceCacheRef.current.version();
     const payload = {
-      source: content,
+      source: contextSource,
       owner: config.owner,
       repo: config.repo,
       branch,
@@ -322,7 +355,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       ...(config.csl ? { csl: config.csl } : {}),
     };
     void loadCoflatDocumentContext(payload).then((ctx) => {
-      if (cancelled) return;
+      if (cancelled || !sourceCacheRef.current.isCurrent(sourceVersion)) return;
       setDocumentContext(ctx);
       contextLoadedRef.current = true;
       setDocumentContextReady(true);
@@ -330,7 +363,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     return () => {
       cancelled = true;
     };
-  }, [branch, branchExists, config.bibliography, config.csl, config.formatId, config.mathMacros, config.owner, config.path, config.repo, content, currentPath]);
+  }, [branch, branchExists, config.bibliography, config.csl, config.formatId, config.mathMacros, config.owner, config.path, config.repo, contextSource, currentPath]);
 
   useEffect(() => {
     if (config.formatId !== COFLAT_FORMAT_ID) return;
@@ -356,7 +389,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     if (!root) return;
     let queued = false;
     const cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
-      source: content,
+      source: contextSource,
       context: documentContext,
       previewForReference: (key) => createReaderCitationClusterPreviewBody(key, documentContext),
     });
@@ -364,7 +397,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       queued = false;
       hydrateReferences(root, documentContext, {
         documentPath: currentPath.trim() || config.path,
-        source: content,
+        source: contextSource,
         surface: "editor",
       });
     };
@@ -380,7 +413,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       observer.disconnect();
       cleanupHoverPreviews();
     };
-  }, [config.path, content, currentPath, documentContext]);
+  }, [config.path, contextSource, currentPath, documentContext]);
 
   const branchForWrite = useCallback(() => {
     const current = branchRef.current;
@@ -468,7 +501,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         // Reconcile the server's frontmatter id into the controlled editor. This
         // now happens only on an explicit commit (rare), never every autosave
         // tick — so it no longer resets the doc and clobbers the selection (#161).
-        setContent(result.content ?? source);
+        setEditorContent(result.content ?? source);
         setBranch(result.branch);
         setBranchExists(true);
         setSavedReadBranch(result.branch);
@@ -487,7 +520,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo, config.branch, config.path],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path, setEditorContent],
   );
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
@@ -585,7 +618,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           const source = liveEditorSource(editorRef.current, content);
           const separator = source.length === 0 ? "" : source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
           const next = `${source}${separator}${snippets.join("\n")}\n`;
-          setContent(next);
+          setEditorContent(next);
           setUncommitted(true);
           setBranch(writeBranch);
           setBranchExists(true);
@@ -597,7 +630,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         if (assetInputRef.current) assetInputRef.current.value = "";
       }
     },
-    [assetUploader, branchForWrite, busy, config.owner, config.path, config.repo, content],
+    [assetUploader, branchForWrite, busy, config.owner, config.path, config.repo, content, setEditorContent],
   );
 
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
@@ -668,12 +701,12 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       setCurrentPath(pendingDraft.path);
       setPathDirty(pendingDraft.path !== savedPathRef.current);
     }
-    setContent(pendingDraft.source);
+    setEditorContent(pendingDraft.source);
     setUncommitted(true);
     setSaveError(null);
     toast("Restored local draft");
     setPendingDraft(null);
-  }, [pendingDraft]);
+  }, [pendingDraft, setEditorContent]);
 
   const discardDraft = useCallback(() => {
     clearDraft(config.owner, config.repo, config.branch, config.path);
