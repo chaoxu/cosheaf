@@ -426,6 +426,68 @@ describe("web pull request routes", () => {
     expect(body).not.toContain("No changed files");
   });
 
+  it("renders split source file sides from immutable PR SHAs, not moving branch names", async () => {
+    const db = freshTestDb("cosheaf-web-pulls-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const rawRefs: string[] = [];
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () =>
+          Response.json({
+            ...forgejoPull(),
+            state: "closed",
+            merged: true,
+            head: { ref: "user/bob/wip", sha: "head-sha" },
+            base: { ref: "main", sha: "base-sha" },
+          }),
+        );
+        forge.get("/api/v1/repos/owner/w/pulls/7/files", () =>
+          Response.json([
+            {
+              filename: "README.md",
+              status: "modified",
+              additions: 1,
+              deletions: 1,
+            },
+          ]),
+        );
+        forge.get("/api/v1/repos/owner/w/pulls/7.diff", () =>
+          new Response([
+            "diff --git a/README.md b/README.md",
+            "index old..new 100644",
+            "--- a/README.md",
+            "+++ b/README.md",
+            "@@ -1,3 +1,3 @@",
+            " # bandits",
+            " ",
+            "-K-armed bandits with possibly biased offline data",
+            "+Resolve the following research problem.",
+          ].join("\n")),
+        );
+        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([]));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", (c) => {
+          const ref = c.req.query("ref") ?? "";
+          rawRefs.push(ref);
+          if (ref === "base-sha") return c.text("# bandits\n\nK-armed bandits with possibly biased offline data\n");
+          if (ref === "head-sha") return c.text("# bandits\n\nResolve the following research problem.\n");
+          return c.text(`unexpected ref ${ref}`, 500);
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/pulls/7/files?file=README.md&mode=source&shape=split", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(rawRefs).toEqual(["base-sha", "head-sha"]);
+    expect(body).toContain("K-armed bandits with possibly biased offline data");
+    expect(body).toContain("Resolve the following research problem.");
+    expect(body).not.toContain("unexpected ref");
+  });
+
   it("surfaces PR edit metadata failures instead of rendering a milestone-clearing form", async () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);

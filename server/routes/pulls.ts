@@ -473,8 +473,9 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   const sha = side === "base" ? pull.base.sha : pull.head.sha;
+  const readPath = side === "base" ? await baseSidePath(fj, owner, repo, n, path) : path;
   try {
-    const content = await fj.getRawFile(owner, repo, sha, path);
+    const content = await fj.getRawFile(owner, repo, sha, readPath);
     return c.json({ content });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404)
@@ -482,6 +483,11 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
     throw err;
   }
 });
+
+async function baseSidePath(fj: Forgejo, owner: string, repo: string, n: number, path: string): Promise<string> {
+  const files = await fj.listPullFiles(owner, repo, n);
+  return files.find((file) => file.filename === path)?.previous_filename || path;
+}
 
 // ---------- reviews (approve / request-changes / comment) ----------
 

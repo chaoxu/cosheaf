@@ -850,6 +850,35 @@ describe("pulls + branches routes", () => {
     });
   });
 
+  describe("GET /pulls/:n/file raw side reads", () => {
+    it("reads renamed files from the previous path on the immutable base SHA", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "read");
+      const rawRequests: Array<{ path: string; ref: string | undefined }> = [];
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () =>
+          ok(pull({ head: { ref: "user/alice/wip", sha: "head-sha" }, base: { ref: "main", sha: "base-sha" } })),
+        );
+        forge.get("/api/v1/repos/owner/w/pulls/7/files", () =>
+          ok([{ filename: "new.md", previous_filename: "old.md", status: "renamed", additions: 1, deletions: 1, changes: 2 }]),
+        );
+        forge.get("/api/v1/repos/owner/w/raw/:path", (c) => {
+          rawRequests.push({ path: c.req.param("path"), ref: c.req.query("ref") });
+          return c.text("# Old\n");
+        });
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/file?path=new.md&side=base", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ content: "# Old\n" });
+      expect(rawRequests).toEqual([{ path: "old.md", ref: "base-sha" }]);
+    });
+  });
+
   describe("GET /pulls/:n/comments line/side mapping", () => {
     const addedFile = ["diff --git a/new.md b/new.md", "new file mode 100644", "--- /dev/null", "+++ b/new.md", "@@ -0,0 +1,2 @@", "+alpha", "+beta"].join("\n");
     const deletedFile = ["diff --git a/gone.md b/gone.md", "deleted file mode 100644", "--- a/gone.md", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-x", "-y"].join("\n");
