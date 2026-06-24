@@ -416,11 +416,33 @@ describe("GET /users/:username", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-testid="user-page"');
+    expect(body).toContain('class="user-profile-main"');
+    expect(body).toContain('class="user-profile-avatar"');
     expect(body).toContain("Bob Builder");
     expect(body).toContain('class="avatar-link" href="/users/bob"');
     expect(body).toContain("Builds notes.");
     expect(body).toContain("https://example.test/bob");
     expect(body).toContain('href="/bob/notes"');
+  });
+
+  it("puts the own-profile edit action in the profile header", async () => {
+    const db = freshTestDb("cosheaf-account-");
+    const token = seedAuthUser(db, config, { username: "alice" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/users/alice", () => Response.json({ id: 1, login: "alice", full_name: "Alice" }));
+        forge.get("/api/v1/users/alice/repos", () => Response.json([]));
+      }),
+    );
+
+    const res = await appFor(db).request("/users/alice", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('class="button user-profile-edit" href="/account/settings"');
   });
 
   it("returns a not-found page when Forgejo has no such user", async () => {

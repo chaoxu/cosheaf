@@ -574,18 +574,20 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
       statusPath: [{ label: "users" }, { label: profile.login }],
       body: html`<main class="page user-page" data-testid="user-page">
         <section class="settings-section user-profile-card">
-          <div class="settings-section-header user-profile-header">
-            ${avatarLinkForUser(profile)}
-            <div>
-              <h1>${displayName}</h1>
-              <p>${profile.login}</p>
-              <div class="profile-badges">
-                <span>${repoCount} ${repoCount === 1 ? "repository" : "repositories"}</span>
-                ${profile.active === false ? html`<span>Inactive</span>` : html`<span>Active</span>`}
-                ${profile.is_admin ? html`<span>Site admin</span>` : emptyHtml}
+          <div class="user-profile-header">
+            <div class="user-profile-main">
+              <div class="user-profile-avatar">${avatarLinkForUser(profile)}</div>
+              <div class="user-profile-identity">
+                <h1>${displayName}</h1>
+                <p>${profile.login}</p>
+                <div class="profile-badges">
+                  <span>${repoCount} ${repoCount === 1 ? "repository" : "repositories"}</span>
+                  ${profile.active === false ? html`<span>Inactive</span>` : html`<span>Active</span>`}
+                  ${profile.is_admin ? html`<span>Site admin</span>` : emptyHtml}
+                </div>
               </div>
             </div>
-            ${profile.login === auth.user.username ? html`<a class="button" href="/account/settings">Edit profile</a>` : emptyHtml}
+            ${profile.login === auth.user.username ? html`<a class="button user-profile-edit" href="/account/settings">Edit profile</a>` : emptyHtml}
           </div>
           ${profile.description ? html`<p>${profile.description}</p>` : emptyHtml}
           ${
