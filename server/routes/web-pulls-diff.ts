@@ -196,6 +196,14 @@ function renderSourceSplit(
   if (rows.length === 0) return html`<div data-testid="diff-pane-split"><pre class="patch empty">No textual diff.</pre></div>`;
   return html`<div data-testid="diff-pane-split" class="source-split-diff">
     <table class="source-split-lines">
+      <colgroup>
+        <col class="source-split-action">
+        <col class="source-split-line-no">
+        <col class="source-split-code">
+        <col class="source-split-action">
+        <col class="source-split-line-no">
+        <col class="source-split-code">
+      </colgroup>
       <thead><tr><th colspan="3">Base</th><th colspan="3">Head</th></tr></thead>
       <tbody>${rows.map((row) => renderSourceSplitRow(row, comments, form))}</tbody>
     </table>
