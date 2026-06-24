@@ -54,3 +54,17 @@ test("document rail reaches the status bar in reader and editor modes", async ({
   await expect(page.getByTestId("editor")).toBeVisible();
   await expectRailBottomAligned(page);
 });
+
+test("branch actions remain visible when the document rail is hidden", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/fixtures/side-by-side-rendering/hello.md`);
+  await expect(page.locator(".doc-mobile-actions").getByRole("link", { name: "Open PR" })).toBeVisible();
+
+  await page.goto(`${repoBase}/_edit?branch=fixtures%2Fside-by-side-rendering&path=hello.md`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  const mobileActions = page.locator(".web-editor-mobile-actions");
+  await expect(mobileActions.getByRole("button", { name: "Open PR" })).toBeVisible();
+  await expect(mobileActions.getByRole("button", { name: "Merge" })).toBeVisible();
+});

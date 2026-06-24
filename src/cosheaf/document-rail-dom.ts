@@ -70,6 +70,8 @@ function renderControl(control: DocumentRailControl, opts: DocumentRailRenderOpt
     el.className = "active";
     el.setAttribute("aria-current", "page");
   }
+  if (control.label === "Open PR") el.setAttribute("data-testid", "open-pull-request");
+  if (control.label === "Merge to main") el.setAttribute("data-testid", "merge-branch");
   el.textContent = control.label;
   if (opts.onControl) {
     el.addEventListener("click", (event) => {

@@ -43,6 +43,7 @@ export function documentRailModel(opts: {
   mode: DocumentRailMode;
   readHref: string;
   editHref?: string | null;
+  actionControls?: readonly DocumentRailControl[];
   fileControls?: readonly DocumentRailControl[];
   editorMode?: "rich" | "source";
   outline: readonly DocumentRailOutlineInput[];
@@ -58,17 +59,19 @@ export function documentRailGroups(opts: {
   mode: DocumentRailMode;
   readHref: string;
   editHref?: string | null;
+  actionControls?: readonly DocumentRailControl[];
   fileControls?: readonly DocumentRailControl[];
   editorMode?: "rich" | "source";
 }): readonly DocumentRailGroup[] {
   const groups: DocumentRailGroup[] = [
     {
-      label: "Mode",
+      label: "Actions",
       controls: [
         { kind: "link", label: "Read", href: opts.readHref, active: opts.mode === "read", modeLink: true },
         ...opts.editHref
           ? [{ kind: "link" as const, label: "Edit", href: opts.editHref, active: opts.mode === "edit", modeLink: true }]
           : [],
+        ...(opts.actionControls ?? []),
       ],
     },
   ];

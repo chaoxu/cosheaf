@@ -9,16 +9,17 @@ describe("document rail model", () => {
       editHref: "/edit",
       fileControls: [{ kind: "link", label: "Raw", href: "/raw" }],
     })).toMatchObject([
-      { label: "Mode", controls: [{ label: "Read", active: true }, { label: "Edit", active: false }] },
+      { label: "Actions", controls: [{ label: "Read", active: true }, { label: "Edit", active: false }] },
       { label: "File", controls: [{ label: "Raw", href: "/raw" }] },
     ]);
     expect(documentRailGroups({
       mode: "edit",
       readHref: "/read",
       editHref: "/edit",
+      actionControls: [{ kind: "button", label: "Open PR" }],
       editorMode: "source",
     })).toMatchObject([
-      { label: "Mode", controls: [{ label: "Read", active: false }, { label: "Edit", active: true }] },
+      { label: "Actions", controls: [{ label: "Read", active: false }, { label: "Edit", active: true }, { label: "Open PR" }] },
       { label: "Editor", controls: [{ label: "Rich", active: false }, { label: "Source", active: true }] },
     ]);
   });
@@ -47,7 +48,7 @@ describe("document rail model", () => {
     })).toEqual({
       groups: [
         {
-          label: "Mode",
+          label: "Actions",
           controls: [
             { kind: "link", label: "Read", href: "/read", active: false, modeLink: true },
             { kind: "link", label: "Edit", href: "/edit", active: true, modeLink: true },

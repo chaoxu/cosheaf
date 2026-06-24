@@ -151,6 +151,9 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const openPrHref = ctx.ws.role !== "read" && resolved.branch !== "main"
+    ? `${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`
+    : "";
   // Coflat-rendered markdown gets a shared document rail: view-switch actions
   // at the top and the table of contents below. The reader island fills the TOC
   // from Coflat's outline data, while the editor renders the same rail shape
@@ -168,7 +171,10 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const docBody =
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
-          <div class="doc-main">${preview}</div>
+          <div class="doc-main">
+            ${openPrHref ? html`<div class="doc-mobile-actions"><a class="button" href="${openPrHref}">Open PR</a></div>` : emptyHtml}
+            ${preview}
+          </div>
           <aside
             class="doc-rail"
             aria-label="Document tools"
@@ -176,6 +182,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             data-doc-mode="read"
             data-read-href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
             data-edit-href="${editableFileKind(kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, resolved.branch, rel) : ""}"
+            data-open-pr-href="${openPrHref}"
             data-pdf-href="${kind === "markdown" ? pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel) : ""}"
             data-raw-href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
           >

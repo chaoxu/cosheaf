@@ -41,7 +41,7 @@ function referencedKeySignature(source: string): string {
 
 function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; config: ComposeConfig }): ReactElement {
   const [value, setValue] = useState(textarea.value);
-  const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(document.body.dataset.cosheafUser));
+  const [mode] = useState<"rich" | "source">(() => readEditorMode(document.body.dataset.cosheafUser));
   const [documentContext, setDocumentContext] = useState<DocumentContext>(() => composeContext(config));
   const latestValueRef = useRef(value);
   const refSignature = useMemo(() => referencedKeySignature(value), [value]);
@@ -85,14 +85,6 @@ function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; co
   );
   return (
     <div className="coflat-compose-editor cf-theme-scope">
-      <div className="coflat-compose-toolbar">
-        <button type="button" className={mode === "rich" ? "active" : ""} onClick={() => setMode("rich")} aria-pressed={mode === "rich"}>
-          Rich
-        </button>
-        <button type="button" className={mode === "source" ? "active" : ""} onClick={() => setMode("source")} aria-pressed={mode === "source"}>
-          Source
-        </button>
-      </div>
       <MarkdownEditor
         value={value}
         mode={mode}

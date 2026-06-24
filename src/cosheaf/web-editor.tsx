@@ -816,10 +816,19 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // path that was never written.
   const readHref = repoBranchFileHref(config.owner, config.repo, savedReadBranch, savedPath);
   const outlineMathMacros = documentContext?.mathMacros;
+  const actionControls = useMemo(() => {
+    if (!branch || branch === "main") return [];
+    return [
+      ...(config.role === "admin" ? [{ kind: "button" as const, label: "Merge to main" }] : []),
+      { kind: "button" as const, label: "Open PR" },
+    ];
+  }, [branch, config.role]);
+  const branchActions = branch && branch !== "main";
   const railModel = documentRailModel({
     mode: "edit",
     readHref,
     editHref: window.location.href,
+    actionControls,
     editorMode: config.formatId === COFLAT_FORMAT_ID ? mode : undefined,
     outline: outline.map((entry) => ({
       key: entry.key,
@@ -840,13 +849,15 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         onControl: (control) => {
           if (control.label === "Source") setEditorMode("source");
           else if (control.label === "Rich") setEditorMode("rich");
+          else if (control.label === "Open PR" && !busy) void openPullRequest(false);
+          else if (control.label === "Merge to main" && !busy) void openPullRequest(true);
         },
         onOutlineItem: (entry) => {
           if (typeof entry.line === "number") editorRef.current?.scrollToLine(entry.line, { center: true });
         },
       },
     );
-  }, [outlineMathMacros, railModel, setEditorMode]);
+  }, [busy, openPullRequest, outlineMathMacros, railModel, setEditorMode]);
 
   return (
     <div className={readerClass}>
@@ -990,17 +1001,17 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           <button type="button" data-testid="editor-upload-asset" onClick={() => assetInputRef.current?.click()} disabled={busy}>
             Upload
           </button>
-          {branch && branch !== "main" ? (
-            <>
+          {branchActions ? (
+            <span className="web-editor-mobile-actions" aria-label="Branch actions">
               {config.role === "admin" ? (
-                <button type="button" data-testid="merge-branch" onClick={() => void openPullRequest(true)} disabled={busy}>
-                  Merge to main
+                <button type="button" onClick={() => void openPullRequest(true)} disabled={busy}>
+                  Merge
                 </button>
               ) : null}
-              <button type="button" data-testid="open-pull-request" onClick={() => void openPullRequest(false)} disabled={busy}>
+              <button type="button" onClick={() => void openPullRequest(false)} disabled={busy}>
                 Open PR
               </button>
-            </>
+            </span>
           ) : null}
           <a className="web-editor-cancel" data-testid="editor-cancel" href={readHref}>
             Cancel
