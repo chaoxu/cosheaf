@@ -56,6 +56,11 @@ export interface CoflatCitations {
   keys: ReadonlySet<string>;
 }
 
+interface CitationCluster {
+  readonly ids: readonly string[];
+  readonly locators?: readonly (string | undefined)[];
+}
+
 export interface RenderedCrossref {
   label: string;
   href?: string;
@@ -322,9 +327,10 @@ async function loadCitations(
     const processor = await CslProcessor.create(entries, cslXml ?? undefined);
     const keys = new Set(entries.map((entry) => entry.id));
     const formatter = createCslCitationFormatter(processor);
-    formatter.registerCitations(citationClusters(payload.source, keys, isLocalTarget));
+    const clusters = citationClusters(payload.source, keys, isLocalTarget);
+    formatter.registerCitations(clusters);
     return {
-      formatter,
+      formatter: fullDocumentCitationFormatter(formatter, clusters),
       keys,
     };
   } catch (_error) {
@@ -333,11 +339,38 @@ async function loadCitations(
   }
 }
 
+function fullDocumentCitationFormatter(formatter: CitationFormatter, fullClusters: readonly CitationCluster[]): CitationFormatter {
+  const fullRegistrationKey = citationRegistrationKey(fullClusters);
+  return {
+    cite: (ids, locators) => formatter.cite(ids, locators),
+    citeNarrative: (id) => formatter.citeNarrative(id),
+    bibliographyEntries: (citedIds) => formatter.bibliographyEntries(citedIds),
+    registerCitations: (clusters) => {
+      if (citationRegistrationKey(clusters) === fullRegistrationKey) {
+        formatter.registerCitations(clusters);
+      }
+    },
+    get citationRegistrationKey() {
+      return formatter.citationRegistrationKey;
+    },
+    get revision() {
+      return formatter.revision;
+    },
+  };
+}
+
+function citationRegistrationKey(clusters: readonly CitationCluster[]): string {
+  return clusters
+    .map((cluster) => cluster.ids.map((id, index) =>
+      `${id}\0${cluster.locators?.[index] ?? ""}`).join("\u0001"))
+    .join("\u0002");
+}
+
 function citationClusters(
   source: string,
   keys: ReadonlySet<string>,
   isLocalTarget: (id: string) => boolean,
-): Array<{ ids: string[]; locators: Array<string | undefined> }> {
+): CitationCluster[] {
   const clusters: Array<{ ids: string[]; locators: Array<string | undefined> }> = [];
   for (const ref of analyzeReferences(source).references) {
     const ids: string[] = [];
