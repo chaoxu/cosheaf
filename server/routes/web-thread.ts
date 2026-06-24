@@ -659,11 +659,13 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   if (item.kind === "review") {
     const label = reviewStateLabel(item.review.state);
     const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
-    return html`<div class="timeline-event">
-      <strong>${userLink(item.review.user?.login)}</strong>
-      <span>${label}</span>
-      <small>${timeEl(item.review.submitted_at)}</small>
-      ${body}
+    return html`<div class="timeline-event timeline-review">
+      <div class="timeline-event-meta">
+        <strong>${userLink(item.review.user?.login)}</strong>
+        <span>${label}</span>
+        <small>${timeEl(item.review.submitted_at)}</small>
+      </div>
+      ${body ? html`<div class="timeline-event-body">${body}</div>` : emptyHtml}
     </div>`;
   }
   if (item.kind === "commit") {
