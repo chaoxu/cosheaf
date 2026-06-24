@@ -4,13 +4,14 @@
 // file stays focused; the handlers import the small exported surface here.
 
 import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
-import { chunks } from "../diff-parse.js";
 import { resolveLineComment, type Side } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import type { ForgejoPull } from "../forgejo.js";
 import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
+import { prSideRefAndPath } from "../pr-side.js";
+import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
 import { html, type Html } from "./web-html.js";
 import { renderMarkdownSurface } from "./web-markdown.js";
@@ -43,6 +44,8 @@ interface WebLineComment {
   outdated: boolean;
 }
 
+type LineCommentIndex = Map<string, WebLineComment[]>;
+
 // Rich diff renders through the Coflat reader island, which only exists for
 // the coflat format. For forgejo-passthrough there is no rich surface, so we
 // coerce to source regardless of the requested/saved mode — the server is the
@@ -59,9 +62,9 @@ export function parseDiffShape(value: string | undefined, mode: DiffMode): DiffS
 
 export async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, file: { path: string; previous_path?: string }): Promise<PrFileVersions> {
   const read = (ref: string, p: string) => ctx.fj.getRawFile(ctx.owner, ctx.repo, ref, p).catch(onForgejo404(""));
-  // A renamed file lives under its OLD name on the base ref; reading the new name
-  // there would 404 → empty Base → wrong "new file" rendering (it isn't new).
-  const [base, head] = await Promise.all([read(pull.base.sha, file.previous_path ?? file.path), read(pull.head.sha, file.path)]);
+  const baseSide = prSideRefAndPath(pull, file, "base");
+  const headSide = prSideRefAndPath(pull, file, "head");
+  const [base, head] = await Promise.all([read(baseSide.ref, baseSide.path), read(headSide.ref, headSide.path)]);
   return { base, head };
 }
 
@@ -80,12 +83,13 @@ export async function renderPrFileView(
   const nextVersions = versions ?? (await prFileVersions(ctx, pull, file));
   const changed = changedLines(file.patch);
   const commentable = commentableLines(file.patch);
+  const commentIndex = indexLineComments(comments);
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
   if (mode === "source" && shape === "split") {
-    return renderSourceSplit(file.patch, comments, commentForm);
+    return renderSourceSplit(file.patch, commentIndex, commentForm);
   }
   if (mode === "source") {
-    return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", file.status, changed.added, commentable.head, comments, commentForm)}</div>`;
+    return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", file.status, changed.added, commentable.head, commentIndex, commentForm)}</div>`;
   }
   // Rich split: render each side through the reader, but show the empty-side
   // notice when a version is absent (new/deleted file) rather than a blank reader.
@@ -94,9 +98,11 @@ export async function renderPrFileView(
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
       : renderMarkdownSurface(ctx, src, { branch, documentPath: file.path, surface: "diff", markedLines: [...marked] });
   if (shape === "split") {
+    const baseSide = prSideRefAndPath(pull, file, "base");
+    const headSide = prSideRefAndPath(pull, file, "head");
     const [base, head] = await Promise.all([
-      renderSide(nextVersions.base, pull.base.sha, changed.deleted, "base"),
-      renderSide(nextVersions.head, pull.head.sha, changed.added, "head"),
+      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base"),
+      renderSide(nextVersions.head, headSide.ref, changed.added, "head"),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
@@ -109,7 +115,7 @@ export async function renderPrFileView(
   const head =
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
-      : await renderMarkdownSurface(ctx, nextVersions.head, { branch: pull.head.sha, documentPath: file.path, surface: "diff", markedLines: [...changed.added] });
+      : await renderMarkdownSurface(ctx, nextVersions.head, { branch: prSideRefAndPath(pull, file, "head").ref, documentPath: file.path, surface: "diff", markedLines: [...changed.added] });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
@@ -158,7 +164,7 @@ function sourcePane(
   status: string,
   marked: ReadonlySet<number>,
   commentable: ReadonlySet<number>,
-  comments: readonly WebLineComment[],
+  comments: LineCommentIndex,
   form: LineCommentFormOptions | null,
 ): Html {
   const lines = source.split("\n");
@@ -166,7 +172,7 @@ function sourcePane(
   if (lines.length === 0) return html`<section><h3>${title}</h3>${diffSideEmptyNotice(status, side)}</section>`;
   return html`<section><h3>${title}</h3><table class="source-lines"><tbody>${lines.map((line, index) => {
     const lineNo = index + 1;
-    const lineComments = comments.filter((comment) => comment.side === side && comment.line === lineNo);
+    const lineComments = lineCommentsFor(comments, side, lineNo);
     const composer = form && commentable.has(lineNo) ? lineCommentComposer(form, side, lineNo) : "";
     return html`<tr class="${marked.has(lineNo) ? "marked" : ""}" data-testid="source-line-${side}-${lineNo}">
         <td class="line-action">${composer}</td>
@@ -176,20 +182,9 @@ function sourcePane(
   })}</tbody></table></section>`;
 }
 
-interface SourceSplitCell {
-  side: Side;
-  line: number;
-  text: string;
-  kind: "ctx" | "add" | "del";
-}
-
-type SourceSplitRow =
-  | { kind: "hunk"; text: string }
-  | { kind: "pair"; base: SourceSplitCell | null; head: SourceSplitCell | null };
-
 function renderSourceSplit(
   patch: string,
-  comments: readonly WebLineComment[],
+  comments: LineCommentIndex,
   form: LineCommentFormOptions | null,
 ): Html {
   const rows = sourceSplitRows(patch);
@@ -210,65 +205,40 @@ function renderSourceSplit(
   </div>`;
 }
 
-function sourceSplitRows(patch: string): SourceSplitRow[] {
-  const out: SourceSplitRow[] = [];
-  for (const chunk of chunks(patch)) {
-    out.push({ kind: "hunk", text: chunk.content });
-    for (let i = 0; i < chunk.changes.length; i++) {
-      const change = chunk.changes[i];
-      if (change.content.startsWith("\\")) continue;
-      if (change.type === "normal") {
-        out.push({
-          kind: "pair",
-          base: change.ln1 === undefined ? null : { side: "base", line: change.ln1, text: change.content.slice(1), kind: "ctx" },
-          head: change.ln2 === undefined ? null : { side: "head", line: change.ln2, text: change.content.slice(1), kind: "ctx" },
-        });
-        continue;
-      }
-      if (change.type !== "del") {
-        const line = change.ln;
-        out.push({ kind: "pair", base: null, head: line === undefined ? null : { side: "head", line, text: change.content.slice(1), kind: "add" } });
-        continue;
-      }
-
-      const deleted: SourceSplitCell[] = [];
-      while (i < chunk.changes.length) {
-        const del = chunk.changes[i];
-        if (del.type !== "del" || del.content.startsWith("\\")) break;
-        if (del.ln !== undefined) deleted.push({ side: "base", line: del.ln, text: del.content.slice(1), kind: "del" });
-        i++;
-      }
-      const added: SourceSplitCell[] = [];
-      while (i < chunk.changes.length) {
-        const add = chunk.changes[i];
-        if (add.type !== "add" || add.content.startsWith("\\")) break;
-        if (add.ln !== undefined) added.push({ side: "head", line: add.ln, text: add.content.slice(1), kind: "add" });
-        i++;
-      }
-      i--;
-      const n = Math.max(deleted.length, added.length);
-      for (let j = 0; j < n; j++) out.push({ kind: "pair", base: deleted[j] ?? null, head: added[j] ?? null });
-    }
-  }
-  return out;
-}
-
 function renderSourceSplitRow(
   row: SourceSplitRow,
-  comments: readonly WebLineComment[],
+  comments: LineCommentIndex,
   form: LineCommentFormOptions | null,
 ): Html {
   if (row.kind === "hunk") {
     return html`<tr class="hunk"><td colspan="6"><pre>${row.text}</pre></td></tr>`;
   }
-  const baseComments = row.base ? comments.filter((comment) => comment.side === "base" && comment.line === row.base?.line) : [];
-  const headComments = row.head ? comments.filter((comment) => comment.side === "head" && comment.line === row.head?.line) : [];
+  const baseComments = row.base ? lineCommentsFor(comments, "base", row.base.line) : [];
+  const headComments = row.head ? lineCommentsFor(comments, "head", row.head.line) : [];
   return html`<tr>
       ${sourceSplitCell(row.base, form)}
       ${sourceSplitCell(row.head, form)}
     </tr>${baseComments.length > 0 || headComments.length > 0
       ? html`<tr class="source-split-comment-row"><td colspan="3">${baseComments.map(renderInlineCommentBlock)}</td><td colspan="3">${headComments.map(renderInlineCommentBlock)}</td></tr>`
       : ""}`;
+}
+
+function indexLineComments(comments: readonly WebLineComment[]): LineCommentIndex {
+  const out: LineCommentIndex = new Map();
+  for (const comment of comments) {
+    if (comment.line === null) continue;
+    const key = lineCommentKey(comment.side, comment.line);
+    out.set(key, [...(out.get(key) ?? []), comment]);
+  }
+  return out;
+}
+
+function lineCommentsFor(index: LineCommentIndex, side: Side, line: number): readonly WebLineComment[] {
+  return index.get(lineCommentKey(side, line)) ?? [];
+}
+
+function lineCommentKey(side: Side, line: number): string {
+  return `${side}:${line}`;
 }
 
 function sourceSplitCell(cell: SourceSplitCell | null, form: LineCommentFormOptions | null): Html {
@@ -321,22 +291,23 @@ function lineCommentComposer(form: LineCommentFormOptions, side: Side, line: num
 function renderInlineComment(comment: WebLineComment): Html {
   return html`<tr class="line-comment-row" data-testid="line-comment-${comment.id}">
     <td></td>
-    <td colspan="2">
-      <div class="line-comment ${comment.outdated ? "outdated" : ""}">
-        <strong>${comment.author}</strong>
-        <span>${comment.outdated ? "outdated" : timeEl(comment.createdAt)}</span>
-        ${comment.bodyHtml}
-      </div>
-    </td>
+    <td colspan="2">${lineCommentBody(comment)}</td>
   </tr>`;
 }
 
 function renderInlineCommentBlock(comment: WebLineComment): Html {
-  return html`<div class="line-comment ${comment.outdated ? "outdated" : ""}" data-testid="line-comment-${comment.id}">
+  return lineCommentBody(comment, true);
+}
+
+function lineCommentBody(comment: WebLineComment, includeTestId = false): Html {
+  const content = html`
     <strong>${comment.author}</strong>
     <span>${comment.outdated ? "outdated" : timeEl(comment.createdAt)}</span>
     ${comment.bodyHtml}
-  </div>`;
+  `;
+  return includeTestId
+    ? html`<div class="line-comment ${comment.outdated ? "outdated" : ""}" data-testid="line-comment-${comment.id}">${content}</div>`
+    : html`<div class="line-comment ${comment.outdated ? "outdated" : ""}">${content}</div>`;
 }
 
 // Render each comment body through the same markdown surface the conversation

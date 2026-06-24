@@ -40,6 +40,7 @@ import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
+import { prSideRefAndPath } from "../pr-side.js";
 import { safeRel } from "./files.js";
 import { validBranchName } from "../branch-path.js";
 import { allDocumentFormats } from "../format-registry.js";
@@ -472,10 +473,10 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  const sha = side === "base" ? pull.base.sha : pull.head.sha;
-  const readPath = side === "base" ? await baseSidePath(fj, owner, repo, n, path) : path;
+  const file = { path, previous_path: side === "base" ? await previousPathFor(fj, owner, repo, n, path) : undefined };
+  const read = prSideRefAndPath(pull, file, side);
   try {
-    const content = await fj.getRawFile(owner, repo, sha, readPath);
+    const content = await fj.getRawFile(owner, repo, read.ref, read.path);
     return c.json({ content });
   } catch (err) {
     if (err instanceof ForgejoError && err.status === 404)
@@ -484,9 +485,9 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   }
 });
 
-async function baseSidePath(fj: Forgejo, owner: string, repo: string, n: number, path: string): Promise<string> {
+async function previousPathFor(fj: Forgejo, owner: string, repo: string, n: number, path: string): Promise<string | undefined> {
   const files = await fj.listPullFiles(owner, repo, n);
-  return files.find((file) => file.filename === path)?.previous_filename || path;
+  return files.find((file) => file.filename === path)?.previous_filename;
 }
 
 // ---------- reviews (approve / request-changes / comment) ----------
