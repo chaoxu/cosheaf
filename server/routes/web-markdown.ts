@@ -1,4 +1,5 @@
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { loadRepoConfig } from "../repo-config.js";
 import type { WebCtx } from "./web-context.js";
@@ -19,6 +20,7 @@ export type SurfaceOpts = {
   // the rich-diff "after" pane also renders with surface "document" but must NOT
   // show a title.
   renderTitle?: boolean;
+  assetPreviewPaths?: AssetPreviewPaths;
 };
 
 function coflatSurfaceClass(surface: MarkdownSurface): string {
@@ -62,6 +64,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
     ...(Object.keys(repoConfig.mathMacros).length ? { mathMacros: repoConfig.mathMacros } : {}),
     ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
     ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
+    ...(opts.assetPreviewPaths && Object.keys(opts.assetPreviewPaths).length ? { assetPreviewPaths: opts.assetPreviewPaths } : {}),
   };
 }
 

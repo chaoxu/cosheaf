@@ -27,6 +27,7 @@ import type { ReactNode } from "react";
 import { lazy, StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import {
   MAX_ASSET_BYTES,
@@ -74,6 +75,7 @@ interface EditorConfig {
   mathMacros: Record<string, string>;
   bibliography?: string;
   csl?: string;
+  assetPreviewPaths: AssetPreviewPaths;
 }
 
 interface EditorRepoConfigPayload {
@@ -147,9 +149,13 @@ function readConfig(): { config: EditorConfig; content: string } {
   const mount = document.getElementById("web-editor-root");
   const payload = document.getElementById("web-editor-content");
   const repoConfigScript = document.getElementById("web-editor-repo-config");
+  const assetPreviewsScript = document.getElementById("web-editor-asset-previews");
   if (!mount || !payload) throw new Error("missing web editor mount payload");
   const repoConfig = repoConfigScript?.textContent
     ? JSON.parse(repoConfigScript.textContent) as EditorRepoConfigPayload
+    : {};
+  const assetPreviewPaths = assetPreviewsScript?.textContent
+    ? JSON.parse(assetPreviewsScript.textContent) as AssetPreviewPaths
     : {};
   return {
     config: {
@@ -166,6 +172,7 @@ function readConfig(): { config: EditorConfig; content: string } {
       sourceSha: mount.dataset.sourceSha || null,
       resetEditBranch: mount.dataset.resetEditBranch === "1",
       mathMacros: repoConfig.mathMacros ?? {},
+      assetPreviewPaths,
       ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
       ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
     },
@@ -253,6 +260,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const contextSourceTimerRef = useRef<number | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const branchRef = useRef(branch);
+  const branchExistsRef = useRef(branchExists);
+  const savedReadBranchRef = useRef(savedReadBranch);
   const currentPathRef = useRef(currentPath);
   const savedPathRef = useRef(savedPath);
   const savedShaRef = useRef<string | null | undefined>(config.baseSha);
@@ -260,6 +269,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const resetEditBranchRef = useRef(config.resetEditBranch);
   const contextLoadedRef = useRef(config.formatId !== COFLAT_FORMAT_ID);
   branchRef.current = branch;
+  branchExistsRef.current = branchExists;
+  savedReadBranchRef.current = savedReadBranch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
 
@@ -351,6 +362,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       branchExists,
       path: currentPath.trim() || config.path,
       mathMacros: config.mathMacros,
+      assetPreviewPaths: config.assetPreviewPaths,
       ...(config.bibliography ? { bibliography: config.bibliography } : {}),
       ...(config.csl ? { csl: config.csl } : {}),
     };
@@ -363,7 +375,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     return () => {
       cancelled = true;
     };
-  }, [branch, branchExists, config.bibliography, config.csl, config.formatId, config.mathMacros, config.owner, config.path, config.repo, contextSource, currentPath]);
+  }, [branch, branchExists, config.assetPreviewPaths, config.bibliography, config.csl, config.formatId, config.mathMacros, config.owner, config.path, config.repo, contextSource, currentPath]);
 
   useEffect(() => {
     if (config.formatId !== COFLAT_FORMAT_ID) return;
@@ -424,10 +436,12 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   const fileSystem = useMemo<FileSystem | undefined>(() => {
     if (config.formatId !== COFLAT_FORMAT_ID) return undefined;
     const readBranch = () => branchRef.current || config.branch || "main";
+    const readExistingBranch = () => branchExistsRef.current ? readBranch() : savedReadBranchRef.current;
+    const displayAssetPath = (path: string): string => previewAssetPath(path, config.assetPreviewPaths);
     const readFile = async (path: string): Promise<string> =>
-      fetchRawRepoFile(config.owner, config.repo, readBranch(), path).then((res) => res.text());
+      fetchRawRepoFile(config.owner, config.repo, readExistingBranch(), path).then((res) => res.text());
     const readFileBinary = async (path: string): Promise<Uint8Array> => {
-      const buffer = await fetchRawRepoFile(config.owner, config.repo, readBranch(), path).then((res) => res.arrayBuffer());
+      const buffer = await fetchRawRepoFile(config.owner, config.repo, readExistingBranch(), path).then((res) => res.arrayBuffer());
       return new Uint8Array(buffer);
     };
     const unsupportedWrite = async (): Promise<void> => {
@@ -440,7 +454,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       createFile: unsupportedWrite,
       exists: async (path: string): Promise<boolean> => {
         try {
-          await fetchRawRepoFile(config.owner, config.repo, readBranch(), path);
+          await fetchRawRepoFile(config.owner, config.repo, readExistingBranch(), path);
           return true;
         } catch (_error) {
           return false;
@@ -451,9 +465,15 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       deleteFile: unsupportedWrite,
       writeFileBinary: unsupportedWrite,
       readFileBinary,
-      resolveAssetUrl: (path: string): string => rawRepoFileHref(config.owner, config.repo, readBranch(), path),
+      resolveAssetUrl: (path: string, options?: { purpose?: "source" | "display" }): string =>
+        rawRepoFileHref(
+          config.owner,
+          config.repo,
+          readExistingBranch(),
+          options?.purpose === "source" ? path : displayAssetPath(path),
+        ),
     };
-  }, [config.branch, config.formatId, config.owner, config.repo]);
+  }, [config.assetPreviewPaths, config.branch, config.formatId, config.owner, config.repo]);
 
   // Autosave (#162): persist the in-progress source to a local draft. No
   // network, no commit, no branch creation — so it can never clobber the
@@ -579,6 +599,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           const result = await api.uploadAsset(config.owner, config.repo, writeBranch, file);
           setBranch(writeBranch);
           setBranchExists(true);
+          setSavedReadBranch(writeBranch);
           return { path: relativeAssetPath(env.from ?? (currentPathRef.current.trim() || config.path), result.path) };
         } catch (err) {
           return { error: err instanceof ApiError ? err.message : "upload failed" };
@@ -622,6 +643,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           setUncommitted(true);
           setBranch(writeBranch);
           setBranchExists(true);
+          setSavedReadBranch(writeBranch);
         }
       } catch (err) {
         toast(`Upload failed: ${err instanceof ApiError ? err.message : "upload failed"}`, "error");

@@ -7,6 +7,7 @@ import {
   resolveMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
+import { previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { rawRepoBranchFileHref, repoBranchFileHref } from "../../shared/url";
 
@@ -33,6 +34,8 @@ export interface CoflatDocumentPayload {
   /** Repo-wide paper defaults from cosheaf.yaml; document frontmatter wins. */
   bibliography?: string;
   csl?: string;
+  /** Browser-displayable asset previews, e.g. foo.pdf -> foo.png. */
+  assetPreviewPaths?: AssetPreviewPaths;
 }
 
 export interface CoflatDocumentRefs {
@@ -92,6 +95,30 @@ export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string)
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
   return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+}
+
+export function resolveRawRepoDisplayAssetLink(payload: CoflatDocumentPayload, href: string): string | null {
+  const clean = href.trim();
+  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
+    return null;
+  }
+  const [withoutHash, hash = ""] = clean.split("#", 2);
+  const normalized = normalizeRepoPath(payload, withoutHash);
+  if (!normalized || normalized.split("/").includes("..")) return null;
+  const assetPath = previewAssetPath(normalized, payload.assetPreviewPaths);
+  return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+}
+
+function resolveRawRepoAssetPath(payload: CoflatDocumentPayload, path: string, purpose: "source" | "display"): string | null {
+  const clean = path.trim();
+  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
+    return null;
+  }
+  const [withoutHash, hash = ""] = clean.split("#", 2);
+  const decodedPath = decodeMarkdownPathHref(withoutHash);
+  if (!decodedPath || decodedPath.split("/").includes("..")) return null;
+  const assetPath = purpose === "display" ? previewAssetPath(decodedPath, payload.assetPreviewPaths) : decodedPath;
+  return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {
@@ -170,7 +197,7 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
       readFileBinary: async () => {
         throw new Error("Reader context does not provide binary file reads.");
       },
-      resolveAssetUrl: (path) => resolveRawRepoLink(payload, path) ?? path,
+      resolveAssetUrl: (path, options) => resolveRawRepoAssetPath(payload, path, options?.purpose ?? "display") ?? path,
     },
     refResolver: {
       resolve: (key, _mode, env) => {

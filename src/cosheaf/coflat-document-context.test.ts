@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  coflatDocumentContext,
   type CoflatDocumentPayload,
   loadCoflatRefs,
   resolveMathMacros,
+  resolveRawRepoDisplayAssetLink,
   resolveRawRepoLink,
   resolveRepoLink,
 } from "./coflat-document-context";
@@ -70,6 +72,35 @@ describe("resolveRepoLink", () => {
     );
     expect(resolveRawRepoLink(payload, "assets/my%20figure(1%29.png")).toBe(
       "/chao/poa-network-game/raw/branch/main/notes/assets/my%20figure(1).png",
+    );
+  });
+
+  it("uses preview images only for raw asset URLs", () => {
+    const withPreviews = {
+      ...payload,
+      assetPreviewPaths: { "notes/figures/pipeline.pdf": "notes/figures/pipeline.png" },
+    };
+    expect(resolveRawRepoLink(withPreviews, "figures/pipeline.pdf")).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.pdf",
+    );
+    expect(resolveRawRepoDisplayAssetLink(withPreviews, "figures/pipeline.pdf")).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.png",
+    );
+  });
+
+  it("resolves Coflat file-system asset paths as workspace-relative", () => {
+    const context = coflatDocumentContext({
+      ...payload,
+      assetPreviewPaths: { "notes/figures/pipeline.pdf": "notes/figures/pipeline.png" },
+    }, { workspaceCrossrefs: new Map(), citations: null });
+    const fileSystem = context.fileSystem;
+    expect(fileSystem).toBeDefined();
+
+    expect(fileSystem?.resolveAssetUrl("notes/figures/pipeline.pdf", { purpose: "source" })).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.pdf",
+    );
+    expect(fileSystem?.resolveAssetUrl("notes/figures/pipeline.pdf", { purpose: "display" })).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.png",
     );
   });
 });

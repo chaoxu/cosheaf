@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
@@ -50,7 +51,8 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
     const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
-    const readme = await repoReadme(ctx, "main", files);
+    const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
+    const readme = await repoReadme(ctx, "main", files, assetPreviewPaths);
     const stats = {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
       branches: branches.length,
@@ -110,11 +112,12 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     repoFiles(fj, owner, repo, resolved.branch),
     fj.listBranches(owner, repo).catch(() => []),
   ]);
+  const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
   if (!resolved.path) {
     const branchTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
     // The sidebar tree is the file navigator; the main panel shows the branch's
     // README (or a title-first page index), never a second copy of the file list.
-    const readme = await repoReadme(ctx, resolved.branch, files);
+    const readme = await repoReadme(ctx, resolved.branch, files, assetPreviewPaths);
     return htmlResponse(
       repoPageShell(ctx, "files", `${repo}: ${resolved.branch}`, html`
           <div class="page-title compact page-title--actions-only">
@@ -144,7 +147,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const previewKind = await previewKindForFile(fj, owner, repo, resolved.branch, rel, kind, meta.size);
   const rendered =
     kind === "markdown" && content !== null && !sourceView
-      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true })
+      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true, assetPreviewPaths })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
@@ -155,7 +158,12 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
   const sourceRailPayload =
     coflatMarkdownDocument && sourceView && content !== null
-      ? coflatReaderPayload(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true }, await loadRepoConfig(ctx.db, ctx.fj, owner, repo, resolved.branch))
+      ? coflatReaderPayload(
+        ctx,
+        content,
+        { branch: resolved.branch, documentPath: rel, renderTitle: true, assetPreviewPaths },
+        await loadRepoConfig(ctx.db, ctx.fj, owner, repo, resolved.branch),
+      )
       : null;
   const docBody =
     coflatMarkdownDocument
@@ -270,6 +278,10 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const treeBranch = branchExists ? branch : "main";
   const readBranch = branchMeta ? branch : mainMeta ? "main" : treeBranch;
   const files = await repoFiles(ctx.fj, ctx.owner, ctx.repo, treeBranch).catch(() => []);
+  const readFiles = readBranch === treeBranch
+    ? files
+    : await repoFiles(ctx.fj, ctx.owner, ctx.repo, readBranch).catch(() => []);
+  const assetPreviewPaths = buildPdfImagePreviewPaths(readFiles.map((file) => file.path));
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
@@ -295,6 +307,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
+          <script id="web-editor-asset-previews" type="application/json">${jsonScript(assetPreviewPaths)}</script>
           ${webEditorAssets()}
           <noscript>${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, cancelHref })}</noscript>
         </section>
@@ -496,12 +509,12 @@ async function writeFile(
 // README at the repo root, rendered for the /files landing (#136). The nav tree
 // owns navigation; the main panel shows the README when present so it adds value
 // instead of repeating the file list. Case-insensitive `README.md` at the root.
-async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry[]): Promise<{ path: string; rendered: Html } | null> {
+async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry[], assetPreviewPaths: ReturnType<typeof buildPdfImagePreviewPaths>): Promise<{ path: string; rendered: Html } | null> {
   const readme = files.find((file) => /^readme\.md$/i.test(file.path));
   if (!readme) return null;
   const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, readme.path).catch(() => null);
   if (content === null) return null;
-  const rendered = await renderMarkdown(ctx, content, { branch, documentPath: readme.path, renderTitle: true });
+  const rendered = await renderMarkdown(ctx, content, { branch, documentPath: readme.path, renderTitle: true, assetPreviewPaths });
   return { path: readme.path, rendered };
 }
 
