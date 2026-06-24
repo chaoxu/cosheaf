@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { formHeaders, seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
@@ -291,7 +292,7 @@ describe("web pull request routes", () => {
 
   it("renders issue-style pull request conversation comments", async () => {
     const db = freshTestDb("cosheaf-web-pulls-");
-    seedTestWorkspace(db);
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
@@ -321,6 +322,7 @@ describe("web pull request routes", () => {
     expect(body).toContain("plain PR reply");
     expect(body).toContain("<strong>1</strong> reply");
     expect(body).toContain("/owner/w/pulls/7/issue-comments/234/edit");
+    expect(body).toContain("src/cosheaf/web-reader.ts");
   });
 
   it("does not fetch available reviewers when the viewer cannot request review", async () => {
