@@ -244,6 +244,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
           )}
         </article>
       `,
+      { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID },
     ),
   );
 }));
