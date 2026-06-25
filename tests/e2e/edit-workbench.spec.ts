@@ -46,16 +46,6 @@ async function settledReaderScrollState(page: Page): Promise<{ scrollHeight: num
   }));
 }
 
-async function readerScrollSnapshot(page: Page): Promise<{ scrollTop: number; scrollHeight: number; clientHeight: number }> {
-  await waitForHydratedReader(page);
-  await page.waitForTimeout(50);
-  return page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => ({
-    scrollTop: element.scrollTop,
-    scrollHeight: element.scrollHeight,
-    clientHeight: element.clientHeight,
-  }));
-}
-
 async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
   return page.evaluate(() => {
     const img = [...document.images].find((candidate) =>
@@ -293,7 +283,7 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
   }
 });
 
-test("edit workbench preserves reader viewport and generated-section metrics across read edit read", async ({ page }) => {
+test("edit workbench follows the active edit source anchor when switching back to read", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
@@ -305,7 +295,6 @@ test("edit workbench preserves reader viewport and generated-section metrics acr
     element.scrollTop = Math.round((element.scrollHeight - element.clientHeight) * 0.72);
   });
   await page.waitForTimeout(150);
-  const before = await readerScrollSnapshot(page);
   const beforeGenerated = await page.evaluate(() => {
     const heading = document.querySelector<HTMLElement>("[data-edit-read-panel] .cf-bibliography-heading");
     const listText = [...document.querySelectorAll<HTMLElement>("[data-edit-read-panel] .cf-doc-list-item")]
@@ -324,18 +313,26 @@ test("edit workbench preserves reader viewport and generated-section metrics acr
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
   await expect(page.getByTestId("editor")).toBeVisible();
   await page.locator(".cm-scroller").evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
+    const target = [...element.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")]
+      .find((candidate) => candidate.textContent?.includes("Proof of Theorem 4"));
+    if (!target) throw new Error("missing edit source anchor");
+    target.scrollIntoView({ block: "center" });
   });
-  await expect(page.locator("#web-editor-root .cf-bibliography")).toContainText("References");
+  const editAnchor = await visibleCenterSourceRange(page);
+  const editAnchorFrom = Number(editAnchor.from);
+  expect(Number.isFinite(editAnchorFrom)).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
   await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
-  await expect.poll(async () => readerScrollSnapshot(page)).toMatchObject({
-    scrollHeight: before.scrollHeight,
-    clientHeight: before.clientHeight,
-  });
-  const after = await readerScrollSnapshot(page);
-  expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(2);
+  await expect.poll(async () => {
+    const after = await visibleCenterSourceRange(page);
+    const afterFrom = Number(after.from);
+    const afterTo = Number(after.to);
+    return Number.isFinite(afterFrom) && Number.isFinite(afterTo)
+      && afterFrom <= editAnchorFrom && editAnchorFrom <= afterTo;
+  }, {
+    message: "reader should follow the source position that was visible in edit mode",
+  }).toBe(true);
   const afterGenerated = await page.evaluate(() => {
     const heading = document.querySelector<HTMLElement>("[data-edit-read-panel] .cf-bibliography-heading");
     const listText = [...document.querySelectorAll<HTMLElement>("[data-edit-read-panel] .cf-doc-list-item")]

@@ -12,10 +12,6 @@ import type { CoflatDocumentPayload } from "./coflat-document-context";
 
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
-interface WorkbenchReadViewport {
-  scrollTop: number;
-  scrollRatio: number;
-}
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 
 interface EditorModule {
@@ -39,13 +35,16 @@ interface WorkbenchState {
   editorLoaded: boolean;
   editorMount: WebEditorMount | null;
   editorReady: Promise<WebEditorMount | null> | null;
-  interactionSourcePosition: WorkbenchSourcePosition | null;
   payload: CoflatDocumentPayload | null;
-  pendingEditAnchor: boolean;
   previewKey: string | null;
-  readViewport: WorkbenchReadViewport | null;
   sourcePosition: SourcePosition | null;
   switchId: number;
+}
+
+interface WorkbenchSurfaceSnapshot {
+  mode: WorkbenchMode;
+  preview: ReturnType<WebEditorMount["preview"]> | null;
+  sourcePosition: WorkbenchSourcePosition | null;
 }
 
 function shell(): HTMLElement | null {
@@ -207,16 +206,6 @@ function visibleReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition |
   return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
 }
 
-function visibleReadViewport(host: HTMLElement): WorkbenchReadViewport | null {
-  const scroller = readScroller(host);
-  if (!scroller || scroller.hidden) return null;
-  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-  return {
-    scrollTop: scroller.scrollTop,
-    scrollRatio: max > 0 ? scroller.scrollTop / max : 0,
-  };
-}
-
 function visibleEditSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
   const scroller = host.querySelector<HTMLElement>(".cm-scroller");
   if (!scroller || scroller.hidden) return null;
@@ -245,32 +234,12 @@ function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePositi
   window.requestAnimationFrame(apply);
 }
 
-function applyReadViewport(host: HTMLElement, viewport: WorkbenchReadViewport | null): void {
-  if (!viewport) return;
-  let attempts = 0;
-  let appliedFrames = 0;
-  const apply = () => {
-    if (host.dataset.mode !== "read") return;
-    attempts += 1;
-    const scroller = readScroller(host);
-    const pendingPayload = scroller?.querySelector('script[type="application/json"]');
-    if (!scroller || pendingPayload || (scroller.scrollHeight <= scroller.clientHeight && attempts < 20)) {
-      if (attempts < 20) window.requestAnimationFrame(apply);
-      return;
-    }
-    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    const top = Math.min(max, Math.max(0, viewport.scrollTop || Math.round(max * viewport.scrollRatio)));
-    scroller.scrollTop = top;
-    appliedFrames += 1;
-    if (appliedFrames < 8) window.requestAnimationFrame(apply);
-  };
-  window.requestAnimationFrame(apply);
-}
-
-function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState, opts: { preserveSourcePosition?: boolean } = {}): boolean {
-  const preview = state.editorMount?.preview();
+function rebuildReaderFromEditorPreview(
+  host: HTMLElement,
+  state: WorkbenchState,
+  preview: ReturnType<WebEditorMount["preview"]> | null,
+): boolean {
   if (!preview || !state.payload) return false;
-  if (!opts.preserveSourcePosition) state.sourcePosition = preview.sourcePosition;
   state.dirty = preview.dirty;
   host.dataset.dirty = preview.dirty ? "1" : "0";
   const nextPreviewKey = payloadKey(preview);
@@ -326,6 +295,28 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<W
   return state.editorReady;
 }
 
+async function captureSurfaceSnapshot(
+  host: HTMLElement,
+  state: WorkbenchState,
+  mode: WorkbenchMode,
+): Promise<WorkbenchSurfaceSnapshot> {
+  if (mode === "read") {
+    return {
+      mode,
+      preview: null,
+      sourcePosition: visibleReadSourcePosition(host) ?? state.sourcePosition,
+    };
+  }
+
+  const mount = await ensureEditor(host, state);
+  const preview = mount?.preview() ?? null;
+  return {
+    mode,
+    preview,
+    sourcePosition: preview?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition,
+  };
+}
+
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
   if (host.dataset.mode === mode && !opts.replace) {
     state.switchId += 1;
@@ -333,73 +324,31 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
   }
   const switchId = state.switchId + 1;
   state.switchId = switchId;
-  let readViewport: WorkbenchReadViewport | null = null;
-  const readSourcePosition = mode === "edit"
-    ? state.interactionSourcePosition ?? visibleReadSourcePosition(host)
-    : null;
-  if (mode === "edit" && readSourcePosition) {
-    state.interactionSourcePosition = null;
-    state.sourcePosition = readSourcePosition;
-    state.readViewport = visibleReadViewport(host);
-    state.pendingEditAnchor = true;
-  }
-  if (mode === "edit" && !readSourcePosition) {
-    state.interactionSourcePosition = null;
-    state.readViewport = visibleReadViewport(host);
-  }
+  const fromMode: WorkbenchMode = host.dataset.mode === "read" ? "read" : "edit";
+  const snapshot = await captureSurfaceSnapshot(host, state, fromMode);
+  if (state.switchId !== switchId || host.dataset.mode !== fromMode) return;
+  state.sourcePosition = snapshot.sourcePosition ?? state.sourcePosition;
+
   if (mode === "edit") {
     const mount = await ensureEditor(host, state);
     if (state.switchId !== switchId || host.dataset.mode !== "read") return;
     setVisibleMode(host, mode);
     setUrlMode(mode, opts.replace);
-    if (readSourcePosition) {
-      mount?.scrollToSourcePosition(readSourcePosition);
-      window.setTimeout(() => {
-        if (state.switchId !== switchId || host.dataset.mode !== "edit") return;
-        state.pendingEditAnchor = false;
-      }, 220);
-    }
+    if (state.sourcePosition) mount?.scrollToSourcePosition(state.sourcePosition);
     return;
   }
+
   if (mode === "read") {
-    const mount = await ensureEditor(host, state);
-    if (state.switchId !== switchId || host.dataset.mode !== "edit") return;
-    const preview = mount?.preview() ?? null;
-    readViewport = state.readViewport;
-    const editSourcePosition = state.pendingEditAnchor
-      ? state.sourcePosition
-      : state.interactionSourcePosition ?? preview?.sourcePosition ?? visibleEditSourcePosition(host);
-    state.interactionSourcePosition = null;
-    rebuildReaderFromEditor(host, state, { preserveSourcePosition: true });
-    state.sourcePosition = editSourcePosition ?? state.sourcePosition;
-    state.pendingEditAnchor = false;
+    if (snapshot.mode === "edit") {
+      rebuildReaderFromEditorPreview(host, state, snapshot.preview);
+    }
   }
   setVisibleMode(host, mode);
   setUrlMode(mode, opts.replace);
-  if (mode === "read") {
-    if (readViewport) applyReadViewport(host, readViewport);
-    else applyReadSourcePosition(host, state.sourcePosition);
-  }
-}
-
-function captureInteractionSourcePosition(host: HTMLElement, state: WorkbenchState, targetMode: WorkbenchMode): void {
-  const currentMode = host.dataset.mode === "read" ? "read" : "edit";
-  if (currentMode === targetMode) return;
-  state.interactionSourcePosition = currentMode === "read"
-    ? visibleReadSourcePosition(host)
-    : visibleEditSourcePosition(host);
+  if (mode === "read") applyReadSourcePosition(host, state.sourcePosition);
 }
 
 function installModeClicks(host: HTMLElement, state: WorkbenchState): void {
-  document.addEventListener("pointerdown", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const trigger = target.closest<HTMLElement>("[data-edit-mode-target]");
-    const mode = trigger?.dataset.editModeTarget;
-    if (mode !== "read" && mode !== "edit") return;
-    captureInteractionSourcePosition(host, state, mode);
-  }, { capture: true });
-
   document.addEventListener("click", (event) => {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     const target = event.target;
@@ -426,11 +375,8 @@ if (host) {
     editorLoaded: false,
     editorMount: null,
     editorReady: null,
-    interactionSourcePosition: null,
     payload: readPayload(host),
-    pendingEditAnchor: false,
     previewKey: null,
-    readViewport: null,
     sourcePosition: null,
     switchId: 0,
   };
