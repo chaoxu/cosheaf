@@ -12,6 +12,10 @@ import type { CoflatDocumentPayload } from "./coflat-document-context";
 
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
+interface WorkbenchReadViewport {
+  scrollTop: number;
+  scrollRatio: number;
+}
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 
 interface EditorModule {
@@ -39,6 +43,7 @@ interface WorkbenchState {
   payload: CoflatDocumentPayload | null;
   pendingEditAnchor: boolean;
   previewKey: string | null;
+  readViewport: WorkbenchReadViewport | null;
   sourcePosition: SourcePosition | null;
   switchId: number;
 }
@@ -202,6 +207,16 @@ function visibleReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition |
   return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
 }
 
+function visibleReadViewport(host: HTMLElement): WorkbenchReadViewport | null {
+  const scroller = readScroller(host);
+  if (!scroller || scroller.hidden) return null;
+  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  return {
+    scrollTop: scroller.scrollTop,
+    scrollRatio: max > 0 ? scroller.scrollTop / max : 0,
+  };
+}
+
 function visibleEditSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
   const scroller = host.querySelector<HTMLElement>(".cm-scroller");
   if (!scroller || scroller.hidden) return null;
@@ -226,6 +241,28 @@ function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePositi
     if ((!applied && attempts < 20) || (applied && appliedFrames < 8)) {
       window.requestAnimationFrame(apply);
     }
+  };
+  window.requestAnimationFrame(apply);
+}
+
+function applyReadViewport(host: HTMLElement, viewport: WorkbenchReadViewport | null): void {
+  if (!viewport) return;
+  let attempts = 0;
+  let appliedFrames = 0;
+  const apply = () => {
+    if (host.dataset.mode !== "read") return;
+    attempts += 1;
+    const scroller = readScroller(host);
+    const pendingPayload = scroller?.querySelector('script[type="application/json"]');
+    if (!scroller || pendingPayload || (scroller.scrollHeight <= scroller.clientHeight && attempts < 20)) {
+      if (attempts < 20) window.requestAnimationFrame(apply);
+      return;
+    }
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const top = Math.min(max, Math.max(0, viewport.scrollTop || Math.round(max * viewport.scrollRatio)));
+    scroller.scrollTop = top;
+    appliedFrames += 1;
+    if (appliedFrames < 8) window.requestAnimationFrame(apply);
   };
   window.requestAnimationFrame(apply);
 }
@@ -296,15 +333,20 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
   }
   const switchId = state.switchId + 1;
   state.switchId = switchId;
+  let readViewport: WorkbenchReadViewport | null = null;
   const readSourcePosition = mode === "edit"
     ? state.interactionSourcePosition ?? visibleReadSourcePosition(host)
     : null;
   if (mode === "edit" && readSourcePosition) {
     state.interactionSourcePosition = null;
     state.sourcePosition = readSourcePosition;
+    state.readViewport = visibleReadViewport(host);
     state.pendingEditAnchor = true;
   }
-  if (mode === "edit" && !readSourcePosition) state.interactionSourcePosition = null;
+  if (mode === "edit" && !readSourcePosition) {
+    state.interactionSourcePosition = null;
+    state.readViewport = visibleReadViewport(host);
+  }
   if (mode === "edit") {
     const mount = await ensureEditor(host, state);
     if (state.switchId !== switchId || host.dataset.mode !== "read") return;
@@ -320,6 +362,7 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
     return;
   }
   if (mode === "read") {
+    readViewport = state.readViewport;
     const editSourcePosition = state.pendingEditAnchor
       ? state.sourcePosition
       : state.interactionSourcePosition ?? visibleEditSourcePosition(host);
@@ -331,7 +374,8 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
   setVisibleMode(host, mode);
   setUrlMode(mode, opts.replace);
   if (mode === "read") {
-    applyReadSourcePosition(host, state.sourcePosition);
+    if (readViewport) applyReadViewport(host, readViewport);
+    else applyReadSourcePosition(host, state.sourcePosition);
   }
 }
 
@@ -383,6 +427,7 @@ if (host) {
     payload: readPayload(host),
     pendingEditAnchor: false,
     previewKey: null,
+    readViewport: null,
     sourcePosition: null,
     switchId: 0,
   };

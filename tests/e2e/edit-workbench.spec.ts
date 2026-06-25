@@ -46,6 +46,16 @@ async function settledReaderScrollState(page: Page): Promise<{ scrollHeight: num
   }));
 }
 
+async function readerScrollSnapshot(page: Page): Promise<{ scrollTop: number; scrollHeight: number; clientHeight: number }> {
+  await waitForHydratedReader(page);
+  await page.waitForTimeout(50);
+  return page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => ({
+    scrollTop: element.scrollTop,
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  }));
+}
+
 async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
   return page.evaluate(() => {
     const img = [...document.images].find((candidate) =>
@@ -251,6 +261,71 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
       to: "3476",
     });
   }
+});
+
+test("edit workbench preserves reader viewport and generated-section metrics across read edit read", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await waitForHydratedReader(page);
+  await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
+    element.scrollTop = Math.round((element.scrollHeight - element.clientHeight) * 0.72);
+  });
+  await page.waitForTimeout(150);
+  const before = await readerScrollSnapshot(page);
+  const beforeGenerated = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>("[data-edit-read-panel] .cf-bibliography-heading");
+    const listText = [...document.querySelectorAll<HTMLElement>("[data-edit-read-panel] .cf-doc-list-item")]
+      .find((item) => item.textContent?.includes("Display math in list:"));
+    const marker = listText?.querySelector<HTMLElement>(".cf-list-number");
+    const paragraph = marker?.nextElementSibling instanceof HTMLElement ? marker.nextElementSibling : null;
+    const headingStyle = heading ? getComputedStyle(heading) : null;
+    return {
+      headingFontSize: headingStyle?.fontSize ?? "",
+      headingFontStyle: headingStyle?.fontStyle ?? "",
+      listMarkerTop: marker?.getBoundingClientRect().top ?? 0,
+      listParagraphTop: paragraph?.getBoundingClientRect().top ?? -999,
+    };
+  });
+
+  await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await page.locator(".cm-scroller").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(page.locator("#web-editor-root .cf-bibliography")).toContainText("References");
+
+  await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await expect.poll(async () => readerScrollSnapshot(page)).toMatchObject({
+    scrollHeight: before.scrollHeight,
+    clientHeight: before.clientHeight,
+  });
+  const after = await readerScrollSnapshot(page);
+  expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(2);
+  const afterGenerated = await page.evaluate(() => {
+    const heading = document.querySelector<HTMLElement>("[data-edit-read-panel] .cf-bibliography-heading");
+    const listText = [...document.querySelectorAll<HTMLElement>("[data-edit-read-panel] .cf-doc-list-item")]
+      .find((item) => item.textContent?.includes("Display math in list:"));
+    const marker = listText?.querySelector<HTMLElement>(".cf-list-number");
+    const paragraph = marker?.nextElementSibling instanceof HTMLElement ? marker.nextElementSibling : null;
+    const headingStyle = heading ? getComputedStyle(heading) : null;
+    return {
+      headingFontSize: headingStyle?.fontSize ?? "",
+      headingFontStyle: headingStyle?.fontStyle ?? "",
+      listMarkerTop: marker?.getBoundingClientRect().top ?? 0,
+      listParagraphTop: paragraph?.getBoundingClientRect().top ?? -999,
+    };
+  });
+  expect(afterGenerated).toMatchObject({
+    headingFontSize: beforeGenerated.headingFontSize,
+    headingFontStyle: beforeGenerated.headingFontStyle,
+  });
+  expect(Math.abs(beforeGenerated.listMarkerTop - beforeGenerated.listParagraphTop)).toBeLessThanOrEqual(1);
+  expect(Math.abs(afterGenerated.listMarkerTop - afterGenerated.listParagraphTop)).toBeLessThanOrEqual(1);
 });
 
 test("reader selection can open edit mode at the selected source anchor", async ({ page }) => {
