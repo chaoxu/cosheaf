@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
-import { EditorState, Prec, type Extension } from "@codemirror/state";
+import { Prec, type Extension } from "@codemirror/state";
 import { insertTab } from "@codemirror/commands";
-import { EditorView, keymap } from "@codemirror/view";
+import { keymap } from "@codemirror/view";
 import {
   type MountedEditor,
   type MountedDocumentChange,
@@ -96,12 +96,6 @@ export function MarkdownEditor({
       },
     ]));
     const mountExtensions: Extension[] = [sourceModeTabExtension, ...(extensions ?? [])];
-    if (readOnly) {
-      mountExtensions.push(
-        EditorState.readOnly.of(true),
-        EditorView.editable.of(false),
-      );
-    }
 
     // Stable host-API wrappers that always read the latest prop value via ref.
     const stableSaveHandler: SaveHandler = {

@@ -124,6 +124,7 @@ export interface WebEditorCallbacks {
 export interface WebEditorHandle {
   preview: () => WebEditorPreviewEvent;
   scrollToSourcePosition: (position: WebEditorSourcePosition) => boolean;
+  setReadOnly: (readOnly: boolean) => void;
 }
 
 export interface WebEditorMount {
@@ -131,6 +132,7 @@ export interface WebEditorMount {
   ready: Promise<void>;
   preview: () => WebEditorPreviewEvent | null;
   scrollToSourcePosition: (position: WebEditorSourcePosition) => boolean;
+  setReadOnly: (readOnly: boolean) => void;
 }
 
 function shortId(): string {
@@ -257,12 +259,14 @@ function WebEditor({
   callbacks = {},
   handleRef,
   onEditorReady,
+  initialReadOnly,
 }: {
   config: EditorConfig;
   initialContent: string;
   callbacks?: WebEditorCallbacks;
   handleRef?: Ref<WebEditorHandle>;
   onEditorReady?: () => void;
+  initialReadOnly?: boolean;
 }) {
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(config.formatId).editor),
@@ -296,6 +300,7 @@ function WebEditor({
   const [pendingDraft, setPendingDraft] = useState<EditorDraft | null>(null);
   const lastReasonRef = useRef<"manual" | "command" | "autosave">("manual");
   const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(config.username));
+  const [readOnly, setReadOnly] = useState(Boolean(initialReadOnly));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
@@ -340,6 +345,7 @@ function WebEditor({
       editorRef.current?.scrollToSourcePosition(position);
       return Boolean(editorRef.current);
     },
+    setReadOnly,
   }), [config.branch, config.path, content, pathDirty, uncommitted]);
 
   const setEditorMode = useCallback((next: "rich" | "source") => {
@@ -941,7 +947,8 @@ function WebEditor({
               <ActiveMarkdownEditor
                 key={savedPath}
                 value={content}
-                mode={mode}
+                mode={readOnly ? "rich" : mode}
+                readOnly={readOnly}
                 from={currentPath}
                 documentContext={documentContext ?? undefined}
                 fileSystem={fileSystem}
@@ -1157,7 +1164,7 @@ function renderEditorChrome(filename: ReactNode, actions: ReactNode): ReactNode 
   );
 }
 
-export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks = {}): WebEditorMount {
+export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks = {}, options: { initialReadOnly?: boolean } = {}): WebEditorMount {
   const { config, content } = readConfig();
   const handleRef = createRef<WebEditorHandle>();
   const reactRoot = createRoot(root);
@@ -1167,7 +1174,14 @@ export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks 
   });
   reactRoot.render(
     <StrictMode>
-      <WebEditor config={config} initialContent={content} callbacks={callbacks} handleRef={handleRef} onEditorReady={resolveReady} />
+      <WebEditor
+        config={config}
+        initialContent={content}
+        callbacks={callbacks}
+        handleRef={handleRef}
+        onEditorReady={resolveReady}
+        initialReadOnly={options.initialReadOnly}
+      />
     </StrictMode>,
   );
   return {
@@ -1175,6 +1189,7 @@ export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks 
     ready,
     preview: () => handleRef.current?.preview() ?? null,
     scrollToSourcePosition: (position) => handleRef.current?.scrollToSourcePosition(position) ?? false,
+    setReadOnly: (readOnly) => handleRef.current?.setReadOnly(readOnly),
   };
 }
 

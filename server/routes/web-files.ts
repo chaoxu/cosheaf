@@ -1,6 +1,5 @@
 import type { Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
-import { COFLAT_FILE_PREVIEW_TEST_ID } from "../../shared/coflat-reader-surface.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
@@ -16,7 +15,7 @@ import type { AppEnv } from "../types.js";
 import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
 import { branchIcon } from "./icons.js";
 import { editBranchFor, editHref, newFileControl, rawFileHref, readHref, userDefaultEditBranch } from "./web-file-links.js";
-import { editableFileKind, filePreview, markdownArticle, previewKindForFile } from "./web-file-preview.js";
+import { editableFileKind, filePreview, previewKindForFile } from "./web-file-preview.js";
 import { fileToolbar } from "./web-file-toolbar.js";
 import { fileTreePanel } from "./web-file-tree.js";
 import {
@@ -331,52 +330,14 @@ async function editPageResponse(
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
   const coflatMarkdownEdit = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
-  const readPanelPayload = coflatMarkdownEdit && repoConfig
-    ? {
-      ...coflatReaderPayload(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths }, repoConfig),
-      sourcePositions: true,
-    }
-    : null;
-  const readPanel = coflatMarkdownEdit && repoConfig
-    ? await renderMarkdown(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths, sourcePositions: true })
-    : emptyHtml;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
   // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The
   // file tree mirrors the read page's sidebar so edit/read chrome match (#123).
   return htmlResponse(
     repoPageShell(ctx, "files", `Edit ${rel}`, coflatMarkdownEdit ? html`
         <section class="edit-page" data-edit-shell data-initial-mode="${initialMode}" data-mode="${initialMode}">
-          ${readPanelPayload ? html`<script type="application/json" data-edit-reader-payload>${jsonScript(readPanelPayload)}</script>` : emptyHtml}
-          <div data-edit-read-panel${initialMode === "edit" ? " hidden" : ""}>
-            <div class="doc-with-toc">
-              <div class="doc-main">
-                <div class="doc-reader-chrome">
-                  <details class="doc-reader-more">
-                    <summary>More</summary>
-                    <div class="doc-reader-more-menu" aria-label="File representations">
-                      <a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, readBranch, rel)}">PDF</a>
-                      <a href="${rawFileHref(ctx.owner, ctx.repo, readBranch, rel)}">Raw</a>
-                    </div>
-                  </details>
-                </div>
-                <div data-edit-reader-mount>
-                  ${markdownArticle(ctx, readPanel, COFLAT_FILE_PREVIEW_TEST_ID)}
-                </div>
-              </div>
-              <aside
-                class="doc-rail"
-                aria-label="Document tools"
-                data-document-rail
-                data-document-rail-controls="none"
-                data-doc-mode="read"
-                data-read-href="${readHref(ctx.owner, ctx.repo, readBranch, rel)}"
-                data-edit-href="${editHref(ctx.owner, ctx.repo, ctx.user, readBranch, rel)}"
-              ></aside>
-            </div>
-          </div>
           <div
             id="web-editor-root"
-            ${initialMode === "read" ? "hidden" : ""}
             data-owner="${ctx.owner}"
             data-repo="${ctx.repo}"
             data-path="${rel}"
@@ -420,7 +381,7 @@ async function editPageResponse(
           <noscript>${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, cancelHref })}</noscript>
         </section>
       ` : textEditPage(ctx, branch, rel, content, baseSha, sourceSha, treeBranch), {
-        readerAssets: coflatMarkdownEdit,
+        readerAssets: false,
         statusExtra: [{ label: branch, icon: branchIcon({ size: 12 }) }],
         statusOmitTab: true,
         sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles, [], ctx.user, ctx.ws.role !== "read", branch)],

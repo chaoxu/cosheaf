@@ -784,7 +784,7 @@ describe("web file editor route", () => {
     expect(body).toContain("# Main Notes\\n");
   });
 
-  it("renders Coflat edit pages as a lazy read/edit workbench", async () => {
+  it("renders Coflat edit pages as an editor-backed read/edit workbench", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
@@ -805,13 +805,13 @@ describe("web file editor route", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-edit-shell data-initial-mode="read" data-mode="read"');
-    expect(body).toContain("data-edit-read-panel");
-    expect(body).toContain("data-edit-reader-payload");
-    expect(body).toContain('id="web-editor-root"\n            hidden');
+    expect(body).not.toContain("data-edit-read-panel");
+    expect(body).not.toContain("data-edit-reader-payload");
+    expect(body).toContain('id="web-editor-root"');
+    expect(body).not.toContain('id="web-editor-root"\n            hidden');
     expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
-    expect(body).toContain("/src/cosheaf/web-reader.ts");
+    expect(body).not.toContain("/src/cosheaf/web-reader.ts");
     expect(body).not.toContain('/src/cosheaf/web-editor.tsx"></script>');
-    expect(body).toContain('data-document-rail-controls="none"');
   });
 
   it("can start the Coflat workbench directly in edit mode", async () => {
@@ -835,7 +835,7 @@ describe("web file editor route", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-edit-shell data-initial-mode="edit" data-mode="edit"');
-    expect(body).toContain("data-edit-read-panel hidden");
+    expect(body).not.toContain("data-edit-read-panel");
     expect(body).toContain('<div\n            id="web-editor-root"');
     expect(body).not.toContain('id="web-editor-root"\n            hidden');
     expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
