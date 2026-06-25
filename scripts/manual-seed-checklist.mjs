@@ -16,7 +16,7 @@ const routes = [
   ["/chao/flushing-coin/pulls", "PR filters and list"],
   ["/chao/flushing-coin/activity", "activity feed and scroll behavior"],
   ["/chao/flushing-coin/src/branch/main/hello.md", "Coflat reader"],
-  ["/chao/flushing-coin/_edit?branch=user/chao/manual-seed&path=manual-seed.md", "editor island"],
+  ["/chao/flushing-coin/src/branch/main?mode=edit&path=manual-seed.md&edit_branch=user%2Fchao%2Fmanual-seed", "editor island"],
   ["/chao/passthrough-demo/issues", "passthrough issue rendering"],
   ["/chao/passthrough-demo/pulls", "passthrough PR rendering"],
 ];

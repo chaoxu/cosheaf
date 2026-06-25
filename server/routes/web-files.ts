@@ -107,9 +107,29 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
 
 web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
+  const requestedMode = c.req.query("mode");
+  if ((requestedMode === "read" || requestedMode === "edit") && ws.role !== "read") {
+    const requestedEditBranch = c.req.query("edit_branch");
+    const editBranch = requestedEditBranch === undefined ? null : editBranchFor(ctx.user, requestedEditBranch);
+    if (editBranch !== null && !validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+    const requestedPath = c.req.query("path");
+    if (requestedPath !== undefined && requestedPath.trim() !== "" && !safeRel(requestedPath)) {
+      return badRequestPage(ctx.user, "Valid file path is required.");
+    }
+  }
   const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
   if (!resolved.path) {
+    if ((requestedMode === "read" || requestedMode === "edit") && ws.role !== "read") {
+      const requestedPath = c.req.query("path");
+      const rel = requestedPath === undefined || requestedPath.trim() === "" ? "new.md" : safeRel(requestedPath);
+      if (!rel) return badRequestPage(ctx.user, "Valid file path is required.");
+      const kind = fileKindForPath(rel);
+      if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
+      const editBranch = editBranchFor(ctx.user, c.req.query("edit_branch") ?? resolved.branch);
+      if (!validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+      return editPageResponse(ctx, { branch: editBranch, rel, kind, initialMode: requestedMode });
+    }
     const [files, branches] = await Promise.all([
       repoFiles(fj, owner, repo, resolved.branch),
       fj.listBranches(owner, repo).catch(() => []),
@@ -141,7 +161,6 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const rel = safeRel(resolved.path);
   if (!rel) return notFoundPage(user, "File not found");
   const kind = fileKindForPath(rel);
-  const requestedMode = c.req.query("mode");
   if ((requestedMode === "read" || requestedMode === "edit") && editableFileKind(kind) && ws.role !== "read") {
     const editBranchParam = c.req.query("edit_branch");
     const editBranch = editBranchFor(ctx.user, editBranchParam ?? resolved.branch);
@@ -280,20 +299,6 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
 
 registerPdfExportRoutes(web);
 
-web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
-  const requestedBranch = c.req.query("branch");
-  const requestedEditBranch = c.req.query("edit_branch");
-  const branch = editBranchFor(ctx.user, requestedEditBranch ?? requestedBranch);
-  if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
-  const requestedPath = c.req.query("path");
-  const rel = requestedPath === undefined || requestedPath.trim() === "" ? "new.md" : safeRel(requestedPath);
-  if (!rel) return badRequestPage(ctx.user, "Valid file path is required.");
-  const kind = fileKindForPath(rel);
-  if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
-  const readBranch = requestedEditBranch && requestedBranch && validBranchName(requestedBranch) ? requestedBranch : "main";
-  const target = `${readHref(ctx.owner, ctx.repo, readBranch, rel)}?mode=${c.req.query("mode") === "read" ? "read" : "edit"}&edit_branch=${encodeURIComponent(branch)}`;
-  return redirect(target);
-}));
 async function editPageResponse(
   ctx: WebCtx,
   opts: { branch: string; rel: string; kind: FileKind; initialMode: "read" | "edit" },
@@ -482,11 +487,11 @@ async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) 
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-// The non-island /_edit fallback form (the markdown editor's <noscript> and the
-// plain text-file editor): a hidden old_path + Branch/Path inputs + content
-// textarea + Save, all matching the POST /_edit field contract. The two callers
-// differ only in classes/test-id and whether a Cancel sits in the form (the text
-// page owns its own titlebar Cancel instead).
+// The non-island fallback form (the markdown editor's <noscript> and the plain
+// text-file editor): a hidden old_path + Branch/Path inputs + content textarea
+// + Save, all matching the POST /_edit save contract. The two callers differ
+// only in classes/test-id and whether a Cancel sits in the form (the text page
+// owns its own titlebar Cancel instead).
 function editFallbackForm(
   ctx: WebCtx,
   opts: { branch: string; rel: string; content: string; baseSha?: string | null; sourceSha?: string | null; cancelHref?: string; formClass?: string; formTestId?: string; textareaClass?: string },

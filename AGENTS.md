@@ -89,9 +89,9 @@ Primary web routes should mirror Forgejo where practical:
 - `/:owner/:repo/activity`
 - `/:owner/:repo/settings`
 
-Cosheaf-specific routes should be visibly private/tool-like, e.g.
-`/:owner/:repo/_edit`. Do not add top-level SPA modes for durable resources.
-If a screen has a durable identity, give it a server route first.
+Cosheaf-specific action routes should be visibly private/tool-like, but do not
+add top-level SPA modes for durable resources. If a screen has a durable
+identity, give it a server route first.
 
 The pre-migration SPA shell is deprecated and removed. The archival tag is
 `spa-shell-2026-05-24`; do not restore `index.html`, `src/cosheaf/main.tsx`,
@@ -456,8 +456,8 @@ Route owner map:
 - `server/routes/web-markdown.ts` — markdown/Coflat rendering surfaces.
 - `server/routes/web-thread.ts` — shared issue+pull thread machinery: layout
   with metadata rail, edit pages, timelines, review panels.
-- `server/routes/web-files.ts` — tree/src/raw/_edit pages plus branches and
-  commit pages.
+- `server/routes/web-files.ts` — tree/src/raw pages, edit/read workbench mode,
+  fallback save action, branches, and commit pages.
 - `server/routes/web-issues.ts` / `web-pulls.ts` / `web-chat-pages.ts` /
   `web-activity.ts` / `web-settings.ts` — the corresponding page routes
   (pull diff machinery lives with web-pulls).

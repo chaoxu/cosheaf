@@ -51,10 +51,6 @@
       if (parts.length >= 6 && parts[2] === "src" && parts[3] === "branch") {
         return scrollKeyPrefix + parts[0] + "/" + parts[1] + "/" + decodeURIComponent(parts.slice(5).join("/"));
       }
-      if (parts.length >= 3 && parts[2] === "_edit") {
-        var path = url.searchParams.get("path");
-        if (path) return scrollKeyPrefix + parts[0] + "/" + parts[1] + "/" + path;
-      }
     } catch (_err) {}
     return null;
   }

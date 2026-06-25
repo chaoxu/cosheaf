@@ -114,6 +114,7 @@ export interface WebEditorPreviewEvent {
 }
 
 type WebEditorSourcePosition = EditorSourcePosition & { viewportRatio?: number };
+const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 
 export interface WebEditorCallbacks {
   onDirtyChange?: (dirty: boolean) => void;
@@ -333,10 +334,10 @@ function WebEditor({
       branchExists: branchExistsRef.current,
       path: currentPathRef.current.trim() || config.path,
       dirty: uncommitted || pathDirty,
-      sourcePosition: editorRef.current?.getVisibleSourcePosition() ?? null,
+      sourcePosition: editorRef.current?.getVisibleSourcePosition({ viewportRatio: MODE_SWITCH_VIEWPORT_RATIO }) ?? null,
     }),
     scrollToSourcePosition: (position) => {
-      editorRef.current?.scrollToSourcePosition({ ...position, center: true });
+      editorRef.current?.scrollToSourcePosition(position);
       return Boolean(editorRef.current);
     },
   }), [config.branch, config.path, content, pathDirty, uncommitted]);

@@ -12,11 +12,9 @@ export function rawFileHref(owner: string, repo: string, branch: string, rel: st
   return `${repoHref(owner, repo, "/raw/branch")}/${urlPath(branch)}/${urlPath(rel)}`;
 }
 
-export function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
+export function editHref(owner: string, repo: string, user: string, branch: string, rel: string): string {
   const editBranch = editBranchFor(user, branch);
-  const base = rel
-    ? `${readHref(owner, repo, branch, rel)}?mode=edit`
-    : `${repoHref(owner, repo, "/_edit")}?mode=edit`;
+  const base = `${readHref(owner, repo, branch, rel)}?mode=edit`;
   return editBranch === branch ? base : `${base}&edit_branch=${encodeURIComponent(editBranch)}`;
 }
 
@@ -31,15 +29,14 @@ export function defaultFileLinkAttrs(owner: string, repo: string, user: string |
   return html`href="${edit}" data-file-open-link data-edit-href="${edit}" data-read-href="${read}"`;
 }
 
-// "New file" as a name-it-first control: a GET form whose `path` routes to
-// /_edit, which picks the Markdown or plain-text editor from the extension — so
-// you can create a `.bib` (or .csv, .tex, …), not only `.md`. Blank submits as
-// `new.md`, preserving the old one-click create-a-page behavior.
+// "New file" as a name-it-first control. It submits to the normal file route,
+// which picks the Markdown or plain-text editor from the extension — so you can
+// create a `.bib` (or .csv, .tex, …), not only `.md`.
 export function newFileControl(owner: string, repo: string, user: string, branch: string): Html {
-  return html`<form class="newfile" action="${repoHref(owner, repo, "/_edit")}" method="get">
-    <input type="hidden" name="branch" value="${branch}">
+  return html`<form class="newfile" action="${repoHref(owner, repo, "/src/branch")}/${urlPath(branch)}" method="get">
+    <input type="hidden" name="mode" value="edit">
     <input type="hidden" name="edit_branch" value="${editBranchFor(user, branch)}">
-    <input class="newfile-path" name="path" placeholder="new.md" aria-label="New file name" autocomplete="off" spellcheck="false">
+    <input class="newfile-path" name="path" value="new.md" placeholder="new.md" aria-label="New file name" autocomplete="off" spellcheck="false">
     <button class="button" type="submit">New file</button>
   </form>`;
 }

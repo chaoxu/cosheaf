@@ -111,6 +111,10 @@ describe("web file editor route", () => {
     expect(body).toContain('data-file-open-link data-edit-href="/owner/w/src/branch/main/README.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit" data-read-href="/owner/w/src/branch/main/README.md"');
     expect(body).toContain('href="/owner/w/src/branch/main/notes/a.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
     expect(body).toContain('data-file-open-link data-edit-href="/owner/w/src/branch/main/notes/a.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit" data-read-href="/owner/w/src/branch/main/notes/a.md"');
+    expect(body).toContain('<form class="newfile" action="/owner/w/src/branch/main" method="get">');
+    expect(body).toContain('<input type="hidden" name="mode" value="edit">');
+    expect(body).toContain('<input type="hidden" name="edit_branch" value="user/alice/web-edit">');
+    expect(body).toContain('<input class="newfile-path" name="path" value="new.md"');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
     expect(listedPulls).toBe(false);
   });
@@ -927,6 +931,36 @@ describe("web file editor route", () => {
     expect(body).toContain("# Main Notes\\n");
   });
 
+  it("opens a new file from the branch route without the legacy edit route", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/branches/*", () => new Response("not found", { status: 404 }));
+        forge.get("/api/v1/repos/owner/w/contents/fresh.md", () => new Response("not found", { status: 404 }));
+        forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
+          expect(c.req.param("ref")).toBe("main");
+          return c.json({ tree: [], truncated: false });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/src/branch/main?mode=edit&path=fresh.md&edit_branch=user%2Falice%2Fnew", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('id="web-editor-root"');
+    expect(body).toContain('data-path="fresh.md"');
+    expect(body).toContain('data-branch="user/alice/new"');
+    expect(body).toContain('data-branch-exists="0"');
+    expect(body).toContain('data-base-sha=""');
+    expect(body).toContain('name="expected_sha" value=""');
+  });
+
   it("rejects invalid edit branch names before loading editor data", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db);
@@ -935,7 +969,7 @@ describe("web file editor route", () => {
       forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
     }));
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=bad..branch&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/main?mode=edit&path=notes.md&edit_branch=bad..branch", {
       headers: authHeaders(token),
     });
 
@@ -953,7 +987,7 @@ describe("web file editor route", () => {
       forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
     }));
 
-    const res = await appFor(db).request("/owner/w/_edit?path=docs/./escape.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/main?mode=edit&path=docs/./escape.md", {
       headers: authHeaders(token),
     });
 

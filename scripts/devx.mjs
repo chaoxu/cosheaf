@@ -60,7 +60,7 @@ async function ready(opts) {
     "/chao/flushing-coin/issues",
     "/chao/flushing-coin/pulls",
     "/chao/flushing-coin/src/branch/main/hello.md",
-    "/chao/flushing-coin/_edit?branch=user/chao/devx-ready&path=devx-ready.md",
+    "/chao/flushing-coin/src/branch/main?mode=edit&path=devx-ready.md&edit_branch=user%2Fchao%2Fdevx-ready",
     "/chao/passthrough-demo/issues",
     "/chao/passthrough-demo/pulls",
   ]) {

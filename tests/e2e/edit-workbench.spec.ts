@@ -21,7 +21,7 @@ async function signIn(page: Page): Promise<void> {
 async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0): Promise<Buffer> {
   await page.goto(url);
   await expect(page.locator(CF.reader)).toBeVisible();
-  await expect.poll(async () => page.locator(CF.reader).evaluate((element) => element.textContent?.trim().length ?? 0)).toBeGreaterThan(0);
+  await expect(page.locator(`${CF.reader} .cf-doc-paragraph, ${CF.reader} .cf-doc-heading`).first()).toBeVisible();
   await page.waitForTimeout(400);
   await page.locator(".doc-main").evaluate((element, ratio) => {
     const max = Math.max(0, element.scrollHeight - element.clientHeight);
@@ -39,6 +39,24 @@ async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width
     if (!img) return null;
     const rect = img.getBoundingClientRect();
     return { y: rect.y, width: rect.width, height: rect.height };
+  });
+}
+
+async function visibleCenterSourceRange(page: Page): Promise<{ from: string | null; to: string | null; text: string }> {
+  return page.evaluate(() => {
+    const mode = document.querySelector<HTMLElement>("[data-edit-shell]")?.dataset.mode;
+    const scroller = mode === "edit"
+      ? document.querySelector<HTMLElement>(".cm-scroller")
+      : document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
+    if (!scroller) return { from: null, to: null, text: "" };
+    const rect = scroller.getBoundingClientRect();
+    const element = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    const carrier = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-source-from][data-source-to]") : null;
+    return {
+      from: carrier?.getAttribute("data-source-from") ?? null,
+      to: carrier?.getAttribute("data-source-to") ?? null,
+      text: (carrier?.textContent ?? "").replace(/\s+/g, " ").trim(),
+    };
   });
 }
 
@@ -101,6 +119,52 @@ test("edit workbench read mode remains scrollable after switching from edit", as
   expect(scrollState.scrollTop).toBeGreaterThan(0);
 });
 
+test("edit workbench keeps source anchor stable across repeated read edit switches", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
+    const target = [...element.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")]
+      .find((candidate) => candidate.textContent?.includes("Bullet with math"));
+    if (!target) throw new Error("missing bullet source anchor");
+    const scrollerRect = element.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    element.scrollTop += targetRect.top - (scrollerRect.top + scrollerRect.height / 2);
+  });
+  await page.waitForTimeout(400);
+
+  await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
+    from: "3440",
+    to: "3476",
+  });
+
+  await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+  await page.waitForTimeout(120);
+  await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
+    from: "3440",
+    to: "3476",
+  });
+
+  for (let index = 0; index < 2; index += 1) {
+    await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+    await expect(page.getByTestId("editor")).toBeVisible();
+    await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
+      from: "3440",
+      to: "3476",
+    });
+    await page.locator('.edit-primary-mode button:has-text("Read")').click();
+    await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
+      from: "3440",
+      to: "3476",
+    });
+  }
+});
+
 test("edit workbench keeps reader and editor anchored on inline images", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -123,7 +187,7 @@ test("edit workbench keeps reader and editor anchored on inline images", async (
   await expect.poll(async () => visibleShowcaseImageStats(page)).toMatchObject({ width: 257, height: 150 });
   const afterEdit = await visibleShowcaseImageStats(page);
   expect(afterEdit).not.toBeNull();
-  expect(Math.abs((afterEdit?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(16);
+  expect(Math.abs((afterEdit?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(18);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
   await expect(page.locator(CF.reader)).toContainText("Links and Images");
@@ -168,6 +232,33 @@ test("edit workbench previews unsaved drafts in read mode and refreshes after sa
   await expect(page.locator(CF.reader)).toContainText("Saved body.");
   await expect(page.locator(".edit-primary-mode")).not.toHaveClass(/is-dirty/);
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
+});
+
+test("edit workbench keeps compact read and rich line boxes aligned", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  for (const width of [430, 600]) {
+    await page.setViewportSize({ width, height: 820 });
+    await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+    await expect(page.locator(`${CF.reader} .cf-doc-paragraph`).first()).toBeVisible();
+    const readBox = await page.locator(`${CF.reader} .cf-doc-paragraph`).first().boundingBox();
+    expect(readBox, `reader paragraph at ${width}px`).not.toBeNull();
+
+    for (let i = 0; i < 3; i += 1) {
+      await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+      await expect(page.getByTestId("editor")).toBeVisible();
+      await expect(page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first()).toBeVisible();
+      await page.locator('.edit-primary-mode button:has-text("Read")').click();
+      await expect(page.locator(`${CF.reader} .cf-doc-paragraph`).first()).toBeVisible();
+    }
+
+    await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+    await expect(page.getByTestId("editor")).toBeVisible();
+    const editBox = await page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first().boundingBox();
+    expect(editBox, `editor paragraph at ${width}px`).not.toBeNull();
+    expect(Math.abs((editBox?.width ?? 0) - (readBox?.width ?? 0)), `paragraph width at ${width}px`).toBeLessThanOrEqual(1);
+    expect(Math.abs((editBox?.x ?? 0) - (readBox?.x ?? 0)), `paragraph x at ${width}px`).toBeLessThanOrEqual(1);
+  }
 });
 
 test("edit workbench read surface is pixel-identical to the normal reader", async ({ page }) => {

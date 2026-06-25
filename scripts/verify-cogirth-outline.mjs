@@ -8,7 +8,7 @@ loadDotenvDev();
 const WEB_URL = (process.env.COSHEAF_VERIFY_URL ?? "https://cosheaf.chaoxu.prof").replace(/\/$/, "");
 const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
 const STORAGE_STATE = process.env.COSHEAF_STORAGE_STATE;
-const PAGE_PATH = process.env.COSHEAF_COGIRTH_EDIT_PATH ?? "/chao/cogirth/_edit?branch=user%2Fchao%2Fweb-edit&path=main.md";
+const PAGE_PATH = process.env.COSHEAF_COGIRTH_EDIT_PATH ?? "/chao/cogirth/src/branch/main/main.md?mode=edit&edit_branch=user%2Fchao%2Fweb-edit";
 const EXPECTED = process.env.COSHEAF_COGIRTH_OUTLINE_TEXT ?? "Proof of Theorem 4";
 const FORBIDDEN = process.env.COSHEAF_COGIRTH_FORBIDDEN_TEXT ?? "@cor:rank-reduction-from-bounded-gap";
 const IS_PROD = new URL(WEB_URL).hostname === "cosheaf.chaoxu.prof";

@@ -114,7 +114,7 @@ export function _clearBranchRefCacheForTests(): void {
 
 // A write that lost a branch-head race: Forgejo rejects a stale blob sha as
 // 422 "sha does not match", or a push-level reject as 409. Shared by the typed
-// file route and the web _edit path so both classify concurrent writes the
+// file API and the web editor save path so both classify concurrent writes the
 // same way.
 export function isStaleShaConflict(err: unknown): boolean {
   return (
@@ -363,7 +363,7 @@ files.put("/:owner/:repo/file", async (c) => {
   }
   // Only Markdown files are pages: parse/inject the frontmatter id and index
   // doc_map/FTS/backlinks. Plain-text companions (.bib, .csv, …) are committed
-  // verbatim and never indexed (mirrors the web _edit writeFile path). The
+  // verbatim and never indexed (mirrors the web editor writeFile path). The
   // workspace's declared markdown format is passed explicitly so passthrough
   // workspaces don't inherit coflat indexing behavior (#25).
   const isMarkdown = fileKindForPath(rel) === "markdown";

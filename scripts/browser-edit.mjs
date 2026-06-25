@@ -29,7 +29,7 @@ try {
   await signInIfNeeded(page, USERNAME, PASSWORD);
 
   const editUrl = new URL(
-    `/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=${encodeURIComponent(BRANCH)}&path=${encodeURIComponent(PAGE_PATH)}`,
+    `/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}?mode=edit&edit_branch=${encodeURIComponent(BRANCH)}`,
     WEB_URL,
   ).toString();
   await page.goto(editUrl, { waitUntil: "domcontentloaded" });

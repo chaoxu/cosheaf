@@ -502,7 +502,7 @@ async function gotoShowcaseReader() {
 
 async function gotoShowcaseEditor() {
   await page.goto(
-    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/_edit?branch=${encodeURIComponent(EDIT_BRANCH)}&path=${encodeURIComponent(SHOWCASE_PATH)}`,
+    `${WEB_URL.replace(/\/$/, "")}/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${SHOWCASE_PATH}?mode=edit&edit_branch=${encodeURIComponent(EDIT_BRANCH)}`,
     { waitUntil: "domcontentloaded" },
   );
   await page.locator(CF.editorContent).waitFor({ state: "visible", timeout: 10000 });
