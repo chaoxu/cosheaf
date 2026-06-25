@@ -816,20 +816,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   // path that was never written.
   const readHref = repoBranchFileHref(config.owner, config.repo, savedReadBranch, savedPath);
   const outlineMathMacros = documentContext?.mathMacros;
-  const actionControls = useMemo(() => {
-    if (!branch || branch === "main") return [];
-    return [
-      ...(config.role === "admin" ? [{ kind: "button" as const, label: "Merge to main" }] : []),
-      { kind: "button" as const, label: "Open PR" },
-    ];
-  }, [branch, config.role]);
   const branchActions = branch && branch !== "main";
   const railModel = documentRailModel({
     mode: "edit",
     readHref,
     editHref: window.location.href,
-    actionControls,
-    editorMode: config.formatId === COFLAT_FORMAT_ID ? mode : undefined,
     outline: outline.map((entry) => ({
       key: entry.key,
       level: entry.level,
@@ -846,18 +837,12 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
       rail,
       { ...railModel, mathMacros: outlineMathMacros },
       {
-        onControl: (control) => {
-          if (control.label === "Source") setEditorMode("source");
-          else if (control.label === "Rich") setEditorMode("rich");
-          else if (control.label === "Open PR" && !busy) void openPullRequest(false);
-          else if (control.label === "Merge to main" && !busy) void openPullRequest(true);
-        },
         onOutlineItem: (entry) => {
           if (typeof entry.line === "number") editorRef.current?.scrollToLine(entry.line, { center: true });
         },
       },
     );
-  }, [busy, openPullRequest, outlineMathMacros, railModel, setEditorMode]);
+  }, [outlineMathMacros, railModel]);
 
   return (
     <div className={readerClass}>
@@ -958,6 +943,26 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </span>
         </>,
         <>
+          {config.formatId === COFLAT_FORMAT_ID ? (
+            <span className="web-editor-mode-toggle" aria-label="Editor mode">
+              <button
+                type="button"
+                className={mode !== "source" ? "active" : ""}
+                aria-pressed={mode !== "source"}
+                onClick={() => setEditorMode("rich")}
+              >
+                Rich
+              </button>
+              <button
+                type="button"
+                className={mode === "source" ? "active" : ""}
+                aria-pressed={mode === "source"}
+                onClick={() => setEditorMode("source")}
+              >
+                Source
+              </button>
+            </span>
+          ) : null}
           {config.formatId === COFLAT_FORMAT_ID ? (() => {
             const actionable = validationSummary ? validationSummary.brokenRefs + validationSummary.duplicateLabels : null;
             const label = actionable === null ? "Problems -" : `Problems ${actionable}`;
@@ -1002,10 +1007,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             Upload
           </button>
           {branchActions ? (
-            <span className="web-editor-mobile-actions" aria-label="Branch actions">
+            <span className="web-editor-branch-actions web-editor-mobile-actions" aria-label="Branch actions">
               {config.role === "admin" ? (
                 <button type="button" onClick={() => void openPullRequest(true)} disabled={busy}>
-                  Merge
+                  Merge to main
                 </button>
               ) : null}
               <button type="button" onClick={() => void openPullRequest(false)} disabled={busy}>

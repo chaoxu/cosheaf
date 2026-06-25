@@ -66,5 +66,5 @@ test("branch actions remain visible when the document rail is hidden", async ({ 
   await expect(page.getByTestId("editor")).toBeVisible();
   const mobileActions = page.locator(".web-editor-mobile-actions");
   await expect(mobileActions.getByRole("button", { name: "Open PR" })).toBeVisible();
-  await expect(mobileActions.getByRole("button", { name: "Merge" })).toBeVisible();
+  await expect(mobileActions.getByRole("button", { name: "Merge to main" })).toBeVisible();
 });

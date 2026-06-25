@@ -175,15 +175,12 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Rec
   const rail = mount ?? document.querySelector<HTMLElement>("[data-document-rail]");
   if (!rail) return;
   const fileControls: DocumentRailControl[] = [];
-  const actionControls: DocumentRailControl[] = [];
-  if (rail.dataset.openPrHref) actionControls.push({ kind: "link", label: "Open PR", href: rail.dataset.openPrHref });
   if (rail.dataset.pdfHref) fileControls.push({ kind: "link", label: "PDF", href: rail.dataset.pdfHref });
   if (rail.dataset.rawHref) fileControls.push({ kind: "link", label: "Raw", href: rail.dataset.rawHref });
   const model = documentRailModel({
     mode: "read",
     readHref: rail.dataset.readHref ?? window.location.href,
     editHref: rail.dataset.editHref || null,
-    actionControls,
     fileControls,
     outline: outline.map((entry) => ({
       key: entry.id,

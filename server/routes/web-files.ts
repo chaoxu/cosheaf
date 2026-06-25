@@ -172,7 +172,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
           <div class="doc-main">
-            ${openPrHref ? html`<div class="doc-mobile-actions"><a class="button" href="${openPrHref}">Open PR</a></div>` : emptyHtml}
+            ${openPrHref ? html`<div class="doc-branch-actions doc-mobile-actions"><a class="button" href="${openPrHref}">Open PR</a></div>` : emptyHtml}
             ${preview}
           </div>
           <aside
@@ -182,7 +182,6 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             data-doc-mode="read"
             data-read-href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
             data-edit-href="${editableFileKind(kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, resolved.branch, rel) : ""}"
-            data-open-pr-href="${openPrHref}"
             data-pdf-href="${kind === "markdown" ? pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel) : ""}"
             data-raw-href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
           >

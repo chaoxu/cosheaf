@@ -9,18 +9,15 @@ describe("document rail model", () => {
       editHref: "/edit",
       fileControls: [{ kind: "link", label: "Raw", href: "/raw" }],
     })).toMatchObject([
-      { label: "Actions", controls: [{ label: "Read", active: true }, { label: "Edit", active: false }] },
+      { label: "View", controls: [{ label: "Read", active: true }, { label: "Edit", active: false }] },
       { label: "File", controls: [{ label: "Raw", href: "/raw" }] },
     ]);
     expect(documentRailGroups({
       mode: "edit",
       readHref: "/read",
       editHref: "/edit",
-      actionControls: [{ kind: "button", label: "Open PR" }],
-      editorMode: "source",
     })).toMatchObject([
-      { label: "Actions", controls: [{ label: "Read", active: false }, { label: "Edit", active: true }, { label: "Open PR" }] },
-      { label: "Editor", controls: [{ label: "Rich", active: false }, { label: "Source", active: true }] },
+      { label: "View", controls: [{ label: "Read", active: false }, { label: "Edit", active: true }] },
     ]);
   });
 
@@ -40,7 +37,6 @@ describe("document rail model", () => {
       mode: "edit",
       readHref: "/read",
       editHref: "/edit",
-      editorMode: "rich",
       outline: [
         { key: "intro", level: 1, label: "Intro" },
         { key: "deep", level: 4, label: "Deep" },
@@ -48,17 +44,10 @@ describe("document rail model", () => {
     })).toEqual({
       groups: [
         {
-          label: "Actions",
+          label: "View",
           controls: [
             { kind: "link", label: "Read", href: "/read", active: false, modeLink: true },
             { kind: "link", label: "Edit", href: "/edit", active: true, modeLink: true },
-          ],
-        },
-        {
-          label: "Editor",
-          controls: [
-            { kind: "button", label: "Rich", active: true },
-            { kind: "button", label: "Source", active: false },
           ],
         },
       ],

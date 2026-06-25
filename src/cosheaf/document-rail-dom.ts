@@ -2,7 +2,6 @@ import {
   DOCUMENT_RAIL_CONTROLS_CLASS,
   DOCUMENT_RAIL_CONTROLS_LABEL,
   DOCUMENT_RAIL_GROUP_CLASS,
-  DOCUMENT_RAIL_LABEL_CLASS,
   DOCUMENT_RAIL_OUTLINE_CLASS,
   DOCUMENT_RAIL_OUTLINE_LABEL,
   DOCUMENT_RAIL_OUTLINE_TITLE_CLASS,
@@ -42,11 +41,6 @@ function renderControls(groups: readonly DocumentRailGroup[], opts: DocumentRail
     groupEl.className = DOCUMENT_RAIL_GROUP_CLASS;
     groupEl.setAttribute("aria-label", group.label);
 
-    const label = document.createElement("span");
-    label.className = DOCUMENT_RAIL_LABEL_CLASS;
-    label.textContent = group.label;
-    groupEl.appendChild(label);
-
     const switchEl = document.createElement("div");
     switchEl.className = DOCUMENT_RAIL_SWITCH_CLASS;
     for (const control of group.controls) {
@@ -70,8 +64,6 @@ function renderControl(control: DocumentRailControl, opts: DocumentRailRenderOpt
     el.className = "active";
     el.setAttribute("aria-current", "page");
   }
-  if (control.label === "Open PR") el.setAttribute("data-testid", "open-pull-request");
-  if (control.label === "Merge to main") el.setAttribute("data-testid", "merge-branch");
   el.textContent = control.label;
   if (opts.onControl) {
     el.addEventListener("click", (event) => {
