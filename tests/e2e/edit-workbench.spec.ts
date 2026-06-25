@@ -18,66 +18,8 @@ async function signIn(page: Page): Promise<void> {
   });
 }
 
-async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0): Promise<Buffer> {
-  await page.goto(url);
-  await expect(page.locator(CF.reader)).toBeVisible();
-  await expect(page.locator(`${CF.reader} .cf-doc-paragraph, ${CF.reader} .cf-doc-heading`).first()).toBeVisible();
-  await waitForHydratedReader(page);
-  await page.waitForTimeout(400);
-  await page.locator(".doc-main").evaluate((element, ratio) => {
-    function scrollableAncestor(element: Element | null): HTMLElement | null {
-      let candidate: Element | null = element;
-      while (candidate) {
-        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
-          const before = candidate.scrollTop;
-          candidate.scrollTop = before + 1;
-          const canScroll = candidate.scrollTop !== before;
-          candidate.scrollTop = before;
-          if (canScroll) return candidate;
-        }
-        candidate = candidate.parentElement;
-      }
-      return null;
-    }
-    const scroller = scrollableAncestor(element) ?? (element instanceof HTMLElement ? element : null);
-    if (!scroller) return;
-    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    scroller.scrollTop = Math.round(max * ratio);
-  }, scrollRatio);
-  await page.waitForTimeout(150);
-  return page.locator(".doc-main").screenshot({ animations: "disabled" });
-}
-
 async function waitForHydratedReader(page: Page): Promise<void> {
   await expect(page.locator(".coflat-reader-island[data-reader-hydrated='1']").first()).toBeVisible();
-}
-
-async function settledReaderScrollState(page: Page): Promise<{ scrollHeight: number; clientHeight: number; max: number }> {
-  await waitForHydratedReader(page);
-  await page.waitForTimeout(50);
-  return page.locator(".doc-with-toc > .doc-main").first().evaluate((element) => {
-    function scrollableAncestor(element: Element | null): HTMLElement | null {
-      let candidate: Element | null = element;
-      while (candidate) {
-        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
-          const before = candidate.scrollTop;
-          candidate.scrollTop = before + 1;
-          const canScroll = candidate.scrollTop !== before;
-          candidate.scrollTop = before;
-          if (canScroll) return candidate;
-        }
-        candidate = candidate.parentElement;
-      }
-      return null;
-    }
-    const scroller = scrollableAncestor(element) ?? (element instanceof HTMLElement ? element : null);
-    if (!scroller) return { scrollHeight: 0, clientHeight: 0, max: 0 };
-    return {
-      scrollHeight: scroller.scrollHeight,
-      clientHeight: scroller.clientHeight,
-      max: Math.max(0, scroller.scrollHeight - scroller.clientHeight),
-    };
-  });
 }
 
 async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
@@ -93,25 +35,8 @@ async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width
 
 async function visibleCenterSourceRange(page: Page): Promise<{ from: string | null; to: string | null; text: string }> {
   return page.evaluate(() => {
-    function scrollableAncestor(element: Element | null): HTMLElement | null {
-      let candidate: Element | null = element;
-      while (candidate) {
-        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
-          const before = candidate.scrollTop;
-          candidate.scrollTop = before + 1;
-          const canScroll = candidate.scrollTop !== before;
-          candidate.scrollTop = before;
-          if (canScroll) return candidate;
-        }
-        candidate = candidate.parentElement;
-      }
-      return null;
-    }
-    const mode = document.querySelector<HTMLElement>("[data-edit-shell]")?.dataset.mode;
-    const scroller = mode === "edit"
-      ? document.querySelector<HTMLElement>(".cm-scroller")
-      : scrollableAncestor(document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main"))
-        ?? document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
+    const scroller = document.querySelector<HTMLElement>("[data-edit-shell] .cm-scroller")
+      ?? document.querySelector<HTMLElement>(".app-content");
     if (!scroller) return { from: null, to: null, text: "" };
     const rect = scroller.getBoundingClientRect();
     const sampleY = rect.top + rect.height / 2;
@@ -141,75 +66,38 @@ async function visibleCenterSourceRange(page: Page): Promise<{ from: string | nu
   });
 }
 
-async function visibleCenterReaderSourceRange(page: Page): Promise<{ from: string | null; to: string | null; text: string }> {
-  return page.locator(".doc-with-toc > .doc-main").first().evaluate((scroller) => {
-    function scrollableAncestor(element: Element | null): HTMLElement | null {
-      let candidate: Element | null = element;
-      while (candidate) {
-        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
-          const before = candidate.scrollTop;
-          candidate.scrollTop = before + 1;
-          const canScroll = candidate.scrollTop !== before;
-          candidate.scrollTop = before;
-          if (canScroll) return candidate;
-        }
-        candidate = candidate.parentElement;
-      }
-      return null;
-    }
-    scroller = scrollableAncestor(scroller) ?? scroller;
-    const rect = scroller.getBoundingClientRect();
-    const sampleY = rect.top + rect.height / 2;
-    let carrier: HTMLElement | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    let bestHeight = -1;
-    for (const candidate of scroller.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")) {
-      const display = getComputedStyle(candidate).display;
-      if (display === "inline") continue;
-      const box = candidate.getBoundingClientRect();
-      if (box.bottom < rect.top || box.top > rect.bottom) continue;
-      const distance = box.top <= sampleY && box.bottom >= sampleY
-        ? 0
-        : Math.min(Math.abs(box.top - sampleY), Math.abs(box.bottom - sampleY));
-      const height = Math.max(0, box.height);
-      if (distance < bestDistance || (distance === bestDistance && height > bestHeight)) {
-        carrier = candidate;
-        bestDistance = distance;
-        bestHeight = height;
-      }
-    }
-    return {
-      from: carrier?.getAttribute("data-source-from") ?? null,
-      to: carrier?.getAttribute("data-source-to") ?? null,
-      text: (carrier?.textContent ?? "").replace(/\s+/g, " ").trim(),
-    };
-  });
+async function expectWorkbenchReadOnly(page: Page, readOnly: boolean): Promise<void> {
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect.poll(async () =>
+    page.locator(`${CF.editorContent}.cm-content`).evaluate((element) => element.getAttribute("contenteditable") === "false"),
+  ).toBe(readOnly);
 }
 
-test("edit workbench starts as reader and lazy-loads editor on demand", async ({ page }) => {
+test("edit workbench read mode mounts the rich editor read-only", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-  await expect(page.locator(CF.reader)).toContainText("Hello");
+  await expect(page.getByTestId("editor")).toContainText("Hello");
   await expect(page.locator('script[src*="web-edit-shell"]')).toHaveCount(1);
-  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
-  await expect(page.locator('script[src*="web-editor"]')).toHaveCount(0);
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
+  await expect(page.locator("[data-edit-read-panel]")).toHaveCount(0);
+  await expectWorkbenchReadOnly(page, true);
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Read");
-  await expect(page.getByTestId("editor-upload-asset")).toHaveCount(0);
+  await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
   await expect(page.locator(".doc-rail .doc-view-controls")).toHaveCount(0);
   await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, false);
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Edit");
   await expect(page.getByRole("button", { name: "Rich" })).toBeVisible();
   await expect(page.getByTestId("editor-upload-asset")).toBeVisible();
   await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Hello");
-  await expect(page.getByTestId("editor")).toBeHidden();
+  await expect(page.getByTestId("editor")).toContainText("Hello");
+  await expectWorkbenchReadOnly(page, true);
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
 });
 
@@ -230,10 +118,11 @@ test("edit workbench read mode remains scrollable after switching from edit", as
   expect(editScroll.scrollTop).toBeGreaterThan(0);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, true);
 
-  await expect.poll(async () => page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  const scrollState = await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
+  await expect.poll(async () => page.locator("#web-editor-root .cm-scroller").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const scrollState = await page.locator("#web-editor-root .cm-scroller").evaluate((element) => {
     return {
       scrollTop: element.scrollTop,
       scrollHeight: element.scrollHeight,
@@ -263,7 +152,8 @@ test("edit workbench first read switch preserves the editor source anchor", asyn
   expect(Number.isFinite(beforeFrom)).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, true);
   await expect.poll(async () => {
     const after = await visibleCenterSourceRange(page);
     const afterFrom = Number(after.from);
@@ -275,48 +165,15 @@ test("edit workbench first read switch preserves the editor source anchor", asyn
   }).toBe(true);
 });
 
-test("standalone and workbench read modes have settled scroll parity", async ({ page }) => {
-  test.setTimeout(60_000);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await signIn(page);
-
-  const standaloneUrl = `${repoBase}/src/branch/main/coflat-feature-showcase.md`;
-  const workbenchUrl = `${standaloneUrl}?mode=read&edit_branch=user%2Fchao%2Fweb-edit`;
-
-  await page.goto(standaloneUrl);
-  const standaloneState = await settledReaderScrollState(page);
-  const standaloneRanges = [];
-  for (const ratio of [0, 0.3, 0.7, 1]) {
-    const scrollTop = Math.round(standaloneState.max * ratio);
-    await page.locator(".doc-with-toc > .doc-main").first().evaluate((element, top) => {
-      element.scrollTop = top;
-    }, scrollTop);
-    standaloneRanges.push({ ratio, scrollTop, range: await visibleCenterReaderSourceRange(page) });
-  }
-
-  await page.goto(workbenchUrl);
-  const workbenchState = await settledReaderScrollState(page);
-  expect(workbenchState.scrollHeight).toBe(standaloneState.scrollHeight);
-  expect(workbenchState.clientHeight).toBe(standaloneState.clientHeight);
-  for (const item of standaloneRanges) {
-    await page.locator(".doc-with-toc > .doc-main").first().evaluate((element, top) => {
-      element.scrollTop = top;
-    }, item.scrollTop);
-    await expect.poll(async () => visibleCenterReaderSourceRange(page), {
-      message: `reader source range drifted at scroll ratio ${item.ratio}`,
-    }).toMatchObject(item.range);
-  }
-});
-
 test("edit workbench keeps source anchor stable across repeated read edit switches", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=3440&source_to=3476`);
-  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
-  await expect(page.locator('[data-edit-read-panel] [data-source-from="3440"][data-source-to="3476"]').first()).toBeVisible();
-  await waitForHydratedReader(page);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page.locator('[data-edit-shell] .cm-scroller [data-source-from="3440"][data-source-to="3476"]').first()).toBeVisible();
+  await expectWorkbenchReadOnly(page, true);
 
   await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
     from: "3440",
@@ -334,12 +191,13 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
 
   for (let index = 0; index < 2; index += 1) {
     await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-    await expect(page.getByTestId("editor")).toBeVisible();
+    await expectWorkbenchReadOnly(page, false);
     await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
       from: "3440",
       to: "3476",
     });
     await page.locator('.edit-primary-mode button:has-text("Read")').click();
+    await expectWorkbenchReadOnly(page, true);
     await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
       from: "3440",
       to: "3476",
@@ -347,47 +205,30 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
   }
 });
 
-test("edit workbench follows the active edit source anchor when switching back to read", async ({ page }) => {
+test("edit workbench preserves deep source anchors when switching back to read", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
-  await waitForHydratedReader(page);
-  await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
-    element.scrollTop = Math.round((element.scrollHeight - element.clientHeight) * 0.72);
-  });
-  await page.waitForTimeout(150);
-  const beforeGenerated = await page.evaluate(() => {
-    const heading = document.querySelector<HTMLElement>("[data-edit-read-panel] .cf-bibliography-heading");
-    const listText = [...document.querySelectorAll<HTMLElement>("[data-edit-read-panel] .cf-doc-list-item")]
-      .find((item) => item.textContent?.includes("Display math in list:"));
-    const marker = listText?.querySelector<HTMLElement>(".cf-list-number");
-    const paragraph = marker?.nextElementSibling instanceof HTMLElement ? marker.nextElementSibling : null;
-    const headingStyle = heading ? getComputedStyle(heading) : null;
-    return {
-      headingFontSize: headingStyle?.fontSize ?? "",
-      headingFontStyle: headingStyle?.fontStyle ?? "",
-      listMarkerTop: marker?.getBoundingClientRect().top ?? 0,
-      listParagraphTop: paragraph?.getBoundingClientRect().top ?? -999,
-    };
-  });
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=3958&source_to=3972`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, true);
+  await expect.poll(async () => {
+    const range = await visibleCenterSourceRange(page);
+    const from = Number(range.from);
+    const to = Number(range.to);
+    return Number.isFinite(from) && Number.isFinite(to) && from <= 3958 && 3958 <= to;
+  }).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-  await expect(page.getByTestId("editor")).toBeVisible();
-  await page.locator(".cm-scroller").evaluate((element) => {
-    const target = [...element.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")]
-      .find((candidate) => candidate.textContent?.includes("Proof of Theorem 4"));
-    if (!target) throw new Error("missing edit source anchor");
-    target.scrollIntoView({ block: "center" });
-  });
+  await expectWorkbenchReadOnly(page, false);
   const editAnchor = await visibleCenterSourceRange(page);
   const editAnchorFrom = Number(editAnchor.from);
   expect(Number.isFinite(editAnchorFrom)).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, true);
   await expect.poll(async () => {
     const after = await visibleCenterSourceRange(page);
     const afterFrom = Number(after.from);
@@ -395,28 +236,8 @@ test("edit workbench follows the active edit source anchor when switching back t
     return Number.isFinite(afterFrom) && Number.isFinite(afterTo)
       && afterFrom <= editAnchorFrom && editAnchorFrom <= afterTo;
   }, {
-    message: "reader should follow the source position that was visible in edit mode",
+    message: "read-only editor should follow the source position that was visible in edit mode",
   }).toBe(true);
-  const afterGenerated = await page.evaluate(() => {
-    const heading = document.querySelector<HTMLElement>("[data-edit-read-panel] .cf-bibliography-heading");
-    const listText = [...document.querySelectorAll<HTMLElement>("[data-edit-read-panel] .cf-doc-list-item")]
-      .find((item) => item.textContent?.includes("Display math in list:"));
-    const marker = listText?.querySelector<HTMLElement>(".cf-list-number");
-    const paragraph = marker?.nextElementSibling instanceof HTMLElement ? marker.nextElementSibling : null;
-    const headingStyle = heading ? getComputedStyle(heading) : null;
-    return {
-      headingFontSize: headingStyle?.fontSize ?? "",
-      headingFontStyle: headingStyle?.fontStyle ?? "",
-      listMarkerTop: marker?.getBoundingClientRect().top ?? 0,
-      listParagraphTop: paragraph?.getBoundingClientRect().top ?? -999,
-    };
-  });
-  expect(afterGenerated).toMatchObject({
-    headingFontSize: beforeGenerated.headingFontSize,
-    headingFontStyle: beforeGenerated.headingFontStyle,
-  });
-  expect(Math.abs(beforeGenerated.listMarkerTop - beforeGenerated.listParagraphTop)).toBeLessThanOrEqual(1);
-  expect(Math.abs(afterGenerated.listMarkerTop - afterGenerated.listParagraphTop)).toBeLessThanOrEqual(1);
 });
 
 test("reader selection can open edit mode at the selected source anchor", async ({ page }) => {
@@ -486,10 +307,10 @@ test("edit workbench keeps reader and editor anchored on inline images", async (
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-  await expect(page.locator(CF.reader)).toContainText("Links and Images");
-  await expect(page.locator('[data-edit-read-panel] [data-source-from="6363"][data-source-to="6427"]').first()).toBeVisible();
-  await waitForHydratedReader(page);
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=6363&source_to=6427`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page.locator('[data-edit-shell] .cm-scroller [data-source-from="6363"][data-source-to="6427"]').first()).toBeVisible();
+  await expectWorkbenchReadOnly(page, true);
   await page.evaluate(() => {
     const img = [...document.images].find((candidate) => (candidate.currentSrc || candidate.src).includes("hover-preview-figure"));
     img?.scrollIntoView({ block: "center" });
@@ -501,14 +322,15 @@ test("edit workbench keeps reader and editor anchored on inline images", async (
   expect(before?.height).toBe(150);
 
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, false);
   await expect.poll(async () => visibleShowcaseImageStats(page)).toMatchObject({ width: 257, height: 150 });
   const afterEdit = await visibleShowcaseImageStats(page);
   expect(afterEdit).not.toBeNull();
   expect(Math.abs((afterEdit?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(18);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Links and Images");
+  await expect(page.getByTestId("editor")).toContainText("Links and Images");
+  await expectWorkbenchReadOnly(page, true);
   await expect.poll(async () => visibleShowcaseImageStats(page)).toMatchObject({ width: 257, height: 150 });
   const afterRead = await visibleShowcaseImageStats(page);
   expect(afterRead).not.toBeNull();
@@ -528,26 +350,27 @@ test("edit workbench previews unsaved drafts in read mode and refreshes after sa
   await page.locator(CF.editorContent).fill("# Workbench\n\nUnsaved body.\n");
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Unsaved body.");
-  await expect(page.getByTestId("editor")).toBeHidden();
+  await expect(page.getByTestId("editor")).toContainText("Unsaved body.");
+  await expectWorkbenchReadOnly(page, true);
   await expect(page.locator(".edit-primary-mode")).toHaveClass(/is-dirty/);
   const samePreviewReused = await page.evaluate(async () => {
-    const before = document.querySelector(".coflat-reader-island");
+    const before = document.querySelector(".cm-editor");
     document.querySelector<HTMLElement>('.edit-primary-mode button[data-edit-mode-target="read"]')?.click();
     await new Promise((resolve) => requestAnimationFrame(resolve));
-    return before === document.querySelector(".coflat-reader-island");
+    return before === document.querySelector(".cm-editor");
   });
   expect(samePreviewReused).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-  await expect(page.getByTestId("editor")).toBeVisible();
+  await expectWorkbenchReadOnly(page, false);
   await expect(page.locator(CF.editorContent)).toContainText("Unsaved body.");
 
   await page.locator(CF.editorContent).fill("# Workbench\n\nSaved body.\n");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByTestId("statusbar")).toContainText("Saved");
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect(page.locator(CF.reader)).toContainText("Saved body.");
+  await expect(page.getByTestId("editor")).toContainText("Saved body.");
+  await expectWorkbenchReadOnly(page, true);
   await expect(page.locator(".edit-primary-mode")).not.toHaveClass(/is-dirty/);
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
 });
@@ -558,20 +381,22 @@ test("edit workbench keeps compact read and rich line boxes aligned", async ({ p
   for (const width of [430, 600]) {
     await page.setViewportSize({ width, height: 820 });
     await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-    await expect(page.locator(`${CF.reader} .cf-doc-paragraph`).first()).toBeVisible();
-    const readBox = await page.locator(`${CF.reader} .cf-doc-paragraph`).first().boundingBox();
+    await expectWorkbenchReadOnly(page, true);
+    await expect(page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first()).toBeVisible();
+    const readBox = await page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first().boundingBox();
     expect(readBox, `reader paragraph at ${width}px`).not.toBeNull();
 
     for (let i = 0; i < 3; i += 1) {
       await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-      await expect(page.getByTestId("editor")).toBeVisible();
+      await expectWorkbenchReadOnly(page, false);
       await expect(page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first()).toBeVisible();
       await page.locator('.edit-primary-mode button:has-text("Read")').click();
-      await expect(page.locator(`${CF.reader} .cf-doc-paragraph`).first()).toBeVisible();
+      await expectWorkbenchReadOnly(page, true);
+      await expect(page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first()).toBeVisible();
     }
 
     await page.locator('.edit-primary-mode button:has-text("Edit")').click();
-    await expect(page.getByTestId("editor")).toBeVisible();
+    await expectWorkbenchReadOnly(page, false);
     const editBox = await page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first().boundingBox();
     expect(editBox, `editor paragraph at ${width}px`).not.toBeNull();
     expect(Math.abs((editBox?.width ?? 0) - (readBox?.width ?? 0)), `paragraph width at ${width}px`).toBeLessThanOrEqual(1);
@@ -579,24 +404,18 @@ test("edit workbench keeps compact read and rich line boxes aligned", async ({ p
   }
 });
 
-test("edit workbench read surface is pixel-identical to the normal reader", async ({ page }) => {
+test("standalone read still uses the reader while workbench read uses the editor", async ({ page }) => {
   test.setTimeout(60_000);
   await signIn(page);
-  const cases = [
-    { viewport: { width: 1280, height: 900 }, path: "hello.md", scrollRatio: 0 },
-    { viewport: { width: 1280, height: 900 }, path: "coflat-feature-showcase.md", scrollRatio: 0.52 },
-    { viewport: { width: 430, height: 820 }, path: "hello.md", scrollRatio: 0 },
-    { viewport: { width: 430, height: 820 }, path: "coflat-feature-showcase.md", scrollRatio: 0.52 },
-  ];
+  await page.setViewportSize({ width: 1280, height: 900 });
 
-  for (const item of cases) {
-    await page.setViewportSize(item.viewport);
-    const direct = await readerSurfaceScreenshot(page, `${repoBase}/src/branch/main/${item.path}`, item.scrollRatio);
-    const workbench = await readerSurfaceScreenshot(
-      page,
-      `${repoBase}/src/branch/main/${encodeURIComponent(item.path)}?mode=read`,
-      item.scrollRatio,
-    );
-    expect(Buffer.compare(direct, workbench), `${item.path} ${item.viewport.width}x${item.viewport.height}`).toBe(0);
-  }
+  await page.goto(`${repoBase}/src/branch/main/hello.md`);
+  await expect(page.locator(CF.reader)).toContainText("Hello");
+  await waitForHydratedReader(page);
+  await expect(page.getByTestId("editor")).toHaveCount(0);
+
+  await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+  await expect(page.locator(CF.reader)).toHaveCount(0);
+  await expect(page.getByTestId("editor")).toContainText("Hello");
+  await expectWorkbenchReadOnly(page, true);
 });

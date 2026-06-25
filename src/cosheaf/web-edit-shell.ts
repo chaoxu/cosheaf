@@ -1,14 +1,7 @@
 import {
-  scrollReaderToSourcePosition,
   type SourcePosition,
   visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
-import {
-  COFLAT_FILE_PREVIEW_TEST_ID,
-  COFLAT_READER_ARTICLE_CLASS,
-  coflatReaderIslandClass,
-} from "../../shared/coflat-reader-surface";
-import type { CoflatDocumentPayload } from "./coflat-document-context";
 
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
@@ -21,6 +14,7 @@ interface EditorModule {
       onDirtyChange?: (dirty: boolean) => void;
       onSaved?: (event: { source: string; branch: string; path: string; readHref: string }) => void;
     },
+    options?: { initialReadOnly?: boolean },
   ) => WebEditorMount;
 }
 
@@ -28,23 +22,13 @@ interface WebEditorMount {
   ready: Promise<void>;
   preview: () => { source: string; branch: string; branchExists: boolean; path: string; dirty: boolean; sourcePosition: SourcePosition | null } | null;
   scrollToSourcePosition: (position: WorkbenchSourcePosition) => boolean;
+  setReadOnly: (readOnly: boolean) => void;
 }
 
 interface WorkbenchState {
-  dirty: boolean;
-  editorLoaded: boolean;
-  editorMount: WebEditorMount | null;
   editorReady: Promise<WebEditorMount | null> | null;
-  payload: CoflatDocumentPayload | null;
-  previewKey: string | null;
   sourcePosition: SourcePosition | null;
   switchId: number;
-}
-
-interface WorkbenchSurfaceSnapshot {
-  mode: WorkbenchMode;
-  preview: ReturnType<WebEditorMount["preview"]> | null;
-  sourcePosition: WorkbenchSourcePosition | null;
 }
 
 function shell(): HTMLElement | null {
@@ -53,14 +37,6 @@ function shell(): HTMLElement | null {
 
 function editorRoot(host: HTMLElement): HTMLElement | null {
   return host.querySelector<HTMLElement>("#web-editor-root");
-}
-
-function readPanel(host: HTMLElement): HTMLElement | null {
-  return host.querySelector<HTMLElement>("[data-edit-read-panel]");
-}
-
-function readerMount(host: HTMLElement): HTMLElement | null {
-  return host.querySelector<HTMLElement>("[data-edit-reader-mount]");
 }
 
 function statusSlot(): HTMLElement | null {
@@ -73,21 +49,6 @@ function editorActionsSlot(): HTMLElement | null {
 
 function fileActionsSlot(): HTMLElement | null {
   return document.querySelector<HTMLElement>(".file-tree .file-tree-actions-slot");
-}
-
-function readPayload(host: HTMLElement): CoflatDocumentPayload | null {
-  const script = host.querySelector<HTMLScriptElement>("[data-edit-reader-payload]");
-  if (!script?.textContent) return null;
-  return JSON.parse(script.textContent) as CoflatDocumentPayload;
-}
-
-function writePayload(host: HTMLElement, payload: CoflatDocumentPayload): void {
-  const script = host.querySelector<HTMLScriptElement>("[data-edit-reader-payload]");
-  if (script) script.textContent = JSON.stringify(payload);
-}
-
-function payloadKey(payload: Pick<CoflatDocumentPayload, "source" | "branch" | "path">): string {
-  return JSON.stringify([payload.branch, payload.path, payload.source]);
 }
 
 function activeModeFromUrl(): WorkbenchMode | null {
@@ -168,63 +129,13 @@ function renderStatusControls(mode: WorkbenchMode, dirty = false): void {
 function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
   host.dataset.mode = mode;
   document.documentElement.dataset.cosheafWorkbenchMode = mode;
-  const reader = readPanel(host);
   const root = editorRoot(host);
-  if (reader) reader.hidden = mode !== "read";
-  if (root) root.hidden = mode !== "edit";
+  if (root) root.hidden = false;
   const actions = editorActionsSlot();
   if (actions) actions.hidden = mode !== "edit";
   const fileSlot = fileActionsSlot();
   if (fileSlot) fileSlot.hidden = mode !== "edit";
   renderStatusControls(mode, host.dataset.dirty === "1");
-}
-
-function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void {
-  const mount = readerMount(host);
-  if (!mount) return;
-  const article = document.createElement("article");
-  article.className = COFLAT_READER_ARTICLE_CLASS;
-  article.dataset.testid = COFLAT_FILE_PREVIEW_TEST_ID;
-  const island = document.createElement("div");
-  island.className = coflatReaderIslandClass();
-  island.dataset.readerBranch = payload.branch;
-  const script = document.createElement("script");
-  script.type = "application/json";
-  script.textContent = JSON.stringify(payload);
-  island.append(script);
-  article.append(island);
-  mount.replaceChildren(article);
-}
-
-function scrollableAncestor(element: HTMLElement | null): HTMLElement | null {
-  let candidate: HTMLElement | null = element;
-  while (candidate) {
-    if (candidate.scrollHeight > candidate.clientHeight) {
-      const before = candidate.scrollTop;
-      candidate.scrollTop = before + 1;
-      const canScroll = candidate.scrollTop !== before;
-      candidate.scrollTop = before;
-      if (canScroll) return candidate;
-    }
-    candidate = candidate.parentElement;
-  }
-  return null;
-}
-
-function readScroller(host: HTMLElement): HTMLElement | null {
-  const documentMain = host.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
-  return scrollableAncestor(documentMain) ?? documentMain;
-}
-
-function readerReady(scroller: HTMLElement): boolean {
-  const island = scroller.querySelector<HTMLElement>(`.${coflatReaderIslandClass()}`);
-  return !island || island.dataset.readerHydrated === "1";
-}
-
-function visibleReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
-  const scroller = readScroller(host);
-  if (!scroller || scroller.hidden) return null;
-  return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
 }
 
 function visibleEditSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
@@ -242,108 +153,45 @@ function crossSurfaceSourcePosition(position: SourcePosition | null): WorkbenchS
   };
 }
 
-function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePosition | null): void {
+function applyEditorSourcePosition(mount: WebEditorMount | null | undefined, sourcePosition: SourcePosition | null): void {
   if (!sourcePosition) return;
-  let attempts = 0;
-  let appliedFrames = 0;
+  let frames = 0;
   const apply = () => {
-    if (host.dataset.mode !== "read") return;
-    attempts += 1;
-    const scroller = readScroller(host);
-    if (!scroller || !readerReady(scroller) || (scroller.scrollHeight <= scroller.clientHeight && attempts < 20)) {
-      if (attempts < 20) window.requestAnimationFrame(apply);
-      return;
-    }
-    const applied = scrollReaderToSourcePosition(scroller, sourcePosition, { block: "center" });
-    if (applied) appliedFrames += 1;
-    if ((!applied && attempts < 20) || (applied && appliedFrames < 8)) {
-      window.requestAnimationFrame(apply);
-    }
+    mount?.scrollToSourcePosition(sourcePosition);
+    frames += 1;
+    if (frames < 8) window.requestAnimationFrame(apply);
   };
   window.requestAnimationFrame(apply);
 }
 
-function rebuildReaderFromEditorPreview(
-  host: HTMLElement,
-  state: WorkbenchState,
-  preview: ReturnType<WebEditorMount["preview"]> | null,
-): boolean {
-  if (!preview || !state.payload) return false;
-  state.dirty = preview.dirty;
-  host.dataset.dirty = preview.dirty ? "1" : "0";
-  const nextPreviewKey = payloadKey(preview);
-  if (state.previewKey === nextPreviewKey) return false;
-  state.payload = {
-    ...state.payload,
-    source: preview.source,
-    branch: preview.branch,
-    branchExists: preview.branchExists,
-    path: preview.path,
-  };
-  state.previewKey = nextPreviewKey;
-  writePayload(host, state.payload);
-  rebuildReader(host, state.payload);
-  return true;
-}
-
-async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEditorMount | null> {
+function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEditorMount | null> {
   if (state.editorReady) return state.editorReady;
-  if (state.editorLoaded) return state.editorMount;
   const root = editorRoot(host);
-  if (!root) return null;
+  if (!root) return Promise.resolve(null);
   state.editorReady = (async () => {
     const mod = await import("./web-editor") as EditorModule;
     const mount = mod.mountWebEditor(root, {
       onDirtyChange: (dirty) => {
-        state.dirty = dirty;
         host.dataset.dirty = dirty ? "1" : "0";
         renderStatusControls((host.dataset.mode === "read" ? "read" : "edit"), dirty);
       },
-      onSaved: (event) => {
-        state.dirty = false;
+      onSaved: () => {
         host.dataset.dirty = "0";
-        if (state.payload) {
-          state.payload = {
-            ...state.payload,
-            source: event.source,
-            branch: event.branch,
-            branchExists: true,
-            path: event.path,
-          };
-          state.previewKey = payloadKey(state.payload);
-          writePayload(host, state.payload);
-          rebuildReader(host, state.payload);
-        }
+        renderStatusControls((host.dataset.mode === "read" ? "read" : "edit"), false);
       },
-    });
-    state.editorMount = mount;
+    }, { initialReadOnly: (host.dataset.mode === "read") });
     await mount.ready;
-    state.editorLoaded = true;
     return mount;
   })();
   return state.editorReady;
 }
 
-async function captureSurfaceSnapshot(
+async function captureSourcePosition(
   host: HTMLElement,
   state: WorkbenchState,
-  mode: WorkbenchMode,
-): Promise<WorkbenchSurfaceSnapshot> {
-  if (mode === "read") {
-    return {
-      mode,
-      preview: null,
-      sourcePosition: crossSurfaceSourcePosition(visibleReadSourcePosition(host) ?? state.sourcePosition),
-    };
-  }
-
+): Promise<WorkbenchSourcePosition | null> {
   const mount = await ensureEditor(host, state);
-  const preview = mount?.preview() ?? null;
-  return {
-    mode,
-    preview,
-    sourcePosition: crossSurfaceSourcePosition(preview?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition),
-  };
+  return crossSurfaceSourcePosition(mount?.preview()?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition);
 }
 
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
@@ -354,27 +202,15 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
   const switchId = state.switchId + 1;
   state.switchId = switchId;
   const fromMode: WorkbenchMode = host.dataset.mode === "read" ? "read" : "edit";
-  const snapshot = await captureSurfaceSnapshot(host, state, fromMode);
+  const sourcePosition = await captureSourcePosition(host, state);
   if (state.switchId !== switchId || host.dataset.mode !== fromMode) return;
-  state.sourcePosition = snapshot.sourcePosition ?? state.sourcePosition;
-
-  if (mode === "edit") {
-    const mount = await ensureEditor(host, state);
-    if (state.switchId !== switchId || host.dataset.mode !== "read") return;
-    setVisibleMode(host, mode);
-    setUrlMode(mode, opts.replace);
-    if (state.sourcePosition) mount?.scrollToSourcePosition(state.sourcePosition);
-    return;
-  }
-
-  if (mode === "read") {
-    if (snapshot.mode === "edit") {
-      rebuildReaderFromEditorPreview(host, state, snapshot.preview);
-    }
-  }
+  state.sourcePosition = sourcePosition ?? state.sourcePosition;
+  const mount = await ensureEditor(host, state);
+  if (state.switchId !== switchId || host.dataset.mode !== fromMode) return;
   setVisibleMode(host, mode);
+  mount?.setReadOnly(mode === "read");
   setUrlMode(mode, opts.replace);
-  if (mode === "read") applyReadSourcePosition(host, state.sourcePosition);
+  applyEditorSourcePosition(mount, state.sourcePosition);
 }
 
 function installModeClicks(host: HTMLElement, state: WorkbenchState): void {
@@ -400,16 +236,10 @@ function installPopstate(host: HTMLElement, state: WorkbenchState): void {
 const host = shell();
 if (host) {
   const state: WorkbenchState = {
-    dirty: false,
-    editorLoaded: false,
-    editorMount: null,
     editorReady: null,
-    payload: readPayload(host),
-    previewKey: null,
     sourcePosition: null,
     switchId: 0,
   };
-  if (state.payload) state.previewKey = payloadKey(state.payload);
   installModeClicks(host, state);
   installPopstate(host, state);
   const mode = initialMode(host);
@@ -417,12 +247,9 @@ if (host) {
   if (urlSourcePosition) state.sourcePosition = urlSourcePosition;
   setVisibleMode(host, mode);
   setUrlMode(mode, true, { keepSourceAnchor: Boolean(urlSourcePosition) });
-  if (mode === "edit") {
-    void ensureEditor(host, state).then((mount) => {
-      if (!mount || !state.sourcePosition) return;
-      mount.scrollToSourcePosition(state.sourcePosition);
-    });
-  } else if (urlSourcePosition) {
-    applyReadSourcePosition(host, urlSourcePosition);
-  }
+  void ensureEditor(host, state).then((mount) => {
+    if (!mount) return;
+    mount.setReadOnly(mode === "read");
+    applyEditorSourcePosition(mount, state.sourcePosition);
+  });
 }
