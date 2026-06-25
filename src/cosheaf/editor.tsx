@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
-import { Prec, type Extension } from "@codemirror/state";
+import { EditorState, Prec, type Extension } from "@codemirror/state";
 import { insertTab } from "@codemirror/commands";
 import { EditorView, keymap } from "@codemirror/view";
 import {
@@ -44,6 +44,10 @@ interface Props {
   sidenotesCollapsed?: boolean;
 }
 
+export function coflatEditorMode(mode: StandaloneEditorMode, readOnly?: boolean): StandaloneEditorMode {
+  return readOnly && mode === "rich" ? "rich-readonly" : mode;
+}
+
 export function MarkdownEditor({
   value,
   mode,
@@ -76,7 +80,8 @@ export function MarkdownEditor({
   const autocompleteRef = useRef(autocompleteSources);
   onChangeRef.current = onChange;
   onDocumentChangeRef.current = onDocumentChange;
-  modeRef.current = mode;
+  const effectiveMode = coflatEditorMode(mode, readOnly);
+  modeRef.current = effectiveMode;
   saveRef.current = saveHandler;
   statusRef.current = statusEvents;
   assetRef.current = assetUploader;
@@ -91,7 +96,12 @@ export function MarkdownEditor({
       },
     ]));
     const mountExtensions: Extension[] = [sourceModeTabExtension, ...(extensions ?? [])];
-    if (readOnly) mountExtensions.push(EditorView.editable.of(false));
+    if (readOnly) {
+      mountExtensions.push(
+        EditorState.readOnly.of(true),
+        EditorView.editable.of(false),
+      );
+    }
 
     // Stable host-API wrappers that always read the latest prop value via ref.
     const stableSaveHandler: SaveHandler = {
@@ -121,7 +131,7 @@ export function MarkdownEditor({
     const editor = mountEditor({
       parent: containerRef.current,
       doc: value,
-      mode,
+      mode: effectiveMode,
       extensions: mountExtensions,
       ...(onChange ? { onChange: (next) => onChangeRef.current?.(next) } : {}),
       ...(onDocumentChange
@@ -159,8 +169,8 @@ export function MarkdownEditor({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (editor.getMode() !== mode) editor.setMode(mode);
-  }, [mode]);
+    if (editor.getMode() !== effectiveMode) editor.setMode(effectiveMode);
+  }, [effectiveMode]);
 
   useEffect(() => {
     const editor = editorRef.current;
