@@ -22,6 +22,7 @@ async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0)
   await page.goto(url);
   await expect(page.locator(CF.reader)).toBeVisible();
   await expect(page.locator(`${CF.reader} .cf-doc-paragraph, ${CF.reader} .cf-doc-heading`).first()).toBeVisible();
+  await waitForHydratedReader(page);
   await page.waitForTimeout(400);
   await page.locator(".doc-main").evaluate((element, ratio) => {
     const max = Math.max(0, element.scrollHeight - element.clientHeight);
@@ -29,6 +30,10 @@ async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0)
   }, scrollRatio);
   await page.waitForTimeout(150);
   return page.locator(".doc-main").screenshot({ animations: "disabled" });
+}
+
+async function waitForHydratedReader(page: Page): Promise<void> {
+  await expect(page.locator(".coflat-reader-island[data-reader-hydrated='1']").first()).toBeVisible();
 }
 
 async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
@@ -50,8 +55,25 @@ async function visibleCenterSourceRange(page: Page): Promise<{ from: string | nu
       : document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
     if (!scroller) return { from: null, to: null, text: "" };
     const rect = scroller.getBoundingClientRect();
-    const element = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    const carrier = element instanceof HTMLElement ? element.closest<HTMLElement>("[data-source-from][data-source-to]") : null;
+    const sampleY = rect.top + rect.height / 2;
+    let carrier: HTMLElement | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestHeight = -1;
+    for (const candidate of scroller.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")) {
+      const display = getComputedStyle(candidate).display;
+      if (display === "inline") continue;
+      const box = candidate.getBoundingClientRect();
+      if (box.bottom < rect.top || box.top > rect.bottom) continue;
+      const distance = box.top <= sampleY && box.bottom >= sampleY
+        ? 0
+        : Math.min(Math.abs(box.top - sampleY), Math.abs(box.bottom - sampleY));
+      const height = Math.max(0, box.height);
+      if (distance < bestDistance || (distance === bestDistance && height > bestHeight)) {
+        carrier = candidate;
+        bestDistance = distance;
+        bestHeight = height;
+      }
+    }
     return {
       from: carrier?.getAttribute("data-source-from") ?? null,
       to: carrier?.getAttribute("data-source-to") ?? null,
@@ -124,17 +146,10 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=3440&source_to=3476`);
   await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
-  await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
-    const target = [...element.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")]
-      .find((candidate) => candidate.textContent?.includes("Bullet with math"));
-    if (!target) throw new Error("missing bullet source anchor");
-    const scrollerRect = element.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    element.scrollTop += targetRect.top - (scrollerRect.top + scrollerRect.height / 2);
-  });
-  await page.waitForTimeout(400);
+  await expect(page.locator('[data-edit-read-panel] [data-source-from="3440"][data-source-to="3476"]').first()).toBeVisible();
+  await waitForHydratedReader(page);
 
   await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
     from: "3440",
@@ -165,6 +180,38 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
   }
 });
 
+test("reader selection can open edit mode at the selected source anchor", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md`);
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await waitForHydratedReader(page);
+  await page.locator(".doc-main").evaluate((element) => {
+    const target = [...element.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")]
+      .find((candidate) => candidate.textContent?.includes("Bullet with math"));
+    if (!target || !target.firstChild) throw new Error("missing selectable source anchor");
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    target.scrollIntoView({ block: "center" });
+    document.dispatchEvent(new Event("selectionchange"));
+  });
+
+  await expect(page.getByRole("button", { name: "Edit selection" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit selection" }).click();
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page).toHaveURL(/mode=edit/);
+  await expect(page).toHaveURL(/source_from=/);
+  await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
+    from: "3440",
+    to: "3476",
+  });
+});
+
 test("edit workbench keeps reader and editor anchored on inline images", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -172,6 +219,8 @@ test("edit workbench keeps reader and editor anchored on inline images", async (
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.locator(CF.reader)).toContainText("Links and Images");
+  await expect(page.locator('[data-edit-read-panel] [data-source-from="6363"][data-source-to="6427"]').first()).toBeVisible();
+  await waitForHydratedReader(page);
   await page.evaluate(() => {
     const img = [...document.images].find((candidate) => (candidate.currentSrc || candidate.src).includes("hover-preview-figure"));
     img?.scrollIntoView({ block: "center" });

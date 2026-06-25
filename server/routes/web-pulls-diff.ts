@@ -14,7 +14,7 @@ import { prSideRefAndPath } from "../pr-side.js";
 import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
 import { html, type Html } from "./web-html.js";
-import { renderMarkdownSurface } from "./web-markdown.js";
+import { renderMarkdownSurface, type SurfaceOpts } from "./web-markdown.js";
 
 export type DiffMode = "source" | "rich";
 
@@ -34,10 +34,11 @@ interface PrFileVersions {
   head: string;
 }
 
-interface WebLineComment {
+export interface WebLineComment {
   id: number;
   line: number | null;
   side: Side;
+  body: string;
   bodyHtml: Html;
   author: string;
   createdAt: number;
@@ -96,7 +97,7 @@ export async function renderPrFileView(
   const renderSide = (src: string, branch: string, marked: ReadonlySet<number>, side: Side): Promise<Html> =>
     src === ""
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
-      : renderMarkdownSurface(ctx, src, { branch, documentPath: file.path, surface: "diff", markedLines: [...marked] });
+      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side));
   if (shape === "split") {
     const baseSide = prSideRefAndPath(pull, file, "base");
     const headSide = prSideRefAndPath(pull, file, "head");
@@ -115,8 +116,41 @@ export async function renderPrFileView(
   const head =
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
-      : await renderMarkdownSurface(ctx, nextVersions.head, { branch: prSideRefAndPath(pull, file, "head").ref, documentPath: file.path, surface: "diff", markedLines: [...changed.added] });
+      : await renderMarkdownSurface(ctx, nextVersions.head, {
+        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head"),
+      });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
+}
+
+export function richDiffSurfaceOpts(
+  branch: string,
+  filePath: string,
+  marked: ReadonlySet<number>,
+  comments: readonly WebLineComment[],
+  side: Side,
+): SurfaceOpts {
+  return {
+    branch,
+    documentPath: filePath,
+    surface: "diff",
+    markedLines: [...marked],
+    sourcePositions: true,
+    reviewComments: richReviewAnchors(comments, side),
+  };
+}
+
+export function richReviewAnchors(comments: readonly WebLineComment[], side: Side) {
+  return comments
+    .filter((comment) => comment.side === side && comment.line !== null)
+    .map((comment) => ({
+      id: comment.id,
+      line: comment.line as number,
+      side: comment.side,
+      author: comment.author,
+      body: comment.body,
+      bodyHtml: String(comment.bodyHtml),
+      outdated: comment.outdated,
+    }));
 }
 
 export function diffModeControls(ctx: WebCtx, prNumber: number, filePath: string, mode: DiffMode, shape: DiffShape, richOk: boolean): Html {
@@ -326,6 +360,7 @@ export async function mapLineComments(
         id: comment.id,
         line,
         side,
+        body: comment.body,
         bodyHtml: await renderMarkdownSurface(ctx, comment.body, { surface: "thread" }),
         author: displayLogin(comment.user?.login),
         createdAt: toEpochMs(comment.created_at),

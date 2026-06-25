@@ -99,13 +99,28 @@ function preferredOpenMode(): WorkbenchMode {
   return (localStorage.getItem(key) || localStorage.getItem(legacyKey)) === "read" ? "read" : "edit";
 }
 
+function sourcePositionFromUrl(): WorkbenchSourcePosition | null {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("source_from")) return null;
+  const from = Number(params.get("source_from"));
+  const toParam = params.get("source_to");
+  const to = toParam === null ? from : Number(toParam);
+  if (!Number.isInteger(from) || from < 0) return null;
+  if (!Number.isInteger(to) || to < from) return null;
+  return { pos: from, viewportRatio: MODE_SWITCH_VIEWPORT_RATIO };
+}
+
 function initialMode(host: HTMLElement): WorkbenchMode {
   return activeModeFromUrl() ?? (host.dataset.initialMode === "auto" ? preferredOpenMode() : host.dataset.initialMode === "read" ? "read" : "edit");
 }
 
-function setUrlMode(mode: WorkbenchMode, replace = false): void {
+function setUrlMode(mode: WorkbenchMode, replace = false, opts: { keepSourceAnchor?: boolean } = {}): void {
   const url = new URL(window.location.href);
   url.searchParams.set("mode", mode);
+  if (!opts.keepSourceAnchor) {
+    url.searchParams.delete("source_from");
+    url.searchParams.delete("source_to");
+  }
   if (replace) history.replaceState({ ...(history.state ?? {}), editMode: mode }, "", url);
   else history.pushState({ ...(history.state ?? {}), editMode: mode }, "", url);
 }
@@ -375,7 +390,16 @@ if (host) {
   installModeClicks(host, state);
   installPopstate(host, state);
   const mode = initialMode(host);
+  const urlSourcePosition = sourcePositionFromUrl();
+  if (urlSourcePosition) state.sourcePosition = urlSourcePosition;
   setVisibleMode(host, mode);
-  setUrlMode(mode, true);
-  if (mode === "edit") void ensureEditor(host, state);
+  setUrlMode(mode, true, { keepSourceAnchor: Boolean(urlSourcePosition) });
+  if (mode === "edit") {
+    void ensureEditor(host, state).then((mount) => {
+      if (!mount || !state.sourcePosition) return;
+      mount.scrollToSourcePosition(state.sourcePosition);
+    });
+  } else if (urlSourcePosition) {
+    applyReadSourcePosition(host, urlSourcePosition);
+  }
 }

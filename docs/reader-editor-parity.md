@@ -218,6 +218,39 @@ Already shared or recently aligned:
   chrome-slot planning for opener visibility, source-edit fallback, inline
   titles, inline body headers, active-shell body bounds, and below captions.
 
+## Source-Anchored Interaction Model
+
+Reader/edit continuity, rich PR diffs, propose-edit actions, and rendered
+inline review should all use the same anchor contract:
+
+- Coflat owns source metadata on rendered/editor DOM (`data-source-from`,
+  `data-source-to`, `data-source-line`) plus public helpers such as
+  `mapDomRangeToSource` and `scrollReaderToSourcePosition`.
+- Cosheaf owns collaboration state: branches, PRs, review comments, ordinary
+  file discussions, permissions, save/merge, and resolution state.
+- Navigation between read and edit carries source offsets in URL query
+  parameters (`source_from`, `source_to`). The edit workbench scrolls to that
+  source position after lazy-loading the editor.
+- The normal reader can expose contextual actions only when a user selection
+  maps back to a Coflat source range. The first action is "Edit selection",
+  which enters the existing edit workbench rather than creating a separate
+  draft model.
+- Rich PR diff comments are projected from Forgejo review-comment line
+  coordinates into Coflat reader payload anchors. After Coflat renders the
+  source-positioned rich document, Cosheaf places review cards next to the
+  rendered block for that source line.
+- Ordinary rendered inline review should reuse the same visual layer but use
+  issue-backed file-comment records for durability: `{ filePath, branch,
+  blob, anchor: { from, to, selectedText, contextBefore, contextAfter,
+  baseRevision }, status, messages }`. PR review comments stay PR-native.
+
+Rendered inline review should look like document margin notes rather than a
+separate diff table: selected text or a changed rendered block gets a small
+comment marker; opening it shows a compact thread directly under or beside the
+rendered paragraph/equation/list item. The source document remains unchanged,
+and the thread is keyed to source anchors so read, edit, and PR views cannot
+drift into separate comment systems.
+
 Intentionally still split:
 
 - `@chaoxu/coflat/src/reader/reader.ts` is a large HTML-string renderer.

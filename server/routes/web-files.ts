@@ -182,12 +182,12 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const sourceView = c.req.query("view") === "source";
   const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
   const previewKind = await previewKindForFile(fj, owner, repo, resolved.branch, rel, kind, meta.size);
+  const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
   const rendered =
     kind === "markdown" && content !== null && !sourceView
-      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true, assetPreviewPaths })
+      ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true, assetPreviewPaths, sourcePositions: coflatMarkdownDocument })
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
-  const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
   const readerChrome = coflatMarkdownDocument
     ? html`<div class="doc-reader-chrome">
         <details class="doc-reader-more">

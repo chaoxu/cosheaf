@@ -27,6 +27,15 @@ export type SurfaceOpts = {
   renderTitle?: boolean;
   assetPreviewPaths?: AssetPreviewPaths;
   sourcePositions?: boolean;
+  reviewComments?: readonly {
+    id: number;
+    line: number;
+    side: "base" | "head";
+    author: string;
+    body: string;
+    bodyHtml?: string;
+    outdated?: boolean;
+  }[];
 };
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
@@ -66,6 +75,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
     ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
     ...(opts.assetPreviewPaths && Object.keys(opts.assetPreviewPaths).length ? { assetPreviewPaths: opts.assetPreviewPaths } : {}),
     ...(opts.sourcePositions ? { sourcePositions: true } : {}),
+    ...(opts.reviewComments?.length ? { reviewComments: opts.reviewComments } : {}),
   };
 }
 
