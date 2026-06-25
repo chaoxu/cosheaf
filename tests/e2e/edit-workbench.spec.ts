@@ -46,7 +46,7 @@ test("edit workbench starts as reader and lazy-loads editor on demand", async ({
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/_edit?branch=user%2Fchao%2Fweb-edit&mode=read&path=hello.md`);
+  await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.locator(CF.reader)).toContainText("Hello");
   await expect(page.locator('script[src*="web-edit-shell"]')).toHaveCount(1);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
@@ -73,7 +73,7 @@ test("edit workbench read mode remains scrollable after switching from edit", as
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/_edit?branch=user%2Fchao%2Fweb-edit&mode=edit&path=coflat-feature-showcase.md`);
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=edit&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.getByTestId("editor")).toBeVisible();
   const editScroll = await page.locator("#web-editor-root .cm-scroller").evaluate((element) => {
     element.scrollTop = Math.max(1, Math.floor((element.scrollHeight - element.clientHeight) * 0.55));
@@ -106,7 +106,7 @@ test("edit workbench keeps reader and editor anchored on inline images", async (
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/_edit?branch=user%2Fchao%2Fweb-edit&mode=read&path=coflat-feature-showcase.md`);
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.locator(CF.reader)).toContainText("Links and Images");
   await page.evaluate(() => {
     const img = [...document.images].find((candidate) => (candidate.currentSrc || candidate.src).includes("hover-preview-figure"));
@@ -140,7 +140,7 @@ test("edit workbench previews unsaved drafts in read mode and refreshes after sa
   const branch = `user/chao/workbench-${Date.now()}`;
   const path = `workbench-${Date.now()}.md`;
 
-  await page.goto(`${repoBase}/_edit?branch=${encodeURIComponent(branch)}&mode=edit&path=${encodeURIComponent(path)}`);
+  await page.goto(`${repoBase}/src/branch/main/${encodeURIComponent(path)}?mode=edit&edit_branch=${encodeURIComponent(branch)}`);
   await expect(page.getByTestId("editor")).toBeVisible();
   await page.getByRole("button", { name: "Source" }).click();
   await page.locator(CF.editorContent).fill("# Workbench\n\nUnsaved body.\n");
@@ -185,7 +185,7 @@ test("edit workbench read surface is pixel-identical to the normal reader", asyn
     const direct = await readerSurfaceScreenshot(page, `${repoBase}/src/branch/main/${item.path}`, item.scrollRatio);
     const workbench = await readerSurfaceScreenshot(
       page,
-      `${repoBase}/_edit?branch=main&mode=read&path=${encodeURIComponent(item.path)}`,
+      `${repoBase}/src/branch/main/${encodeURIComponent(item.path)}?mode=read`,
       item.scrollRatio,
     );
     expect(Buffer.compare(direct, workbench), `${item.path} ${item.viewport.width}x${item.viewport.height}`).toBe(0);

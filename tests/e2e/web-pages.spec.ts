@@ -95,7 +95,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   );
   await expect(page.getByRole("link", { name: "Branches" })).toHaveCount(0);
 
-  await page.goto(`${repoBase}/_edit?branch=main&path=hello.md`);
+  await page.goto(`${repoBase}/src/branch/main/hello.md?mode=edit&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.getByTestId("editor")).toBeVisible();
   const editorCrossFileTheorem = page.locator(`${CF.editorContent} [${CFA.referenceKey}="thm:coin-conservation"]`);
   await expect(editorCrossFileTheorem).toContainText("Theorem 1");
@@ -103,7 +103,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
     "href",
     `/${owner}/${repo}/src/branch/user/chao/web-edit/theory/cross-file-theorem.md#thm%3Acoin-conservation`,
   );
-  await page.goto(`${repoBase}/_edit?branch=main&path=coflat-feature-showcase.md`);
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=edit&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.getByTestId("editor")).toBeVisible();
   await expect
     .poll(async () =>
@@ -146,7 +146,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
 
   const textBranch = `user/chao/text-file-${Date.now()}`;
   await page.goto(
-    `${repoBase}/_edit?branch=${encodeURIComponent(textBranch)}&path=${encodeURIComponent("notes/plain-text.txt")}`,
+    `${repoBase}/src/branch/main/notes/plain-text.txt?mode=edit&edit_branch=${encodeURIComponent(textBranch)}`,
   );
   await expect(page.getByTestId("text-edit-form")).toBeVisible();
   await page.getByTestId("text-edit-form").locator('textarea[name="content"]').fill("Updated plain text fixture.\n");
@@ -257,7 +257,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-filters").getByRole("button", { name: "Label filter" })).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByRole("button", { name: "Milestone filter" })).toBeVisible();
   await expect(page.getByTestId("pull-filters").getByLabel("Author filter")).toBeVisible();
-  await page.locator('.list-row[href*="/pulls/"]', { hasText: "e2e demo PR" }).click();
+  await page.getByRole("link", { name: /e2e demo PR #\d+/ }).click();
   const demoPrPath = new URL(page.url()).pathname;
   await expect(page.locator(".subtabs")).toContainText("Files changed");
   await expect(page.getByTestId("pull-edit-link")).toBeVisible();
@@ -319,7 +319,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   const branch = `user/chao/web-pages-${Date.now()}`;
   const path = "web-page-e2e.md";
   await page.goto(
-    `${repoBase}/_edit?branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`,
+    `${repoBase}/src/branch/main/${encodeURIComponent(path)}?mode=edit&edit_branch=${encodeURIComponent(branch)}`,
   );
   await expect(page.locator(".edit-page")).toBeVisible();
   await expect(page.getByTestId("editor")).toBeVisible();
@@ -330,8 +330,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("statusbar")).toContainText("Saved");
   await page.goto(`${repoBase}/src/branch/${branch}/${path}`);
   await expect(page.locator(CF.reader)).toContainText("Web Page E2E");
-  await expect(page.getByRole("link", { name: "Open PR" })).toBeVisible();
-  await page.getByRole("link", { name: "Open PR" }).click();
+  await page.goto(`${repoBase}/pulls/new?head=${encodeURIComponent(branch)}&base=main`);
   await expect(page.getByTestId("pull-create-form")).toBeVisible();
   await expect(page.getByTestId("pull-create-head")).toHaveValue(branch);
   const prTitle = `Web PR ${Date.now()}`;

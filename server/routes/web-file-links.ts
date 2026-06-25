@@ -13,8 +13,11 @@ export function rawFileHref(owner: string, repo: string, branch: string, rel: st
 }
 
 export function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
-  const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}&mode=edit`;
-  return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
+  const editBranch = editBranchFor(user, branch);
+  const base = rel
+    ? `${readHref(owner, repo, branch, rel)}?mode=edit`
+    : `${repoHref(owner, repo, "/_edit")}?mode=edit`;
+  return editBranch === branch ? base : `${base}&edit_branch=${encodeURIComponent(editBranch)}`;
 }
 
 export function readHref(owner: string, repo: string, branch: string, rel: string): string {
@@ -34,7 +37,8 @@ export function defaultFileLinkAttrs(owner: string, repo: string, user: string |
 // `new.md`, preserving the old one-click create-a-page behavior.
 export function newFileControl(owner: string, repo: string, user: string, branch: string): Html {
   return html`<form class="newfile" action="${repoHref(owner, repo, "/_edit")}" method="get">
-    <input type="hidden" name="branch" value="${editBranchFor(user, branch)}">
+    <input type="hidden" name="branch" value="${branch}">
+    <input type="hidden" name="edit_branch" value="${editBranchFor(user, branch)}">
     <input class="newfile-path" name="path" placeholder="new.md" aria-label="New file name" autocomplete="off" spellcheck="false">
     <button class="button" type="submit">New file</button>
   </form>`;

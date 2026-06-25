@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import { COFLAT_FILE_PREVIEW_TEST_ID } from "../../shared/coflat-reader-surface.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
+import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import { type Forgejo, ForgejoError } from "../forgejo.js";
@@ -109,12 +109,12 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const { owner, repo, fj, ws, user } = ctx;
   const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
-  const [files, branches] = await Promise.all([
-    repoFiles(fj, owner, repo, resolved.branch),
-    fj.listBranches(owner, repo).catch(() => []),
-  ]);
-  const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
   if (!resolved.path) {
+    const [files, branches] = await Promise.all([
+      repoFiles(fj, owner, repo, resolved.branch),
+      fj.listBranches(owner, repo).catch(() => []),
+    ]);
+    const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
     const branchTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
     // The sidebar tree is the file navigator; the main panel shows the branch's
     // README (or a title-first page index), never a second copy of the file list.
@@ -140,9 +140,26 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   }
   const rel = safeRel(resolved.path);
   if (!rel) return notFoundPage(user, "File not found");
+  const kind = fileKindForPath(rel);
+  const requestedMode = c.req.query("mode");
+  if ((requestedMode === "read" || requestedMode === "edit") && editableFileKind(kind) && ws.role !== "read") {
+    const editBranchParam = c.req.query("edit_branch");
+    const editBranch = editBranchFor(ctx.user, editBranchParam ?? resolved.branch);
+    if (!validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+    return editPageResponse(ctx, {
+      branch: editBranch,
+      rel,
+      kind,
+      initialMode: requestedMode,
+    });
+  }
   const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch(onForgejo404(null));
   if (!meta) return notFoundPage(user, "File not found");
-  const kind = fileKindForPath(rel);
+  const [files, branches] = await Promise.all([
+    repoFiles(fj, owner, repo, resolved.branch),
+    fj.listBranches(owner, repo).catch(() => []),
+  ]);
+  const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
   const sourceView = c.req.query("view") === "source";
   const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
   const previewKind = await previewKindForFile(fj, owner, repo, resolved.branch, rel, kind, meta.size);
@@ -264,13 +281,24 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
 registerPdfExportRoutes(web);
 
 web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
-  const branch = editBranchFor(ctx.user, c.req.query("branch"));
+  const requestedBranch = c.req.query("branch");
+  const requestedEditBranch = c.req.query("edit_branch");
+  const branch = editBranchFor(ctx.user, requestedEditBranch ?? requestedBranch);
   if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
   const requestedPath = c.req.query("path");
   const rel = requestedPath === undefined || requestedPath.trim() === "" ? "new.md" : safeRel(requestedPath);
   if (!rel) return badRequestPage(ctx.user, "Valid file path is required.");
   const kind = fileKindForPath(rel);
   if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
+  const readBranch = requestedEditBranch && requestedBranch && validBranchName(requestedBranch) ? requestedBranch : "main";
+  const target = `${readHref(ctx.owner, ctx.repo, readBranch, rel)}?mode=${c.req.query("mode") === "read" ? "read" : "edit"}&edit_branch=${encodeURIComponent(branch)}`;
+  return redirect(target);
+}));
+async function editPageResponse(
+  ctx: WebCtx,
+  opts: { branch: string; rel: string; kind: FileKind; initialMode: "read" | "edit" },
+): Promise<Response> {
+  const { branch, rel, kind, initialMode } = opts;
   const branchInfo = branch === "main" ? await ctx.fj.getBranch(ctx.owner, ctx.repo, "main") : await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
   const resetEditBranch = Boolean(branchInfo) && await retiredDefaultEditBranch(ctx, branch);
   const branchExists = !resetEditBranch && (branch === "main" || Boolean(branchInfo));
@@ -298,7 +326,6 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
   const coflatMarkdownEdit = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
-  const initialMode = c.req.query("mode") === "read" ? "read" : "edit";
   const readPanelPayload = coflatMarkdownEdit && repoConfig
     ? {
       ...coflatReaderPayload(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths }, repoConfig),
@@ -394,7 +421,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
         sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles, [], ctx.user, ctx.ws.role !== "read")],
       }),
   );
-}));
+}
 
 web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
@@ -438,7 +465,7 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
   return redirect(
     kind === "markdown"
-      ? `${repoHref(ctx.owner, ctx.repo, "/_edit")}?branch=${encodeURIComponent(branch)}&mode=edit&path=${encodeURIComponent(rel)}`
+      ? `${readHref(ctx.owner, ctx.repo, branch, rel)}?mode=edit`
       : readHref(ctx.owner, ctx.repo, branch, rel),
   );
 }));

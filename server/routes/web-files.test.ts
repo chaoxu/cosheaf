@@ -107,10 +107,10 @@ describe("web file editor route", () => {
     expect(body).toContain('data-testid="repo-readme"');
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
     expect(body).toContain('value="ssh://git@forge.cosheaf.test:2222/owner/w.git"');
-    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=README.md"');
-    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=README.md" data-read-href="/owner/w/src/branch/main/README.md"');
-    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes%2Fa.md"');
-    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes%2Fa.md" data-read-href="/owner/w/src/branch/main/notes/a.md"');
+    expect(body).toContain('href="/owner/w/src/branch/main/README.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
+    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/src/branch/main/README.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit" data-read-href="/owner/w/src/branch/main/README.md"');
+    expect(body).toContain('href="/owner/w/src/branch/main/notes/a.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
+    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/src/branch/main/notes/a.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit" data-read-href="/owner/w/src/branch/main/notes/a.md"');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
     expect(listedPulls).toBe(false);
   });
@@ -135,12 +135,12 @@ describe("web file editor route", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes.md"');
+    expect(body).toContain('href="/owner/w/src/branch/main/notes.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
     expect(body).toContain('class="doc-rail"');
     expect(body).toContain("data-document-rail");
     expect(body).toContain('data-doc-mode="read"');
     expect(body).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
-    expect(body).toContain('data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes.md"');
+    expect(body).toContain('data-edit-href="/owner/w/src/branch/main/notes.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
     expect(body).toContain('class="doc-reader-chrome"');
     expect(body).toContain("<summary>More</summary>");
     expect(body).toContain('href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
@@ -746,6 +746,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/wip" }]));
         forge.get("/api/v1/repos/owner/w/branches/*", (c) => c.json({ name: "user/alice/wip" }));
         forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => {
           if (c.req.query("ref") === "user/alice/wip") return c.text("not found", 404);
@@ -763,7 +764,7 @@ describe("web file editor route", () => {
       }),
     );
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=edit&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/main/notes.md?mode=edit&edit_branch=user%2Falice%2Fwip", {
       headers: authHeaders(token),
     });
 
@@ -785,6 +786,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/wip" }]));
         forge.get("/api/v1/repos/owner/w/branches/*", (c) => c.json({ name: decodeURIComponent(c.req.path.split("/branches/")[1] ?? ""), commit: { id: "branch-head" } }));
         forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "branch-sha" }));
         forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
@@ -792,7 +794,7 @@ describe("web file editor route", () => {
       }),
     );
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=read&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/user/alice/wip/notes.md?mode=read", {
       headers: authHeaders(token),
     });
 
@@ -814,6 +816,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/wip" }]));
         forge.get("/api/v1/repos/owner/w/branches/*", () => Response.json({ name: "user/alice/wip", commit: { id: "branch-head" } }));
         forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "branch-sha" }));
         forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
@@ -821,7 +824,7 @@ describe("web file editor route", () => {
       }),
     );
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=edit&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/user/alice/wip/notes.md?mode=edit", {
       headers: authHeaders(token),
     });
 
@@ -841,6 +844,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
         forge.get("/api/v1/repos/owner/w/branches/*", (c) => {
           const branch = decodeURIComponent(c.req.path.split("/branches/")[1] ?? "");
           if (branch === "main") return c.json({ name: "main", commit: { id: "main-head" } });
@@ -870,7 +874,7 @@ describe("web file editor route", () => {
       }),
     );
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fweb-edit&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/main/notes.md?mode=edit&edit_branch=user%2Falice%2Fweb-edit", {
       headers: authHeaders(token),
     });
 
@@ -890,6 +894,7 @@ describe("web file editor route", () => {
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
         forge.get("/api/v1/repos/owner/w/branches/*", (c) => c.text("not found", 404));
         forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => {
           if (c.req.query("ref") === "user/alice/new") return c.text("not found", 404);
@@ -907,7 +912,7 @@ describe("web file editor route", () => {
       }),
     );
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fnew&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/src/branch/main/notes.md?mode=edit&edit_branch=user%2Falice%2Fnew", {
       headers: authHeaders(token),
     });
 
@@ -1276,7 +1281,7 @@ describe("web file editor route", () => {
     });
 
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=edit&path=new.md");
+    expect(res.headers.get("location")).toBe("/owner/w/src/branch/user/alice/wip/new.md?mode=edit");
     expect(deletedOld).toBe(false);
   });
 
