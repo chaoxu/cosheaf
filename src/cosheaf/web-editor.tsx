@@ -3,6 +3,7 @@ import type {
   AutocompleteSource as EditorAutocompleteSource,
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
+  EditorSourcePosition,
   MountedEditor,
   MountedDocumentChange,
   OutlineEntry,
@@ -106,8 +107,10 @@ export interface WebEditorSavedEvent {
 export interface WebEditorPreviewEvent {
   source: string;
   branch: string;
+  branchExists: boolean;
   path: string;
   dirty: boolean;
+  sourcePosition: EditorSourcePosition | null;
 }
 
 export interface WebEditorCallbacks {
@@ -310,8 +313,10 @@ function WebEditor({ config, initialContent, callbacks = {}, handleRef }: { conf
     preview: () => ({
       source: liveEditorSource(editorRef.current, content),
       branch: branchRef.current || config.branch,
+      branchExists: branchExistsRef.current,
       path: currentPathRef.current.trim() || config.path,
       dirty: uncommitted || pathDirty,
+      sourcePosition: editorRef.current?.getVisibleSourcePosition() ?? null,
     }),
   }), [config.branch, config.path, content, pathDirty, uncommitted]);
 

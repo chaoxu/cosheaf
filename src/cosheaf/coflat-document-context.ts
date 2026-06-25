@@ -36,6 +36,8 @@ export interface CoflatDocumentPayload {
   csl?: string;
   /** Browser-displayable asset previews, e.g. foo.pdf -> foo.png. */
   assetPreviewPaths?: AssetPreviewPaths;
+  /** Workbench read/edit switching only: emit source carriers for position mapping. */
+  sourcePositions?: boolean;
 }
 
 export interface CoflatDocumentRefs {
@@ -99,7 +101,7 @@ export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string)
   const [withoutHash, hash = ""] = clean.split("#", 2);
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
-  return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `${rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 export function resolveRawRepoDisplayAssetLink(payload: CoflatDocumentPayload, href: string): string | null {
@@ -111,7 +113,7 @@ export function resolveRawRepoDisplayAssetLink(payload: CoflatDocumentPayload, h
   const normalized = normalizeRepoPath(payload, withoutHash);
   if (!normalized || normalized.split("/").includes("..")) return null;
   const assetPath = previewAssetPath(normalized, payload.assetPreviewPaths);
-  return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `${rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 function resolveRawRepoAssetPath(payload: CoflatDocumentPayload, path: string, purpose: "source" | "display"): string | null {
@@ -123,7 +125,11 @@ function resolveRawRepoAssetPath(payload: CoflatDocumentPayload, path: string, p
   const decodedPath = decodeMarkdownPathHref(withoutHash);
   if (!decodedPath || decodedPath.split("/").includes("..")) return null;
   const assetPath = purpose === "display" ? previewAssetPath(decodedPath, payload.assetPreviewPaths) : decodedPath;
-  return `${rawRepoBranchFileHref(payload.owner, payload.repo, payload.branch, assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  return `${rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+}
+
+function rawResourceBranch(payload: CoflatDocumentPayload): string {
+  return payload.branchExists === false ? "main" : payload.branch;
 }
 
 function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {

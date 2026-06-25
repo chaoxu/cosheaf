@@ -50,6 +50,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     resolveReferences: true,
     sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
     ...(payload.markedLines ? { sourceLineAttribution: true } : {}),
+    ...(payload.sourcePositions ? { sourcePositions: true } : {}),
   });
   const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);

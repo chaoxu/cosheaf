@@ -107,6 +107,7 @@ export function MarkdownEditor({
       setContext: () => undefined,
       getMode: () => "source",
       setMode: () => undefined,
+      getVisibleSourcePosition: () => null,
       outline,
       counts: store(() => countDocument(localValueRef.current)),
       cursorContext: store(() => ({

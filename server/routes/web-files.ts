@@ -299,7 +299,10 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const coflatMarkdownEdit = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
   const initialMode = c.req.query("mode") === "read" ? "read" : "edit";
   const readPanelPayload = coflatMarkdownEdit && repoConfig
-    ? coflatReaderPayload(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths }, repoConfig)
+    ? {
+      ...coflatReaderPayload(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths }, repoConfig),
+      sourcePositions: true,
+    }
     : null;
   const readPanel = coflatMarkdownEdit && repoConfig
     ? await renderMarkdown(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths })

@@ -1,3 +1,7 @@
+import {
+  scrollReaderToSourcePosition,
+  type SourcePosition,
+} from "@chaoxu/coflat/reader";
 import type { CoflatDocumentPayload } from "./coflat-document-context";
 
 type WorkbenchMode = "read" | "edit";
@@ -13,7 +17,7 @@ interface EditorModule {
 }
 
 interface WebEditorMount {
-  preview: () => { source: string; branch: string; path: string; dirty: boolean } | null;
+  preview: () => { source: string; branch: string; branchExists: boolean; path: string; dirty: boolean; sourcePosition: SourcePosition | null } | null;
 }
 
 interface WorkbenchState {
@@ -23,6 +27,7 @@ interface WorkbenchState {
   editorMount: WebEditorMount | null;
   payload: CoflatDocumentPayload | null;
   previewKey: string | null;
+  sourcePosition: SourcePosition | null;
 }
 
 function shell(): HTMLElement | null {
@@ -155,21 +160,12 @@ function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void 
   mount.replaceChildren(island);
 }
 
-function editorScrollRatio(host: HTMLElement): number | null {
-  const scroller = host.querySelector<HTMLElement>("#web-editor-root .cm-scroller")
-    ?? host.querySelector<HTMLElement>("#web-editor-root .doc-main");
-  if (!scroller) return null;
-  const max = scroller.scrollHeight - scroller.clientHeight;
-  if (max <= 0) return null;
-  return Math.min(1, Math.max(0, scroller.scrollTop / max));
-}
-
 function readScroller(host: HTMLElement): HTMLElement | null {
   return host.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
 }
 
-function applyReadScrollRatio(host: HTMLElement, ratio: number | null): void {
-  if (ratio === null) return;
+function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePosition | null): void {
+  if (!sourcePosition) return;
   let attempts = 0;
   const apply = () => {
     attempts += 1;
@@ -179,8 +175,9 @@ function applyReadScrollRatio(host: HTMLElement, ratio: number | null): void {
       if (attempts < 20) window.requestAnimationFrame(apply);
       return;
     }
-    const max = scroller.scrollHeight - scroller.clientHeight;
-    scroller.scrollTop = Math.max(0, Math.round(max * ratio));
+    if (!scrollReaderToSourcePosition(scroller, sourcePosition, { block: "center" }) && attempts < 20) {
+      window.requestAnimationFrame(apply);
+    }
   };
   window.requestAnimationFrame(apply);
 }
@@ -188,6 +185,7 @@ function applyReadScrollRatio(host: HTMLElement, ratio: number | null): void {
 function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState): boolean {
   const preview = state.editorMount?.preview();
   if (!preview || !state.payload) return false;
+  state.sourcePosition = preview.sourcePosition;
   state.dirty = preview.dirty;
   host.dataset.dirty = preview.dirty ? "1" : "0";
   const nextPreviewKey = payloadKey(preview);
@@ -196,6 +194,7 @@ function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState): bool
     ...state.payload,
     source: preview.source,
     branch: preview.branch,
+    branchExists: preview.branchExists,
     path: preview.path,
   };
   state.previewKey = nextPreviewKey;
@@ -225,6 +224,7 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
             ...state.payload,
             source: event.source,
             branch: event.branch,
+            branchExists: true,
             path: event.path,
           };
           state.previewKey = payloadKey(state.payload);
@@ -240,11 +240,10 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
 }
 
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
-  const scrollRatio = mode === "read" ? editorScrollRatio(host) : null;
   if (mode === "read") rebuildReaderFromEditor(host, state);
   setVisibleMode(host, mode);
   setUrlMode(mode, opts.replace);
-  if (mode === "read") applyReadScrollRatio(host, scrollRatio);
+  if (mode === "read") applyReadSourcePosition(host, state.sourcePosition);
   if (mode === "edit") await ensureEditor(host, state);
 }
 
@@ -277,6 +276,7 @@ if (host) {
     editorMount: null,
     payload: readPayload(host),
     previewKey: null,
+    sourcePosition: null,
   };
   if (state.payload) state.previewKey = payloadKey(state.payload);
   installModeClicks(host, state);

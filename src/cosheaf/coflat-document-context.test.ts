@@ -88,6 +88,21 @@ describe("resolveRepoLink", () => {
     );
   });
 
+  it("uses main for raw asset URLs when the edit branch does not exist yet", () => {
+    const freshEditPayload = {
+      ...payload,
+      branch: "user/chao/new-edit",
+      branchExists: false,
+      assetPreviewPaths: { "notes/figures/pipeline.pdf": "notes/figures/pipeline.png" },
+    };
+    expect(resolveRawRepoLink(freshEditPayload, "figures/pipeline.pdf")).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.pdf",
+    );
+    expect(resolveRawRepoDisplayAssetLink(freshEditPayload, "figures/pipeline.pdf")).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.png",
+    );
+  });
+
   it("resolves Coflat file-system asset paths as workspace-relative", () => {
     const context = coflatDocumentContext({
       ...payload,
