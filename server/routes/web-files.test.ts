@@ -805,8 +805,6 @@ describe("web file editor route", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-edit-shell data-initial-mode="read" data-mode="read"');
-    expect(body).not.toContain("data-edit-read-panel");
-    expect(body).not.toContain("data-edit-reader-payload");
     expect(body).toContain('id="web-editor-root"');
     expect(body).not.toContain('id="web-editor-root"\n            hidden');
     expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
@@ -835,7 +833,6 @@ describe("web file editor route", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-edit-shell data-initial-mode="edit" data-mode="edit"');
-    expect(body).not.toContain("data-edit-read-panel");
     expect(body).toContain('<div\n            id="web-editor-root"');
     expect(body).not.toContain('id="web-editor-root"\n            hidden');
     expect(body).toContain("/src/cosheaf/web-edit-shell.ts");

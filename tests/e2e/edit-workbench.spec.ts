@@ -81,7 +81,6 @@ test("edit workbench read mode mounts the rich editor read-only", async ({ page 
   await expect(page.getByTestId("editor")).toContainText("Hello");
   await expect(page.locator('script[src*="web-edit-shell"]')).toHaveCount(1);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
-  await expect(page.locator("[data-edit-read-panel]")).toHaveCount(0);
   await expectWorkbenchReadOnly(page, true);
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Read");
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
@@ -161,7 +160,7 @@ test("edit workbench first read switch preserves the editor source anchor", asyn
     return Number.isFinite(afterFrom) && Number.isFinite(afterTo)
       && afterFrom <= beforeFrom && beforeFrom <= afterTo;
   }, {
-    message: "reader should keep the source position that was centered in the editor",
+    message: "workbench read mode should keep the source position that was centered in the editor",
   }).toBe(true);
 });
 
@@ -302,7 +301,7 @@ test("normal reader edit control opens editor at the current source anchor", asy
   });
 });
 
-test("edit workbench keeps reader and editor anchored on inline images", async ({ page }) => {
+test("edit workbench keeps read-only and editable modes anchored on inline images", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
@@ -384,7 +383,7 @@ test("edit workbench keeps compact read and rich line boxes aligned", async ({ p
     await expectWorkbenchReadOnly(page, true);
     await expect(page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first()).toBeVisible();
     const readBox = await page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first().boundingBox();
-    expect(readBox, `reader paragraph at ${width}px`).not.toBeNull();
+    expect(readBox, `read-only editor paragraph at ${width}px`).not.toBeNull();
 
     for (let i = 0; i < 3; i += 1) {
       await page.locator('.edit-primary-mode button:has-text("Edit")').click();

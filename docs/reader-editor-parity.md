@@ -228,9 +228,10 @@ inline review should all use the same anchor contract:
   `mapDomRangeToSource` and `scrollReaderToSourcePosition`.
 - Cosheaf owns collaboration state: branches, PRs, review comments, ordinary
   file discussions, permissions, save/merge, and resolution state.
-- Navigation between read and edit carries source offsets in URL query
-  parameters (`source_from`, `source_to`). The edit workbench scrolls to that
-  source position after lazy-loading the editor.
+- Navigation from the standalone reader into the edit workbench carries source
+  offsets in URL query parameters (`source_from`, `source_to`). Once inside the
+  workbench, read/edit switches keep the anchor in editor state and clean the
+  transient source query parameters from normal mode URLs.
 - The normal reader can expose contextual actions only when a user selection
   maps back to a Coflat source range. The first action is "Edit selection",
   which enters the existing edit workbench rather than creating a separate
@@ -255,14 +256,15 @@ Intentionally still split:
 
 - `@chaoxu/coflat/src/reader/reader.ts` is a large HTML-string renderer.
 - `@chaoxu/coflat/src/editor/render/preview-block-renderer.ts` is a separate DOM renderer.
-- Reader-only behaviors include source-position attributes, truncation, reference-preview indexing, outline id generation, and disclosure hydration.
+- Reader-only behaviors include HTML serialization, truncation, reference-preview indexing, outline id generation, and disclosure hydration. Source-position attributes are shared with editor-rendered workbench DOM.
 - Editor-only behaviors include CM6 widgets, viewport mounting, editable/source transitions, and non-interactive preview rendering.
 
 Completion audit state:
 
 - The remaining reader/editor split is the intended emitter and runtime split:
-  reader HTML serialization, reader hydration and truncation, editor DOM/CM6
-  widgets, viewport behavior, and static editor preview policies.
+  standalone read/source routes use reader HTML serialization plus reader
+  hydration/truncation, while workbench read mode uses the editor DOM/CM6
+  runtime in Coflat rich-readonly mode.
 - No known reader/editor semantic interpretation remains intentionally
   duplicated for references, outlines, fenced divs, lists, footnotes, source
   ranges, or hover previews; those are covered by the shared Coflat planners
