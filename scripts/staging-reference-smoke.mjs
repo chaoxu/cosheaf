@@ -46,7 +46,7 @@ try {
   await page.getByTestId("editor").waitFor({ state: "visible", timeout: 15000 });
   const editorPreview = await hoverPreviewText(
     page,
-    `${CF.referenceWidget}${CF.referenceKey}, ${CF.referenceWidget} ${CF.referenceWidgetId}`,
+    `${CF.editorContent} ${CF.referenceWidget}, ${CF.editorContent} ${CF.referenceKey}, ${CF.editorContent} ${CF.referenceWidgetId}`,
   );
 
   if (badResponses.length > 0 || pageErrors.length > 0) {
