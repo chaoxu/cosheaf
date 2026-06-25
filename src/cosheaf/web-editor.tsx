@@ -23,8 +23,8 @@ import {
   hydrateReaderHoverPreviews,
   hydrateReferences,
 } from "@chaoxu/coflat/reader";
-import type { ReactNode } from "react";
-import { lazy, StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode, Ref } from "react";
+import { createRef, lazy, StrictMode, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
@@ -103,9 +103,25 @@ export interface WebEditorSavedEvent {
   readHref: string;
 }
 
+export interface WebEditorPreviewEvent {
+  source: string;
+  branch: string;
+  path: string;
+  dirty: boolean;
+}
+
 export interface WebEditorCallbacks {
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: (event: WebEditorSavedEvent) => void;
+}
+
+export interface WebEditorHandle {
+  preview: () => WebEditorPreviewEvent;
+}
+
+export interface WebEditorMount {
+  root: Root;
+  preview: () => WebEditorPreviewEvent | null;
 }
 
 function shortId(): string {
@@ -226,7 +242,7 @@ function matchesSuggestion(id: string, title: string | null, prefix: string): bo
   return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
-function WebEditor({ config, initialContent, callbacks = {} }: { config: EditorConfig; initialContent: string; callbacks?: WebEditorCallbacks }) {
+function WebEditor({ config, initialContent, callbacks = {}, handleRef }: { config: EditorConfig; initialContent: string; callbacks?: WebEditorCallbacks; handleRef?: Ref<WebEditorHandle> }) {
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(config.formatId).editor),
     [config.formatId],
@@ -289,6 +305,15 @@ function WebEditor({ config, initialContent, callbacks = {} }: { config: EditorC
   useEffect(() => {
     callbacks.onDirtyChange?.(uncommitted || pathDirty);
   }, [callbacks, pathDirty, uncommitted]);
+
+  useImperativeHandle(handleRef, () => ({
+    preview: () => ({
+      source: liveEditorSource(editorRef.current, content),
+      branch: branchRef.current || config.branch,
+      path: currentPathRef.current.trim() || config.path,
+      dirty: uncommitted || pathDirty,
+    }),
+  }), [config.branch, config.path, content, pathDirty, uncommitted]);
 
   const setEditorMode = useCallback((next: "rich" | "source") => {
     setMode(next);
@@ -1087,15 +1112,19 @@ function renderEditorChrome(filename: ReactNode, actions: ReactNode): ReactNode 
   );
 }
 
-export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks = {}): Root {
+export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks = {}): WebEditorMount {
   const { config, content } = readConfig();
+  const handleRef = createRef<WebEditorHandle>();
   const reactRoot = createRoot(root);
   reactRoot.render(
     <StrictMode>
-      <WebEditor config={config} initialContent={content} callbacks={callbacks} />
+      <WebEditor config={config} initialContent={content} callbacks={callbacks} handleRef={handleRef} />
     </StrictMode>,
   );
-  return reactRoot;
+  return {
+    root: reactRoot,
+    preview: () => handleRef.current?.preview() ?? null,
+  };
 }
 
 const root = document.getElementById("web-editor-root");

@@ -67,7 +67,7 @@ test("edit workbench read mode remains scrollable after switching from edit", as
   expect(scrollState.scrollTop).toBeGreaterThan(0);
 });
 
-test("edit workbench confirms dirty read switch and refreshes reader after save", async ({ page }) => {
+test("edit workbench previews unsaved drafts in read mode and refreshes after save", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
@@ -79,17 +79,20 @@ test("edit workbench confirms dirty read switch and refreshes reader after save"
   await page.getByRole("button", { name: "Source" }).click();
   await page.locator(CF.editorContent).fill("# Workbench\n\nUnsaved body.\n");
 
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("Discard unsaved changes");
-    await dialog.dismiss();
-  });
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expect(page.locator(CF.reader)).toContainText("Unsaved body.");
+  await expect(page.getByTestId("editor")).toBeHidden();
+  await expect(page.locator(".edit-primary-mode")).toHaveClass(/is-dirty/);
+
+  await page.locator('.edit-primary-mode button:has-text("Edit")').click();
   await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page.locator(CF.editorContent)).toContainText("Unsaved body.");
 
   await page.locator(CF.editorContent).fill("# Workbench\n\nSaved body.\n");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByTestId("statusbar")).toContainText("Saved");
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
   await expect(page.locator(CF.reader)).toContainText("Saved body.");
+  await expect(page.locator(".edit-primary-mode")).not.toHaveClass(/is-dirty/);
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
 });

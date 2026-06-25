@@ -9,13 +9,18 @@ interface EditorModule {
       onDirtyChange?: (dirty: boolean) => void;
       onSaved?: (event: { source: string; branch: string; path: string; readHref: string }) => void;
     },
-  ) => unknown;
+  ) => WebEditorMount;
+}
+
+interface WebEditorMount {
+  preview: () => { source: string; branch: string; path: string; dirty: boolean } | null;
 }
 
 interface WorkbenchState {
   dirty: boolean;
   editorLoaded: boolean;
   editorLoading: boolean;
+  editorMount: WebEditorMount | null;
   payload: CoflatDocumentPayload | null;
 }
 
@@ -82,7 +87,7 @@ function setUrlMode(mode: WorkbenchMode, replace = false): void {
   else history.pushState({ ...(history.state ?? {}), editMode: mode }, "", url);
 }
 
-function renderStatusControls(mode: WorkbenchMode): void {
+function renderStatusControls(mode: WorkbenchMode, dirty = false): void {
   const slot = statusSlot();
   if (!slot) return;
   let primary = slot.querySelector<HTMLElement>("[data-edit-primary-mode]");
@@ -114,6 +119,8 @@ function renderStatusControls(mode: WorkbenchMode): void {
     item.classList.toggle("active", active);
     item.setAttribute("aria-pressed", active ? "true" : "false");
   }
+  primary.classList.toggle("is-dirty", dirty);
+  primary.title = dirty ? "Previewing unsaved edits" : "";
 }
 
 function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
@@ -127,7 +134,7 @@ function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
   if (actions) actions.hidden = mode !== "edit";
   const fileSlot = fileActionsSlot();
   if (fileSlot) fileSlot.hidden = mode !== "edit";
-  renderStatusControls(mode);
+  renderStatusControls(mode, host.dataset.dirty === "1");
 }
 
 function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void {
@@ -143,6 +150,21 @@ function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void 
   mount.replaceChildren(island);
 }
 
+function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState): void {
+  const preview = state.editorMount?.preview();
+  if (!preview || !state.payload) return;
+  state.dirty = preview.dirty;
+  host.dataset.dirty = preview.dirty ? "1" : "0";
+  state.payload = {
+    ...state.payload,
+    source: preview.source,
+    branch: preview.branch,
+    path: preview.path,
+  };
+  writePayload(host, state.payload);
+  rebuildReader(host, state.payload);
+}
+
 async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<void> {
   if (state.editorLoaded || state.editorLoading) return;
   const root = editorRoot(host);
@@ -150,10 +172,11 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
   state.editorLoading = true;
   try {
     const mod = await import("./web-editor") as EditorModule;
-    mod.mountWebEditor(root, {
+    state.editorMount = mod.mountWebEditor(root, {
       onDirtyChange: (dirty) => {
         state.dirty = dirty;
         host.dataset.dirty = dirty ? "1" : "0";
+        renderStatusControls((host.dataset.mode === "read" ? "read" : "edit"), dirty);
       },
       onSaved: (event) => {
         state.dirty = false;
@@ -177,7 +200,7 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
 }
 
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
-  if (mode === "read" && state.dirty && !window.confirm("Discard unsaved changes and switch to Read?")) return;
+  if (mode === "read") rebuildReaderFromEditor(host, state);
   setVisibleMode(host, mode);
   setUrlMode(mode, opts.replace);
   if (mode === "edit") await ensureEditor(host, state);
@@ -209,6 +232,7 @@ if (host) {
     dirty: false,
     editorLoaded: false,
     editorLoading: false,
+    editorMount: null,
     payload: readPayload(host),
   };
   installModeClicks(host, state);
