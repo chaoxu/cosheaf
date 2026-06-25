@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { globalSidebar, sidebarIdentity } from "./web-shell.js";
+import { globalSidebar, pageShell, sidebarIdentity } from "./web-shell.js";
+import { raw } from "./web-html.js";
 
 // Narrow source cross-check (allowed per AGENTS.md: regex over source text in a
 // test). A page island only mounts in production if THREE things agree:
@@ -51,6 +52,17 @@ describe("vite island wiring stays in lockstep", () => {
 });
 
 describe("shell preference wiring", () => {
+  it("cache-busts Coflat vendor CSS links by installed package content", () => {
+    const body = pageShell({
+      title: "Reader",
+      body: raw(""),
+      readerAssets: true,
+    });
+
+    expect(body).toMatch(/\/vendor\/coflat\/editor\.css\?v=[0-9a-f]{12}/);
+    expect(body).toMatch(/\/vendor\/coflat\/themes\/blueprint-book\.css\?v=[0-9a-f]{12}/);
+  });
+
   it("applies file labels from an explicit preference without read/build mode", () => {
     const shell = read("server/routes/web-shell.ts");
     const css = read("public/cosheaf-web.css");
