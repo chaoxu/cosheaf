@@ -51,11 +51,21 @@ test("edit workbench read mode remains scrollable after switching from edit", as
 
   await page.goto(`${repoBase}/_edit?branch=user%2Fchao%2Fweb-edit&mode=edit&path=coflat-feature-showcase.md`);
   await expect(page.getByTestId("editor")).toBeVisible();
+  const editScroll = await page.locator("#web-editor-root .cm-scroller").evaluate((element) => {
+    element.scrollTop = Math.max(1, Math.floor((element.scrollHeight - element.clientHeight) * 0.55));
+    return {
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+  expect(editScroll.scrollTop).toBeGreaterThan(0);
+
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
   await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
 
+  await expect.poll(async () => page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   const scrollState = await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
-    element.scrollTop = 400;
     return {
       scrollTop: element.scrollTop,
       scrollHeight: element.scrollHeight,
@@ -83,6 +93,13 @@ test("edit workbench previews unsaved drafts in read mode and refreshes after sa
   await expect(page.locator(CF.reader)).toContainText("Unsaved body.");
   await expect(page.getByTestId("editor")).toBeHidden();
   await expect(page.locator(".edit-primary-mode")).toHaveClass(/is-dirty/);
+  const samePreviewReused = await page.evaluate(async () => {
+    const before = document.querySelector(".coflat-reader-island");
+    document.querySelector<HTMLElement>('.edit-primary-mode button[data-edit-mode-target="read"]')?.click();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return before === document.querySelector(".coflat-reader-island");
+  });
+  expect(samePreviewReused).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
   await expect(page.getByTestId("editor")).toBeVisible();

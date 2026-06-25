@@ -22,6 +22,7 @@ interface WorkbenchState {
   editorLoading: boolean;
   editorMount: WebEditorMount | null;
   payload: CoflatDocumentPayload | null;
+  previewKey: string | null;
 }
 
 function shell(): HTMLElement | null {
@@ -61,6 +62,10 @@ function readPayload(host: HTMLElement): CoflatDocumentPayload | null {
 function writePayload(host: HTMLElement, payload: CoflatDocumentPayload): void {
   const script = host.querySelector<HTMLScriptElement>("[data-edit-reader-payload]");
   if (script) script.textContent = JSON.stringify(payload);
+}
+
+function payloadKey(payload: Pick<CoflatDocumentPayload, "source" | "branch" | "path">): string {
+  return JSON.stringify([payload.branch, payload.path, payload.source]);
 }
 
 function activeModeFromUrl(): WorkbenchMode | null {
@@ -150,19 +155,53 @@ function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void 
   mount.replaceChildren(island);
 }
 
-function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState): void {
+function editorScrollRatio(host: HTMLElement): number | null {
+  const scroller = host.querySelector<HTMLElement>("#web-editor-root .cm-scroller")
+    ?? host.querySelector<HTMLElement>("#web-editor-root .doc-main");
+  if (!scroller) return null;
+  const max = scroller.scrollHeight - scroller.clientHeight;
+  if (max <= 0) return null;
+  return Math.min(1, Math.max(0, scroller.scrollTop / max));
+}
+
+function readScroller(host: HTMLElement): HTMLElement | null {
+  return host.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
+}
+
+function applyReadScrollRatio(host: HTMLElement, ratio: number | null): void {
+  if (ratio === null) return;
+  let attempts = 0;
+  const apply = () => {
+    attempts += 1;
+    const scroller = readScroller(host);
+    const pendingPayload = scroller?.querySelector('script[type="application/json"]');
+    if (!scroller || pendingPayload || (scroller.scrollHeight <= scroller.clientHeight && attempts < 20)) {
+      if (attempts < 20) window.requestAnimationFrame(apply);
+      return;
+    }
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = Math.max(0, Math.round(max * ratio));
+  };
+  window.requestAnimationFrame(apply);
+}
+
+function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState): boolean {
   const preview = state.editorMount?.preview();
-  if (!preview || !state.payload) return;
+  if (!preview || !state.payload) return false;
   state.dirty = preview.dirty;
   host.dataset.dirty = preview.dirty ? "1" : "0";
+  const nextPreviewKey = payloadKey(preview);
+  if (state.previewKey === nextPreviewKey) return false;
   state.payload = {
     ...state.payload,
     source: preview.source,
     branch: preview.branch,
     path: preview.path,
   };
+  state.previewKey = nextPreviewKey;
   writePayload(host, state.payload);
   rebuildReader(host, state.payload);
+  return true;
 }
 
 async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<void> {
@@ -188,6 +227,7 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
             branch: event.branch,
             path: event.path,
           };
+          state.previewKey = payloadKey(state.payload);
           writePayload(host, state.payload);
           rebuildReader(host, state.payload);
         }
@@ -200,9 +240,11 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
 }
 
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
+  const scrollRatio = mode === "read" ? editorScrollRatio(host) : null;
   if (mode === "read") rebuildReaderFromEditor(host, state);
   setVisibleMode(host, mode);
   setUrlMode(mode, opts.replace);
+  if (mode === "read") applyReadScrollRatio(host, scrollRatio);
   if (mode === "edit") await ensureEditor(host, state);
 }
 
@@ -234,7 +276,9 @@ if (host) {
     editorLoading: false,
     editorMount: null,
     payload: readPayload(host),
+    previewKey: null,
   };
+  if (state.payload) state.previewKey = payloadKey(state.payload);
   installModeClicks(host, state);
   installPopstate(host, state);
   const mode = initialMode(host);
