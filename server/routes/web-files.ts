@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
+import { COFLAT_FILE_PREVIEW_TEST_ID } from "../../shared/coflat-reader-surface.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
@@ -15,7 +16,7 @@ import type { AppEnv } from "../types.js";
 import { isStaleShaConflict, rollbackCreatedRenameDestination, safeRel } from "./files.js";
 import { branchIcon } from "./icons.js";
 import { editBranchFor, editHref, newFileControl, rawFileHref, readHref, userDefaultEditBranch } from "./web-file-links.js";
-import { editableFileKind, filePreview, previewKindForFile } from "./web-file-preview.js";
+import { editableFileKind, filePreview, markdownArticle, previewKindForFile } from "./web-file-preview.js";
 import { fileToolbar } from "./web-file-toolbar.js";
 import { fileTreePanel } from "./web-file-tree.js";
 import {
@@ -327,9 +328,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
                   </details>
                 </div>
                 <div data-edit-reader-mount>
-                  <article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
-                    ${readPanel}
-                  </article>
+                  ${markdownArticle(ctx, readPanel, COFLAT_FILE_PREVIEW_TEST_ID)}
                 </div>
               </div>
               <aside

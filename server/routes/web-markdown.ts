@@ -1,11 +1,16 @@
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
+import {
+  coflatReaderIslandClass,
+  coflatReaderSurfaceClass,
+  type CoflatReaderSurface,
+} from "../../shared/coflat-reader-surface.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { loadRepoConfig } from "../repo-config.js";
 import type { WebCtx } from "./web-context.js";
 import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
 
-export type MarkdownSurface = "document" | "thread" | "diff";
+export type MarkdownSurface = CoflatReaderSurface;
 
 // `markedLines` (source line numbers) are only passed for the diff surface: the
 // reader renders with sourceLineAttribution and highlights blocks whose source
@@ -22,12 +27,6 @@ export type SurfaceOpts = {
   renderTitle?: boolean;
   assetPreviewPaths?: AssetPreviewPaths;
 };
-
-function coflatSurfaceClass(surface: MarkdownSurface): string {
-  if (surface === "thread") return "cf-reader-compact";
-  if (surface === "diff") return "cf-rich-diff cf-reader-compact";
-  return "";
-}
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
@@ -70,9 +69,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
 
 function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): Html {
   const payload = coflatReaderPayload(ctx, source, opts, repoConfig);
-  const className = ["cf-reader", "cf-doc-surface", "cf-doc-flow", "coflat-reader-island", coflatSurfaceClass(opts.surface ?? "document")]
-    .filter(Boolean)
-    .join(" ");
+  const className = coflatReaderIslandClass(opts.surface ?? "document");
   return html`<div class="${className}" data-reader-branch="${payload.branch}"><script type="application/json">${jsonScript(payload)}</script></div>`;
 }
 
@@ -105,7 +102,7 @@ export function composeField(
 
 export function markdownSurface(ctx: WebCtx, rendered: Html, surface: MarkdownSurface = "document"): Html {
   if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) return rendered;
-  const className = ["markdown-body", "cf-reader", "cf-doc-surface", "cf-doc-flow", coflatSurfaceClass(surface)]
+  const className = ["markdown-body", coflatReaderSurfaceClass(surface)]
     .filter(Boolean)
     .join(" ");
   return html`<div class="${className}">${rendered}</div>`;

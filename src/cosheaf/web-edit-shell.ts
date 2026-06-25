@@ -2,6 +2,11 @@ import {
   scrollReaderToSourcePosition,
   type SourcePosition,
 } from "@chaoxu/coflat/reader";
+import {
+  COFLAT_FILE_PREVIEW_TEST_ID,
+  COFLAT_READER_ARTICLE_CLASS,
+  coflatReaderIslandClass,
+} from "../../shared/coflat-reader-surface";
 import type { CoflatDocumentPayload } from "./coflat-document-context";
 
 type WorkbenchMode = "read" | "edit";
@@ -151,10 +156,10 @@ function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void 
   const mount = readerMount(host);
   if (!mount) return;
   const article = document.createElement("article");
-  article.className = "document cosheaf-document-reader cf-theme-scope";
-  article.dataset.testid = "file-preview-markdown";
+  article.className = COFLAT_READER_ARTICLE_CLASS;
+  article.dataset.testid = COFLAT_FILE_PREVIEW_TEST_ID;
   const island = document.createElement("div");
-  island.className = "cf-reader cf-doc-surface cf-doc-flow coflat-reader-island";
+  island.className = coflatReaderIslandClass();
   island.dataset.readerBranch = payload.branch;
   const script = document.createElement("script");
   script.type = "application/json";

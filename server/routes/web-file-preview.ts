@@ -1,4 +1,5 @@
 import type { FileKind } from "../../shared/file-kind.js";
+import { COFLAT_FILE_PREVIEW_TEST_ID, COFLAT_READER_ARTICLE_CLASS } from "../../shared/coflat-reader-surface.js";
 import { isLikelyTextContent } from "../content-type.js";
 import type { Forgejo } from "../forgejo.js";
 import type { WebCtx } from "./web-context.js";
@@ -36,7 +37,7 @@ export function filePreview(
   const rawHref = rawFileHref(ctx.owner, ctx.repo, branch, rel);
   if (view.sourceView && view.source !== null) return sourceFilePreview(view.source);
   if (kind === "markdown") {
-    return markdownArticle(ctx, view.rendered ?? emptyHtml, "file-preview-markdown");
+    return markdownArticle(ctx, view.rendered ?? emptyHtml, COFLAT_FILE_PREVIEW_TEST_ID);
   }
   if (kind === "text") {
     return html`<article class="file-preview file-preview-embed" data-testid="file-preview-text">
@@ -64,7 +65,7 @@ export function filePreview(
 }
 
 export function markdownArticle(ctx: WebCtx, rendered: Html, testId: string): Html {
-  return html`<article class="document cosheaf-document-reader cf-theme-scope" data-testid="${testId}">
+  return html`<article class="${COFLAT_READER_ARTICLE_CLASS}" data-testid="${testId}">
     ${markdownSurface(ctx, rendered)}
   </article>`;
 }
