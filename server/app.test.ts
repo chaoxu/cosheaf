@@ -82,4 +82,22 @@ describe("createApp API route assembly", () => {
       "http://localhost:5173/@fs/Users/example/node_modules/@chaoxu/coflat/dist/fonts/KaTeX_Main-Regular.woff2",
     );
   });
+
+  it("serves the current Coflat document-surface CSS contract", async () => {
+    const config = testConfig("app-coflat-css");
+    const db = freshTestDb("cosheaf-app-coflat-css-");
+    const app = createApp({ config, db });
+
+    const res = await app.request("/vendor/coflat/editor.css?v=test");
+
+    expect(res.status).toBe(200);
+    const css = await res.text();
+    expect(css).toContain(".cf-doc-heading[data-section-number]::before");
+    expect(css).not.toMatch(/(^|})\s*\[data-section-number\]::before/);
+    expect(css).not.toContain("cf-section-number");
+
+    const themeRes = await app.request("/vendor/coflat/themes/blueprint-book.css?v=test");
+    expect(themeRes.status).toBe(200);
+    expect(await themeRes.text()).toContain(".cf-theme-blueprint-book");
+  });
 });

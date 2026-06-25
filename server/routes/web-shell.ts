@@ -1,4 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { DEFAULT_LOCALE, type LocaleId, localeDir, makeT, type T } from "../../shared/i18n/index.js";
 import { viteDevOrigin } from "../vite-dev-origin.js";
@@ -10,6 +12,7 @@ import { emptyHtml, type Html, html, jsonScript, raw } from "./web-html.js";
 // sites haven't been threaded the request `t` yet (incremental rollout). Wired
 // call sites pass the real per-request `t` and render the active locale.
 const enT: T = makeT(DEFAULT_LOCALE);
+const requireResolve = createRequire(import.meta.url).resolve;
 
 // A breadcrumb segment. `wsTitle` carries the workspace title alongside the
 // slug `label`; current chrome keeps the slug primary.
@@ -35,8 +38,8 @@ export function pageShell(opts: {
         <title>${opts.title} - Cosheaf</title>
         ${
           opts.readerAssets
-            ? raw(`<link rel="stylesheet" href="/vendor/coflat/editor.css">
-        <link rel="stylesheet" href="/vendor/coflat/themes/blueprint-book.css">`)
+            ? raw(`<link rel="stylesheet" href="/vendor/coflat/editor.css${coflatVendorCssVersion("style.css")}">
+        <link rel="stylesheet" href="/vendor/coflat/themes/blueprint-book.css${coflatVendorCssVersion("themes/blueprint-book.css")}">`)
             : ""
         }
         ${opts.readerAssets ? webReaderAssets() : ""}
@@ -64,6 +67,23 @@ export function pageShell(opts: {
 function cosheafWebCssVersion(): string {
   const version = process.env.COSHEAF_GIT_SHA?.slice(0, 12);
   return version ? `?v=${encodeURIComponent(version)}` : "";
+}
+
+const coflatVendorCssVersions = new Map<string, string>();
+
+function coflatVendorCssVersion(exportPath: "style.css" | "themes/blueprint-book.css"): string {
+  const cached = coflatVendorCssVersions.get(exportPath);
+  if (cached !== undefined) return cached;
+  try {
+    const filePath = requireResolve(`@chaoxu/coflat/${exportPath}`);
+    const hash = createHash("sha256").update(readFileSync(filePath)).digest("hex").slice(0, 12);
+    const version = `?v=${encodeURIComponent(hash)}`;
+    coflatVendorCssVersions.set(exportPath, version);
+    return version;
+  } catch (_error) {
+    coflatVendorCssVersions.set(exportPath, "");
+    return "";
+  }
 }
 
 export function globalSidebar(
