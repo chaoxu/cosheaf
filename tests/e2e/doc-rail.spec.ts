@@ -23,7 +23,10 @@ async function expectRailBottomAligned(page: Page): Promise<void> {
       page.evaluate(() => {
         const appContent = document.querySelector(".app-content");
         const statusbar = document.querySelector(".app-statusbar");
-        const rail = document.querySelector(".doc-rail");
+        const rail = [...document.querySelectorAll<HTMLElement>(".doc-rail")].find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
         if (!appContent || !statusbar || !rail) return null;
         const appRect = appContent.getBoundingClientRect();
         const statusRect = statusbar.getBoundingClientRect();

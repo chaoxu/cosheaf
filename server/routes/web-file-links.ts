@@ -13,7 +13,7 @@ export function rawFileHref(owner: string, repo: string, branch: string, rel: st
 }
 
 export function editHref(owner: string, repo: string, user: string, branch: string, rel?: string): string {
-  const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}`;
+  const base = `${repoHref(owner, repo, "/_edit")}?branch=${encodeURIComponent(editBranchFor(user, branch))}&mode=edit`;
   return rel ? `${base}&path=${encodeURIComponent(rel)}` : base;
 }
 

@@ -155,6 +155,10 @@ export function webEditorAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-editor.tsx");
 }
 
+export function webEditShellAssets(): Html {
+  return viteEntryAssets("src/cosheaf/web-edit-shell.ts");
+}
+
 export function webCommentEditorAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-comment-editor.tsx");
 }

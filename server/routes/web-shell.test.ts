@@ -30,6 +30,7 @@ describe("vite island wiring stays in lockstep", () => {
     // Guards the regex itself against silently matching nothing.
     expect(webShellEntryIds()).toEqual([
       "src/cosheaf/web-comment-editor.tsx",
+      "src/cosheaf/web-edit-shell.ts",
       "src/cosheaf/web-editor.tsx",
       "src/cosheaf/web-reader.ts",
     ]);

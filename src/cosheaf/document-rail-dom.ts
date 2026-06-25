@@ -28,7 +28,10 @@ export function renderDocumentRail(
   opts: DocumentRailRenderOptions = {},
 ): void {
   const toggle = container.querySelector<HTMLElement>(":scope > .rail-collapse-toggle");
-  const children = [renderControls(model.groups, opts), renderOutline(model.outline, model.mathMacros, opts)];
+  const children = [
+    ...(model.groups.length ? [renderControls(model.groups, opts)] : []),
+    renderOutline(model.outline, model.mathMacros, opts),
+  ];
   container.replaceChildren(...(toggle ? [toggle, ...children] : children));
 }
 

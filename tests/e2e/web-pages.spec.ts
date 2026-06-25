@@ -48,9 +48,9 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.locator(".repo-tabs")).toContainText("PRs");
   await expect(page.locator(".repo-tabs")).toContainText("Notifications");
   await expect(page.locator(".repo-tabs a.active")).toHaveText("Files");
-  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/hello.md"]`)).toHaveCount(1);
-  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/theory/cross-file-theorem.md"]`)).toHaveCount(1);
-  await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/notes/plain-text.txt"]`)).toHaveCount(1);
+  await expect(page.locator(`.app-sidebar a[title="hello.md"]`)).toHaveAttribute("data-read-href", `/${owner}/${repo}/src/branch/main/hello.md`);
+  await expect(page.locator(`.app-sidebar a[title="cross-file-theorem.md"]`)).toHaveAttribute("data-read-href", `/${owner}/${repo}/src/branch/main/theory/cross-file-theorem.md`);
+  await expect(page.locator(`.app-sidebar a[title="plain-text.txt"]`)).toHaveAttribute("data-read-href", `/${owner}/${repo}/src/branch/main/notes/plain-text.txt`);
   await expect(page.locator(`.app-sidebar a[href="/${owner}/${repo}/src/branch/main/docs/sample.pdf"]`)).toHaveCount(1);
   await expect(page.locator(".repo-body")).not.toContainText("Pull requests");
 
@@ -58,7 +58,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   // and the status bar path includes an owner crumb.
   await expect(page.locator(".app-sidebar")).toContainText(`${owner}/${repo}`);
   await expect(page.locator(".app-statusbar .status-path")).toContainText(owner);
-  await page.locator(".sidebar-identity-link").click();
+  await page.locator(".settings-gear").click();
   await expect(page).toHaveURL(`${webBase}/account/settings`);
   await expect(page.getByTestId("settings-user-preferences")).toBeVisible();
   await page.getByTestId("settings-document-theme-select").selectOption("blueprint-book");

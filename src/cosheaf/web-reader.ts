@@ -177,6 +177,7 @@ function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Rec
     mode: "read",
     readHref: rail.dataset.readHref ?? window.location.href,
     editHref: rail.dataset.editHref || null,
+    controls: rail.dataset.documentRailControls !== "none",
     outline: outline.map((entry) => ({
       key: entry.id,
       level: entry.level,

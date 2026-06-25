@@ -107,10 +107,10 @@ describe("web file editor route", () => {
     expect(body).toContain('data-testid="repo-readme"');
     expect(body).toContain('<div class="repo-readme-label">README.md</div>');
     expect(body).toContain('value="ssh://git@forge.cosheaf.test:2222/owner/w.git"');
-    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=README.md"');
-    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=README.md" data-read-href="/owner/w/src/branch/main/README.md"');
-    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md"');
-    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes%2Fa.md" data-read-href="/owner/w/src/branch/main/notes/a.md"');
+    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=README.md"');
+    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=README.md" data-read-href="/owner/w/src/branch/main/README.md"');
+    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes%2Fa.md"');
+    expect(body).toContain('data-file-open-link data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes%2Fa.md" data-read-href="/owner/w/src/branch/main/notes/a.md"');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
     expect(listedPulls).toBe(false);
   });
@@ -135,12 +135,12 @@ describe("web file editor route", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
+    expect(body).toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes.md"');
     expect(body).toContain('class="doc-rail"');
     expect(body).toContain("data-document-rail");
     expect(body).toContain('data-doc-mode="read"');
     expect(body).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
-    expect(body).toContain('data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
+    expect(body).toContain('data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=notes.md"');
     expect(body).toContain('class="doc-reader-chrome"');
     expect(body).toContain("<summary>More</summary>");
     expect(body).toContain('href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
@@ -221,7 +221,7 @@ describe("web file editor route", () => {
     expect(body).toContain('data-testid="file-preview-text"');
     expect(body).toContain('data-testid="file-preview-text-raw" data="/owner/w/raw/branch/main/.gitignore" type="text/plain"');
     expect(body).not.toContain("No inline preview is available");
-    expect(body).not.toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=.gitignore"');
+    expect(body).not.toContain('href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;mode=edit&amp;path=.gitignore"');
   });
 
   it("does not fetch large unknown files only to sniff a text preview", async () => {
@@ -763,7 +763,7 @@ describe("web file editor route", () => {
       }),
     );
 
-    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&path=notes.md", {
+    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=edit&path=notes.md", {
       headers: authHeaders(token),
     });
 
@@ -777,6 +777,62 @@ describe("web file editor route", () => {
     expect(body).toContain('name="expected_sha" value=""');
     expect(body).toContain('name="expected_source_sha" value="main-sha"');
     expect(body).toContain("# Main Notes\\n");
+  });
+
+  it("renders Coflat edit pages as a lazy read/edit workbench", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches/*", (c) => c.json({ name: decodeURIComponent(c.req.path.split("/branches/")[1] ?? ""), commit: { id: "branch-head" } }));
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "branch-sha" }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+        forge.get("/api/v1/repos/owner/w/git/trees/:ref", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=read&path=notes.md", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-edit-shell data-initial-mode="read" data-mode="read"');
+    expect(body).toContain("data-edit-read-panel");
+    expect(body).toContain("data-edit-reader-payload");
+    expect(body).toContain('id="web-editor-root"\n            hidden');
+    expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
+    expect(body).toContain("/src/cosheaf/web-reader.ts");
+    expect(body).not.toContain('/src/cosheaf/web-editor.tsx"></script>');
+    expect(body).toContain('data-document-rail-controls="none"');
+  });
+
+  it("can start the Coflat workbench directly in edit mode", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches/*", () => Response.json({ name: "user/alice/wip", commit: { id: "branch-head" } }));
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "branch-sha" }));
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));
+        forge.get("/api/v1/repos/owner/w/git/trees/:ref", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=edit&path=notes.md", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-edit-shell data-initial-mode="edit" data-mode="edit"');
+    expect(body).toContain("data-edit-read-panel hidden");
+    expect(body).toContain('<div\n            id="web-editor-root"');
+    expect(body).not.toContain('id="web-editor-root"\n            hidden');
+    expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
+    expect(body).not.toContain('/src/cosheaf/web-editor.tsx"></script>');
   });
 
   it("loads main content and marks the default edit branch for reset after a closed unmerged PR", async () => {
@@ -1220,7 +1276,7 @@ describe("web file editor route", () => {
     });
 
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/owner/w/_edit?branch=user%2Falice%2Fwip&path=new.md");
+    expect(res.headers.get("location")).toBe("/owner/w/_edit?branch=user%2Falice%2Fwip&mode=edit&path=new.md");
     expect(deletedOld).toBe(false);
   });
 

@@ -26,7 +26,7 @@ import {
 import type { ReactNode } from "react";
 import { lazy, StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import {
@@ -94,6 +94,18 @@ interface Suggestion {
   id: string;
   insert: string;
   display: string;
+}
+
+export interface WebEditorSavedEvent {
+  source: string;
+  branch: string;
+  path: string;
+  readHref: string;
+}
+
+export interface WebEditorCallbacks {
+  onDirtyChange?: (dirty: boolean) => void;
+  onSaved?: (event: WebEditorSavedEvent) => void;
 }
 
 function shortId(): string {
@@ -214,7 +226,7 @@ function matchesSuggestion(id: string, title: string | null, prefix: string): bo
   return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
-function WebEditor({ config, initialContent }: { config: EditorConfig; initialContent: string }) {
+function WebEditor({ config, initialContent, callbacks = {} }: { config: EditorConfig; initialContent: string; callbacks?: WebEditorCallbacks }) {
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(config.formatId).editor),
     [config.formatId],
@@ -273,6 +285,10 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
   savedReadBranchRef.current = savedReadBranch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
+
+  useEffect(() => {
+    callbacks.onDirtyChange?.(uncommitted || pathDirty);
+  }, [callbacks, pathDirty, uncommitted]);
 
   const setEditorMode = useCallback((next: "rich" | "source") => {
     setMode(next);
@@ -521,7 +537,8 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         // Reconcile the server's frontmatter id into the controlled editor. This
         // now happens only on an explicit commit (rare), never every autosave
         // tick — so it no longer resets the doc and clobbers the selection (#161).
-        setEditorContent(result.content ?? source);
+        const savedSource = result.content ?? source;
+        setEditorContent(savedSource);
         setBranch(result.branch);
         setBranchExists(true);
         setSavedReadBranch(result.branch);
@@ -535,12 +552,18 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
         clearDraft(config.owner, config.repo, config.branch, config.path);
         if (previousPath !== nextPath) clearDraft(config.owner, config.repo, result.branch, previousPath);
         clearDraft(config.owner, config.repo, result.branch, nextPath);
+        callbacks.onSaved?.({
+          source: savedSource,
+          branch: result.branch,
+          path: nextPath,
+          readHref: repoBranchFileHref(config.owner, config.repo, result.branch, nextPath),
+        });
         return { ok: true, branch: result.branch, path: nextPath };
       } catch (err) {
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo, config.branch, config.path, setEditorContent],
+    [branchForWrite, callbacks, config.owner, config.repo, config.branch, config.path, setEditorContent],
   );
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
@@ -821,6 +844,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
     mode: "edit",
     readHref,
     editHref: window.location.href,
+    controls: false,
     outline: outline.map((entry) => ({
       key: entry.key,
       level: entry.level,
@@ -1035,7 +1059,7 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 // slot. Fall back to one in-place footer if the shell slots are absent (tests,
 // standalone mounts).
 const renameSlot = document.querySelector(".app-statusbar .status-rename-slot");
-const statusbarSlot = document.querySelector(".app-statusbar .status-editor-slot");
+const statusbarSlot = document.querySelector("[data-editor-actions-slot]") ?? document.querySelector(".app-statusbar .status-editor-slot");
 const fileTreeActionsSlot = document.querySelector(".file-tree .file-tree-actions-slot");
 
 function renderFileTreeActions(actions: ReactNode): ReactNode {
@@ -1063,11 +1087,16 @@ function renderEditorChrome(filename: ReactNode, actions: ReactNode): ReactNode 
   );
 }
 
-const { config, content } = readConfig();
+export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks = {}): Root {
+  const { config, content } = readConfig();
+  const reactRoot = createRoot(root);
+  reactRoot.render(
+    <StrictMode>
+      <WebEditor config={config} initialContent={content} callbacks={callbacks} />
+    </StrictMode>,
+  );
+  return reactRoot;
+}
+
 const root = document.getElementById("web-editor-root");
-if (!root) throw new Error("missing #web-editor-root");
-createRoot(root).render(
-  <StrictMode>
-    <WebEditor config={config} initialContent={content} />
-  </StrictMode>,
-);
+if (root && !root.closest("[data-edit-shell]")) mountWebEditor(root);

@@ -39,7 +39,7 @@ import { repoPageShell } from "./web-page.js";
 import { pdfExportOptionsHref, registerPdfExportRoutes } from "./web-pdf-export.js";
 import { clonePanel, sshCloneUrl } from "./web-repo-clone.js";
 import { pageSearchForm, repoHomeHeader, repoLanding, searchResultRow } from "./web-repo-landing.js";
-import { webEditorAssets } from "./web-shell.js";
+import { webEditShellAssets, webEditorAssets } from "./web-shell.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -296,11 +296,69 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const assetPreviewPaths = buildPdfImagePreviewPaths(readFiles.map((file) => file.path));
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
+  const coflatMarkdownEdit = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const initialMode = c.req.query("mode") === "read" ? "read" : "edit";
+  const readPanelPayload = coflatMarkdownEdit && repoConfig
+    ? coflatReaderPayload(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths }, repoConfig)
+    : null;
+  const readPanel = coflatMarkdownEdit && repoConfig
+    ? await renderMarkdown(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths })
+    : emptyHtml;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
   // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The
   // file tree mirrors the read page's sidebar so edit/read chrome match (#123).
   return htmlResponse(
-    repoPageShell(ctx, "files", `Edit ${rel}`, kind === "markdown" ? html`
+    repoPageShell(ctx, "files", `Edit ${rel}`, coflatMarkdownEdit ? html`
+        <section class="edit-page" data-edit-shell data-initial-mode="${initialMode}" data-mode="${initialMode}">
+          ${readPanelPayload ? html`<script type="application/json" data-edit-reader-payload>${jsonScript(readPanelPayload)}</script>` : emptyHtml}
+          <div data-edit-read-panel${initialMode === "edit" ? " hidden" : ""}>
+            <div class="doc-with-toc">
+              <div class="doc-main">
+                <div class="doc-reader-chrome">
+                  <details class="doc-reader-more">
+                    <summary>More</summary>
+                    <div class="doc-reader-more-menu" aria-label="File representations">
+                      <a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, readBranch, rel)}">PDF</a>
+                      <a href="${rawFileHref(ctx.owner, ctx.repo, readBranch, rel)}">Raw</a>
+                    </div>
+                  </details>
+                </div>
+                <div data-edit-reader-mount>${readPanel}</div>
+              </div>
+              <aside
+                class="doc-rail"
+                aria-label="Document tools"
+                data-document-rail
+                data-document-rail-controls="none"
+                data-doc-mode="read"
+                data-read-href="${readHref(ctx.owner, ctx.repo, readBranch, rel)}"
+                data-edit-href="${editHref(ctx.owner, ctx.repo, ctx.user, readBranch, rel)}"
+              ></aside>
+            </div>
+          </div>
+          <div
+            id="web-editor-root"
+            ${initialMode === "read" ? "hidden" : ""}
+            data-owner="${ctx.owner}"
+            data-repo="${ctx.repo}"
+            data-path="${rel}"
+            data-branch="${branch}"
+            data-branch-exists="${branchExists ? "1" : "0"}"
+            data-read-branch="${readBranch}"
+            data-username="${ctx.user}"
+            data-role="${ctx.ws.role}"
+            data-format-id="${ctx.ws.defaultMdFormat}"
+            data-base-sha="${baseSha ?? ""}"
+            data-source-sha="${sourceSha ?? ""}"
+            data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
+          ><div class="web-editor-loading">Loading editor...</div></div>
+          <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
+          <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
+          <script id="web-editor-asset-previews" type="application/json">${jsonScript(assetPreviewPaths)}</script>
+          ${webEditShellAssets()}
+          <noscript>${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, cancelHref })}</noscript>
+        </section>
+      ` : kind === "markdown" ? html`
         <section class="edit-page">
           <div
             id="web-editor-root"
@@ -324,6 +382,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
           <noscript>${editFallbackForm(ctx, { branch, rel, content, baseSha, sourceSha, cancelHref })}</noscript>
         </section>
       ` : textEditPage(ctx, branch, rel, content, baseSha, sourceSha, treeBranch), {
+        readerAssets: coflatMarkdownEdit,
         statusExtra: [{ label: branch, icon: branchIcon({ size: 12 }) }],
         statusOmitTab: true,
         sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles, [], ctx.user, ctx.ws.role !== "read")],
@@ -371,7 +430,11 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   }
   if (oldRel && oldRel !== rel) c.get("sse").publish(ctx.ws.slug, { type: "change", path: oldRel });
   c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
-  return redirect(`${repoHref(ctx.owner, ctx.repo, "/_edit")}?branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(rel)}`);
+  return redirect(
+    kind === "markdown"
+      ? `${repoHref(ctx.owner, ctx.repo, "/_edit")}?branch=${encodeURIComponent(branch)}&mode=edit&path=${encodeURIComponent(rel)}`
+      : readHref(ctx.owner, ctx.repo, branch, rel),
+  );
 }));
 }
 

@@ -109,6 +109,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         "web-editor": path.resolve(__dirname, "src/cosheaf/web-editor.tsx"),
+        "web-edit-shell": path.resolve(__dirname, "src/cosheaf/web-edit-shell.ts"),
         "web-comment-editor": path.resolve(__dirname, "src/cosheaf/web-comment-editor.tsx"),
         "web-reader": path.resolve(__dirname, "src/cosheaf/web-reader.ts"),
       },

@@ -44,9 +44,10 @@ export function documentRailModel(opts: {
   editHref?: string | null;
   outline: readonly DocumentRailOutlineInput[];
   maxOutlineLevel?: number;
+  controls?: boolean;
 }): DocumentRailModel {
   return {
-    groups: documentRailGroups(opts),
+    groups: opts.controls === false ? [] : documentRailGroups(opts),
     outline: documentRailOutline(opts.outline, { maxLevel: opts.maxOutlineLevel }),
   };
 }
