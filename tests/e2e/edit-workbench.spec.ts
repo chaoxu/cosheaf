@@ -18,6 +18,19 @@ async function signIn(page: Page): Promise<void> {
   });
 }
 
+async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0): Promise<Buffer> {
+  await page.goto(url);
+  await expect(page.locator(CF.reader)).toBeVisible();
+  await expect.poll(async () => page.locator(CF.reader).evaluate((element) => element.textContent?.trim().length ?? 0)).toBeGreaterThan(0);
+  await page.waitForTimeout(400);
+  await page.locator(".doc-main").evaluate((element, ratio) => {
+    const max = Math.max(0, element.scrollHeight - element.clientHeight);
+    element.scrollTop = Math.round(max * ratio);
+  }, scrollRatio);
+  await page.waitForTimeout(150);
+  return page.locator(".doc-main").screenshot({ animations: "disabled" });
+}
+
 test("edit workbench starts as reader and lazy-loads editor on demand", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
@@ -112,4 +125,26 @@ test("edit workbench previews unsaved drafts in read mode and refreshes after sa
   await expect(page.locator(CF.reader)).toContainText("Saved body.");
   await expect(page.locator(".edit-primary-mode")).not.toHaveClass(/is-dirty/);
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
+});
+
+test("edit workbench read surface is pixel-identical to the normal reader", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  const cases = [
+    { viewport: { width: 1280, height: 900 }, path: "hello.md", scrollRatio: 0 },
+    { viewport: { width: 1280, height: 900 }, path: "coflat-feature-showcase.md", scrollRatio: 0.52 },
+    { viewport: { width: 430, height: 820 }, path: "hello.md", scrollRatio: 0 },
+    { viewport: { width: 430, height: 820 }, path: "coflat-feature-showcase.md", scrollRatio: 0.52 },
+  ];
+
+  for (const item of cases) {
+    await page.setViewportSize(item.viewport);
+    const direct = await readerSurfaceScreenshot(page, `${repoBase}/src/branch/main/${item.path}`, item.scrollRatio);
+    const workbench = await readerSurfaceScreenshot(
+      page,
+      `${repoBase}/_edit?branch=main&mode=read&path=${encodeURIComponent(item.path)}`,
+      item.scrollRatio,
+    );
+    expect(Buffer.compare(direct, workbench), `${item.path} ${item.viewport.width}x${item.viewport.height}`).toBe(0);
+  }
 });

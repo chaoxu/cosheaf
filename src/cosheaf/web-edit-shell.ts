@@ -150,6 +150,9 @@ function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
 function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void {
   const mount = readerMount(host);
   if (!mount) return;
+  const article = document.createElement("article");
+  article.className = "document cosheaf-document-reader cf-theme-scope";
+  article.dataset.testid = "file-preview-markdown";
   const island = document.createElement("div");
   island.className = "cf-reader cf-doc-surface cf-doc-flow coflat-reader-island";
   island.dataset.readerBranch = payload.branch;
@@ -157,7 +160,8 @@ function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void 
   script.type = "application/json";
   script.textContent = JSON.stringify(payload);
   island.append(script);
-  mount.replaceChildren(island);
+  article.append(island);
+  mount.replaceChildren(article);
 }
 
 function readScroller(host: HTMLElement): HTMLElement | null {

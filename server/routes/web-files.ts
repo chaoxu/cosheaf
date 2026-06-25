@@ -326,7 +326,11 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
                     </div>
                   </details>
                 </div>
-                <div data-edit-reader-mount>${readPanel}</div>
+                <div data-edit-reader-mount>
+                  <article class="document cosheaf-document-reader cf-theme-scope" data-testid="file-preview-markdown">
+                    ${readPanel}
+                  </article>
+                </div>
               </div>
               <aside
                 class="doc-rail"
