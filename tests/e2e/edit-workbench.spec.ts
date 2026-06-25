@@ -25,8 +25,24 @@ async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0)
   await waitForHydratedReader(page);
   await page.waitForTimeout(400);
   await page.locator(".doc-main").evaluate((element, ratio) => {
-    const max = Math.max(0, element.scrollHeight - element.clientHeight);
-    element.scrollTop = Math.round(max * ratio);
+    function scrollableAncestor(element: Element | null): HTMLElement | null {
+      let candidate: Element | null = element;
+      while (candidate) {
+        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
+          const before = candidate.scrollTop;
+          candidate.scrollTop = before + 1;
+          const canScroll = candidate.scrollTop !== before;
+          candidate.scrollTop = before;
+          if (canScroll) return candidate;
+        }
+        candidate = candidate.parentElement;
+      }
+      return null;
+    }
+    const scroller = scrollableAncestor(element) ?? (element instanceof HTMLElement ? element : null);
+    if (!scroller) return;
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    scroller.scrollTop = Math.round(max * ratio);
   }, scrollRatio);
   await page.waitForTimeout(150);
   return page.locator(".doc-main").screenshot({ animations: "disabled" });
@@ -39,11 +55,29 @@ async function waitForHydratedReader(page: Page): Promise<void> {
 async function settledReaderScrollState(page: Page): Promise<{ scrollHeight: number; clientHeight: number; max: number }> {
   await waitForHydratedReader(page);
   await page.waitForTimeout(50);
-  return page.locator(".doc-with-toc > .doc-main").first().evaluate((element) => ({
-    scrollHeight: element.scrollHeight,
-    clientHeight: element.clientHeight,
-    max: Math.max(0, element.scrollHeight - element.clientHeight),
-  }));
+  return page.locator(".doc-with-toc > .doc-main").first().evaluate((element) => {
+    function scrollableAncestor(element: Element | null): HTMLElement | null {
+      let candidate: Element | null = element;
+      while (candidate) {
+        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
+          const before = candidate.scrollTop;
+          candidate.scrollTop = before + 1;
+          const canScroll = candidate.scrollTop !== before;
+          candidate.scrollTop = before;
+          if (canScroll) return candidate;
+        }
+        candidate = candidate.parentElement;
+      }
+      return null;
+    }
+    const scroller = scrollableAncestor(element) ?? (element instanceof HTMLElement ? element : null);
+    if (!scroller) return { scrollHeight: 0, clientHeight: 0, max: 0 };
+    return {
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
+      max: Math.max(0, scroller.scrollHeight - scroller.clientHeight),
+    };
+  });
 }
 
 async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
@@ -59,10 +93,25 @@ async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width
 
 async function visibleCenterSourceRange(page: Page): Promise<{ from: string | null; to: string | null; text: string }> {
   return page.evaluate(() => {
+    function scrollableAncestor(element: Element | null): HTMLElement | null {
+      let candidate: Element | null = element;
+      while (candidate) {
+        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
+          const before = candidate.scrollTop;
+          candidate.scrollTop = before + 1;
+          const canScroll = candidate.scrollTop !== before;
+          candidate.scrollTop = before;
+          if (canScroll) return candidate;
+        }
+        candidate = candidate.parentElement;
+      }
+      return null;
+    }
     const mode = document.querySelector<HTMLElement>("[data-edit-shell]")?.dataset.mode;
     const scroller = mode === "edit"
       ? document.querySelector<HTMLElement>(".cm-scroller")
-      : document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
+      : scrollableAncestor(document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main"))
+        ?? document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
     if (!scroller) return { from: null, to: null, text: "" };
     const rect = scroller.getBoundingClientRect();
     const sampleY = rect.top + rect.height / 2;
@@ -94,6 +143,21 @@ async function visibleCenterSourceRange(page: Page): Promise<{ from: string | nu
 
 async function visibleCenterReaderSourceRange(page: Page): Promise<{ from: string | null; to: string | null; text: string }> {
   return page.locator(".doc-with-toc > .doc-main").first().evaluate((scroller) => {
+    function scrollableAncestor(element: Element | null): HTMLElement | null {
+      let candidate: Element | null = element;
+      while (candidate) {
+        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
+          const before = candidate.scrollTop;
+          candidate.scrollTop = before + 1;
+          const canScroll = candidate.scrollTop !== before;
+          candidate.scrollTop = before;
+          if (canScroll) return candidate;
+        }
+        candidate = candidate.parentElement;
+      }
+      return null;
+    }
+    scroller = scrollableAncestor(scroller) ?? scroller;
     const rect = scroller.getBoundingClientRect();
     const sampleY = rect.top + rect.height / 2;
     let carrier: HTMLElement | null = null;
@@ -183,7 +247,7 @@ test("edit workbench read mode remains scrollable after switching from edit", as
 
 test("edit workbench first read switch preserves the editor source anchor", async ({ page }) => {
   test.setTimeout(60_000);
-  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.setViewportSize({ width: 1280, height: 520 });
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=edit&edit_branch=user%2Fchao%2Fweb-edit`);

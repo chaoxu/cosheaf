@@ -196,8 +196,29 @@ function rebuildReader(host: HTMLElement, payload: CoflatDocumentPayload): void 
   mount.replaceChildren(article);
 }
 
+function scrollableAncestor(element: HTMLElement | null): HTMLElement | null {
+  let candidate: HTMLElement | null = element;
+  while (candidate) {
+    if (candidate.scrollHeight > candidate.clientHeight) {
+      const before = candidate.scrollTop;
+      candidate.scrollTop = before + 1;
+      const canScroll = candidate.scrollTop !== before;
+      candidate.scrollTop = before;
+      if (canScroll) return candidate;
+    }
+    candidate = candidate.parentElement;
+  }
+  return null;
+}
+
 function readScroller(host: HTMLElement): HTMLElement | null {
-  return host.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
+  const documentMain = host.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
+  return scrollableAncestor(documentMain) ?? documentMain;
+}
+
+function readerReady(scroller: HTMLElement): boolean {
+  const island = scroller.querySelector<HTMLElement>(`.${coflatReaderIslandClass()}`);
+  return !island || island.dataset.readerHydrated === "1";
 }
 
 function visibleReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
@@ -212,6 +233,15 @@ function visibleEditSourcePosition(host: HTMLElement): WorkbenchSourcePosition |
   return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
 }
 
+function crossSurfaceSourcePosition(position: SourcePosition | null): WorkbenchSourcePosition | null {
+  if (!position) return null;
+  return {
+    pos: position.pos,
+    line: position.line,
+    viewportRatio: position.viewportRatio ?? MODE_SWITCH_VIEWPORT_RATIO,
+  };
+}
+
 function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePosition | null): void {
   if (!sourcePosition) return;
   let attempts = 0;
@@ -220,8 +250,7 @@ function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePositi
     if (host.dataset.mode !== "read") return;
     attempts += 1;
     const scroller = readScroller(host);
-    const pendingPayload = scroller?.querySelector('script[type="application/json"]');
-    if (!scroller || pendingPayload || (scroller.scrollHeight <= scroller.clientHeight && attempts < 20)) {
+    if (!scroller || !readerReady(scroller) || (scroller.scrollHeight <= scroller.clientHeight && attempts < 20)) {
       if (attempts < 20) window.requestAnimationFrame(apply);
       return;
     }
@@ -304,7 +333,7 @@ async function captureSurfaceSnapshot(
     return {
       mode,
       preview: null,
-      sourcePosition: visibleReadSourcePosition(host) ?? state.sourcePosition,
+      sourcePosition: crossSurfaceSourcePosition(visibleReadSourcePosition(host) ?? state.sourcePosition),
     };
   }
 
@@ -313,7 +342,7 @@ async function captureSurfaceSnapshot(
   return {
     mode,
     preview,
-    sourcePosition: preview?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition,
+    sourcePosition: crossSurfaceSourcePosition(preview?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition),
   };
 }
 
