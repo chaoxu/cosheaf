@@ -4,6 +4,7 @@ import type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
   EditorSourcePosition,
+  ScrollToSourcePositionOptions,
   MountedEditor,
   MountedDocumentChange,
   OutlineEntry,
@@ -97,13 +98,6 @@ interface Suggestion {
   display: string;
 }
 
-export interface WebEditorSavedEvent {
-  source: string;
-  branch: string;
-  path: string;
-  readHref: string;
-}
-
 export interface WebEditorPreviewEvent {
   source: string;
   branch: string;
@@ -113,12 +107,11 @@ export interface WebEditorPreviewEvent {
   sourcePosition: EditorSourcePosition | null;
 }
 
-type WebEditorSourcePosition = EditorSourcePosition & { viewportRatio?: number };
+type WebEditorSourcePosition = EditorSourcePosition | ScrollToSourcePositionOptions;
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 
 export interface WebEditorCallbacks {
   onDirtyChange?: (dirty: boolean) => void;
-  onSaved?: (event: WebEditorSavedEvent) => void;
 }
 
 export interface WebEditorHandle {
@@ -610,18 +603,12 @@ function WebEditor({
         clearDraft(config.owner, config.repo, config.branch, config.path);
         if (previousPath !== nextPath) clearDraft(config.owner, config.repo, result.branch, previousPath);
         clearDraft(config.owner, config.repo, result.branch, nextPath);
-        callbacks.onSaved?.({
-          source: savedSource,
-          branch: result.branch,
-          path: nextPath,
-          readHref: repoBranchFileHref(config.owner, config.repo, result.branch, nextPath),
-        });
         return { ok: true, branch: result.branch, path: nextPath };
       } catch (err) {
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, callbacks, config.owner, config.repo, config.branch, config.path, setEditorContent],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path, setEditorContent],
   );
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
@@ -733,7 +720,7 @@ function WebEditor({
         if (assetInputRef.current) assetInputRef.current.value = "";
       }
     },
-    [assetUploader, branchForWrite, busy, config.owner, config.path, config.repo, content, setEditorContent],
+    [branchForWrite, busy, config.owner, config.path, config.repo, content, setEditorContent],
   );
 
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(

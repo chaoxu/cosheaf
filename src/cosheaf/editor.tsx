@@ -77,7 +77,6 @@ export function MarkdownEditor({
   const saveRef = useRef(saveHandler);
   const statusRef = useRef(statusEvents);
   const assetRef = useRef(assetUploader);
-  const autocompleteRef = useRef(autocompleteSources);
   onChangeRef.current = onChange;
   onDocumentChangeRef.current = onDocumentChange;
   const effectiveMode = coflatEditorMode(mode, readOnly);
@@ -85,7 +84,6 @@ export function MarkdownEditor({
   saveRef.current = saveHandler;
   statusRef.current = statusEvents;
   assetRef.current = assetUploader;
-  autocompleteRef.current = autocompleteSources;
 
   useEffect(() => {
     if (!containerRef.current) return;

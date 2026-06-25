@@ -2,32 +2,19 @@ import {
   type SourcePosition,
   visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
+import type { WebEditorMount, mountWebEditor } from "./web-editor";
 
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 
 interface EditorModule {
-  mountWebEditor: (
-    root: HTMLElement,
-    callbacks?: {
-      onDirtyChange?: (dirty: boolean) => void;
-      onSaved?: (event: { source: string; branch: string; path: string; readHref: string }) => void;
-    },
-    options?: { initialReadOnly?: boolean },
-  ) => WebEditorMount;
-}
-
-interface WebEditorMount {
-  ready: Promise<void>;
-  preview: () => { source: string; branch: string; branchExists: boolean; path: string; dirty: boolean; sourcePosition: SourcePosition | null } | null;
-  scrollToSourcePosition: (position: WorkbenchSourcePosition) => boolean;
-  setReadOnly: (readOnly: boolean) => void;
+  mountWebEditor: typeof mountWebEditor;
 }
 
 interface WorkbenchState {
   editorReady: Promise<WebEditorMount | null> | null;
-  sourcePosition: SourcePosition | null;
+  sourcePosition: WorkbenchSourcePosition | null;
   switchId: number;
 }
 
@@ -128,9 +115,6 @@ function renderStatusControls(mode: WorkbenchMode, dirty = false): void {
 
 function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
   host.dataset.mode = mode;
-  document.documentElement.dataset.cosheafWorkbenchMode = mode;
-  const root = editorRoot(host);
-  if (root) root.hidden = false;
   const actions = editorActionsSlot();
   if (actions) actions.hidden = mode !== "edit";
   const fileSlot = fileActionsSlot();
@@ -153,7 +137,7 @@ function crossSurfaceSourcePosition(position: SourcePosition | null): WorkbenchS
   };
 }
 
-function applyEditorSourcePosition(mount: WebEditorMount | null | undefined, sourcePosition: SourcePosition | null): void {
+function applyEditorSourcePosition(mount: WebEditorMount | null | undefined, sourcePosition: WorkbenchSourcePosition | null): void {
   if (!sourcePosition) return;
   let frames = 0;
   const apply = () => {
@@ -174,10 +158,6 @@ function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEdit
       onDirtyChange: (dirty) => {
         host.dataset.dirty = dirty ? "1" : "0";
         renderStatusControls((host.dataset.mode === "read" ? "read" : "edit"), dirty);
-      },
-      onSaved: () => {
-        host.dataset.dirty = "0";
-        renderStatusControls((host.dataset.mode === "read" ? "read" : "edit"), false);
       },
     }, { initialReadOnly: (host.dataset.mode === "read") });
     await mount.ready;

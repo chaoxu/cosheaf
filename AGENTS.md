@@ -349,6 +349,7 @@ server/
     webhooks.ts    # Forgejo webhook reconciliation
 src/cosheaf/
   web-editor.tsx  # page-owned rich editor island
+  web-edit-shell.ts # read/edit workbench mode switcher around the editor island
   web-reader.ts   # page-owned Coflat reader hydration island
   editor.tsx      # MarkdownEditor wrapper around @chaoxu/coflat
   api.ts          # small cookie-auth fetch client for page islands
