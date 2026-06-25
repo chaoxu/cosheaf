@@ -103,7 +103,7 @@ function fileTreeSidebar(
 ): Html {
   if (files.length === 0) return emptyHtml;
   return html`<nav class="file-tree" aria-label="Files">
-    <div class="file-tree-head">${branchSwitcher(owner, repo, branch, branches)}</div>
+    <div class="file-tree-head">${branchSwitcher(owner, repo, branch, branches)}<span class="file-tree-actions-slot"></span></div>
     ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles, user, editByDefault)}
   </nav>`;
 }

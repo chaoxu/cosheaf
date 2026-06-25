@@ -1003,9 +1003,6 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
             multiple
             onChange={(event) => void uploadPickedAssets(event.currentTarget.files)}
           />
-          <button type="button" data-testid="editor-upload-asset" onClick={() => assetInputRef.current?.click()} disabled={busy}>
-            Upload
-          </button>
           {branchActions ? (
             <span className="web-editor-branch-actions web-editor-mobile-actions" aria-label="Branch actions">
               {config.role === "admin" ? (
@@ -1023,6 +1020,11 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
           </a>
         </>,
       )}
+      {renderFileTreeActions(
+        <button type="button" className="file-tree-upload" data-testid="editor-upload-asset" onClick={() => assetInputRef.current?.click()} disabled={busy}>
+          Upload
+        </button>,
+      )}
     </div>
   );
 }
@@ -1034,6 +1036,12 @@ function WebEditor({ config, initialContent }: { config: EditorConfig; initialCo
 // standalone mounts).
 const renameSlot = document.querySelector(".app-statusbar .status-rename-slot");
 const statusbarSlot = document.querySelector(".app-statusbar .status-editor-slot");
+const fileTreeActionsSlot = document.querySelector(".file-tree .file-tree-actions-slot");
+
+function renderFileTreeActions(actions: ReactNode): ReactNode {
+  if (!fileTreeActionsSlot) return null;
+  return createPortal(actions, fileTreeActionsSlot);
+}
 
 function renderEditorChrome(filename: ReactNode, actions: ReactNode): ReactNode {
   // With the shell slots present (the real app), the filename portals into the
