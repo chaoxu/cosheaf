@@ -36,6 +36,16 @@ async function waitForHydratedReader(page: Page): Promise<void> {
   await expect(page.locator(".coflat-reader-island[data-reader-hydrated='1']").first()).toBeVisible();
 }
 
+async function settledReaderScrollState(page: Page): Promise<{ scrollHeight: number; clientHeight: number; max: number }> {
+  await waitForHydratedReader(page);
+  await page.waitForTimeout(50);
+  return page.locator(".doc-with-toc > .doc-main").first().evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    clientHeight: element.clientHeight,
+    max: Math.max(0, element.scrollHeight - element.clientHeight),
+  }));
+}
+
 async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
   return page.evaluate(() => {
     const img = [...document.images].find((candidate) =>
@@ -54,6 +64,36 @@ async function visibleCenterSourceRange(page: Page): Promise<{ from: string | nu
       ? document.querySelector<HTMLElement>(".cm-scroller")
       : document.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
     if (!scroller) return { from: null, to: null, text: "" };
+    const rect = scroller.getBoundingClientRect();
+    const sampleY = rect.top + rect.height / 2;
+    let carrier: HTMLElement | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestHeight = -1;
+    for (const candidate of scroller.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")) {
+      const display = getComputedStyle(candidate).display;
+      if (display === "inline") continue;
+      const box = candidate.getBoundingClientRect();
+      if (box.bottom < rect.top || box.top > rect.bottom) continue;
+      const distance = box.top <= sampleY && box.bottom >= sampleY
+        ? 0
+        : Math.min(Math.abs(box.top - sampleY), Math.abs(box.bottom - sampleY));
+      const height = Math.max(0, box.height);
+      if (distance < bestDistance || (distance === bestDistance && height > bestHeight)) {
+        carrier = candidate;
+        bestDistance = distance;
+        bestHeight = height;
+      }
+    }
+    return {
+      from: carrier?.getAttribute("data-source-from") ?? null,
+      to: carrier?.getAttribute("data-source-to") ?? null,
+      text: (carrier?.textContent ?? "").replace(/\s+/g, " ").trim(),
+    };
+  });
+}
+
+async function visibleCenterReaderSourceRange(page: Page): Promise<{ from: string | null; to: string | null; text: string }> {
+  return page.locator(".doc-with-toc > .doc-main").first().evaluate((scroller) => {
     const rect = scroller.getBoundingClientRect();
     const sampleY = rect.top + rect.height / 2;
     let carrier: HTMLElement | null = null;
@@ -141,6 +181,39 @@ test("edit workbench read mode remains scrollable after switching from edit", as
   expect(scrollState.scrollTop).toBeGreaterThan(0);
 });
 
+test("standalone and workbench read modes have settled scroll parity", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  const standaloneUrl = `${repoBase}/src/branch/main/coflat-feature-showcase.md`;
+  const workbenchUrl = `${standaloneUrl}?mode=read&edit_branch=user%2Fchao%2Fweb-edit`;
+
+  await page.goto(standaloneUrl);
+  const standaloneState = await settledReaderScrollState(page);
+  const standaloneRanges = [];
+  for (const ratio of [0, 0.3, 0.7, 1]) {
+    const scrollTop = Math.round(standaloneState.max * ratio);
+    await page.locator(".doc-with-toc > .doc-main").first().evaluate((element, top) => {
+      element.scrollTop = top;
+    }, scrollTop);
+    standaloneRanges.push({ ratio, scrollTop, range: await visibleCenterReaderSourceRange(page) });
+  }
+
+  await page.goto(workbenchUrl);
+  const workbenchState = await settledReaderScrollState(page);
+  expect(workbenchState.scrollHeight).toBe(standaloneState.scrollHeight);
+  expect(workbenchState.clientHeight).toBe(standaloneState.clientHeight);
+  for (const item of standaloneRanges) {
+    await page.locator(".doc-with-toc > .doc-main").first().evaluate((element, top) => {
+      element.scrollTop = top;
+    }, item.scrollTop);
+    await expect.poll(async () => visibleCenterReaderSourceRange(page), {
+      message: `reader source range drifted at scroll ratio ${item.ratio}`,
+    }).toMatchObject(item.range);
+  }
+});
+
 test("edit workbench keeps source anchor stable across repeated read edit switches", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -206,6 +279,36 @@ test("reader selection can open edit mode at the selected source anchor", async 
   await expect(page.getByTestId("editor")).toBeVisible();
   await expect(page).toHaveURL(/mode=edit/);
   await expect(page).toHaveURL(/source_from=/);
+  await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
+    from: "3440",
+    to: "3476",
+  });
+});
+
+test("normal reader edit control opens editor at the current source anchor", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md`);
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await waitForHydratedReader(page);
+  await page.locator(".app-content").evaluate((element) => {
+    const target = [...element.querySelectorAll<HTMLElement>("[data-source-from='3440'][data-source-to='3476']")][0];
+    if (!target) throw new Error("missing source anchor");
+    target.scrollIntoView({ block: "center" });
+  });
+  await expect.poll(async () => page.evaluate(() => {
+    const target = document.querySelector<HTMLElement>("[data-source-from='3440'][data-source-to='3476']");
+    if (!target) return false;
+    const rect = target.getBoundingClientRect();
+    return rect.top > 100 && rect.bottom < window.innerHeight - 100;
+  })).toBe(true);
+
+  await page.locator(".doc-view-switch a:has-text('Edit')").click();
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page).toHaveURL(/mode=edit/);
+  await expect(page).toHaveURL(/source_from=3440/);
   await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
     from: "3440",
     to: "3476",

@@ -7,6 +7,7 @@ import {
   mapDomRangeToSource,
   type ReaderOutlineEntry,
   renderToHtml,
+  visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
 import { urlPath } from "../../shared/url";
 import {
@@ -83,7 +84,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   // result.mathMacros covers frontmatter/in-body macros from Coflat's render;
   // ctx.mathMacros also includes Cosheaf's repo-wide cosheaf.yaml macros.
   // Forward both so hydration sees the same macro set as the render pass.
-  hydrateMath(root, { mathMacros: { ...ctx.mathMacros, ...result.mathMacros } });
+  await hydrateMath(root, { mathMacros: { ...ctx.mathMacros, ...result.mathMacros } });
   // Coflat resolves citation/crossref hover natively from the context. The
   // preview index and source are both relative to the full source passed to
   // renderToHtml.
@@ -224,6 +225,31 @@ function sourceAnchorEditHref(editHref: string, range: { from: number; to: numbe
   url.searchParams.set("source_from", String(range.from));
   url.searchParams.set("source_to", String(range.to));
   return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function currentSourceAnchorEditHref(editHref: string): string | null {
+  const container = readerScrollContainer();
+  if (!container) return null;
+  const position = visibleSourcePositionInScroller(container, { viewportRatio: 0.5 });
+  if (!position) return null;
+  return sourceAnchorEditHref(editHref, { from: position.pos, to: position.pos });
+}
+
+function installReaderModeLinkAnchors(): void {
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const anchor = target.closest<HTMLAnchorElement>("a[data-doc-mode-link]");
+    if (!anchor) return;
+    const editHref = documentEditHref();
+    if (!editHref) return;
+    const anchorUrl = new URL(anchor.href, window.location.href);
+    const editUrl = new URL(editHref, window.location.href);
+    if (anchorUrl.pathname !== editUrl.pathname || anchorUrl.searchParams.get("mode") !== "edit") return;
+    const anchored = currentSourceAnchorEditHref(editHref);
+    if (anchored) anchor.href = anchored;
+  }, { capture: true });
 }
 
 function placeReviewComments(root: HTMLElement, comments: readonly CoflatReviewCommentAnchor[]): void {
@@ -398,6 +424,7 @@ if (typeof document !== "undefined") {
   hydrateIslandsIn(document);
   if (!document.querySelector(".coflat-reader-island")) void renderStandaloneRail();
   installReaderSelectionEditAction();
+  installReaderModeLinkAnchors();
 
   // Islands inserted after initial load — e.g. the chat thread swapping in new
   // turns on a live update — must hydrate too, so watch for them rather than
