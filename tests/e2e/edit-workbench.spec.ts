@@ -30,12 +30,14 @@ test("edit workbench starts as reader and lazy-loads editor on demand", async ({
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Read");
   await expect(page.getByTestId("editor-upload-asset")).toHaveCount(0);
   await expect(page.locator(".doc-rail .doc-view-controls")).toHaveCount(0);
+  await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
   await expect(page.getByTestId("editor")).toBeVisible();
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Edit");
   await expect(page.getByRole("button", { name: "Rich" })).toBeVisible();
   await expect(page.getByTestId("editor-upload-asset")).toBeVisible();
+  await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
   await expect(page.locator(CF.reader)).toContainText("Hello");

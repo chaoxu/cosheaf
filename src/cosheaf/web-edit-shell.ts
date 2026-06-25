@@ -107,7 +107,7 @@ function renderStatusControls(mode: WorkbenchMode): void {
     actions = document.createElement("span");
     actions.className = "editor-actions-slot";
     actions.dataset.editorActionsSlot = "";
-    slot.append(primary, actions);
+    slot.append(actions, primary);
   }
   for (const item of primary.querySelectorAll<HTMLElement>("[data-edit-primary-mode-item]")) {
     const active = item.dataset.editPrimaryModeItem === mode;
