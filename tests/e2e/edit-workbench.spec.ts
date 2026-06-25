@@ -31,6 +31,17 @@ async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0)
   return page.locator(".doc-main").screenshot({ animations: "disabled" });
 }
 
+async function visibleShowcaseImageStats(page: Page): Promise<{ y: number; width: number; height: number } | null> {
+  return page.evaluate(() => {
+    const img = [...document.images].find((candidate) =>
+      !candidate.closest("[hidden]") && (candidate.currentSrc || candidate.src).includes("hover-preview-figure")
+    );
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    return { y: rect.y, width: rect.width, height: rect.height };
+  });
+}
+
 test("edit workbench starts as reader and lazy-loads editor on demand", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
@@ -88,6 +99,38 @@ test("edit workbench read mode remains scrollable after switching from edit", as
 
   expect(scrollState.scrollHeight).toBeGreaterThan(scrollState.clientHeight);
   expect(scrollState.scrollTop).toBeGreaterThan(0);
+});
+
+test("edit workbench keeps reader and editor anchored on inline images", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/_edit?branch=user%2Fchao%2Fweb-edit&mode=read&path=coflat-feature-showcase.md`);
+  await expect(page.locator(CF.reader)).toContainText("Links and Images");
+  await page.evaluate(() => {
+    const img = [...document.images].find((candidate) => (candidate.currentSrc || candidate.src).includes("hover-preview-figure"));
+    img?.scrollIntoView({ block: "center" });
+  });
+  await page.waitForTimeout(700);
+  const before = await visibleShowcaseImageStats(page);
+  expect(before).not.toBeNull();
+  expect(before?.width).toBe(257);
+  expect(before?.height).toBe(150);
+
+  await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect.poll(async () => visibleShowcaseImageStats(page)).toMatchObject({ width: 257, height: 150 });
+  const afterEdit = await visibleShowcaseImageStats(page);
+  expect(afterEdit).not.toBeNull();
+  expect(Math.abs((afterEdit?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(16);
+
+  await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expect(page.locator(CF.reader)).toContainText("Links and Images");
+  await expect.poll(async () => visibleShowcaseImageStats(page)).toMatchObject({ width: 257, height: 150 });
+  const afterRead = await visibleShowcaseImageStats(page);
+  expect(afterRead).not.toBeNull();
+  expect(Math.abs((afterRead?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(96);
 });
 
 test("edit workbench previews unsaved drafts in read mode and refreshes after save", async ({ page }) => {

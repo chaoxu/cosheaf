@@ -1,6 +1,7 @@
 import {
   scrollReaderToSourcePosition,
   type SourcePosition,
+  visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
 import {
   COFLAT_FILE_PREVIEW_TEST_ID,
@@ -10,6 +11,7 @@ import {
 import type { CoflatDocumentPayload } from "./coflat-document-context";
 
 type WorkbenchMode = "read" | "edit";
+type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
 
 interface EditorModule {
   mountWebEditor: (
@@ -22,14 +24,16 @@ interface EditorModule {
 }
 
 interface WebEditorMount {
+  ready: Promise<void>;
   preview: () => { source: string; branch: string; branchExists: boolean; path: string; dirty: boolean; sourcePosition: SourcePosition | null } | null;
+  scrollToSourcePosition: (position: WorkbenchSourcePosition) => boolean;
 }
 
 interface WorkbenchState {
   dirty: boolean;
   editorLoaded: boolean;
-  editorLoading: boolean;
   editorMount: WebEditorMount | null;
+  editorReady: Promise<WebEditorMount | null> | null;
   payload: CoflatDocumentPayload | null;
   previewKey: string | null;
   sourcePosition: SourcePosition | null;
@@ -173,6 +177,12 @@ function readScroller(host: HTMLElement): HTMLElement | null {
   return host.querySelector<HTMLElement>("[data-edit-read-panel] .doc-main");
 }
 
+function visibleReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
+  const scroller = readScroller(host);
+  if (!scroller || scroller.hidden) return null;
+  return visibleSourcePositionInScroller(scroller);
+}
+
 function applyReadSourcePosition(host: HTMLElement, sourcePosition: SourcePosition | null): void {
   if (!sourcePosition) return;
   let attempts = 0;
@@ -212,14 +222,14 @@ function rebuildReaderFromEditor(host: HTMLElement, state: WorkbenchState): bool
   return true;
 }
 
-async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<void> {
-  if (state.editorLoaded || state.editorLoading) return;
+async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEditorMount | null> {
+  if (state.editorLoaded) return state.editorMount;
+  if (state.editorReady) return state.editorReady;
   const root = editorRoot(host);
-  if (!root) return;
-  state.editorLoading = true;
-  try {
+  if (!root) return null;
+  state.editorReady = (async () => {
     const mod = await import("./web-editor") as EditorModule;
-    state.editorMount = mod.mountWebEditor(root, {
+    const mount = mod.mountWebEditor(root, {
       onDirtyChange: (dirty) => {
         state.dirty = dirty;
         host.dataset.dirty = dirty ? "1" : "0";
@@ -242,18 +252,24 @@ async function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<v
         }
       },
     });
+    state.editorMount = mount;
     state.editorLoaded = true;
-  } finally {
-    state.editorLoading = false;
-  }
+    await mount.ready;
+    return mount;
+  })();
+  return state.editorReady;
 }
 
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
+  const readSourcePosition = mode === "edit" ? visibleReadSourcePosition(host) : null;
   if (mode === "read") rebuildReaderFromEditor(host, state);
   setVisibleMode(host, mode);
   setUrlMode(mode, opts.replace);
   if (mode === "read") applyReadSourcePosition(host, state.sourcePosition);
-  if (mode === "edit") await ensureEditor(host, state);
+  if (mode === "edit") {
+    const mount = await ensureEditor(host, state);
+    if (readSourcePosition) mount?.scrollToSourcePosition(readSourcePosition);
+  }
 }
 
 function installModeClicks(host: HTMLElement, state: WorkbenchState): void {
@@ -281,8 +297,8 @@ if (host) {
   const state: WorkbenchState = {
     dirty: false,
     editorLoaded: false,
-    editorLoading: false,
     editorMount: null,
+    editorReady: null,
     payload: readPayload(host),
     previewKey: null,
     sourcePosition: null,

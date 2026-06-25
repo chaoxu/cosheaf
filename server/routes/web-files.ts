@@ -306,7 +306,7 @@ web.get("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
     }
     : null;
   const readPanel = coflatMarkdownEdit && repoConfig
-    ? await renderMarkdown(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths })
+    ? await renderMarkdown(ctx, content, { branch: readBranch, documentPath: rel, renderTitle: true, assetPreviewPaths, sourcePositions: true })
     : emptyHtml;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
   // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The

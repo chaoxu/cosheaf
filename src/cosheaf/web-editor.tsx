@@ -113,6 +113,8 @@ export interface WebEditorPreviewEvent {
   sourcePosition: EditorSourcePosition | null;
 }
 
+type WebEditorSourcePosition = EditorSourcePosition & { viewportRatio?: number };
+
 export interface WebEditorCallbacks {
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: (event: WebEditorSavedEvent) => void;
@@ -120,11 +122,14 @@ export interface WebEditorCallbacks {
 
 export interface WebEditorHandle {
   preview: () => WebEditorPreviewEvent;
+  scrollToSourcePosition: (position: WebEditorSourcePosition) => boolean;
 }
 
 export interface WebEditorMount {
   root: Root;
+  ready: Promise<void>;
   preview: () => WebEditorPreviewEvent | null;
+  scrollToSourcePosition: (position: WebEditorSourcePosition) => boolean;
 }
 
 function shortId(): string {
@@ -245,7 +250,19 @@ function matchesSuggestion(id: string, title: string | null, prefix: string): bo
   return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
-function WebEditor({ config, initialContent, callbacks = {}, handleRef }: { config: EditorConfig; initialContent: string; callbacks?: WebEditorCallbacks; handleRef?: Ref<WebEditorHandle> }) {
+function WebEditor({
+  config,
+  initialContent,
+  callbacks = {},
+  handleRef,
+  onEditorReady,
+}: {
+  config: EditorConfig;
+  initialContent: string;
+  callbacks?: WebEditorCallbacks;
+  handleRef?: Ref<WebEditorHandle>;
+  onEditorReady?: () => void;
+}) {
   const ActiveMarkdownEditor = useMemo(
     () => lazy(getClientDocumentFormat(config.formatId).editor),
     [config.formatId],
@@ -318,6 +335,10 @@ function WebEditor({ config, initialContent, callbacks = {}, handleRef }: { conf
       dirty: uncommitted || pathDirty,
       sourcePosition: editorRef.current?.getVisibleSourcePosition() ?? null,
     }),
+    scrollToSourcePosition: (position) => {
+      editorRef.current?.scrollToSourcePosition({ ...position, center: true });
+      return Boolean(editorRef.current);
+    },
   }), [config.branch, config.path, content, pathDirty, uncommitted]);
 
   const setEditorMode = useCallback((next: "rich" | "source") => {
@@ -928,6 +949,7 @@ function WebEditor({ config, initialContent, callbacks = {}, handleRef }: { conf
                   editorRef.current = editor;
                   setOutline(editor.outline.get());
                   outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
+                  onEditorReady?.();
                 }}
                 {...routeEditorChangeHandlers(config.formatId, {
                   onStringChange: handleEditorStringChange,
@@ -1121,14 +1143,20 @@ export function mountWebEditor(root: HTMLElement, callbacks: WebEditorCallbacks 
   const { config, content } = readConfig();
   const handleRef = createRef<WebEditorHandle>();
   const reactRoot = createRoot(root);
+  let resolveReady!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+  });
   reactRoot.render(
     <StrictMode>
-      <WebEditor config={config} initialContent={content} callbacks={callbacks} handleRef={handleRef} />
+      <WebEditor config={config} initialContent={content} callbacks={callbacks} handleRef={handleRef} onEditorReady={resolveReady} />
     </StrictMode>,
   );
   return {
     root: reactRoot,
+    ready,
     preview: () => handleRef.current?.preview() ?? null,
+    scrollToSourcePosition: (position) => handleRef.current?.scrollToSourcePosition(position) ?? false,
   };
 }
 

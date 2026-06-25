@@ -1,5 +1,6 @@
 import {
   hydrateMath,
+  hydrateMedia,
   hydrateReaderDisclosures,
   hydrateReaderHoverPreviews,
   hydrateReferences,
@@ -62,6 +63,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     fragment.querySelector(".cf-doc-title")?.remove();
   }
   root.replaceChildren(fragment);
+  hydrateMedia(root);
   hydrateReferences(root, ctx, {
     documentPath: payload.path,
     source: payload.source,

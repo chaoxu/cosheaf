@@ -26,6 +26,7 @@ export type SurfaceOpts = {
   // show a title.
   renderTitle?: boolean;
   assetPreviewPaths?: AssetPreviewPaths;
+  sourcePositions?: boolean;
 };
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
@@ -64,6 +65,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
     ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
     ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
     ...(opts.assetPreviewPaths && Object.keys(opts.assetPreviewPaths).length ? { assetPreviewPaths: opts.assetPreviewPaths } : {}),
+    ...(opts.sourcePositions ? { sourcePositions: true } : {}),
   };
 }
 
