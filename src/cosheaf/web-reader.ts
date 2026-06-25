@@ -12,7 +12,6 @@ import {
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
 import {
-  type DocumentRailControl,
   documentRailModel,
 } from "../../shared/document-rail";
 import { readDocumentTheme, readSectionNumbering } from "./document-theme";
@@ -174,14 +173,10 @@ function installReaderHashHistory(): void {
 function buildReaderToc(outline: readonly ReaderOutlineEntry[], mathMacros?: Record<string, string>, mount?: HTMLElement): void {
   const rail = mount ?? document.querySelector<HTMLElement>("[data-document-rail]");
   if (!rail) return;
-  const fileControls: DocumentRailControl[] = [];
-  if (rail.dataset.pdfHref) fileControls.push({ kind: "link", label: "PDF", href: rail.dataset.pdfHref });
-  if (rail.dataset.rawHref) fileControls.push({ kind: "link", label: "Raw", href: rail.dataset.rawHref });
   const model = documentRailModel({
     mode: "read",
     readHref: rail.dataset.readHref ?? window.location.href,
     editHref: rail.dataset.editHref || null,
-    fileControls,
     outline: outline.map((entry) => ({
       key: entry.id,
       level: entry.level,

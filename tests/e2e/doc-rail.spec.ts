@@ -60,7 +60,12 @@ test("branch actions remain visible when the document rail is hidden", async ({ 
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/fixtures/side-by-side-rendering/hello.md`);
-  await expect(page.locator(".doc-mobile-actions").getByRole("link", { name: "Open PR" })).toBeVisible();
+  const readerChrome = page.locator(".doc-reader-chrome");
+  await expect(readerChrome.getByText("More")).toBeVisible();
+  await readerChrome.locator("summary").click();
+  await expect(readerChrome.getByRole("link", { name: "PDF" })).toBeVisible();
+  await expect(readerChrome.getByRole("link", { name: "Raw" })).toBeVisible();
+  await expect(readerChrome.getByRole("link", { name: "Open PR" })).toHaveCount(0);
 
   await page.goto(`${repoBase}/_edit?branch=fixtures%2Fside-by-side-rendering&path=hello.md`);
   await expect(page.getByTestId("editor")).toBeVisible();

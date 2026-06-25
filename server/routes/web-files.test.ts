@@ -141,8 +141,12 @@ describe("web file editor route", () => {
     expect(body).toContain('data-doc-mode="read"');
     expect(body).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
     expect(body).toContain('data-edit-href="/owner/w/_edit?branch=user%2Falice%2Fweb-edit&amp;path=notes.md"');
-    expect(body).toContain('data-pdf-href="/owner/w/export/pdf/options/branch/main/notes.md"');
-    expect(body).toContain('data-raw-href="/owner/w/raw/branch/main/notes.md"');
+    expect(body).toContain('class="doc-reader-chrome"');
+    expect(body).toContain("<summary>More</summary>");
+    expect(body).toContain('href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
+    expect(body).toContain('href="/owner/w/raw/branch/main/notes.md">Raw</a>');
+    expect(body).not.toContain("data-pdf-href");
+    expect(body).not.toContain("data-raw-href");
     expect(body).not.toContain('data-reader-toc');
     expect(body).not.toContain('<div class="doc-view-controls" aria-label="View">');
     expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');

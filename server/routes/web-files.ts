@@ -151,9 +151,17 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
-  const openPrHref = ctx.ws.role !== "read" && resolved.branch !== "main"
-    ? `${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`
-    : "";
+  const readerChrome = coflatMarkdownDocument
+    ? html`<div class="doc-reader-chrome">
+        <details class="doc-reader-more">
+          <summary>More</summary>
+          <div class="doc-reader-more-menu" aria-label="File representations">
+            <a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel)}">PDF</a>
+            <a href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}">Raw</a>
+          </div>
+        </details>
+      </div>`
+    : emptyHtml;
   // Coflat-rendered markdown gets a shared document rail: view-switch actions
   // at the top and the table of contents below. The reader island fills the TOC
   // from Coflat's outline data, while the editor renders the same rail shape
@@ -172,7 +180,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     coflatMarkdownDocument
       ? html`<div class="doc-with-toc">
           <div class="doc-main">
-            ${openPrHref ? html`<div class="doc-branch-actions doc-mobile-actions"><a class="button" href="${openPrHref}">Open PR</a></div>` : emptyHtml}
+            ${readerChrome}
             ${preview}
           </div>
           <aside
@@ -182,8 +190,6 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
             data-doc-mode="read"
             data-read-href="${readHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
             data-edit-href="${editableFileKind(kind) && ctx.ws.role !== "read" ? editHref(ctx.owner, ctx.repo, ctx.user, resolved.branch, rel) : ""}"
-            data-pdf-href="${kind === "markdown" ? pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel) : ""}"
-            data-raw-href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}"
           >
             ${sourceRailPayload ? html`<script type="application/json" data-document-rail-source>${jsonScript(sourceRailPayload)}</script>` : emptyHtml}
           </aside>
