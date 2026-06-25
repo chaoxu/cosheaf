@@ -43,6 +43,28 @@ test("edit workbench starts as reader and lazy-loads editor on demand", async ({
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
 });
 
+test("edit workbench read mode remains scrollable after switching from edit", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/_edit?branch=user%2Fchao%2Fweb-edit&mode=edit&path=coflat-feature-showcase.md`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+
+  const scrollState = await page.locator("[data-edit-read-panel] .doc-main").evaluate((element) => {
+    element.scrollTop = 400;
+    return {
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+
+  expect(scrollState.scrollHeight).toBeGreaterThan(scrollState.clientHeight);
+  expect(scrollState.scrollTop).toBeGreaterThan(0);
+});
+
 test("edit workbench confirms dirty read switch and refreshes reader after save", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
