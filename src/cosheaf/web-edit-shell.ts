@@ -362,10 +362,13 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
     return;
   }
   if (mode === "read") {
+    const mount = await ensureEditor(host, state);
+    if (state.switchId !== switchId || host.dataset.mode !== "edit") return;
+    const preview = mount?.preview() ?? null;
     readViewport = state.readViewport;
     const editSourcePosition = state.pendingEditAnchor
       ? state.sourcePosition
-      : state.interactionSourcePosition ?? visibleEditSourcePosition(host);
+      : state.interactionSourcePosition ?? preview?.sourcePosition ?? visibleEditSourcePosition(host);
     state.interactionSourcePosition = null;
     rebuildReaderFromEditor(host, state, { preserveSourcePosition: true });
     state.sourcePosition = editSourcePosition ?? state.sourcePosition;

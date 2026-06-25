@@ -191,6 +191,36 @@ test("edit workbench read mode remains scrollable after switching from edit", as
   expect(scrollState.scrollTop).toBeGreaterThan(0);
 });
 
+test("edit workbench first read switch preserves the editor source anchor", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=edit&edit_branch=user%2Fchao%2Fweb-edit`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await page.locator(".cm-scroller").evaluate((element) => {
+    element.scrollTop = Math.round((element.scrollHeight - element.clientHeight) * 0.58);
+  });
+  await page.waitForTimeout(250);
+  const before = await visibleCenterSourceRange(page);
+  expect(before.from).not.toBeNull();
+  expect(before.from).not.toBe("0");
+  const beforeFrom = Number(before.from);
+  expect(Number.isFinite(beforeFrom)).toBe(true);
+
+  await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expect(page.locator(CF.reader)).toContainText("Coflat Feature Showcase");
+  await expect.poll(async () => {
+    const after = await visibleCenterSourceRange(page);
+    const afterFrom = Number(after.from);
+    const afterTo = Number(after.to);
+    return Number.isFinite(afterFrom) && Number.isFinite(afterTo)
+      && afterFrom <= beforeFrom && beforeFrom <= afterTo;
+  }, {
+    message: "reader should keep the source position that was centered in the editor",
+  }).toBe(true);
+});
+
 test("standalone and workbench read modes have settled scroll parity", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1280, height: 900 });
