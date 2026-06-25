@@ -42,6 +42,29 @@ async function expectRailBottomAligned(page: Page): Promise<void> {
     });
 }
 
+async function expectEditorStatusbarContained(page: Page): Promise<void> {
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const footer = document.querySelector(".app-statusbar");
+        const slot = document.querySelector(".status-editor-slot");
+        if (!footer || !slot) return null;
+        const footerRect = footer.getBoundingClientRect();
+        const slotRect = slot.getBoundingClientRect();
+        return {
+          pageScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+          slotPastFooter: Math.max(0, Math.ceil(slotRect.right - footerRect.right)),
+        };
+      }),
+    )
+    .toEqual({
+      pageScrollWidth: await page.evaluate(() => window.innerWidth),
+      viewportWidth: await page.evaluate(() => window.innerWidth),
+      slotPastFooter: 0,
+    });
+}
+
 test("document rail reaches the status bar in reader and editor modes", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page);
@@ -69,7 +92,11 @@ test("branch actions remain visible when the document rail is hidden", async ({ 
 
   await page.goto(`${repoBase}/_edit?branch=fixtures%2Fside-by-side-rendering&path=hello.md`);
   await expect(page.getByTestId("editor")).toBeVisible();
+  await expectEditorStatusbarContained(page);
   const mobileActions = page.locator(".web-editor-mobile-actions");
   await expect(mobileActions.getByRole("button", { name: "Open PR" })).toBeVisible();
   await expect(mobileActions.getByRole("button", { name: "Merge to main" })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expectEditorStatusbarContained(page);
 });

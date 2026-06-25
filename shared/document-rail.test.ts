@@ -7,10 +7,8 @@ describe("document rail model", () => {
       mode: "read",
       readHref: "/read",
       editHref: "/edit",
-      fileControls: [{ kind: "link", label: "Raw", href: "/raw" }],
     })).toMatchObject([
       { label: "View", controls: [{ label: "Read", active: true }, { label: "Edit", active: false }] },
-      { label: "File", controls: [{ label: "Raw", href: "/raw" }] },
     ]);
     expect(documentRailGroups({
       mode: "edit",

@@ -42,7 +42,6 @@ export function documentRailModel(opts: {
   mode: DocumentRailMode;
   readHref: string;
   editHref?: string | null;
-  fileControls?: readonly DocumentRailControl[];
   outline: readonly DocumentRailOutlineInput[];
   maxOutlineLevel?: number;
 }): DocumentRailModel {
@@ -56,9 +55,8 @@ export function documentRailGroups(opts: {
   mode: DocumentRailMode;
   readHref: string;
   editHref?: string | null;
-  fileControls?: readonly DocumentRailControl[];
 }): readonly DocumentRailGroup[] {
-  const groups: DocumentRailGroup[] = [
+  return [
     {
       label: "View",
       controls: [
@@ -69,10 +67,6 @@ export function documentRailGroups(opts: {
       ],
     },
   ];
-  if (opts.fileControls?.length) {
-    groups.push({ label: "File", controls: opts.fileControls });
-  }
-  return groups;
 }
 
 export function documentRailOutline(
