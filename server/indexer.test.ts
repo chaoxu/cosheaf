@@ -62,6 +62,32 @@ describe("indexPage", () => {
     expect(r.cosheafId).toBe("abcd1234");
   });
 
+  it("does not prepend generated frontmatter above a malformed delimited yaml block", () => {
+    const db = freshDb();
+    const source = [
+      "---",
+      "id: ztrcpji2",
+      "bibliography: ref.bib",
+      "title: \"Rank-k-reduction on matroid intersection\"",
+      "math:",
+      "\t\\cl: \"\\operatorname{cl}\"",
+      "---",
+      "",
+      "motivated by Tamas Kiraly's question",
+      "",
+    ].join("\n");
+
+    const r = indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "paper.md",
+      bodyText: source,
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    expect(r.rewrittenContent).toBeNull();
+    expect(r.cosheafId).toMatch(/^[a-z0-9]{8}$/);
+  });
+
   it("repairs a path row when frontmatter id changes on the same file", () => {
     const db = freshDb();
     indexPage(db, {

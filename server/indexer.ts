@@ -161,7 +161,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
   });
 
   let rewritten: string | null = null;
-  if (fmId !== cosheafId) {
+  if (fmId !== cosheafId && !hasUnparsedDelimitedFrontmatter(p.bodyText, parsed.hadFrontmatter)) {
     const newFm = { ...parsed.frontmatter, id: cosheafId };
     if (title) newFm.title = title;
     rewritten = format.serializeDocument(newFm, parsed.body);
@@ -177,6 +177,31 @@ function lineFromOffset(source: string, offset: number): number {
     if (source.charCodeAt(i) === 10) line += 1;
   }
   return line;
+}
+
+function hasUnparsedDelimitedFrontmatter(source: string, hadParsedFrontmatter: boolean): boolean {
+  if (hadParsedFrontmatter) return false;
+  const firstEnd = frontmatterFenceLineEnd(source, 0);
+  if (firstEnd === null) return false;
+  let lineStart = firstEnd;
+  while (lineStart < source.length) {
+    const lineEnd = source.indexOf("\n", lineStart);
+    const end = lineEnd === -1 ? source.length : lineEnd;
+    const rawLine = source.slice(lineStart, end);
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line === "---") return true;
+    lineStart = lineEnd === -1 ? source.length : lineEnd + 1;
+  }
+  return false;
+}
+
+function frontmatterFenceLineEnd(source: string, offset: number): number | null {
+  if (!source.startsWith("---", offset)) return null;
+  const afterFence = offset + 3;
+  const next = source[afterFence];
+  if (next === "\n") return afterFence + 1;
+  if (next === "\r" && source[afterFence + 1] === "\n") return afterFence + 2;
+  return afterFence === source.length ? afterFence : null;
 }
 
 // Convenience for webhook-driven reindex where there's no Forgejo write to fail.
