@@ -911,7 +911,7 @@ describe("web file editor route", () => {
         });
         forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
           expect(c.req.param("ref")).toBe("main");
-          return c.json({ tree: [], truncated: false });
+          return c.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false });
         });
       }),
     );
@@ -928,6 +928,10 @@ describe("web file editor route", () => {
     expect(body).toContain('data-base-sha="main-sha"');
     expect(body).toContain('data-source-sha=""');
     expect(body).toContain('name="expected_sha" value="main-sha"');
+    expect(body).toContain('<span class="ftree-branch-name">user/alice/new</span>');
+    expect(body).toContain('<span class="branch-ref"');
+    expect(body).toContain(">user/alice/new</span>");
+    expect(body).toContain('href="/owner/w/src/branch/main/notes.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
     expect(body).toContain("# Main Notes\\n");
   });
 

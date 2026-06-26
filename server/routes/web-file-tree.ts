@@ -100,10 +100,11 @@ function fileTreeSidebar(
   branches: readonly ForgejoBranch[],
   user?: string,
   editByDefault = false,
+  displayBranch = branch,
 ): Html {
   if (files.length === 0) return emptyHtml;
   return html`<nav class="file-tree" aria-label="Files">
-    <div class="file-tree-head">${branchSwitcher(owner, repo, branch, branches)}<span class="file-tree-actions-slot"></span></div>
+    <div class="file-tree-head">${branchSwitcher(owner, repo, displayBranch, branches)}<span class="file-tree-actions-slot"></span></div>
     ${renderFileTreeLevel(buildFileTree(files), "", owner, repo, branch, activeRel, titles, user, editByDefault)}
   </nav>`;
 }
@@ -124,6 +125,7 @@ export function fileTreePanel(
   branches: readonly ForgejoBranch[] = [],
   user?: string,
   editByDefault = false,
+  displayBranch = branch,
 ): Panel {
-  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches, user, editByDefault));
+  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches, user, editByDefault, displayBranch));
 }

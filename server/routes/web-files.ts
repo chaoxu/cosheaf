@@ -423,7 +423,7 @@ async function editPageResponse(
         readerAssets: coflatMarkdownEdit,
         statusExtra: [{ label: branch, icon: branchIcon({ size: 12 }) }],
         statusOmitTab: true,
-        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles, [], ctx.user, ctx.ws.role !== "read")],
+        sidebarPanels: [fileTreePanel(ctx.owner, ctx.repo, treeBranch, files, rel, treeTitles, [], ctx.user, ctx.ws.role !== "read", branch)],
       }),
   );
 }
