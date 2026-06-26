@@ -3,15 +3,14 @@ import type {
   AutocompleteSource as EditorAutocompleteSource,
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
-  EditorSourcePosition,
-  ScrollToSourcePositionOptions,
-  MountedEditor,
-  MountedDocumentChange,
+  LazyEditorSourcePosition as EditorSourcePosition,
+  LazyEditorScrollToSourcePositionOptions as ScrollToSourcePositionOptions,
+  LazyEditorDocumentChange as MountedDocumentChange,
   OutlineEntry,
-} from "@chaoxu/coflat";
+} from "@chaoxu/coflat/editor-lazy";
 import {
   formatUploadedAssetMarkdown,
-} from "@chaoxu/coflat";
+} from "@chaoxu/coflat/editor-lazy";
 import {
   extractFirstH1 as extractCoflatFirstH1,
   parseFrontmatter as parseCoflatFrontmatter,
@@ -57,6 +56,7 @@ import {
 } from "./editor-change-routing";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
+import type { MountedEditor } from "./document-format/coflat";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";

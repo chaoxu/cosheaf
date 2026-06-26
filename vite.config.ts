@@ -153,6 +153,8 @@ export default defineConfig({
     // already a single bundled .mjs so there's nothing to pre-bundle.
     exclude: [
       "@chaoxu/coflat",
+      "@chaoxu/coflat/editor-lazy",
+      "@chaoxu/coflat/inline-render",
       "@chaoxu/coflat/reader",
       "@chaoxu/coflat/rich-readonly",
       "@chaoxu/coflat/parse",

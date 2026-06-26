@@ -1,4 +1,4 @@
-import { renderInlineMarkdown } from "@chaoxu/coflat";
+import { renderInlineMarkdown } from "@chaoxu/coflat/inline-render";
 import { hydrateMath } from "@chaoxu/coflat/reader";
 import { sanitizeAndRewriteRefsFragment } from "./ref-rewriter";
 

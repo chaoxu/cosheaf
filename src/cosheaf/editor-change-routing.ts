@@ -1,5 +1,8 @@
 import { Text } from "@codemirror/state";
-import type { MountedDocumentChange, MountedEditor } from "@chaoxu/coflat";
+import type {
+  LazyEditorDocumentChange as MountedDocumentChange,
+  MountedLazyEditor as MountedEditor,
+} from "@chaoxu/coflat/editor-lazy";
 import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 
 interface EditorChangeHandlers {

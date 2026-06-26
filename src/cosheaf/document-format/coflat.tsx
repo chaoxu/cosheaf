@@ -1,5 +1,5 @@
 export { MarkdownEditor } from "../editor";
-export type { MountedEditor } from "@chaoxu/coflat";
+export type { MountedEditor } from "../editor";
 export type {
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,

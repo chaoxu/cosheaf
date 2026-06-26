@@ -4,17 +4,18 @@ import { Prec, type Extension } from "@codemirror/state";
 import { insertTab } from "@codemirror/commands";
 import { keymap } from "@codemirror/view";
 import {
-  type MountedEditor,
-  type MountedDocumentChange,
+  type MountedLazyEditor,
+  type LazyEditorDocumentChange as MountedDocumentChange,
   type SaveHandler,
-  type StandaloneEditorMode,
+  type LazyEditorMode as StandaloneEditorMode,
   type StatusEvents,
   type AssetUploader,
   type AutocompleteSource,
-  mountEditor,
-} from "@chaoxu/coflat";
+  mountLazyEditor,
+} from "@chaoxu/coflat/editor-lazy";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
 export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource, MountedDocumentChange };
+export type MountedEditor = MountedLazyEditor;
 
 interface Props {
   value: string;
@@ -67,7 +68,7 @@ export function MarkdownEditor({
   sidenotesCollapsed,
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<MountedEditor | null>(null);
+  const editorRef = useRef<MountedLazyEditor | null>(null);
   const lastValueRef = useRef(value);
   const modeRef = useRef(mode);
   const onChangeRef = useRef(onChange);
@@ -120,10 +121,11 @@ export function MarkdownEditor({
       cancel: (file) => assetRef.current?.cancel?.(file),
     };
 
-    const editor = mountEditor({
+    const editor = mountLazyEditor({
       parent: containerRef.current,
       doc: value,
       mode: effectiveMode,
+      pluginPreset: "workbench",
       extensions: mountExtensions,
       ...(onChange ? { onChange: (next) => onChangeRef.current?.(next) } : {}),
       ...(onDocumentChange
