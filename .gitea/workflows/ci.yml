@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  COFLAT_REF: 0371117d4a00e7511372c0c7762c0d0b89697f0f
+  COFLAT_REF: b1e8151ea1cb15cec22bc910e3e3a3a996f4d061
 
 jobs:
   static:
