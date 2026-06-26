@@ -892,6 +892,7 @@ function WebEditor({
   const readHref = repoBranchFileHref(config.owner, config.repo, savedReadBranch, savedPath);
   const outlineMathMacros = documentContext?.mathMacros;
   const branchActions = branch && branch !== "main";
+  const canDiscardDefaultEditBranch = branchExists && branch === `${userBranchPrefix(config.username)}web-edit`;
   const railModel = documentRailModel({
     mode: "edit",
     readHref,
@@ -1091,6 +1092,22 @@ function WebEditor({
                 Open PR
               </button>
             </span>
+          ) : null}
+          {canDiscardDefaultEditBranch ? (
+            <form
+              className="inline-form web-editor-discard-branch"
+              method="post"
+              action={repoHref(config.owner, config.repo, "/branches/delete")}
+              onSubmit={(event) => {
+                if (!window.confirm(`Discard all committed changes on ${branch}?`)) event.preventDefault();
+              }}
+            >
+              <input type="hidden" name="name" value={branch} />
+              <input type="hidden" name="redirect_to" value={readHref} />
+              <button className="button danger" type="submit" disabled={busy}>
+                Discard branch
+              </button>
+            </form>
           ) : null}
           <a className="web-editor-cancel" data-testid="editor-cancel" href={readHref}>
             Cancel
