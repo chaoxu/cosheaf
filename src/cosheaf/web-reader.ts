@@ -24,7 +24,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
-import { markChangedBlocks } from "./reader-diff-marking";
+import { markChangedBlocks, richDiffBlockForLine } from "./reader-diff-marking";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 const observedScrollTop = new WeakMap<HTMLElement, number>();
@@ -256,7 +256,7 @@ function placeReviewComments(root: HTMLElement, comments: readonly CoflatReviewC
   for (const old of root.querySelectorAll(".rich-review-comment")) old.remove();
   const grouped = new Map<HTMLElement, CoflatReviewCommentAnchor[]>();
   for (const comment of comments) {
-    const target = root.querySelector<HTMLElement>(`[data-source-line="${comment.line}"]`);
+    const target = richDiffBlockForLine(root, comment.line);
     if (!target) continue;
     const host = reviewCommentHost(target);
     grouped.set(host, [...(grouped.get(host) ?? []), comment]);

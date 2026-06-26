@@ -59,7 +59,7 @@ describe("shell preference wiring", () => {
       readerAssets: true,
     });
 
-    expect(body).toMatch(/\/vendor\/coflat\/editor\.css\?v=[0-9a-f]{12}/);
+    expect(body).toMatch(/\/vendor\/coflat\/document-surface\.css\?v=[0-9a-f]{12}/);
     expect(body).toMatch(/\/vendor\/coflat\/themes\/blueprint-book\.css\?v=[0-9a-f]{12}/);
   });
 

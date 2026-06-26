@@ -32,8 +32,10 @@
 
     const collect = () => {
       // Change markers across shapes: source rows (tr.marked), unified patch rows
-      // (tr.add/tr.del), rich blocks (.marked). Collapse adjacent rows into one stop.
-      const all = Array.from(pane.querySelectorAll("tr.marked, tr.add, tr.del, .marked")).filter((el) => {
+      // (tr.add/tr.del), split source cells (td.add/td.del), rich blocks
+      // (.marked). Collapse adjacent rows into one stop.
+      const raw = Array.from(pane.querySelectorAll("tr.marked, tr.add, tr.del, .source-split-lines td.add, .source-split-lines td.del, .marked"));
+      const all = Array.from(new Set(raw.map((el) => el.closest(".source-split-lines tr") || el))).filter((el) => {
         // Rich readers can mark both a compound block and its children. The
         // nested markers are visually transparent, so keep the stepper aligned
         // with the visible highlight regions.

@@ -38,7 +38,7 @@ export function pageShell(opts: {
         <title>${opts.title} - Cosheaf</title>
         ${
           opts.readerAssets
-            ? raw(`<link rel="stylesheet" href="/vendor/coflat/editor.css${coflatVendorCssVersion("style.css")}">
+            ? raw(`<link rel="stylesheet" href="/vendor/coflat/document-surface.css${coflatVendorCssVersion("document-surface.css")}">
         <link rel="stylesheet" href="/vendor/coflat/themes/blueprint-book.css${coflatVendorCssVersion("themes/blueprint-book.css")}">`)
             : ""
         }
@@ -71,7 +71,7 @@ function cosheafWebCssVersion(): string {
 
 const coflatVendorCssVersions = new Map<string, string>();
 
-function coflatVendorCssVersion(exportPath: "style.css" | "themes/blueprint-book.css"): string {
+function coflatVendorCssVersion(exportPath: "document-surface.css" | "themes/blueprint-book.css"): string {
   const cached = coflatVendorCssVersions.get(exportPath);
   if (cached !== undefined) return cached;
   try {
