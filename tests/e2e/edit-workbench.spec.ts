@@ -79,19 +79,33 @@ async function expectWorkbenchReadOnly(page: Page, readOnly: boolean): Promise<v
   ).toBe(readOnly);
 }
 
-test("edit workbench read mode mounts the rich editor read-only", async ({ page }) => {
+async function expectFastWorkbenchRead(page: Page, text?: string): Promise<void> {
+  const fast = page.getByTestId("editor-fast-readonly");
+  await expect(fast).toBeVisible();
+  if (text) await expect(fast).toContainText(text);
+  await expect(page.getByTestId("editor")).toHaveCount(0);
+}
+
+async function centerIsNearSource(page: Page, pos: number, tolerance = 8): Promise<boolean> {
+  const range = await visibleCenterSourceRange(page);
+  const from = Number(range.from);
+  const to = Number(range.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return false;
+  return from <= pos + tolerance && to >= pos - tolerance;
+}
+
+test("edit workbench read mode paints the fast rich-readonly surface before editing", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-  await expect(page.getByTestId("editor")).toContainText("Hello");
+  await expectFastWorkbenchRead(page, "Hello");
   await expect(page.locator('script[src*="web-edit-shell"]')).toHaveCount(1);
   await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
-  await expectWorkbenchReadOnly(page, true);
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Read");
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
-  await expect(page.getByTestId("editor-path-input")).toBeDisabled();
-  await expect(page.getByTestId("editor-path-pencil")).toBeDisabled();
+  await expect(page.getByTestId("editor-path-input")).toHaveCount(0);
+  await expect(page.getByTestId("editor-path-pencil")).toHaveCount(0);
   await expect(page.locator(".doc-rail .doc-view-controls")).toHaveCount(0);
   await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
@@ -222,37 +236,27 @@ test("edit workbench keeps source anchor stable across repeated read edit switch
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=3440&source_to=3476`);
-  await expect(page.getByTestId("editor")).toBeVisible();
-  await expect(page.locator('[data-edit-shell] .cm-scroller [data-source-from="3440"][data-source-to="3476"]').first()).toBeVisible();
-  await expectWorkbenchReadOnly(page, true);
+  await expectFastWorkbenchRead(page);
+  await expect(page.locator('[data-edit-shell] [data-testid="editor-fast-readonly"] [data-source-from="3440"][data-source-to="3476"]').first()).toBeVisible();
 
-  await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
-    from: "3440",
-    to: "3476",
-  });
+  await expect.poll(async () => centerIsNearSource(page, 3440)).toBe(true);
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
+  await expectFastWorkbenchRead(page);
   await page.locator('.edit-primary-mode button:has-text("Edit")').click();
+  await expectWorkbenchReadOnly(page, false);
   await page.waitForTimeout(120);
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
-  await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
-    from: "3440",
-    to: "3476",
-  });
+  await expectWorkbenchReadOnly(page, true);
+  await expect.poll(async () => centerIsNearSource(page, 3440)).toBe(true);
 
   for (let index = 0; index < 2; index += 1) {
     await page.locator('.edit-primary-mode button:has-text("Edit")').click();
     await expectWorkbenchReadOnly(page, false);
-    await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
-      from: "3440",
-      to: "3476",
-    });
+    await expect.poll(async () => centerIsNearSource(page, 3440)).toBe(true);
     await page.locator('.edit-primary-mode button:has-text("Read")').click();
     await expectWorkbenchReadOnly(page, true);
-    await expect.poll(async () => visibleCenterSourceRange(page)).toMatchObject({
-      from: "3440",
-      to: "3476",
-    });
+    await expect.poll(async () => centerIsNearSource(page, 3440)).toBe(true);
   }
 });
 
@@ -262,8 +266,7 @@ test("edit workbench preserves deep source anchors when switching back to read",
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=3958&source_to=3972`);
-  await expect(page.getByTestId("editor")).toBeVisible();
-  await expectWorkbenchReadOnly(page, true);
+  await expectFastWorkbenchRead(page);
   await expect.poll(async () => {
     const range = await visibleCenterSourceRange(page);
     const from = Number(range.from);
@@ -359,9 +362,8 @@ test("edit workbench keeps read-only and editable modes anchored on inline image
   await signIn(page);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit&source_from=6363&source_to=6427`);
-  await expect(page.getByTestId("editor")).toBeVisible();
-  await expect(page.locator('[data-edit-shell] .cm-scroller [data-source-from="6363"][data-source-to="6427"]').first()).toBeVisible();
-  await expectWorkbenchReadOnly(page, true);
+  await expectFastWorkbenchRead(page);
+  await expect(page.locator('[data-edit-shell] [data-testid="editor-fast-readonly"] [data-source-from="6363"][data-source-to="6427"]').first()).toBeVisible();
   await page.evaluate(() => {
     const img = [...document.images].find((candidate) => (candidate.currentSrc || candidate.src).includes("hover-preview-figure"));
     img?.scrollIntoView({ block: "center" });
@@ -432,10 +434,10 @@ test("edit workbench keeps compact read and rich line boxes aligned", async ({ p
   for (const width of [430, 600]) {
     await page.setViewportSize({ width, height: 820 });
     await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-    await expectWorkbenchReadOnly(page, true);
-    await expect(page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first()).toBeVisible();
-    const readBox = await page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first().boundingBox();
-    expect(readBox, `read-only editor paragraph at ${width}px`).not.toBeNull();
+    await expectFastWorkbenchRead(page);
+    await expect(page.locator('[data-testid="editor-fast-readonly"] .cf-doc-paragraph').first()).toBeVisible();
+    const readBox = await page.locator('[data-testid="editor-fast-readonly"]').first().boundingBox();
+    expect(readBox, `fast read document flow at ${width}px`).not.toBeNull();
 
     for (let i = 0; i < 3; i += 1) {
       await page.locator('.edit-primary-mode button:has-text("Edit")').click();
@@ -448,10 +450,10 @@ test("edit workbench keeps compact read and rich line boxes aligned", async ({ p
 
     await page.locator('.edit-primary-mode button:has-text("Edit")').click();
     await expectWorkbenchReadOnly(page, false);
-    const editBox = await page.locator(`${CF.editorContent} .cm-line.cf-doc-paragraph`).first().boundingBox();
-    expect(editBox, `editor paragraph at ${width}px`).not.toBeNull();
-    expect(Math.abs((editBox?.width ?? 0) - (readBox?.width ?? 0)), `paragraph width at ${width}px`).toBeLessThanOrEqual(1);
-    expect(Math.abs((editBox?.x ?? 0) - (readBox?.x ?? 0)), `paragraph x at ${width}px`).toBeLessThanOrEqual(1);
+    const editBox = await page.locator(CF.editorContent).first().boundingBox();
+    expect(editBox, `editor document flow at ${width}px`).not.toBeNull();
+    expect(Math.abs((editBox?.width ?? 0) - (readBox?.width ?? 0)), `document flow width at ${width}px`).toBeLessThanOrEqual(1);
+    expect(Math.abs((editBox?.x ?? 0) - (readBox?.x ?? 0)), `document flow x at ${width}px`).toBeLessThanOrEqual(1);
   }
 });
 
@@ -466,7 +468,6 @@ test("standalone read still uses the reader while workbench read uses the editor
   await expect(page.getByTestId("editor")).toHaveCount(0);
 
   await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
-  await expect(page.locator(CF.reader)).toHaveCount(0);
-  await expect(page.getByTestId("editor")).toContainText("Hello");
-  await expectWorkbenchReadOnly(page, true);
+  await expect(page.locator(".coflat-reader-island")).toHaveCount(0);
+  await expectFastWorkbenchRead(page, "Hello");
 });

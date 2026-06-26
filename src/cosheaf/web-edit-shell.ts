@@ -2,7 +2,23 @@ import {
   type SourcePosition,
   visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
+import {
+  mountRichReadonlyDocument,
+  type MountedRichReadonlyDocument,
+} from "@chaoxu/coflat/rich-readonly";
+import {
+  documentRailModel,
+} from "../../shared/document-rail";
+import { renderDocumentRail } from "./document-rail-dom";
+import { readDocumentTheme, readSectionNumbering } from "./document-theme";
+import {
+  loadCoflatDocumentContext,
+  type CoflatDocumentPayload,
+} from "./coflat-document-context";
 import type { WebEditorMount } from "./web-editor";
+import "@chaoxu/coflat/document-surface.css";
+import "@chaoxu/coflat/themes/blueprint-book.css";
+import "./globals.css";
 
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
@@ -10,8 +26,13 @@ const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 
 interface WorkbenchState {
   editorReady: Promise<WebEditorMount | null> | null;
+  fastReadReady: Promise<MountedRichReadonlyDocument | null> | null;
   sourcePosition: WorkbenchSourcePosition | null;
   switchId: number;
+}
+
+interface WorkbenchConfig extends CoflatDocumentPayload {
+  username: string;
 }
 
 function shell(): HTMLElement | null {
@@ -20,6 +41,39 @@ function shell(): HTMLElement | null {
 
 function editorRoot(host: HTMLElement): HTMLElement | null {
   return host.querySelector<HTMLElement>("#web-editor-root");
+}
+
+function readWorkbenchConfig(): WorkbenchConfig | null {
+  const mount = document.getElementById("web-editor-root");
+  const payload = document.getElementById("web-editor-content");
+  const repoConfigScript = document.getElementById("web-editor-repo-config");
+  const assetPreviewsScript = document.getElementById("web-editor-asset-previews");
+  if (!mount || !payload) return null;
+  const repoConfig = repoConfigScript?.textContent
+    ? JSON.parse(repoConfigScript.textContent) as {
+      mathMacros?: Record<string, string>;
+      bibliography?: string;
+      csl?: string;
+    }
+    : {};
+  const assetPreviewPaths = assetPreviewsScript?.textContent
+    ? JSON.parse(assetPreviewsScript.textContent) as Record<string, string>
+    : {};
+  return {
+    source: JSON.parse(payload.textContent || "\"\"") as string,
+    owner: mount.dataset.owner ?? "",
+    repo: mount.dataset.repo ?? "",
+    path: mount.dataset.path ?? "",
+    branch: mount.dataset.branch ?? "",
+    branchExists: mount.dataset.branchExists !== "0",
+    username: mount.dataset.username ?? "",
+    renderTitle: true,
+    sourcePositions: true,
+    mathMacros: repoConfig.mathMacros ?? {},
+    assetPreviewPaths,
+    ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
+    ...(repoConfig.csl ? { csl: repoConfig.csl } : {}),
+  };
 }
 
 function statusSlot(): HTMLElement | null {
@@ -111,6 +165,7 @@ function renderStatusControls(mode: WorkbenchMode, dirty = false): void {
 
 function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
   host.dataset.mode = mode;
+  host.classList.toggle("is-fast-read", mode === "read" && !host.querySelector(".cm-editor"));
   const actions = editorActionsSlot();
   if (actions) actions.hidden = mode !== "edit";
   const fileSlot = fileActionsSlot();
@@ -121,6 +176,13 @@ function setVisibleMode(host: HTMLElement, mode: WorkbenchMode): void {
 function visibleEditSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
   const scroller = host.querySelector<HTMLElement>(".cm-scroller");
   if (!scroller || scroller.hidden) return null;
+  return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
+}
+
+function visibleFastReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
+  const doc = host.querySelector<HTMLElement>(".web-editor-fast-doc");
+  const scroller = document.querySelector<HTMLElement>(".app-content");
+  if (!doc || !scroller) return null;
   return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
 }
 
@@ -144,11 +206,123 @@ function applyEditorSourcePosition(mount: WebEditorMount | null | undefined, sou
   window.requestAnimationFrame(apply);
 }
 
+function applyFastSourcePosition(host: HTMLElement, sourcePosition: WorkbenchSourcePosition | null): void {
+  if (!sourcePosition) return;
+  const doc = host.querySelector<HTMLElement>(".web-editor-fast-doc");
+  if (!doc) return;
+  let frames = 0;
+  const apply = () => {
+    const target = doc.querySelector<HTMLElement>(`[data-source-from="${sourcePosition.pos}"], [data-source-to="${sourcePosition.pos}"]`)
+      ?? [...doc.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")].find((candidate) => {
+        const from = Number(candidate.dataset.sourceFrom);
+        const to = Number(candidate.dataset.sourceTo);
+        return Number.isFinite(from) && Number.isFinite(to) && from <= sourcePosition.pos && sourcePosition.pos <= to;
+      });
+    target?.scrollIntoView({ block: "center" });
+    frames += 1;
+    if (frames < 4 && target) window.requestAnimationFrame(apply);
+  };
+  window.requestAnimationFrame(apply);
+}
+
+function fastReadShellClass(username: string): string {
+  const theme = readDocumentTheme(username);
+  return theme === "blueprint-book"
+    ? "web-editor-shell cf-theme-scope cf-theme-blueprint-book web-editor-fast-shell"
+    : "web-editor-shell cf-theme-scope web-editor-fast-shell";
+}
+
+function installFastReadFrame(root: HTMLElement, username: string): { doc: HTMLElement; rail: HTMLElement } {
+  root.replaceChildren();
+  const shellEl = document.createElement("div");
+  shellEl.className = fastReadShellClass(username);
+  const layout = document.createElement("div");
+  layout.className = "doc-with-toc";
+  const main = document.createElement("div");
+  main.className = "doc-main";
+  const doc = document.createElement("div");
+  doc.className = "web-editor-fast-doc";
+  doc.dataset.testid = "editor-fast-readonly";
+  const rail = document.createElement("aside");
+  rail.className = "web-editor-outline doc-rail";
+  rail.setAttribute("aria-label", "Document tools");
+  rail.dataset.documentRail = "";
+  main.append(doc);
+  layout.append(main, rail);
+  shellEl.append(layout);
+  root.append(shellEl);
+  return { doc, rail };
+}
+
+function renderFastRail(rail: HTMLElement, mounted: MountedRichReadonlyDocument): void {
+  renderDocumentRail(
+    rail,
+    {
+      ...documentRailModel({
+        mode: "edit",
+        readHref: window.location.href,
+        controls: false,
+        outline: (mounted.result.outline ?? []).map((entry) => ({
+          key: entry.id,
+          level: entry.level,
+          label: entry.text,
+          html: entry.html,
+        })),
+      }),
+      mathMacros: mounted.result.mathMacros,
+    },
+    {
+      onOutlineItem: (entry) => {
+        const target = mounted.root.querySelector<HTMLElement>(`#${CSS.escape(entry.key)}`);
+        target?.scrollIntoView({ block: "center" });
+      },
+    },
+  );
+  rail.hidden = mounted.result.outline?.length ? false : rail.hidden;
+}
+
+function ensureFastRead(host: HTMLElement, state: WorkbenchState): Promise<MountedRichReadonlyDocument | null> {
+  if (state.fastReadReady) return state.fastReadReady;
+  const root = editorRoot(host);
+  const config = readWorkbenchConfig();
+  if (!root || !config) return Promise.resolve(null);
+  state.fastReadReady = (async () => {
+    const { doc, rail } = installFastReadFrame(root, config.username);
+    const context = await loadCoflatDocumentContext(config);
+    const mounted = mountRichReadonlyDocument({
+      root: doc,
+      source: config.source,
+      context,
+      renderOptions: {
+        documentPath: config.path,
+        outline: true,
+        referencePreviews: true,
+        resolveReferences: true,
+        sectionNumbering: readSectionNumbering(config.username),
+        sourcePositions: true,
+      },
+      hydration: {
+        disclosures: true,
+        media: true,
+        references: true,
+        math: true,
+        hoverPreviews: true,
+      },
+    });
+    renderFastRail(rail, mounted);
+    await mounted.ready;
+    return mounted;
+  })();
+  return state.fastReadReady;
+}
+
 function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEditorMount | null> {
   if (state.editorReady) return state.editorReady;
   const root = editorRoot(host);
   if (!root) return Promise.resolve(null);
   state.editorReady = (async () => {
+    const fastRead = await state.fastReadReady;
+    fastRead?.dispose();
     const mod: typeof import("./web-editor") = await import("./web-editor");
     const mount = mod.mountWebEditor(root, {
       onDirtyChange: (dirty) => {
@@ -166,8 +340,11 @@ async function captureSourcePosition(
   host: HTMLElement,
   state: WorkbenchState,
 ): Promise<WorkbenchSourcePosition | null> {
-  const mount = await ensureEditor(host, state);
-  return crossSurfaceSourcePosition(mount?.preview()?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition);
+  if (state.editorReady) {
+    const mount = await ensureEditor(host, state);
+    return crossSurfaceSourcePosition(mount?.preview()?.sourcePosition ?? visibleEditSourcePosition(host) ?? state.sourcePosition);
+  }
+  return visibleFastReadSourcePosition(host) ?? state.sourcePosition;
 }
 
 async function switchMode(host: HTMLElement, state: WorkbenchState, mode: WorkbenchMode, opts: { replace?: boolean } = {}): Promise<void> {
@@ -181,11 +358,16 @@ async function switchMode(host: HTMLElement, state: WorkbenchState, mode: Workbe
   const sourcePosition = await captureSourcePosition(host, state);
   if (state.switchId !== switchId || host.dataset.mode !== fromMode) return;
   state.sourcePosition = sourcePosition ?? state.sourcePosition;
-  const mount = await ensureEditor(host, state);
-  if (state.switchId !== switchId || host.dataset.mode !== fromMode) return;
   setVisibleMode(host, mode);
-  mount?.setReadOnly(mode === "read");
   setUrlMode(mode, opts.replace);
+  if (mode === "read" && !state.editorReady) {
+    await ensureFastRead(host, state);
+    applyFastSourcePosition(host, state.sourcePosition);
+    return;
+  }
+  const mount = await ensureEditor(host, state);
+  if (state.switchId !== switchId || host.dataset.mode !== mode) return;
+  mount?.setReadOnly(mode === "read");
   applyEditorSourcePosition(mount, state.sourcePosition);
 }
 
@@ -213,6 +395,7 @@ const host = shell();
 if (host) {
   const state: WorkbenchState = {
     editorReady: null,
+    fastReadReady: null,
     sourcePosition: null,
     switchId: 0,
   };
@@ -223,9 +406,15 @@ if (host) {
   if (urlSourcePosition) state.sourcePosition = urlSourcePosition;
   setVisibleMode(host, mode);
   setUrlMode(mode, true, { keepSourceAnchor: Boolean(urlSourcePosition) });
-  void ensureEditor(host, state).then((mount) => {
-    if (!mount) return;
-    mount.setReadOnly(mode === "read");
-    applyEditorSourcePosition(mount, state.sourcePosition);
+  void ensureFastRead(host, state).then(() => {
+    if (mode === "read") {
+      applyFastSourcePosition(host, state.sourcePosition);
+      return;
+    }
+    void ensureEditor(host, state).then((mount) => {
+      if (!mount) return;
+      mount.setReadOnly(false);
+      applyEditorSourcePosition(mount, state.sourcePosition);
+    });
   });
 }

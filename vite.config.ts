@@ -154,6 +154,7 @@ export default defineConfig({
     exclude: [
       "@chaoxu/coflat",
       "@chaoxu/coflat/reader",
+      "@chaoxu/coflat/rich-readonly",
       "@chaoxu/coflat/parse",
       "@chaoxu/coflat/citeproc",
     ],
