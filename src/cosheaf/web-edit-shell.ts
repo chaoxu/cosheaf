@@ -2,15 +2,11 @@ import {
   type SourcePosition,
   visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
-import type { WebEditorMount, mountWebEditor } from "./web-editor";
+import type { WebEditorMount } from "./web-editor";
 
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
-
-interface EditorModule {
-  mountWebEditor: typeof mountWebEditor;
-}
 
 interface WorkbenchState {
   editorReady: Promise<WebEditorMount | null> | null;
@@ -153,7 +149,7 @@ function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEdit
   const root = editorRoot(host);
   if (!root) return Promise.resolve(null);
   state.editorReady = (async () => {
-    const mod = await import("./web-editor") as EditorModule;
+    const mod: typeof import("./web-editor") = await import("./web-editor");
     const mount = mod.mountWebEditor(root, {
       onDirtyChange: (dirty) => {
         host.dataset.dirty = dirty ? "1" : "0";

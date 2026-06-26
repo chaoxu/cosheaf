@@ -24,36 +24,6 @@ async function apiPat(page: Page): Promise<string> {
   return cookie?.value ?? "";
 }
 
-async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0): Promise<Buffer> {
-  await page.goto(url);
-  await expect(page.locator(CF.reader)).toBeVisible();
-  await expect(page.locator(`${CF.reader} .cf-doc-paragraph, ${CF.reader} .cf-doc-heading`).first()).toBeVisible();
-  await waitForHydratedReader(page);
-  await page.waitForTimeout(400);
-  await page.locator(".doc-main").evaluate((element, ratio) => {
-    function scrollableAncestor(element: Element | null): HTMLElement | null {
-      let candidate: Element | null = element;
-      while (candidate) {
-        if (candidate instanceof HTMLElement && candidate.scrollHeight > candidate.clientHeight) {
-          const before = candidate.scrollTop;
-          candidate.scrollTop = before + 1;
-          const canScroll = candidate.scrollTop !== before;
-          candidate.scrollTop = before;
-          if (canScroll) return candidate;
-        }
-        candidate = candidate.parentElement;
-      }
-      return null;
-    }
-    const scroller = scrollableAncestor(element) ?? (element instanceof HTMLElement ? element : null);
-    if (!scroller) return;
-    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    scroller.scrollTop = Math.round(max * ratio);
-  }, scrollRatio);
-  await page.waitForTimeout(150);
-  return page.locator(".doc-main").screenshot({ animations: "disabled" });
-}
-
 async function waitForHydratedReader(page: Page): Promise<void> {
   await expect(page.locator(".coflat-reader-island[data-reader-hydrated='1']").first()).toBeVisible();
 }
