@@ -18,6 +18,12 @@ async function signIn(page: Page): Promise<void> {
   });
 }
 
+async function apiPat(page: Page): Promise<string> {
+  const cookie = (await page.context().cookies(webBase)).find((entry) => entry.name === "cosheaf_pat");
+  expect(cookie?.value).toBeTruthy();
+  return cookie?.value ?? "";
+}
+
 async function readerSurfaceScreenshot(page: Page, url: string, scrollRatio = 0): Promise<Buffer> {
   await page.goto(url);
   await expect(page.locator(CF.reader)).toBeVisible();
@@ -211,6 +217,46 @@ test("edit workbench starts as reader and lazy-loads editor on demand", async ({
   await expect(page.locator(CF.reader)).toContainText("Hello");
   await expect(page.getByTestId("editor")).toBeHidden();
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
+});
+
+test("rich editor keeps fenced div opener editable while adding a label", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  const branch = `user/chao/issue-225-fenced-${Date.now()}`;
+  const path = "issue-225-fenced.md";
+  const pat = await apiPat(page);
+  const put = await page.request.put(
+    `${webBase}/api/v1/repos/chao/flushing-coin/file?path=${path}&branch=${encodeURIComponent(branch)}`,
+    {
+      headers: { authorization: `Bearer ${pat}` },
+      data: {
+        content: [
+          "# Fenced Div Regression",
+          "",
+          "::: {.lemma}",
+          "some lemma",
+          ":::",
+          "",
+        ].join("\n"),
+      },
+    },
+  );
+  expect(put.ok()).toBe(true);
+
+  await page.goto(`${repoBase}/src/branch/${branch}/${path}?mode=edit&edit_branch=${encodeURIComponent(branch)}`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  const header = page.locator(CF.editorContent).locator(CF.blockHeaderRendered, { hasText: "Lemma" }).first();
+  await expect(header).toBeVisible();
+
+  await header.click();
+  await expect(page.locator(CF.editorContent)).toContainText("::: {.lemma}");
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.type(" #l");
+
+  await expect(page.locator(CF.editorContent)).toContainText("::: {.lemma #l}");
+  await expect(page.locator(CF.editorContent).locator(CF.blockHeaderRendered, { hasText: "Lemma" })).toHaveCount(0);
 });
 
 test("edit workbench read mode remains scrollable after switching from edit", async ({ page }) => {
