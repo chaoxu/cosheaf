@@ -58,7 +58,8 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
   }));
 
   web.post("/:owner/:repo/branches/delete", webRouteForWrite(async (c, ctx) => {
-    const name = stringField((await c.req.parseBody()).name);
+    const form = await c.req.parseBody();
+    const name = stringField(form.name);
     if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
     try {
       await ctx.fj.deleteBranch(ctx.owner, ctx.repo, name);
@@ -66,7 +67,8 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
       if (!(err instanceof ForgejoError && err.status === 404)) throw err;
     }
     invalidateRepoTrees(ctx.owner, ctx.repo);
-    return redirect(repoHref(ctx.owner, ctx.repo, "/branches"));
+    const redirectTo = branchDeleteRedirect(ctx, stringField(form.redirect_to));
+    return redirect(redirectTo);
   }));
 
   web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
@@ -90,6 +92,13 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
       `),
     );
   }));
+}
+
+function branchDeleteRedirect(ctx: WebCtx, redirectTo: string | null): string {
+  const fallback = repoHref(ctx.owner, ctx.repo, "/branches");
+  if (!redirectTo) return fallback;
+  const repoRoot = repoHref(ctx.owner, ctx.repo);
+  return redirectTo === repoRoot || redirectTo.startsWith(`${repoRoot}/`) ? redirectTo : fallback;
 }
 
 function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Html {

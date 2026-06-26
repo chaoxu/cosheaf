@@ -1638,7 +1638,26 @@ describe("web file editor route", () => {
       forge.delete("/api/v1/repos/owner/w/branches/user%2Falice%2Fwip", () => new Response("not found", { status: 404 }));
     }));
 
-    const form = new URLSearchParams({ name: "user/alice/wip" });
+    const form = new URLSearchParams({ name: "user/alice/wip", redirect_to: "/owner/w/src/branch/main/notes.md" });
+    const res = await appFor(db).request("/owner/w/branches/delete", {
+      method: "POST",
+      headers: formHeaders(token),
+      body: form.toString(),
+    });
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/owner/w/src/branch/main/notes.md");
+  });
+
+  it("ignores a browser branch delete redirect outside the repo", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.delete("/api/v1/repos/owner/w/branches/user%2Falice%2Fwip", () => new Response(null, { status: 204 }));
+    }));
+
+    const form = new URLSearchParams({ name: "user/alice/wip", redirect_to: "/other/repo/src/branch/main/notes.md" });
     const res = await appFor(db).request("/owner/w/branches/delete", {
       method: "POST",
       headers: formHeaders(token),
