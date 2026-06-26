@@ -975,7 +975,7 @@ function WebEditor({
             title="Rename file"
             spellCheck={false}
             value={currentPath}
-            disabled={busy}
+            disabled={readOnly || busy}
             onChange={(e) => {
               setCurrentPath(e.target.value);
               setPathDirty(e.target.value.trim() !== savedPath);
@@ -1002,7 +1002,7 @@ function WebEditor({
             data-testid="editor-path-pencil"
             aria-label="Rename file"
             title="Rename file"
-            disabled={busy}
+            disabled={readOnly || busy}
             onClick={() => pathInputRef.current?.select()}
           >
             {/* #186: render the shared lucide source (shared/lucide.ts), the same

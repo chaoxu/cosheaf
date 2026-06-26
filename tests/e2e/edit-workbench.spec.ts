@@ -90,6 +90,8 @@ test("edit workbench read mode mounts the rich editor read-only", async ({ page 
   await expectWorkbenchReadOnly(page, true);
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Read");
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
+  await expect(page.getByTestId("editor-path-input")).toBeDisabled();
+  await expect(page.getByTestId("editor-path-pencil")).toBeDisabled();
   await expect(page.locator(".doc-rail .doc-view-controls")).toHaveCount(0);
   await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
@@ -98,12 +100,16 @@ test("edit workbench read mode mounts the rich editor read-only", async ({ page 
   await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Edit");
   await expect(page.getByRole("button", { name: "Rich" })).toBeVisible();
   await expect(page.getByTestId("editor-upload-asset")).toBeVisible();
+  await expect(page.getByTestId("editor-path-input")).toBeEnabled();
+  await expect(page.getByTestId("editor-path-pencil")).toBeEnabled();
   await expect(page.locator(".status-editor-slot > :last-child")).toHaveAttribute("data-edit-primary-mode", "");
 
   await page.locator('.edit-primary-mode button:has-text("Read")').click();
   await expect(page.getByTestId("editor")).toContainText("Hello");
   await expectWorkbenchReadOnly(page, true);
   await expect(page.getByTestId("editor-upload-asset")).toBeHidden();
+  await expect(page.getByTestId("editor-path-input")).toBeDisabled();
+  await expect(page.getByTestId("editor-path-pencil")).toBeDisabled();
 });
 
 test("rich editor keeps fenced div opener editable while adding a label", async ({ page }) => {
