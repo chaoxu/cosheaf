@@ -721,6 +721,46 @@ describe("files mutation gates", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("preserves malformed delimited yaml frontmatter instead of prepending generated metadata", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const source = [
+      "---",
+      "id: ztrcpji2",
+      "bibliography: ref.bib",
+      "title: \"Rank-k-reduction on matroid intersection\"",
+      "math:",
+      "\t\\cl: \"\\operatorname{cl}\"",
+      "---",
+      "",
+      "body.",
+      "",
+    ].join("\n");
+    let written = "";
+
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
+      forge.get("/api/v1/repos/owner/w/contents/paper.md", (c) => c.text("not found", 404));
+      forge.post("/api/v1/repos/owner/w/contents/paper.md", async (c) => {
+        const body = (await c.req.json()) as { content: string };
+        written = Buffer.from(body.content, "base64").toString("utf8");
+        return c.json({ commit: { sha: "paper-commit" }, content: { sha: "paper-sha" } });
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=paper.md&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ content: source }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok: boolean; content?: string };
+    expect(json.ok).toBe(true);
+    expect(json.content).toBeUndefined();
+    expect(written).toBe(source);
+  });
+
   it("rejects asset uploads to main before forwarding to Forgejo", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
