@@ -88,11 +88,11 @@
         const leftMissingGap = bySide[0].gaps.get(`${id}-missing`) ?? bySide[0].gaps.get(id);
         const rightMissingGap = bySide[1].gaps.get(`${id}-missing`) ?? bySide[1].gaps.get(id);
         if (!left && right && leftMissingGap) {
-          setRichGapHeight(leftMissingGap, right.getBoundingClientRect().height);
+          setRichGapHeight(leftMissingGap, heightThroughOppositeContent(leftMissingGap, right));
           continue;
         }
         if (!right && left && rightMissingGap) {
-          setRichGapHeight(rightMissingGap, left.getBoundingClientRect().height);
+          setRichGapHeight(rightMissingGap, heightThroughOppositeContent(rightMissingGap, left));
           continue;
         }
         if (!left || !right) continue;
@@ -126,6 +126,9 @@
     const setRichGapHeight = (gap, height) => {
       gap.style.height = `${Math.max(0, Math.round(height))}px`;
     };
+
+    const heightThroughOppositeContent = (gap, content) =>
+      Math.max(content.getBoundingClientRect().height, content.getBoundingClientRect().bottom - gap.getBoundingClientRect().top);
 
     const richGapNumber = (id) => Number.parseInt(id.replace(/^rich-gap-(\d+).*$/, "$1"), 10) || 0;
 
