@@ -67,7 +67,7 @@
         const gaps = new Map();
         for (const el of section.querySelectorAll("[data-rich-gap-content-ids]")) {
           for (const id of (el.getAttribute("data-rich-gap-content-ids") || "").split(/\s+/)) {
-            if (id && !content.has(id)) content.set(id, el);
+            if (id && !content.has(id)) content.set(id, richLayoutRoot(el, section));
           }
         }
         for (const el of section.querySelectorAll(".cf-doc-layout-gap[data-cf-layout-gap-id]")) {
@@ -82,17 +82,21 @@
       ]))
         .filter((id) => bySide[0].content.has(id) || bySide[1].content.has(id))
         .sort((a, b) => richGapNumber(a) - richGapNumber(b));
+      const seenRoots = [new Set(), new Set()];
       for (const id of ids) {
         let left = bySide[0].content.get(id);
         let right = bySide[1].content.get(id);
+        if ((!left || seenRoots[0].has(left)) && (!right || seenRoots[1].has(right))) continue;
         const leftMissingGap = bySide[0].gaps.get(`${id}-missing`) ?? bySide[0].gaps.get(id);
         const rightMissingGap = bySide[1].gaps.get(`${id}-missing`) ?? bySide[1].gaps.get(id);
         if (!left && right && leftMissingGap) {
           setRichGapHeight(leftMissingGap, heightThroughOppositeContent(leftMissingGap, right));
+          seenRoots[1].add(right);
           continue;
         }
         if (!right && left && rightMissingGap) {
           setRichGapHeight(rightMissingGap, heightThroughOppositeContent(rightMissingGap, left));
+          seenRoots[0].add(left);
           continue;
         }
         if (!left || !right) continue;
@@ -117,6 +121,8 @@
           const gap = bySide[leftBottom < rightBottom ? 0 : 1].gaps.get(`${id}-after`);
           if (gap) setRichGapHeight(gap, bottomDelta);
         }
+        seenRoots[0].add(left);
+        seenRoots[1].add(right);
       }
       setTimeout(() => {
         delete pane.dataset.richGapApplying;
@@ -129,6 +135,14 @@
 
     const heightThroughOppositeContent = (gap, content) =>
       Math.max(content.getBoundingClientRect().height, content.getBoundingClientRect().bottom - gap.getBoundingClientRect().top);
+
+    const richLayoutRoot = (el, section) => {
+      let root = el;
+      for (let parent = el.parentElement?.closest("[data-rich-gap-content-ids]"); parent && section.contains(parent); parent = parent.parentElement?.closest("[data-rich-gap-content-ids]")) {
+        root = parent;
+      }
+      return root;
+    };
 
     const richGapNumber = (id) => Number.parseInt(id.replace(/^rich-gap-(\d+).*$/, "$1"), 10) || 0;
 
