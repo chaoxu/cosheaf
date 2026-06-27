@@ -158,6 +158,55 @@ describe("loadCoflatRefs", () => {
     });
   });
 
+  it("loads workspace refs from the document ref when rendering a non-main snapshot", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("ids=thm%3Abranch");
+      expect(url).toContain("ref=abc123");
+      return new Response(JSON.stringify({
+        refs: [
+          {
+            id: "thm:branch",
+            path: "branch.md",
+            kind: "block",
+            label: "Theorem 7",
+            fragment: "thm:branch",
+          },
+        ],
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refs = await loadCoflatRefs({
+      ...payload,
+      branch: "abc123",
+      source: "See [@thm:branch].",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(refs.workspaceCrossrefs.get("thm:branch")).toEqual({
+      label: "Theorem 7",
+      href: "/chao/poa-network-game/src/branch/abc123/branch.md#thm%3Abranch",
+    });
+  });
+
+  it("does not request branch refs for a missing edit branch", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toContain("ids=thm%3Abranch");
+      expect(url).not.toContain("ref=");
+      return new Response(JSON.stringify({ refs: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCoflatRefs({
+      ...payload,
+      branch: "user/alice/new",
+      branchExists: false,
+      source: "See [@thm:branch].",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("resolves built-in CSL names without fetching them as repo files", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/refs?ids=")) return new Response(JSON.stringify({ refs: [] }), { status: 200 });

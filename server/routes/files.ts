@@ -39,6 +39,8 @@ interface BranchRefEntry {
   id: string;
   title: string | null;
   path: string;
+  kind: "page" | "block" | "equation" | "heading";
+  line: number | null;
 }
 
 const BRANCH_REF_CACHE_MAX = 128;
@@ -635,9 +637,13 @@ async function parseBranchRefs(
         id: frontmatter.id,
         title: typeof frontmatter.title === "string" ? frontmatter.title : extractCoflatFirstH1(parsed.body),
         path: rel,
+        kind: "page",
+        line: null,
       });
     }
-    for (const target of extractCoflatXrefTargets(source)) entries.push({ id: target.id, title: target.label, path: rel });
+    for (const target of extractCoflatXrefTargets(source)) {
+      entries.push({ id: target.id, title: target.label, path: rel, kind: target.kind, line: target.line });
+    }
   }
   return entries.sort((a, b) => a.id.length - b.id.length || a.id.localeCompare(b.id));
 }
@@ -666,7 +672,7 @@ function suggestionMatches(id: string, title: string | null, prefix: string): bo
   return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
 
-files.get("/:owner/:repo/refs", (c) => {
+files.get("/:owner/:repo/refs", async (c) => {
   const ids = [
     ...new Set(
       (c.req.query("ids") ?? "")
@@ -678,6 +684,13 @@ files.get("/:owner/:repo/refs", (c) => {
   ];
   if (ids.length === 0) return c.json({ refs: [] });
   const ws = c.get("workspace");
+  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
+  const ref = c.req.query("ref")?.trim();
+  if (ref) {
+    if (!validRequestedBranch(ref)) return c.json(...bad("valid ref required"));
+    if (ref !== "main" && supportsXrefs) return c.json(await branchRefs(c, ref, ids));
+    if (ref !== "main") return c.json({ refs: [], ambiguous_refs: [] });
+  }
   const placeholders = ids.map(() => "?").join(",");
   const pageRows = c
     .get("db")
@@ -687,7 +700,6 @@ files.get("/:owner/:repo/refs", (c) => {
         WHERE workspace_slug = ? AND cosheaf_id IN (${placeholders})`,
     )
     .all(ws.slug, ...ids) as Array<{ id: string; path: string; label: string }>;
-  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
   const xrefRows = supportsXrefs
     ? c
         .get("db")
@@ -749,6 +761,64 @@ files.get("/:owner/:repo/refs", (c) => {
     ambiguous_refs: ambiguousRefs,
   });
 });
+
+async function branchRefs(
+  c: import("hono").Context<AppEnv>,
+  ref: string,
+  ids: readonly string[],
+): Promise<{ refs: Array<Record<string, unknown>>; ambiguous_refs: Array<{ id: string; paths: string[] }> }> {
+  const { fj, owner, repo } = c.get("repoCtx");
+  let tree = getCachedTree(owner, repo, ref);
+  if (!tree) {
+    try {
+      tree = await fj.getTree(owner, repo, ref, true);
+      setCachedTree(owner, repo, ref, tree);
+    } catch (err) {
+      if (err instanceof ForgejoError && (err.status === 404 || err.status === 400)) return { refs: [], ambiguous_refs: [] };
+      throw err;
+    }
+  }
+  const markdownFiles = tree
+    .filter((entry) => entry.type === "blob" && fileKindForPath(entry.path) === "markdown" && (entry.size ?? 0) <= 512_000);
+  const cacheKey = branchRefCacheKey(owner, repo, ref, markdownFiles);
+  let entries = getCachedBranchRefs(cacheKey);
+  if (!entries) {
+    entries = await parseBranchRefs(c, ref, markdownFiles);
+    setCachedBranchRefs(cacheKey, entries);
+  }
+
+  const wanted = new Set(ids);
+  const grouped = new Map<string, BranchRefEntry[]>();
+  for (const entry of entries) {
+    if (!wanted.has(entry.id)) continue;
+    grouped.set(entry.id, [...(grouped.get(entry.id) ?? []), entry]);
+  }
+
+  const refs: Array<Record<string, unknown>> = [];
+  const ambiguousRefs: Array<{ id: string; paths: string[] }> = [];
+  for (const id of ids) {
+    const matches = grouped.get(id) ?? [];
+    if (matches.length === 0) continue;
+    if (matches.length > 1) {
+      const perPath = new Map<string, number>();
+      for (const match of matches) perPath.set(match.path, (perPath.get(match.path) ?? 0) + 1);
+      ambiguousRefs.push({
+        id,
+        paths: [...perPath.entries()].map(([path, count]) => count > 1 ? `${path} (${count} definitions)` : path),
+      });
+      continue;
+    }
+    const match = matches[0];
+    refs.push({
+      id: match.id,
+      path: match.path,
+      kind: match.kind,
+      label: match.title ?? match.id,
+      ...(match.kind === "page" ? {} : { fragment: match.id, line: match.line }),
+    });
+  }
+  return { refs, ambiguous_refs: ambiguousRefs };
+}
 
 files.delete("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));

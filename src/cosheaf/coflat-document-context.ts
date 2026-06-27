@@ -276,7 +276,9 @@ async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string
   const keys = referencedKeys(source).filter((key) => !localKeys.has(key));
   if (keys.length === 0) return new Map();
   try {
-    const response = await fetch(`/api/v1/repos/${encodeURIComponent(payload.owner)}/${encodeURIComponent(payload.repo)}/refs?ids=${encodeURIComponent(keys.join(","))}`, {
+    const params = new URLSearchParams({ ids: keys.join(",") });
+    if (payload.branchExists !== false && payload.branch !== "main") params.set("ref", payload.branch);
+    const response = await fetch(`/api/v1/repos/${encodeURIComponent(payload.owner)}/${encodeURIComponent(payload.repo)}/refs?${params.toString()}`, {
       credentials: "same-origin",
     });
     if (!response.ok) return new Map();

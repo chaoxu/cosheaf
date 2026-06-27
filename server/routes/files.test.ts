@@ -357,6 +357,103 @@ describe("files refs route", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ refs: [], ambiguous_refs: [] });
   });
+
+  it("resolves refs from the requested branch instead of the main sidecar", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "main.md",
+      bodyText: "---\nid: main-page\n---\n# Main\n\n::: {#thm:main .theorem}\nMain theorem.\n:::\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
+        expect(c.req.param("ref")).toBe("user/alice/wip");
+        return c.json({
+          tree: [{ path: "draft.md", type: "blob", size: 200, sha: "draft-sha" }],
+          truncated: false,
+        });
+      });
+      forge.get("/api/v1/repos/owner/w/raw/draft.md", (c) => {
+        expect(c.req.query("ref")).toBe("user/alice/wip");
+        return c.text("---\nid: branch-page\ntitle: Branch Page\n---\n# Branch\n\n::: {#thm:branch .theorem}\nBranch theorem.\n:::\n");
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=branch-page,thm:branch,thm:main&ref=user%2Falice%2Fwip", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      refs: [
+        { id: "branch-page", path: "draft.md", kind: "page", label: "Branch Page" },
+        { id: "thm:branch", path: "draft.md", kind: "block", label: "Theorem 1", fragment: "thm:branch", line: 7 },
+      ],
+      ambiguous_refs: [],
+    });
+  });
+
+  it("does not silently resolve duplicate branch-local refs", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", () =>
+        Response.json({
+          tree: [
+            { path: "a.md", type: "blob", size: 200, sha: "a-sha" },
+            { path: "b.md", type: "blob", size: 200, sha: "b-sha" },
+          ],
+          truncated: false,
+        }),
+      );
+      forge.get("/api/v1/repos/owner/w/raw/:path", (c) => {
+        const name = c.req.param("path");
+        return c.text(`---\nid: ${name[0]}\n---\n# ${name}\n\n::: {#thm:dup .theorem}\nDuplicate.\n:::\n`);
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=thm:dup&ref=user%2Falice%2Fwip", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      refs: [],
+      ambiguous_refs: [{ id: "thm:dup", paths: ["a.md", "b.md"] }],
+    });
+  });
+
+  it("does not cap branch-local refs during render resolution", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    const tree = Array.from({ length: 81 }, (_, index) => ({
+      path: index === 80 ? "target.md" : `filler-${index}.md`,
+      type: "blob",
+      size: 200,
+      sha: `sha-${index}`,
+    }));
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/git/trees/:ref", () => Response.json({ tree, truncated: false }));
+      forge.get("/api/v1/repos/owner/w/raw/:path", (c) => {
+        const name = c.req.param("path");
+        return c.text(name === "target.md"
+          ? "---\nid: target-page\ntitle: Target Page\n---\n# Target\n"
+          : `---\nid: filler-${name}\n---\n# Filler\n`);
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=target-page&ref=user%2Falice%2Fwip", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      refs: [{ id: "target-page", path: "target.md", kind: "page", label: "Target Page" }],
+      ambiguous_refs: [],
+    });
+  });
 });
 
 describe("files suggest route", () => {
