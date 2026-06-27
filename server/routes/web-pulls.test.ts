@@ -19,6 +19,10 @@ function appFor(db: Database.Database): Hono<AppEnv> {
 
 const fetchMock = vi.fn();
 
+function visibleHtmlText(input: string): string {
+  return input.replace(/<[^>]*>/g, "");
+}
+
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
@@ -482,9 +486,10 @@ describe("web pull request routes", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
+    const visibleText = visibleHtmlText(body);
     expect(rawRefs).toEqual(["base-sha", "head-sha"]);
-    expect(body).toContain("K-armed bandits with possibly biased offline data");
-    expect(body).toContain("Resolve the following research problem.");
+    expect(visibleText).toContain("K-armed bandits with possibly biased offline data");
+    expect(visibleText).toContain("Resolve the following research problem.");
     expect(body).not.toContain("unexpected ref");
   });
 

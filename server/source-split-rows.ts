@@ -1,5 +1,6 @@
 import { chunks } from "./diff-parse.js";
 import type { Side } from "./diff-position.js";
+import { matchSourceLines } from "./source-line-matcher.js";
 
 export interface SourceSplitCell {
   side: Side;
@@ -51,8 +52,7 @@ export function sourceSplitRows(patch: string): SourceSplitRow[] {
       }
       i--;
 
-      const count = Math.max(deleted.length, added.length);
-      for (let j = 0; j < count; j++) out.push({ kind: "pair", base: deleted[j] ?? null, head: added[j] ?? null });
+      out.push(...matchSourceLines(deleted, added).map((row) => ({ kind: "pair" as const, ...row })));
     }
   }
   return out;
