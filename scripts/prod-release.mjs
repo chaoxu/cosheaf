@@ -3,7 +3,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { run } from "./lib/run.mjs";
+import { DEFAULT_COFLAT_REF } from "./check-coflat-ref.mjs";
+import { output, run } from "./lib/run.mjs";
 
 const DEFAULT_FLEET_INFRA = path.resolve(process.cwd(), "..", "fleet-infra");
 const WORKTREE_FLEET_INFRA = path.resolve(process.cwd(), "..", "..", "..", "fleet-infra");
@@ -33,6 +34,10 @@ if (!existsSync(helper)) {
   process.exit(1);
 }
 
+if (action === "release" && prodAlreadyAtTarget()) {
+  process.exit(0);
+}
+
 run(helper, [action, ...rest], {
   cwd: fleetInfra,
   env: {
@@ -40,6 +45,23 @@ run(helper, [action, ...rest], {
     COSHEAF_CHECKOUT: process.env.COSHEAF_CHECKOUT ?? process.cwd(),
   },
 });
+
+function prodAlreadyAtTarget() {
+  const targetSha = output("git", ["rev-parse", "HEAD"]);
+  const targetCoflatRef = process.env.COFLAT_REF?.trim() || DEFAULT_COFLAT_REF;
+  const body = output("curl", ["-fsS", "https://cosheaf.chaoxu.prof/api/v1/health"], { allowFailure: true });
+  if (!body) return false;
+  try {
+    const health = JSON.parse(body);
+    if (health.commit === targetSha && health.coflat_ref === targetCoflatRef) {
+      console.log(`production already running ${targetSha} coflat=${targetCoflatRef}; skipping release`);
+      return true;
+    }
+  } catch (_err) {
+    return false;
+  }
+  return false;
+}
 
 function firstExistingDir(candidates) {
   return candidates.find((candidate) => existsSync(candidate));

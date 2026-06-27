@@ -26,7 +26,7 @@ if (action === "gate") {
 } else if (action === "deploy") {
   deploy(resolveSha(explicitSha));
 } else if (action === "verify") {
-  await verify(resolveSha(explicitSha));
+  await verify(resolveExpectedShaForVerify(explicitSha));
 } else {
   await verify(explicitSha);
 }
@@ -47,13 +47,33 @@ function resolveSha(value) {
   return sha;
 }
 
+function resolveExpectedShaForVerify(value) {
+  if (value) return value;
+  const dirty = output("git", ["status", "--porcelain"], { allowFailure: false });
+  if (dirty) return undefined;
+  const sha = output("git", ["rev-parse", "HEAD"]);
+  const remoteRefs = output("git", ["branch", "-r", "--contains", sha], { allowFailure: true });
+  return remoteRefs.trim() ? sha : undefined;
+}
+
 function deploy(sha) {
   const script = `
 set -euo pipefail
 cd ${remoteCheckoutExpr()}
 git fetch --all --prune
 git checkout ${shellQuote(sha)}
-sudo -n env COSHEAF_GIT_SHA=${shellQuote(sha)} docker compose --profile test up -d --build
+current_sha="$(curl -fsS http://127.0.0.1:3031/api/v1/health 2>/dev/null | node -e "let body=''; process.stdin.on('data', d => body += d); process.stdin.on('end', () => { try { console.log(JSON.parse(body).commit || ''); } catch { console.log(''); } });" || true)"
+if [ "$current_sha" = ${shellQuote(sha)} ]; then
+  echo "staging already running ${sha}; skipping deploy"
+  exit 0
+fi
+image_sha="$(docker image inspect cosheaf-test:local --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '$1 == "COSHEAF_GIT_SHA" { print $2; exit }' || true)"
+if [ "$image_sha" = ${shellQuote(sha)} ]; then
+  echo "reusing existing cosheaf-test:local image for ${sha}"
+  sudo -n env COSHEAF_GIT_SHA=${shellQuote(sha)} docker compose --profile test up -d --no-build --force-recreate cosheaf-test
+else
+  sudo -n env COSHEAF_GIT_SHA=${shellQuote(sha)} docker compose --profile test up -d --build
+fi
 `;
   run("ssh", [stagingHost, "bash -s"], { input: script });
 }
