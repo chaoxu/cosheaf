@@ -187,9 +187,11 @@ export function richDiffGapAnchors(patch: string): RichDiffGapAnchors {
       index += 1;
       const id = `rich-gap-${index}`;
       base.push({ id, line: row.base.line, role: "content" });
-      base.push({ id, line: row.base.line, role: "gap", placement: "after" });
+      base.push({ id: richGapBeforeId(id), line: row.base.line, role: "gap", placement: "before" });
+      base.push({ id: richGapAfterId(id), line: row.base.line, role: "gap", placement: "after" });
       head.push({ id, line: row.head.line, role: "content" });
-      head.push({ id, line: row.head.line, role: "gap", placement: "after" });
+      head.push({ id: richGapBeforeId(id), line: row.head.line, role: "gap", placement: "before" });
+      head.push({ id: richGapAfterId(id), line: row.head.line, role: "gap", placement: "after" });
       continue;
     }
     if (!row.base && row.head?.kind === "add") {
@@ -197,7 +199,7 @@ export function richDiffGapAnchors(patch: string): RichDiffGapAnchors {
       if (!gap) continue;
       index += 1;
       const id = `rich-gap-${index}`;
-      base.push({ id, ...gap, role: "gap" });
+      base.push({ id: richGapMissingId(id), ...gap, role: "gap" });
       head.push({ id, line: row.head.line, role: "content" });
       continue;
     }
@@ -207,10 +209,22 @@ export function richDiffGapAnchors(patch: string): RichDiffGapAnchors {
       index += 1;
       const id = `rich-gap-${index}`;
       base.push({ id, line: row.base.line, role: "content" });
-      head.push({ id, ...gap, role: "gap" });
+      head.push({ id: richGapMissingId(id), ...gap, role: "gap" });
     }
   }
   return { base, head };
+}
+
+function richGapBeforeId(id: string): string {
+  return `${id}-before`;
+}
+
+function richGapAfterId(id: string): string {
+  return `${id}-after`;
+}
+
+function richGapMissingId(id: string): string {
+  return `${id}-missing`;
 }
 
 function nearestGapAnchor(

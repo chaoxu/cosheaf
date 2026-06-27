@@ -116,19 +116,23 @@ describe("richDiffGapAnchors", () => {
     expect(richDiffGapAnchors(patch)).toEqual({
       base: [
         { id: "rich-gap-1", line: 2, role: "content" },
-        { id: "rich-gap-1", line: 2, role: "gap", placement: "after" },
+        { id: "rich-gap-1-before", line: 2, role: "gap", placement: "before" },
+        { id: "rich-gap-1-after", line: 2, role: "gap", placement: "after" },
         { id: "rich-gap-2", line: 3, role: "content" },
-        { id: "rich-gap-2", line: 3, role: "gap", placement: "after" },
-        { id: "rich-gap-3", line: 3, role: "gap", placement: "after" },
+        { id: "rich-gap-2-before", line: 3, role: "gap", placement: "before" },
+        { id: "rich-gap-2-after", line: 3, role: "gap", placement: "after" },
+        { id: "rich-gap-3-missing", line: 3, role: "gap", placement: "after" },
         { id: "rich-gap-4", line: 5, role: "content" },
       ],
       head: [
         { id: "rich-gap-1", line: 2, role: "content" },
-        { id: "rich-gap-1", line: 2, role: "gap", placement: "after" },
+        { id: "rich-gap-1-before", line: 2, role: "gap", placement: "before" },
+        { id: "rich-gap-1-after", line: 2, role: "gap", placement: "after" },
         { id: "rich-gap-2", line: 3, role: "content" },
-        { id: "rich-gap-2", line: 3, role: "gap", placement: "after" },
+        { id: "rich-gap-2-before", line: 3, role: "gap", placement: "before" },
+        { id: "rich-gap-2-after", line: 3, role: "gap", placement: "after" },
         { id: "rich-gap-3", line: 4, role: "content" },
-        { id: "rich-gap-4", line: 5, role: "gap", placement: "after" },
+        { id: "rich-gap-4-missing", line: 5, role: "gap", placement: "after" },
       ],
     });
   });

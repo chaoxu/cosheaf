@@ -79,36 +79,43 @@
       const ids = Array.from(new Set([
         ...bySide[0].content.keys(),
         ...bySide[1].content.keys(),
-      ])).filter((id) => bySide[0].content.has(id) || bySide[1].content.has(id));
+      ]))
+        .filter((id) => bySide[0].content.has(id) || bySide[1].content.has(id))
+        .sort((a, b) => richGapNumber(a) - richGapNumber(b));
       for (const id of ids) {
-        const left = bySide[0].content.get(id);
-        const right = bySide[1].content.get(id);
-        const leftGap = bySide[0].gaps.get(id);
-        const rightGap = bySide[1].gaps.get(id);
-        if (!left && right && leftGap) {
-          setRichGapHeight(leftGap, right.getBoundingClientRect().height);
+        let left = bySide[0].content.get(id);
+        let right = bySide[1].content.get(id);
+        const leftMissingGap = bySide[0].gaps.get(`${id}-missing`) ?? bySide[0].gaps.get(id);
+        const rightMissingGap = bySide[1].gaps.get(`${id}-missing`) ?? bySide[1].gaps.get(id);
+        if (!left && right && leftMissingGap) {
+          setRichGapHeight(leftMissingGap, right.getBoundingClientRect().height);
           continue;
         }
-        if (!right && left && rightGap) {
-          setRichGapHeight(rightGap, left.getBoundingClientRect().height);
+        if (!right && left && rightMissingGap) {
+          setRichGapHeight(rightMissingGap, left.getBoundingClientRect().height);
           continue;
         }
         if (!left || !right) continue;
-        const leftTop = left.getBoundingClientRect().top;
-        const rightTop = right.getBoundingClientRect().top;
+        let leftTop = left.getBoundingClientRect().top;
+        let rightTop = right.getBoundingClientRect().top;
         const delta = Math.round(Math.abs(leftTop - rightTop));
         if (delta > 1) {
-          const target = leftTop < rightTop ? left : right;
-          const sideIndex = target === left ? 0 : 1;
-          const gap = bySide[sideIndex].gaps.get(id);
-          if (gap) setRichGapHeight(gap, delta);
+          const sideIndex = leftTop < rightTop ? 0 : 1;
+          const gap = bySide[sideIndex].gaps.get(`${id}-before`);
+          if (gap) {
+            setRichGapHeight(gap, delta);
+            left = bySide[0].content.get(id);
+            right = bySide[1].content.get(id);
+            leftTop = left.getBoundingClientRect().top;
+            rightTop = right.getBoundingClientRect().top;
+          }
         }
         const leftBottom = left.getBoundingClientRect().bottom;
         const rightBottom = right.getBoundingClientRect().bottom;
         const bottomDelta = Math.round(Math.abs(leftBottom - rightBottom));
         if (bottomDelta > 1) {
-          const gap = bySide[leftBottom < rightBottom ? 0 : 1].gaps.get(id);
-          if (gap) setRichGapHeight(gap, Math.max(Number.parseFloat(gap.style.height) || 0, bottomDelta));
+          const gap = bySide[leftBottom < rightBottom ? 0 : 1].gaps.get(`${id}-after`);
+          if (gap) setRichGapHeight(gap, bottomDelta);
         }
       }
       setTimeout(() => {
@@ -119,6 +126,8 @@
     const setRichGapHeight = (gap, height) => {
       gap.style.height = `${Math.max(0, Math.round(height))}px`;
     };
+
+    const richGapNumber = (id) => Number.parseInt(id.replace(/^rich-gap-(\d+).*$/, "$1"), 10) || 0;
 
     const sameStops = (a, b) => a.length === b.length && a.every((el, i) => el === b[i]);
 
