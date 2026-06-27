@@ -17,6 +17,7 @@ export type MarkdownSurface = CoflatReaderSurface;
 // range intersects this set (changed lines on this side of the PR diff, #113).
 export type SurfaceOpts = {
   branch?: string;
+  branchExists?: boolean;
   documentPath?: string;
   surface?: MarkdownSurface;
   markedLines?: readonly number[];
@@ -37,6 +38,33 @@ export type SurfaceOpts = {
     bodyHtml?: string;
     outdated?: boolean;
   }[];
+  reviewCommentForm?: {
+    action: string;
+    path: string;
+    side: "base" | "head";
+    mode: "source" | "rich";
+    shape: "unified" | "split" | "after";
+    lines: readonly number[];
+  };
+};
+
+type CoflatReaderPayload = {
+  source: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  branchExists?: boolean;
+  path: string;
+  markedLines?: readonly number[];
+  changeStops?: readonly number[];
+  renderTitle?: boolean;
+  mathMacros?: Record<string, string>;
+  bibliography?: string;
+  csl?: string;
+  assetPreviewPaths?: AssetPreviewPaths;
+  sourcePositions?: boolean;
+  reviewComments?: SurfaceOpts["reviewComments"];
+  reviewCommentForm?: SurfaceOpts["reviewCommentForm"];
 };
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
@@ -58,12 +86,13 @@ export async function renderMarkdownSurface(ctx: WebCtx, source: string, opts: S
   return markdownSurface(ctx, rendered, opts.surface ?? "document");
 }
 
-export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>) {
+export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): CoflatReaderPayload {
   return {
     source,
     owner: ctx.owner,
     repo: ctx.repo,
     branch: opts.branch ?? "main",
+    ...(opts.branchExists === false ? { branchExists: false } : {}),
     path: opts.documentPath ?? "",
     ...(opts.markedLines?.length ? { markedLines: opts.markedLines } : {}),
     ...(opts.changeStops?.length ? { changeStops: opts.changeStops } : {}),
@@ -78,6 +107,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
     ...(opts.assetPreviewPaths && Object.keys(opts.assetPreviewPaths).length ? { assetPreviewPaths: opts.assetPreviewPaths } : {}),
     ...(opts.sourcePositions ? { sourcePositions: true } : {}),
     ...(opts.reviewComments?.length ? { reviewComments: opts.reviewComments } : {}),
+    ...(opts.reviewCommentForm && opts.reviewCommentForm.lines.length ? { reviewCommentForm: opts.reviewCommentForm } : {}),
   };
 }
 

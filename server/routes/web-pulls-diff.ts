@@ -95,16 +95,23 @@ export async function renderPrFileView(
   }
   // Rich split: render each side through the reader, but show the empty-side
   // notice when a version is absent (new/deleted file) rather than a blank reader.
-  const renderSide = (src: string, branch: string, marked: ReadonlySet<number>, side: Side, sideStops: readonly number[]): Promise<Html> =>
+  const renderSide = (
+    src: string,
+    branch: string,
+    marked: ReadonlySet<number>,
+    side: Side,
+    sideStops: readonly number[],
+    commentableLinesForSide: ReadonlySet<number>,
+  ): Promise<Html> =>
     src === ""
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
-      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops));
+      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide));
   if (shape === "split") {
     const baseSide = prSideRefAndPath(pull, file, "base");
     const headSide = prSideRefAndPath(pull, file, "head");
     const [base, head] = await Promise.all([
-      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base),
-      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head),
+      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base, commentable.base),
+      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head, commentable.head),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
@@ -118,7 +125,7 @@ export async function renderPrFileView(
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
       : await renderMarkdownSurface(ctx, nextVersions.head, {
-        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head),
+        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head, commentForm, commentable.head),
       });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
@@ -130,6 +137,8 @@ export function richDiffSurfaceOpts(
   comments: readonly WebLineComment[],
   side: Side,
   stops: readonly number[] = [],
+  commentForm: LineCommentFormOptions | null = null,
+  commentable: ReadonlySet<number> = new Set(),
 ): SurfaceOpts {
   return {
     branch,
@@ -139,6 +148,15 @@ export function richDiffSurfaceOpts(
     ...(stops.length ? { changeStops: stops } : {}),
     sourcePositions: true,
     reviewComments: richReviewAnchors(comments, side),
+    ...(commentForm && commentable.size
+      ? {
+        reviewCommentForm: {
+          ...commentForm,
+          side,
+          lines: [...commentable],
+        },
+      }
+      : {}),
   };
 }
 

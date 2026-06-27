@@ -219,7 +219,7 @@ async function collectPageMetrics(page) {
   return page.evaluate((selectors) => {
     const text = (selector) => document.querySelector(selector)?.textContent?.trim() ?? "";
     const changeText = text(".diff-change-count");
-    const changeMatch = changeText.match(/(?:^|\s)(\d+)\s*\/\s*(\d+)\s+changes?/i);
+    const changeMatch = changeText.match(/(?:^|\s)(?:\d+|—|-)\s*\/\s*(\d+)\s+changes?/i);
     const provenance = [...document.querySelectorAll(".coflat-reader-island")].map((el) => ({
       documentRef: el.dataset.renderDocumentRef ?? el.dataset.readerBranch ?? null,
       resourceRef: el.dataset.renderResourceRef ?? null,
@@ -230,7 +230,7 @@ async function collectPageMetrics(page) {
     return {
       title: document.title,
       changeNavText: changeText,
-      changeCount: changeMatch ? Number(changeMatch[2]) : (changeText.includes("No changes") ? 0 : null),
+      changeCount: changeMatch ? Number(changeMatch[1]) : (changeText.includes("No changes") ? 0 : null),
       unresolvedCrossrefs: document.querySelectorAll(selectors.unresolvedCrossref).length,
       unresolvedCitations: document.querySelectorAll(selectors.unresolvedCitation).length,
       mathErrors: document.querySelectorAll(selectors.mathError).length,
@@ -238,6 +238,8 @@ async function collectPageMetrics(page) {
       bibliographyEntries: document.querySelectorAll(selectors.bibliographyEntry).length,
       readerIslands: document.querySelectorAll(".coflat-reader-island").length,
       hydratedReaderIslands: document.querySelectorAll(".coflat-reader-island[data-reader-hydrated='1']").length,
+      richCommentComposers: document.querySelectorAll(".rich-line-composer").length,
+      richReviewComments: document.querySelectorAll(".rich-review-comment").length,
       provenance,
     };
   }, CF);
@@ -268,6 +270,7 @@ function printSummary(data) {
       console.log(`  ${item.ok ? "OK" : "FAIL"} ${item.name} ${item.mode ?? "default"}/${item.shape ?? "default"}`);
       console.log(`    changes: ${item.changeNavText || "n/a"}`);
       console.log(`    unresolved: refs=${item.unresolvedCrossrefs ?? "?"} citations=${item.unresolvedCitations ?? "?"} math=${item.mathErrors ?? "?"}`);
+      console.log(`    rich comments: composers=${item.richCommentComposers ?? "?"} existing=${item.richReviewComments ?? "?"}`);
       if (item.provenance?.length) console.log(`    provenance: ${JSON.stringify(item.provenance)}`);
       if (item.badResponses?.length) console.log(`    bad responses: ${JSON.stringify(item.badResponses)}`);
       if (item.consoleErrors?.length) console.log(`    console errors: ${JSON.stringify(item.consoleErrors)}`);

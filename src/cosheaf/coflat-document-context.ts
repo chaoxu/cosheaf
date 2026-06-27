@@ -44,6 +44,8 @@ export interface CoflatDocumentPayload {
   sourcePositions?: boolean;
   /** PR rich-diff surface: review comments anchored to source lines on this side. */
   reviewComments?: readonly CoflatReviewCommentAnchor[];
+  /** PR rich-diff surface: form metadata for adding review comments on rendered anchors. */
+  reviewCommentForm?: CoflatReviewCommentForm;
 }
 
 export interface CoflatReviewCommentAnchor {
@@ -54,6 +56,15 @@ export interface CoflatReviewCommentAnchor {
   body: string;
   bodyHtml?: string;
   outdated?: boolean;
+}
+
+export interface CoflatReviewCommentForm {
+  action: string;
+  path: string;
+  side: "base" | "head";
+  mode: "source" | "rich";
+  shape: "unified" | "split" | "after";
+  lines: readonly number[];
 }
 
 export interface CoflatDocumentRefs {

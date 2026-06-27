@@ -313,8 +313,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("view-shape-unified")).toHaveClass(/disabled/);
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();
+  await expect(page.locator(".rich-line-composer summary").first()).toBeVisible();
+  await expect(page.locator(".rich-review-comment").first()).toBeVisible();
   await page.getByTestId("view-shape-after").click();
   await expect(page.getByTestId("diff-pane-after")).toBeVisible();
+  await expect(page.locator(".rich-line-composer summary").first()).toBeVisible();
 
   const branch = `user/chao/web-pages-${Date.now()}`;
   const path = "web-page-e2e.md";

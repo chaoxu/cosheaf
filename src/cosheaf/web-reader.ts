@@ -12,6 +12,7 @@ import {
 import { urlPath } from "../../shared/url";
 import {
   type CoflatDocumentPayload,
+  type CoflatReviewCommentForm,
   type CoflatReviewCommentAnchor,
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
@@ -44,6 +45,12 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   root.dataset.renderPath = payload.path;
   applyDocumentTheme(root);
   const ctx = await loadCoflatDocumentContext(payload);
+  const needsSourceAnchors = Boolean(
+    payload.markedLines?.length ||
+      payload.changeStops?.length ||
+      payload.reviewComments?.length ||
+      payload.reviewCommentForm?.lines.length,
+  );
   // outline:true makes coflat emit stable, collision-free heading ids on the
   // rendered HTML (so deep-link anchors and #114's hash-scroll work without any
   // client-side slugging) and return the outline for the TOC rail (#117).
@@ -58,8 +65,8 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     referencePreviews: true,
     resolveReferences: true,
     sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
-    ...(payload.markedLines || payload.reviewComments?.length ? { sourceLineAttribution: true } : {}),
-    ...(payload.sourcePositions ? { sourcePositions: true } : {}),
+    ...(needsSourceAnchors ? { sourceMap: true } : {}),
+    ...(payload.sourcePositions || needsSourceAnchors ? { sourcePositions: true } : {}),
   });
   const rendered = result.html;
   const fragment = sanitizeAndRewriteRefsFragment(rendered);
@@ -105,6 +112,9 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   }
   if (payload.changeStops?.length) {
     markChangeStops(root, payload.changeStops);
+  }
+  if (payload.reviewCommentForm) {
+    placeReviewCommentComposers(root, payload.reviewCommentForm);
   }
   if (payload.reviewComments?.length) {
     placeReviewComments(root, payload.reviewComments);
@@ -295,6 +305,48 @@ function placeReviewComments(root: HTMLElement, comments: readonly CoflatReviewC
       wrap.append(card);
     }
     target.insertAdjacentElement("afterend", wrap);
+  }
+}
+
+function placeReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommentForm): void {
+  for (const old of root.querySelectorAll(".rich-line-composer")) old.remove();
+  const seenHosts = new Set<HTMLElement>();
+  for (const line of form.lines) {
+    const target = richDiffBlockForLine(root, line);
+    if (!target) continue;
+    const host = reviewCommentHost(target);
+    if (seenHosts.has(host)) continue;
+    seenHosts.add(host);
+    const composer = document.createElement("details");
+    composer.className = "line-composer rich-line-composer";
+    const summary = document.createElement("summary");
+    summary.setAttribute("aria-label", `Comment on line ${line}`);
+    summary.textContent = "+";
+    const formEl = document.createElement("form");
+    formEl.method = "post";
+    formEl.action = form.action;
+    for (const [name, value] of [
+      ["path", form.path],
+      ["side", form.side],
+      ["line", String(line)],
+      ["mode", form.mode],
+      ["shape", form.shape],
+    ] as const) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      formEl.append(input);
+    }
+    const textarea = document.createElement("textarea");
+    textarea.name = "body";
+    textarea.required = true;
+    const button = document.createElement("button");
+    button.type = "submit";
+    button.textContent = "Comment";
+    formEl.append(textarea, button);
+    composer.append(summary, formEl);
+    host.insertAdjacentElement("afterend", composer);
   }
 }
 
