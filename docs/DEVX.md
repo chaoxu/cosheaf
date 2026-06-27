@@ -17,6 +17,12 @@
 - `pnpm devx:verify-route` opens real browser pages and checks HTTP status,
   global-header scroll behavior, issue/PR filter visibility, asset 4xxs, and
   console errors. Defaults to the seeded activity/issues/pulls routes.
+- `pnpm check:pr-rich -- <url|route|fixture>` opens a PR file page in
+  rich/source split and after variants, waits for Coflat hydration, checks
+  unresolved xrefs/citations, change-step counts, console/page errors, failed
+  asset/raw responses, screenshots, and render-ref provenance.
+- `pnpm staging:check-page -- <url|route|fixture>` runs the same rich-page
+  checker against `https://cosheaf-test.lab/`.
 - `pnpm prod:release` deploys Cosheaf production to Pluto
 - `pnpm prod:build-check` builds the production image on `jupiter` without deploying
   (`https://cosheaf.chaoxu.prof`) through the fleet-infra Pluto release helper.
@@ -30,6 +36,9 @@
 - `pnpm staging:e2e` runs stable non-destructive browser smoke against
   `cosheaf-test.lab`, plus a focused reader/editor reference-hover canary.
 - `pnpm staging:refs` runs only the focused staging reference-hover canary.
+- `pnpm staging:check-page -- <url|route|fixture>` is the focused live checker
+  for a specific reader or PR file URL. It is the fastest way to verify "why is
+  this reference red?" or "why does diff navigation say no changes?" on staging.
 - `pnpm staging:gate` runs the local gate, deploys the current pushed commit to
   staging, verifies health, and runs staging browser smoke.
 - `pnpm coflat:status` prints the pinned Coflat SHA, sibling checkout SHA,
@@ -64,6 +73,10 @@
 - `pnpm smoke:reader-parity` runs the broad seeded Coflat showcase
   reader/editor parity browser check, including outline labels, hover target
   selection, footnote sections, typography, and geometry.
+- `pnpm check:pr-rich -- --list-fixtures` prints named rich-render fixtures.
+  Built-ins are intentionally small aliases for known live regressions; add
+  site-specific aliases with
+  `COSHEAF_PR_RICH_FIXTURES='name=/owner/repo/pulls/1/files?file=a.md'`.
 - `pnpm check:web:settings` runs only account/repository settings separation and
   prints DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm dev:login-state` writes `.playwright/cosheaf-chao-state.json` for manual browser/debug scripts against `COSHEAF_WEB_URL` from `.env.dev` (default `http://localhost:3030`).
@@ -103,6 +116,18 @@ Keep the broad seeded reader/editor parity suite local (`pnpm
 smoke:reader-parity`). Staging has persistent user data, so `staging:e2e` uses
 stable live canaries rather than assuming every local fixture detail exists
 there.
+
+For targeted PR-rich validation, prefer:
+
+```sh
+pnpm staging:check-page -- /chao/flushing-coin/pulls/1/files?file=coflat-feature-showcase.md
+pnpm staging:check-page -- milk-pr3-md
+```
+
+The checker writes screenshots under `test-results/page-rich-check/` and prints
+the reader island's `documentRef`, `resourceRef`, and fallback refs. Those
+provenance fields are the first place to look for stale-main bugs in citations,
+cross-file refs, linked assets, and PDF/raw companion resources.
 
 ## Production
 

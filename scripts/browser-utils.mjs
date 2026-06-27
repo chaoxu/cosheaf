@@ -33,14 +33,22 @@ export async function loadChromium() {
 
 export function attachPageListeners(page, { label = "", consoleSink, errorSink, badResponseSink }) {
   const tag = label ? `[${label}]` : "";
-  page.on("console", async (msg) => {
+  const onConsole = async (msg) => {
     const args = await Promise.all(msg.args().map((a) => a.jsonValue().catch(() => "[unserializable]")));
     consoleSink.push(`${tag}[${msg.type()}] ${msg.text()} | ${JSON.stringify(args).slice(0, 400)}`);
-  });
-  page.on("pageerror", (err) => errorSink.push(`${tag} ${err.name}: ${err.message}\n${err.stack ?? ""}`));
-  page.on("response", (res) => {
+  };
+  const onPageError = (err) => errorSink.push(`${tag} ${err.name}: ${err.message}\n${err.stack ?? ""}`);
+  const onResponse = (res) => {
     if (res.status() >= 400) badResponseSink.push(`${tag} ${res.status()} ${res.url()}`);
-  });
+  };
+  page.on("console", onConsole);
+  page.on("pageerror", onPageError);
+  page.on("response", onResponse);
+  return () => {
+    page.off("console", onConsole);
+    page.off("pageerror", onPageError);
+    page.off("response", onResponse);
+  };
 }
 
 export function browserAppUrl(env = process.env) {

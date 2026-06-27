@@ -38,6 +38,10 @@ function readPayload(root: HTMLElement): CoflatDocumentPayload | null {
 async function renderIsland(root: HTMLElement): Promise<void> {
   const payload = readPayload(root);
   if (!payload) return;
+  root.dataset.renderDocumentRef = payload.branch;
+  root.dataset.renderResourceRef = payload.branchExists === false ? "main" : payload.branch;
+  root.dataset.renderResourceFallbackRefs = root.dataset.renderResourceRef === "main" ? "main" : `${root.dataset.renderResourceRef},main`;
+  root.dataset.renderPath = payload.path;
   applyDocumentTheme(root);
   const ctx = await loadCoflatDocumentContext(payload);
   // outline:true makes coflat emit stable, collision-free heading ids on the

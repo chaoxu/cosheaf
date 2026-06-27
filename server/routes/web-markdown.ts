@@ -84,7 +84,16 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
 function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repoConfig: Awaited<ReturnType<typeof loadRepoConfig>>): Html {
   const payload = coflatReaderPayload(ctx, source, opts, repoConfig);
   const className = coflatReaderIslandClass(opts.surface ?? "document");
-  return html`<div class="${className}" data-reader-branch="${payload.branch}"><script type="application/json">${jsonScript(payload)}</script></div>`;
+  const resourceRef = payload.branchExists === false ? "main" : payload.branch;
+  const fallbackRefs = resourceRef === "main" ? "main" : `${resourceRef},main`;
+  return html`<div
+    class="${className}"
+    data-reader-branch="${payload.branch}"
+    data-render-document-ref="${payload.branch}"
+    data-render-resource-ref="${resourceRef}"
+    data-render-resource-fallback-refs="${fallbackRefs}"
+    data-render-path="${payload.path}"
+  ><script type="application/json">${jsonScript(payload)}</script></div>`;
 }
 
 // A markdown compose/edit field. On coflat workspaces it renders a textarea
