@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { raw } from "./web-html.js";
-import { parseDiffMode, parseDiffShape, richDiffGapAnchors, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
+import { parseDiffMode, parseDiffShape, renderPrFileView, richDiffGapAnchors, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
 
 describe("parseDiffMode", () => {
   it("defaults to rich when rich is available and no mode is given", () => {
@@ -135,5 +135,31 @@ describe("richDiffGapAnchors", () => {
         { id: "rich-gap-4-missing", line: 5, role: "gap", placement: "after" },
       ],
     });
+  });
+});
+
+describe("renderPrFileView", () => {
+  it("renders inline token highlights for paired source replacements", async () => {
+    const patch = [
+      "diff --git a/a.md b/a.md",
+      "--- a/a.md",
+      "+++ b/a.md",
+      "@@ -1,1 +1,1 @@",
+      "-The quick brown fox.",
+      "+The quick red fox.",
+    ].join("\n");
+
+    const rendered = await renderPrFileView(
+      {} as never,
+      { state: "closed" } as never,
+      { path: "a.md", status: "modified", additions: 1, deletions: 1, patch },
+      "source",
+      "split",
+      { base: "", head: "" },
+      [],
+    );
+
+    expect(String(rendered)).toContain('<span class="source-inline-del">brown</span>');
+    expect(String(rendered)).toContain('<span class="source-inline-add">red</span>');
   });
 });

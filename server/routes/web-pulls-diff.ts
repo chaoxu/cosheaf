@@ -11,9 +11,10 @@ import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
+import { sourceInlineDiff, type SourceInlineDiffSegment } from "../source-inline-diff.js";
 import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
-import { html, raw, type Html } from "./web-html.js";
+import { html, joinHtml, raw, type Html } from "./web-html.js";
 import { renderMarkdownSurface, type SurfaceOpts } from "./web-markdown.js";
 
 export type DiffMode = "source" | "rich";
@@ -366,9 +367,13 @@ function renderSourceSplitRow(
   const baseComments = row.base ? lineCommentsFor(comments, "base", row.base.line) : [];
   const headComments = row.head ? lineCommentsFor(comments, "head", row.head.line) : [];
   const stopAttr = sourceSplitRowHasStop(row, stopKeys) ? raw(` data-diff-stop="1"`) : "";
+  const inline =
+    row.base?.kind === "del" && row.head?.kind === "add"
+      ? sourceInlineDiff(row.base.text, row.head.text)
+      : null;
   return html`<tr${stopAttr}>
-      ${sourceSplitCell(row.base, form)}
-      ${sourceSplitCell(row.head, form)}
+      ${sourceSplitCell(row.base, form, inline?.base)}
+      ${sourceSplitCell(row.head, form, inline?.head)}
     </tr>${baseComments.length > 0 || headComments.length > 0
       ? html`<tr class="source-split-comment-row"><td colspan="3">${baseComments.map(renderInlineCommentBlock)}</td><td colspan="3">${headComments.map(renderInlineCommentBlock)}</td></tr>`
       : ""}`;
@@ -399,12 +404,19 @@ function lineCommentKey(side: Side, line: number): string {
   return `${side}:${line}`;
 }
 
-function sourceSplitCell(cell: SourceSplitCell | null, form: LineCommentFormOptions | null): Html {
+function sourceSplitCell(cell: SourceSplitCell | null, form: LineCommentFormOptions | null, inlineDiff?: readonly SourceInlineDiffSegment[]): Html {
   if (!cell) return html`<td class="line-action"></td><td class="line-no"></td><td class="empty"><pre></pre></td>`;
   const composer = form ? lineCommentComposer(form, cell.side, cell.line) : "";
   return html`<td class="line-action ${cell.kind}">${composer}</td>
     <td class="line-no ${cell.kind}">${cell.line}</td>
-    <td class="${cell.kind}" data-testid="source-line-${cell.side}-${cell.line}"><pre>${cell.text}</pre></td>`;
+    <td class="${cell.kind}" data-testid="source-line-${cell.side}-${cell.line}"><pre>${inlineDiff ? renderSourceInlineDiff(inlineDiff) : cell.text}</pre></td>`;
+}
+
+function renderSourceInlineDiff(segments: readonly SourceInlineDiffSegment[]): Html {
+  return joinHtml(segments.map((segment) => {
+    if (segment.kind === "same") return html`${segment.text}`;
+    return html`<span class="source-inline-${segment.kind}">${segment.text}</span>`;
+  }));
 }
 
 interface LineCommentFormOptions {
