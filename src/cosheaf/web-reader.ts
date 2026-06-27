@@ -25,7 +25,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
-import { markChangedBlocks, markChangeStops, markRichGapContentAnchors, richDiffBlockForLine } from "./reader-diff-marking";
+import { markChangedBlocks, markChangeStops, markRichGapContentAnchors, markRichInlineRanges, richDiffBlockForLine } from "./reader-diff-marking";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 const observedScrollTop = new WeakMap<HTMLElement, number>();
@@ -49,6 +49,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     payload.markedLines?.length ||
       payload.changeStops?.length ||
       payload.richGapAnchors?.length ||
+      payload.richInlineRanges?.length ||
       payload.reviewComments?.length ||
       payload.reviewCommentForm?.lines.length,
   );
@@ -124,6 +125,9 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   }
   if (payload.richGapAnchors?.length) {
     markRichGapContentAnchors(root, payload.richGapAnchors.filter((anchor) => anchor.role === "content"));
+  }
+  if (payload.richInlineRanges?.length) {
+    markRichInlineRanges(root, payload.richInlineRanges);
   }
   if (payload.reviewCommentForm) {
     placeReviewCommentComposers(root, payload.reviewCommentForm);

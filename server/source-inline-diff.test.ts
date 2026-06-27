@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sourceInlineDiff } from "./source-inline-diff.js";
+import { sourceInlineDiff, sourceInlineDiffRanges } from "./source-inline-diff.js";
 
 describe("sourceInlineDiff", () => {
   it("marks only changed tokens inside paired replacement lines", () => {
@@ -55,6 +55,13 @@ describe("sourceInlineDiff", () => {
         { kind: "add", text: "=" },
         { kind: "same", text: " y" },
       ],
+    });
+  });
+
+  it("returns local line ranges for rich inline highlighting", () => {
+    expect(sourceInlineDiffRanges("The quick brown fox.", "The quick red fox.")).toEqual({
+      base: [{ from: 10, to: 15, kind: "del" }],
+      head: [{ from: 10, to: 13, kind: "add" }],
     });
   });
 });

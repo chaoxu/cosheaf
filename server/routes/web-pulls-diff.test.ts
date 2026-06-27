@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { raw } from "./web-html.js";
-import { parseDiffMode, parseDiffShape, renderPrFileView, richDiffGapAnchors, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
+import { parseDiffMode, parseDiffShape, renderPrFileView, richDiffGapAnchors, richDiffInlineRanges, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
 
 describe("parseDiffMode", () => {
   it("defaults to rich when rich is available and no mode is given", () => {
@@ -134,6 +134,28 @@ describe("richDiffGapAnchors", () => {
         { id: "rich-gap-3", line: 4, role: "content" },
         { id: "rich-gap-4-missing", line: 5, role: "gap", placement: "after" },
       ],
+    });
+  });
+});
+
+describe("richDiffInlineRanges", () => {
+  it("builds absolute source ranges from paired replacement rows", () => {
+    const patch = [
+      "diff --git a/a.md b/a.md",
+      "--- a/a.md",
+      "+++ b/a.md",
+      "@@ -1,3 +1,3 @@",
+      " Title",
+      "-The quick brown fox.",
+      "+The quick red fox.",
+      " Tail",
+    ].join("\n");
+    const base = "Title\nThe quick brown fox.\nTail\n";
+    const head = "Title\nThe quick red fox.\nTail\n";
+
+    expect(richDiffInlineRanges(patch, { base, head })).toEqual({
+      base: [{ from: base.indexOf("brown"), to: base.indexOf("brown") + "brown".length, kind: "del" }],
+      head: [{ from: head.indexOf("red"), to: head.indexOf("red") + "red".length, kind: "add" }],
     });
   });
 });

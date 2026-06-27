@@ -30,6 +30,9 @@ export interface CoflatDocumentPayload {
   /** PR rich split only: maps rendered source lines to diff-row content or to
    * the neighboring source line where an unmatched gap should be inserted. */
   richGapAnchors?: readonly CoflatRichGapAnchor[];
+  /** PR rich diff surface only: absolute source offsets whose rendered text
+   * should receive the stronger inline add/delete tint. */
+  richInlineRanges?: readonly CoflatRichInlineRange[];
   /** Render the frontmatter `title` as a document-title heading, matching the
    * editor's rich-mode title widget. Set only for the document surface (not
    * comments/diffs). */
@@ -66,6 +69,12 @@ export interface CoflatRichGapAnchor {
   line: number;
   role: "content" | "gap";
   placement?: "before" | "after";
+}
+
+export interface CoflatRichInlineRange {
+  from: number;
+  to: number;
+  kind: "del" | "add";
 }
 
 export interface CoflatReviewCommentForm {

@@ -11,7 +11,7 @@ import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
-import { sourceInlineDiff, type SourceInlineDiffSegment } from "../source-inline-diff.js";
+import { sourceInlineDiff, sourceInlineDiffRanges, type SourceInlineDiffSegment } from "../source-inline-diff.js";
 import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
 import { html, joinHtml, raw, type Html } from "./web-html.js";
@@ -59,6 +59,12 @@ interface RichDiffGapAnchor {
   placement?: "before" | "after";
 }
 
+interface RichDiffInlineRange {
+  from: number;
+  to: number;
+  kind: "del" | "add";
+}
+
 // Rich diff renders through the Coflat reader island, which only exists for
 // the coflat format. For forgejo-passthrough there is no rich surface, so we
 // coerce to source regardless of the requested/saved mode — the server is the
@@ -99,13 +105,14 @@ export async function renderPrFileView(
   const commentable = commentableLines(file.patch);
   const commentIndex = indexLineComments(comments);
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
-  const richGaps = richDiffGapAnchors(file.patch);
   if (mode === "source" && shape === "split") {
     return renderSourceSplit(file.patch, stops, commentIndex, commentForm);
   }
   if (mode === "source") {
     return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", file.status, changed.added, commentable.head, commentIndex, commentForm)}</div>`;
   }
+  const richGaps = richDiffGapAnchors(file.patch);
+  const richInline = richDiffInlineRanges(file.patch, nextVersions);
   // Rich split: render each side through the reader, but show the empty-side
   // notice when a version is absent (new/deleted file) rather than a blank reader.
   const renderSide = (
@@ -116,16 +123,17 @@ export async function renderPrFileView(
     sideStops: readonly number[],
     commentableLinesForSide: ReadonlySet<number>,
     gapAnchors: readonly RichDiffGapAnchor[] = [],
+    inlineRanges: readonly RichDiffInlineRange[] = [],
   ): Promise<Html> =>
     src === ""
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
-      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide, gapAnchors));
+      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide, gapAnchors, inlineRanges));
   if (shape === "split") {
     const baseSide = prSideRefAndPath(pull, file, "base");
     const headSide = prSideRefAndPath(pull, file, "head");
     const [base, head] = await Promise.all([
-      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base, commentable.base, richGaps.base),
-      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head, commentable.head, richGaps.head),
+      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base, commentable.base, richGaps.base, richInline.base),
+      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head, commentable.head, richGaps.head, richInline.head),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
@@ -139,7 +147,7 @@ export async function renderPrFileView(
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
       : await renderMarkdownSurface(ctx, nextVersions.head, {
-        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head, commentForm, commentable.head),
+        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head, commentForm, commentable.head, [], richInline.head),
       });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
@@ -154,6 +162,7 @@ export function richDiffSurfaceOpts(
   commentForm: LineCommentFormOptions | null = null,
   commentable: ReadonlySet<number> = new Set(),
   richGapAnchors: readonly RichDiffGapAnchor[] = [],
+  richInlineRanges: readonly RichDiffInlineRange[] = [],
 ): SurfaceOpts {
   return {
     branch,
@@ -162,6 +171,7 @@ export function richDiffSurfaceOpts(
     markedLines: [...marked],
     ...(stops.length ? { changeStops: stops } : {}),
     ...(richGapAnchors.length ? { richGapAnchors } : {}),
+    ...(richInlineRanges.length ? { richInlineRanges } : {}),
     sourcePositions: true,
     reviewComments: richReviewAnchors(comments, side),
     ...(commentForm && commentable.size
@@ -214,6 +224,45 @@ export function richDiffGapAnchors(patch: string): RichDiffGapAnchors {
     }
   }
   return { base, head };
+}
+
+export function richDiffInlineRanges(patch: string, versions: PrFileVersions): { base: readonly RichDiffInlineRange[]; head: readonly RichDiffInlineRange[] } {
+  const base: RichDiffInlineRange[] = [];
+  const head: RichDiffInlineRange[] = [];
+  const baseLines = sourceLineStarts(versions.base);
+  const headLines = sourceLineStarts(versions.head);
+  for (const row of sourceSplitRows(patch)) {
+    if (row.kind !== "pair" || row.base?.kind !== "del" || row.head?.kind !== "add") continue;
+    const ranges = sourceInlineDiffRanges(row.base.text, row.head.text);
+    for (const range of ranges.base) {
+      const abs = absoluteLineRange(baseLines, row.base.line, range.from, range.to);
+      if (abs) base.push({ ...abs, kind: "del" });
+    }
+    for (const range of ranges.head) {
+      const abs = absoluteLineRange(headLines, row.head.line, range.from, range.to);
+      if (abs) head.push({ ...abs, kind: "add" });
+    }
+  }
+  return { base, head };
+}
+
+function sourceLineStarts(source: string): number[] {
+  const starts = [0];
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === "\n") starts.push(index + 1);
+  }
+  return starts;
+}
+
+function absoluteLineRange(
+  lineStarts: readonly number[],
+  line: number,
+  from: number,
+  to: number,
+): { from: number; to: number } | null {
+  const start = lineStarts[line - 1];
+  if (start === undefined) return null;
+  return { from: start + from, to: start + to };
 }
 
 function richGapBeforeId(id: string): string {

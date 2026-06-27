@@ -12,11 +12,30 @@ export interface SourceInlineDiff {
   head: SourceInlineDiffSegment[];
 }
 
+export interface SourceInlineDiffRange {
+  from: number;
+  to: number;
+  kind: "del" | "add";
+}
+
+export interface SourceInlineDiffRanges {
+  base: SourceInlineDiffRange[];
+  head: SourceInlineDiffRange[];
+}
+
 export function sourceInlineDiff(base: string, head: string): SourceInlineDiff {
   const changes = diffWordsWithSpace(base, head);
   return {
     base: segmentsForSide(changes, "base"),
     head: segmentsForSide(changes, "head"),
+  };
+}
+
+export function sourceInlineDiffRanges(base: string, head: string): SourceInlineDiffRanges {
+  const changes = diffWordsWithSpace(base, head);
+  return {
+    base: rangesForSide(changes, "base"),
+    head: rangesForSide(changes, "head"),
   };
 }
 
@@ -39,4 +58,19 @@ function collapseSegments(segments: readonly SourceInlineDiffSegment[]): SourceI
     else out.push({ ...segment });
   }
   return out;
+}
+
+function rangesForSide(changes: readonly Change[], side: "base" | "head"): SourceInlineDiffRange[] {
+  const ranges: SourceInlineDiffRange[] = [];
+  let offset = 0;
+  for (const change of changes) {
+    if (side === "base" && change.added) continue;
+    if (side === "head" && change.removed) continue;
+    const nextOffset = offset + change.value.length;
+    if ((side === "base" && change.removed) || (side === "head" && change.added)) {
+      ranges.push({ from: offset, to: nextOffset, kind: side === "base" ? "del" : "add" });
+    }
+    offset = nextOffset;
+  }
+  return ranges.filter((range) => range.to > range.from);
 }
