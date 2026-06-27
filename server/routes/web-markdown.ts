@@ -22,6 +22,12 @@ export type SurfaceOpts = {
   surface?: MarkdownSurface;
   markedLines?: readonly number[];
   changeStops?: readonly number[];
+  richGapAnchors?: readonly {
+    id: string;
+    line: number;
+    role: "content" | "gap";
+    placement?: "before" | "after";
+  }[];
   // Render the frontmatter title as a .cf-doc-title heading (the file view +
   // README landing set this). Explicit — not inferred from `surface` — because
   // the rich-diff "after" pane also renders with surface "document" but must NOT
@@ -57,6 +63,7 @@ type CoflatReaderPayload = {
   path: string;
   markedLines?: readonly number[];
   changeStops?: readonly number[];
+  richGapAnchors?: SurfaceOpts["richGapAnchors"];
   renderTitle?: boolean;
   mathMacros?: Record<string, string>;
   bibliography?: string;
@@ -96,6 +103,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
     path: opts.documentPath ?? "",
     ...(opts.markedLines?.length ? { markedLines: opts.markedLines } : {}),
     ...(opts.changeStops?.length ? { changeStops: opts.changeStops } : {}),
+    ...(opts.richGapAnchors?.length ? { richGapAnchors: opts.richGapAnchors } : {}),
     // Doc title is opt-in per call site (file view / README), never on comment
     // threads or the rich-diff "after" pane (which also uses surface "document").
     ...(opts.renderTitle ? { renderTitle: true } : {}),

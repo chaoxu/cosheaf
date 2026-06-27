@@ -27,6 +27,9 @@ export interface CoflatDocumentPayload {
    * group. Kept separate from markedLines so visual highlighting can cover the
    * whole change while navigation lands once per group. */
   changeStops?: readonly number[];
+  /** PR rich split only: maps rendered source lines to diff-row content or to
+   * the neighboring source line where an unmatched gap should be inserted. */
+  richGapAnchors?: readonly CoflatRichGapAnchor[];
   /** Render the frontmatter `title` as a document-title heading, matching the
    * editor's rich-mode title widget. Set only for the document surface (not
    * comments/diffs). */
@@ -56,6 +59,13 @@ export interface CoflatReviewCommentAnchor {
   body: string;
   bodyHtml?: string;
   outdated?: boolean;
+}
+
+export interface CoflatRichGapAnchor {
+  id: string;
+  line: number;
+  role: "content" | "gap";
+  placement?: "before" | "after";
 }
 
 export interface CoflatReviewCommentForm {

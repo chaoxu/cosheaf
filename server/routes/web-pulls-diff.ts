@@ -46,6 +46,17 @@ export interface WebLineComment {
 }
 
 type LineCommentIndex = Map<string, WebLineComment[]>;
+export interface RichDiffGapAnchors {
+  base: readonly RichDiffGapAnchor[];
+  head: readonly RichDiffGapAnchor[];
+}
+
+interface RichDiffGapAnchor {
+  id: string;
+  line: number;
+  role: "content" | "gap";
+  placement?: "before" | "after";
+}
 
 // Rich diff renders through the Coflat reader island, which only exists for
 // the coflat format. For forgejo-passthrough there is no rich surface, so we
@@ -87,6 +98,7 @@ export async function renderPrFileView(
   const commentable = commentableLines(file.patch);
   const commentIndex = indexLineComments(comments);
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
+  const richGaps = richDiffGapAnchors(file.patch);
   if (mode === "source" && shape === "split") {
     return renderSourceSplit(file.patch, stops, commentIndex, commentForm);
   }
@@ -102,16 +114,17 @@ export async function renderPrFileView(
     side: Side,
     sideStops: readonly number[],
     commentableLinesForSide: ReadonlySet<number>,
+    gapAnchors: readonly RichDiffGapAnchor[] = [],
   ): Promise<Html> =>
     src === ""
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
-      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide));
+      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide, gapAnchors));
   if (shape === "split") {
     const baseSide = prSideRefAndPath(pull, file, "base");
     const headSide = prSideRefAndPath(pull, file, "head");
     const [base, head] = await Promise.all([
-      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base, commentable.base),
-      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head, commentable.head),
+      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base, commentable.base, richGaps.base),
+      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head, commentable.head, richGaps.head),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
@@ -139,6 +152,7 @@ export function richDiffSurfaceOpts(
   stops: readonly number[] = [],
   commentForm: LineCommentFormOptions | null = null,
   commentable: ReadonlySet<number> = new Set(),
+  richGapAnchors: readonly RichDiffGapAnchor[] = [],
 ): SurfaceOpts {
   return {
     branch,
@@ -146,6 +160,7 @@ export function richDiffSurfaceOpts(
     surface: "diff",
     markedLines: [...marked],
     ...(stops.length ? { changeStops: stops } : {}),
+    ...(richGapAnchors.length ? { richGapAnchors } : {}),
     sourcePositions: true,
     reviewComments: richReviewAnchors(comments, side),
     ...(commentForm && commentable.size
@@ -158,6 +173,66 @@ export function richDiffSurfaceOpts(
       }
       : {}),
   };
+}
+
+export function richDiffGapAnchors(patch: string): RichDiffGapAnchors {
+  const base: RichDiffGapAnchor[] = [];
+  const head: RichDiffGapAnchor[] = [];
+  let index = 0;
+  const rows = sourceSplitRows(patch);
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (row.kind !== "pair") continue;
+    if (row.base?.kind === "del" && row.head?.kind === "add") {
+      index += 1;
+      const id = `rich-gap-${index}`;
+      base.push({ id, line: row.base.line, role: "content" });
+      base.push({ id, line: row.base.line, role: "gap", placement: "after" });
+      head.push({ id, line: row.head.line, role: "content" });
+      head.push({ id, line: row.head.line, role: "gap", placement: "after" });
+      continue;
+    }
+    if (!row.base && row.head?.kind === "add") {
+      const gap = nearestGapAnchor(rows, rowIndex, "base");
+      if (!gap) continue;
+      index += 1;
+      const id = `rich-gap-${index}`;
+      base.push({ id, ...gap, role: "gap" });
+      head.push({ id, line: row.head.line, role: "content" });
+      continue;
+    }
+    if (!row.head && row.base?.kind === "del") {
+      const gap = nearestGapAnchor(rows, rowIndex, "head");
+      if (!gap) continue;
+      index += 1;
+      const id = `rich-gap-${index}`;
+      base.push({ id, line: row.base.line, role: "content" });
+      head.push({ id, ...gap, role: "gap" });
+    }
+  }
+  return { base, head };
+}
+
+function nearestGapAnchor(
+  rows: readonly SourceSplitRow[],
+  index: number,
+  side: Side,
+): { line: number; placement: "before" | "after" } | null {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (row.kind === "pair") {
+      const cell = row[side];
+      if (cell) return { line: cell.line, placement: "after" };
+    }
+  }
+  for (let i = index + 1; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (row.kind === "pair") {
+      const cell = row[side];
+      if (cell) return { line: cell.line, placement: "before" };
+    }
+  }
+  return null;
 }
 
 export function richReviewAnchors(comments: readonly WebLineComment[], side: Side) {

@@ -25,7 +25,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
-import { markChangedBlocks, markChangeStops, richDiffBlockForLine } from "./reader-diff-marking";
+import { markChangedBlocks, markChangeStops, markRichGapContentAnchors, richDiffBlockForLine } from "./reader-diff-marking";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 const observedScrollTop = new WeakMap<HTMLElement, number>();
@@ -48,6 +48,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const needsSourceAnchors = Boolean(
     payload.markedLines?.length ||
       payload.changeStops?.length ||
+      payload.richGapAnchors?.length ||
       payload.reviewComments?.length ||
       payload.reviewCommentForm?.lines.length,
   );
@@ -65,6 +66,14 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     referencePreviews: true,
     resolveReferences: true,
     sectionNumbering: readSectionNumbering(document.body.dataset.cosheafUser),
+    layoutGaps: payload.richGapAnchors
+      ?.filter((anchor) => anchor.role === "gap")
+      .map((anchor) => ({
+        id: anchor.id,
+        sourceLine: anchor.line,
+        placement: anchor.placement,
+        className: "rich-gap-spacer",
+      })),
     ...(needsSourceAnchors ? { sourceMap: true } : {}),
     ...(payload.sourcePositions || needsSourceAnchors ? { sourcePositions: true } : {}),
   });
@@ -112,6 +121,9 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   }
   if (payload.changeStops?.length) {
     markChangeStops(root, payload.changeStops);
+  }
+  if (payload.richGapAnchors?.length) {
+    markRichGapContentAnchors(root, payload.richGapAnchors.filter((anchor) => anchor.role === "content"));
   }
   if (payload.reviewCommentForm) {
     placeReviewCommentComposers(root, payload.reviewCommentForm);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { raw } from "./web-html.js";
-import { parseDiffMode, parseDiffShape, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
+import { parseDiffMode, parseDiffShape, richDiffGapAnchors, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
 
 describe("parseDiffMode", () => {
   it("defaults to rich when rich is available and no mode is given", () => {
@@ -84,6 +84,52 @@ describe("richDiffSurfaceOpts", () => {
     expect(richDiffSurfaceOpts("feature", "note.md", new Set([4, 5, 6]), [], "head", [4])).toMatchObject({
       markedLines: [4, 5, 6],
       changeStops: [4],
+    });
+  });
+
+  it("passes paired rich split gap anchors separately from highlights", () => {
+    expect(richDiffSurfaceOpts("feature", "note.md", new Set([4]), [], "head", [], null, new Set(), [{ id: "rich-gap-1", line: 4, role: "content" }])).toMatchObject({
+      markedLines: [4],
+      richGapAnchors: [{ id: "rich-gap-1", line: 4, role: "content" }],
+    });
+  });
+});
+
+describe("richDiffGapAnchors", () => {
+  it("builds paired replacement anchors from the same row model as source split", () => {
+    const patch = [
+      "diff --git a/a.md b/a.md",
+      "--- a/a.md",
+      "+++ b/a.md",
+      "@@ -1,5 +1,5 @@",
+      " one",
+      "-old first",
+      "-old second",
+      "+new first",
+      "+new second",
+      "+added only",
+      " same",
+      "-deleted only",
+      " done",
+    ].join("\n");
+
+    expect(richDiffGapAnchors(patch)).toEqual({
+      base: [
+        { id: "rich-gap-1", line: 2, role: "content" },
+        { id: "rich-gap-1", line: 2, role: "gap", placement: "after" },
+        { id: "rich-gap-2", line: 3, role: "content" },
+        { id: "rich-gap-2", line: 3, role: "gap", placement: "after" },
+        { id: "rich-gap-3", line: 3, role: "gap", placement: "after" },
+        { id: "rich-gap-4", line: 5, role: "content" },
+      ],
+      head: [
+        { id: "rich-gap-1", line: 2, role: "content" },
+        { id: "rich-gap-1", line: 2, role: "gap", placement: "after" },
+        { id: "rich-gap-2", line: 3, role: "content" },
+        { id: "rich-gap-2", line: 3, role: "gap", placement: "after" },
+        { id: "rich-gap-3", line: 4, role: "content" },
+        { id: "rich-gap-4", line: 5, role: "gap", placement: "after" },
+      ],
     });
   });
 });

@@ -50,6 +50,76 @@
       });
     };
 
+    const alignRichSplit = () => {
+      const split = pane.matches(".rich-split") ? pane : pane.querySelector(".rich-split");
+      if (!split) return;
+      pane.dataset.richGapApplying = "1";
+      for (const spacer of split.querySelectorAll(".cf-doc-layout-gap[data-cf-layout-gap-id]")) spacer.style.height = "";
+      const sections = split.querySelectorAll(":scope > section");
+      if (sections.length < 2) {
+        setTimeout(() => {
+          delete pane.dataset.richGapApplying;
+        }, 0);
+        return;
+      }
+      const bySide = Array.from(sections).map((section) => {
+        const content = new Map();
+        const gaps = new Map();
+        for (const el of section.querySelectorAll("[data-rich-gap-content-ids]")) {
+          for (const id of (el.getAttribute("data-rich-gap-content-ids") || "").split(/\s+/)) {
+            if (id && !content.has(id)) content.set(id, el);
+          }
+        }
+        for (const el of section.querySelectorAll(".cf-doc-layout-gap[data-cf-layout-gap-id]")) {
+          const id = el.getAttribute("data-cf-layout-gap-id");
+          if (id && !gaps.has(id)) gaps.set(id, el);
+        }
+        return { content, gaps };
+      });
+      const ids = Array.from(new Set([
+        ...bySide[0].content.keys(),
+        ...bySide[1].content.keys(),
+      ])).filter((id) => bySide[0].content.has(id) || bySide[1].content.has(id));
+      for (const id of ids) {
+        const left = bySide[0].content.get(id);
+        const right = bySide[1].content.get(id);
+        const leftGap = bySide[0].gaps.get(id);
+        const rightGap = bySide[1].gaps.get(id);
+        if (!left && right && leftGap) {
+          setRichGapHeight(leftGap, right.getBoundingClientRect().height);
+          continue;
+        }
+        if (!right && left && rightGap) {
+          setRichGapHeight(rightGap, left.getBoundingClientRect().height);
+          continue;
+        }
+        if (!left || !right) continue;
+        const leftTop = left.getBoundingClientRect().top;
+        const rightTop = right.getBoundingClientRect().top;
+        const delta = Math.round(Math.abs(leftTop - rightTop));
+        if (delta > 1) {
+          const target = leftTop < rightTop ? left : right;
+          const sideIndex = target === left ? 0 : 1;
+          const gap = bySide[sideIndex].gaps.get(id);
+          if (gap) setRichGapHeight(gap, delta);
+        }
+        const leftBottom = left.getBoundingClientRect().bottom;
+        const rightBottom = right.getBoundingClientRect().bottom;
+        const bottomDelta = Math.round(Math.abs(leftBottom - rightBottom));
+        if (bottomDelta > 1) {
+          const gap = bySide[leftBottom < rightBottom ? 0 : 1].gaps.get(id);
+          if (gap) setRichGapHeight(gap, Math.max(Number.parseFloat(gap.style.height) || 0, bottomDelta));
+        }
+      }
+      setTimeout(() => {
+        delete pane.dataset.richGapApplying;
+      }, 0);
+    };
+
+    const setRichGapHeight = (gap, height) => {
+      gap.style.height = `${Math.max(0, Math.round(height))}px`;
+    };
+
     const sameStops = (a, b) => a.length === b.length && a.every((el, i) => el === b[i]);
 
     const render = () => {
@@ -101,6 +171,7 @@
     };
 
     const rescan = () => {
+      alignRichSplit();
       const next = collect();
       if (sameStops(next, stops) && nav) return; // unchanged (e.g. our own focus toggle)
       stops = next;
@@ -128,9 +199,14 @@
     // no-ops when stops are unchanged, so the focus-class toggle won't loop.
     let timer = null;
     new MutationObserver(() => {
+      if (pane.dataset.richGapApplying === "1") return;
       clearTimeout(timer);
       timer = setTimeout(rescan, 120);
     }).observe(pane, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+    window.addEventListener("resize", () => {
+      clearTimeout(timer);
+      timer = setTimeout(rescan, 120);
+    });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

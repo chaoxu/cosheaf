@@ -16,6 +16,16 @@ export function markChangeStops(root: ParentNode, stops: readonly number[]): voi
   }
 }
 
+export function markRichGapContentAnchors(root: ParentNode, anchors: readonly { id: string; line: number }[]): void {
+  for (const anchor of anchors) {
+    const block = richDiffBlockForLine(root, anchor.line);
+    if (!block) continue;
+    const ids = new Set((block.dataset.richGapContentIds ?? "").split(/\s+/).filter(Boolean));
+    ids.add(anchor.id);
+    block.dataset.richGapContentIds = [...ids].join(" ");
+  }
+}
+
 export function richDiffBlockForLine(root: ParentNode, line: number): HTMLElement | null {
   return richDiffAnchorsForLine(root, line)[0]?.element ?? null;
 }
