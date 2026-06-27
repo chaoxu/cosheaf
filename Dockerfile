@@ -87,6 +87,14 @@ RUN if [ -n "$NPM_CONFIG_REGISTRY" ]; then npm config set registry "$NPM_CONFIG_
 
 FROM deps-base AS prod-deps
 
+RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,id=cosheaf-apt-lib,target=/var/lib/apt,sharing=locked \
+  rm -f /etc/apt/apt.conf.d/docker-clean \
+  && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ pkg-config \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /workspace/coflat/package.json ./coflat/package.json
 COPY --from=build /workspace/coflat/dist ./coflat/dist
 COPY --from=build /workspace/coflat/patches ./coflat/patches
