@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changedLines, commentableLines, patchRows } from "./diff-lines.js";
+import { changedLines, changeStops, commentableLines, patchRows } from "./diff-lines.js";
 
 const patch = [
   "diff --git a/a.md b/a.md",
@@ -23,6 +23,41 @@ describe("server diff line helpers", () => {
     const changed = changedLines(patch);
     expect([...changed.added]).toEqual([2, 3, 12]);
     expect([...changed.deleted]).toEqual([2, 11]);
+  });
+
+  it("returns the first line of each contiguous changed group for navigation", () => {
+    expect(changeStops(patch)).toEqual({
+      base: [],
+      head: [2, 12],
+    });
+  });
+
+  it("uses the base side for pure deletion navigation stops", () => {
+    const deletionPatch = [
+      "diff --git a/a.md b/a.md",
+      "--- a/a.md",
+      "+++ b/a.md",
+      "@@ -1,3 +1,1 @@",
+      " keep",
+      "-remove-one",
+      "-remove-two",
+    ].join("\n");
+
+    expect(changeStops(deletionPatch)).toEqual({ base: [2], head: [] });
+  });
+
+  it("uses the head side for pure addition navigation stops", () => {
+    const additionPatch = [
+      "diff --git a/a.md b/a.md",
+      "--- a/a.md",
+      "+++ b/a.md",
+      "@@ -1,1 +1,3 @@",
+      " keep",
+      "+add-one",
+      "+add-two",
+    ].join("\n");
+
+    expect(changeStops(additionPatch)).toEqual({ base: [], head: [2] });
   });
 
   it("returns lines that can receive comments on each side", () => {

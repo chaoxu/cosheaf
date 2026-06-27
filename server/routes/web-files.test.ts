@@ -172,6 +172,29 @@ describe("web file editor route", () => {
     expect(sourceBody).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
   });
 
+  it("serves raw files from immutable commit sha refs for PR companion resources", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    const sha = "62c0db5830f659dd20b8b8a7fe56eeea075e2b08";
+    let forwardedRef = "";
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/raw/reference.bib", (c) => {
+          forwardedRef = c.req.query("ref") ?? "";
+          return new Response("@article{NewKey, title={New reference}}\n");
+        });
+      }),
+    );
+
+    const res = await appFor(db).request(`/owner/w/raw/branch/${sha}/reference.bib`, { headers: authHeaders(token) });
+
+    expect(res.status).toBe(200);
+    expect(forwardedRef).toBe(sha);
+    expect(await res.text()).toContain("NewKey");
+  });
+
   it("reuses the cached Forgejo tree across server-rendered file pages", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });

@@ -3,7 +3,7 @@
 // Split out of web-pulls.ts (which keeps the pull lifecycle handlers) so each
 // file stays focused; the handlers import the small exported surface here.
 
-import { changedLines, commentableLines, patchRows } from "../diff-lines.js";
+import { changedLines, changeStops, commentableLines, patchRows } from "../diff-lines.js";
 import { resolveLineComment, type Side } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import type { ForgejoPull } from "../forgejo.js";
@@ -13,7 +13,7 @@ import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
 import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
-import { html, type Html } from "./web-html.js";
+import { html, raw, type Html } from "./web-html.js";
 import { renderMarkdownSurface, type SurfaceOpts } from "./web-markdown.js";
 
 export type DiffMode = "source" | "rich";
@@ -83,27 +83,28 @@ export async function renderPrFileView(
   }
   const nextVersions = versions ?? (await prFileVersions(ctx, pull, file));
   const changed = changedLines(file.patch);
+  const stops = changeStops(file.patch);
   const commentable = commentableLines(file.patch);
   const commentIndex = indexLineComments(comments);
   const commentForm = commentFormOptions(ctx, pull, file.path, mode, shape);
   if (mode === "source" && shape === "split") {
-    return renderSourceSplit(file.patch, commentIndex, commentForm);
+    return renderSourceSplit(file.patch, stops, commentIndex, commentForm);
   }
   if (mode === "source") {
     return html`<div data-testid="diff-pane-after" class="source-after">${sourcePane("After", nextVersions.head, "head", file.status, changed.added, commentable.head, commentIndex, commentForm)}</div>`;
   }
   // Rich split: render each side through the reader, but show the empty-side
   // notice when a version is absent (new/deleted file) rather than a blank reader.
-  const renderSide = (src: string, branch: string, marked: ReadonlySet<number>, side: Side): Promise<Html> =>
+  const renderSide = (src: string, branch: string, marked: ReadonlySet<number>, side: Side, sideStops: readonly number[]): Promise<Html> =>
     src === ""
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
-      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side));
+      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops));
   if (shape === "split") {
     const baseSide = prSideRefAndPath(pull, file, "base");
     const headSide = prSideRefAndPath(pull, file, "head");
     const [base, head] = await Promise.all([
-      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base"),
-      renderSide(nextVersions.head, headSide.ref, changed.added, "head"),
+      renderSide(nextVersions.base, baseSide.ref, changed.deleted, "base", stops.base),
+      renderSide(nextVersions.head, headSide.ref, changed.added, "head", stops.head),
     ]);
     return html`<div data-testid="diff-pane-split" class="rich-split cf-theme-scope">
       <section><h3>Base</h3>${base}</section>
@@ -117,7 +118,7 @@ export async function renderPrFileView(
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
       : await renderMarkdownSurface(ctx, nextVersions.head, {
-        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head"),
+        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head),
       });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
@@ -128,12 +129,14 @@ export function richDiffSurfaceOpts(
   marked: ReadonlySet<number>,
   comments: readonly WebLineComment[],
   side: Side,
+  stops: readonly number[] = [],
 ): SurfaceOpts {
   return {
     branch,
     documentPath: filePath,
     surface: "diff",
     markedLines: [...marked],
+    ...(stops.length ? { changeStops: stops } : {}),
     sourcePositions: true,
     reviewComments: richReviewAnchors(comments, side),
   };
@@ -218,11 +221,16 @@ function sourcePane(
 
 function renderSourceSplit(
   patch: string,
+  stops: { base: readonly number[]; head: readonly number[] },
   comments: LineCommentIndex,
   form: LineCommentFormOptions | null,
 ): Html {
   const rows = sourceSplitRows(patch);
   if (rows.length === 0) return html`<div data-testid="diff-pane-split"><pre class="patch empty">No textual diff.</pre></div>`;
+  const stopKeys = new Set([
+    ...stops.base.map((line) => lineCommentKey("base", line)),
+    ...stops.head.map((line) => lineCommentKey("head", line)),
+  ]);
   return html`<div data-testid="diff-pane-split" class="source-split-diff">
     <table class="source-split-lines">
       <colgroup>
@@ -234,13 +242,14 @@ function renderSourceSplit(
         <col class="source-split-code">
       </colgroup>
       <thead><tr><th colspan="3">Base</th><th colspan="3">Head</th></tr></thead>
-      <tbody>${rows.map((row) => renderSourceSplitRow(row, comments, form))}</tbody>
+      <tbody>${rows.map((row) => renderSourceSplitRow(row, stopKeys, comments, form))}</tbody>
     </table>
   </div>`;
 }
 
 function renderSourceSplitRow(
   row: SourceSplitRow,
+  stopKeys: ReadonlySet<string>,
   comments: LineCommentIndex,
   form: LineCommentFormOptions | null,
 ): Html {
@@ -249,12 +258,20 @@ function renderSourceSplitRow(
   }
   const baseComments = row.base ? lineCommentsFor(comments, "base", row.base.line) : [];
   const headComments = row.head ? lineCommentsFor(comments, "head", row.head.line) : [];
-  return html`<tr>
+  const stopAttr = sourceSplitRowHasStop(row, stopKeys) ? raw(` data-diff-stop="1"`) : "";
+  return html`<tr${stopAttr}>
       ${sourceSplitCell(row.base, form)}
       ${sourceSplitCell(row.head, form)}
     </tr>${baseComments.length > 0 || headComments.length > 0
       ? html`<tr class="source-split-comment-row"><td colspan="3">${baseComments.map(renderInlineCommentBlock)}</td><td colspan="3">${headComments.map(renderInlineCommentBlock)}</td></tr>`
       : ""}`;
+}
+
+function sourceSplitRowHasStop(row: Extract<SourceSplitRow, { kind: "pair" }>, stopKeys: ReadonlySet<string>): boolean {
+  return Boolean(
+    (row.base && stopKeys.has(lineCommentKey("base", row.base.line))) ||
+      (row.head && stopKeys.has(lineCommentKey("head", row.head.line))),
+  );
 }
 
 function indexLineComments(comments: readonly WebLineComment[]): LineCommentIndex {

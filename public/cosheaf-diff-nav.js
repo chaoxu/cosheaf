@@ -31,6 +31,9 @@
     };
 
     const collect = () => {
+      const explicit = Array.from(pane.querySelectorAll("[data-diff-stop]"));
+      if (explicit.length > 0) return explicit;
+
       // Change markers across shapes: source rows (tr.marked), unified patch rows
       // (tr.add/tr.del), split source cells (td.add/td.del), rich blocks
       // (.marked). Collapse adjacent rows into one stop.

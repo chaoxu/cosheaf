@@ -20,6 +20,8 @@ export function resolveBranchPathFromNames(branchNames: string[], rest: string):
     if (clean === branch) return { branch, path: "" };
     if (clean.startsWith(`${branch}/`)) return { branch, path: clean.slice(branch.length + 1) };
   }
+  const sha = clean.match(/^([0-9a-f]{40})(?:\/(.*))?$/i);
+  if (sha) return { branch: sha[1], path: sha[2] ?? "" };
   return null;
 }
 

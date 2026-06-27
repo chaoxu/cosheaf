@@ -24,7 +24,7 @@ import {
   REF_BUTTON_CLASS,
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
-import { markChangedBlocks, richDiffBlockForLine } from "./reader-diff-marking";
+import { markChangedBlocks, markChangeStops, richDiffBlockForLine } from "./reader-diff-marking";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 const observedScrollTop = new WeakMap<HTMLElement, number>();
@@ -98,6 +98,9 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   hydrateReaderDisclosures(root);
   if (payload.markedLines?.length) {
     markChangedBlocks(root, new Set(payload.markedLines));
+  }
+  if (payload.changeStops?.length) {
+    markChangeStops(root, payload.changeStops);
   }
   if (payload.reviewComments?.length) {
     placeReviewComments(root, payload.reviewComments);

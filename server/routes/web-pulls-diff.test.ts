@@ -79,4 +79,11 @@ describe("richDiffSurfaceOpts", () => {
       ],
     });
   });
+
+  it("passes rich diff navigation stops separately from highlighted lines", () => {
+    expect(richDiffSurfaceOpts("feature", "note.md", new Set([4, 5, 6]), [], "head", [4])).toMatchObject({
+      markedLines: [4, 5, 6],
+      changeStops: [4],
+    });
+  });
 });

@@ -37,4 +37,11 @@ describe("resolveBranchPathFromNames", () => {
   it("does not match branch name prefixes without a path boundary", () => {
     expect(resolveBranchPathFromNames(["feat"], "feature/readme.md")).toBeNull();
   });
+
+  it("accepts immutable commit sha refs after branch matching fails", () => {
+    expect(resolveBranchPathFromNames(["main"], "62c0db5830f659dd20b8b8a7fe56eeea075e2b08/reference.bib")).toEqual({
+      branch: "62c0db5830f659dd20b8b8a7fe56eeea075e2b08",
+      path: "reference.bib",
+    });
+  });
 });

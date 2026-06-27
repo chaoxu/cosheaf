@@ -22,6 +22,12 @@ export function markChangedBlocks(root: ParentNode, marked: ReadonlySet<number>)
   }
 }
 
+export function markChangeStops(root: ParentNode, stops: readonly number[]): void {
+  for (const line of stops) {
+    richDiffBlockForLine(root, line)?.setAttribute("data-diff-stop", "1");
+  }
+}
+
 export function richDiffBlockForLine(root: ParentNode, line: number): HTMLElement | null {
   const blocks = richDiffSourceBlocks(root);
   for (const [index, { el, range }] of blocks.entries()) {
