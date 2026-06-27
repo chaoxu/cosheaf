@@ -7,12 +7,24 @@ export interface SourceInlineDiffSegment {
   text: string;
 }
 
-export function sourceInlineDiff(base: string, head: string): { base: SourceInlineDiffSegment[]; head: SourceInlineDiffSegment[] } {
+export interface SourceInlineDiff {
+  base: SourceInlineDiffSegment[];
+  head: SourceInlineDiffSegment[];
+}
+
+export function sourceInlineDiff(base: string, head: string): SourceInlineDiff {
   const changes = diffWordsWithSpace(base, head);
   return {
-    base: collapseSegments(changes.filter((change) => !change.added).map((change) => segment(change, "del"))),
-    head: collapseSegments(changes.filter((change) => !change.removed).map((change) => segment(change, "add"))),
+    base: segmentsForSide(changes, "base"),
+    head: segmentsForSide(changes, "head"),
   };
+}
+
+function segmentsForSide(changes: readonly Change[], side: "base" | "head"): SourceInlineDiffSegment[] {
+  const filtered = side === "base"
+    ? changes.filter((change) => !change.added)
+    : changes.filter((change) => !change.removed);
+  return collapseSegments(filtered.map((change) => segment(change, side === "base" ? "del" : "add")));
 }
 
 function segment(change: Change, changedKind: "del" | "add"): SourceInlineDiffSegment {

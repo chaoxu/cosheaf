@@ -31,4 +31,30 @@ describe("sourceInlineDiff", () => {
       ],
     });
   });
+
+  it("keeps whitespace-only edits visible", () => {
+    expect(sourceInlineDiff("alpha beta", "alpha  beta")).toEqual({
+      base: [
+        { kind: "same", text: "alpha" },
+        { kind: "del", text: " " },
+        { kind: "same", text: "beta" },
+      ],
+      head: [
+        { kind: "same", text: "alpha" },
+        { kind: "add", text: "  " },
+        { kind: "same", text: "beta" },
+      ],
+    });
+  });
+
+  it("keeps HTML-looking text as plain segment text for the renderer to escape", () => {
+    expect(sourceInlineDiff("x < y", "x <= y")).toEqual({
+      base: [{ kind: "same", text: "x < y" }],
+      head: [
+        { kind: "same", text: "x <" },
+        { kind: "add", text: "=" },
+        { kind: "same", text: " y" },
+      ],
+    });
+  });
 });
