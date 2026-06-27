@@ -93,6 +93,16 @@ describe("richDiffSurfaceOpts", () => {
       richGapAnchors: [{ id: "rich-gap-1", line: 4, role: "content" }],
     });
   });
+
+  it("passes PDF image preview paths into rich diff rendering", () => {
+    expect(
+      richDiffSurfaceOpts("feature", "note.md", new Set([4]), [], "head", [], null, new Set(), [], [], {
+        "img/complexity.pdf": "img/complexity.png",
+      }),
+    ).toMatchObject({
+      assetPreviewPaths: { "img/complexity.pdf": "img/complexity.png" },
+    });
+  });
 });
 
 describe("richDiffGapAnchors", () => {

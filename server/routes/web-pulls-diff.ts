@@ -8,6 +8,7 @@ import { resolveLineComment, type Side } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import type { ForgejoPull } from "../forgejo.js";
 import type { ForgejoPullReviewComment } from "../forgejo-types.js";
+import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
@@ -65,6 +66,11 @@ interface RichDiffInlineRange {
   kind: "del" | "add";
 }
 
+export interface PrFileAssetPreviewPaths {
+  base?: AssetPreviewPaths;
+  head?: AssetPreviewPaths;
+}
+
 // Rich diff renders through the Coflat reader island, which only exists for
 // the coflat format. For forgejo-passthrough there is no rich surface, so we
 // coerce to source regardless of the requested/saved mode — the server is the
@@ -95,6 +101,7 @@ export async function renderPrFileView(
   shape: DiffShape,
   versions: PrFileVersions | null,
   comments: readonly WebLineComment[],
+  assetPreviewPaths: PrFileAssetPreviewPaths = {},
 ): Promise<Html> {
   if (mode === "source" && shape === "unified") {
     return html`<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
@@ -127,7 +134,7 @@ export async function renderPrFileView(
   ): Promise<Html> =>
     src === ""
       ? Promise.resolve(diffSideEmptyNotice(file.status, side))
-      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide, gapAnchors, inlineRanges));
+      : renderMarkdownSurface(ctx, src, richDiffSurfaceOpts(branch, file.path, marked, comments, side, sideStops, commentForm, commentableLinesForSide, gapAnchors, inlineRanges, assetPreviewPaths[side]));
   if (shape === "split") {
     const baseSide = prSideRefAndPath(pull, file, "base");
     const headSide = prSideRefAndPath(pull, file, "head");
@@ -147,7 +154,7 @@ export async function renderPrFileView(
     nextVersions.head === ""
       ? diffSideEmptyNotice(file.status, "head")
       : await renderMarkdownSurface(ctx, nextVersions.head, {
-        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head, commentForm, commentable.head, [], richInline.head),
+        ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head, commentForm, commentable.head, [], richInline.head, assetPreviewPaths.head),
       });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
@@ -163,6 +170,7 @@ export function richDiffSurfaceOpts(
   commentable: ReadonlySet<number> = new Set(),
   richGapAnchors: readonly RichDiffGapAnchor[] = [],
   richInlineRanges: readonly RichDiffInlineRange[] = [],
+  assetPreviewPaths?: AssetPreviewPaths,
 ): SurfaceOpts {
   return {
     branch,
@@ -172,6 +180,7 @@ export function richDiffSurfaceOpts(
     ...(stops.length ? { changeStops: stops } : {}),
     ...(richGapAnchors.length ? { richGapAnchors } : {}),
     ...(richInlineRanges.length ? { richInlineRanges } : {}),
+    ...(assetPreviewPaths && Object.keys(assetPreviewPaths).length ? { assetPreviewPaths } : {}),
     sourcePositions: true,
     reviewComments: richReviewAnchors(comments, side),
     ...(commentForm && commentable.size

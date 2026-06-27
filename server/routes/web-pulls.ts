@@ -1,4 +1,5 @@
 import type { Context, Hono } from "hono";
+import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
@@ -40,6 +41,7 @@ import {
   mapLineComments,
   parseDiffMode,
   parseDiffShape,
+  type PrFileAssetPreviewPaths,
   prFileVersions,
   prFilesHref,
   renderFileCommentSummary,
@@ -479,6 +481,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   const shape = parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file) : null;
   const fileComments = file ? await mapLineComments(ctx, file, allComments) : [];
+  const assetPreviewPaths = file && mode === "rich" ? await prAssetPreviewPaths(ctx, pull) : {};
   return htmlResponse(
     repoPageShell(
       ctx,
@@ -513,7 +516,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
                 file
                   ? html`<div class="diff-title"><strong>${file.path}</strong><span>+${file.additions} -${file.deletions}</span></div>
                     ${diffModeControls(ctx, pull.number, file.path, mode, shape, richOk)}
-                    ${await renderPrFileView(ctx, pull, file, mode, shape, versions, fileComments)}`
+                    ${await renderPrFileView(ctx, pull, file, mode, shape, versions, fileComments, assetPreviewPaths)}`
                   : html`<div class="empty">No changed files.</div>`
               }
             </section>
@@ -557,6 +560,17 @@ async function pullFiles(ctx: WebCtx, number: number) {
     deletions: meta.deletions,
     patch: sections.get(meta.filename) ?? "",
   }));
+}
+
+async function prAssetPreviewPaths(ctx: WebCtx, pull: ForgejoPull): Promise<PrFileAssetPreviewPaths> {
+  const [baseTree, headTree] = await Promise.all([
+    ctx.fj.getTree(ctx.owner, ctx.repo, pull.base.sha, true),
+    ctx.fj.getTree(ctx.owner, ctx.repo, pull.head.sha, true),
+  ]);
+  return {
+    base: buildPdfImagePreviewPaths(baseTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
+    head: buildPdfImagePreviewPaths(headTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
+  };
 }
 
 type PullListSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
