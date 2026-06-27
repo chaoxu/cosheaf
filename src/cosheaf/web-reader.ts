@@ -317,8 +317,10 @@ function placeReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommen
     const host = reviewCommentHost(target);
     if (seenHosts.has(host)) continue;
     seenHosts.add(host);
+    host.classList.add("rich-commentable");
     const composer = document.createElement("details");
     composer.className = "line-composer rich-line-composer";
+    composer.style.setProperty("--rich-composer-host-height", `${Math.max(22, Math.ceil(host.getBoundingClientRect().height))}px`);
     const summary = document.createElement("summary");
     summary.setAttribute("aria-label", `Comment on line ${line}`);
     summary.textContent = "+";

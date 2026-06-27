@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   COFLAT_BROWSER_ATTRIBUTES as CFA,
   COFLAT_BROWSER_SELECTORS as CF,
@@ -26,6 +26,14 @@ async function fillCompose(scope: Locator, text: string): Promise<void> {
     return;
   }
   await scope.locator('textarea[name="body"]').fill(text);
+}
+
+async function expectRichComposerRevealsOnHover(page: Page): Promise<void> {
+  const composer = page.locator(".rich-line-composer summary").first();
+  await expect(composer).toBeVisible();
+  await expect(composer).toHaveCSS("opacity", "0");
+  await page.locator(".rich-commentable").first().hover();
+  await expect(composer).toHaveCSS("opacity", "1");
 }
 
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
@@ -313,11 +321,11 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("view-shape-unified")).toHaveClass(/disabled/);
   await page.getByTestId("view-shape-split").click();
   await expect(page.getByTestId("diff-pane-split")).toBeVisible();
-  await expect(page.locator(".rich-line-composer summary").first()).toBeVisible();
+  await expectRichComposerRevealsOnHover(page);
   await expect(page.locator(".rich-review-comment").first()).toBeVisible();
   await page.getByTestId("view-shape-after").click();
   await expect(page.getByTestId("diff-pane-after")).toBeVisible();
-  await expect(page.locator(".rich-line-composer summary").first()).toBeVisible();
+  await expectRichComposerRevealsOnHover(page);
 
   const branch = `user/chao/web-pages-${Date.now()}`;
   const path = "web-page-e2e.md";
