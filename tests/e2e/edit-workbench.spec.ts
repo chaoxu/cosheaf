@@ -166,6 +166,53 @@ test("rich editor keeps fenced div opener editable while adding a label", async 
   await expect(page.locator(CF.editorContent).locator(CF.blockHeaderRendered, { hasText: "Lemma" })).toHaveCount(0);
 });
 
+test("edit workbench treats held Enter repeat as repeated rich editor splitting", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  const branch = `user/chao/held-enter-${Date.now()}`;
+  const path = "held-enter.md";
+  const pat = await apiPat(page);
+  const put = await page.request.put(
+    `${webBase}/api/v1/repos/chao/flushing-coin/file?path=${path}&branch=${encodeURIComponent(branch)}`,
+    {
+      headers: { authorization: `Bearer ${pat}` },
+      data: { content: "- item" },
+    },
+  );
+  expect(put.ok()).toBe(true);
+
+  await page.goto(`${repoBase}/src/branch/${branch}/${path}?mode=edit&edit_branch=${encodeURIComponent(branch)}`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await page.locator(CF.editorContent).click();
+  await page.keyboard.press("Meta+ArrowRight");
+  await page.evaluate(() => {
+    const content = document.querySelector(".cm-content");
+    if (!content) throw new Error("missing editor content");
+    const init: KeyboardEventInit = {
+      key: "Enter",
+      code: "Enter",
+      bubbles: true,
+      cancelable: true,
+    };
+    content.dispatchEvent(new KeyboardEvent("keydown", { ...init, repeat: false }));
+    for (let i = 0; i < 3; i += 1) {
+      content.dispatchEvent(new KeyboardEvent("keydown", { ...init, repeat: true }));
+    }
+  });
+  await page.keyboard.type("After hold");
+
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("statusbar")).toContainText("Saved");
+  const saved = await page.request.get(
+    `${webBase}/api/v1/repos/chao/flushing-coin/file?path=${path}&branch=${encodeURIComponent(branch)}`,
+    { headers: { authorization: `Bearer ${pat}` } },
+  );
+  expect(saved.ok()).toBe(true);
+  const body = await saved.json() as { content: string };
+  expect(body.content.replace(/^---\n[\s\S]*?\n---\n/, "")).toBe("- item\n\n\n\nAfter hold");
+});
+
 test("edit workbench read mode remains scrollable after switching from edit", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
