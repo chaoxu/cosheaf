@@ -5,6 +5,7 @@ import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
 import { resolveApiToken, type ResolvedApiToken } from "./api-tokens.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
+import { ForgejoWorkspaceBackend } from "./forgejo-backend.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
@@ -172,9 +173,19 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
 
   const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
   c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat, role });
-  c.set("repoCtx", { fj, owner, repo });
+  c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, owner, repo });
   await next();
 };
+
+// Accessor for the hosted-only review/issue/notification routes that still call
+// the raw Forgejo client. `repoCtx.fj` is optional (undefined in local mode),
+// but these routes are never mounted in local mode, so asserting it here keeps
+// their many destructure sites unchanged while the type stays honest.
+export function repoCtxForgejo(c: Context<AppEnv>): { fj: Forgejo; owner: string; repo: string } {
+  const { fj, owner, repo } = c.get("repoCtx");
+  if (!fj) throw new Error("forgejo client unavailable: this route is not mounted in local mode");
+  return { fj, owner, repo };
+}
 
 // Same TTL discipline as the role cache — format changes propagate quickly
 // enough, and a topic flip is a rare admin action.

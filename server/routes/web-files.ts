@@ -4,8 +4,11 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
-import { type Forgejo, ForgejoError } from "../forgejo.js";
-import { onForgejo404 } from "../forgejo-errors.js";
+import {
+  WorkspaceBackendError,
+  onWorkspaceNotFound,
+  type WorkspaceBackend,
+} from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { planIndexPage } from "../indexer.js";
 import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
@@ -43,11 +46,11 @@ import { webEditShellAssets, webEditorAssets } from "./web-shell.js";
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
-    const { owner, repo, fj, ws, user } = ctx;
+    const { owner, repo, backend, ws, user } = ctx;
     const [files, branches, repoMeta] = await Promise.all([
-      repoFiles(fj, owner, repo, "main").catch(() => []),
-      fj.listBranches(owner, repo).catch(() => []),
-      fj.getRepo(owner, repo).catch(() => null),
+      repoFiles(backend, owner, repo, "main").catch(() => []),
+      backend.listBranches(owner, repo).catch(() => []),
+      backend.getRepo(owner, repo).catch(() => null),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
     const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
@@ -105,7 +108,7 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
-  const { owner, repo, fj, ws, user } = ctx;
+  const { owner, repo, backend, ws, user } = ctx;
   const requestedMode = c.req.query("mode");
   if ((requestedMode === "read" || requestedMode === "edit") && ws.role !== "read") {
     const requestedEditBranch = c.req.query("edit_branch");
@@ -116,7 +119,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       return badRequestPage(ctx.user, "Valid file path is required.");
     }
   }
-  const resolved = await resolveBranchPath(fj, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
+  const resolved = await resolveBranchPath(backend, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
   if (!resolved.path) {
     if ((requestedMode === "read" || requestedMode === "edit") && ws.role !== "read") {
@@ -130,8 +133,8 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       return editPageResponse(ctx, { branch: editBranch, rel, kind, initialMode: requestedMode });
     }
     const [files, branches] = await Promise.all([
-      repoFiles(fj, owner, repo, resolved.branch),
-      fj.listBranches(owner, repo).catch(() => []),
+      repoFiles(backend, owner, repo, resolved.branch),
+      backend.listBranches(owner, repo).catch(() => []),
     ]);
     const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
     const branchTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
@@ -178,15 +181,15 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       initialMode: workbenchMode,
     });
   }
-  const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch(onForgejo404(null));
+  const meta = await backend.getFileMeta(owner, repo, resolved.branch, rel).catch(onWorkspaceNotFound(null));
   if (!meta) return notFoundPage(user, "File not found");
   const [files, branches] = await Promise.all([
-    repoFiles(fj, owner, repo, resolved.branch),
-    fj.listBranches(owner, repo).catch(() => []),
+    repoFiles(backend, owner, repo, resolved.branch),
+    backend.listBranches(owner, repo).catch(() => []),
   ]);
   const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
-  const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
-  const previewKind = await previewKindForFile(fj, owner, repo, resolved.branch, rel, kind, meta.size);
+  const content = kind === "markdown" || (kind === "text" && sourceView) ? await backend.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const previewKind = await previewKindForFile(backend, owner, repo, resolved.branch, rel, kind, meta.size);
   const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
   const rendered =
     kind === "markdown" && content !== null && !sourceView
@@ -215,7 +218,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
         ctx,
         content,
         { branch: resolved.branch, documentPath: rel, renderTitle: true, assetPreviewPaths },
-        await loadRepoConfig(ctx.db, ctx.fj, owner, repo, resolved.branch),
+        await loadRepoConfig(ctx.db, ctx.backend, owner, repo, resolved.branch),
       )
       : null;
   const docBody =
@@ -259,7 +262,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
 web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
   if (stringField(form.action) !== "delete") return badRequestPage(ctx.user, "Unsupported file action.");
-  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/src/branch/"));
+  const resolved = await resolveBranchPath(ctx.backend, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/src/branch/"));
   if (!resolved?.path) return notFoundPage(ctx.user, "File not found");
   if (resolved.branch === "main") return forbiddenPage(ctx.user);
   const rel = safeRel(resolved.path);
@@ -269,13 +272,13 @@ web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
     return badRequestPage(ctx.user, "Invalid delete freshness token.");
   }
   const expectedSha = typeof expectedShaField === "string" ? expectedShaField : undefined;
-  const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel);
+  const meta = await ctx.backend.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel);
   if (!meta) return notFoundPage(ctx.user, "File not found");
   if (expectedSha !== undefined && meta.sha !== expectedSha) {
     return badRequestPage(ctx.user, "This file changed on the branch while you were viewing it. Reload and try again.");
   }
   try {
-    await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+    await ctx.backend.deleteFile(ctx.owner, ctx.repo, {
       branch: resolved.branch,
       path: rel,
       sha: meta.sha,
@@ -294,11 +297,11 @@ web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
-  const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/raw/branch/"));
+  const resolved = await resolveBranchPath(ctx.backend, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/raw/branch/"));
   if (!resolved?.path) return new Response("not found", { status: 404 });
   const rel = safeRel(resolved.path);
   if (!rel) return new Response("not found", { status: 404 });
-  const content = await ctx.fj.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
+  const content = await ctx.backend.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
   return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
 }));
 
@@ -309,29 +312,29 @@ async function editPageResponse(
   opts: { branch: string; rel: string; kind: FileKind; initialMode: "read" | "edit" | "auto" },
 ): Promise<Response> {
   const { branch, rel, kind, initialMode } = opts;
-  const branchInfo = branch === "main" ? await ctx.fj.getBranch(ctx.owner, ctx.repo, "main") : await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
+  const branchInfo = branch === "main" ? await ctx.backend.getBranch(ctx.owner, ctx.repo, "main") : await ctx.backend.getBranch(ctx.owner, ctx.repo, branch);
   const resetEditBranch = Boolean(branchInfo) && await retiredDefaultEditBranch(ctx, branch);
   const branchExists = !resetEditBranch && (branch === "main" || Boolean(branchInfo));
   const branchRef = branchInfo?.commit?.id ?? branch;
-  const branchMeta = resetEditBranch ? null : await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branchRef, rel);
-  const mainInfo = branchMeta ? null : await ctx.fj.getBranch(ctx.owner, ctx.repo, "main");
+  const branchMeta = resetEditBranch ? null : await ctx.backend.getFileMeta(ctx.owner, ctx.repo, branchRef, rel);
+  const mainInfo = branchMeta ? null : await ctx.backend.getBranch(ctx.owner, ctx.repo, "main");
   const mainRef = mainInfo?.commit?.id ?? "main";
-  const mainMeta = branchMeta ? null : await ctx.fj.getFileMeta(ctx.owner, ctx.repo, mainRef, rel);
+  const mainMeta = branchMeta ? null : await ctx.backend.getFileMeta(ctx.owner, ctx.repo, mainRef, rel);
   const sourceRef = branchMeta ? branchRef : mainMeta ? mainRef : null;
   const baseSha = branchMeta?.sha ?? (!branchExists ? mainMeta?.sha : null) ?? null;
   const sourceSha = !branchMeta && branchExists ? (mainMeta?.sha ?? null) : null;
-  const content = sourceRef ? await ctx.fj.getRawFile(ctx.owner, ctx.repo, sourceRef, rel) : "";
+  const content = sourceRef ? await ctx.backend.getRawFile(ctx.owner, ctx.repo, sourceRef, rel) : "";
   const repoConfig = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
-    ? await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, branchExists ? branch : "main")
+    ? await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, branchExists ? branch : "main")
     : null;
   // The edit branch is created lazily on first save, so for a brand-new edit
   // branch the tree (file list) and Cancel target come from main instead.
   const treeBranch = branchExists ? branch : "main";
   const readBranch = branchMeta ? branch : mainMeta ? "main" : treeBranch;
-  const files = await repoFiles(ctx.fj, ctx.owner, ctx.repo, treeBranch).catch(() => []);
+  const files = await repoFiles(ctx.backend, ctx.owner, ctx.repo, treeBranch).catch(() => []);
   const readFiles = readBranch === treeBranch
     ? files
-    : await repoFiles(ctx.fj, ctx.owner, ctx.repo, readBranch).catch(() => []);
+    : await repoFiles(ctx.backend, ctx.owner, ctx.repo, readBranch).catch(() => []);
   const assetPreviewPaths = buildPdfImagePreviewPaths(readFiles.map((file) => file.path));
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
@@ -415,7 +418,7 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   if (!rel || content === null) return redirect(repoHref(ctx.owner, ctx.repo));
   if (form.old_path !== undefined && (!oldRel || !isEditableTextFile(oldRel)))
     return badRequestPage(ctx.user, "Invalid original path.");
-  await ensureBranch(ctx.fj, ctx.owner, ctx.repo, branch);
+  await ensureBranch(ctx.backend, ctx.owner, ctx.repo, branch);
   const kind = fileKindForPath(rel);
   if (kind !== "markdown" && kind !== "text") {
     return badRequestPage(ctx.user, "Only Markdown and text files can be edited in Cosheaf.");
@@ -443,10 +446,10 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
 }));
 }
 
-async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
+async function repoFiles(backend: WorkspaceBackend, owner: string, repo: string, ref: string) {
   let tree = getCachedTree(owner, repo, ref);
   if (!tree) {
-    tree = await fj.getTree(owner, repo, ref, true);
+    tree = await backend.getTree(owner, repo, ref, true);
     setCachedTree(owner, repo, ref, tree);
   }
   return tree
@@ -487,14 +490,14 @@ function textEditPage(ctx: WebCtx, branch: string, rel: string, content: string,
   </section>`;
 }
 
-async function ensureBranch(fj: Forgejo, owner: string, repo: string, branch: string): Promise<void> {
+async function ensureBranch(backend: WorkspaceBackend, owner: string, repo: string, branch: string): Promise<void> {
   if (branch === "main") return;
-  const exists = await fj.getBranch(owner, repo, branch);
+  const exists = await backend.getBranch(owner, repo, branch);
   if (exists) return;
   try {
-    await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
+    await backend.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409 && await fj.getBranch(owner, repo, branch)) return;
+    if (err instanceof WorkspaceBackendError && err.status === 409 && await backend.getBranch(owner, repo, branch)) return;
     throw err;
   }
 }
@@ -513,19 +516,19 @@ async function writeFile(
 ): Promise<void> {
   const isMarkdown = fileKindForPath(rel) === "markdown";
   const isRename = Boolean(previousRel && previousRel !== rel);
-  const existing = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, rel);
+  const existing = await ctx.backend.getFileMeta(ctx.owner, ctx.repo, branch, rel);
   if (isRename && existing) throw new Error(`destination already exists: ${rel}`);
-  const previous = isRename ? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
+  const previous = isRename ? await ctx.backend.getFileMeta(ctx.owner, ctx.repo, branch, previousRel as string) : null;
   const fallbackRename =
     isRename && !previous && expectedSha === null && expectedSourceSha !== undefined;
   if (isRename && !previous && !fallbackRename) {
-    throw new ForgejoError(409, `missing source for rename ${previousRel}`, "PUT", `/repos/${ctx.owner}/${ctx.repo}/contents/${previousRel}`);
+    throw new WorkspaceBackendError(409, "stale_sha", `missing source for rename ${previousRel}`);
   }
   const casMeta = isRename ? previous : existing;
   const casPath = isRename ? (previousRel as string) : rel;
-  let mainSourceMeta: Awaited<ReturnType<Forgejo["getFileMeta"]>> | undefined;
+  let mainSourceMeta: Awaited<ReturnType<WorkspaceBackend["getFileMeta"]>> | undefined;
   if (isRename && previous && isMarkdown && fileKindForPath(previousRel as string) === "markdown") {
-    mainSourceMeta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, "main", previousRel as string);
+    mainSourceMeta = await ctx.backend.getFileMeta(ctx.owner, ctx.repo, "main", previousRel as string);
   }
   const replacePath = isRename && previous && mainSourceMeta === null
     ? previousRel as string
@@ -541,15 +544,15 @@ async function writeFile(
     : null;
   const finalContent = plan?.rewrittenContent ?? content;
   if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
-    throw new ForgejoError(409, `stale sha for ${casPath}`, "PUT", `/repos/${ctx.owner}/${ctx.repo}/contents/${casPath}`);
+    throw new WorkspaceBackendError(409, "stale_sha", `stale sha for ${casPath}`);
   }
   if (expectedSourceSha !== undefined && !casMeta?.sha) {
-    const sourceMeta = mainSourceMeta ?? await ctx.fj.getFileMeta(ctx.owner, ctx.repo, "main", casPath);
+    const sourceMeta = mainSourceMeta ?? await ctx.backend.getFileMeta(ctx.owner, ctx.repo, "main", casPath);
     if ((sourceMeta?.sha ?? null) !== expectedSourceSha) {
-      throw new ForgejoError(409, `stale source sha for ${casPath}`, "PUT", `/repos/${ctx.owner}/${ctx.repo}/contents/${casPath}`);
+      throw new WorkspaceBackendError(409, "stale_sha", `stale source sha for ${casPath}`);
     }
   }
-  const written = await ctx.fj.putFile(ctx.owner, ctx.repo, {
+  const written = await ctx.backend.putFile(ctx.owner, ctx.repo, {
     branch,
     path: rel,
     content: finalContent,
@@ -558,7 +561,7 @@ async function writeFile(
   });
   if (isRename && previous) {
     try {
-      await ctx.fj.deleteFile(ctx.owner, ctx.repo, {
+      await ctx.backend.deleteFile(ctx.owner, ctx.repo, {
         branch,
         path: previousRel as string,
         sha: previous.sha,
@@ -567,7 +570,7 @@ async function writeFile(
     } catch (err) {
       if (!isStaleShaConflict(err)) throw err;
       try {
-        await rollbackCreatedRenameDestination(ctx.fj, ctx.owner, ctx.repo, branch, rel, written.content?.sha);
+        await rollbackCreatedRenameDestination(ctx.backend, ctx.owner, ctx.repo, branch, rel, written.content?.sha);
       } catch (rollbackErr) {
         invalidateBranchTree(ctx.owner, ctx.repo, branch);
         throw new Error(`rename rollback failed for ${rel}: ${(rollbackErr as Error).message}`);
@@ -592,7 +595,7 @@ async function writeFile(
 async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTreeEntry[], assetPreviewPaths: ReturnType<typeof buildPdfImagePreviewPaths>): Promise<{ path: string; rendered: Html } | null> {
   const readme = files.find((file) => /^readme\.md$/i.test(file.path));
   if (!readme) return null;
-  const content = await ctx.fj.getRawFile(ctx.owner, ctx.repo, branch, readme.path).catch(() => null);
+  const content = await ctx.backend.getRawFile(ctx.owner, ctx.repo, branch, readme.path).catch(() => null);
   if (content === null) return null;
   const rendered = await renderMarkdown(ctx, content, { branch, documentPath: readme.path, renderTitle: true, assetPreviewPaths });
   return { path: readme.path, rendered };
@@ -600,7 +603,7 @@ async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTr
 
 async function retiredDefaultEditBranch(ctx: WebCtx, branch: string): Promise<boolean> {
   if (branch !== userDefaultEditBranch(ctx.user)) return false;
-  const pulls = await ctx.fj.listPulls(ctx.owner, ctx.repo, "all").catch(() => []);
+  const pulls = await ctx.backend.listPulls(ctx.owner, ctx.repo, "all").catch(() => []);
   const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
   return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
 }

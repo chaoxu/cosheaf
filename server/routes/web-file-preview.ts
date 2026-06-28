@@ -1,7 +1,7 @@
 import type { FileKind } from "../../shared/file-kind.js";
 import { COFLAT_FILE_PREVIEW_TEST_ID, COFLAT_READER_ARTICLE_CLASS } from "../../shared/coflat-reader-surface.js";
 import { isLikelyTextContent } from "../content-type.js";
-import type { Forgejo } from "../forgejo.js";
+import type { WorkspaceBackend } from "../workspace-backend.js";
 import type { WebCtx } from "./web-context.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
 import { rawFileHref } from "./web-file-links.js";
@@ -14,7 +14,7 @@ export function editableFileKind(kind: FileKind): boolean {
 }
 
 export async function previewKindForFile(
-  fj: Forgejo,
+  backend: WorkspaceBackend,
   owner: string,
   repo: string,
   branch: string,
@@ -23,7 +23,7 @@ export async function previewKindForFile(
   size: number,
 ): Promise<FileKind> {
   if (kind !== "binary" || size > INLINE_TEXT_PREVIEW_MAX_BYTES) return kind;
-  const content = await fj.getRawFileBytes(owner, repo, branch, rel);
+  const content = await backend.getRawFileBytes(owner, repo, branch, rel);
   return isLikelyTextContent(content) ? "text" : kind;
 }
 

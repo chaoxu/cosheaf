@@ -30,7 +30,7 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
     }
     const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
     if (!meta) return notFoundPage(ctx.user, "File not found");
-    const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, resolved.branch);
+    const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
     return htmlResponse(
       repoPageShell(ctx, "files", `PDF export - ${rel}`, html`
         <div class="page-title compact">
@@ -89,7 +89,7 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
           ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
           repoFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch),
         ]);
-        const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, resolved.branch);
+        const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
         const projectFiles = await collectPdfProjectFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
         return exportCoflatMarkdownPdf({
           source,

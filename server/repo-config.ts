@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { parse } from "yaml";
-import { ForgejoError, type Forgejo } from "./forgejo.js";
+import { WorkspaceBackendError, type WorkspaceBackend } from "./workspace-backend.js";
 
 // Git-managed, repo-level Cosheaf config (#182). Authoritative on the branch as
 // `cosheaf.yaml`; SQLite only caches the parsed result (derived/rebuildable,
@@ -112,7 +112,7 @@ const inFlight = new Map<string, Promise<RepoConfig>>();
 // empty for this render without caching, so it self-heals next time.
 export async function loadRepoConfig(
   db: Database.Database,
-  fj: Forgejo,
+  backend: WorkspaceBackend,
   owner: string,
   repo: string,
   branch: string,
@@ -130,9 +130,9 @@ export async function loadRepoConfig(
   const load = (async (): Promise<RepoConfig> => {
     let config = EMPTY;
     try {
-      config = parseRepoConfig(await fj.getRawFile(owner, repo, branch, REPO_CONFIG_PATH));
+      config = parseRepoConfig(await backend.getRawFile(owner, repo, branch, REPO_CONFIG_PATH));
     } catch (err) {
-      if (!(err instanceof ForgejoError && err.status === 404)) return EMPTY;
+      if (!(err instanceof WorkspaceBackendError && err.code === "not_found")) return EMPTY;
     }
     db.prepare(
       `INSERT INTO repo_config (workspace_slug, branch, config_json, updated_at) VALUES (?, ?, ?, ?)

@@ -4,7 +4,7 @@ import type { Role } from "../../shared/roles.js";
 import { ROLES } from "../../shared/roles.js";
 import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
 import { ForgejoError, type ForgejoRepo } from "../forgejo.js";
-import { invalidateWorkspacePermissionCache, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
+import { invalidateWorkspacePermissionCache, repoCtxForgejo, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { provisionWorkspace, type WorkspaceVisibility } from "../workspace-provisioning.js";
 import { setWorkspaceMember } from "../workspace-members.js";
@@ -176,7 +176,7 @@ function publicRepoShape(c: import("hono").Context<AppEnv>, repoMeta: ForgejoRep
 }
 
 members.get("/:owner/:repo", requireMembership(), async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const found = await fj.getRepo(owner, repo);
   if (!found) return c.json(...notFound("workspace not found"));
   return c.json(publicRepoShape(c, found));

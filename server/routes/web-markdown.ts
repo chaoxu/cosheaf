@@ -85,7 +85,7 @@ export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceO
     // Repo-wide math macros (#183) live in cosheaf.yaml (#182), cached per
     // branch; thread them into every coflat surface via the island payload so
     // they apply to documents, issue/PR/comment bodies, and diffs alike.
-    const repoConfig = await loadRepoConfig(ctx.db, ctx.fj, ctx.owner, ctx.repo, opts.branch ?? "main");
+    const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, opts.branch ?? "main");
     return coflatReaderIsland(ctx, source, opts, repoConfig);
   }
   const { body } = parseFrontmatterYaml(source);

@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { User } from "./users.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
+import type { WorkspaceBackend } from "./workspace-backend.js";
 import type { SSEHub } from "./sse.js";
 import type { Role } from "../shared/roles.js";
 import type { LocaleId, T } from "../shared/i18n/index.js";
@@ -18,11 +19,15 @@ export interface WorkspaceContext {
   role: Role;
 }
 
-// Per-request bundle handed to workspace-scoped routes. `fj` is bound to the
-// authenticated user's server-side Forgejo credential — there is no admin token
-// at runtime and no impersonation header to forget.
+// Per-request bundle handed to workspace-scoped routes. `backend` is the
+// data-access seam every route should use (file/tree/branch reads+writes); it is
+// a ForgejoWorkspaceBackend in the hosted app and a LocalGitWorkspaceBackend in
+// the local Workbench. `fj` is the raw Forgejo client bound to the authenticated
+// user's server-side credential — kept for the hosted-only review/issue/
+// notification routes that are not mounted locally; it is undefined in local mode.
 export interface RepoCtx {
-  fj: Forgejo;
+  backend: WorkspaceBackend;
+  fj?: Forgejo;
   owner: string;
   repo: string;
 }

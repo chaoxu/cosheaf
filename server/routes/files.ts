@@ -5,7 +5,11 @@ import {
 } from "@chaoxu/coflat/parse";
 import type { AppEnv } from "../types.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
-import { ForgejoError } from "../forgejo.js";
+import {
+  WorkspaceBackendError,
+  isStaleShaConflict,
+  type WorkspaceBackend,
+} from "../workspace-backend.js";
 import { validBranchName } from "../branch-path.js";
 import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { planIndexPage } from "../indexer.js";
@@ -162,13 +166,13 @@ async function ensureBranchFrom(
   baseBranch: string,
 ): Promise<void> {
   if (branch === baseBranch) return;
-  const { fj, owner, repo } = c.get("repoCtx");
-  const exists = await fj.getBranch(owner, repo, branch);
+  const { backend, owner, repo } = c.get("repoCtx");
+  const exists = await backend.getBranch(owner, repo, branch);
   if (exists) return;
   try {
-    await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: baseBranch });
+    await backend.createBranch(owner, repo, { newBranchName: branch, oldBranchName: baseBranch });
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409 && await fj.getBranch(owner, repo, branch)) return;
+    if (err instanceof WorkspaceBackendError && err.status === 409 && await backend.getBranch(owner, repo, branch)) return;
     throw err;
   }
 }
@@ -177,23 +181,17 @@ export function _clearBranchRefCacheForTests(): void {
   branchRefCache.clear();
 }
 
-// A write that lost a branch-head race: Forgejo rejects a stale blob sha as
-// 422 "sha does not match", or a push-level reject as 409. Shared by the typed
-// file API and the web editor save path so both classify concurrent writes the
-// same way.
-export function isStaleShaConflict(err: unknown): boolean {
-  return (
-    err instanceof ForgejoError &&
-    (err.status === 409 || (err.status === 422 && /sha does not match/i.test(err.bodyText)))
-  );
-}
+// A write that lost a branch-head race. Classification now lives on the backend
+// seam (WorkspaceBackendError code "stale_sha"); re-exported here so the web
+// editor save path keeps importing it from this module.
+export { isStaleShaConflict };
 
 // Build the typed 409 for a concurrent-write conflict: re-read the live branch
 // head + current blob sha so the agent can rebase its edit and retry (#92).
 // Best-effort — if the branch was deleted concurrently the lookups 404, and we
 // still return a useful conflict rather than throwing a fresh error.
 export async function staleShaConflict(
-  fj: import("../forgejo.js").Forgejo,
+  backend: WorkspaceBackend,
   owner: string,
   repo: string,
   branch: string,
@@ -201,8 +199,8 @@ export async function staleShaConflict(
   expectedSha: string | null | undefined,
 ): Promise<readonly [import("./responses.js").ErrorBody, 409]> {
   const [meta, branchInfo] = await Promise.all([
-    fj.getFileMeta(owner, repo, branch, path).catch(() => null),
-    fj.getBranch(owner, repo, branch).catch(() => null),
+    backend.getFileMeta(owner, repo, branch, path).catch(() => null),
+    backend.getBranch(owner, repo, branch).catch(() => null),
   ]);
   return conflict("branch head moved; reload and retry", {
     path,
@@ -215,7 +213,7 @@ export async function staleShaConflict(
 }
 
 export async function rollbackCreatedRenameDestination(
-  fj: import("../forgejo.js").Forgejo,
+  backend: WorkspaceBackend,
   owner: string,
   repo: string,
   branch: string,
@@ -225,7 +223,7 @@ export async function rollbackCreatedRenameDestination(
   if (!createdSha) {
     throw new Error(`rename rollback unsafe for ${path}: created blob sha missing`);
   }
-  await fj.deleteFile(owner, repo, {
+  await backend.deleteFile(owner, repo, {
     branch,
     path,
     sha: createdSha,
@@ -247,19 +245,19 @@ async function ensureBranch(
 
 async function retiredDefaultEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
   if (branch !== `${userBranchPrefix(c.get("user").username)}web-edit`) return false;
-  const { fj, owner, repo } = c.get("repoCtx");
-  const pulls = await fj.listPulls(owner, repo, "all").catch(() => []);
+  const { backend, owner, repo } = c.get("repoCtx");
+  const pulls = await backend.listPulls(owner, repo, "all").catch(() => []);
   const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
   return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
 }
 
 async function resetRetiredEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
   if (!await retiredDefaultEditBranch(c, branch)) return false;
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   try {
-    await fj.deleteBranch(owner, repo, branch);
+    await backend.deleteBranch(owner, repo, branch);
   } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+    if (!(err instanceof WorkspaceBackendError && err.status === 404)) throw err;
   }
   invalidateBranchReadCaches(owner, repo, branch);
   return true;
@@ -267,13 +265,13 @@ async function resetRetiredEditBranch(c: import("hono").Context<AppEnv>, branch:
 
 files.get("/:owner/:repo/tree", async (c) => {
   const ws = c.get("workspace");
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
   if (!validRequestedBranch(ref)) return c.json(...bad("valid branch name required"));
   let tree = getCachedTree(owner, repo, ref);
   if (!tree) {
     try {
-      tree = await fj.getTree(owner, repo, ref, true);
+      tree = await backend.getTree(owner, repo, ref, true);
       setCachedTree(owner, repo, ref, tree);
     } catch (err) {
       // Forgejo returns 404 for a missing ref *or* 400 with "sha not found"
@@ -281,10 +279,10 @@ files.get("/:owner/:repo/tree", async (c) => {
       // (e.g. squash-merge dropped the head branch). Either way, fall back
       // to main so a stale tab keeps rendering.
       const missing =
-        err instanceof ForgejoError &&
-        (err.status === 404 || (err.status === 400 && /sha not found/i.test(err.bodyText)));
+        err instanceof WorkspaceBackendError &&
+        (err.code === "not_found" || err.code === "ref_missing");
       if (missing && ref !== "main") {
-        tree = getCachedTree(owner, repo, "main") ?? (await fj.getTree(owner, repo, "main", true));
+        tree = getCachedTree(owner, repo, "main") ?? (await backend.getTree(owner, repo, "main", true));
         setCachedTree(owner, repo, "main", tree);
       } else {
         throw err;
@@ -321,11 +319,11 @@ files.get("/:owner/:repo/contents/:path{.+}", async (c) => {
   if (!rel) return c.json(...bad("invalid path"));
   const ref = c.req.query("ref")?.trim() || c.req.query("branch")?.trim() || "main";
   if (!validRequestedBranch(ref)) return c.json(...bad("valid branch name required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   try {
     const [content, meta] = await Promise.all([
-      fj.getRawFileBytes(owner, repo, ref, rel),
-      fj.getFileMeta(owner, repo, ref, rel),
+      backend.getRawFileBytes(owner, repo, ref, rel),
+      backend.getFileMeta(owner, repo, ref, rel),
     ]);
     if (!meta) return c.json(...notFound());
     return c.json(giteaContentShape(c, rel, {
@@ -334,7 +332,7 @@ files.get("/:owner/:repo/contents/:path{.+}", async (c) => {
       content,
     }));
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 404) return c.json(...notFound());
+    if (err instanceof WorkspaceBackendError && err.status === 404) return c.json(...notFound());
     throw err;
   }
 });
@@ -354,11 +352,11 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
 
   await ensureBranchFrom(c, branch, baseBranch);
   const content = decoded.toString("utf8");
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
-  const existing = await fj.getFileMeta(owner, repo, branch, rel);
+  const existing = await backend.getFileMeta(owner, repo, branch, rel);
   if (typeof body?.sha === "string" && (existing?.sha ?? null) !== body.sha) {
-    return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, body.sha)));
+    return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, body.sha)));
   }
   const isMarkdown = fileKindForPath(rel) === "markdown";
   const plan = isMarkdown
@@ -372,7 +370,7 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
   const finalContent = plan?.rewrittenContent ?? content;
   let written;
   try {
-    written = await fj.putFile(owner, repo, {
+    written = await backend.putFile(owner, repo, {
       branch,
       path: rel,
       content: finalContent,
@@ -381,13 +379,13 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
     });
   } catch (err) {
     if (isStaleShaConflict(err)) {
-      return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, body?.sha)));
+      return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, body?.sha)));
     }
     throw err;
   }
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(ws.slug, { type: "change", path: rel });
-  const writtenSha = written.content?.sha ?? (await fj.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
+  const writtenSha = written.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
   return c.json({
     content: giteaContentShape(c, rel, {
       sha: writtenSha,
@@ -413,12 +411,12 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
   if (branch === "main") return c.json(...bad("branch required (cannot delete on main)"));
   if (typeof body?.sha !== "string" || body.sha.trim() === "") return c.json(...bad("sha required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   await ensureBranch(c, branch);
-  const meta = await fj.getFileMeta(owner, repo, branch, rel);
+  const meta = await backend.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json(...notFound());
-  if (meta.sha !== body.sha) return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, body.sha)));
-  await fj.deleteFile(owner, repo, {
+  if (meta.sha !== body.sha) return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, body.sha)));
+  await backend.deleteFile(owner, repo, {
     branch,
     path: rel,
     sha: body.sha,
@@ -432,28 +430,28 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
 files.get("/:owner/:repo/file", async (c) => {
   const rel = safeRel(c.req.query("path"));
   if (!rel) return c.json(...bad("path required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   const ref = refFromQuery(c);
   if (!validRequestedBranch(ref)) return c.json(...bad("valid branch name required"));
-  let branchInfo: Awaited<ReturnType<typeof fj.getBranch>> | null = null;
+  let branchInfo: Awaited<ReturnType<typeof backend.getBranch>> | null = null;
   try {
-    branchInfo = await fj.getBranch(owner, repo, ref);
+    branchInfo = await backend.getBranch(owner, repo, ref);
     const snapshotRef = branchInfo?.commit?.id ?? ref;
     const [content, meta] = await Promise.all([
-      fj.getRawFile(owner, repo, snapshotRef, rel),
-      fj.getFileMeta(owner, repo, snapshotRef, rel),
+      backend.getRawFile(owner, repo, snapshotRef, rel),
+      backend.getFileMeta(owner, repo, snapshotRef, rel),
     ]);
     return c.json({ content, sha: meta?.sha ?? null });
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 404 && ref !== "main") {
+    if (err instanceof WorkspaceBackendError && err.status === 404 && ref !== "main") {
       // File not on the branch — fall back to main so the editor can still
       // show the canonical version.
       try {
-        const mainInfo = await fj.getBranch(owner, repo, "main");
+        const mainInfo = await backend.getBranch(owner, repo, "main");
         const mainRef = mainInfo?.commit?.id ?? "main";
         const [content, meta] = await Promise.all([
-          fj.getRawFile(owner, repo, mainRef, rel),
-          fj.getFileMeta(owner, repo, mainRef, rel),
+          backend.getRawFile(owner, repo, mainRef, rel),
+          backend.getFileMeta(owner, repo, mainRef, rel),
         ]);
         return c.json({
           content,
@@ -462,12 +460,12 @@ files.get("/:owner/:repo/file", async (c) => {
           source_sha: meta?.sha ?? null,
         });
       } catch (err2) {
-        if (err2 instanceof ForgejoError && err2.status === 404)
+        if (err2 instanceof WorkspaceBackendError && err2.status === 404)
           return c.json(...notFound());
         throw err2;
       }
     }
-    if (err instanceof ForgejoError && err.status === 404)
+    if (err instanceof WorkspaceBackendError && err.status === 404)
       return c.json(...notFound());
     throw err;
   }
@@ -512,16 +510,16 @@ files.put("/:owner/:repo/file", async (c) => {
     return c.json(...conflict("edit branch is active; reload and retry"));
   }
   await ensureBranch(c, branch);
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const db = c.get("db");
   const hub = c.get("sse");
 
   const isRename = Boolean(previousRel && previousRel !== rel);
-  const existing = await fj.getFileMeta(owner, repo, branch, rel);
+  const existing = await backend.getFileMeta(owner, repo, branch, rel);
   if (isRename && existing)
     return c.json(...conflict("destination already exists"));
-  const previous = isRename ? await fj.getFileMeta(owner, repo, branch, previousRel as string) : null;
+  const previous = isRename ? await backend.getFileMeta(owner, repo, branch, previousRel as string) : null;
   const fallbackRename =
     isRename && !previous && expectedSha === null && expectedSourceSha !== undefined;
   if (isRename && !previous && !fallbackRename) {
@@ -537,9 +535,9 @@ files.put("/:owner/:repo/file", async (c) => {
   // workspace's declared markdown format is passed explicitly so passthrough
   // workspaces don't inherit coflat indexing behavior (#25).
   const isMarkdown = fileKindForPath(rel) === "markdown";
-  let mainSourceMeta: Awaited<ReturnType<typeof fj.getFileMeta>> | undefined;
+  let mainSourceMeta: Awaited<ReturnType<typeof backend.getFileMeta>> | undefined;
   if (isRename && previous && isMarkdown && fileKindForPath(previousRel as string) === "markdown") {
-    mainSourceMeta = await fj.getFileMeta(owner, repo, "main", previousRel as string);
+    mainSourceMeta = await backend.getFileMeta(owner, repo, "main", previousRel as string);
   }
   const replacePath = isRename && previous && mainSourceMeta === null
     ? previousRel as string
@@ -561,10 +559,10 @@ files.put("/:owner/:repo/file", async (c) => {
   const casMeta = isRename ? previous : existing;
   const casPath = isRename ? (previousRel as string) : rel;
   if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
-    return c.json(...(await staleShaConflict(fj, owner, repo, branch, casPath, expectedSha)));
+    return c.json(...(await staleShaConflict(backend, owner, repo, branch, casPath, expectedSha)));
   }
   if (expectedSourceSha !== undefined && !casMeta?.sha) {
-    const sourceMeta = mainSourceMeta ?? await fj.getFileMeta(owner, repo, "main", casPath);
+    const sourceMeta = mainSourceMeta ?? await backend.getFileMeta(owner, repo, "main", casPath);
     if ((sourceMeta?.sha ?? null) !== expectedSourceSha) {
       return c.json(...conflict("source file changed; reload and retry", {
         path: casPath,
@@ -578,7 +576,7 @@ files.put("/:owner/:repo/file", async (c) => {
   }
   let r;
   try {
-    r = await fj.putFile(owner, repo, {
+    r = await backend.putFile(owner, repo, {
       branch,
       path: rel,
       content: finalContent,
@@ -591,13 +589,13 @@ files.put("/:owner/:repo/file", async (c) => {
     // (a push-level reject is 409). Either way, surface a typed, recoverable
     // conflict instead of a bare 502 (#92).
     if (isStaleShaConflict(err)) {
-      return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+      return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, expectedSha)));
     }
     throw err;
   }
   if (isRename && previous) {
     try {
-      await fj.deleteFile(owner, repo, {
+      await backend.deleteFile(owner, repo, {
         branch,
         path: previousRel as string,
         sha: previous.sha,
@@ -606,13 +604,13 @@ files.put("/:owner/:repo/file", async (c) => {
     } catch (err) {
       if (!isStaleShaConflict(err)) throw err;
       try {
-        await rollbackCreatedRenameDestination(fj, owner, repo, branch, rel, r.content?.sha);
+        await rollbackCreatedRenameDestination(backend, owner, repo, branch, rel, r.content?.sha);
       } catch (rollbackErr) {
         invalidateBranchReadCaches(owner, repo, branch);
         throw new Error(`rename rollback failed for ${rel}: ${(rollbackErr as Error).message}`);
       }
       invalidateBranchReadCaches(owner, repo, branch);
-      return c.json(...(await staleShaConflict(fj, owner, repo, branch, previousRel as string, expectedSha)));
+      return c.json(...(await staleShaConflict(backend, owner, repo, branch, previousRel as string, expectedSha)));
     }
   }
   // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
@@ -626,7 +624,7 @@ files.put("/:owner/:repo/file", async (c) => {
   invalidateBranchReadCaches(owner, repo, branch);
   if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
   hub.publish(ws.slug, { type: "change", path: rel });
-  const writtenSha = r.content?.sha ?? (await fj.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
+  const writtenSha = r.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
   return c.json({
     ok: true,
     branch,
@@ -651,16 +649,16 @@ files.post("/:owner/:repo/assets", async (c) => {
     return c.json(...bad("file field required"));
   if (file.size > MAX_ASSET_BYTES)
     return c.json(...bad(`asset exceeds ${MAX_ASSET_DISPLAY}`));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   await ensureBranch(c, branch);
   // Keep a readable basename plus a short random suffix so simultaneous uploads
   // of the same filename don't collide. Git still deduplicates blobs server-side.
   const safeName = predictableUploadName(file.name);
   const rand = Math.random().toString(36).slice(2, 10);
-  const repoConfig = await loadRepoConfig(c.get("db"), fj, owner, repo, branch);
+  const repoConfig = await loadRepoConfig(c.get("db"), backend, owner, repo, branch);
   const assetPath = `${repoConfig.assetFolder}/${safeName.stem}-${rand}${safeName.ext}`;
   const bytes = Buffer.from(await file.arrayBuffer());
-  await fj.putFileBytes(owner, repo, {
+  await backend.putFileBytes(owner, repo, {
     branch,
     path: assetPath,
     content: bytes,
@@ -757,14 +755,14 @@ async function branchRefSuggestions(
   prefix: string,
   limit: number,
 ): Promise<RefSuggestion[]> {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   let tree = getCachedTree(owner, repo, branch);
   if (!tree) {
     try {
-      tree = await fj.getTree(owner, repo, branch, true);
+      tree = await backend.getTree(owner, repo, branch, true);
       setCachedTree(owner, repo, branch, tree);
     } catch (err) {
-      if (err instanceof ForgejoError && (err.status === 404 || err.status === 400)) return [];
+      if (err instanceof WorkspaceBackendError && (err.status === 404 || err.status === 400)) return [];
       throw err;
     }
   }
@@ -791,12 +789,12 @@ async function parseBranchRefs(
   branch: string,
   markdownFiles: readonly { path: string }[],
 ): Promise<readonly BranchRefEntry[]> {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   const entries: BranchRefEntry[] = [];
   for (const entry of markdownFiles) {
     const rel = safeRel(entry.path);
     if (!rel) continue;
-    const source = await fj.getRawFile(owner, repo, branch, rel).catch(() => null);
+    const source = await backend.getRawFile(owner, repo, branch, rel).catch(() => null);
     if (source === null) continue;
     const parsed = parseCoflatFrontmatter(source);
     const frontmatter = (parsed.frontmatter ?? {}) as Record<string, unknown>;
@@ -935,14 +933,14 @@ async function branchRefs(
   ref: string,
   ids: readonly string[],
 ): Promise<{ refs: Array<Record<string, unknown>>; ambiguous_refs: Array<{ id: string; paths: string[] }> }> {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   let tree = getCachedTree(owner, repo, ref);
   if (!tree) {
     try {
-      tree = await fj.getTree(owner, repo, ref, true);
+      tree = await backend.getTree(owner, repo, ref, true);
       setCachedTree(owner, repo, ref, tree);
     } catch (err) {
-      if (err instanceof ForgejoError && (err.status === 404 || err.status === 400)) return { refs: [], ambiguous_refs: [] };
+      if (err instanceof WorkspaceBackendError && (err.status === 404 || err.status === 400)) return { refs: [], ambiguous_refs: [] };
       throw err;
     }
   }
@@ -1018,14 +1016,14 @@ files.delete("/:owner/:repo/file", async (c) => {
       expectedSha = value;
     }
   }
-  const { fj, owner, repo } = c.get("repoCtx");
-  const meta = await fj.getFileMeta(owner, repo, branch, rel);
+  const { backend, owner, repo } = c.get("repoCtx");
+  const meta = await backend.getFileMeta(owner, repo, branch, rel);
   if (!meta) return c.json(...notFound());
   if (expectedSha !== undefined && meta.sha !== expectedSha) {
-    return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+    return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, expectedSha)));
   }
   try {
-    await fj.deleteFile(owner, repo, {
+    await backend.deleteFile(owner, repo, {
       branch,
       path: rel,
       sha: meta.sha,
@@ -1033,7 +1031,7 @@ files.delete("/:owner/:repo/file", async (c) => {
     });
   } catch (err) {
     if (isStaleShaConflict(err)) {
-      return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, expectedSha)));
+      return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, expectedSha)));
     }
     throw err;
   }

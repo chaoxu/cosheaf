@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ForgejoError, type Forgejo } from "./forgejo.js";
+import { WorkspaceBackendError, type WorkspaceBackend } from "./workspace-backend.js";
 import { bustRepoConfig, loadRepoConfig, parseRepoConfig } from "./repo-config.js";
 import { freshTestDb } from "./routes/test-fixtures.js";
 
 // cosheaf.yaml uses single-quoted YAML so the backslashes in macros stay literal.
 const YAML_R = "math:\n  '\\R': '\\mathbb{R}'\n";
 
-function fakeForgejo(getRawFile: () => Promise<string>): Forgejo {
-  return { getRawFile } as unknown as Forgejo;
+function fakeBackend(getRawFile: () => Promise<string>): WorkspaceBackend {
+  return { getRawFile } as unknown as WorkspaceBackend;
 }
 
 describe("parseRepoConfig", () => {
@@ -80,7 +80,7 @@ describe("loadRepoConfig", () => {
   it("fetches+parses+caches on a miss, then serves the cache without refetching", async () => {
     const db = freshTestDb("cosheaf-repocfg-");
     let fetches = 0;
-    const fj = fakeForgejo(async () => {
+    const fj = fakeBackend(async () => {
       fetches++;
       return YAML_R;
     });
@@ -92,9 +92,9 @@ describe("loadRepoConfig", () => {
   it("caches the empty config when cosheaf.yaml is missing (404), not refetched", async () => {
     const db = freshTestDb("cosheaf-repocfg-");
     let fetches = 0;
-    const fj = fakeForgejo(async () => {
+    const fj = fakeBackend(async () => {
       fetches++;
-      throw new ForgejoError(404, "not found", "GET", "/raw");
+      throw new WorkspaceBackendError(404, "not_found", "not found");
     });
     expect((await loadRepoConfig(db, fj, "o", "w", "main")).mathMacros).toEqual({});
     await loadRepoConfig(db, fj, "o", "w", "main");
@@ -104,9 +104,9 @@ describe("loadRepoConfig", () => {
   it("does not cache a transient (non-404) fetch failure", async () => {
     const db = freshTestDb("cosheaf-repocfg-");
     let fetches = 0;
-    const fj = fakeForgejo(async () => {
+    const fj = fakeBackend(async () => {
       fetches++;
-      throw new ForgejoError(502, "upstream", "GET", "/raw");
+      throw new WorkspaceBackendError(502, "error", "upstream");
     });
     await loadRepoConfig(db, fj, "o", "w", "main");
     await loadRepoConfig(db, fj, "o", "w", "main");
@@ -116,7 +116,7 @@ describe("loadRepoConfig", () => {
   it("coalesces concurrent cold-cache loads into a single fetch (no herd)", async () => {
     const db = freshTestDb("cosheaf-repocfg-");
     let fetches = 0;
-    const fj = fakeForgejo(async () => {
+    const fj = fakeBackend(async () => {
       fetches++;
       await new Promise((resolve) => setTimeout(resolve, 5));
       return YAML_R;
@@ -130,7 +130,7 @@ describe("loadRepoConfig", () => {
     const db = freshTestDb("cosheaf-repocfg-");
     let body = YAML_R;
     let fetches = 0;
-    const fj = fakeForgejo(async () => {
+    const fj = fakeBackend(async () => {
       fetches++;
       return body;
     });

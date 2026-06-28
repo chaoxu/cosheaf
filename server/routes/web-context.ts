@@ -4,6 +4,8 @@ import { setCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import { Forgejo } from "../forgejo.js";
+import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
+import type { WorkspaceBackend } from "../workspace-backend.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
@@ -21,6 +23,8 @@ export interface WebCtx {
   owner: string;
   repo: string;
   user: string;
+  // Data-access seam (file/tree/branch reads+writes) the page modules use.
+  backend: WorkspaceBackend;
   fj: Forgejo;
   ws: WorkspaceContext;
   db: Database.Database;
@@ -165,13 +169,14 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
-  c.set("repoCtx", { fj, owner, repo });
+  const backend = new ForgejoWorkspaceBackend(fj);
+  c.set("repoCtx", { backend, fj, owner, repo });
   const db = c.get("db");
   const [wsTitle, userAvatarSrc] = await Promise.all([
     resolveWorkspaceDisplayTitle(db, fj, ws),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, fj, ws, db, wsTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, ws, db, wsTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(

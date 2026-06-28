@@ -29,6 +29,7 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../types.js";
 import {
+  repoCtxForgejo,
   requireAdminFresh,
   requireAuth,
   requireMembership,
@@ -276,7 +277,7 @@ function mergeStatusMessage(status: number): string {
 
 
 pulls.get("/:owner/:repo/pulls", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const rows = await fj.listPulls(owner, repo, {
     state: parseListState(c.req.query("state")),
     labels: parsePositiveIntList(c.req.query("labels")),
@@ -292,7 +293,7 @@ pulls.get("/:owner/:repo/pulls", async (c) => {
 pulls.get("/:owner/:repo/pulls/:n", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   return c.json({ pull: prMeta(pull) });
@@ -307,7 +308,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
   if (!validBranchName(base)) return c.json(...bad("valid base branch name required"));
   if (body.title !== undefined && typeof body.title !== "string") return c.json(...bad("title must be a string"));
   if (body.body !== undefined && typeof body.body !== "string") return c.json(...bad("body must be a string"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   try {
     const pr = await fj.createPull(owner, repo, {
       head,
@@ -348,7 +349,7 @@ pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const parsed = parseTitleBodyPatch(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.editPull(owner, repo, n, parsed.patch);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
   return c.json({ pull: prMeta(pull) });
@@ -362,7 +363,7 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
   if (labelIds === null) {
     return c.json(...bad("labels must be positive integer ids"));
   }
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const [allLabels, pull] = await Promise.all([
     fj.listLabels(owner, repo),
     fj.getPull(owner, repo, n),
@@ -380,7 +381,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = await readJsonObject(c.req);
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   // Admins can bypass the required-approvals branch protection rule by
   // passing `force: true`. Callers default to false (normal review flow).
   if (body.Do !== undefined && body.Do !== "squash" && body.Do !== "merge" && body.Do !== "rebase") {
@@ -421,7 +422,7 @@ pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   await fj.editPull(owner, repo, n, { state: "closed" });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
   return c.json({ ok: true });
@@ -431,7 +432,7 @@ pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   await fj.editPull(owner, repo, n, { state: "open" });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reopened" });
   return c.json({ ok: true });
@@ -442,7 +443,7 @@ pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
 pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const [metas, unified] = await Promise.all([
     fj.listPullFiles(owner, repo, n),
     fj.getPullDiff(owner, repo, n),
@@ -473,7 +474,7 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   if (!path) return c.json(...bad("path required"));
   if (side !== "base" && side !== "head")
     return c.json(...bad("side must be base or head"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   const file = { path, previous_path: side === "base" ? await previousPathFor(fj, owner, repo, n, path) : undefined };
@@ -511,7 +512,7 @@ function parseOptionalReviewBody(value: unknown): { ok: true; body: string } | {
 pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const reviews = await fj.listReviews(owner, repo, n);
   const out = reviews
     .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
@@ -543,7 +544,7 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   if (!reviewBody.ok) return c.json(...bad(reviewBody.message));
 
   const ws = c.get("workspace");
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (EVENT_MAP[reviewEvent] !== "COMMENT" && pull.user?.login === c.get("user").username)
@@ -570,7 +571,7 @@ function parseReviewers(raw: unknown): string[] | null {
 pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const [pull, reviewers] = await Promise.all([
     fj.getPull(owner, repo, n),
     fj.listPullReviewers(owner, repo),
@@ -589,7 +590,7 @@ pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const body = await readJsonObject(c.req);
   const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   await fj.createPullReviewRequests(owner, repo, n, reviewers);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
@@ -603,7 +604,7 @@ pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const body = await readJsonObject(c.req);
   const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   await fj.deletePullReviewRequests(owner, repo, n, reviewers);
   const pull = await fj.getPull(owner, repo, n);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
@@ -657,7 +658,7 @@ async function requirePullComment(
 pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   // Comment line/side come straight from Forgejo's position/original_position
   // (absolute file lines), so the read path no longer needs the unified diff.
   const [allComments, metas] = await Promise.all([
@@ -698,7 +699,7 @@ pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
       400,
     );
   const ws = c.get("workspace");
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (pull.state === "closed") return c.json(...forbidden("cannot comment on a closed pull request"));
@@ -722,7 +723,7 @@ pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const comment = await requirePullComment(fj, owner, repo, n, cid);
   if (!comment) return c.json(...notFound("comment not found"));
   await fj.editIssueComment(owner, repo, cid, text);
@@ -737,7 +738,7 @@ pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   if (cid === null) return c.json(...bad("bad comment id"));
   if (rid === null) return c.json(...bad("bad review id"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const comment = await requirePullComment(fj, owner, repo, n, cid);
   if (!comment) return c.json(...notFound("comment not found"));
   if (comment.pull_request_review_id !== rid) return c.json(...bad("review id does not match comment"));
@@ -770,7 +771,7 @@ async function requireOwnPendingReview(
   n: number,
   rid: number,
 ): Promise<ForgejoReview | Response> {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
@@ -788,7 +789,7 @@ async function requireOwnPendingReview(
 pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const pull = await fj.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
@@ -804,7 +805,7 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
   const ws = c.get("workspace");
   const input = parseCommentInput(await readJsonBody(c.req));
   if (!input) return c.json(...bad("path, line, side, body required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const review = await requireOwnPendingReview(c, n, rid);
   if (review instanceof Response) return review;
   const pos = await resolveLinePosition(fj, owner, repo, n, input);
@@ -829,7 +830,7 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   if (!Object.hasOwn(eventMap, event)) return c.json(...bad("invalid event"));
   const reviewBody = parseOptionalReviewBody(body.body);
   if (!reviewBody.ok) return c.json(...bad(reviewBody.message));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const review = await requireOwnPendingReview(c, n, rid);
   if (review instanceof Response) return review;
   await fj.submitPullReview(owner, repo, n, rid, {
@@ -843,7 +844,7 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
 // ---------- settings (min_approvals on main) ----------
 
 pulls.get("/:owner/:repo/settings", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const bp = await fj.getBranchProtection(owner, repo, "main");
   return c.json({
     min_approvals: bp?.required_approvals ?? 1,
@@ -876,7 +877,7 @@ pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
   if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format)) {
     return c.json(...bad("unknown markdown format"));
   }
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
 
   let minApprovals: number;
   try {

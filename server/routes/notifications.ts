@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership } from "../middleware.js";
+import { repoCtxForgejo, requireAuth, requireMembership } from "../middleware.js";
 import { notificationChannel } from "../../shared/conventions.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
 import type { NotificationRow } from "../../shared/issues.js";
@@ -81,7 +81,7 @@ function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
 // GET /api/v1/repos/:owner/:repo/notifications — unread notifications for the
 // calling user in this workspace's Forgejo repo.
 notifications.get("/:owner/:repo/notifications", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   const threads = await fj.listRepoNotifications(owner, repo, {
     statusTypes: ["unread"],
     subjectTypes: ["Issue", "Pull"],
@@ -93,7 +93,7 @@ notifications.get("/:owner/:repo/notifications", async (c) => {
 notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
   const id = parsePositiveIntId(c.req.param("id"));
   if (id === null) return c.json(...bad("bad id"));
-  const { fj } = c.get("repoCtx");
+  const { fj } = repoCtxForgejo(c);
   // A stale/cross-repo/unreadable id should 404, not 500 — normalize the fetch.
   const thread = await fj.getNotificationThread(id).catch(() => null);
   if (!thread || thread.repository?.full_name !== c.get("workspace").slug) return c.json(...notFound());
@@ -103,7 +103,7 @@ notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
 
 // POST /api/v1/repos/:owner/:repo/notifications/read-all
 notifications.post("/:owner/:repo/notifications/read-all", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { fj, owner, repo } = repoCtxForgejo(c);
   await fj.markRepoNotificationsRead(owner, repo);
   return c.json({ ok: true });
 });

@@ -15,8 +15,7 @@ import {
   requireMembership,
   requireWriteOnMutation,
 } from "../middleware.js";
-import { ForgejoError } from "../forgejo.js";
-import type { ForgejoBranch } from "../forgejo-types.js";
+import { WorkspaceBackendError, type WsBranch } from "../workspace-backend.js";
 import { validBranchName } from "../branch-path.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 
@@ -27,7 +26,7 @@ branches.use("/:owner/:repo/*", requireWriteOnMutation);
 
 import { bad, conflict } from "./responses.js";
 
-function publicBranch(c: import("hono").Context<AppEnv>, branch: ForgejoBranch): Record<string, unknown> {
+function publicBranch(c: import("hono").Context<AppEnv>, branch: WsBranch): Record<string, unknown> {
   const { owner, repo } = c.get("repoCtx");
   const origin = new URL(c.req.url).origin;
   const commitId = branch.commit?.id ?? "";
@@ -41,8 +40,8 @@ function publicBranch(c: import("hono").Context<AppEnv>, branch: ForgejoBranch):
 }
 
 branches.get("/:owner/:repo/branches", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
-  const list = await fj.listBranches(owner, repo);
+  const { backend, owner, repo } = c.get("repoCtx");
+  const list = await backend.listBranches(owner, repo);
   return c.json(list.map((branch) => publicBranch(c, branch)));
 });
 
@@ -51,10 +50,10 @@ branches.get("/:owner/:repo/branch_protections", async (c) => {
 });
 
 branches.get("/:owner/:repo/branches/mine", async (c) => {
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   const [list, pulls] = await Promise.all([
-    fj.listBranches(owner, repo),
-    fj.listPulls(owner, repo, "open"),
+    backend.listBranches(owner, repo),
+    backend.listPulls(owner, repo, "open"),
   ]);
   const openHeads = new Set(pulls.map((p) => p.head.ref));
   // Identify "your branches" by the author of the branch's head commit.
@@ -77,11 +76,11 @@ branches.post("/:owner/:repo/branches", async (c) => {
   const body = (await c.req.json().catch(() => null)) as { name?: string } | null;
   const name = body?.name;
   if (!validBranchName(name) || name === "main") return c.json(...bad("valid branch name required"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   try {
-    await fj.createBranch(owner, repo, { newBranchName: name, oldBranchName: "main" });
+    await backend.createBranch(owner, repo, { newBranchName: name, oldBranchName: "main" });
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409)
+    if (err instanceof WorkspaceBackendError && err.status === 409)
       return c.json(...conflict("branch already exists"));
     throw err;
   }
@@ -96,11 +95,11 @@ branches.post("/:owner/:repo/branches", async (c) => {
 branches.delete("/:owner/:repo/branches/:name{.+}", async (c) => {
   const name = c.req.param("name");
   if (!validBranchName(name) || name === "main") return c.json(...bad("valid branch name required (not main)"));
-  const { fj, owner, repo } = c.get("repoCtx");
+  const { backend, owner, repo } = c.get("repoCtx");
   try {
-    await fj.deleteBranch(owner, repo, name);
+    await backend.deleteBranch(owner, repo, name);
   } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+    if (!(err instanceof WorkspaceBackendError && err.status === 404)) throw err;
   }
   invalidateRepoTrees(owner, repo);
   return c.json({ ok: true });
