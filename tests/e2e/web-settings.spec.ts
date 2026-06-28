@@ -70,9 +70,10 @@ test("account preferences are separate from repository settings", async ({ page 
   await expect(page.locator(".repo-body")).toContainText("Access");
   await expect(page.getByTestId("settings-access")).toHaveCount(1);
 
+  await page.evaluate(() => localStorage.setItem("cosheaf:file-open-mode:chao", "read"));
   await page.goto(`${repoBase}/src/branch/main/hello.md`);
-  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(1);
-  await expect(page.locator('link[href*="/vendor/coflat/"]')).not.toHaveCount(0);
+  await expect(page.locator('script[src*="web-reader"]')).toHaveCount(0);
+  await expect(page.locator('script[src*="web-edit-shell"]')).toHaveCount(1);
 
   await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md`);
   await expect(page.locator(`${CF.theoremBlock} ${CF.blockHeaderRendered}`).filter({ hasText: "Theorem 1" }).first()).toBeVisible();

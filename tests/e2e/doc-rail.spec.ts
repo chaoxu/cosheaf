@@ -68,11 +68,12 @@ async function expectEditorStatusbarContained(page: Page): Promise<void> {
     });
 }
 
-test("document rail reaches the status bar in reader and editor modes", async ({ page }) => {
+test("document rail reaches the status bar in workbench read and edit modes", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/src/branch/main/hello.md`);
+  await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+  await expect(page.locator(".coflat-reader-island")).toHaveCount(0);
   await expect(page.locator(CF.reader)).toContainText("Hello");
   await expectRailBottomAligned(page);
 
@@ -81,17 +82,14 @@ test("document rail reaches the status bar in reader and editor modes", async ({
   await expectRailBottomAligned(page);
 });
 
-test("branch actions remain visible when the document rail is hidden", async ({ page }) => {
+test("workbench actions remain visible when the document rail is hidden", async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 900 });
   await signIn(page);
 
-  await page.goto(`${repoBase}/src/branch/fixtures/side-by-side-rendering/hello.md`);
-  const readerChrome = page.locator(".doc-reader-chrome");
-  await expect(readerChrome.getByText("More")).toBeVisible();
-  await readerChrome.locator("summary").click();
-  await expect(readerChrome.getByRole("link", { name: "PDF" })).toBeVisible();
-  await expect(readerChrome.getByRole("link", { name: "Raw" })).toBeVisible();
-  await expect(readerChrome.getByRole("link", { name: "Open PR" })).toHaveCount(0);
+  await page.goto(`${repoBase}/src/branch/fixtures/side-by-side-rendering/hello.md?mode=read`);
+  await expect(page.locator(".doc-reader-chrome")).toHaveCount(0);
+  await expect(page.locator(CF.reader)).toContainText("Hello");
+  await expect(page.locator(".doc-rail")).not.toBeVisible();
 
   await page.goto(`${repoBase}/src/branch/fixtures/side-by-side-rendering/hello.md?mode=edit`);
   await expect(page.getByTestId("editor")).toBeVisible();
