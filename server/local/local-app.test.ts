@@ -52,7 +52,7 @@ describe("local Workbench app (Tier 0)", () => {
     const read = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };
     const res = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ content: "# Changed\n", expected_sha: read.sha }),
     });
     expect(res.status).toBe(200);
@@ -66,10 +66,20 @@ describe("local Workbench app (Tier 0)", () => {
     const { app } = localApp({ "hello.md": "# Hello\n" });
     const res = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ content: "# Changed\n", expected_sha: "0000000000000000000000000000000000000000" }),
     });
     expect(res.status).toBe(409);
+  });
+
+  it("rejects an origin-less (cross-origin) mutation with 403", async () => {
+    const { app } = localApp({ "hello.md": "# Hello\n" });
+    const res = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
+      method: "PUT",
+      headers: { "content-type": "application/json" }, // no Origin/Referer — a cross-origin page
+      body: JSON.stringify({ content: "# x\n" }),
+    });
+    expect(res.status).toBe(403);
   });
 
   it("404s a workspace that is not the one this Workbench serves", async () => {

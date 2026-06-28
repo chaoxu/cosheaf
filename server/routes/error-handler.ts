@@ -1,11 +1,14 @@
-// App-level error mapping. A ForgejoError that escapes a route handler is
-// translated into the surface the caller expects: the typed JSON envelope on
-// /api/* and a styled error page on server-rendered web routes. Everything
-// else falls through to Hono's default 500.
+// App-level error mapping. A ForgejoError (hosted forge call) or
+// WorkspaceBackendError (the WorkspaceBackend seam — file/tree/branch routes)
+// that escapes a route handler is translated into the surface the caller
+// expects: the typed JSON envelope on /api/* and a styled error page on
+// server-rendered web routes. Both carry `.status`, so they share one mapping.
+// Everything else falls through to Hono's default 500.
 
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { ForgejoError } from "../forgejo.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 import { AUTH_COOKIE, invalidateBearerCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { badGateway, forbidden, notFound } from "./responses.js";
@@ -13,7 +16,7 @@ import { errorPage, forbiddenPage, notFoundPage, redirect } from "./web-context.
 
 export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Response> {
   const isApi = c.req.path.startsWith("/api/");
-  if (!(err instanceof ForgejoError)) throw err;
+  if (!(err instanceof ForgejoError) && !(err instanceof WorkspaceBackendError)) throw err;
 
   // A 401 from the backing forge means the caller's token was rejected
   // (revoked, rotated). Invalidate the cache so the next request re-checks;
@@ -44,6 +47,6 @@ export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Re
   }
   if (err.status === 404) return notFoundPage(user, "Not found");
   if (err.status === 403) return forbiddenPage(user);
-  console.error(`[${reqId}] unhandled forgejo error on ${c.req.method} ${c.req.path}: ${err.message}`);
+  console.error(`[${reqId}] unhandled backend error on ${c.req.method} ${c.req.path}: ${err.message}`);
   return errorPage(user, "The backing forge failed to answer. Try again in a moment.", 502);
 }

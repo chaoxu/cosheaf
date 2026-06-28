@@ -3,8 +3,29 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForgejoError } from "../forgejo.js";
 import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests, resolveAuth } from "../middleware.js";
 import type { AppEnv } from "../types.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 import { handleAppError } from "./error-handler.js";
 import { testConfig } from "./test-fixtures.js";
+
+// A WorkspaceBackendError (the file/tree/branch seam) that escapes a route must
+// be mapped the same way as a ForgejoError — both carry `.status`. Regression
+// guard for the backend-seam refactor: without this the converted file/raw
+// routes would degrade forge 401/404/5xx into bare 500s.
+function appThrowingBackend(status: number, code = "error"): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.onError(handleAppError);
+  app.use("*", async (c, next) => {
+    c.set("user", { username: "chao" });
+    await next();
+  });
+  app.get("/api/v1/repos/owner/w/file", () => {
+    throw new WorkspaceBackendError(status, code, "boom");
+  });
+  app.get("/owner/repo/src/branch/main/x.md", () => {
+    throw new WorkspaceBackendError(status, code, "boom");
+  });
+  return app;
+}
 
 function appThrowing(status: number): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -50,6 +71,26 @@ describe("handleAppError", () => {
     const res = await appThrowing(401).request("/api/v1/repos/owner/w/issues");
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toMatchObject({ code: "pat_invalid" });
+  });
+
+  it("maps WorkspaceBackendError the same as Forgejo (404 / 502 / 401 on /api)", async () => {
+    const notFound = await appThrowingBackend(404, "not_found").request("/api/v1/repos/owner/w/file");
+    expect(notFound.status).toBe(404);
+    await expect(notFound.json()).resolves.toMatchObject({ code: "not_found" });
+
+    const gateway = await appThrowingBackend(502).request("/api/v1/repos/owner/w/file");
+    expect(gateway.status).toBe(502);
+    await expect(gateway.json()).resolves.toMatchObject({ code: "bad_gateway" });
+
+    const rejected = await appThrowingBackend(401).request("/api/v1/repos/owner/w/file");
+    expect(rejected.status).toBe(401);
+    await expect(rejected.json()).resolves.toMatchObject({ code: "pat_invalid" });
+  });
+
+  it("sends a web WorkspaceBackendError 401 back to /login", async () => {
+    const res = await appThrowingBackend(401).request("/owner/repo/src/branch/main/x.md");
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login");
   });
 
   it("renders HTML error pages on web routes", async () => {

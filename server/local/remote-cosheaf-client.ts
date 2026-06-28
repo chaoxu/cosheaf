@@ -12,7 +12,6 @@ export interface RemotePullClient {
     repo: string,
     body: { head: string; base: string; title: string; body: string },
   ): Promise<{ number: number }>;
-  getPull(owner: string, repo: string, n: number): Promise<{ number: number; state: string; merged: boolean } | null>;
   // Browser URL of a PR on the remote, for redirecting the user after opening it.
   pullUrl(owner: string, repo: string, n: number): string;
 }
@@ -60,10 +59,6 @@ export class RemoteCosheafClient implements RemotePullClient {
     body: { head: string; base: string; title: string; body: string },
   ): Promise<{ number: number }> {
     return this.req(`/api/v1/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify(body) });
-  }
-
-  getPull(owner: string, repo: string, n: number): Promise<{ number: number; state: string; merged: boolean } | null> {
-    return this.req(`/api/v1/repos/${owner}/${repo}/pulls/${n}`);
   }
 
   pullUrl(owner: string, repo: string, n: number): string {

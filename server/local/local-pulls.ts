@@ -5,6 +5,7 @@
 // remote Cosheaf via its typed API. Mounted only in local mode.
 
 import { Hono } from "hono";
+import { validBranchName } from "../branch-path.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { bad, conflict } from "../routes/responses.js";
 import type { AppEnv } from "../types.js";
@@ -37,6 +38,16 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
   const base = body?.base?.trim() || "main";
   if (!head) return c.json(...bad("head branch required"));
   if (head === base) return c.json(...bad("head and base are the same branch (nothing to review)"));
+  // Validate before either reaches `git push` as an argument (also blocks a
+  // leading "-" being read as a git option).
+  if (!validBranchName(head)) return c.json(...bad("invalid head branch name"));
+  if (base !== "main" && !validBranchName(base)) return c.json(...bad("invalid base branch name"));
+  // The commit lands on the checked-out branch, so it must match the branch we
+  // push — otherwise the edit lands on one branch and an empty `head` is pushed.
+  const current = await backend.currentBranch();
+  if (current && current !== head) {
+    return c.json(...bad(`open the pull request from the checked-out branch ("${current}"), not "${head}"`));
+  }
   const title = body?.title?.trim() || `Update ${head}`;
   const prBody = typeof body?.body === "string" ? body.body : title;
 

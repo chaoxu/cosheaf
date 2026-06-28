@@ -3,8 +3,7 @@ import type { Context, Hono } from "hono";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { resolveBranchPath } from "../branch-path.js";
-import type { Forgejo } from "../forgejo.js";
-import { onForgejo404 } from "../forgejo-errors.js";
+import { onWorkspaceNotFound, type WorkspaceBackend } from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { exportCoflatMarkdownPdf, PdfExportError, type PdfProjectFile, withPdfExportLimit } from "../pdf-export.js";
 import { loadRepoConfig } from "../repo-config.js";
@@ -22,13 +21,13 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
     if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
       return badRequestPage(ctx.user, "PDF export is only available for Coflat Markdown workspaces.");
     }
-    const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/options/branch/"));
+    const resolved = await resolveBranchPath(ctx.backend, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/options/branch/"));
     if (!resolved?.path) return notFoundPage(ctx.user, "File not found");
     const rel = safeRel(resolved.path);
     if (!rel || fileKindForPath(rel) !== "markdown") {
       return badRequestPage(ctx.user, "PDF export is only available for Markdown files.");
     }
-    const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
+    const meta = await ctx.backend.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onWorkspaceNotFound(null));
     if (!meta) return notFoundPage(ctx.user, "File not found");
     const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
     return htmlResponse(
@@ -75,22 +74,22 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
     }
     try {
       const result = await withPdfExportLimit(`${ctx.user}:${clientIp(c, c.get("config").trustedProxyHops)}`, async () => {
-        const resolved = await resolveBranchPath(ctx.fj, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/branch/"));
+        const resolved = await resolveBranchPath(ctx.backend, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/branch/"));
         if (!resolved?.path) throw new PdfExportError(404, "not found");
         const rel = safeRel(resolved.path);
         if (!rel) throw new PdfExportError(404, "not found");
         if (fileKindForPath(rel) !== "markdown") {
           throw new PdfExportError(400, "PDF export is only available for Markdown files.");
         }
-        const meta = await ctx.fj.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onForgejo404(null));
+        const meta = await ctx.backend.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onWorkspaceNotFound(null));
         if (!meta) throw new PdfExportError(404, "not found");
 
         const [source, files] = await Promise.all([
-          ctx.fj.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
-          repoFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch),
+          ctx.backend.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
+          repoFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch),
         ]);
         const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
-        const projectFiles = await collectPdfProjectFiles(ctx.fj, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
+        const projectFiles = await collectPdfProjectFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
         return exportCoflatMarkdownPdf({
           source,
           sourcePath: rel,
@@ -126,15 +125,15 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
   }));
 }
 
-async function repoFiles(fj: Forgejo, owner: string, repo: string, ref: string) {
-  const tree = await fj.getTree(owner, repo, ref, true);
+async function repoFiles(backend: WorkspaceBackend, owner: string, repo: string, ref: string) {
+  const tree = await backend.getTree(owner, repo, ref, true);
   return tree
     .filter((entry) => entry.type === "blob")
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 async function collectPdfProjectFiles(
-  fj: Forgejo,
+  backend: WorkspaceBackend,
   owner: string,
   repo: string,
   branch: string,
@@ -155,7 +154,7 @@ async function collectPdfProjectFiles(
     }
     const content = rel === sourceRel
       ? Buffer.from(source, "utf8")
-      : await fj.getRawFileBytes(owner, repo, branch, rel);
+      : await backend.getRawFileBytes(owner, repo, branch, rel);
     totalBytes += content.byteLength;
     if (totalBytes > PDF_EXPORT_MAX_PROJECT_BYTES) {
       throw new PdfExportError(413, "PDF export project files are too large.");

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
@@ -204,6 +204,10 @@ export function loadConfig(): Config {
 // scripts/check-no-forgejo-in-workbench.mjs).
 export function buildLocalConfig(opts: { dataDir: string; port: number }): Config {
   mkdirSync(opts.dataDir, { recursive: true });
+  // The sidecar lives inside the user's workspace folder; keep git from ever
+  // staging it (the commit page's `git add -A` would otherwise commit and push
+  // the live SQLite db). A self-ignoring .gitignore inside the dir is enough.
+  writeFileSync(path.join(opts.dataDir, ".gitignore"), "*\n");
   return {
     mode: "local",
     dataDir: opts.dataDir,

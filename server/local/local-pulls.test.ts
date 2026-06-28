@@ -60,7 +60,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     const { work } = repoWithOrigin();
     const res = await app(work).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "feature", base: "main", title: "t" }),
     });
     expect(res.status).toBe(409);
@@ -74,13 +74,12 @@ describe("local Workbench Tier 2 (push + PR)", () => {
         calls.push({ owner, repo, ...body });
         return { number: 7 };
       },
-      getPull: async () => null,
       pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
     };
 
     const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "feature", base: "main", title: "edit hello", body: "b" }),
     });
     expect(res.status).toBe(200);
@@ -97,12 +96,11 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     const { work } = repoWithOrigin();
     const remote: RemotePullClient = {
       openPull: async () => ({ number: 1 }),
-      getPull: async () => null,
       pullUrl: () => "x",
     };
     const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "main", base: "main" }),
     });
     expect(res.status).toBe(400);
@@ -112,7 +110,6 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     const { work } = repoWithOrigin();
     const remote: RemotePullClient = {
       openPull: async () => ({ number: 7 }),
-      getPull: async () => null,
       pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
     };
     const res = await app(work, remote).request("/me/notes/pulls/7");

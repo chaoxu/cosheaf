@@ -12,7 +12,6 @@ import {
   WorkspaceBackendError,
   type WorkspaceBackend,
   type WsBranch,
-  type WsCommit,
   type WsCreateBranch,
   type WsDeleteFile,
   type WsFileMeta,
@@ -100,9 +99,5 @@ export class ForgejoWorkspaceBackend implements WorkspaceBackend {
 
   listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return tx(() => this.fj.listPulls(owner, repo, state));
-  }
-
-  getCommit(owner: string, repo: string, sha: string): Promise<WsCommit> {
-    return tx(() => this.fj.getCommit(owner, repo, sha));
   }
 }

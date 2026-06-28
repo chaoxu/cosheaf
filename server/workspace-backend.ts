@@ -11,8 +11,6 @@
 // reads (sha, commit.id, head.ref, …) so the hosted ForgejoWorkspaceBackend can
 // return its Forgejo responses directly and the conversion stays mechanical.
 
-import type { Role } from "../shared/roles.js";
-
 // A backend operation failed with a recoverable, classifiable status. `code`
 // carries the semantic the route branches on (so it never reaches into a
 // backend-specific error body):
@@ -101,15 +99,6 @@ export interface WsPull {
   state: "open" | "closed";
 }
 
-export interface WsCommit {
-  sha: string;
-  commit: {
-    message: string;
-    author?: { name?: string; email?: string; date?: string };
-  };
-  author?: { login: string } | null;
-}
-
 export interface WsPutFile {
   branch: string;
   path: string;
@@ -138,11 +127,6 @@ export interface WsCreateBranch {
   oldBranchName?: string;
 }
 
-// The role the caller holds on a workspace, as resolved by the backend. Kept
-// here (rather than only in middleware) so a future backend can resolve role
-// without importing middleware.
-export type WsRole = Role | "none";
-
 // The repository data layer. Methods keep `(owner, repo, …)` so the hosted
 // conversion is a mechanical `repoCtx.fj` → `repoCtx.backend` rename; the local
 // backend is bound to a single working tree and ignores owner/repo.
@@ -161,8 +145,7 @@ export interface WorkspaceBackend {
   listBranches(owner: string, repo: string): Promise<WsBranch[]>;
   createBranch(owner: string, repo: string, opts: WsCreateBranch): Promise<WsBranch>;
   deleteBranch(owner: string, repo: string, branch: string): Promise<void>;
-  // repo meta + pulls + commit
+  // repo meta + pulls
   getRepo(owner: string, repo: string): Promise<WsRepo | null>;
   listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<WsPull[]>;
-  getCommit(owner: string, repo: string, sha: string): Promise<WsCommit>;
 }

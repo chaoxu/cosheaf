@@ -81,6 +81,22 @@ describe("local Workbench Tier 1 (git)", () => {
     expect(git(dir, ["status", "--porcelain"]).trim()).toBe("");
   });
 
+  it("never commits the .cosheaf sidecar dir", async () => {
+    const dir = gitRepo();
+    const wb = app(dir); // buildLocalConfig writes <dir>/.cosheaf/.gitignore
+    writeFileSync(join(dir, ".cosheaf", "db.sqlite"), "fake-sidecar");
+    writeFileSync(join(dir, "hello.md"), "# changed\n");
+    const res = await wb.request("/me/notes/commit", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: new URLSearchParams({ message: "edit" }).toString(),
+    });
+    expect(res.status).toBe(303);
+    const tracked = git(dir, ["ls-files"]).split("\n").filter(Boolean);
+    expect(tracked.some((f) => f.startsWith(".cosheaf"))).toBe(false);
+    expect(tracked).toContain("hello.md");
+  });
+
   it("reports a non-git folder gracefully", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cosheaf-wb-nogit-"));
     writeFileSync(join(dir, "a.md"), "# A\n");

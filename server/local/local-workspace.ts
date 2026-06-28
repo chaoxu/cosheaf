@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { COFLAT_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 
 // Same shape the forge enforces for owner/repo names: start with an
 // alphanumeric or underscore, then alphanumerics / _ / . / -.
@@ -71,9 +71,11 @@ function readConfigDoc(dir: string): Record<string, unknown> | null {
   }
 }
 
-function formatFromDoc(doc: Record<string, unknown> | null): string {
-  const raw = doc?.format;
-  return typeof raw === "string" && isDocumentFormatId(raw) ? raw : COFLAT_FORMAT_ID;
+function formatFromDoc(_doc: Record<string, unknown> | null): string {
+  // The Workbench renders Coflat directly; the passthrough format depends on the
+  // forge's /markdown API, which isn't available locally. So a local workspace is
+  // always Coflat regardless of cosheaf.yaml — Coflat renders plain markdown fine.
+  return COFLAT_FORMAT_ID;
 }
 
 function remoteFromDoc(doc: Record<string, unknown> | null): LocalRemote | null {

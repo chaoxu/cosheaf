@@ -6,14 +6,8 @@
 // they fabricate the fixed local user and the single admin workspace without
 // any forge call. Forge-free by construction.
 
-import type { Context } from "hono";
 import { workspaceSlug } from "../../shared/conventions.js";
-import type { AppEnv, LocalWorkspaceIdentity, WorkspaceContext } from "../types.js";
-
-// True when this process is the local Workbench.
-export function isLocalMode(c: Context<AppEnv>): boolean {
-  return c.get("config").mode === "local";
-}
+import type { LocalWorkspaceIdentity, WorkspaceContext } from "../types.js";
 
 // The WorkspaceContext for a local request, or null when owner/repo don't match
 // the single workspace this Workbench serves (the caller turns that into a 404).

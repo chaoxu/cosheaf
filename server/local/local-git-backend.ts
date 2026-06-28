@@ -14,15 +14,13 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
   WorkspaceBackendError,
   type WorkspaceBackend,
   type WsBranch,
-  type WsCommit,
   type WsCreateBranch,
   type WsDeleteFile,
   type WsFileMeta,
@@ -50,15 +48,6 @@ export function gitBlobHash(bytes: Buffer): string {
   return createHash("sha1").update(header).update(bytes).digest("hex");
 }
 
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await access(p, fsConstants.F_OK);
-    return true;
-  } catch (_err) {
-    return false;
-  }
-}
-
 const execFileP = promisify(execFile);
 
 // A single changed entry from `git status --porcelain` (Tier 1 status panel).
@@ -75,6 +64,9 @@ export interface GitStatus {
 
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   private readonly root: string;
+  // Monotonic per-instance counter so concurrent writes (even of identical
+  // content) never collide on the same temp filename.
+  private writeSeq = 0;
 
   constructor(rootDir: string) {
     this.root = resolve(rootDir);
@@ -159,7 +151,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     // Write to a temp sibling then rename so a reader never sees a half-written
     // file. The temp name is derived from the content hash (no Math.random,
     // which is unavailable in some sandboxes and irrelevant here).
-    const tmp = `${full}.tmp-${gitBlobHash(opts.content).slice(0, 12)}`;
+    const tmp = `${full}.tmp-${gitBlobHash(opts.content).slice(0, 12)}-${this.writeSeq++}`;
     await writeFile(tmp, opts.content);
     await rename(tmp, full);
     return { content: { sha: gitBlobHash(opts.content) }, commit: { sha: WORKTREE_REF } };
@@ -216,10 +208,6 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // (Tier 2), reached through RemoteCosheafClient, not this backend.
   async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return [];
-  }
-
-  async getCommit(_owner: string, _repo: string, sha: string): Promise<WsCommit> {
-    throw new WorkspaceBackendError(404, "not_found", `commit not available locally: ${sha}`);
   }
 
   // ---------------- Tier 1: git operations ----------------
@@ -283,14 +271,5 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   async push(branch: string): Promise<void> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
     await this.git(["push", "origin", branch]);
-  }
-
-  // Expose the root for the launcher (indexing, identity derivation).
-  get rootDir(): string {
-    return this.root;
-  }
-
-  async exists(filepath: string): Promise<boolean> {
-    return pathExists(this.abs(filepath));
   }
 }
