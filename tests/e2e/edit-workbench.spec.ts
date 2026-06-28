@@ -504,15 +504,15 @@ test("edit workbench keeps compact read and rich line boxes aligned", async ({ p
   }
 });
 
-test("standalone read still uses the reader while workbench read uses the editor", async ({ page }) => {
+test("bare editable Coflat Markdown routes enter the read/edit workbench", async ({ page }) => {
   test.setTimeout(60_000);
   await signIn(page);
   await page.setViewportSize({ width: 1280, height: 900 });
 
   await page.goto(`${repoBase}/src/branch/main/hello.md`);
-  await expect(page.locator(CF.reader)).toContainText("Hello");
-  await waitForHydratedReader(page);
-  await expect(page.getByTestId("editor")).toHaveCount(0);
+  await expect(page.locator(".coflat-reader-island")).toHaveCount(0);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  await expect(page.locator(".edit-primary-mode button.active")).toHaveText("Edit");
 
   await page.goto(`${repoBase}/src/branch/main/hello.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
   await expect(page.locator(".coflat-reader-island")).toHaveCount(0);

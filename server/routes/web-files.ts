@@ -160,7 +160,14 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const rel = safeRel(resolved.path);
   if (!rel) return notFoundPage(user, "File not found");
   const kind = fileKindForPath(rel);
-  if ((requestedMode === "read" || requestedMode === "edit") && editableFileKind(kind) && ws.role !== "read") {
+  const sourceView = c.req.query("view") === "source";
+  const workbenchMode =
+    requestedMode === "read" || requestedMode === "edit"
+      ? requestedMode
+      : requestedMode === undefined && !sourceView && kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
+        ? "auto"
+        : null;
+  if (workbenchMode && editableFileKind(kind) && ws.role !== "read") {
     const editBranchParam = c.req.query("edit_branch");
     const editBranch = editBranchFor(ctx.user, editBranchParam ?? resolved.branch);
     if (!validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
@@ -168,7 +175,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       branch: editBranch,
       rel,
       kind,
-      initialMode: requestedMode,
+      initialMode: workbenchMode,
     });
   }
   const meta = await fj.getFileMeta(owner, repo, resolved.branch, rel).catch(onForgejo404(null));
@@ -178,7 +185,6 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     fj.listBranches(owner, repo).catch(() => []),
   ]);
   const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
-  const sourceView = c.req.query("view") === "source";
   const content = kind === "markdown" || (kind === "text" && sourceView) ? await fj.getRawFile(owner, repo, resolved.branch, rel) : null;
   const previewKind = await previewKindForFile(fj, owner, repo, resolved.branch, rel, kind, meta.size);
   const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
@@ -300,7 +306,7 @@ registerPdfExportRoutes(web);
 
 async function editPageResponse(
   ctx: WebCtx,
-  opts: { branch: string; rel: string; kind: FileKind; initialMode: "read" | "edit" },
+  opts: { branch: string; rel: string; kind: FileKind; initialMode: "read" | "edit" | "auto" },
 ): Promise<Response> {
   const { branch, rel, kind, initialMode } = opts;
   const branchInfo = branch === "main" ? await ctx.fj.getBranch(ctx.owner, ctx.repo, "main") : await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);

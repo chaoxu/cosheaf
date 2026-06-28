@@ -119,14 +119,24 @@ describe("web file editor route", () => {
     expect(listedPulls).toBe(false);
   });
 
-  it("keeps the rendered file reader available without a Branches toolbar button", async () => {
+  it("opens bare editable Coflat Markdown files in the read/edit workbench", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/web-edit" }]));
+        forge.get("/api/v1/repos/owner/w/branches/*", (c) => {
+          const branch = decodeURIComponent(c.req.path.split("/branches/")[1] ?? "");
+          return Response.json({ name: branch, commit: { id: branch === "main" ? "main-head" : "edit-head" } });
+        });
         forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }),
+        );
+        forge.get("/api/v1/repos/owner/w/git/trees/user%2Falice%2Fweb-edit", () =>
+          Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }),
+        );
+        forge.get("/api/v1/repos/owner/w/git/trees/edit-head", () =>
           Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }),
         );
         forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
@@ -139,24 +149,13 @@ describe("web file editor route", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('href="/owner/w/src/branch/main/notes.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
-    expect(body).toContain('class="doc-rail"');
-    expect(body).toContain("data-document-rail");
-    expect(body).toContain('data-doc-mode="read"');
-    expect(body).toContain('data-read-href="/owner/w/src/branch/main/notes.md"');
-    expect(body).toContain('data-edit-href="/owner/w/src/branch/main/notes.md?mode=edit&amp;edit_branch=user%2Falice%2Fweb-edit"');
-    expect(body).toContain('class="doc-reader-chrome"');
-    expect(body).toContain("<summary>More</summary>");
-    expect(body).toContain('href="/owner/w/export/pdf/options/branch/main/notes.md">PDF</a>');
-    expect(body).toContain('href="/owner/w/raw/branch/main/notes.md">Raw</a>');
-    expect(body).not.toContain("data-pdf-href");
-    expect(body).not.toContain("data-raw-href");
-    expect(body).not.toContain('data-reader-toc');
-    expect(body).not.toContain('<div class="doc-view-controls" aria-label="View">');
-    expect(body).not.toContain('<a class="button" href="/owner/w/branches">Branches</a>');
-    expect(body).not.toContain('<a class="button" href="/owner/w/raw/branch/main/notes.md">Raw</a>');
-    expect(body).not.toContain('<a class="button" href="/owner/w/src/branch/main/notes.md?view=source">Source</a>');
-    expect(body).not.toContain('<summary class="button">More</summary>');
+    expect(body).toContain('data-edit-shell data-initial-mode="auto" data-mode="auto"');
+    expect(body).toContain('id="web-editor-root"');
+    expect(body).toContain('data-branch="user/alice/web-edit"');
+    expect(body).toContain('data-read-branch="user/alice/web-edit"');
+    expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
+    expect(body).not.toContain("/src/cosheaf/web-reader.ts");
+    expect(body).not.toContain('class="doc-reader-chrome"');
 
     const sourceRes = await appFor(db).request("/owner/w/src/branch/main/notes.md?view=source", { headers: authHeaders(token) });
     expect(sourceRes.status).toBe(200);
@@ -198,7 +197,7 @@ describe("web file editor route", () => {
   it("reuses the cached Forgejo tree across server-rendered file pages", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
-    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
     let treeCalls = 0;
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
