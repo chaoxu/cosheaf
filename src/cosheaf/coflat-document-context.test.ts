@@ -118,6 +118,13 @@ describe("resolveRepoLink", () => {
       "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.png",
     );
   });
+
+  it("resolves PDF display assets to the raw PDF when no sibling preview exists", () => {
+    const context = coflatDocumentContext(payload, { workspaceCrossrefs: new Map(), citations: null });
+    expect(context.fileSystem?.resolveAssetUrl("notes/figures/pipeline.pdf", { purpose: "display" })).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.pdf",
+    );
+  });
 });
 
 describe("loadCoflatRefs", () => {

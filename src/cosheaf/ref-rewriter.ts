@@ -16,7 +16,11 @@ export function sanitizeAndRewriteRefs(rendered: string): string {
 }
 
 export function sanitizeAndRewriteRefsFragment(rendered: string): DocumentFragment {
-  const fragment = DOMPurify.sanitize(rendered, { RETURN_DOM_FRAGMENT: true }) as DocumentFragment;
+  const fragment = DOMPurify.sanitize(rendered, {
+    RETURN_DOM_FRAGMENT: true,
+    ADD_TAGS: ["object"],
+    ADD_ATTR: ["data", "type", "aria-label"],
+  }) as DocumentFragment;
   rewriteRefsInFragment(fragment);
   injectPageRefTestIds(fragment);
   return fragment;

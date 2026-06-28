@@ -7,7 +7,7 @@ import { formHeaders, seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { handleAppError } from "./error-handler.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
-import { prSideAssetPreviewPaths, registerPullRoutes } from "./web-pulls.js";
+import { registerPullRoutes } from "./web-pulls.js";
 
 const config = testConfig("web-pulls");
 
@@ -32,20 +32,6 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("web pull request routes", () => {
-  it("maps PR PDF assets to sibling previews or raw PDFs", () => {
-    const previews = prSideAssetPreviewPaths({ owner: "chao", repo: "milk" } as never, "head-sha", [
-      "img/has-preview.pdf",
-      "img/has-preview.png",
-      "img/complexity.pdf",
-      "notes/readme.md",
-    ]);
-
-    expect(previews).toEqual({
-      "img/has-preview.pdf": "img/has-preview.png",
-      "img/complexity.pdf": "/chao/milk/raw/branch/head-sha/img/complexity.pdf",
-    });
-  });
-
   function forgejoPull(): Record<string, unknown> {
     return {
       number: 7,
