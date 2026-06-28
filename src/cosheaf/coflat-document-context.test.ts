@@ -317,4 +317,47 @@ describe("loadCoflatRefs", () => {
     formatter?.registerCitations([{ ids: ["beta2021"], locators: [undefined] }]);
     expect(formatter?.cite(["beta2021"], [undefined])).toContain("[2]");
   });
+
+  it("ignores duplicate full-document citation registration from reader hydration", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/refs?ids=")) return new Response(JSON.stringify({ refs: [] }), { status: 200 });
+      if (url.endsWith("/refs.bib")) {
+        return new Response([
+          "@article{alpha2020,",
+          "  author = {Alpha, Alice},",
+          "  title = {First Paper},",
+          "  journal = {JACM},",
+          "  year = {2020}",
+          "}",
+          "",
+          "@article{beta2021,",
+          "  author = {Beta, Bob},",
+          "  title = {Second Paper},",
+          "  journal = {SICOMP},",
+          "  year = {2021}",
+          "}",
+        ].join("\n"));
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refs = await loadCoflatRefs({
+      ...payload,
+      bibliography: "refs.bib",
+      csl: "ieee",
+      source: "See [@alpha2020] before [@beta2021].",
+    });
+    const formatter = refs.citations?.formatter;
+    const revision = formatter?.revision;
+
+    formatter?.registerCitations([
+      { ids: ["alpha2020"], locators: [undefined] },
+      { ids: ["beta2021"], locators: [undefined] },
+    ]);
+
+    expect(formatter?.revision).toBe(revision);
+    expect(formatter?.cite(["alpha2020"], [undefined])).toContain("[1]");
+    expect(formatter?.cite(["beta2021"], [undefined])).toContain("[2]");
+  });
 });

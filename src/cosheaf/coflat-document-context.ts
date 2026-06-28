@@ -400,12 +400,12 @@ function fullDocumentCitationFormatter(formatter: CitationFormatter, fullCluster
     citeNarrative: (id) => formatter.citeNarrative(id),
     bibliographyEntries: (citedIds) => formatter.bibliographyEntries(citedIds),
     registerCitations: (clusters) => {
-      if (citationRegistrationKey(clusters) === fullRegistrationKey) {
-        formatter.registerCitations(clusters);
-      }
+      const key = citationRegistrationKey(clusters);
+      if (key !== fullRegistrationKey || formatter.citationRegistrationKey === fullRegistrationKey) return;
+      formatter.registerCitations(clusters);
     },
     get citationRegistrationKey() {
-      return formatter.citationRegistrationKey;
+      return fullRegistrationKey;
     },
     get revision() {
       return formatter.revision;
