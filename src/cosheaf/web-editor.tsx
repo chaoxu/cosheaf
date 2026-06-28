@@ -74,6 +74,14 @@ interface EditorConfig {
   baseSha: string | null;
   sourceSha: string | null;
   resetEditBranch: boolean;
+  // 'branch' (hosted default): edits land on a lazily-created `wip-` branch and
+  // expose Open-PR / Merge affordances. 'direct' (local Workbench): edits write
+  // the current ref in place — no invented branch, PR/Merge only when the
+  // backend reports it can open one.
+  writeMode: "branch" | "direct";
+  // Whether opening a PR is available (hosted: always; local: only at Tier 2
+  // with a configured remote). Gates the Open-PR / Merge-to-main affordances.
+  canOpenPull: boolean;
   mathMacros: Record<string, string>;
   bibliography?: string;
   csl?: string;
@@ -203,6 +211,8 @@ function readConfig(): { config: EditorConfig; content: string } {
       baseSha: mount.dataset.baseSha || null,
       sourceSha: mount.dataset.sourceSha || null,
       resetEditBranch: mount.dataset.resetEditBranch === "1",
+      writeMode: mount.dataset.writeMode === "direct" ? "direct" : "branch",
+      canOpenPull: mount.dataset.canOpenPull !== "0",
       mathMacros: repoConfig.mathMacros ?? {},
       assetPreviewPaths,
       ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
@@ -496,9 +506,13 @@ function WebEditor({
 
   const branchForWrite = useCallback(() => {
     const current = branchRef.current;
+    // Direct mode (local Workbench): write the current ref in place — never
+    // invent a `wip-` branch. The local backend aliases all refs to the working
+    // tree, so this is just "save to disk on the checked-out branch".
+    if (config.writeMode === "direct") return current || config.branch || "main";
     if (current && current !== "main") return current;
     return `${userBranchPrefix(config.username)}wip-${shortId()}`;
-  }, [config.username]);
+  }, [config.username, config.writeMode, config.branch]);
 
   const fileSystem = useMemo<FileSystem | undefined>(() => {
     if (config.formatId !== COFLAT_FORMAT_ID) return undefined;
@@ -884,7 +898,10 @@ function WebEditor({
   // path that was never written.
   const readHref = repoBranchFileHref(config.owner, config.repo, savedReadBranch, savedPath);
   const outlineMathMacros = documentContext?.mathMacros;
-  const branchActions = branch && branch !== "main";
+  // PR/Merge affordances require the backend to support opening a PR (hosted
+  // always; local only at Tier 2). In direct mode without that capability the
+  // branch actions are hidden entirely.
+  const branchActions = config.canOpenPull && branch && branch !== "main";
   const canDiscardDefaultEditBranch = branchExists && branch === `${userBranchPrefix(config.username)}web-edit`;
   const railModel = documentRailModel({
     mode: "edit",

@@ -6,6 +6,7 @@ import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import { Forgejo } from "../forgejo.js";
 import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
 import type { WorkspaceBackend } from "../workspace-backend.js";
+import { localWorkspaceContext } from "../local/local-mode.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
@@ -36,6 +37,12 @@ export interface WebCtx {
   // The signed-in user's same-origin avatar src for the sidebar identity (#177),
   // or null when they have no uploaded avatar (the chrome shows initials).
   userAvatarSrc: string | null;
+  // How the page editor island writes: 'branch' (hosted — lazy wip-branch + PR
+  // affordances) or 'direct' (local Workbench — write the current ref in place).
+  writeMode: "branch" | "direct";
+  // Whether the editor may open a pull request (hosted always; local only at
+  // Tier 2 with a configured remote).
+  canOpenPull: boolean;
   // Per-request UI locale and a locale-bound translate, threaded into repo-page
   // chrome/renderers (no AsyncLocalStorage).
   locale: LocaleId;
@@ -140,6 +147,13 @@ function decodePathPart(value: string): string {
 }
 
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {
+  // Local Workbench: the fixed local user, no token, no Forgejo client.
+  if (c.get("config").mode === "local") {
+    const user = { username: c.get("localWorkspace").user };
+    c.set("user", user);
+    c.set("forgejoToken", "");
+    return { user, forgejoToken: "" };
+  }
   const auth = await resolveAuth(c);
   if (!auth) return null;
   c.set("user", auth.user);
@@ -156,6 +170,34 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const config = c.get("config");
   if (!owner || !repo || !FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo)) {
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
+  }
+  if (config.mode === "local") {
+    const id = c.get("localWorkspace");
+    const ws = localWorkspaceContext(id, owner, repo);
+    if (!ws) return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
+    const backend = c.get("localBackend");
+    c.set("workspace", ws);
+    c.set("repoCtx", { backend, owner, repo });
+    // Local mode has no Forgejo: the local web router mounts only backend-driven
+    // pages, so ctx.fj is never read. The typed-undefined placeholder keeps
+    // WebCtx.fj's type without a forge connection and without churning the
+    // hosted-only page modules to an optional fj.
+    return {
+      ok: true,
+      owner,
+      repo,
+      user: auth.user.username,
+      backend,
+      fj: undefined as unknown as Forgejo,
+      ws,
+      db: c.get("db"),
+      wsTitle: id.title,
+      userAvatarSrc: null,
+      writeMode: "direct",
+      canOpenPull: id.canOpenPull,
+      locale: c.get("locale"),
+      t: c.get("t"),
+    };
   }
   const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: auth.forgejoToken });
   const role = await resolveRepoRole(fj, owner, repo, auth.user.username);
@@ -176,7 +218,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     resolveWorkspaceDisplayTitle(db, fj, ws),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, ws, db, wsTitle, userAvatarSrc, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", canOpenPull: true, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(

@@ -153,6 +153,10 @@ describe("web file editor route", () => {
     expect(body).toContain('id="web-editor-root"');
     expect(body).toContain('data-branch="user/alice/web-edit"');
     expect(body).toContain('data-read-branch="user/alice/web-edit"');
+    // Hosted edit pages keep the branch-based write model (lazy wip-branch + PR
+    // affordances); the local Workbench is the only writeMode="direct" surface.
+    expect(body).toContain('data-write-mode="branch"');
+    expect(body).toContain('data-can-open-pull="1"');
     expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
     expect(body).not.toContain("/src/cosheaf/web-reader.ts");
     expect(body).not.toContain('class="doc-reader-chrome"');

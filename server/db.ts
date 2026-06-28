@@ -20,6 +20,10 @@ for (const candidate of [
 }
 
 export interface Config {
+  // "hosted" (default): Forgejo-backed multi-workspace server. "local": the
+  // Cosheaf Workbench serving a single on-disk folder through a
+  // LocalGitWorkspaceBackend, with no Forgejo, webhooks, or reconciler.
+  mode: "hosted" | "local";
   dataDir: string;
   port: number;
   forgejoUrl: string;
@@ -174,6 +178,7 @@ export function loadConfig(): Config {
     process.exit(1);
   }
   return {
+    mode: "hosted",
     dataDir,
     port: serverPort(),
     forgejoUrl,
@@ -189,6 +194,33 @@ export function loadConfig(): Config {
     coverifyBotToken: withDefault("COSHEAF_COVERIFY_BOT_TOKEN", ""),
     coverifyBotLogin: withDefault("COSHEAF_COVERIFY_BOT_LOGIN", "coverify"),
     reconcileIntervalMs: reconcileIntervalMs(),
+  };
+}
+
+// Build a Config for the local Workbench (config.mode === "local"). The backend
+// is a LocalGitWorkspaceBackend, so the Forgejo fields are inert placeholders
+// (never read in local mode). Kept here, outside server/local/**, so the
+// Workbench source never even names a forge field (enforced by
+// scripts/check-no-forgejo-in-workbench.mjs).
+export function buildLocalConfig(opts: { dataDir: string; port: number }): Config {
+  mkdirSync(opts.dataDir, { recursive: true });
+  return {
+    mode: "local",
+    dataDir: opts.dataDir,
+    port: opts.port,
+    forgejoUrl: "http://127.0.0.1:0",
+    forgejoToken: "",
+    forgejoAdminToken: "",
+    webhookSecret: "",
+    webhookUrl: "",
+    publicOrigin: null,
+    registrationOpen: false,
+    trustedProxyHops: 0,
+    coverifyCmd: "",
+    coverifyApiUrl: "",
+    coverifyBotToken: "",
+    coverifyBotLogin: "",
+    reconcileIntervalMs: 0,
   };
 }
 

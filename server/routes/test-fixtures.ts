@@ -77,6 +77,7 @@ export function seedTestWorkspace(
 // only dataDir varying; `name` keeps the per-suite tmp path distinct.
 export function testConfig(name: string, overrides: Partial<Config> = {}): Config {
   return {
+    mode: "hosted",
     dataDir: `/tmp/cosheaf-${name}-test`,
     port: 3030,
     forgejoUrl: "http://forgejo.test",

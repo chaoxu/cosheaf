@@ -24,7 +24,9 @@ import { webhooks } from "./routes/webhooks.js";
 import { members, workspaces } from "./routes/workspaces.js";
 import { SSEHub } from "./sse.js";
 import { listPublicAssetPaths } from "./static-assets.js";
-import type { AppEnv } from "./types.js";
+import { createLocalWebRouter } from "./local/local-web.js";
+import type { AppEnv, LocalWorkspaceIdentity } from "./types.js";
+import type { WorkspaceBackend } from "./workspace-backend.js";
 import { viteDevOrigin } from "./vite-dev-origin.js";
 import { makeT } from "../shared/i18n/index.js";
 
@@ -35,11 +37,18 @@ export interface CreateAppOptions {
   db: Database.Database;
   fjAdmin?: Forgejo;
   sse?: SSEHub;
+  // Local Workbench (config.mode === "local"): the single on-disk backend and
+  // the workspace identity it serves. Required in local mode; ignored otherwise.
+  workspaceBackend?: WorkspaceBackend;
+  localWorkspace?: LocalWorkspaceIdentity;
 }
 
 export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   const { config, db } = options;
-  const fjAdmin = options.fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken });
+  const local = config.mode === "local";
+  // No admin forge client in local mode — webhooks/provisioning aren't mounted
+  // and the Workbench is Forgejo-free.
+  const fjAdmin = local ? undefined : options.fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken });
   const sse = options.sse ?? new SSEHub();
   const app = new Hono<AppEnv>();
 
@@ -48,7 +57,11 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
-    c.set("fjAdmin", fjAdmin);
+    if (fjAdmin) c.set("fjAdmin", fjAdmin);
+    if (local && options.workspaceBackend && options.localWorkspace) {
+      c.set("localBackend", options.workspaceBackend);
+      c.set("localWorkspace", options.localWorkspace);
+    }
     c.set("sse", sse);
     const locale = resolveLocale(c);
     c.set("locale", locale);
@@ -65,16 +78,23 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
 
   app.use("/api/v1/*", rejectCrossOriginCookieApiMutation);
 
-  app.route("/api/v1", auth);
-  app.route("/api/v1/workspaces", workspaces);
-  app.route("/api/v1/repos", members);
-  app.route("/api/v1/repos", files);
-  app.route("/api/v1/repos", pulls);
-  app.route("/api/v1/repos", branches);
-  app.route("/api/v1/repos", issues);
-  app.route("/api/v1/repos", notifications);
-  app.route("/api/v1", globalNotifications);
-  app.route("/api/v1/webhooks", webhooks);
+  if (local) {
+    // Local Workbench: only the Forgejo-free, backend-driven typed routes the
+    // page islands call. No auth/workspaces/pulls/issues/notifications/webhooks.
+    app.route("/api/v1/repos", files);
+    app.route("/api/v1/repos", branches);
+  } else {
+    app.route("/api/v1", auth);
+    app.route("/api/v1/workspaces", workspaces);
+    app.route("/api/v1/repos", members);
+    app.route("/api/v1/repos", files);
+    app.route("/api/v1/repos", pulls);
+    app.route("/api/v1/repos", branches);
+    app.route("/api/v1/repos", issues);
+    app.route("/api/v1/repos", notifications);
+    app.route("/api/v1", globalNotifications);
+    app.route("/api/v1/webhooks", webhooks);
+  }
 
   const distDir = path.resolve(process.cwd(), "dist");
   const publicDir = path.resolve(process.cwd(), "public");
@@ -128,7 +148,12 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     return response ?? c.json({ error: "not found" }, 404);
   });
 
-  app.route("/", web);
+  app.route(
+    "/",
+    local && options.localWorkspace
+      ? createLocalWebRouter(options.localWorkspace.owner, options.localWorkspace.repo)
+      : web,
+  );
 
   return app;
 }

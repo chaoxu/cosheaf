@@ -8,6 +8,7 @@ import type { AppEnv } from "./types.js";
 import { freshTestDb } from "./routes/test-fixtures.js";
 
 const config: Config = {
+  mode: "hosted",
   dataDir: "/tmp/cosheaf-api-csrf-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",

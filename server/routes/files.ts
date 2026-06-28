@@ -347,7 +347,7 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
   const branch = body?.new_branch?.trim() || baseBranch;
   if (!validRequestedBranch(baseBranch) || !validRequestedBranch(branch))
     return c.json(...bad("valid branch name required"));
-  if (branch === "main")
+  if (branch === "main" && c.get("config").mode !== "local")
     return c.json(...bad("branch required (cannot write to main)"));
 
   await ensureBranchFrom(c, branch, baseBranch);
@@ -409,7 +409,7 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
   } | null;
   const branch = body?.branch?.trim() || "main";
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
-  if (branch === "main") return c.json(...bad("branch required (cannot delete on main)"));
+  if (branch === "main" && c.get("config").mode !== "local") return c.json(...bad("branch required (cannot delete on main)"));
   if (typeof body?.sha !== "string" || body.sha.trim() === "") return c.json(...bad("sha required"));
   const { backend, owner, repo } = c.get("repoCtx");
   await ensureBranch(c, branch);
@@ -477,7 +477,7 @@ files.put("/:owner/:repo/file", async (c) => {
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
-  if (branch === "main")
+  if (branch === "main" && c.get("config").mode !== "local")
     return c.json(...bad("branch required (cannot write to main)"));
   const body = (await c.req.json().catch(() => null)) as {
     content?: string;
@@ -641,7 +641,7 @@ files.post("/:owner/:repo/assets", async (c) => {
     return c.json(...bad("branch required"));
   if (!validBranchName(branch))
     return c.json(...bad("valid branch name required"));
-  if (branch === "main")
+  if (branch === "main" && c.get("config").mode !== "local")
     return c.json(...bad("branch required (cannot upload assets to main)"));
   const form = await c.req.formData().catch(() => null);
   const file = form?.get("file");
@@ -992,7 +992,7 @@ files.delete("/:owner/:repo/file", async (c) => {
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
-  if (branch === "main")
+  if (branch === "main" && c.get("config").mode !== "local")
     return c.json(...bad("branch required (cannot delete on main)"));
   const rawBody = await c.req.text().catch(() => null);
   if (rawBody === null)

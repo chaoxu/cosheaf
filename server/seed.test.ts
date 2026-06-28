@@ -15,6 +15,7 @@ vi.mock("./workspace-provisioning.js", () => ({
 }));
 
 const config: Config = {
+  mode: "hosted",
   dataDir: "/tmp/cosheaf-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",

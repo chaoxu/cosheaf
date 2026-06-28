@@ -32,6 +32,22 @@ export interface RepoCtx {
   repo: string;
 }
 
+// Identity + capabilities of the single workspace a local Workbench serves.
+// Set on context by the local app assembly; consumed by the local-mode branches
+// in requireAuth/requireMembership/resolveWebRepo so they resolve role, format,
+// title, and editor write-mode without any Forgejo call.
+export interface LocalWorkspaceIdentity {
+  owner: string;
+  repo: string;
+  defaultMdFormat: string;
+  user: string;
+  // Workbench title (folder/README), shown in the Read-mode chrome.
+  title: string;
+  // Tier 2 (remote + Cosheaf token configured) — gates the editor's Open-PR /
+  // Merge affordances. false for Tier 0/1.
+  canOpenPull: boolean;
+}
+
 export interface AppEnv {
   Variables: {
     // Per-request correlation id (hono/request-id): echoed in the
@@ -57,5 +73,9 @@ export interface AppEnv {
     forgejoToken: string;
     workspace: WorkspaceContext;
     repoCtx: RepoCtx;
+    // Local Workbench only (config.mode === "local"): the single on-disk backend
+    // and the workspace identity it serves. Undefined in hosted mode.
+    localBackend: WorkspaceBackend;
+    localWorkspace: LocalWorkspaceIdentity;
   };
 }

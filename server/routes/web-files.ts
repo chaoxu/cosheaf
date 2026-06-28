@@ -109,6 +109,9 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
 
 web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const { owner, repo, backend, ws, user } = ctx;
+  // Direct write-mode (local Workbench): edit the resolved ref in place rather
+  // than forking a per-user edit branch.
+  const directWrite = ctx.writeMode === "direct";
   const requestedMode = c.req.query("mode");
   if ((requestedMode === "read" || requestedMode === "edit") && ws.role !== "read") {
     const requestedEditBranch = c.req.query("edit_branch");
@@ -128,8 +131,8 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       if (!rel) return badRequestPage(ctx.user, "Valid file path is required.");
       const kind = fileKindForPath(rel);
       if (!editableFileKind(kind)) return badRequestPage(ctx.user, "This file type can be previewed or opened raw, but cannot be edited in Cosheaf.");
-      const editBranch = editBranchFor(ctx.user, c.req.query("edit_branch") ?? resolved.branch);
-      if (!validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+      const editBranch = directWrite ? resolved.branch : editBranchFor(ctx.user, c.req.query("edit_branch") ?? resolved.branch);
+      if (!directWrite && !validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
       return editPageResponse(ctx, { branch: editBranch, rel, kind, initialMode: requestedMode });
     }
     const [files, branches] = await Promise.all([
@@ -172,8 +175,8 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
         : null;
   if (workbenchMode && editableFileKind(kind) && ws.role !== "read") {
     const editBranchParam = c.req.query("edit_branch");
-    const editBranch = editBranchFor(ctx.user, editBranchParam ?? resolved.branch);
-    if (!validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+    const editBranch = directWrite ? resolved.branch : editBranchFor(ctx.user, editBranchParam ?? resolved.branch);
+    if (!directWrite && !validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
     return editPageResponse(ctx, {
       branch: editBranch,
       rel,
@@ -359,6 +362,8 @@ async function editPageResponse(
             data-base-sha="${baseSha ?? ""}"
             data-source-sha="${sourceSha ?? ""}"
             data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
+            data-write-mode="${ctx.writeMode}"
+            data-can-open-pull="${ctx.canOpenPull ? "1" : "0"}"
           ><div class="web-editor-loading">Loading editor...</div></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
@@ -382,6 +387,8 @@ async function editPageResponse(
             data-base-sha="${baseSha ?? ""}"
             data-source-sha="${sourceSha ?? ""}"
             data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
+            data-write-mode="${ctx.writeMode}"
+            data-can-open-pull="${ctx.canOpenPull ? "1" : "0"}"
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
@@ -400,8 +407,11 @@ async function editPageResponse(
 
 web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
-  const branch = editBranchFor(ctx.user, stringField(form.branch));
-  if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+  // Direct write-mode (local Workbench) saves to the working-tree ref as-is;
+  // hosted folds the request onto a per-user edit branch.
+  const directWrite = ctx.writeMode === "direct";
+  const branch = directWrite ? (stringField(form.branch) ?? "main") : editBranchFor(ctx.user, stringField(form.branch));
+  if (!directWrite && !validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
   const rel = safeRel(stringField(form.path) ?? undefined);
   const oldRel = safeRel(stringField(form.old_path) ?? undefined);
   const content = textField(form.content);
