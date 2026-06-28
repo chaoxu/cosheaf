@@ -92,6 +92,18 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     expect(calls[0]).toMatchObject({ owner: "me", repo: "notes", head: "feature", base: "main", title: "edit hello" });
   });
 
+  it("409s opening a PR from a detached HEAD (no silent orphan commit)", async () => {
+    const { work } = repoWithOrigin();
+    git(work, ["checkout", "-q", "--detach"]);
+    const remote: RemotePullClient = { openPull: async () => ({ number: 1 }), pullUrl: () => "x" };
+    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ head: "feature", base: "main", title: "t" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("rejects a PR whose head equals its base", async () => {
     const { work } = repoWithOrigin();
     const remote: RemotePullClient = {

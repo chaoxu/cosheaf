@@ -21,7 +21,7 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
   if (!remote) {
     return c.json(
       ...conflict(
-        "No remote configured. Add a `remote:` block (url + Cosheaf token) to cosheaf.yaml to push and open pull requests.",
+        "No remote configured. Add { url, token } to .cosheaf/remote.json (gitignored) to push and open pull requests.",
       ),
     );
   }
@@ -44,8 +44,13 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
   if (base !== "main" && !validBranchName(base)) return c.json(...bad("invalid base branch name"));
   // The commit lands on the checked-out branch, so it must match the branch we
   // push — otherwise the edit lands on one branch and an empty `head` is pushed.
+  // A null current (detached/unborn HEAD) would commit to an orphan ref while
+  // pushing a stale named branch, silently stranding the edit — reject it.
   const current = await backend.currentBranch();
-  if (current && current !== head) {
+  if (!current) {
+    return c.json(...bad("HEAD is detached or on an unborn branch; check out a branch before opening a pull request"));
+  }
+  if (current !== head) {
     return c.json(...bad(`open the pull request from the checked-out branch ("${current}"), not "${head}"`));
   }
   const title = body?.title?.trim() || `Update ${head}`;

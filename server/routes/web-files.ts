@@ -10,7 +10,7 @@ import {
   type WorkspaceBackend,
 } from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
-import { planIndexPage } from "../indexer.js";
+import { deletePage, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -72,7 +72,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
           </div>
         </div>
         ${repoHomeHeader(ctx, owner, repo, stats)}
-        ${clonePanel(cloneUrl)}
+        ${ctx.writeMode === "direct" ? emptyHtml : clonePanel(cloneUrl)}
         ${repoLanding(ctx, "main", files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
@@ -293,6 +293,7 @@ web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
     }
     throw err;
   }
+  if (ctx.writeMode === "direct") deletePage(ctx.db, ctx.ws.slug, rel);
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, resolved.branch);
   invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
   c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
@@ -411,7 +412,10 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
   // hosted folds the request onto a per-user edit branch.
   const directWrite = ctx.writeMode === "direct";
   const branch = directWrite ? (stringField(form.branch) ?? "main") : editBranchFor(ctx.user, stringField(form.branch));
-  if (!directWrite && !validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
+  // Validate in both modes — even in direct mode the branch flows into the
+  // post-save redirect URL, so it must be a safe ref ("main" or a valid name).
+  const branchValid = directWrite ? branch === "main" || validBranchName(branch) : validBranchName(branch);
+  if (!branchValid) return badRequestPage(ctx.user, "Valid branch name is required.");
   const rel = safeRel(stringField(form.path) ?? undefined);
   const oldRel = safeRel(stringField(form.old_path) ?? undefined);
   const content = textField(form.content);
@@ -593,6 +597,12 @@ async function writeFile(
   // the plan for frontmatter/id rewriting, but must not publish unmerged branch
   // content into search/backlinks/tree doc metadata.
   // Deliberately do not call plan.commit() here; webhooks/reindex reconcile main.
+  // Local Workbench (direct write-mode) is the exception: the working tree is
+  // canonical and there is no webhook, so index now to keep search/backlinks live.
+  if (ctx.writeMode === "direct") {
+    plan?.commit();
+    if (previousRel && previousRel !== rel) deletePage(ctx.db, ctx.ws.slug, previousRel);
+  }
   // #182: a cosheaf.yaml edit through the editor busts its cached config for
   // this branch (read-after-write for config, independent of sidecar indexing).
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, branch);

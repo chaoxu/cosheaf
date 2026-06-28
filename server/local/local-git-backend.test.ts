@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -82,5 +83,38 @@ describe("LocalGitWorkspaceBackend", () => {
     const dir = tmpRepo();
     const backend = new LocalGitWorkspaceBackend(dir);
     await expect(backend.getFileMeta(O, R, "main", "../escape.md")).rejects.toBeInstanceOf(WorkspaceBackendError);
+  });
+
+  it("does not read through a symlink that escapes the workspace", async () => {
+    const dir = tmpRepo();
+    const outside = mkdtempSync(join(tmpdir(), "cosheaf-wb-outside-"));
+    writeFileSync(join(outside, "secret.txt"), "TOPSECRET");
+    symlinkSync(join(outside, "secret.txt"), join(dir, "link.md"));
+    const backend = new LocalGitWorkspaceBackend(dir);
+    await expect(backend.getRawFile(O, R, "main", "link.md")).rejects.toMatchObject({ code: "not_found" });
+    expect(await backend.getFileMeta(O, R, "main", "link.md")).toBeNull();
+    // The link is also not listed in the tree.
+    expect((await backend.getTree(O, R, "main")).map((e) => e.path)).not.toContain("link.md");
+  });
+
+  it("pins writes to the checked-out branch (Tier 1)", async () => {
+    const dir = tmpRepo();
+    const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: ["ignore", "pipe", "ignore"] });
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "user.email", "t@t"]);
+    git(["config", "user.name", "T"]);
+    writeFileSync(join(dir, "a.md"), "x");
+    git(["add", "-A"]);
+    git(["commit", "-qm", "i"]);
+    git(["checkout", "-q", "-b", "feature"]);
+    const backend = new LocalGitWorkspaceBackend(dir);
+    // Checked out on "feature": writing to "main" would land on the wrong branch.
+    await expect(
+      backend.putFile(O, R, { branch: "main", path: "a.md", content: "y", message: "m" }),
+    ).rejects.toMatchObject({ code: "wrong_branch" });
+    // Writing to the current branch is fine.
+    await expect(
+      backend.putFile(O, R, { branch: "feature", path: "a.md", content: "y", message: "m" }),
+    ).resolves.toMatchObject({ content: { sha: expect.any(String) } });
   });
 });

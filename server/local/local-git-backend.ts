@@ -14,7 +14,7 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -64,6 +64,7 @@ export interface GitStatus {
 
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   private readonly root: string;
+  private realRoot: string | undefined;
   // Monotonic per-instance counter so concurrent writes (even of identical
   // content) never collide on the same temp filename.
   private writeSeq = 0;
@@ -83,10 +84,25 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return full;
   }
 
+  // Resolve symlinks and re-assert containment so a link INSIDE the workspace
+  // (e.g. `secret.md -> /etc/passwd` in a folder cloned from an untrusted
+  // source) can't be read past the trust boundary. Throws not_found if the real
+  // target escapes the root; rethrows ENOENT for a genuinely missing file.
+  private async realInside(full: string): Promise<string> {
+    const realRoot = (this.realRoot ??= await realpath(this.root));
+    const real = await realpath(full);
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+      throw new WorkspaceBackendError(404, "not_found", "not found");
+    }
+    return real;
+  }
+
   private async readBytes(filepath: string): Promise<Buffer> {
+    const full = this.abs(filepath);
     try {
-      return await readFile(this.abs(filepath));
+      return await readFile(await this.realInside(full));
     } catch (err) {
+      if (err instanceof WorkspaceBackendError) throw err;
       if ((err as NodeJS.ErrnoException).code === "ENOENT" || (err as NodeJS.ErrnoException).code === "EISDIR") {
         throw new WorkspaceBackendError(404, "not_found", `not found: ${filepath}`);
       }
@@ -109,10 +125,15 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
           if (SKIP_DIRS.has(dirent.name)) continue;
           await walk(join(dir, dirent.name));
         } else if (dirent.isFile()) {
+          // isFile() is false for symlinks, so links are not listed (and can't
+          // be read through the tree). Use a stat-based signature for the sha:
+          // it's only a cache key, and reading every blob — including large
+          // binaries — just to hash it is wasteful and can exhaust memory.
           const full = join(dir, dirent.name);
           const rel = relative(this.root, full).split(sep).join("/");
-          const bytes = await readFile(full);
-          entries.push({ path: rel, type: "blob", size: bytes.length, sha: gitBlobHash(bytes) });
+          const info = await stat(full);
+          const sha = createHash("sha1").update(`${rel}:${info.size}:${info.mtimeMs}`).digest("hex");
+          entries.push({ path: rel, type: "blob", size: info.size, sha });
         }
       }
     };
@@ -131,11 +152,14 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   async getFileMeta(_owner: string, _repo: string, _ref: string, filepath: string): Promise<WsFileMeta | null> {
     const full = this.abs(filepath);
     try {
-      const info = await stat(full);
+      const real = await this.realInside(full);
+      const info = await stat(real);
       if (!info.isFile()) return null;
-      const bytes = await readFile(full);
+      const bytes = await readFile(real);
       return { sha: gitBlobHash(bytes), size: bytes.length };
     } catch (err) {
+      // Missing file, or a symlink whose target escaped the root — both "no meta".
+      if (err instanceof WorkspaceBackendError) return null;
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;
     }
@@ -145,7 +169,24 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return this.putFileBytes(owner, repo, { ...opts, content: Buffer.from(opts.content, "utf8") });
   }
 
+  // Every ref aliases the working tree, which in a git repo is exactly the
+  // checked-out branch. A write whose target branch differs would land on the
+  // wrong branch (silent data loss / misattribution), so reject it loudly.
+  // Tier 0 (no git) and a detached/unborn HEAD impose no branch.
+  private async assertOnBranch(branch: string): Promise<void> {
+    if (!(await this.isGitRepo())) return;
+    const cur = await this.currentBranch();
+    if (cur && branch !== cur) {
+      throw new WorkspaceBackendError(
+        409,
+        "wrong_branch",
+        `the working tree is on "${cur}", not "${branch}" — switch branches to edit it`,
+      );
+    }
+  }
+
   async putFileBytes(_owner: string, _repo: string, opts: WsPutFileBytes): Promise<WsFileWrite> {
+    await this.assertOnBranch(opts.branch);
     const full = this.abs(opts.path);
     await mkdir(resolve(full, ".."), { recursive: true });
     // Write to a temp sibling then rename so a reader never sees a half-written
@@ -158,6 +199,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   async deleteFile(_owner: string, _repo: string, opts: WsDeleteFile): Promise<void> {
+    await this.assertOnBranch(opts.branch);
     const full = this.abs(opts.path);
     try {
       await rm(full);
@@ -177,8 +219,8 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
 
   // Tier 0 (non-git folder): the working tree is a single `main` branch. Tier 1
   // (git repo): the real local branch list, so /raw/branch/<name> resolves and
-  // the chrome reflects the actual branches. All refs still alias the working
-  // tree for reads/writes.
+  // the chrome reflects the actual branches. All refs alias the working tree for
+  // reads; writes are pinned to the checked-out branch (see putFileBytes).
   async listBranches(_owner: string, _repo: string): Promise<WsBranch[]> {
     if (await this.isGitRepo()) {
       try {
@@ -250,7 +292,13 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     const entries = out
       .split("\n")
       .filter((line) => line.length > 3)
-      .map((line) => ({ code: line.slice(0, 2), path: line.slice(3).trim() }));
+      .map((line) => {
+        const code = line.slice(0, 2);
+        const rest = line.slice(3).trim();
+        // Renamed/copied entries are "old -> new"; show the new path.
+        const arrow = rest.indexOf(" -> ");
+        return { code, path: arrow === -1 ? rest : rest.slice(arrow + 4) };
+      });
     return { branch, entries };
   }
 

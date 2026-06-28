@@ -1094,7 +1094,7 @@ function WebEditor({
           />
           {branchActions ? (
             <span className="web-editor-branch-actions web-editor-mobile-actions" aria-label="Branch actions">
-              {config.role === "admin" ? (
+              {config.role === "admin" && config.writeMode !== "direct" ? (
                 <button type="button" onClick={() => void openPullRequest(true)} disabled={busy}>
                   Merge to main
                 </button>

@@ -72,6 +72,20 @@ describe("local Workbench app (Tier 0)", () => {
     expect(res.status).toBe(409);
   });
 
+  it("reindexes the sidecar on save so search finds the new content", async () => {
+    const { app } = localApp({ "hello.md": "---\nid: hello\n---\n# Hello\n" });
+    const read = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };
+    const put = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ content: "---\nid: hello\n---\n# Hello\n\nzzuniquewordzz\n", expected_sha: read.sha }),
+    });
+    expect(put.status).toBe(200);
+    const res = await app.request("/api/v1/repos/me/notes/search?q=zzuniquewordzz");
+    const body = (await res.json()) as { results: unknown[] };
+    expect(body.results.length).toBeGreaterThan(0);
+  });
+
   it("rejects an origin-less (cross-origin) mutation with 403", async () => {
     const { app } = localApp({ "hello.md": "# Hello\n" });
     const res = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {

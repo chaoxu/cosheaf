@@ -12,7 +12,7 @@ import {
 } from "../workspace-backend.js";
 import { validBranchName } from "../branch-path.js";
 import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
-import { planIndexPage } from "../indexer.js";
+import { deletePage, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import { workspaceSupportsXrefs, workspaceValidation } from "../workspace-validation.js";
@@ -383,6 +383,7 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
     }
     throw err;
   }
+  if (c.get("config").mode === "local") plan?.commit();
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(ws.slug, { type: "change", path: rel });
   const writtenSha = written.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
@@ -422,6 +423,7 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
     sha: body.sha,
     message: body.message?.trim() || `delete ${rel}`,
   });
+  if (c.get("config").mode === "local") deletePage(c.get("db"), c.get("workspace").slug, rel);
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(c.get("workspace").slug, { type: "change", path: rel });
   return c.json({ content: null, commit: null });
@@ -617,6 +619,13 @@ files.put("/:owner/:repo/file", async (c) => {
   // the plan for frontmatter/id rewriting and response metadata, but must not
   // publish unmerged branch content into search/backlinks/tree doc metadata.
   // Deliberately do not call plan.commit() here; webhooks/reindex reconcile main.
+  // Local Workbench is the exception: the working tree IS canonical and there is
+  // no webhook, so commit the plan now (and clean up a renamed-away page) to keep
+  // search/backlinks/xref live within a session.
+  if (c.get("config").mode === "local") {
+    plan?.commit();
+    if (isRename && previousRel && previousRel !== rel) deletePage(db, ws.slug, previousRel);
+  }
   // #182: a cosheaf.yaml write through the typed route busts its cached config
   // for this branch so the change is read-after-write consistent (the webhook
   // only reconciles main; external non-main pushes reconcile on reindex).
@@ -1037,6 +1046,7 @@ files.delete("/:owner/:repo/file", async (c) => {
   }
   const db = c.get("db");
   const ws = c.get("workspace");
+  if (c.get("config").mode === "local") deletePage(db, ws.slug, rel);
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(ws.slug, { type: "change", path: rel });
