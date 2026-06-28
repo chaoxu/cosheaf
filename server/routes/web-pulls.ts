@@ -35,6 +35,7 @@ import { emptyHtml, html, type Html } from "./web-html.js";
 import { branchIcon } from "./icons.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 import { composeField } from "./web-markdown.js";
+import { rawFileHref } from "./web-file-links.js";
 import { webCommentEditorAssets } from "./web-shell.js";
 import {
   diffModeControls,
@@ -568,9 +569,18 @@ async function prAssetPreviewPaths(ctx: WebCtx, pull: ForgejoPull): Promise<PrFi
     ctx.fj.getTree(ctx.owner, ctx.repo, pull.head.sha, true),
   ]);
   return {
-    base: buildPdfImagePreviewPaths(baseTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
-    head: buildPdfImagePreviewPaths(headTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
+    base: prSideAssetPreviewPaths(ctx, pull.base.sha, baseTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
+    head: prSideAssetPreviewPaths(ctx, pull.head.sha, headTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
   };
+}
+
+export function prSideAssetPreviewPaths(ctx: WebCtx, ref: string, paths: readonly string[]): Record<string, string> {
+  const previews = buildPdfImagePreviewPaths(paths);
+  for (const path of paths) {
+    if (!path.toLowerCase().endsWith(".pdf") || previews[path]) continue;
+    previews[path] = rawFileHref(ctx.owner, ctx.repo, ref, path);
+  }
+  return previews;
 }
 
 type PullListSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
