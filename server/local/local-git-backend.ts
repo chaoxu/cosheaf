@@ -12,10 +12,12 @@
 // hash so it equals the committed blob id for unchanged files and so a
 // concurrent on-disk edit is detected as a stale-sha conflict.
 
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import {
   WorkspaceBackendError,
   type WorkspaceBackend,
@@ -55,6 +57,20 @@ async function pathExists(p: string): Promise<boolean> {
   } catch (_err) {
     return false;
   }
+}
+
+const execFileP = promisify(execFile);
+
+// A single changed entry from `git status --porcelain` (Tier 1 status panel).
+export interface GitStatusEntry {
+  // The two-char porcelain status code (e.g. " M", "??", "A ").
+  code: string;
+  path: string;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  entries: GitStatusEntry[];
 }
 
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
@@ -167,9 +183,20 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return { name: branch, commit: { id: WORKTREE_REF } };
   }
 
-  // Tier 0: the working tree is presented as a single `main` branch. Tier 1
-  // (git repo) overrides this with the real branch list.
+  // Tier 0 (non-git folder): the working tree is a single `main` branch. Tier 1
+  // (git repo): the real local branch list, so /raw/branch/<name> resolves and
+  // the chrome reflects the actual branches. All refs still alias the working
+  // tree for reads/writes.
   async listBranches(_owner: string, _repo: string): Promise<WsBranch[]> {
+    if (await this.isGitRepo()) {
+      try {
+        const out = await this.git(["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
+        const names = out.split("\n").map((s) => s.trim()).filter(Boolean);
+        if (names.length > 0) return names.map((name) => ({ name, commit: { id: WORKTREE_REF } }));
+      } catch (_err) {
+        // Fall through to the working-tree default.
+      }
+    }
     return [{ name: "main", commit: { id: WORKTREE_REF } }];
   }
 
@@ -193,6 +220,69 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
 
   async getCommit(_owner: string, _repo: string, sha: string): Promise<WsCommit> {
     throw new WorkspaceBackendError(404, "not_found", `commit not available locally: ${sha}`);
+  }
+
+  // ---------------- Tier 1: git operations ----------------
+  //
+  // These are extra capabilities of the local backend (not part of the
+  // WorkspaceBackend interface), used by the local commit page. When the folder
+  // is not a git repo they degrade to "no git" rather than failing.
+
+  private gitRepo: boolean | undefined;
+
+  private async git(args: string[]): Promise<string> {
+    const { stdout } = await execFileP("git", ["-C", this.root, ...args], { maxBuffer: 16 * 1024 * 1024 });
+    return stdout;
+  }
+
+  async isGitRepo(): Promise<boolean> {
+    if (this.gitRepo !== undefined) return this.gitRepo;
+    try {
+      const out = await this.git(["rev-parse", "--is-inside-work-tree"]);
+      this.gitRepo = out.trim() === "true";
+    } catch (_err) {
+      this.gitRepo = false;
+    }
+    return this.gitRepo;
+  }
+
+  async currentBranch(): Promise<string | null> {
+    try {
+      const out = (await this.git(["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+      return out && out !== "HEAD" ? out : null;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  async gitStatus(): Promise<GitStatus> {
+    if (!(await this.isGitRepo())) return { branch: null, entries: [] };
+    const branch = await this.currentBranch();
+    const out = await this.git(["status", "--porcelain=v1"]);
+    const entries = out
+      .split("\n")
+      .filter((line) => line.length > 3)
+      .map((line) => ({ code: line.slice(0, 2), path: line.slice(3).trim() }));
+    return { branch, entries };
+  }
+
+  // Stage everything and commit. Returns the new commit sha, or null when there
+  // was nothing to commit.
+  async commitAll(message: string): Promise<string | null> {
+    if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
+    await this.git(["add", "-A"]);
+    const status = await this.git(["status", "--porcelain=v1"]);
+    if (status.trim() === "") return null;
+    await this.git(["commit", "-m", message]);
+    return (await this.git(["rev-parse", "HEAD"])).trim();
+  }
+
+  // Tier 2: push a branch to the working tree's `origin` remote over the user's
+  // configured git transport (SSH key). Cosheaf is never in this path — the
+  // remote service only opens the PR afterward.
+  async push(branch: string): Promise<void> {
+    if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
+    await this.git(["push", "origin", branch]);
   }
 
   // Expose the root for the launcher (indexing, identity derivation).

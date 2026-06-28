@@ -7,7 +7,7 @@ import { type Panel, renderRegion } from "./web-panels.js";
 import { pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 import { backIcon } from "./icons.js";
 
-export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings";
+export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings" | "commit";
 
 // A small "+ <label>" disclosure that keeps a durable add/create form closed by
 // default behind a native <details>, so a panel/section reads cleanly when
@@ -63,6 +63,10 @@ export function repoPageShell(
     statusExtra: opts.statusExtra,
     statusOmitTab: opts.statusOmitTab,
     userAvatarSrc: ctx.userAvatarSrc,
+    // Local Workbench (direct write-mode): trim the repo nav to the surfaces the
+    // local app actually mounts (files + commit); the hosted issue/pull/settings
+    // tabs would 404.
+    local: ctx.writeMode === "direct",
     locale: ctx.locale,
     t: ctx.t,
   });
@@ -91,11 +95,16 @@ export function repoPage(opts: {
   statusOmitTab?: boolean;
   // The signed-in user's same-origin avatar src for the sidebar identity (#177).
   userAvatarSrc?: string | null;
+  // Local Workbench: render the trimmed local nav (files + commit) and avoid
+  // linking to hosted-only owner/profile pages.
+  local?: boolean;
   locale: LocaleId;
   t: T;
 }): string {
   const t = opts.t;
-  const nav = REPO_TABS.map(([id, key, suffix]) => tab(opts, id, t(key), suffix));
+  const nav = opts.local
+    ? [tab(opts, "files", t("tab.files"), ""), tab(opts, "commit", "Commit", "/commit")]
+    : REPO_TABS.map(([id, key, suffix]) => tab(opts, id, t(key), suffix));
   const activeKey = REPO_TABS.find(([id]) => id === opts.active)?.[1];
   const activeLabel = activeKey ? t(activeKey) : opts.active;
   return pageShell({
@@ -115,7 +124,7 @@ export function repoPage(opts: {
       <nav class="repo-tabs">${nav}</nav>
       ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
-      { label: opts.owner, href: `/users/${encodeURIComponent(opts.owner)}`, cls: opts.wsTitle ? "status-owner" : undefined },
+      { label: opts.owner, href: opts.local ? repoHref(opts.owner, opts.repo) : `/users/${encodeURIComponent(opts.owner)}`, cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },
       ...(opts.statusOmitTab ? [] : [{ label: activeLabel.toLowerCase() }]),
       ...(opts.statusExtra ?? []),

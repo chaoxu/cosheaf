@@ -11,6 +11,7 @@ import { repoHref } from "../../shared/url.js";
 import type { AppEnv } from "../types.js";
 import { redirect } from "../routes/web-context.js";
 import { registerFileRoutes } from "../routes/web-files.js";
+import { registerLocalCommitRoutes } from "./local-commit.js";
 
 export function createLocalWebRouter(owner: string, repo: string): Hono<AppEnv> {
   const localWeb = new Hono<AppEnv>();
@@ -25,10 +26,19 @@ export function createLocalWebRouter(owner: string, repo: string): Hono<AppEnv> 
   localWeb.get("/login", () => redirect("/"));
   localWeb.get("/logout", () => redirect("/"));
 
+  // Tier 2: after the editor opens a PR it navigates to /:owner/:repo/pulls/:n.
+  // The PR lives on the remote Cosheaf, so bounce there. 404 when no remote.
+  localWeb.get("/:owner/:repo/pulls/:n{[0-9]+}", (c) => {
+    const remote = c.get("remoteCosheaf");
+    if (!remote) return c.notFound();
+    return redirect(remote.pullUrl(c.req.param("owner"), c.req.param("repo"), Number(c.req.param("n"))));
+  });
+
   // The repo landing, file tree/src/raw pages, and the read/edit workbench —
   // all resolve through the local branch of resolveWebRepo and read
   // ctx.backend, so they work against the working tree unchanged.
   registerFileRoutes(localWeb);
+  registerLocalCommitRoutes(localWeb);
 
   return localWeb;
 }

@@ -23,6 +23,7 @@ import { SSEHub } from "../sse.js";
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { deriveLocalWorkspace } from "./local-workspace.js";
+import { RemoteCosheafClient } from "./remote-cosheaf-client.js";
 
 function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
@@ -85,7 +86,15 @@ async function run(dirArg: string): Promise<void> {
   const db = getDb(config);
   const { pages, bibs } = await indexWorkspace(db, backend, identity);
 
-  const app = createApp({ config, db, sse: new SSEHub(), workspaceBackend: backend, localWorkspace: identity });
+  const remoteClient = ws.remote ? new RemoteCosheafClient(ws.remote.url, ws.remote.token) : undefined;
+  const app = createApp({
+    config,
+    db,
+    sse: new SSEHub(),
+    workspaceBackend: backend,
+    localWorkspace: identity,
+    remoteClient,
+  });
 
   serve({ fetch: app.fetch, port: config.port, hostname: "127.0.0.1" }, (info) => {
     const url = `http://127.0.0.1:${info.port}/`;

@@ -25,6 +25,9 @@ import { members, workspaces } from "./routes/workspaces.js";
 import { SSEHub } from "./sse.js";
 import { listPublicAssetPaths } from "./static-assets.js";
 import { createLocalWebRouter } from "./local/local-web.js";
+import { localNotifications } from "./local/local-notifications.js";
+import { localPulls } from "./local/local-pulls.js";
+import type { RemotePullClient } from "./local/remote-cosheaf-client.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "./types.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 import { viteDevOrigin } from "./vite-dev-origin.js";
@@ -41,6 +44,9 @@ export interface CreateAppOptions {
   // the workspace identity it serves. Required in local mode; ignored otherwise.
   workspaceBackend?: WorkspaceBackend;
   localWorkspace?: LocalWorkspaceIdentity;
+  // Tier 2: client for the remote Cosheaf (open PR / status). Omitted for
+  // local-only (Tier 0/1) workspaces.
+  remoteClient?: RemotePullClient;
 }
 
 export function createApp(options: CreateAppOptions): Hono<AppEnv> {
@@ -61,6 +67,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     if (local && options.workspaceBackend && options.localWorkspace) {
       c.set("localBackend", options.workspaceBackend);
       c.set("localWorkspace", options.localWorkspace);
+      if (options.remoteClient) c.set("remoteCosheaf", options.remoteClient);
     }
     c.set("sse", sse);
     const locale = resolveLocale(c);
@@ -79,10 +86,13 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   app.use("/api/v1/*", rejectCrossOriginCookieApiMutation);
 
   if (local) {
-    // Local Workbench: only the Forgejo-free, backend-driven typed routes the
-    // page islands call. No auth/workspaces/pulls/issues/notifications/webhooks.
+    // Local Workbench: only the forge-free, backend-driven typed routes the page
+    // islands call, plus the local pulls router (commit + push + open PR on the
+    // remote Cosheaf). No auth/workspaces/issues/notifications/webhooks.
     app.route("/api/v1/repos", files);
     app.route("/api/v1/repos", branches);
+    app.route("/api/v1/repos", localPulls);
+    app.route("/api/v1", localNotifications);
   } else {
     app.route("/api/v1", auth);
     app.route("/api/v1/workspaces", workspaces);

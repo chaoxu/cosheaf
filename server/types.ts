@@ -77,5 +77,8 @@ export interface AppEnv {
     // and the workspace identity it serves. Undefined in hosted mode.
     localBackend: WorkspaceBackend;
     localWorkspace: LocalWorkspaceIdentity;
+    // Tier 2 only: client for the remote Cosheaf service (open PR / status).
+    // Undefined when no remote is configured.
+    remoteCosheaf: import("./local/remote-cosheaf-client.js").RemotePullClient;
   };
 }
