@@ -334,9 +334,18 @@ function placeReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommen
     if (seenHosts.has(host)) continue;
     seenHosts.add(host);
     host.classList.add("rich-commentable");
-    host.insertAdjacentElement("afterend", reviewCommentComposer(form, line, `Comment on line ${line}`, host));
+    placeReviewCommentComposer(host, reviewCommentComposer(form, line, `Comment on line ${line}`, host));
   }
   placeBibliographyReviewCommentComposers(root, form, source);
+}
+
+function placeReviewCommentComposer(host: HTMLElement, composer: HTMLDetailsElement): void {
+  if (host.classList.contains("cf-doc-section-heading-collapsible")) {
+    composer.classList.add("rich-line-composer-before");
+    host.insertAdjacentElement("beforebegin", composer);
+    return;
+  }
+  host.insertAdjacentElement("afterend", composer);
 }
 
 function placeBibliographyReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommentForm, source: string): void {

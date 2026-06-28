@@ -91,6 +91,33 @@ test("rich PR diffs expose comment composers on generated bibliography entries",
   await expect(bibliographyComposer).toHaveCSS("opacity", "1");
 });
 
+test("rich PR diff comment composers preserve Coflat section disclosure adjacency", async ({ page }) => {
+  await page.goto(`${webBase}/login`);
+  await page.locator('input[name="username"]').fill("chao");
+  await page.locator('input[name="password"]').fill("Cosheaf123!");
+  await page.locator('button:has-text("Sign in")').click();
+  await expect(page).toHaveURL(`${webBase}/`);
+
+  await page.goto(`${repoBase}/pulls/3/files?mode=rich&shape=after`);
+  await expect(page.locator(".cf-doc-section-heading-collapsible").first()).toBeVisible();
+  await expect(page.locator(".rich-line-composer-before + .cf-doc-section-heading-collapsible").first()).toBeVisible();
+
+  const brokenAdjacency = await page.locator(".cf-doc-section-heading-collapsible").evaluateAll((headings) =>
+    headings
+      .map((heading) => ({
+        text: heading.textContent?.replace(/\s+/g, " ").trim() ?? "",
+        nextClass: heading.nextElementSibling?.className?.toString() ?? "",
+      }))
+      .filter((entry) => !entry.nextClass.split(/\s+/).includes("cf-section-disclosure-body")),
+  );
+  expect(brokenAdjacency).toEqual([]);
+
+  const headingComposer = page.locator(".rich-line-composer-before summary").first();
+  await expect(headingComposer).toHaveCSS("opacity", "0");
+  await page.locator(".rich-line-composer-before + .cf-doc-section-heading-collapsible").first().hover();
+  await expect(headingComposer).toHaveCSS("opacity", "1");
+});
+
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   test.setTimeout(90_000);
   await page.goto(`${webBase}/login`);
