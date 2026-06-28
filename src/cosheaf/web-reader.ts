@@ -130,7 +130,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
     markRichInlineRanges(root, payload.richInlineRanges);
   }
   if (payload.reviewCommentForm) {
-    placeReviewCommentComposers(root, payload.reviewCommentForm);
+    placeReviewCommentComposers(root, payload.reviewCommentForm, payload.source);
   }
   if (payload.reviewComments?.length) {
     placeReviewComments(root, payload.reviewComments);
@@ -324,7 +324,7 @@ function placeReviewComments(root: HTMLElement, comments: readonly CoflatReviewC
   }
 }
 
-function placeReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommentForm): void {
+function placeReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommentForm, source: string): void {
   for (const old of root.querySelectorAll(".rich-line-composer")) old.remove();
   const seenHosts = new Set<HTMLElement>();
   for (const line of form.lines) {
@@ -334,38 +334,78 @@ function placeReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommen
     if (seenHosts.has(host)) continue;
     seenHosts.add(host);
     host.classList.add("rich-commentable");
-    const composer = document.createElement("details");
-    composer.className = "line-composer rich-line-composer";
-    composer.style.setProperty("--rich-composer-host-height", `${Math.max(22, Math.ceil(host.getBoundingClientRect().height))}px`);
-    const summary = document.createElement("summary");
-    summary.setAttribute("aria-label", `Comment on line ${line}`);
-    summary.textContent = "+";
-    const formEl = document.createElement("form");
-    formEl.method = "post";
-    formEl.action = form.action;
-    for (const [name, value] of [
-      ["path", form.path],
-      ["side", form.side],
-      ["line", String(line)],
-      ["mode", form.mode],
-      ["shape", form.shape],
-    ] as const) {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = name;
-      input.value = value;
-      formEl.append(input);
-    }
-    const textarea = document.createElement("textarea");
-    textarea.name = "body";
-    textarea.required = true;
-    const button = document.createElement("button");
-    button.type = "submit";
-    button.textContent = "Comment";
-    formEl.append(textarea, button);
-    composer.append(summary, formEl);
-    host.insertAdjacentElement("afterend", composer);
+    host.insertAdjacentElement("afterend", reviewCommentComposer(form, line, `Comment on line ${line}`, host));
   }
+  placeBibliographyReviewCommentComposers(root, form, source);
+}
+
+function placeBibliographyReviewCommentComposers(root: HTMLElement, form: CoflatReviewCommentForm, source: string): void {
+  const commentable = new Set(form.lines);
+  if (commentable.size === 0) return;
+  for (const entry of root.querySelectorAll<HTMLElement>(".cf-bibliography-entry")) {
+    const key = entry.dataset.citationKey;
+    const line = bibliographyEntryCommentLine(entry, source, commentable);
+    if (line === null) continue;
+    entry.classList.add("rich-commentable");
+    entry.insertAdjacentElement(
+      "afterend",
+      reviewCommentComposer(form, line, key ? `Comment on reference ${key} at line ${line}` : `Comment on reference at line ${line}`, entry),
+    );
+  }
+}
+
+function bibliographyEntryCommentLine(entry: HTMLElement, source: string, commentable: ReadonlySet<number>): number | null {
+  const offsets = [...entry.querySelectorAll<HTMLElement>(".cf-bibliography-backlink[data-source-from]")]
+    .map((link) => Number(link.dataset.sourceFrom))
+    .filter((offset) => Number.isFinite(offset) && offset >= 0)
+    .sort((a, b) => a - b);
+  for (const offset of offsets) {
+    const line = sourceLineForOffset(source, offset);
+    if (commentable.has(line)) return line;
+  }
+  return null;
+}
+
+function sourceLineForOffset(source: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < source.length && i < offset; i += 1) {
+    if (source.charCodeAt(i) === 10) line += 1;
+  }
+  return line;
+}
+
+function reviewCommentComposer(form: CoflatReviewCommentForm, line: number, label: string, host: HTMLElement): HTMLDetailsElement {
+  const composer = document.createElement("details");
+  composer.className = "line-composer rich-line-composer";
+  composer.style.setProperty("--rich-composer-host-height", `${Math.max(22, Math.ceil(host.getBoundingClientRect().height))}px`);
+  const summary = document.createElement("summary");
+  summary.setAttribute("aria-label", label);
+  summary.textContent = "+";
+  const formEl = document.createElement("form");
+  formEl.method = "post";
+  formEl.action = form.action;
+  for (const [name, value] of [
+    ["path", form.path],
+    ["side", form.side],
+    ["line", String(line)],
+    ["mode", form.mode],
+    ["shape", form.shape],
+  ] as const) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    formEl.append(input);
+  }
+  const textarea = document.createElement("textarea");
+  textarea.name = "body";
+  textarea.required = true;
+  const button = document.createElement("button");
+  button.type = "submit";
+  button.textContent = "Comment";
+  formEl.append(textarea, button);
+  composer.append(summary, formEl);
+  return composer;
 }
 
 function reviewCommentHost(target: HTMLElement): HTMLElement {

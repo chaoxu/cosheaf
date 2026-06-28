@@ -36,6 +36,61 @@ async function expectRichComposerRevealsOnHover(page: Page): Promise<void> {
   await expect(composer).toHaveCSS("opacity", "1");
 }
 
+test("rich PR diffs expose comment composers on generated bibliography entries", async ({ page }) => {
+  await page.goto(`${webBase}/login`);
+  await page.locator('input[name="username"]').fill("chao");
+  await page.locator('input[name="password"]').fill("Cosheaf123!");
+  await page.locator('button:has-text("Sign in")').click();
+  await expect(page).toHaveURL(`${webBase}/`);
+  const token = (await page.context().cookies(webBase)).find((cookie) => cookie.name === "cosheaf_pat")?.value;
+  expect(token).toBeTruthy();
+
+  const branch = `codex/bib-comment-${Date.now()}`;
+  const path = "notes/bib-comment-fixture.md";
+  const apiHeaders = {
+    Authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+  };
+  const branchRes = await page.request.post(`${webBase}/api/v1/repos/${owner}/${repo}/branches`, {
+    headers: apiHeaders,
+    data: { name: branch },
+  });
+  expect(branchRes.ok()).toBe(true);
+  const writeRes = await page.request.put(
+    `${webBase}/api/v1/repos/${owner}/${repo}/file?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(branch)}`,
+    {
+      headers: apiHeaders,
+      data: {
+        content: [
+          "---",
+          "bibliography: ../reference.bib",
+          "---",
+          "",
+          "# Bibliography Comment Fixture",
+          "",
+          "A citation appears here [@cormen2009].",
+          "",
+        ].join("\n"),
+      },
+    },
+  );
+  expect(writeRes.ok()).toBe(true);
+  const prRes = await page.request.post(`${webBase}/api/v1/repos/${owner}/${repo}/pulls`, {
+    headers: apiHeaders,
+    data: { head: branch, base: "main", title: "Bibliography comment fixture" },
+  });
+  expect(prRes.ok()).toBe(true);
+  const pr = await prRes.json() as { number: number };
+
+  await page.goto(`${repoBase}/pulls/${pr.number}/files?file=${encodeURIComponent(path)}&mode=rich&shape=after`);
+  await expect(page.locator(".cf-bibliography-entry")).toContainText("Introduction to Algorithms");
+  const bibliographyComposer = page.locator('.cf-bibliography-entry + .rich-line-composer summary[aria-label*="reference cormen2009"]');
+  await expect(bibliographyComposer).toHaveCount(1);
+  await expect(bibliographyComposer).toHaveCSS("opacity", "0");
+  await page.locator(".cf-bibliography-entry.rich-commentable").hover();
+  await expect(bibliographyComposer).toHaveCSS("opacity", "1");
+});
+
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   test.setTimeout(90_000);
   await page.goto(`${webBase}/login`);
