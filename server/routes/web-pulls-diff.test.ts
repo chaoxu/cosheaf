@@ -171,6 +171,39 @@ describe("richDiffInlineRanges", () => {
 });
 
 describe("renderPrFileView", () => {
+  it("previews PDF pull-request files instead of rendering raw PDF bytes", async () => {
+    const rendered = await renderPrFileView(
+      { owner: "chao", repo: "milk" } as never,
+      { base: { sha: "base-sha" }, head: { sha: "head-sha" } } as never,
+      { path: "img/complexity.pdf", status: "modified", additions: 1, deletions: 1, patch: "" },
+      "source",
+      "after",
+      null,
+      [],
+    );
+
+    expect(String(rendered)).toContain('data-testid="diff-pane-after"');
+    expect(String(rendered)).toContain('data-testid="pr-file-pdf"');
+    expect(String(rendered)).toContain("/chao/milk/raw/branch/head-sha/img/complexity.pdf");
+    expect(String(rendered)).not.toContain("source-line-");
+  });
+
+  it("previews both sides of modified PDF pull-request files in split mode", async () => {
+    const rendered = await renderPrFileView(
+      { owner: "chao", repo: "milk" } as never,
+      { base: { sha: "base-sha" }, head: { sha: "head-sha" } } as never,
+      { path: "img/complexity.pdf", status: "modified", additions: 1, deletions: 1, patch: "" },
+      "source",
+      "split",
+      null,
+      [],
+    );
+
+    expect(String(rendered)).toContain('data-testid="diff-pane-split"');
+    expect(String(rendered)).toContain("/chao/milk/raw/branch/base-sha/img/complexity.pdf");
+    expect(String(rendered)).toContain("/chao/milk/raw/branch/head-sha/img/complexity.pdf");
+  });
+
   it("renders inline token highlights for paired source replacements", async () => {
     const patch = [
       "diff --git a/a.md b/a.md",

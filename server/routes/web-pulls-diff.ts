@@ -9,12 +9,14 @@ import { splitUnifiedDiff } from "../diff-splitter.js";
 import type { ForgejoPull } from "../forgejo.js";
 import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
+import { fileKindForPath } from "../../shared/file-kind.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
 import { sourceInlineDiff, sourceInlineDiffRanges, type SourceInlineDiffSegment } from "../source-inline-diff.js";
 import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
+import { rawFileHref } from "./web-file-links.js";
 import { html, joinHtml, raw, type Html } from "./web-html.js";
 import { renderMarkdownSurface, type SurfaceOpts } from "./web-markdown.js";
 
@@ -103,6 +105,9 @@ export async function renderPrFileView(
   comments: readonly WebLineComment[],
   assetPreviewPaths: PrFileAssetPreviewPaths = {},
 ): Promise<Html> {
+  if (fileKindForPath(file.path) === "pdf") {
+    return renderPdfPrFileView(ctx, pull, file, shape);
+  }
   if (mode === "source" && shape === "unified") {
     return html`<div data-testid="diff-pane-unified">${renderPatch(file.patch)}</div>`;
   }
@@ -157,6 +162,29 @@ export async function renderPrFileView(
         ...richDiffSurfaceOpts(prSideRefAndPath(pull, file, "head").ref, file.path, changed.added, comments, "head", stops.head, commentForm, commentable.head, [], richInline.head, assetPreviewPaths.head),
       });
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
+}
+
+function renderPdfPrFileView(ctx: WebCtx, pull: ForgejoPull, file: PrFileView, shape: DiffShape): Html {
+  if (shape === "split") {
+    const base = file.status === "added" ? diffSideEmptyNotice(file.status, "base") : prPdfObject(ctx, pull, file, "base");
+    const head = file.status === "deleted" ? diffSideEmptyNotice(file.status, "head") : prPdfObject(ctx, pull, file, "head");
+    return html`<div data-testid="diff-pane-split" class="source-split pr-pdf-split">
+      <section><h3>Base</h3>${base}</section>
+      <section><h3>Head</h3>${head}</section>
+    </div>`;
+  }
+  const head = file.status === "deleted" ? diffSideEmptyNotice(file.status, "head") : prPdfObject(ctx, pull, file, "head");
+  return html`<div data-testid="diff-pane-after" class="pr-pdf-after">${head}</div>`;
+}
+
+function prPdfObject(ctx: WebCtx, pull: ForgejoPull, file: PrFileView, side: Side): Html {
+  const { ref, path } = prSideRefAndPath(pull, file, side);
+  const href = rawFileHref(ctx.owner, ctx.repo, ref, path);
+  return html`<article class="file-preview file-preview-embed pr-file-pdf-preview">
+    <object data-testid="pr-file-pdf" data="${href}" type="application/pdf">
+      <p>PDF preview is not available in this browser. <a class="inline-link" href="${href}">Open the raw file.</a></p>
+    </object>
+  </article>`;
 }
 
 export function richDiffSurfaceOpts(
