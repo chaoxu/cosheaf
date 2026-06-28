@@ -34,8 +34,9 @@ await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
 await signInIfNeeded(page, USERNAME, PASSWORD);
 
 // Open the seeded page.
-const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL).toString();
-await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
+const fileUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL);
+fileUrl.searchParams.set("mode", "read");
+await page.goto(fileUrl.toString(), { waitUntil: "domcontentloaded" });
 await page.getByText(PAGE_PATH).first().waitFor({ state: "visible", timeout: 10000 });
 const renderedSurface = page.locator(".cf-reader, [data-testid=file-preview-markdown] .markdown-body").first();
 await renderedSurface.waitFor({ state: "visible", timeout: 10000 });
@@ -58,7 +59,7 @@ const sizes = await page.evaluate(() => {
 const documentText = await renderedSurface.textContent().catch(() => "");
 await page.screenshot({ path: SCREENSHOT, fullPage: false });
 
-const ok = pageErrors.length === 0 && badResponses.length === 0 && sizes.document && documentText.length > 0;
+const ok = pageErrors.length === 0 && badResponses.length === 0 && (sizes.document ?? sizes.reader) && documentText.length > 0;
 
 console.log(JSON.stringify({
   ok,
