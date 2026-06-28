@@ -5,9 +5,10 @@ import { _seedBearerAuthCacheForTests, _seedPermCacheForTests } from "./middlewa
 
 // After #63, cosheaf has no users table. The bearer cache and the workspace
 // permission cache are seeded directly so route tests don't need a live Forgejo.
-// The returned token is the PAT the test can send in `Authorization: Bearer
-// <token>`. The `id` and any `Database` argument are kept only for call-site
-// compatibility with the previous helper signature and are otherwise unused.
+// The returned token is the opaque Cosheaf token tests can send in
+// `Authorization: Bearer <token>` or `Authorization: token <token>`. The `id`
+// and any `Database` argument are kept only for call-site compatibility with
+// the previous helper signature and are otherwise unused.
 export function seedAuthUser(
   _db: Database.Database,
   _config: Config,

@@ -59,6 +59,20 @@ describe("devx check suggestions", () => {
       "pnpm exec vitest run scripts/devx.test.mjs scripts/browser-utils.test.mjs server/vite-dev-origin.test.ts server/vite-config.test.ts",
     );
   });
+
+  it("maps the Cosheaf agent CLI to typed API checks", () => {
+    const result = suggestChecks(["scripts/cosheaf-agent.mjs"]);
+    expect(result.matchedRules).toContain("api-contract");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm exec vitest run scripts/cosheaf-agent.test.mjs");
+    expect(result.suggestions.map((item) => item.run)).toContain(
+      "pnpm exec vitest run server/routes/auth.test.ts server/middleware.test.ts",
+    );
+    expect(result.suggestions.map((item) => item.run)).toContain(
+      "pnpm exec vitest run server/routes/files.test.ts server/routes/workspaces.test.ts server/routes/pulls.test.ts",
+    );
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm cosheaf:tea-check");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:api");
+  });
 });
 
 describe("changed file detection", () => {

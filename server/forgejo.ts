@@ -1,11 +1,11 @@
 // Thin wrapper around the Forgejo REST API.
 //
 // Each instance is bound to a single token. On the request path that's the
-// caller's Forgejo PAT, resolved from either API bearer auth or the
-// server-rendered web cookie; for out-of-band provisioning (CLI user/workspace
-// creation, webhook handler) we instantiate a separate admin-bound instance.
-// There is no impersonation header — Forgejo attributes every action to whoever
-// owns the token.
+// server-side Forgejo credential resolved from the caller's opaque Cosheaf
+// token; for out-of-band provisioning (CLI user/workspace creation, webhook
+// handler) we instantiate a separate admin-bound instance. There is no
+// impersonation header — Forgejo attributes every action to whoever owns the
+// backend token.
 
 import type {
   ForgejoActivity,
@@ -33,7 +33,7 @@ import type {
 
 export interface ForgejoConfig {
   baseUrl: string;
-  token: string;  // PAT for the identity this client acts as
+  token: string;  // Backend token for the identity this client acts as
 }
 
 export class ForgejoError extends Error {
@@ -353,11 +353,11 @@ export class Forgejo {
 
   // Every repo the caller can access, page-walking /repos/search (which wraps
   // results in {data} rather than a bare array, so it can't use pagedList).
-  // Runs under the caller's PAT, so private repos respect Forgejo visibility,
-  // and each result already carries `permissions` + `topics` (no per-repo
-  // round-trip). Cosheaf is a frontend over the forge: discovery shows every
-  // accessible repo, not only `cosheaf-format-*` tagged ones; untagged repos
-  // default to forgejo-passthrough.
+  // Runs under the resolved backend credential, so private repos respect
+  // Forgejo visibility, and each result already carries `permissions` +
+  // `topics` (no per-repo round-trip). Cosheaf is a frontend over the forge:
+  // discovery shows every accessible repo, not only `cosheaf-format-*` tagged
+  // ones; untagged repos default to forgejo-passthrough.
   async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
     const out: ForgejoRepo[] = [];
     for (let page = 1; page <= 50; page++) {

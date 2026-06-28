@@ -88,6 +88,69 @@ describe("safeRel repo-path validator", () => {
   });
 });
 
+describe("Gitea-shaped contents compatibility", () => {
+  it("GET /contents/:path returns base64 file content", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/raw/hello.md", () => new Response("# Hello\n"));
+      forge.get("/api/v1/repos/owner/w/contents/hello.md", () =>
+        Response.json({ name: "hello.md", path: "hello.md", sha: "blob-sha", size: 8, type: "file" }));
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/contents/hello.md?ref=main", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { path: string; sha: string; encoding: string; content: string };
+    expect(body.path).toBe("hello.md");
+    expect(body.sha).toBe("blob-sha");
+    expect(body.encoding).toBe("base64");
+    expect(Buffer.from(body.content, "base64").toString("utf8")).toBe("# Hello\n");
+  });
+
+  it("POST /contents/:path writes Markdown through Cosheaf frontmatter handling", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    let writtenBody: unknown = null;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/agent%2Ftea", () => new Response("not found", { status: 404 }));
+      forge.post("/api/v1/repos/owner/w/branches", () => Response.json({ name: "agent/tea" }, { status: 201 }));
+      forge.get("/api/v1/repos/owner/w/contents/notes/tea.md", () => new Response("not found", { status: 404 }));
+      forge.post("/api/v1/repos/owner/w/contents/notes/tea.md", async (c) => {
+        writtenBody = await c.req.json();
+        return Response.json({ commit: { sha: "commit-sha" }, content: { sha: "new-sha" } }, { status: 201 });
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/contents/notes/tea.md", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        branch: "main",
+        new_branch: "agent/tea",
+        message: "Create tea note",
+        content: Buffer.from("# Tea note\n\nBody.\n", "utf8").toString("base64"),
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(writtenBody).toMatchObject({
+      branch: "agent/tea",
+      message: "Create tea note",
+    });
+    const encoded = (writtenBody as { content: string }).content;
+    const written = Buffer.from(encoded, "base64").toString("utf8");
+    expect(written).toContain("id:");
+    expect(written).toContain("# Tea note");
+    const body = await res.json() as { content: { path: string; sha: string; content: string }; commit: { sha: string } };
+    expect(body.content.path).toBe("notes/tea.md");
+    expect(body.content.sha).toBe("new-sha");
+    expect(body.commit.sha).toBe("commit-sha");
+  });
+});
+
 describe("files validation route", () => {
   it("reports broken references with source lines and orphan page ids", async () => {
     const db = freshDb();

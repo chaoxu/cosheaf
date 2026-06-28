@@ -50,6 +50,7 @@ import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/docu
 import type { MergeFailure, MergeFailureReason, PrMeta, PrFileStatus, PrState } from "../../shared/review.js";
 import { parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
 import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
+import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
 
 export const pulls = new Hono<AppEnv>();
 pulls.use("*", requireAuth);
@@ -283,7 +284,9 @@ pulls.get("/:owner/:repo/pulls", async (c) => {
     poster: c.req.query("author")?.trim() || undefined,
     sort: parsePullSort(c.req.query("sort")),
   });
-  return c.json({ pulls: rows.map(prMeta) });
+  if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, rows));
+  const out = rows.map(prMeta);
+  return c.json({ pulls: out });
 });
 
 pulls.get("/:owner/:repo/pulls/:n", async (c) => {

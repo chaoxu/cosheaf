@@ -97,6 +97,24 @@ describe("pulls + branches routes", () => {
     });
   });
 
+  it("GET /pulls returns a tea-compatible array for Gitea token auth", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok([
+      pull({ number: 8, title: "Update docs", head: { ref: "agent/wip", sha: "h8" } }),
+    ]));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls?state=open", {
+      headers: { authorization: `token ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ number: 8, title: "Update docs", head: expect.objectContaining({ ref: "agent/wip" }) }),
+    ]);
+  });
+
   it("GET /pulls maps Forgejo-native filters", async () => {
     const db = freshDb();
     seedWorkspace(db);
@@ -1051,6 +1069,41 @@ describe("pulls + branches routes", () => {
   });
 
   describe("branches", () => {
+    it("GET /branches returns the forge-shaped branch list", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "read");
+      fetchMock.mockResolvedValueOnce(
+        ok([
+          { name: "main", commit: { id: "m", url: "http://forgejo.test/owner/w/commit/m" } },
+          { name: "agent/wip", commit: { id: "a1", url: "http://forgejo.test/owner/w/commit/a1" } },
+        ]),
+      );
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branches", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual([
+        { name: "main", commit: { id: "m", url: "http://localhost/owner/w/commit/m" } },
+        { name: "agent/wip", commit: { id: "a1", url: "http://localhost/owner/w/commit/a1" } },
+      ]);
+      expect(JSON.stringify(body)).not.toContain("forgejo.test");
+    });
+
+    it("GET /branch_protections returns an empty list for tea branches", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "read");
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branch_protections", {
+        headers: { authorization: `token ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual([]);
+    });
+
     it("GET /branches/mine filters by head-commit author and excludes branches with open PRs", async () => {
       const db = freshDb();
       seedWorkspace(db);

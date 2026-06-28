@@ -77,8 +77,12 @@ const rules = [
   },
   {
     id: "api-contract",
-    matches: [/^docs\//, /^AGENTS\.md$/, /^server\/routes\/(?:files|branches|notifications|workspaces)\.ts$/],
+    matches: [/^docs\//, /^AGENTS\.md$/, /^scripts\/(?:cosheaf-agent|tea-compat-check)\.mjs$/, /^server\/routes\/(?:auth|files|branches|notifications|workspaces)\.ts$/],
     commands: [
+      command("pnpm exec vitest run scripts/cosheaf-agent.test.mjs", "tea-shaped Cosheaf agent CLI coverage"),
+      command("pnpm exec vitest run server/routes/auth.test.ts server/middleware.test.ts", "opaque token and tea discovery endpoint coverage"),
+      command("pnpm exec vitest run server/routes/files.test.ts server/routes/workspaces.test.ts server/routes/pulls.test.ts", "tea/Gitea-shaped repository, branch, and content route coverage"),
+      command("pnpm cosheaf:tea-check", "live tea/Gitea endpoint subset compatibility check"),
       command("pnpm check:static", "types, lints, API contract, unused exports"),
       command("pnpm smoke:api", "typed agent/API route flow"),
     ],

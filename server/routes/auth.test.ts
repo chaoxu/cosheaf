@@ -1,10 +1,11 @@
 // Auth route tests. Stubs global fetch so we exercise the PAT-exchange
-// flow without a live Forgejo. Login returns { username, pat } for API clients
-// and also sets an HttpOnly cookie so
-// server-rendered web pages can authenticate normal GET requests.
+// flow without a live Forgejo. Login returns an opaque Cosheaf token for API
+// clients and also sets an HttpOnly cookie so server-rendered web pages can
+// authenticate normal GET requests without receiving the backing Forgejo PAT.
 
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hashApiToken } from "../api-tokens.js";
 import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests } from "../middleware.js";
 import { auth } from "./auth.js";
 import { freshTestDb, testApp, testConfig } from "./test-fixtures.js";
@@ -57,14 +58,31 @@ async function waitForFetchCalls(count: number): Promise<void> {
   throw new Error(`expected ${count} fetch calls, saw ${fetchMock.mock.calls.length}`);
 }
 
+async function expectOpaqueLoginToken(
+  db: Database.Database,
+  res: Response,
+  username: string,
+  forgejoPat: string,
+): Promise<string> {
+  const body = await res.json() as { username: string; pat: string; token_type: string };
+  expect(body.username).toBe(username);
+  expect(body.token_type).toBe("cosheaf");
+  expect(body.pat).toMatch(/^cosheaf_[A-Za-z0-9_-]+$/);
+  expect(body.pat).not.toBe(forgejoPat);
+  const row = db.prepare("SELECT username, forgejo_pat FROM api_tokens WHERE token_hash = ?")
+    .get(hashApiToken(body.pat)) as { username: string; forgejo_pat: string } | undefined;
+  expect(row).toEqual({ username, forgejo_pat: forgejoPat });
+  return body.pat;
+}
+
 describe("POST /api/v1/login", () => {
-  it("201 from Forgejo → returns { username, pat } and sets the web auth cookie", async () => {
+  it("201 from Forgejo → returns an opaque Cosheaf token and sets the web auth cookie", async () => {
     const db = freshDb();
     mintOk("pat-aaa", "alice");
     const res = await login(db, "alice", "secret");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ username: "alice", pat: "pat-aaa" });
-    expect(res.headers.get("set-cookie")).toContain("cosheaf_pat=pat-aaa");
+    const apiToken = await expectOpaqueLoginToken(db, res, "alice", "pat-aaa");
+    expect(res.headers.get("set-cookie")).toContain(`cosheaf_pat=${apiToken}`);
     expect(res.headers.get("set-cookie")).toContain("HttpOnly");
     expect(res.headers.get("set-cookie")).toContain("SameSite=Lax");
 
@@ -121,7 +139,7 @@ describe("POST /api/v1/login", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ username: "alice", pat: "pat-api" });
+    await expectOpaqueLoginToken(db, res, "alice", "pat-api");
   });
 
   it("rejects non-string credentials before contacting Forgejo", async () => {
@@ -136,6 +154,45 @@ describe("POST /api/v1/login", () => {
     await expect(res.json()).resolves.toMatchObject({ error: "missing credentials" });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("serves the public Gitea-compatible version probe", async () => {
+    const db = freshDb();
+    const res = await appFor(db).request("/api/v1/version");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ version: "cosheaf" });
+  });
+
+  it("serves the authenticated Gitea-compatible current user probe", async () => {
+    const db = freshDb();
+    mintOk("pat-user", "alice");
+    const loginRes = await login(db, "alice", "secret");
+    const token = await expectOpaqueLoginToken(db, loginRes, "alice", "pat-user");
+
+    const res = await appFor(db).request("/api/v1/user", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      login: "alice",
+      username: "alice",
+      active: true,
+    });
+  });
+
+  it("serves an empty Gitea-compatible SSH key list for tea login", async () => {
+    const db = freshDb();
+    mintOk("pat-user", "alice");
+    const loginRes = await login(db, "alice", "secret");
+    const token = await expectOpaqueLoginToken(db, loginRes, "alice", "pat-user");
+
+    const res = await appFor(db).request("/api/v1/user/keys?limit=0&page=0", {
+      headers: { authorization: `token ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
   });
 
   it("401 from Forgejo → bad credentials, no cookie", async () => {
@@ -159,7 +216,7 @@ describe("POST /api/v1/login", () => {
 
     const res = await login(db, "carol", "secret");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ username: "carol", pat: "pat-carol" });
+    await expectOpaqueLoginToken(db, res, "carol", "pat-carol");
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const firstName = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name;
     const secondName = JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string).name;
@@ -228,7 +285,7 @@ describe("POST /api/v1/login", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(await second.json()).toEqual({ username: "hen", pat: "pat-hen" });
+    await expectOpaqueLoginToken(db, second, "hen", "pat-hen");
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string).name)
       .toBe(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name);
@@ -246,7 +303,7 @@ describe("POST /api/v1/login", () => {
     const res = await login(db, "Chao", "secret");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ username: "chao", pat: "pat-chao" });
+    await expectOpaqueLoginToken(db, res, "chao", "pat-chao");
     const rows = db.prepare("SELECT username, pat FROM login_tokens WHERE username = ? COLLATE NOCASE")
       .all("chao") as Array<{ username: string; pat: string }>;
     expect(rows).toEqual([{ username: "chao", pat: "pat-chao" }]);
@@ -267,7 +324,7 @@ describe("POST /api/v1/login", () => {
     const res = await login(db, "Chao", "secret");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ username: "chao", pat: "pat-new" });
+    await expectOpaqueLoginToken(db, res, "chao", "pat-new");
     const rows = db.prepare("SELECT username, pat FROM login_tokens WHERE username = ? COLLATE NOCASE ORDER BY username")
       .all("chao") as Array<{ username: string; pat: string }>;
     expect(rows).toEqual([{ username: "chao", pat: "pat-new" }]);
@@ -288,7 +345,7 @@ describe("POST /api/v1/login", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(await second.json()).toEqual({ username: "hen", pat: "pat-new" });
+    await expectOpaqueLoginToken(db, second, "hen", "pat-new");
     expect(fetchMock).toHaveBeenCalledTimes(6);
 
     const firstTokenName = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name;
@@ -318,7 +375,7 @@ describe("POST /api/v1/login", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(await second.json()).toEqual({ username: "hen", pat: "pat-new" });
+    await expectOpaqueLoginToken(db, second, "hen", "pat-new");
     expect(fetchMock).toHaveBeenCalledTimes(4);
     const firstTokenName = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string).name;
     const recreatedTokenName = JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string).name;
@@ -358,7 +415,7 @@ describe("POST /api/v1/login", () => {
     const res = await login(db, "jon", "secret");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ username: "jon", pat: "pat-new" });
+    await expectOpaqueLoginToken(db, res, "jon", "pat-new");
     // One mint call plus canonical user verification — the stale PAT is not served.
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/users/jon/tokens");

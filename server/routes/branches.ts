@@ -3,6 +3,7 @@
 // can list a user's in-progress work without their open PRs duplicating in.
 //
 // Endpoints under /:owner/:repo/* :
+//   GET    /branches              — list branches
 //   GET    /branches/mine         — your branches with no open PR
 //   POST   /branches              — create a branch from main
 //   DELETE /branches/:name        — delete a branch
@@ -15,6 +16,7 @@ import {
   requireWriteOnMutation,
 } from "../middleware.js";
 import { ForgejoError } from "../forgejo.js";
+import type { ForgejoBranch } from "../forgejo-types.js";
 import { validBranchName } from "../branch-path.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 
@@ -24,6 +26,29 @@ branches.use("/:owner/:repo/*", requireMembership());
 branches.use("/:owner/:repo/*", requireWriteOnMutation);
 
 import { bad, conflict } from "./responses.js";
+
+function publicBranch(c: import("hono").Context<AppEnv>, branch: ForgejoBranch): Record<string, unknown> {
+  const { owner, repo } = c.get("repoCtx");
+  const origin = new URL(c.req.url).origin;
+  const commitId = branch.commit?.id ?? "";
+  return {
+    ...branch,
+    commit: {
+      ...branch.commit,
+      url: commitId ? `${origin}/${owner}/${repo}/commit/${commitId}` : "",
+    },
+  };
+}
+
+branches.get("/:owner/:repo/branches", async (c) => {
+  const { fj, owner, repo } = c.get("repoCtx");
+  const list = await fj.listBranches(owner, repo);
+  return c.json(list.map((branch) => publicBranch(c, branch)));
+});
+
+branches.get("/:owner/:repo/branch_protections", async (c) => {
+  return c.json([]);
+});
 
 branches.get("/:owner/:repo/branches/mine", async (c) => {
   const { fj, owner, repo } = c.get("repoCtx");

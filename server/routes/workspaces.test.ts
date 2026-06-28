@@ -88,6 +88,46 @@ describe("GET /api/v1/workspaces", () => {
   });
 });
 
+describe("GET /api/v1/repos/:owner/:repo", () => {
+  it("returns forge-shaped repository metadata through Cosheaf auth", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "read", owner: "owner", repo: "w" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
+      forge.get("/api/v1/repos/owner/w", () =>
+        responseOk({
+          id: 12,
+          name: "w",
+          full_name: "owner/w",
+          default_branch: "main",
+          description: "Workspace",
+          owner: { id: 1, login: "owner", html_url: "http://forgejo.test/owner", avatar_url: "http://forgejo.test/avatar" },
+          html_url: "http://forgejo.test/owner/w",
+          url: "http://forgejo.test/api/v1/repos/owner/w",
+          clone_url: "http://forgejo.test/owner/w.git",
+          ssh_url: "ssh://git@forgejo.test/owner/w.git",
+          languages_url: "http://forgejo.test/api/v1/repos/owner/w/languages",
+        }));
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { url: string; html_url: string };
+    expect(body).toMatchObject({
+      id: 12,
+      name: "w",
+      full_name: "owner/w",
+      default_branch: "main",
+    });
+    expect(JSON.stringify(body)).not.toContain("forgejo.test");
+    expect(body.url).toBe("http://localhost/api/v1/repos/owner/w");
+    expect(body.html_url).toBe("http://localhost/owner/w");
+  });
+});
+
 describe("POST /api/v1/workspaces", () => {
   it("creates a workspace in the caller's namespace and writes the cosheaf-format topic", async () => {
     const { app, db } = appFor();

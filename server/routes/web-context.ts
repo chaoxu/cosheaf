@@ -93,12 +93,12 @@ function normalizedOrigin(value: string): string | null {
   }
 }
 
-// Set the cosheaf_pat session cookie (the user's minted Forgejo PAT). `secure`
+// Set the cosheaf_pat cookie to the user's opaque Cosheaf API token. `secure`
 // is derived from the proxy-aware origin so the flag is set behind a
 // TLS-terminating reverse proxy (where c.req.url is the internal http URL) and
 // stays unset over plain http in local dev.
-export function setAuthCookie(c: Context<AppEnv>, pat: string): void {
-  setCookie(c, AUTH_COOKIE, pat, {
+export function setAuthCookie(c: Context<AppEnv>, token: string): void {
+  setCookie(c, AUTH_COOKIE, token, {
     httpOnly: true,
     sameSite: "Lax",
     path: "/",

@@ -81,6 +81,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.COSHEAF_ACCEPT_FORGEJO_BEARER;
 });
 
 function ok(body: unknown): Response {
@@ -97,7 +98,44 @@ function notFound(): Response {
 }
 
 describe("requireMembership", () => {
-  it("accepts a Forgejo PAT bearer by resolving /api/v1/user", async () => {
+  it("accepts Gitea-style Authorization token headers for Cosheaf tokens", async () => {
+    const db = freshDb();
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    const token = seedUser(db, "alice");
+    _seedPermCacheForTests("owner", "w", "alice", "write");
+
+    const res = await appFor(db).request("/repos/owner/w/probe", {
+      headers: { authorization: `token ${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, role: "write" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a direct Forgejo PAT bearer by default", async () => {
+    const db = freshDb();
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+
+    const res = await appFor(db).request("/repos/owner/w/probe", {
+      headers: { authorization: "Bearer forgejo-pat-alice" },
+    });
+    expect(res.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a direct Forgejo token header by default", async () => {
+    const db = freshDb();
+    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+
+    const res = await appFor(db).request("/repos/owner/w/probe", {
+      headers: { authorization: "token forgejo-pat-alice" },
+    });
+    expect(res.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("can temporarily accept a Forgejo PAT bearer when migration mode is enabled", async () => {
+    process.env.COSHEAF_ACCEPT_FORGEJO_BEARER = "1";
     const db = freshDb();
     _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
     fetchMock

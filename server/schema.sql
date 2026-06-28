@@ -1,8 +1,9 @@
 -- Cosheaf sidecar schema (Forgejo backend).
 
--- Cosheaf stores no passwords or sessions. Server-rendered pages receive the
--- user's Forgejo PAT as an HttpOnly `cosheaf_pat` cookie; API clients and
--- agents send the same credential as `Authorization: Bearer <pat>`.
+-- Cosheaf stores no passwords or sessions. Server-rendered pages receive an
+-- opaque Cosheaf token as an HttpOnly `cosheaf_pat` cookie; API clients and
+-- agents send the same Cosheaf-only credential as `Authorization: Bearer` or
+-- Gitea/tea-style `Authorization: token`.
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tokens;
@@ -22,6 +23,17 @@ CREATE TABLE IF NOT EXISTS login_tokens (
   -- re-minted on next login instead of being served missing a new scope (#148).
   -- Existing rows are migrated to NULL in db.ts and re-mint on next login.
   scopes TEXT
+);
+
+-- Opaque Cosheaf API tokens handed to browsers, agents, and CLI clients.
+-- The backing Forgejo PAT stays server-side so clients cannot use Cosheaf
+-- credentials directly against Forgejo.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  token_hash TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  forgejo_pat TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER NOT NULL
 );
 
 -- Site-wide admin state. These rows are Cosheaf-local operator state, not

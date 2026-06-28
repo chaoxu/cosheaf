@@ -43,6 +43,14 @@ interface BranchRefEntry {
   line: number | null;
 }
 
+interface ContentsWriteBody {
+  content?: string;
+  branch?: string;
+  new_branch?: string;
+  message?: string;
+  sha?: string;
+}
+
 const BRANCH_REF_CACHE_MAX = 128;
 const BRANCH_REF_CACHE_TTL_MS = 5 * 60_000;
 const branchRefCache = new Map<string, { expiresAt: number; entries: readonly BranchRefEntry[] }>();
@@ -108,6 +116,61 @@ function invalidateBranchRefs(owner: string, repo: string, branch: string): void
 function invalidateBranchReadCaches(owner: string, repo: string, branch: string): void {
   invalidateBranchTree(owner, repo, branch);
   invalidateBranchRefs(owner, repo, branch);
+}
+
+function basename(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
+function giteaContentShape(c: import("hono").Context<AppEnv>, path: string, meta: {
+  sha: string | null;
+  size: number;
+  content: Buffer;
+}): Record<string, unknown> {
+  const apiPath = `/api/v1/repos/${c.req.param("owner")}/${c.req.param("repo")}/contents/${path}`;
+  const url = new URL(apiPath, c.req.url).toString();
+  return {
+    name: basename(path),
+    path,
+    sha: meta.sha,
+    size: meta.size,
+    type: "file",
+    content: meta.content.toString("base64"),
+    encoding: "base64",
+    url,
+    html_url: null,
+    git_url: null,
+    download_url: null,
+    _links: {
+      self: url,
+      git: null,
+      html: null,
+    },
+  };
+}
+
+function decodeBase64Content(value: string | undefined): Buffer | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  const compact = value.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(compact) || compact.length % 4 === 1) return null;
+  return Buffer.from(compact, "base64");
+}
+
+async function ensureBranchFrom(
+  c: import("hono").Context<AppEnv>,
+  branch: string,
+  baseBranch: string,
+): Promise<void> {
+  if (branch === baseBranch) return;
+  const { fj, owner, repo } = c.get("repoCtx");
+  const exists = await fj.getBranch(owner, repo, branch);
+  if (exists) return;
+  try {
+    await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: baseBranch });
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 409 && await fj.getBranch(owner, repo, branch)) return;
+    throw err;
+  }
 }
 
 export function _clearBranchRefCacheForTests(): void {
@@ -179,15 +242,7 @@ async function ensureBranch(
   branch: string,
 ): Promise<void> {
   if (branch === "main") return;
-  const { fj, owner, repo } = c.get("repoCtx");
-  const exists = await fj.getBranch(owner, repo, branch);
-  if (exists) return;
-  try {
-    await fj.createBranch(owner, repo, { newBranchName: branch, oldBranchName: "main" });
-  } catch (err) {
-    if (err instanceof ForgejoError && err.status === 409 && await fj.getBranch(owner, repo, branch)) return;
-    throw err;
-  }
+  await ensureBranchFrom(c, branch, "main");
 }
 
 async function retiredDefaultEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
@@ -259,6 +314,119 @@ files.get("/:owner/:repo/tree", async (c) => {
       : f;
   });
   return c.json({ files: merged });
+});
+
+files.get("/:owner/:repo/contents/:path{.+}", async (c) => {
+  const rel = safeRel(c.req.param("path"));
+  if (!rel) return c.json(...bad("invalid path"));
+  const ref = c.req.query("ref")?.trim() || c.req.query("branch")?.trim() || "main";
+  if (!validRequestedBranch(ref)) return c.json(...bad("valid branch name required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  try {
+    const [content, meta] = await Promise.all([
+      fj.getRawFileBytes(owner, repo, ref, rel),
+      fj.getFileMeta(owner, repo, ref, rel),
+    ]);
+    if (!meta) return c.json(...notFound());
+    return c.json(giteaContentShape(c, rel, {
+      sha: meta.sha,
+      size: meta.size ?? content.length,
+      content,
+    }));
+  } catch (err) {
+    if (err instanceof ForgejoError && err.status === 404) return c.json(...notFound());
+    throw err;
+  }
+});
+
+async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdStatus: 200 | 201): Promise<Response> {
+  const rel = safeRel(c.req.param("path"));
+  if (!rel || !isEditableTextFile(rel)) return c.json(...bad("invalid path"));
+  const body = (await c.req.json().catch(() => null)) as ContentsWriteBody | null;
+  const decoded = decodeBase64Content(body?.content);
+  if (!decoded) return c.json(...bad("base64 content required"));
+  const baseBranch = body?.branch?.trim() || "main";
+  const branch = body?.new_branch?.trim() || baseBranch;
+  if (!validRequestedBranch(baseBranch) || !validRequestedBranch(branch))
+    return c.json(...bad("valid branch name required"));
+  if (branch === "main")
+    return c.json(...bad("branch required (cannot write to main)"));
+
+  await ensureBranchFrom(c, branch, baseBranch);
+  const content = decoded.toString("utf8");
+  const { fj, owner, repo } = c.get("repoCtx");
+  const ws = c.get("workspace");
+  const existing = await fj.getFileMeta(owner, repo, branch, rel);
+  if (typeof body?.sha === "string" && (existing?.sha ?? null) !== body.sha) {
+    return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, body.sha)));
+  }
+  const isMarkdown = fileKindForPath(rel) === "markdown";
+  const plan = isMarkdown
+    ? planIndexPage(c.get("db"), {
+        workspaceSlug: ws.slug,
+        filePath: rel,
+        bodyText: content,
+        formatId: ws.defaultMdFormat,
+      })
+    : null;
+  const finalContent = plan?.rewrittenContent ?? content;
+  let written;
+  try {
+    written = await fj.putFile(owner, repo, {
+      branch,
+      path: rel,
+      content: finalContent,
+      sha: existing?.sha,
+      message: body?.message?.trim() || (existing ? `update ${rel}` : `create ${rel}`),
+    });
+  } catch (err) {
+    if (isStaleShaConflict(err)) {
+      return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, body?.sha)));
+    }
+    throw err;
+  }
+  invalidateBranchReadCaches(owner, repo, branch);
+  c.get("sse").publish(ws.slug, { type: "change", path: rel });
+  const writtenSha = written.content?.sha ?? (await fj.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
+  return c.json({
+    content: giteaContentShape(c, rel, {
+      sha: writtenSha,
+      size: Buffer.byteLength(finalContent, "utf8"),
+      content: Buffer.from(finalContent, "utf8"),
+    }),
+    commit: written.commit,
+  }, existing ? 200 : createdStatus);
+}
+
+files.post("/:owner/:repo/contents/:path{.+}", (c) => writeContentsCompat(c, 201));
+files.put("/:owner/:repo/contents/:path{.+}", (c) => writeContentsCompat(c, 200));
+
+files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
+  const rel = safeRel(c.req.param("path"));
+  if (!rel) return c.json(...bad("invalid path"));
+  const body = (await c.req.json().catch(() => null)) as {
+    branch?: string;
+    message?: string;
+    sha?: string;
+  } | null;
+  const branch = body?.branch?.trim() || "main";
+  if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
+  if (branch === "main") return c.json(...bad("branch required (cannot delete on main)"));
+  if (typeof body?.sha !== "string" || body.sha.trim() === "") return c.json(...bad("sha required"));
+  const { fj, owner, repo } = c.get("repoCtx");
+  await ensureBranch(c, branch);
+  const meta = await fj.getFileMeta(owner, repo, branch, rel);
+  if (!meta) return c.json(...notFound());
+  if (meta.sha !== body.sha) return c.json(...(await staleShaConflict(fj, owner, repo, branch, rel, body.sha)));
+  await fj.deleteFile(owner, repo, {
+    branch,
+    path: rel,
+    sha: body.sha,
+    message: body.message?.trim() || `delete ${rel}`,
+  });
+  invalidateBranchReadCaches(owner, repo, branch);
+  c.get("sse").publish(c.get("workspace").slug, { type: "change", path: rel });
+  return c.json({ content: null, commit: null });
 });
 
 files.get("/:owner/:repo/file", async (c) => {

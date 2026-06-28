@@ -3,7 +3,7 @@ import type { AppEnv } from "../types.js";
 import type { Role } from "../../shared/roles.js";
 import { ROLES } from "../../shared/roles.js";
 import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
-import { ForgejoError } from "../forgejo.js";
+import { ForgejoError, type ForgejoRepo } from "../forgejo.js";
 import { invalidateWorkspacePermissionCache, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { provisionWorkspace, type WorkspaceVisibility } from "../workspace-provisioning.js";
@@ -39,13 +39,15 @@ function parseRequiredApprovals(value: unknown): number | null {
 workspaces.get("/", async (c) => {
   // Workspaces are repos with a `cosheaf-format-*` topic, discovered across
   // ALL owners the caller can see (Forgejo repo search runs under the
-  // caller's PAT, so private repos respect Forgejo visibility). Permission
-  // resolution and display name come from the same repo objects.
+  // user's resolved backend credential, so private repos respect Forgejo
+  // visibility). Permission resolution and display name come from the same repo
+  // objects.
   const fj = c.get("fjUser");
 
   const repos = await listVisibleWorkspaceRepos(fj);
   // Forgejo's search response includes a `permissions` object on each repo
-  // when called with a PAT — derive the role from that instead of a
+  // for the authenticated backend credential — derive the role from that
+  // instead of a
   // per-repo getRepoPermission round-trip.
   const workspaces = repos
     .map((r) => ({ repo: r, role: roleFromPermissions(r.permissions) }))
@@ -141,6 +143,44 @@ workspaces.post("/", async (c) => {
 // Mounted under /api/v1/repos alongside the other typed workspace routes.
 export const members = new Hono<AppEnv>();
 members.use("*", requireAuth);
+
+function publicRepoShape(c: import("hono").Context<AppEnv>, repoMeta: ForgejoRepo): Record<string, unknown> {
+  const { owner, repo } = c.get("repoCtx");
+  const origin = new URL(c.req.url).origin;
+  const apiRepo = `${origin}/api/v1/repos/${owner}/${repo}`;
+  const webRepo = `${origin}/${owner}/${repo}`;
+  return {
+    ...repoMeta,
+    full_name: repoMeta.full_name || `${owner}/${repo}`,
+    name: repoMeta.name || repo,
+    owner: {
+      id: repoMeta.owner?.id ?? 0,
+      login: repoMeta.owner?.login ?? owner,
+      login_name: repoMeta.owner?.login ?? owner,
+      username: repoMeta.owner?.login ?? owner,
+      full_name: repoMeta.owner?.full_name ?? "",
+      email: "",
+      avatar_url: "",
+      html_url: `${origin}/${owner}`,
+    },
+    url: apiRepo,
+    html_url: webRepo,
+    link: webRepo,
+    languages_url: `${apiRepo}/languages`,
+    clone_url: "",
+    ssh_url: "",
+    original_url: "",
+    wiki_ssh_url: "",
+    wiki_clone_url: "",
+  };
+}
+
+members.get("/:owner/:repo", requireMembership(), async (c) => {
+  const { fj, owner, repo } = c.get("repoCtx");
+  const found = await fj.getRepo(owner, repo);
+  if (!found) return c.json(...notFound("workspace not found"));
+  return c.json(publicRepoShape(c, found));
+});
 
 members.put("/:owner/:repo/members/:username", requireMembership(), requireAdminFresh, async (c) => {
   const username = c.req.param("username")?.trim();

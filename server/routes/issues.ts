@@ -34,6 +34,7 @@ import type {
 import { normalizeLabelColor, parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
 import { bad, conflict, notFound } from "./responses.js";
 import { parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
+import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
 
 function toIssueRow(i: ForgejoIssue): IssueRow {
   return {
@@ -180,12 +181,21 @@ issues.get("/:owner/:repo/issues", async (c) => {
       fj.listIssues(owner, repo, { state, q, labels, milestones, mentioned_by: mentionedBy, sort, created_by: username }),
       fj.listIssues(owner, repo, { state, q, labels, milestones, mentioned_by: mentionedBy, sort, assigned_by: username }),
     ]);
+    if (wantsTeaShape(c)) {
+      const byNum = new Map<number, ForgejoIssue>();
+      for (const i of [...authored, ...assigned]) {
+        if (!i.pull_request) byNum.set(i.number, i);
+      }
+      const merged = Array.from(byNum.values()).sort((a, b) => toEpochMs(b.updated_at) - toEpochMs(a.updated_at));
+      return c.json(scrubBackendUrls(c, merged));
+    }
     const byNum = new Map<number, IssueRow>();
     for (const i of [...authored, ...assigned]) {
       if (!i.pull_request) byNum.set(i.number, toIssueRow(i));
     }
     const merged = Array.from(byNum.values()).sort((a, b) => b.updated_at - a.updated_at);
-    return c.json({ issues: attachClaims(c, merged) });
+    const rows = attachClaims(c, merged);
+    return c.json({ issues: rows });
   }
   const list = await fj.listIssues(owner, repo, {
     state,
@@ -197,7 +207,9 @@ issues.get("/:owner/:repo/issues", async (c) => {
     ...(filter === "assigned" ? { assigned_by: username } : assignedBy ? { assigned_by: assignedBy } : {}),
     ...(createdBy ? { created_by: createdBy } : {}),
   });
-  return c.json({ issues: attachClaims(c, list.filter((i) => !i.pull_request).map(toIssueRow)) });
+  const issueList = list.filter((i) => !i.pull_request);
+  if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, issueList));
+  return c.json({ issues: attachClaims(c, issueList.map(toIssueRow)) });
 });
 
 // Decorate issue rows with their active live-work leases (#95) in one batched

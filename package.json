@@ -67,6 +67,8 @@
     "issue": "node scripts/issue.mjs",
     "devx:pending": "node scripts/devx-pending.mjs",
     "devx:review-prompt": "node scripts/devx-review-prompt.mjs",
+    "cosheaf:tea": "node scripts/cosheaf-agent.mjs",
+    "cosheaf:tea-check": "node scripts/tea-compat-check.mjs",
     "merge-task": "node scripts/merge-task.mjs",
     "smoke": "playwright test --config playwright.smoke.config.ts --grep @smoke-basic",
     "smoke:list": "node scripts/smoke-list.mjs",

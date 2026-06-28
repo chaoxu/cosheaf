@@ -84,6 +84,24 @@ afterEach(() => {
 });
 
 describe("issues routes", () => {
+  it("returns a tea-compatible issue array for Gitea token auth", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockResolvedValueOnce(ok([
+      forgejoIssue(4, "Visible issue"),
+      forgejoIssue(5, "Pull request", { isPr: true }),
+    ]));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues?state=open", {
+      headers: { authorization: `token ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([
+      expect.objectContaining({ number: 4, title: "Visible issue", updated_at: "2026-05-20T00:01:00Z" }),
+    ]);
+  });
+
   it("rejects malformed issue creation payloads before contacting Forgejo", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

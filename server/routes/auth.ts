@@ -1,12 +1,14 @@
-// Login exchanges user credentials for a Cosheaf-issued Forgejo PAT. Cosheaf
-// doesn't hold passwords or sessions; the returned PAT supports API clients as
-// JSON and server-rendered pages as an HttpOnly cookie.
+// Login validates user credentials with Forgejo, keeps the backend credential
+// server-side, and returns an opaque Cosheaf token for API clients and
+// server-rendered pages.
 
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
-import { deleteCookie } from "hono/cookie";
+import { deleteCookie, getCookie } from "hono/cookie";
+import { createApiToken, deleteApiToken, storeApiToken } from "../api-tokens.js";
 import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
+import { bearerToken } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { bad, unauthorized } from "./responses.js";
 import { rejectCrossOriginMutation, setAuthCookie } from "./web-context.js";
@@ -298,17 +300,58 @@ auth.post("/login", async (c) => {
       502,
     );
   }
-  setAuthCookie(c, outcome.pat);
-  return c.json({ username: outcome.username, pat: outcome.pat });
+  const apiToken = createApiToken();
+  storeApiToken(c.get("db"), apiToken, outcome.username, outcome.pat);
+  setAuthCookie(c, apiToken);
+  return c.json({ username: outcome.username, pat: apiToken, token_type: "cosheaf" });
 });
 
-// Logout clears the browser cookie. We deliberately do NOT revoke the cached
-// Forgejo PAT because other API clients may still use it.
+// Logout clears the browser cookie and deletes the presented Cosheaf API token.
+// We deliberately do NOT revoke the cached server-side Forgejo credential
+// because other Cosheaf API tokens for the same user may still use it.
 auth.post("/logout", (c) => {
   const crossOrigin = rejectCrossOriginMutation(c);
   if (crossOrigin) return crossOrigin;
+  const token = bearerToken(c.req.header("authorization")) ?? getCookie(c, AUTH_COOKIE) ?? null;
+  if (token) deleteApiToken(c.get("db"), token);
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.json({ ok: true });
+});
+
+auth.get("/version", (c) => c.json({ version: "cosheaf" }));
+
+auth.get("/user", async (c) => {
+  const a = await resolveAuth(c);
+  if (!a) return c.json(...unauthorized("not authenticated"));
+  return c.json({
+    id: 0,
+    login: a.user.username,
+    login_name: a.user.username,
+    username: a.user.username,
+    full_name: "",
+    email: "",
+    avatar_url: "",
+    language: "en-US",
+    is_admin: false,
+    last_login: null,
+    created: null,
+    restricted: false,
+    active: true,
+    prohibit_login: false,
+    location: "",
+    website: "",
+    description: "",
+    visibility: "public",
+    followers_count: 0,
+    following_count: 0,
+    starred_repos_count: 0,
+  });
+});
+
+auth.get("/user/keys", async (c) => {
+  const a = await resolveAuth(c);
+  if (!a) return c.json(...unauthorized("not authenticated"));
+  return c.json([]);
 });
 
 auth.get("/me", async (c) => {

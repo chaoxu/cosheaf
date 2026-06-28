@@ -19,8 +19,8 @@ export interface WorkspaceContext {
 }
 
 // Per-request bundle handed to workspace-scoped routes. `fj` is bound to the
-// authenticated user's Forgejo PAT — there is no admin token at runtime and
-// no impersonation header to forget.
+// authenticated user's server-side Forgejo credential — there is no admin token
+// at runtime and no impersonation header to forget.
 export interface RepoCtx {
   fj: Forgejo;
   owner: string;
@@ -35,7 +35,8 @@ export interface AppEnv {
     db: Database.Database;
     config: Config;
     // Admin-bound Forgejo client. Used only by the webhook handler and
-    // explicit provisioning paths; normal workspace routes use user PATs.
+    // explicit provisioning paths; normal workspace routes use the user's
+    // resolved server-side Forgejo credential.
     fjAdmin: Forgejo;
     sse: SSEHub;
     // Per-request UI locale (resolved once in middleware from the cosheaf_lang
@@ -44,8 +45,9 @@ export interface AppEnv {
     locale: LocaleId;
     t: T;
     user: User;
-    // Forgejo client bound to the authenticated user's PAT. Set by
-    // requireAuth; used by every workspace route via repoCtx.fj.
+    // Forgejo client bound to the authenticated user's resolved backend
+    // credential. Set by requireAuth; used by every workspace route via
+    // repoCtx.fj.
     fjUser: Forgejo;
     forgejoToken: string;
     workspace: WorkspaceContext;

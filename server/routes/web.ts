@@ -738,7 +738,7 @@ function accountApiTokenSection(opts: AccountSettingsOptions): Html {
               <div class="settings-actions">
                 <button class="button" type="button" data-testid="api-token-copy" onclick="navigator.clipboard?.writeText(this.closest('[data-testid=api-token-result]')?.querySelector('[data-testid=api-token-value]')?.value ?? '')">Copy token</button>
               </div>
-              <p>Send it as <code>Authorization: Bearer &lt;token&gt;</code>. Treat it like your password.</p>
+              <p>Send it as <code>Authorization: Bearer &lt;token&gt;</code>, or as <code>Authorization: token &lt;token&gt;</code> for tea-compatible clients. Treat it like your password.</p>
             </div>`
           : html`<div class="settings-note">
               <p>The token acts as you and can read or write repositories you can access.</p>

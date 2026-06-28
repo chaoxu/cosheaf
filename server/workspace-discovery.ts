@@ -18,8 +18,9 @@ export function roleFromPermissions(
 // is a thin frontend over the forge, so discovery shows all repos the caller
 // can see — not only ones carrying a `cosheaf-format-*` topic. Untagged repos
 // open as forgejo-passthrough (documentFormatFromTopics defaults them).
-// Forgejo repo search runs under the caller's PAT, so private repos respect
-// Forgejo visibility. Dedupe by full name and sort for a stable list.
+// Forgejo repo search runs under the user's resolved backend credential, so
+// private repos respect Forgejo visibility. Dedupe by full name and sort for a
+// stable list.
 export async function listVisibleWorkspaceRepos(
   fj: { searchAllAccessibleRepos(): Promise<ForgejoRepo[]> },
 ): Promise<ForgejoRepo[]> {

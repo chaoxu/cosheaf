@@ -30,6 +30,9 @@ const ALLOWED_TABLES = new Set([
   "webhook_log",
   // Cosheaf-issued Forgejo PAT cache; login validates credentials before reuse
   "login_tokens",
+  // Opaque client-visible API tokens mapped to server-side Forgejo credentials;
+  // credential state, not a Forgejo workflow mirror.
+  "api_tokens",
   // Cosheaf-owned site controls: global admin bootstrap and registration gate.
   "site_admins",
   "site_settings",

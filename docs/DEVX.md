@@ -2,6 +2,12 @@
 
 ## Agent Entry Points
 
+- `docs/AI_CLIENTS.md` is the short public contract for AI tools that use
+  Cosheaf workspaces. Start there when an agent needs to edit pages, open a PR,
+  review, merge, or triage issues through the typed API instead of the backing
+  Forgejo service.
+- `pnpm cosheaf:tea -- --workspace <owner>/<repo> pr-from-files ...` is the
+  tea-shaped helper for the common local-files-to-Cosheaf-PR flow.
 - `pnpm devx:ready` prepares a local agent workspace: checks Forgejo `3002`,
   runs the manual seed, starts `pnpm dev:all` if needed, writes Playwright login
   state, and prints route targets plus focused checks.

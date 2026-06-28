@@ -3,6 +3,7 @@ import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import type { AppEnv } from "./types.js";
 import type { Role } from "../shared/roles.js";
+import { resolveApiToken, type ResolvedApiToken } from "./api-tokens.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
@@ -15,53 +16,62 @@ interface AuthResolution {
 }
 
 const BEARER_TTL_MS = 30_000;
-const BEARER_CACHE = new TTLCache<string, string>(BEARER_TTL_MS);
+const BEARER_CACHE = new TTLCache<string, ResolvedApiToken>(BEARER_TTL_MS);
 
 export function _seedBearerAuthCacheForTests(token: string, username: string): void {
-  BEARER_CACHE.set(token, username, 60_000);
+  BEARER_CACHE.set(token, { username, forgejoToken: token }, 60_000);
 }
 
 export function _resetBearerAuthCacheForTests(): void {
   BEARER_CACHE.clear();
 }
 
-// Drop the cached username for a bearer that Forgejo just rejected. Called
-// from the global 401 handler so a revoked PAT can't keep resolving from
+// Drop the cached bearer resolution after a backend 401. Called from the
+// global 401 handler so a revoked backend credential can't keep resolving from
 // the cache for up to BEARER_TTL_MS after revocation.
 export function invalidateBearerCache(token: string): void {
   BEARER_CACHE.delete(token);
 }
 
 export function bearerToken(authHeader?: string): string | null {
-  if (!authHeader?.startsWith("Bearer ")) return null;
-  const token = authHeader.slice("Bearer ".length).trim();
+  const match = /^(?:Bearer|token)\s+(.+)$/i.exec(authHeader ?? "");
+  if (!match) return null;
+  const token = match[1]?.trim() ?? "";
   return token || null;
 }
 
 export const AUTH_COOKIE = "cosheaf_pat";
 
-// PAT-only authentication. API clients and agents send the PAT as
-// `Authorization: Bearer <pat>`; server-rendered pages (and same-origin
-// EventSource, which sends the cookie) receive the same PAT through an HttpOnly
-// cookie. There is no cosheaf-side user table or session record: the PAT is the
-// credential. No `?pat=` query path — keeping the credential out of URLs/logs;
-// re-add it scoped to a specific SSE handler if an off-cookie client ever needs it.
+// API clients and agents send an opaque Cosheaf token as
+// `Authorization: Bearer <token>` or Gitea/tea's
+// `Authorization: token <token>`; server-rendered pages (and same-origin
+// EventSource, which sends the cookie) receive the same token through an
+// HttpOnly cookie. Cosheaf resolves that token to the backend Forgejo
+// credential internally. Direct Forgejo tokens are migration-only behind
+// COSHEAF_ACCEPT_FORGEJO_BEARER=1. No `?pat=` query path — keeping credentials
+// out of URLs/logs; re-add it scoped to a specific SSE handler if an off-cookie
+// client ever needs it.
 export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | null> {
   const config = c.get("config");
   const bearer = bearerToken(c.req.header("authorization")) ?? getCookie(c, AUTH_COOKIE) ?? null;
   if (!bearer) return null;
-  let username = BEARER_CACHE.get(bearer);
-  if (!username) {
+  let resolved = BEARER_CACHE.get(bearer);
+  if (!resolved) {
+    resolved = resolveApiToken(c.get("db"), bearer);
+  }
+  if (!resolved && process.env.COSHEAF_ACCEPT_FORGEJO_BEARER === "1") {
     const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: bearer });
     try {
-      username = (await fj.getCurrentUser()).login;
+      const username = (await fj.getCurrentUser()).login;
+      resolved = { username, forgejoToken: bearer };
     } catch (err) {
       if (err instanceof ForgejoError && (err.status === 401 || err.status === 403)) return null;
       throw err;
     }
-    BEARER_CACHE.set(bearer, username);
   }
-  return { user: { username }, forgejoToken: bearer };
+  if (!resolved) return null;
+  BEARER_CACHE.set(bearer, resolved);
+  return { user: { username: resolved.username }, forgejoToken: resolved.forgejoToken };
 }
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {

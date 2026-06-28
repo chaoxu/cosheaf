@@ -3,9 +3,11 @@
 Human-usable knowledge base for Coflat-flavored markdown. Forgejo repositories
 hold the canonical markdown files, branches, pull requests, reviews, issues,
 and collaborator memberships; SQLite is a derived sidecar for fast reads and
-small Cosheaf-owned credentials. The credential is a Forgejo PAT, sent either
-as `Authorization: Bearer <token>` by API clients and agents or as an HttpOnly
-`cosheaf_pat` cookie for server-rendered web pages.
+small Cosheaf-owned credentials. Client-visible credentials are opaque
+Cosheaf tokens, sent as `Authorization: Bearer <token>` by API clients,
+as Gitea/tea-style `Authorization: token <token>` by compatibility clients,
+or as an HttpOnly `cosheaf_pat` cookie for server-rendered web pages. Cosheaf
+maps that token to its backend forge credential internally.
 
 The long-term direction is a thin knowledge-base UI over a Forgejo-style
 forge. Cosheaf should feel like a focused repository interface with custom
@@ -31,6 +33,15 @@ collaborators over the same HTTP API. Cosheaf may provide a thin issue-backed
 chat surface and optional launcher for that external layer, but keep cosheaf's
 surface usable without any automation.
 
+## AI client contract
+
+Agents using Cosheaf as a product must use Cosheaf's typed workspace API or
+the tea-shaped `pnpm cosheaf:tea` helper, not the backing Forgejo API. The
+client-visible token is an opaque Cosheaf token, not a Forgejo PAT. The short
+reusable runbook is `docs/AI_CLIENTS.md`; keep it aligned whenever an
+agent-facing branch, file, pull-request, issue, review, merge, or notification
+workflow changes.
+
 ## Shared file
 
 `AGENTS.md` is the canonical shared instructions file for both `AGENTS.md` and
@@ -51,14 +62,15 @@ surface usable without any automation.
   state is needed for speed or UX, treat it as cache/mapping/reconciliation
   state with a clear Forgejo source.
 - **No hidden database-only knowledge.** SQLite stores document metadata,
-  links, FTS index, webhook dedupe, and cached Cosheaf-issued Forgejo PATs —
-  keyed by the Forgejo `owner/repo` full name or username. There is no users,
-  sessions, or workspaces table; identity, workspace registry, memberships,
-  branches, pull requests, issues, labels, milestones, and notifications all
-  live on Forgejo and are read on demand (the workspace format lives in a
-  `cosheaf-format-*` repo topic). Passthrough calls are not audited locally —
-  Forgejo's access log is the trail. The page index is rebuildable from Forgejo
-  via `pnpm cli workspace reindex <owner>/<repo>`.
+  links, FTS index, webhook dedupe, opaque API-token mappings, and cached
+  Cosheaf-owned backend credentials — keyed by the Forgejo `owner/repo` full
+  name or username. There is no users, sessions, or workspaces table; identity,
+  workspace registry, memberships, branches, pull requests, issues, labels,
+  milestones, and notifications all live on Forgejo and are read on demand
+  (the workspace format lives in a `cosheaf-format-*` repo topic). Passthrough
+  calls are not audited locally — Forgejo's access log is the trail. The page
+  index is rebuildable from Forgejo via
+  `pnpm cli workspace reindex <owner>/<repo>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
   add frontmatter before persisting content.
@@ -161,16 +173,19 @@ move in small, reversible steps:
   for public clients; keep Forgejo details behind route implementations; delete
   old token and wrapper language as the Forgejo-native path lands.
 
-Forgejo-only: Gitea is not a supported target. Don't add Gitea-compatibility
-hedging or version-sensitivity caveats; assume Forgejo behavior.
+Forgejo-only backend: Gitea is not a supported storage target. Do not add
+backend version-sensitivity caveats; assume Forgejo behavior behind Cosheaf.
+Tea/Gitea-shaped client compatibility at the Cosheaf API edge is allowed when
+it translates into typed Cosheaf routes and does not expose the backend forge.
 
 ### Agent API and typed routes
 
-Agents and external tools must use the typed Cosheaf workspace API. Forgejo is
-currently the durable backend, but it is an implementation detail: public
-client code should not construct `/forgejo/...` paths, send Forgejo-shaped
-request bodies, or rely on Forgejo response fields such as `head.ref` or
-`user.login`.
+Agents and external tools must use the typed Cosheaf workspace API or the
+tea-shaped `pnpm cosheaf:tea` helper. Forgejo is the durable backend, but it is
+an implementation detail: public client code should not construct
+`/forgejo/...` paths, send Forgejo-shaped request bodies, or rely on Forgejo
+response fields. The reusable prompt-sized contract, endpoint map, and common
+flows live in `docs/AI_CLIENTS.md`.
 
 The typed routes live in `routes/pulls.ts`, `routes/issues.ts`,
 `routes/files.ts`, `routes/branches.ts`, and `routes/notifications.ts`. Keep or
@@ -179,133 +194,15 @@ shaping, sidecar integration, SSE events, or Cosheaf-specific gates (e.g.
 `requireAdminFresh` on merge). Do not add a raw backend passthrough route; if a
 normal workflow needs an API surface, add a typed Cosheaf route.
 
-Typed routes are the public contract for Cosheaf document/index behavior:
-
-- Use `routes/files.ts` for page reads/writes that should synchronously apply
-  Coflat frontmatter/id handling, path validation, and browser events. The
-  sidecar index (backlinks, FTS, page metadata) mirrors `main`; branch writes
-  do not publish unmerged content into it.
-- Use typed search, backlinks, document-list, and event routes when callers
-  need the SQLite sidecar index rather than raw backend repository contents.
-- Use typed branch, pull, issue, label, milestone, notification, and markdown
-  routes for normal workspace automation.
-- Use typed merge/admin routes where Cosheaf adds freshness checks or other
-  UI safety gates before calling the backend forge.
-
-File-write boundary: a Markdown write made outside Cosheaf is an external
-repository write from Cosheaf's point of view. Webhooks and `pnpm cli workspace
-reindex <owner>/<repo>` reconcile `main` into SQLite. A Markdown branch write
-that needs immediate Cosheaf frontmatter/SSE behavior should go through the
-typed file route; search/backlinks/doc metadata update after merge webhook or
-reindex.
-
-Cosheaf does not synchronously run the indexer or emit SSE on external backend
-writes. Reconciliation is webhook-only. Callers (including agents) that need
-read-after-write consistency for branch file content should use the typed file
-route; callers that need sidecar search/backlink consistency must wait for the
-change to land on `main` and reconcile.
-
-Examples for agents using a Cosheaf API token (the workspace is the
-`chao/flushing-coin` repo):
-
-- `GET /api/v1/repos/chao/flushing-coin/issues?state=open`
-- `PATCH /api/v1/repos/chao/flushing-coin/issues/42/state` with `{ "state": "closed" }`
-- `GET /api/v1/repos/chao/flushing-coin/pulls?state=open`
-- `GET /api/v1/repos/chao/flushing-coin/labels`
-- `GET /api/v1/repos/chao/flushing-coin/milestones?state=open`
-- `GET /api/v1/repos/chao/flushing-coin/file?path=hello.md&branch=main`
-- `GET /api/v1/repos/chao/flushing-coin/notifications`
-
-Use `Authorization: Bearer <token>` on these Cosheaf requests; Cosheaf
-validates workspace membership and translates to the backend credential
-internally.
-
 Rules of thumb:
 
 - Don't add raw backend passthrough routes.
+- Use `routes/files.ts` for page writes that need frontmatter/id handling,
+  path validation, branch read-after-write, or browser events.
 - Keep protected operations behind typed routes (e.g. `pulls/:n/merge` must
   keep running `requireAdminFresh`).
 - Don't mirror backend forge state into SQLite just to filter on it; compose
   backend filters inside typed routes and return stable Cosheaf DTOs.
-
-### Agent flows
-
-Three common flows. Each works with `curl` against a running cosheaf
-(`pnpm dev:all`) using a Cosheaf API token as the Bearer token. Replace
-`$OWNER`, `$REPO`, `$PAT`, etc. (the dev fixture is `chao`/`flushing-coin`).
-
-**1. Add a page on a work branch.** Use the typed file route so frontmatter is
-applied immediately; open and merge a PR to land it on `main`, where the
-sidecar search/backlink index is reconciled by the merge push webhook:
-
-```sh
-curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=agent/wip-1" \
-  -H "Authorization: Bearer $PAT" \
-  -H "content-type: application/json" \
-  -d '{"content": "# New page\n\nbody."}'
-```
-
-**2. Open a PR, get a review, merge.**
-
-```sh
-# Create branch
-curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/branches" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"name": "agent/wip-1"}'
-
-# Edit a file on the branch (typed route applies frontmatter/id handling)
-curl -X PUT "http://localhost:3030/api/v1/repos/$OWNER/$REPO/file?path=notes/new.md&branch=agent/wip-1" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"content": "# Updated\n\nbody."}'
-
-# Open PR
-curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/pulls" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"head": "agent/wip-1", "base": "main", "title": "Update notes/new.md"}'
-
-# Submit a review
-curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/pulls/42/reviews" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"event": "APPROVE", "body": "looks good"}'
-
-# Merge (typed route — runs requireAdminFresh)
-curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/pulls/42/merge" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"Do": "squash"}'
-```
-
-**3. Triage issues.**
-
-```sh
-# List my open issues
-curl "http://localhost:3030/api/v1/repos/$OWNER/$REPO/issues?state=open&filter=assigned" \
-  -H "Authorization: Bearer $PAT"
-
-# Comment on one
-curl -X POST "http://localhost:3030/api/v1/repos/$OWNER/$REPO/issues/17/comments" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"body": "investigating"}'
-
-# Close it
-curl -X PATCH "http://localhost:3030/api/v1/repos/$OWNER/$REPO/issues/17/state" \
-  -H "Authorization: Bearer $PAT" -H "content-type: application/json" \
-  -d '{"state": "closed"}'
-```
-
-Notes for agent retry logic:
-
-- Reading after an external backend write through cosheaf's typed routes is not
-  immediately consistent — the webhook reconciles asynchronously. If you need
-  branch file read-your-write, use the typed file route. If you need sidecar
-  search/backlink consistency, wait until the change lands on `main` and is
-  reconciled.
-- Typed `PUT /file`, `PATCH /issues/:n/state`, `DELETE /issues/:n/comments/:id`,
-  and `DELETE /pulls/:n/comments/:id` are idempotent enough for normal
-  client retry.
-- `POST pulls` is **not** idempotent — retry produces a duplicate PR.
-  Check for an existing open PR with the same head/base before retrying.
-- `POST pulls/:n/merge` retries internally on Forgejo's transient 405
-  "try again later"; you don't need to retry it from outside.
 
 Do not rewrite the app, build a generic CMS, add arbitrary document-format
 plugins, or move gatherer/oracle/prover logic into this repo as part of this
@@ -332,7 +229,7 @@ server/
   db.ts           # config + better-sqlite3 instance
   schema.sql      # full DB schema (executed on every startup; CREATE IF NOT EXISTS)
   users.ts        # minimal `User` type ({username}); identity comes from Forgejo
-  middleware.ts   # requireAuth (Bearer PAT), requireMembership() on /:owner/:repo routes
+    middleware.ts   # requireAuth (opaque Cosheaf token), requireMembership() on /:owner/:repo routes
   frontmatter.ts  # parse/serialize YAML frontmatter
   indexer.ts      # indexPage(): parse → upsert doc_map → reindex backlinks/tags/FTS
   forgejo.ts      # minimal Forgejo REST client
@@ -536,17 +433,19 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 `parseWorkspaceSlug` splits it).
 
 There is no `users`, `sessions`, or `workspaces` table (#63, #62). Identity
-comes from a Forgejo PAT sent as `Authorization: Bearer <token>` by API clients
-or as the `cosheaf_pat` HttpOnly cookie by server-rendered pages; workspace
-identity is the Forgejo `(owner, repo)` pair — the same repo name under
-different owners is a different workspace; the workspace's markdown format
-lives in a Forgejo repo topic (`cosheaf-format-coflat` or
-`cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write |
-read`) is resolved from Forgejo's collaborator-permission API on each
-request, cached in-process for 30s; the bearer→username and
-(owner, repo)→format mappings are cached on the same TTL. There is no
-`memberships` table and no sidecar `branches` table — branches and pull
-requests live entirely on Forgejo and are queried on demand.
+comes from an opaque Cosheaf token sent as `Authorization: Bearer <token>` by
+API clients, as `Authorization: token <token>` by Gitea/tea-compatible clients,
+or as the `cosheaf_pat` HttpOnly cookie by server-rendered pages; Cosheaf
+resolves that token to the server-side Forgejo credential internally.
+Workspace identity is the Forgejo `(owner, repo)` pair — the same repo name
+under different owners is a different workspace; the workspace's markdown
+format lives in a Forgejo repo topic (`cosheaf-format-coflat` or
+`cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write | read`)
+is resolved from Forgejo's collaborator-permission API on each request, cached
+in-process for 30s; the bearer→username and (owner, repo)→format mappings are
+cached on the same TTL. There is no `memberships` table and no sidecar
+`branches` table — branches and pull requests live entirely on Forgejo and are
+queried on demand.
 
 ## Branch and pull request lifecycle
 
@@ -643,14 +542,15 @@ need Coflat behavior explicitly set the topic via `--default-md-format
 coflat` at seed time.
 
 Discovery is topic-agnostic: cosheaf is a frontend over the forge, so the
-home page and `GET /api/v1/workspaces` list **every** repo the caller's PAT
-can access (`Forgejo.searchAllAccessibleRepos`), not only `cosheaf-format-*`
-tagged repos. An untagged repo opens as a `forgejo-passthrough` workspace.
-The format topic therefore only selects rendering/indexing behavior, never
-visibility. Cosheaf-minted login PATs carry `write:user` and
-`write:organization` (alongside repo/issue/notification scopes) so the user
-can create and delete repos through cosheaf; if you change the scope set,
-existing `login_tokens` rows must be cleared so they re-mint.
+home page and `GET /api/v1/workspaces` list **every** repo the authenticated
+user can access (`Forgejo.searchAllAccessibleRepos`), not only
+`cosheaf-format-*` tagged repos. An untagged repo opens as a
+`forgejo-passthrough` workspace. The format topic therefore only selects
+rendering/indexing behavior, never visibility. Cosheaf-owned backend login
+tokens carry `write:user` and `write:organization` (alongside
+repo/issue/notification scopes) so the user can create and delete repos
+through cosheaf; if you change the scope set, existing `login_tokens` rows must
+be cleared so they re-mint.
 
 - `forgejo-passthrough`: plain `.md` files rendered through Forgejo's
   repo-scoped `/markdown` API. It preserves YAML frontmatter but extracts no
