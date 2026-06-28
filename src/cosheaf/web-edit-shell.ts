@@ -1,4 +1,5 @@
 import {
+  scrollReaderToSourcePosition,
   type SourcePosition,
   visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
@@ -192,6 +193,9 @@ function crossSurfaceSourcePosition(position: SourcePosition | null): WorkbenchS
     pos: position.pos,
     line: position.line,
     viewportRatio: position.viewportRatio ?? MODE_SWITCH_VIEWPORT_RATIO,
+    ...(typeof position.viewportY === "number" && Number.isFinite(position.viewportY)
+      ? { viewportY: position.viewportY }
+      : {}),
   };
 }
 
@@ -209,18 +213,15 @@ function applyEditorSourcePosition(mount: WebEditorMount | null | undefined, sou
 function applyFastSourcePosition(host: HTMLElement, sourcePosition: WorkbenchSourcePosition | null): void {
   if (!sourcePosition) return;
   const doc = host.querySelector<HTMLElement>(".web-editor-fast-doc");
-  if (!doc) return;
+  const scroller = document.querySelector<HTMLElement>(".app-content");
+  if (!doc || !scroller) return;
   let frames = 0;
   const apply = () => {
-    const target = doc.querySelector<HTMLElement>(`[data-source-from="${sourcePosition.pos}"], [data-source-to="${sourcePosition.pos}"]`)
-      ?? [...doc.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")].find((candidate) => {
-        const from = Number(candidate.dataset.sourceFrom);
-        const to = Number(candidate.dataset.sourceTo);
-        return Number.isFinite(from) && Number.isFinite(to) && from <= sourcePosition.pos && sourcePosition.pos <= to;
-      });
-    target?.scrollIntoView({ block: "center" });
+    scrollReaderToSourcePosition(scroller, sourcePosition, {
+      viewportRatio: sourcePosition.viewportRatio ?? MODE_SWITCH_VIEWPORT_RATIO,
+    });
     frames += 1;
-    if (frames < 4 && target) window.requestAnimationFrame(apply);
+    if (frames < 8) window.requestAnimationFrame(apply);
   };
   window.requestAnimationFrame(apply);
 }
