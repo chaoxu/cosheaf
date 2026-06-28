@@ -76,10 +76,17 @@ function optionalEnv(value) {
 }
 
 export async function signInIfNeeded(page, username, password) {
-  if ((await page.locator("text=username").count()) > 0) {
-    const inputs = page.locator("input");
-    await inputs.nth(0).fill(username);
-    await inputs.nth(1).fill(password);
-    await page.locator('button:has-text("Sign in")').click();
+  const signInButton = page.getByRole("button", { name: /^sign in$/i });
+  if ((await signInButton.count()) === 0) return;
+  const inputs = page.locator("input");
+  if ((await inputs.count()) < 2) return;
+  await inputs.nth(0).fill(username);
+  await inputs.nth(1).fill(password);
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => undefined),
+    signInButton.click(),
+  ]);
+  if ((await page.getByRole("button", { name: /^sign in$/i }).count()) > 0) {
+    throw new Error("sign-in did not complete");
   }
 }

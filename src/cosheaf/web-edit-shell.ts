@@ -1,4 +1,5 @@
 import {
+  scrollReaderToSourcePosition,
   type SourcePosition,
   visibleSourcePositionInScroller,
 } from "@chaoxu/coflat/reader";
@@ -23,6 +24,7 @@ import "./globals.css";
 type WorkbenchMode = "read" | "edit";
 type WorkbenchSourcePosition = SourcePosition & { viewportRatio?: number };
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
+const URL_ANCHOR_TOP_OFFSET_PX = 8;
 
 interface WorkbenchState {
   editorReady: Promise<WebEditorMount | null> | null;
@@ -179,11 +181,30 @@ function visibleEditSourcePosition(host: HTMLElement): WorkbenchSourcePosition |
   return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
 }
 
-function visibleFastReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
+function visibleContentViewportY(viewportRatio = MODE_SWITCH_VIEWPORT_RATIO): number | null {
+  const content = document.querySelector<HTMLElement>(".app-content");
+  const rect = content?.getBoundingClientRect();
+  if (!rect || rect.height <= 0) return null;
+  return rect.top + rect.height * Math.max(0, Math.min(1, viewportRatio));
+}
+
+function fastReadScroller(host: HTMLElement): HTMLElement | null {
   const doc = host.querySelector<HTMLElement>(".web-editor-fast-doc");
-  const scroller = document.querySelector<HTMLElement>(".app-content");
-  if (!doc || !scroller) return null;
-  return visibleSourcePositionInScroller(scroller, { viewportRatio: MODE_SWITCH_VIEWPORT_RATIO });
+  return doc?.closest<HTMLElement>(".doc-with-toc") ?? null;
+}
+
+function fastReadViewportRatio(scroller: HTMLElement): number {
+  const viewportY = visibleContentViewportY();
+  if (viewportY === null) return MODE_SWITCH_VIEWPORT_RATIO;
+  const rect = scroller.getBoundingClientRect();
+  if (rect.height <= 0) return MODE_SWITCH_VIEWPORT_RATIO;
+  return Math.max(0, Math.min(1, (viewportY - rect.top) / rect.height));
+}
+
+function visibleFastReadSourcePosition(host: HTMLElement): WorkbenchSourcePosition | null {
+  const scroller = fastReadScroller(host);
+  if (!scroller) return null;
+  return visibleSourcePositionInScroller(scroller, { viewportRatio: fastReadViewportRatio(scroller) });
 }
 
 function crossSurfaceSourcePosition(position: SourcePosition | null): WorkbenchSourcePosition | null {
@@ -192,6 +213,9 @@ function crossSurfaceSourcePosition(position: SourcePosition | null): WorkbenchS
     pos: position.pos,
     line: position.line,
     viewportRatio: position.viewportRatio ?? MODE_SWITCH_VIEWPORT_RATIO,
+    ...(typeof position.viewportY === "number" && Number.isFinite(position.viewportY)
+      ? { viewportY: position.viewportY }
+      : {}),
   };
 }
 
@@ -208,19 +232,22 @@ function applyEditorSourcePosition(mount: WebEditorMount | null | undefined, sou
 
 function applyFastSourcePosition(host: HTMLElement, sourcePosition: WorkbenchSourcePosition | null): void {
   if (!sourcePosition) return;
-  const doc = host.querySelector<HTMLElement>(".web-editor-fast-doc");
-  if (!doc) return;
+  const scroller = fastReadScroller(host);
+  if (!scroller) return;
+  const viewportY = typeof sourcePosition.viewportY === "number" && Number.isFinite(sourcePosition.viewportY)
+    ? sourcePosition.viewportY
+    : (() => {
+      const y = visibleContentViewportY(sourcePosition.viewportRatio ?? MODE_SWITCH_VIEWPORT_RATIO);
+      return y === null ? null : y - URL_ANCHOR_TOP_OFFSET_PX;
+    })();
+  const scrollPosition = viewportY === null ? sourcePosition : { ...sourcePosition, viewportY };
   let frames = 0;
   const apply = () => {
-    const target = doc.querySelector<HTMLElement>(`[data-source-from="${sourcePosition.pos}"], [data-source-to="${sourcePosition.pos}"]`)
-      ?? [...doc.querySelectorAll<HTMLElement>("[data-source-from][data-source-to]")].find((candidate) => {
-        const from = Number(candidate.dataset.sourceFrom);
-        const to = Number(candidate.dataset.sourceTo);
-        return Number.isFinite(from) && Number.isFinite(to) && from <= sourcePosition.pos && sourcePosition.pos <= to;
-      });
-    target?.scrollIntoView({ block: "center" });
+    scrollReaderToSourcePosition(scroller, scrollPosition, {
+      viewportRatio: fastReadViewportRatio(scroller),
+    });
     frames += 1;
-    if (frames < 4 && target) window.requestAnimationFrame(apply);
+    if (frames < 8) window.requestAnimationFrame(apply);
   };
   window.requestAnimationFrame(apply);
 }
