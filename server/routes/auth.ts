@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { deleteCookie, getCookie } from "hono/cookie";
-import { createApiToken, deleteApiToken, storeApiToken } from "../api-tokens.js";
+import { deleteApiToken, mintApiToken } from "../api-tokens.js";
 import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
 import { bearerToken } from "../middleware.js";
 import type { AppEnv } from "../types.js";
@@ -300,8 +300,7 @@ auth.post("/login", async (c) => {
       502,
     );
   }
-  const apiToken = createApiToken();
-  storeApiToken(c.get("db"), apiToken, outcome.username, outcome.pat);
+  const apiToken = mintApiToken(c.get("db"), outcome.username, outcome.pat);
   setAuthCookie(c, apiToken);
   return c.json({ username: outcome.username, pat: apiToken, token_type: "cosheaf" });
 });

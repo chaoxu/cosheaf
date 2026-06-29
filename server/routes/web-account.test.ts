@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveApiToken } from "../api-tokens.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
@@ -226,11 +227,15 @@ describe("POST /account/settings (profile)", () => {
     const res = await appFor(db).request("/account/api-token", form({ password: "secret" }, token));
 
     expect(res.status).toBe(200);
-    expect(res.headers.get("set-cookie")).toContain("cosheaf_pat=pat-agent");
+    // The revealed token (cookie + displayed value) is an opaque Cosheaf token
+    // that resolves to the backend PAT — not the raw PAT itself.
+    const apiToken = /cosheaf_pat=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    expect(apiToken.startsWith("cosheaf_")).toBe(true);
+    expect(resolveApiToken(db, apiToken)).toMatchObject({ forgejoToken: "pat-agent" });
     const body = await res.text();
     expect(body).toContain('data-testid="api-token-result"');
     expect(body).toContain('data-testid="api-token-value"');
-    expect(body).toContain('value="pat-agent"');
+    expect(body).toContain(`value="${apiToken}"`);
     expect(body).toContain("Authorization: Bearer");
   });
 

@@ -14,6 +14,17 @@ export function hashApiToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+// Mint a fresh opaque Cosheaf token for `username`, persist its mapping to the
+// backend credential, and return it. This is the only correct way to produce a
+// client-visible token: the cookie / Bearer value must be the opaque token (what
+// resolveApiToken looks up), never the raw backend PAT — otherwise resolveAuth
+// can't resolve it and every web session loops back to /login.
+export function mintApiToken(db: Database.Database, username: string, forgejoToken: string): string {
+  const token = createApiToken();
+  storeApiToken(db, token, username, forgejoToken);
+  return token;
+}
+
 export function storeApiToken(db: Database.Database, token: string, username: string, forgejoToken: string): void {
   const now = Date.now();
   db.prepare(`

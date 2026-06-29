@@ -5,6 +5,7 @@ import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js"
 import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import type { NotificationRow } from "../../shared/issues.js";
+import { mintApiToken } from "../api-tokens.js";
 import { ForgejoError } from "../forgejo.js";
 import type { ForgejoSshKey, ForgejoUser } from "../forgejo-types.js";
 import { allDocumentFormats } from "../format-registry.js";
@@ -148,7 +149,7 @@ web.post("/login", async (c) => {
     password,
   );
   if (outcome.kind !== "ok") return redirect("/login?error=invalid");
-  setAuthCookie(c, outcome.pat);
+  setAuthCookie(c, mintApiToken(c.get("db"), outcome.username, outcome.pat));
   return c.redirect("/", 303);
 });
 
@@ -248,7 +249,7 @@ web.post("/register", async (c) => {
     // Forgejo signup gate). Don't fail a successful signup — send them to sign in.
     return redirect("/login?registered=1");
   }
-  setAuthCookie(c, outcome.pat);
+  setAuthCookie(c, mintApiToken(c.get("db"), outcome.username, outcome.pat));
   return c.redirect("/", 303);
 });
 
@@ -683,8 +684,11 @@ web.post("/account/api-token", globalRoute(async (c, auth) => {
   if (outcome.kind === "upstream_unavailable") {
     return accountSettingsResponse(c, auth, { apiTokenError: `Could not create an API token: ${outcome.detail}` });
   }
-  setAuthCookie(c, outcome.pat);
-  return accountSettingsResponse(c, auth, { apiToken: outcome.pat });
+  // The revealed API token must be the opaque Cosheaf token (usable as Bearer),
+  // not the raw backend PAT.
+  const apiToken = mintApiToken(c.get("db"), auth.user.username, outcome.pat);
+  setAuthCookie(c, apiToken);
+  return accountSettingsResponse(c, auth, { apiToken });
 }));
 
 function normalizedExternalHref(raw: string): string | null {

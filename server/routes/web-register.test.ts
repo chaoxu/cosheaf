@@ -1,7 +1,16 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveApiToken } from "../api-tokens.js";
 import { createRegistrationInvite, setRegistrationOpen } from "../site-admin.js";
+
+// The session cookie must be an opaque Cosheaf token that resolves to the user's
+// backend credential — not the raw backend PAT (which would loop to /login).
+function expectOpaqueCookie(db: Database.Database, setCookie: string | null, username: string, forgejoToken: string): void {
+  const token = /cosheaf_pat=([^;]+)/.exec(setCookie ?? "")?.[1] ?? "";
+  expect(token.startsWith("cosheaf_")).toBe(true);
+  expect(resolveApiToken(db, token)).toEqual({ username, forgejoToken });
+}
 import type { AppEnv } from "../types.js";
 import { fakeForgejo, freshTestDb, testApp, testConfig } from "./test-fixtures.js";
 import { web } from "./web.js";
@@ -88,7 +97,7 @@ describe("web /register", () => {
 
     expect(postRes.status).toBe(303);
     expect(postRes.headers.get("location")).toBe("/");
-    expect(postRes.headers.get("set-cookie")).toMatch(/cosheaf_pat=invitepat/);
+    expectOpaqueCookie(db, postRes.headers.get("set-cookie"), "invitee", "invitepat");
     expect(createBody).toMatchObject({ username: "invitee", email: "invitee@cosheaf.local" });
     const row = db.prepare("SELECT used_by, used_at FROM registration_invites").get() as { used_by: string; used_at: number };
     expect(row.used_by).toBe("invitee");
@@ -178,7 +187,7 @@ describe("web /register", () => {
 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/");
-    expect(res.headers.get("set-cookie")).toMatch(/cosheaf_pat=newpat/);
+    expectOpaqueCookie(db, res.headers.get("set-cookie"), "newbie", "newpat");
     // Email is synthesized, not collected from the form.
     expect(createBody).toMatchObject({ username: "newbie", email: "newbie@cosheaf.local" });
     // The minted PAT was cached for reuse on later logins.
