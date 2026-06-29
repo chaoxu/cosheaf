@@ -5,6 +5,9 @@
 // issue/pull/settings/account/admin pages are NOT mounted: they read the raw
 // forge client, which is absent in local mode.
 
+import { readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { repoHref } from "../../shared/url.js";
@@ -44,6 +47,83 @@ function workspaceCard(entry: WorkspaceEntry): Html {
   </li>`;
 }
 
+// --- Folder picker -------------------------------------------------------
+// A server-side directory browser: a browser can't hand the server a folder
+// path (sandboxed), and the Workbench runs where its files are, so folder
+// selection has to walk the server's own filesystem.
+
+const PICKER_MAX = 400; // cap a pathologically large directory listing
+
+function isGitRepo(dir: string): boolean {
+  try {
+    statSync(join(dir, ".git"));
+    return true;
+  } catch (_err) {
+    return false;
+  }
+}
+
+function markdownCount(dir: string): number {
+  try {
+    return readdirSync(dir).filter((n) => /\.(md|markdown)$/i.test(n)).length;
+  } catch (_err) {
+    return 0;
+  }
+}
+
+function listChildDirs(dir: string): { name: string; path: string; git: boolean }[] {
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (_err) {
+    return [];
+  }
+  return entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules")
+    .slice(0, PICKER_MAX)
+    .map((e) => ({ name: e.name, path: join(dir, e.name), git: isGitRepo(join(dir, e.name)) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function browsePage(user: string, dir: string, notice: string | null): string {
+  const parent = dirname(dir);
+  const home = homedir();
+  const children = listChildDirs(dir);
+  const git = isGitRepo(dir);
+  const mdCount = markdownCount(dir);
+  const body = html`<main class="page workbench-home">
+    <div class="page-title compact"><div><h1>Pick a folder</h1></div></div>
+    ${notice ? html`<p class="muted" data-testid="browse-notice">${notice}</p>` : emptyHtml}
+    <p class="muted">Browsing this machine's files. Go into a folder, then open it as a workspace.</p>
+    <div class="browse-toolbar" data-testid="browse-toolbar">
+      <a class="button subtle" href="/_browse?path=${encodeURIComponent(home)}">⌂ Home</a>
+      ${dir !== parent ? html`<a class="button subtle" href="/_browse?path=${encodeURIComponent(parent)}" data-testid="browse-up">↑ Up</a>` : emptyHtml}
+      <code class="browse-path" data-testid="browse-path">${dir}</code>
+    </div>
+    <form class="browse-open-current" method="post" action="/_workspace/add">
+      <input type="hidden" name="path" value="${dir}">
+      <button class="button primary" type="submit" data-testid="browse-open-current">Open this folder</button>
+      <span class="muted">${git ? "git repo · " : ""}${mdCount} markdown file${mdCount === 1 ? "" : "s"}</span>
+    </form>
+    ${
+      children.length === 0
+        ? html`<p class="muted" data-testid="browse-empty">No sub-folders here.</p>`
+        : html`<ul class="browse-list" data-testid="browse-list">${children.map(
+            (d) => html`<li class="browse-item">
+              <a class="browse-item__name" href="/_browse?path=${encodeURIComponent(d.path)}" data-testid="browse-dir">${d.name}</a>
+              ${d.git ? html`<span class="badge badge--ok" title="git repository">git</span>` : emptyHtml}
+              <form method="post" action="/_workspace/add" class="browse-item__open">
+                <input type="hidden" name="path" value="${d.path}">
+                <button class="button subtle" type="submit">open</button>
+              </form>
+            </li>`,
+          )}</ul>`
+    }
+    <p class="browse-back"><a href="/">← back to workspaces</a></p>
+  </main>`;
+  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user), body });
+}
+
 function switcherPage(registry: WorkspaceRegistry, user: string, notice: string | null): string {
   const workspaces = registry.list();
   const body = html`<main class="page workbench-home">
@@ -51,15 +131,18 @@ function switcherPage(registry: WorkspaceRegistry, user: string, notice: string 
     ${notice ? html`<p class="muted" data-testid="workspace-notice">${notice}</p>` : emptyHtml}
     ${
       workspaces.length === 0
-        ? html`<div class="empty" data-testid="workspace-empty">No workspaces yet. Add a folder below to open it.</div>`
+        ? html`<div class="empty" data-testid="workspace-empty">No workspaces yet — <strong>browse for a folder</strong> to open one.</div>`
         : html`<ul class="workspace-list" data-testid="workspace-list">${workspaces.map(workspaceCard)}</ul>`
     }
-    <form class="workspace-add" method="post" action="/_workspace/add" data-testid="workspace-add-form">
-      <label>Add a folder
-        <input name="path" required placeholder="/absolute/path/to/a/project" autocomplete="off" spellcheck="false" data-testid="workspace-add-path">
-      </label>
-      <div class="form-actions"><button class="button primary" type="submit">Add workspace</button></div>
-    </form>
+    <div class="workspace-add" data-testid="workspace-add">
+      <a class="button primary" href="/_browse" data-testid="workspace-browse">Browse for a folder…</a>
+      <form class="workspace-add__paste" method="post" action="/_workspace/add" data-testid="workspace-add-form">
+        <label class="muted">or paste a path
+          <input name="path" placeholder="/absolute/path/to/a/project" autocomplete="off" spellcheck="false" data-testid="workspace-add-path">
+        </label>
+        <button class="button subtle" type="submit">Add</button>
+      </form>
+    </div>
   </main>`;
   return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user), body });
 }
@@ -72,6 +155,22 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   localWeb.get(
     "/",
     globalRoute((c) => htmlResponse(switcherPage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null))),
+  );
+
+  // Folder picker: browse the server's filesystem to choose a folder. A browser
+  // can't hand the server a path, so selection walks the server's own files.
+  localWeb.get(
+    "/_browse",
+    globalRoute((c) => {
+      const raw = c.req.query("path");
+      let dir = raw && raw.trim() ? resolve(raw) : homedir();
+      try {
+        if (!statSync(dir).isDirectory()) dir = homedir();
+      } catch (_err) {
+        dir = homedir();
+      }
+      return htmlResponse(browsePage(c.get("user").username, dir, c.req.query("toast") ?? null));
+    }),
   );
 
   // Open a folder as a workspace: derive its identity, index it, register it.

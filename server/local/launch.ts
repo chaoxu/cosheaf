@@ -9,21 +9,20 @@
 // `pnpm workbench <dir>` also opens that folder. Requires `pnpm build` to have
 // produced dist/.vite/manifest.json — the editor island loads from the manifest.
 
-import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { Command } from "commander";
+import open from "open";
 import { createApp } from "../app.js";
 import { resolveAppRoot } from "../app-root.js";
 import { buildLocalConfig, getDb } from "../db.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 
 function openBrowser(url: string): void {
-  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-  // Best-effort: ignore failures (no browser, headless, etc.).
-  execFile(cmd, [url], () => undefined);
+  // `open` handles macOS/Windows/Linux/WSL; best-effort (headless is fine).
+  void open(url).catch(() => undefined);
 }
 
 // Resolve the listen port: --port, else COSHEAF_PORT, else 0 (a random free
