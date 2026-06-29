@@ -228,7 +228,10 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 .workspace-add__paste label{display:flex;flex-direction:column;gap:4px;font-size:13px}
 .workspace-add__paste input{min-width:300px}
 .browse-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0}
-.browse-path{background:var(--cf-hover);border-radius:var(--cf-radius-xs);padding:2px 8px;font-size:13px;color:var(--cf-fg)}
+.browse-crumbs{display:flex;flex-wrap:wrap;align-items:center}
+.browse-crumbs .crumb{text-decoration:none;color:var(--cf-muted);padding:1px 4px;border-radius:var(--cf-radius-xs);font-size:13px}
+.browse-crumbs a.crumb:hover{background:var(--cf-hover);color:var(--cf-fg)}
+.browse-crumbs .crumb::before{content:"/";margin:0 3px 0 1px;color:var(--cf-border-strong)}
 .browse-open-current{display:flex;align-items:center;gap:10px;margin:6px 0 14px}
 .browse-list{list-style:none;margin:0;padding:0;border:1px solid var(--cf-border);border-radius:var(--cf-radius-sm);max-width:640px}
 .browse-item{display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--cf-border)}

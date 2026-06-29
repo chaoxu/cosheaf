@@ -7,7 +7,7 @@
 
 import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { repoHref } from "../../shared/url.js";
@@ -54,6 +54,26 @@ function workspaceCard(entry: WorkspaceEntry): Html {
 
 const PICKER_MAX = 400; // cap a pathologically large directory listing
 
+// Expand a leading `~` so a pasted "~/notes" resolves to the home directory.
+function expandTilde(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith(`~${sep}`)) return join(homedir(), p.slice(2));
+  return p;
+}
+
+// Clickable path segments so the user can jump to any ancestor directory. Each
+// crumb is prefixed with a "/" separator in CSS, so `/a/b` renders `/a /b`.
+function breadcrumb(dir: string): Html {
+  let acc = "";
+  const crumbs: Html[] = [];
+  for (const segment of dir.split(sep).filter(Boolean)) {
+    acc += sep + segment;
+    const here = acc;
+    crumbs.push(html`<a class="crumb" href="/_browse?path=${encodeURIComponent(here)}">${segment}</a>`);
+  }
+  return html`<nav class="browse-crumbs" data-testid="browse-crumbs">${crumbs.length ? crumbs : html`<span class="crumb">${sep}</span>`}</nav>`;
+}
+
 function isGitRepo(dir: string): boolean {
   try {
     statSync(join(dir, ".git"));
@@ -98,7 +118,7 @@ function browsePage(user: string, dir: string, notice: string | null): string {
     <div class="browse-toolbar" data-testid="browse-toolbar">
       <a class="button subtle" href="/_browse?path=${encodeURIComponent(home)}">⌂ Home</a>
       ${dir !== parent ? html`<a class="button subtle" href="/_browse?path=${encodeURIComponent(parent)}" data-testid="browse-up">↑ Up</a>` : emptyHtml}
-      <code class="browse-path" data-testid="browse-path">${dir}</code>
+      ${breadcrumb(dir)}
     </div>
     <form class="browse-open-current" method="post" action="/_workspace/add">
       <input type="hidden" name="path" value="${dir}">
@@ -163,7 +183,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
     "/_browse",
     globalRoute((c) => {
       const raw = c.req.query("path");
-      let dir = raw && raw.trim() ? resolve(raw) : homedir();
+      let dir = raw && raw.trim() ? resolve(expandTilde(raw)) : homedir();
       try {
         if (!statSync(dir).isDirectory()) dir = homedir();
       } catch (_err) {
@@ -182,7 +202,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
       const path = stringField(form.path);
       if (!path) return redirect("/?toast=" + encodeURIComponent("A folder path is required."));
       try {
-        const entry = await c.get("localRegistry").addFolder(path);
+        const entry = await c.get("localRegistry").addFolder(expandTilde(path));
         return redirect(repoHref(entry.identity.owner, entry.identity.repo));
       } catch (err) {
         return redirect("/?toast=" + encodeURIComponent(err instanceof Error ? err.message : "Could not open that folder."));
