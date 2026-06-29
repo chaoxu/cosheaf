@@ -90,6 +90,7 @@ async function run(dirArg: string | undefined, opts: { port?: string }): Promise
     const url = opened ? `${root}${opened.owner}/${opened.repo}` : root;
     console.log(`\n  Cosheaf Workbench`);
     console.log(`  data:      ${home}`);
+    console.log(`  logs:      ${join(home, "server.log")}`);
     const list = registry.list();
     if (list.length === 0) {
       console.log(`  workspaces: none yet — add a folder from the home page`);

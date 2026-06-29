@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { logger } from "hono/logger";
 import { requestId } from "hono/request-id";
-import { statSync } from "node:fs";
+import { createWriteStream, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,7 +84,22 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.use("*", requestId());
-  if (process.env.COSHEAF_REQUEST_LOG) app.use("*", logger());
+  if (local) {
+    // The single-user Workbench writes a timestamped request+timing line to
+    // <dataDir>/server.log (appended) so it can always be inspected after the
+    // fact: slow requests show a high duration, and errors still get a line.
+    const logStream = createWriteStream(path.join(config.dataDir, "server.log"), { flags: "a" });
+    app.use("*", async (c, next) => {
+      const start = Date.now();
+      try {
+        await next();
+      } finally {
+        logStream.write(`${new Date().toISOString()} ${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms\n`);
+      }
+    });
+  } else if (process.env.COSHEAF_REQUEST_LOG) {
+    app.use("*", logger());
+  }
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("config", config);
