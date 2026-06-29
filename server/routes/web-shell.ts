@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DEFAULT_LOCALE, type LocaleId, localeDir, makeT, type T } from "../../shared/i18n/index.js";
+import { resolveAppRoot } from "../app-root.js";
 import { viteDevOrigin } from "../vite-dev-origin.js";
 import { avatar } from "./avatar.js";
 import { bellIcon, helpIcon, homeIcon, settingsIcon } from "./icons.js";
@@ -72,16 +73,19 @@ function cosheafWebCssVersion(): string {
 const coflatVendorCssVersions = new Map<string, string>();
 
 function coflatVendorCssVersion(exportPath: "document-surface.css" | "themes/blueprint-book.css"): string {
-  const cached = coflatVendorCssVersions.get(exportPath);
+  const appRoot = resolveAppRoot();
+  const cacheKey = `${appRoot}:${exportPath}`;
+  const cached = coflatVendorCssVersions.get(cacheKey);
   if (cached !== undefined) return cached;
   try {
-    const filePath = requireResolve(`@chaoxu/coflat/${exportPath}`);
+    const vendoredPath = path.resolve(appRoot, "vendor/coflat", exportPath);
+    const filePath = existsSync(vendoredPath) ? vendoredPath : requireResolve(`@chaoxu/coflat/${exportPath}`);
     const hash = createHash("sha256").update(readFileSync(filePath)).digest("hex").slice(0, 12);
     const version = `?v=${encodeURIComponent(hash)}`;
-    coflatVendorCssVersions.set(exportPath, version);
+    coflatVendorCssVersions.set(cacheKey, version);
     return version;
   } catch (_error) {
-    coflatVendorCssVersions.set(exportPath, "");
+    coflatVendorCssVersions.set(cacheKey, "");
     return "";
   }
 }
@@ -189,7 +193,7 @@ type ViteManifestChunk = {
   imports?: string[];
 };
 
-let manifestCache: Record<string, ViteManifestChunk> | null | undefined;
+let manifestCache: { appRoot: string; manifest: Record<string, ViteManifestChunk> | null } | undefined;
 
 function webReaderAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-reader.ts");
@@ -210,14 +214,15 @@ function viteEntryAssets(entryId: string): Html {
 }
 
 function readViteManifest(): Record<string, ViteManifestChunk> | null {
-  if (manifestCache !== undefined) return manifestCache;
-  const manifestPath = path.resolve(process.cwd(), "dist/.vite/manifest.json");
+  const appRoot = resolveAppRoot();
+  if (manifestCache?.appRoot === appRoot) return manifestCache.manifest;
+  const manifestPath = path.resolve(appRoot, "dist/.vite/manifest.json");
   if (!existsSync(manifestPath)) {
-    manifestCache = null;
-    return manifestCache;
+    manifestCache = { appRoot, manifest: null };
+    return manifestCache.manifest;
   }
-  manifestCache = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, ViteManifestChunk>;
-  return manifestCache;
+  manifestCache = { appRoot, manifest: JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, ViteManifestChunk> };
+  return manifestCache.manifest;
 }
 
 function collectCss(

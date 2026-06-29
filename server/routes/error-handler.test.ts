@@ -5,7 +5,7 @@ import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests, resolveAut
 import type { AppEnv } from "../types.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";
 import { handleAppError } from "./error-handler.js";
-import { testConfig } from "./test-fixtures.js";
+import { freshTestDb, testConfig } from "./test-fixtures.js";
 
 // A WorkspaceBackendError (the file/tree/branch seam) that escapes a route must
 // be mapped the same way as a ForgejoError — both carry `.status`. Regression
@@ -118,6 +118,7 @@ describe("handleAppError", () => {
     app.onError(handleAppError);
     app.use("*", async (c, next) => {
       c.set("config", testConfig("error-handler-cookie-cache"));
+      c.set("db", freshTestDb("error-handler-cookie-cache-"));
       await next();
     });
     app.get("/owner/repo/issues", () => {
@@ -136,6 +137,7 @@ describe("handleAppError", () => {
 
     const fetchMock = vi.fn().mockResolvedValue(new Response("bad token", { status: 401 }));
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("COSHEAF_ACCEPT_FORGEJO_BEARER", "1");
     const next = await app.request("/probe-auth", {
       headers: { cookie: "cosheaf_pat=pat-cookie" },
     });
