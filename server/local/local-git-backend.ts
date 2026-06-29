@@ -68,9 +68,14 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // Monotonic per-instance counter so concurrent writes (even of identical
   // content) never collide on the same temp filename.
   private writeSeq = 0;
+  // The git remote `push` targets. Defaults to `origin`; the registry sets this
+  // to the working tree's actual upstream name (e.g. `cosheaf`) so a repo whose
+  // upstream isn't called `origin` can still push for Tier-2 Open-PR.
+  private readonly pushRemote: string;
 
-  constructor(rootDir: string) {
+  constructor(rootDir: string, opts: { pushRemote?: string } = {}) {
     this.root = resolve(rootDir);
+    this.pushRemote = opts.pushRemote ?? "origin";
   }
 
   // Resolve a repo-relative path to an absolute path inside the root, rejecting
@@ -313,11 +318,11 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return (await this.git(["rev-parse", "HEAD"])).trim();
   }
 
-  // Tier 2: push a branch to the working tree's `origin` remote over the user's
+  // Tier 2: push a branch to the working tree's upstream remote over the user's
   // configured git transport (SSH key). Cosheaf is never in this path — the
   // remote service only opens the PR afterward.
   async push(branch: string): Promise<void> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
-    await this.git(["push", "origin", branch]);
+    await this.git(["push", this.pushRemote, branch]);
   }
 }

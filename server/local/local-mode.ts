@@ -1,28 +1,34 @@
 // Local Workbench mode helpers (config.mode === "local").
 //
 // The Workbench reuses the hosted routes and islands, but its identity and
-// authorization come from the launcher (a single on-disk folder), not a forge.
-// These helpers are the local branch of the shared auth/membership resolvers:
-// they fabricate the fixed local user and the single admin workspace without
-// any forge call. Forge-free by construction.
+// authorization come from the registry of opened folders, not a forge. These
+// helpers are the local branch of the shared auth/membership resolvers: they
+// resolve the requested owner/repo to a registered workspace and fabricate the
+// fixed local user without any forge call. Forge-free by construction.
 
 import { workspaceSlug } from "../../shared/conventions.js";
-import type { LocalWorkspaceIdentity, WorkspaceContext } from "../types.js";
+import type { WorkspaceContext } from "../types.js";
+import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
-// The WorkspaceContext for a local request, or null when owner/repo don't match
-// the single workspace this Workbench serves (the caller turns that into a 404).
-// The local user is always `admin` on their own folder.
-export function localWorkspaceContext(
-  id: LocalWorkspaceIdentity,
+// Resolve a request's owner/repo to a registered workspace + its WorkspaceContext,
+// or null when no folder is registered under that slug (the caller turns that
+// into a 404). The local user is always `admin` on their own folders.
+export function resolveLocalWorkspace(
+  registry: WorkspaceRegistry,
   owner: string,
   repo: string,
-): WorkspaceContext | null {
-  if (owner !== id.owner || repo !== id.repo) return null;
+): { entry: WorkspaceEntry; ws: WorkspaceContext } | null {
+  const slug = workspaceSlug(owner, repo);
+  const entry = registry.get(slug);
+  if (!entry) return null;
   return {
-    owner,
-    repo,
-    slug: workspaceSlug(owner, repo),
-    defaultMdFormat: id.defaultMdFormat,
-    role: "admin",
+    entry,
+    ws: {
+      owner,
+      repo,
+      slug,
+      defaultMdFormat: entry.identity.defaultMdFormat,
+      role: "admin",
+    },
   };
 }

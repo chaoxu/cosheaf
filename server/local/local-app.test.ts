@@ -102,11 +102,16 @@ describe("local Workbench app (Tier 0)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("redirects home to the single workspace landing", async () => {
+  it("renders the workspace switcher at home, linking each registered workspace", async () => {
     const { app } = localApp();
     const res = await app.request("/");
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/me/notes");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="workspace-list"');
+    // The single registered workspace is listed and links to its landing.
+    expect(body).toContain('href="/me/notes"');
+    // A local-only folder (no git upstream) is labelled as such.
+    expect(body).toContain("local-only");
   });
 
   it("renders the edit page in direct write-mode with PR affordances off", async () => {

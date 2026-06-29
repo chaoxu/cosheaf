@@ -9,7 +9,7 @@ import { validBranchName } from "../branch-path.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { bad, conflict } from "../routes/responses.js";
 import type { AppEnv } from "../types.js";
-import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
+import { resolveLocalWorkspace } from "./local-mode.js";
 
 export const localPulls = new Hono<AppEnv>();
 localPulls.use("*", requireAuth);
@@ -17,7 +17,11 @@ localPulls.use("/:owner/:repo/*", requireMembership());
 localPulls.use("/:owner/:repo/*", requireWriteOnMutation);
 
 localPulls.post("/:owner/:repo/pulls", async (c) => {
-  const remote = c.get("remoteCosheaf");
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const entry = resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry;
+  if (!entry) return c.json({ error: "workspace not found", code: "not_found" }, 404);
+  const remote = entry.remoteClient;
   if (!remote) {
     return c.json(
       ...conflict(
@@ -25,9 +29,7 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
       ),
     );
   }
-  const owner = c.req.param("owner");
-  const repo = c.req.param("repo");
-  const backend = c.get("localBackend") as LocalGitWorkspaceBackend;
+  const backend = entry.backend;
   const body = (await c.req.json().catch(() => null)) as {
     head?: string;
     base?: string;

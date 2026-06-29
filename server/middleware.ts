@@ -6,7 +6,7 @@ import type { Role } from "../shared/roles.js";
 import { resolveApiToken, type ResolvedApiToken } from "./api-tokens.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ForgejoWorkspaceBackend } from "./forgejo-backend.js";
-import { localWorkspaceContext } from "./local/local-mode.js";
+import { resolveLocalWorkspace } from "./local/local-mode.js";
 import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
@@ -77,11 +77,11 @@ export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | 
 }
 
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
-  // Local Workbench: the single OS user is the fixed local identity; there is no
+  // Local Workbench: the single local person is the fixed identity; there is no
   // token and no Forgejo client. Never emits a 401 (the islands' api.ts bounces
   // to /login on unauthorized/pat_invalid, which a local app must avoid).
   if (isLocalMode(c)) {
-    c.set("user", { username: c.get("localWorkspace").user });
+    c.set("user", { username: c.get("localRegistry").user });
     c.set("forgejoToken", "");
     return next();
   }
@@ -175,10 +175,10 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
   if (!owner || !repo || !FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo))
     return c.json({ error: "workspace required", code: "validation" }, 400);
   if (isLocalMode(c)) {
-    const ws = localWorkspaceContext(c.get("localWorkspace"), owner, repo);
-    if (!ws) return c.json({ error: "workspace not found", code: "not_found" }, 404);
-    c.set("workspace", ws);
-    c.set("repoCtx", { backend: c.get("localBackend"), owner, repo });
+    const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
+    if (!resolved) return c.json({ error: "workspace not found", code: "not_found" }, 404);
+    c.set("workspace", resolved.ws);
+    c.set("repoCtx", { backend: resolved.entry.backend, owner, repo });
     return next();
   }
   const fj = c.get("fjUser");

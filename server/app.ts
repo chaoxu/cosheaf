@@ -28,6 +28,9 @@ import { createLocalWebRouter } from "./local/local-web.js";
 import { localNotifications } from "./local/local-notifications.js";
 import { localPulls } from "./local/local-pulls.js";
 import type { RemotePullClient } from "./local/remote-cosheaf-client.js";
+import type { LocalGitWorkspaceBackend } from "./local/local-git-backend.js";
+import { WorkspaceRegistry } from "./local/workspace-registry.js";
+import { workspaceSlug } from "../shared/conventions.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "./types.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 import { viteDevOrigin } from "./vite-dev-origin.js";
@@ -40,12 +43,14 @@ export interface CreateAppOptions {
   db: Database.Database;
   fjAdmin?: Forgejo;
   sse?: SSEHub;
-  // Local Workbench (config.mode === "local"): the single on-disk backend and
-  // the workspace identity it serves. Required in local mode; ignored otherwise.
+  // Local Workbench (config.mode === "local"): the registry of opened folders.
+  // The launcher passes a populated registry; tests use the single-workspace
+  // back-compat fields below, which are wrapped into a one-entry registry.
+  localRegistry?: WorkspaceRegistry;
+  // Back-compat single-workspace assembly (tests): one backend + identity, and
+  // an optional Tier-2 remote client. Ignored when localRegistry is provided.
   workspaceBackend?: WorkspaceBackend;
   localWorkspace?: LocalWorkspaceIdentity;
-  // Tier 2: client for the remote Cosheaf (open PR / status). Omitted for
-  // local-only (Tier 0/1) workspaces.
   remoteClient?: RemotePullClient;
 }
 
@@ -56,6 +61,25 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   // and the Workbench is Forgejo-free.
   const fjAdmin = local ? undefined : options.fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken });
   const sse = options.sse ?? new SSEHub();
+
+  // Resolve the local registry: an explicit one from the launcher, or (tests) a
+  // one-entry registry wrapping the back-compat single-workspace fields.
+  let registry = options.localRegistry;
+  if (local && !registry) {
+    registry = new WorkspaceRegistry(db, { user: options.localWorkspace?.user });
+    if (options.workspaceBackend && options.localWorkspace) {
+      const id = options.localWorkspace;
+      registry.register({
+        slug: workspaceSlug(id.owner, id.repo),
+        path: "",
+        identity: id,
+        backend: options.workspaceBackend as LocalGitWorkspaceBackend,
+        gitRemote: null,
+        remoteClient: options.remoteClient,
+      });
+    }
+  }
+
   const app = new Hono<AppEnv>();
 
   app.use("*", requestId());
@@ -64,11 +88,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     c.set("db", db);
     c.set("config", config);
     if (fjAdmin) c.set("fjAdmin", fjAdmin);
-    if (local && options.workspaceBackend && options.localWorkspace) {
-      c.set("localBackend", options.workspaceBackend);
-      c.set("localWorkspace", options.localWorkspace);
-      if (options.remoteClient) c.set("remoteCosheaf", options.remoteClient);
-    }
+    if (local && registry) c.set("localRegistry", registry);
     c.set("sse", sse);
     const locale = resolveLocale(c);
     c.set("locale", locale);
@@ -158,12 +178,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     return response ?? c.json({ error: "not found" }, 404);
   });
 
-  app.route(
-    "/",
-    local && options.localWorkspace
-      ? createLocalWebRouter(options.localWorkspace.owner, options.localWorkspace.repo)
-      : web,
-  );
+  app.route("/", local ? createLocalWebRouter() : web);
 
   return app;
 }

@@ -73,12 +73,9 @@ export interface AppEnv {
     forgejoToken: string;
     workspace: WorkspaceContext;
     repoCtx: RepoCtx;
-    // Local Workbench only (config.mode === "local"): the single on-disk backend
-    // and the workspace identity it serves. Undefined in hosted mode.
-    localBackend: WorkspaceBackend;
-    localWorkspace: LocalWorkspaceIdentity;
-    // Tier 2 only: client for the remote Cosheaf service (open PR / status).
-    // Undefined when no remote is configured.
-    remoteCosheaf: import("./local/remote-cosheaf-client.js").RemotePullClient;
+    // Local Workbench only (config.mode === "local"): the registry of opened
+    // folders. Routes resolve the per-request backend/identity/remote by
+    // owner/repo slug from it. Undefined in hosted mode.
+    localRegistry: import("./local/workspace-registry.js").WorkspaceRegistry;
   };
 }

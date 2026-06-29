@@ -6,7 +6,7 @@ import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import { Forgejo } from "../forgejo.js";
 import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
 import type { WorkspaceBackend } from "../workspace-backend.js";
-import { localWorkspaceContext } from "../local/local-mode.js";
+import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
@@ -149,7 +149,7 @@ function decodePathPart(value: string): string {
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {
   // Local Workbench: the fixed local user, no token, no Forgejo client.
   if (c.get("config").mode === "local") {
-    const user = { username: c.get("localWorkspace").user };
+    const user = { username: c.get("localRegistry").user };
     c.set("user", user);
     c.set("forgejoToken", "");
     return { user, forgejoToken: "" };
@@ -172,10 +172,10 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
   if (config.mode === "local") {
-    const id = c.get("localWorkspace");
-    const ws = localWorkspaceContext(id, owner, repo);
-    if (!ws) return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
-    const backend = c.get("localBackend");
+    const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
+    if (!resolved) return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
+    const { entry, ws } = resolved;
+    const backend = entry.backend;
     c.set("workspace", ws);
     c.set("repoCtx", { backend, owner, repo });
     // Local mode has no Forgejo: the local web router mounts only backend-driven
@@ -191,10 +191,10 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       fj: undefined as unknown as Forgejo,
       ws,
       db: c.get("db"),
-      wsTitle: id.title,
+      wsTitle: entry.identity.title,
       userAvatarSrc: null,
       writeMode: "direct",
-      canOpenPull: id.canOpenPull,
+      canOpenPull: entry.identity.canOpenPull,
       locale: c.get("locale"),
       t: c.get("t"),
     };

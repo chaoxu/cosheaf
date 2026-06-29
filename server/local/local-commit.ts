@@ -3,7 +3,7 @@
 // the current branch + `git status` and commits all changes with a message.
 // Mounted only by the local web router.
 
-import type { Context, Hono } from "hono";
+import type { Hono } from "hono";
 import type { AppEnv } from "../types.js";
 import {
   badRequestPage,
@@ -11,6 +11,7 @@ import {
   redirect,
   repoHref,
   stringField,
+  type WebCtx,
   webRoute,
   webRouteForWrite,
 } from "../routes/web-context.js";
@@ -18,13 +19,15 @@ import { emptyHtml, html } from "../routes/web-html.js";
 import { repoPageShell } from "../routes/web-page.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 
-function localBackend(c: Context<AppEnv>): LocalGitWorkspaceBackend {
-  return c.get("localBackend") as LocalGitWorkspaceBackend;
+// The web ctx's backend is always the resolved workspace's LocalGitWorkspaceBackend
+// in local mode (resolveWebRepo sets it); narrow to reach the Tier-1 git ops.
+function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
+  return ctx.backend as LocalGitWorkspaceBackend;
 }
 
 export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/commit", webRoute(async (c, ctx) => {
-    const status = await localBackend(c).gitStatus();
+    const status = await localBackend(ctx).gitStatus();
     const notice = c.req.query("toast");
     const body = html`
       <div class="page-title compact"><div><h1>Commit</h1></div></div>
@@ -59,7 +62,7 @@ export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
     if (!message) return badRequestPage(ctx.user, "A commit message is required.");
     let sha: string | null;
     try {
-      sha = await localBackend(c).commitAll(message);
+      sha = await localBackend(ctx).commitAll(message);
     } catch (err) {
       return badRequestPage(ctx.user, err instanceof Error ? err.message : "Commit failed.");
     }
