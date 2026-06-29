@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-server/
+dist-workbench/
+cosheaf-workbench.tar.gz
 .vite/
 data/
 .DS_Store

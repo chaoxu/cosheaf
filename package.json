@@ -32,6 +32,8 @@
     "server": "tsx watch server/index.ts",
     "server:start": "tsx server/index.ts",
     "workbench": "tsx server/local/launch.ts",
+    "workbench:pack": "node scripts/pack-workbench.mjs",
+    "workbench:release": "node scripts/release-workbench.mjs",
     "check:no-forgejo-workbench": "node scripts/check-no-forgejo-in-workbench.mjs",
     "cli": "tsx server/cli.ts",
     "build": "vite build",

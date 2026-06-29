@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { contentTypeForPath } from "./content-type.js";
+import { resolveAppRoot, resolveCoflatDistDir } from "./app-root.js";
 import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { healthPayload, healthStatus } from "./health.js";
@@ -126,12 +127,11 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     app.route("/api/v1/webhooks", webhooks);
   }
 
-  const distDir = path.resolve(process.cwd(), "dist");
-  const publicDir = path.resolve(process.cwd(), "public");
+  const appRoot = resolveAppRoot();
+  const distDir = path.resolve(appRoot, "dist");
+  const publicDir = path.resolve(appRoot, "public");
   const publicAssetPaths = new Set(listPublicAssetPaths(publicDir, distDir));
-  const coflatEditorDistDir = path.dirname(
-    requireResolve("@chaoxu/coflat/style.css"),
-  );
+  const coflatEditorDistDir = resolveCoflatDistDir(appRoot, () => requireResolve("@chaoxu/coflat/style.css"));
 
   if (process.env.NODE_ENV !== "production") {
     app.get("/node_modules/*", async (c) => {

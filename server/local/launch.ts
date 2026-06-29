@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { Command } from "commander";
 import { createApp } from "../app.js";
+import { resolveAppRoot } from "../app-root.js";
 import { buildLocalConfig, getDb } from "../db.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 
@@ -29,8 +30,24 @@ async function run(dirArg: string | undefined): Promise<void> {
   // The editor island loads from the built manifest; force production asset mode
   // and require the build to exist.
   process.env.NODE_ENV = "production";
-  if (!existsSync(resolve(process.cwd(), "dist/.vite/manifest.json"))) {
-    console.error("missing dist/.vite/manifest.json — run `pnpm build` first (from the cosheaf repo root).");
+  // Tier-2 over HTTPS to an internal-CA host (e.g. cosheaf-test.lab) needs the CA
+  // trusted via NODE_EXTRA_CA_CERTS, which Node only reads at process start. The
+  // bundle shim exports it from COSHEAF_CA_FILE before node runs; for `pnpm
+  // workbench` (no shim) it is too late to set here, so warn instead of silently
+  // failing the first push.
+  if (process.env.COSHEAF_CA_FILE && !process.env.NODE_EXTRA_CA_CERTS) {
+    console.warn(
+      `warning: COSHEAF_CA_FILE is set but NODE_EXTRA_CA_CERTS is not — set it before launch, e.g.\n` +
+        `  NODE_EXTRA_CA_CERTS=${process.env.COSHEAF_CA_FILE} pnpm workbench <dir>`,
+    );
+  }
+  const appRoot = resolveAppRoot();
+  if (!existsSync(resolve(appRoot, "dist/.vite/manifest.json"))) {
+    console.error(
+      process.env.COSHEAF_APP_ROOT
+        ? `missing dist/.vite/manifest.json under COSHEAF_APP_ROOT=${appRoot} — the bundle is incomplete.`
+        : "missing dist/.vite/manifest.json — run `pnpm build` first (from the cosheaf repo root).",
+    );
     process.exit(1);
   }
 
