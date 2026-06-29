@@ -26,7 +26,21 @@ function openBrowser(url: string): void {
   execFile(cmd, [url], () => undefined);
 }
 
-async function run(dirArg: string | undefined): Promise<void> {
+// Resolve the listen port: --port, else COSHEAF_PORT, else 0 (a random free
+// port). A fixed port gives a stable URL to bookmark or SSH-forward; the bind
+// stays loopback either way (the Workbench has no auth — see the serve() host).
+function resolvePort(raw: string | undefined): number {
+  const value = raw ?? process.env.COSHEAF_PORT;
+  if (value === undefined || value.trim() === "") return 0;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    console.error(`invalid port: ${value} (expected 0-65535)`);
+    process.exit(1);
+  }
+  return n;
+}
+
+async function run(dirArg: string | undefined, opts: { port?: string }): Promise<void> {
   // The editor island loads from the built manifest; force production asset mode
   // and require the build to exist.
   process.env.NODE_ENV = "production";
@@ -52,7 +66,7 @@ async function run(dirArg: string | undefined): Promise<void> {
   }
 
   const home = join(homedir(), ".cosheaf", "workbench");
-  const config = buildLocalConfig({ dataDir: home, port: 0 });
+  const config = buildLocalConfig({ dataDir: home, port: resolvePort(opts.port) });
   const db = getDb(config);
   const registry = new WorkspaceRegistry(db, { configPath: join(home, "workspaces.json") });
 
@@ -71,7 +85,7 @@ async function run(dirArg: string | undefined): Promise<void> {
 
   const app = createApp({ config, db, localRegistry: registry });
 
-  serve({ fetch: app.fetch, port: config.port, hostname: "127.0.0.1" }, (info) => {
+  const server = serve({ fetch: app.fetch, port: config.port, hostname: "127.0.0.1" }, (info) => {
     const root = `http://127.0.0.1:${info.port}/`;
     // Land on the opened workspace when a dir was passed, else the switcher.
     const url = opened ? `${root}${opened.owner}/${opened.repo}` : root;
@@ -90,6 +104,13 @@ async function run(dirArg: string | undefined): Promise<void> {
     console.log(`\n  → ${url}\n`);
     if (process.env.COSHEAF_NO_OPEN !== "1") openBrowser(url);
   });
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\n  port ${config.port} is already in use — choose another with --port <n> or COSHEAF_PORT.\n`);
+      process.exit(1);
+    }
+    throw err;
+  });
 }
 
 const program = new Command();
@@ -97,7 +118,8 @@ program
   .name("cosheaf-workbench")
   .description("Open the Cosheaf Workbench. With no folder, reopens your registered workspaces; with a folder, also opens it.")
   .argument("[dir]", "folder to open as a workspace")
-  .action((dir: string | undefined) => {
-    void run(dir);
+  .option("-p, --port <port>", "loopback port to listen on (default: a random free port; or COSHEAF_PORT)")
+  .action((dir: string | undefined, opts: { port?: string }) => {
+    void run(dir, opts);
   });
 program.parse();

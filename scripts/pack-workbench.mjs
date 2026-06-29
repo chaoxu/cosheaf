@@ -155,6 +155,17 @@ directory (the source ships with it):
 Opens a loopback server and your browser. Edits save to disk; commit and (with a
 configured remote) open-PR are explicit actions in the UI.
 
+### Stable port + remote access
+
+A random free port is used by default. Pin it for a stable URL:
+
+    ./cosheaf-workbench --port 3030 /path/to/folder    # or COSHEAF_PORT=3030
+
+The bind stays loopback (127.0.0.1) — the Workbench has no auth, so it must not
+listen on the network. Reach it from another machine via an SSH tunnel:
+
+    ssh -L 3030:127.0.0.1:3030 <host>    # then open http://localhost:3030
+
 ## Tiers
 
 - Any folder: rich edit + read, save to disk, offline search/backlinks.

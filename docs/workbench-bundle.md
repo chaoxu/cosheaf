@@ -81,6 +81,24 @@ attaches the tarball as a release asset.
 Opens a loopback server + your browser. Edits save to disk; commit and (with a
 configured remote) open-PR are explicit UI actions.
 
+### Stable port + remote access
+
+By default it picks a random free port and opens the browser on the same
+machine. For a **stable URL** (to bookmark or SSH-forward), pin the port:
+
+```bash
+./cosheaf-workbench --port 3030 /path/to/folder    # or: COSHEAF_PORT=3030 ./cosheaf-workbench …
+```
+
+The bind stays **loopback (127.0.0.1)** by design — the Workbench has no auth
+(ambient authority: it edits files and pushes with your keys), so it must not
+listen on the network. To reach it from **another machine's browser**, SSH-
+forward the (now stable) port rather than exposing it:
+
+```bash
+ssh -L 3030:127.0.0.1:3030 earth    # then open http://localhost:3030
+```
+
 ### Reaching an internal-CA host over HTTPS (staging cosheaf-test.lab)
 
 Node rejects the lab Caddy root by default
