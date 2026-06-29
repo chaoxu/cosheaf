@@ -146,6 +146,12 @@ no repo, no pnpm, no build step.
 
     ./cosheaf-workbench /path/to/your/folder
 
+If it fails with a better-sqlite3 \`NODE_MODULE_VERSION\` error, your Node major
+differs from the build's — rebuild the native addon once from inside this bundle
+directory (the source ships with it):
+
+    npm rebuild better-sqlite3
+
 Opens a loopback server and your browser. Edits save to disk; commit and (with a
 configured remote) open-PR are explicit actions in the UI.
 

@@ -33,7 +33,16 @@ pnpm workbench:pack --skip-build   # reuse an existing dist/ + dist-server/
 - **CPU arch:** the `better-sqlite3` `.node` is native. saturn and earth are both
   Apple Silicon (arm64), so one build serves both. Build per-arch otherwise.
 - **Node major:** the addon is built against the packing machine's Node ABI. The
-  consumer needs a compatible Node major (build and run with the same, e.g. 24).
+  consumer needs a compatible Node major. If `brew install node` gives a *newer*
+  major than the build (e.g. consumer Node 26 vs build Node 25), better-sqlite3
+  fails to load (`NODE_MODULE_VERSION` mismatch). Fix on the consumer with a
+  one-time rebuild — the bundle ships better-sqlite3's source + prebuild-install:
+
+  ```bash
+  cd ~/cosheaf-workbench && npm rebuild better-sqlite3
+  ```
+
+  (or install a matching Node major: `brew install node@24`).
 - **Sidecar gitignore guard stays intact:** each `<folder>/.cosheaf/` is ignored,
   so `remote.json` tokens never get committed.
 
