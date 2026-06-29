@@ -9,7 +9,7 @@
 // rebuildable index, scoped by the workspace_slug column the schema already has.
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import { workspaceSlug } from "../../shared/conventions.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
@@ -36,6 +36,23 @@ export interface WorkspaceEntry {
   gitRemote: LocalGitRemote | null;
   // Tier 2 open-PR client (present iff .cosheaf/remote.json configured a token).
   remoteClient?: RemotePullClient;
+}
+
+// Ensure `<dir>/.cosheaf/.gitignore` exists and ignores everything, so a
+// workspace's gitignored sidecar (remote.json's Cosheaf token, any local index
+// files) can never be swept into a commit by the Tier-1 `git add -A`. Writing a
+// `*` ignore inside the sidecar dir is self-contained — it needs no entry in the
+// user's tracked .gitignore and survives even if the dir is created later.
+function ensureSidecarIgnored(dir: string): void {
+  try {
+    const sidecar = join(dir, ".cosheaf");
+    mkdirSync(sidecar, { recursive: true });
+    const ignore = join(sidecar, ".gitignore");
+    if (!existsSync(ignore)) writeFileSync(ignore, "*\n");
+  } catch (_err) {
+    // Best-effort: a read-only or odd filesystem shouldn't block opening a
+    // folder. remote.json simply won't be auto-protected there.
+  }
 }
 
 export class WorkspaceRegistry {
@@ -74,6 +91,13 @@ export class WorkspaceRegistry {
   // sidecar remote.json → Tier 2 client). Does not index or persist.
   buildEntry(dir: string): WorkspaceEntry {
     const path = resolve(dir);
+    // Guard the per-workspace sidecar before anything can commit: `.cosheaf/`
+    // holds the gitignored remote.json (a live Cosheaf token), and the commit
+    // page / Open-PR run `git add -A`. A self-ignoring .gitignore inside the
+    // dir keeps that token out of every commit. (In single-folder mode this was
+    // a side effect of buildLocalConfig writing the sidecar here; the central
+    // data dir moved that out, so the Workbench must write it explicitly.)
+    ensureSidecarIgnored(path);
     const cfg = deriveLocalWorkspace(path);
     const slug = workspaceSlug(cfg.owner, cfg.repo);
     const identity: LocalWorkspaceIdentity = {
