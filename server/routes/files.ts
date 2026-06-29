@@ -4,7 +4,7 @@ import {
   parseFrontmatter as parseCoflatFrontmatter,
 } from "@chaoxu/coflat/parse";
 import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import { isLocalMode, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import {
   WorkspaceBackendError,
   isStaleShaConflict,
@@ -12,7 +12,7 @@ import {
 } from "../workspace-backend.js";
 import { validBranchName } from "../branch-path.js";
 import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
-import { deletePage, planIndexPage } from "../indexer.js";
+import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import { workspaceSupportsXrefs, workspaceValidation } from "../workspace-validation.js";
@@ -347,7 +347,7 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
   const branch = body?.new_branch?.trim() || baseBranch;
   if (!validRequestedBranch(baseBranch) || !validRequestedBranch(branch))
     return c.json(...bad("valid branch name required"));
-  if (branch === "main" && c.get("config").mode !== "local")
+  if (branch === "main" && !isLocalMode(c))
     return c.json(...bad("branch required (cannot write to main)"));
 
   await ensureBranchFrom(c, branch, baseBranch);
@@ -383,7 +383,7 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
     }
     throw err;
   }
-  if (c.get("config").mode === "local") plan?.commit();
+  indexLocalWrite(isLocalMode(c), c.get("db"), ws.slug, plan);
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(ws.slug, { type: "change", path: rel });
   const writtenSha = written.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
@@ -410,7 +410,7 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
   } | null;
   const branch = body?.branch?.trim() || "main";
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
-  if (branch === "main" && c.get("config").mode !== "local") return c.json(...bad("branch required (cannot delete on main)"));
+  if (branch === "main" && !isLocalMode(c)) return c.json(...bad("branch required (cannot delete on main)"));
   if (typeof body?.sha !== "string" || body.sha.trim() === "") return c.json(...bad("sha required"));
   const { backend, owner, repo } = c.get("repoCtx");
   await ensureBranch(c, branch);
@@ -423,7 +423,7 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
     sha: body.sha,
     message: body.message?.trim() || `delete ${rel}`,
   });
-  if (c.get("config").mode === "local") deletePage(c.get("db"), c.get("workspace").slug, rel);
+  indexLocalDelete(isLocalMode(c), c.get("db"), c.get("workspace").slug, rel);
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(c.get("workspace").slug, { type: "change", path: rel });
   return c.json({ content: null, commit: null });
@@ -479,7 +479,7 @@ files.put("/:owner/:repo/file", async (c) => {
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
-  if (branch === "main" && c.get("config").mode !== "local")
+  if (branch === "main" && !isLocalMode(c))
     return c.json(...bad("branch required (cannot write to main)"));
   const body = (await c.req.json().catch(() => null)) as {
     content?: string;
@@ -617,15 +617,10 @@ files.put("/:owner/:repo/file", async (c) => {
   }
   // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
   // the plan for frontmatter/id rewriting and response metadata, but must not
-  // publish unmerged branch content into search/backlinks/tree doc metadata.
-  // Deliberately do not call plan.commit() here; webhooks/reindex reconcile main.
-  // Local Workbench is the exception: the working tree IS canonical and there is
-  // no webhook, so commit the plan now (and clean up a renamed-away page) to keep
-  // search/backlinks/xref live within a session.
-  if (c.get("config").mode === "local") {
-    plan?.commit();
-    if (isRename && previousRel && previousRel !== rel) deletePage(db, ws.slug, previousRel);
-  }
+  // publish unmerged branch content into search/backlinks/tree doc metadata
+  // (webhooks/reindex reconcile main). Local Workbench is the exception — see
+  // indexLocalWrite — committing now and cleaning up a renamed-away page.
+  indexLocalWrite(isLocalMode(c), db, ws.slug, plan, isRename && previousRel && previousRel !== rel ? previousRel : undefined);
   // #182: a cosheaf.yaml write through the typed route busts its cached config
   // for this branch so the change is read-after-write consistent (the webhook
   // only reconciles main; external non-main pushes reconcile on reindex).
@@ -650,7 +645,7 @@ files.post("/:owner/:repo/assets", async (c) => {
     return c.json(...bad("branch required"));
   if (!validBranchName(branch))
     return c.json(...bad("valid branch name required"));
-  if (branch === "main" && c.get("config").mode !== "local")
+  if (branch === "main" && !isLocalMode(c))
     return c.json(...bad("branch required (cannot upload assets to main)"));
   const form = await c.req.formData().catch(() => null);
   const file = form?.get("file");
@@ -1001,7 +996,7 @@ files.delete("/:owner/:repo/file", async (c) => {
     return c.json(...bad("invalid path"));
   const branch = refFromQuery(c);
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
-  if (branch === "main" && c.get("config").mode !== "local")
+  if (branch === "main" && !isLocalMode(c))
     return c.json(...bad("branch required (cannot delete on main)"));
   const rawBody = await c.req.text().catch(() => null);
   if (rawBody === null)
@@ -1046,7 +1041,7 @@ files.delete("/:owner/:repo/file", async (c) => {
   }
   const db = c.get("db");
   const ws = c.get("workspace");
-  if (c.get("config").mode === "local") deletePage(db, ws.slug, rel);
+  indexLocalDelete(isLocalMode(c), db, ws.slug, rel);
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
   invalidateBranchReadCaches(owner, repo, branch);
   c.get("sse").publish(ws.slug, { type: "change", path: rel });

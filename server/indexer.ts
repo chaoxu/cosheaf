@@ -231,6 +231,26 @@ export function deletePage(db: Database.Database, workspaceSlug: string, filePat
   db.transaction(() => deletePageRows(db, workspaceSlug, row.cosheaf_id))();
 }
 
+// Local Workbench keeps the sidecar live itself: the working tree is canonical
+// and there is no merge webhook, so a write/delete must be indexed immediately.
+// Both are a no-op in hosted mode, where webhooks/reindex reconcile `main`.
+// Centralized here so every write/delete route doesn't repeat the rationale.
+export function indexLocalWrite(
+  local: boolean,
+  db: Database.Database,
+  workspaceSlug: string,
+  plan: IngestPlan | null,
+  renamedFrom?: string,
+): void {
+  if (!local) return;
+  plan?.commit();
+  if (renamedFrom) deletePage(db, workspaceSlug, renamedFrom);
+}
+
+export function indexLocalDelete(local: boolean, db: Database.Database, workspaceSlug: string, filePath: string): void {
+  if (local) deletePage(db, workspaceSlug, filePath);
+}
+
 export function indexCitationFile(
   db: Database.Database,
   p: { workspaceSlug: string; filePath: string; bodyText: string },

@@ -10,7 +10,7 @@ import {
   type WorkspaceBackend,
 } from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
-import { deletePage, planIndexPage } from "../indexer.js";
+import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -53,7 +53,8 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
       backend.getRepo(owner, repo).catch(() => null),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
-    const cloneUrl = sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
+    // No clone panel in local mode (it has no real remote), so skip the URL too.
+    const cloneUrl = ctx.writeMode === "direct" ? null : sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
     const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
     const readme = await repoReadme(ctx, "main", files, assetPreviewPaths);
     const stats = {
@@ -72,7 +73,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
           </div>
         </div>
         ${repoHomeHeader(ctx, owner, repo, stats)}
-        ${ctx.writeMode === "direct" ? emptyHtml : clonePanel(cloneUrl)}
+        ${cloneUrl ? clonePanel(cloneUrl) : emptyHtml}
         ${repoLanding(ctx, "main", files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
@@ -293,7 +294,7 @@ web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
     }
     throw err;
   }
-  if (ctx.writeMode === "direct") deletePage(ctx.db, ctx.ws.slug, rel);
+  indexLocalDelete(ctx.writeMode === "direct", ctx.db, ctx.ws.slug, rel);
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, resolved.branch);
   invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
   c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
@@ -596,13 +597,10 @@ async function writeFile(
   // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
   // the plan for frontmatter/id rewriting, but must not publish unmerged branch
   // content into search/backlinks/tree doc metadata.
-  // Deliberately do not call plan.commit() here; webhooks/reindex reconcile main.
-  // Local Workbench (direct write-mode) is the exception: the working tree is
-  // canonical and there is no webhook, so index now to keep search/backlinks live.
-  if (ctx.writeMode === "direct") {
-    plan?.commit();
-    if (previousRel && previousRel !== rel) deletePage(ctx.db, ctx.ws.slug, previousRel);
-  }
+  // Branch writes don't publish into the sidecar (webhooks/reindex reconcile
+  // main). Local Workbench (direct write-mode) is the exception — see
+  // indexLocalWrite — indexing now to keep search/backlinks live.
+  indexLocalWrite(ctx.writeMode === "direct", ctx.db, ctx.ws.slug, plan, previousRel && previousRel !== rel ? previousRel : undefined);
   // #182: a cosheaf.yaml edit through the editor busts its cached config for
   // this branch (read-after-write for config, independent of sidecar indexing).
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, branch);

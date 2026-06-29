@@ -1,6 +1,6 @@
 import { getCookie } from "hono/cookie";
 import type { MiddlewareHandler } from "hono";
-import { AUTH_COOKIE, bearerToken } from "./middleware.js";
+import { AUTH_COOKIE, bearerToken, isLocalMode } from "./middleware.js";
 import type { AppEnv } from "./types.js";
 import { rejectCrossOriginMutation } from "./routes/web-context.js";
 
@@ -11,7 +11,7 @@ export const rejectCrossOriginCookieApiMutation: MiddlewareHandler<AppEnv> = asy
   // that knows the loopback port could otherwise drive file writes and git
   // commit/push. Enforce the same-origin check on every mutation, like a cookie
   // session.
-  if (c.get("config").mode === "local") {
+  if (isLocalMode(c)) {
     const crossOrigin = rejectCrossOriginMutation(c);
     if (crossOrigin) return crossOrigin;
     return next();

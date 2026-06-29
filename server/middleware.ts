@@ -80,7 +80,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   // Local Workbench: the single OS user is the fixed local identity; there is no
   // token and no Forgejo client. Never emits a 401 (the islands' api.ts bounces
   // to /login on unauthorized/pat_invalid, which a local app must avoid).
-  if (c.get("config").mode === "local") {
+  if (isLocalMode(c)) {
     c.set("user", { username: c.get("localWorkspace").user });
     c.set("forgejoToken", "");
     return next();
@@ -174,7 +174,7 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
   const repo = c.req.param("repo");
   if (!owner || !repo || !FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo))
     return c.json({ error: "workspace required", code: "validation" }, 400);
-  if (c.get("config").mode === "local") {
+  if (isLocalMode(c)) {
     const ws = localWorkspaceContext(c.get("localWorkspace"), owner, repo);
     if (!ws) return c.json({ error: "workspace not found", code: "not_found" }, 404);
     c.set("workspace", ws);
@@ -192,6 +192,11 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
   c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, owner, repo });
   await next();
 };
+
+// True when the request is served by the local Workbench (single on-disk folder).
+export function isLocalMode(c: Context<AppEnv>): boolean {
+  return c.get("config").mode === "local";
+}
 
 // Accessor for the hosted-only review/issue/notification routes that still call
 // the raw Forgejo client. `repoCtx.fj` is optional (undefined in local mode),
