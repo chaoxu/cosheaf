@@ -6,6 +6,9 @@
   Cosheaf workspaces. Start there when an agent needs to edit pages, open a PR,
   review, merge, or triage issues through the typed API instead of the backing
   Forgejo service.
+- `docs/workbench-origin-split.md` is the design contract for Workbench versus
+  Cosheaf server authority, Origin API terminology, multi-server scoping, and
+  local Workbench security boundaries.
 - `pnpm cosheaf:tea -- --workspace <owner>/<repo> pr-from-files ...` is the
   tea-shaped helper for the common local-files-to-Cosheaf-PR flow.
 - `pnpm devx:ready` prepares a local agent workspace: checks Forgejo `3002`,

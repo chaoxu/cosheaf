@@ -144,6 +144,9 @@ hosted server.
   go through `RemoteCosheafClient` and typed `/api/v1/repos/:owner/:repo/*`
   routes. Do not import forge clients or construct backend forge paths in
   `server/local/**`.
+- The planning contract for this split is `docs/workbench-origin-split.md`.
+  Read it before changing local/server authority boundaries, Origin API naming,
+  multi-server workbench state, or Workbench security rules.
 
 When changing a durable web surface, run a feature-parity checklist against
 the server-rendered route:

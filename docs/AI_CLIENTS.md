@@ -7,6 +7,10 @@ directly for normal workspace workflows.
 Use this guide when an agent needs to read or update pages, open pull requests,
 triage issues, or merge reviewed work in a Cosheaf workspace.
 
+For local Workbench and future Origin API boundary work, also read
+`docs/workbench-origin-split.md`. That document defines which operations belong
+to the local git workbench versus the remote Cosheaf server authority.
+
 Cosheaf login returns an opaque `cosheaf_...` token. That token is valid only at
 Cosheaf; it is not a Forgejo PAT and should fail if sent to the backing forge.
 The server keeps the Forgejo credential internally when it needs to delegate to
