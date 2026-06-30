@@ -52,6 +52,7 @@ type PullFileShape = Awaited<ReturnType<CollaborationClient["listPullFiles"]>>[n
 type PullCommitShape = Awaited<ReturnType<CollaborationClient["listPullCommits"]>>[number];
 type PullCommentShape = Awaited<ReturnType<CollaborationClient["listPullComments"]>>[number];
 type CollaboratorShape = Awaited<ReturnType<CollaborationClient["listCollaborators"]>>[number];
+type ReviewerShape = Awaited<ReturnType<CollaborationClient["listPullReviewers"]>>[number];
 type ActivityShape = Awaited<ReturnType<CollaborationClient["listRepoActivities"]>>[number];
 type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
 type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
@@ -965,6 +966,17 @@ export class OriginCollaborationClient {
     return (r.collaborators ?? []).map(collaboratorToShape);
   }
 
+  // Available reviewers for a PR = the repo's collaborators (the forge's
+  // repo-scoped reviewer list). The core has no separate reviewer-candidates
+  // endpoint, so source it from /collaborators and map to the user shape the
+  // PR page's reviewer picker reads (login only).
+  async listPullReviewers(owner: string, repo: string): Promise<ReviewerShape[]> {
+    const r = await this.get<{ collaborators: Array<{ login: string; permission: string }> }>(
+      this.repoPath(owner, repo, "/collaborators"),
+    );
+    return (r.collaborators ?? []).map((m) => ({ id: 0, login: m.login }) as ReviewerShape);
+  }
+
   async listRepoTopics(owner: string, repo: string): Promise<string[]> {
     const r = await this.get<{ topics: string[] }>(this.repoPath(owner, repo, "/topics"));
     return r.topics ?? [];
@@ -1072,9 +1084,13 @@ function withUnimplementedStubs(client: OriginCollaborationClient): Collaboratio
     get(target, prop, receiver) {
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") return value.bind(target);
-      return () => {
-        throw new Error(`OriginCollaborationClient.${String(prop)} is not implemented yet`);
-      };
+      // Reject ASYNCHRONOUSLY, not a synchronous throw: every CollaborationClient
+      // method is async, and call sites wrap optional ones in `.catch(() => [])`
+      // (e.g. listPullReviewers on the PR page). A sync throw fires before the
+      // promise exists, so `.catch` never attaches and the page 500s; a rejected
+      // promise lets those guards degrade gracefully.
+      return () =>
+        Promise.reject(new Error(`OriginCollaborationClient.${String(prop)} is not implemented yet`));
     },
   }) as unknown as CollaborationClient;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  localCollaborationClient,
   localMemberSetter,
   NoCoreConnectedError,
   OriginCollaborationClient,
@@ -82,5 +83,23 @@ describe("localMemberSetter", () => {
   it("throws NoCoreConnectedError for an unconnected workspace", () => {
     const setMember = localMemberSetter({ remote: null } as unknown as WorkspaceEntry, "me", "notes");
     expect(() => setMember("vera", "write")).toThrow(NoCoreConnectedError);
+  });
+});
+
+describe("unimplemented stubs", () => {
+  // Regression: a not-yet-backed method (e.g. editRepo) must reject
+  // ASYNCHRONOUSLY, never throw synchronously. Call sites wrap optional methods
+  // in `.catch(() => [])` (the PR page's listPullReviewers); a sync throw fires
+  // before the promise exists, so `.catch` can't attach and the page 500s.
+  it("reject asynchronously so .catch can degrade", async () => {
+    const client = localCollaborationClient({
+      remote: { url: "https://core.example", token: "t" },
+    } as unknown as WorkspaceEntry);
+    const result = (client.editRepo as (...a: unknown[]) => unknown)("me", "notes", {});
+    expect(result).toBeInstanceOf(Promise);
+    await expect(result as Promise<unknown>).rejects.toThrow(/not implemented/);
+    await expect(
+      (client.editRepo as (...a: unknown[]) => Promise<unknown>)("me", "notes", {}).catch(() => "ok"),
+    ).resolves.toBe("ok");
   });
 });

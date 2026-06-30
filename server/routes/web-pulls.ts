@@ -480,9 +480,17 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   // Rich rendering is only meaningful for markdown; a .bib/.json/.png/binary file
   // fed through the Coflat reader renders as garbage (#2). Gate rich on the
   // selected file's kind so those default to (and are pinned to) source.
-  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && file !== null && fileKindForPath(file.path) === "markdown";
-  const mode = parseDiffMode(c.req.query("mode"), richOk);
-  const shape = parseDiffShape(c.req.query("shape"), mode);
+  // Local Workbench: the PR's per-side file content lives on the core, not the
+  // opened folder, so the rich/split/after views (which read getRawFile at the
+  // PR's base+head SHAs) can't be sourced. Fall back to the unified source patch
+  // — the same documented behavior as a passthrough workspace's rich diff.
+  const richOk =
+    ctx.writeMode !== "direct" &&
+    ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID &&
+    file !== null &&
+    fileKindForPath(file.path) === "markdown";
+  const mode = ctx.writeMode === "direct" ? "source" : parseDiffMode(c.req.query("mode"), richOk);
+  const shape = ctx.writeMode === "direct" ? "unified" : parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file) : null;
   const fileComments = file ? await mapLineComments(ctx, file, allComments) : [];
   const assetPreviewPaths = file && mode === "rich" ? await prAssetPreviewPaths(ctx, pull) : {};
@@ -567,6 +575,11 @@ async function pullFiles(ctx: WebCtx, number: number) {
 }
 
 async function prAssetPreviewPaths(ctx: WebCtx, pull: ForgejoPull): Promise<PrFileAssetPreviewPaths> {
+  // Inline PDF/image previews need the base+head file trees. In the local
+  // Workbench the content backend is the opened folder, which does not hold the
+  // PR's core-side commits, so the tree lookup can't resolve those SHAs —
+  // degrade to no previews (the diff itself still renders from the core).
+  if (ctx.writeMode === "direct") return { base: {}, head: {} };
   const [baseTree, headTree] = await Promise.all([
     ctx.backend.getTree(ctx.owner, ctx.repo, pull.base.sha, true),
     ctx.backend.getTree(ctx.owner, ctx.repo, pull.head.sha, true),
