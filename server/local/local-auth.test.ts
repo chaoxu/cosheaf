@@ -175,6 +175,35 @@ describe("local Workbench access gate", () => {
   });
 });
 
+describe("local Workbench /origin manifest", () => {
+  it("describes a federated, local-git provider (no native collaboration)", async () => {
+    const res = await localApp(null).request("/api/v1/origin");
+    const body = (await res.json()) as {
+      display_name: string;
+      provider: { content: string; collaboration: string };
+      capabilities: Array<{ id: string }>;
+      auth_schemes: Array<{ id: string; type: string }>;
+      consistency: { source_of_truth: string };
+    };
+    expect(body.display_name).toBe("Cosheaf Workbench");
+    expect(body.provider).toEqual({ content: "local-git", collaboration: "federated" });
+    const ids = body.capabilities.map((cap) => cap.id);
+    expect(ids).toContain("files");
+    expect(ids).toContain("branches");
+    expect(ids).not.toContain("issues");
+    expect(ids).not.toContain("reviews");
+    expect(body.consistency.source_of_truth).toMatch(/local git working tree/i);
+    expect(body.auth_schemes).toEqual([expect.objectContaining({ id: "none", type: "none" })]);
+  });
+
+  it("advertises the workbench cookie + bearer auth schemes when a token is set", async () => {
+    const res = await localApp(TOKEN).request("/api/v1/origin");
+    const body = (await res.json()) as { auth_schemes: Array<{ id: string; cookie_name?: string }> };
+    expect(body.auth_schemes.map((s) => s.id)).toEqual(["cookie", "bearer"]);
+    expect(body.auth_schemes[0].cookie_name).toBe("cosheaf_wb");
+  });
+});
+
 describe("refuseRemoteWithoutToken", () => {
   it("allows loopback with no token", () => {
     expect(refuseRemoteWithoutToken("127.0.0.1", null)).toBeNull();

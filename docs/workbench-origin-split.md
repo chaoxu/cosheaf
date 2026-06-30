@@ -21,6 +21,39 @@ Cosheaf Workbench into a second server or a local Forgejo clone.
   operations. Today this is either the hosted server's backend provider or the
   local git provider.
 
+## Provider model (the unifying frame)
+
+Hosted and local are not two products; they are one Workbench frontend (the same
+routes, islands, Coflat editor and reader, already shared through
+`WorkspaceBackend`) configured with different **providers**. A workspace binds
+two orthogonal seams:
+
+- **Content backend** — where editing / commits / branches happen:
+  `LocalGitWorkspaceBackend` (a folder) or `ForgejoWorkspaceBackend` (a forge).
+- **Collaboration core** — who owns PRs / issues / reviews / notifications:
+  `self` (the content backend's own co-located forge), `remote` (a separate
+  Cosheaf core reached over the Origin API), or `none`.
+
+**Authority follows the backend, not the frontend.** A forge-backed workbench
+legitimately owns collaboration because the forge does; a local-git workbench
+never does — it proxies to a connected core, or has none.
+
+Only three combinations are valid, because a multi-user core's content must be
+network-reachable (a local folder is single-machine), so **`core: self` ⟹ forge
+content backend**:
+
+| Case | content backend | bound core |
+| --- | --- | --- |
+| Hosted server (`cosheaf.chaoxu.prof`) | the forge | `self` |
+| Local Workbench + core | local folder | `remote` (Origin API) |
+| Local Workbench, bare | local folder | `none` |
+
+The local Workbench is inherently multi-core (each folder binds its own core via
+`.cosheaf/remote.json`, scoped by `origin_id`). It carries two identities: how a
+client authenticates *to* the Workbench (the optional `COSHEAF_WORKBENCH_TOKEN`
+access gate) and how the Workbench authenticates *to* a core (the per-core Origin
+token in `remote.json`).
+
 ## Current Mapping
 
 - The hosted web app is the Cosheaf server surface. Its durable repository
@@ -107,8 +140,16 @@ Cosheaf authority.
 - Raw Forgejo PATs must not be stored in workbench client state or sent by
   workbench clients. Cosheaf tokens stay opaque to clients; the Cosheaf server
   owns backend forge credentials.
-- Local workbench HTTP service stays loopback-only by default. It has ambient
-  local file authority and must reject cross-origin cookie-style mutations.
+- Local workbench HTTP service stays loopback + no-auth by default. It has
+  ambient local file authority and must reject cross-origin cookie-style
+  mutations. Exposing it beyond loopback requires an access token
+  (`COSHEAF_WORKBENCH_TOKEN`): the launcher refuses a non-loopback bind without
+  one, and the token gate then guards every request (Bearer for API/agents, the
+  `cosheaf_wb` HttpOnly cookie for browsers via `/login`). The access token is
+  the N=1 case of the forge provider's multi-user token auth. Transport, TLS,
+  and reachability (tunnel, reverse proxy, VPN) are the operator's
+  responsibility and out of scope for the Workbench — no transport is assumed or
+  bundled.
 - A configured workspace server binding must make the target server and
   workspace visible enough that publishing a PR cannot silently go to the wrong
   server.
