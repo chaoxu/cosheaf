@@ -9,15 +9,15 @@
 //   DELETE /branches/:name        — delete a branch
 
 import { Hono } from "hono";
-import type { AppEnv } from "../types.js";
+import { validBranchName } from "../branch-path.js";
 import {
   requireAuth,
   requireMembership,
   requireWriteOnMutation,
 } from "../middleware.js";
-import { WorkspaceBackendError, type WsBranch } from "../workspace-backend.js";
-import { validBranchName } from "../branch-path.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
+import type { AppEnv } from "../types.js";
+import { WorkspaceBackendError, type WsBranch } from "../workspace-backend.js";
 
 export const branches = new Hono<AppEnv>();
 branches.use("*", requireAuth);
@@ -30,11 +30,16 @@ function publicBranch(c: import("hono").Context<AppEnv>, branch: WsBranch): Reco
   const { owner, repo } = c.get("repoCtx");
   const origin = new URL(c.req.url).origin;
   const commitId = branch.commit?.id ?? "";
+  // Only a real commit sha gets a commit URL. The local Workbench aliases every
+  // branch to the working tree and reports a synthetic "WORKTREE" id, which has
+  // no /commit/<sha> page — emitting a link for it would 404. Hosted branches
+  // carry full 40-char shas and are unaffected.
+  const isCommitSha = /^[0-9a-f]{7,40}$/i.test(commitId);
   return {
     ...branch,
     commit: {
       ...branch.commit,
-      url: commitId ? `${origin}/${owner}/${repo}/commit/${commitId}` : "",
+      url: isCommitSha ? `${origin}/${owner}/${repo}/commit/${commitId}` : "",
     },
   };
 }

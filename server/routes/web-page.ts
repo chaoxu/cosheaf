@@ -125,7 +125,7 @@ export function repoPage(opts: {
     locale: opts.locale,
     readerAssets: opts.readerAssets,
     sidebar: html`
-      ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null, t)}
+      ${sidebarIdentity(opts.user, false, opts.userAvatarSrc ?? null, t, false, false, { local: opts.local })}
       <nav class="sidebar-topnav">
         <a href="/">${backIcon({ size: 14 })} ${t("nav.workspaces")}</a>
       </nav>

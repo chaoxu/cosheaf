@@ -171,7 +171,7 @@ function browsePage(user: string, dir: string, notice: string | null, signOut: b
     }
     <p class="browse-back"><a href="/">← back to workspaces</a></p>
   </main>`;
-  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true, signOut }), body });
+  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true, signOut, local: true }), body });
 }
 
 function switcherPage(registry: WorkspaceRegistry, user: string, notice: string | null, signOut: boolean): string {
@@ -195,7 +195,7 @@ function switcherPage(registry: WorkspaceRegistry, user: string, notice: string 
       </form>
     </div>
   </main>`;
-  return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true, signOut }), body });
+  return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true, signOut, local: true }), body });
 }
 
 // The Workbench profile page: a git authorship identity (name + email) used to
@@ -217,7 +217,7 @@ function profilePage(registry: WorkspaceRegistry, user: string, notice: string |
       <div class="form-actions"><button class="button primary" type="submit">Save</button></div>
     </form>
   </main>`;
-  return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true, signOut }), body });
+  return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true, signOut, local: true }), body });
 }
 
 // The Workbench access-token sign-in page, shown only when COSHEAF_WORKBENCH_TOKEN

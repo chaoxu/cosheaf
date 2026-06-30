@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { globalSidebar, pageShell, sidebarIdentity } from "./web-shell.js";
 import { raw } from "./web-html.js";
+import { globalSidebar, pageShell, sidebarIdentity } from "./web-shell.js";
 
 // Narrow source cross-check (allowed per AGENTS.md: regex over source text in a
 // test). A page island only mounts in production if THREE things agree:
@@ -101,5 +101,23 @@ describe("sidebar identity chrome", () => {
     const body = String(sidebarIdentity("alice", false, null, undefined, true));
     expect(body).toContain('class="settings-gear active"');
     expect(body).toContain('class="notif-bell"');
+  });
+
+  it("local mode points identity at /_profile and hides bell/help/settings", () => {
+    const body = String(sidebarIdentity("alice", false, null, undefined, false, false, { local: true }));
+    expect(body).toContain('class="sidebar-identity-link" href="/_profile"');
+    expect(body).not.toContain("/users/alice");
+    expect(body).not.toContain("notif-bell");
+    expect(body).not.toContain("help-circle");
+    expect(body).not.toContain("settings-gear");
+  });
+
+  it("local globalSidebar emits no hosted-only account hrefs", () => {
+    const body = String(globalSidebar("workspaces", "alice", null, undefined, { profile: true, local: true }));
+    expect(body).toContain('href="/_profile"');
+    expect(body).not.toContain("/account/notifications");
+    expect(body).not.toContain('href="/help"');
+    expect(body).not.toContain("/account/settings");
+    expect(body).not.toContain("/users/alice");
   });
 });

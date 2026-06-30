@@ -247,6 +247,7 @@ export function classifyMergeFailure(
     reviewGate !== null && (reviewGate.approvals < reviewGate.requiredApprovals || reviewGate.rejections > 0);
   let reason: MergeFailureReason;
   if (pull === null || merged) reason = "stale";
+  else if (pull.state === "closed") reason = "closed";
   else if (mergeable === false) reason = "conflict";
   else if (reviewBlocked) reason = "blocked";
   else if (mergeable === null || transientExhausted) reason = "transient";
@@ -266,6 +267,8 @@ export function mergeFailureMessage(reason: MergeFailureReason): string {
       return "This pull request has conflicts that must be resolved before it can merge.";
     case "stale":
       return "This pull request is already merged or no longer open.";
+    case "closed":
+      return "This pull request is closed; reopen it before merging.";
     case "transient":
       return "The merge service is busy — try again in a moment.";
     case "unknown":
@@ -415,6 +418,16 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
       const ambiguous = pull !== null && pull.merged !== true && pull.mergeable !== false;
       const reviewGate = ambiguous ? await readReviewGate(collab, owner, repo, n, pull.base.ref) : null;
       return c.json(classifyMergeFailure(pull, reviewGate, result.transientExhausted), 409);
+    }
+    if (result.status === 404) {
+      // Forgejo answers 404 when merging a PR that isn't open — but the PR may
+      // still EXIST (closed, not merged). Re-read to tell a genuinely-missing PR
+      // (a true 404) from a closed one, which is a precondition conflict (409),
+      // not a not-found. Don't echo the misleading "no longer exists" message at
+      // 404 for a PR that does exist.
+      const pull = await collab.getPull(owner, repo, n);
+      if (pull) return c.json(classifyMergeFailure(pull, null, result.transientExhausted), 409);
+      return c.json(...notFound("this pull request no longer exists"));
     }
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
     return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);

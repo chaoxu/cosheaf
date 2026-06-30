@@ -95,9 +95,9 @@ export function globalSidebar(
   user?: string,
   avatarSrc: string | null = null,
   t: T = enT,
-  opts: { siteAdmin?: boolean; profile?: boolean; signOut?: boolean } = {},
+  opts: { siteAdmin?: boolean; profile?: boolean; signOut?: boolean; local?: boolean } = {},
 ): Html {
-  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account", active === "help")}
+  return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account", active === "help", { local: opts.local })}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
       ${opts.profile ? html`<a class="${active === "account" ? "active" : ""}" href="/_profile">Profile</a>` : emptyHtml}
@@ -111,13 +111,19 @@ export function globalSidebar(
 // The same block renders in the global and repo sidebars so identity + chrome
 // actions are always visible. Logged-out chrome (only the pre-auth message
 // pages) shows a sign-in link instead — and no action icons.
-export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT, settingsActive = false, helpActive = false): Html {
+// `local` switches the chrome to the Workbench's mode-aware targets: the local
+// app mounts no global notifications/help/settings pages and serves the profile
+// at /_profile (not the hosted /users/:username), so in local mode the identity
+// links to /_profile and the bell/help/gear are hidden rather than emitting
+// hosted hrefs that 404 in the Workbench.
+export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT, settingsActive = false, helpActive = false, opts: { local?: boolean } = {}): Html {
   if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">${t("auth.sign_in")}</a></div>`;
+  const profileTarget = opts.local ? "/_profile" : profileHref(user);
   return html`<div class="sidebar-identity">
-    <a class="sidebar-identity-link" href="${profileHref(user)}" title="${t("nav.profile")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
-    ${notificationsBell(notificationsActive, t)}
-    ${helpCircle(helpActive, t)}
-    ${settingsGear(settingsActive, t)}
+    <a class="sidebar-identity-link" href="${profileTarget}" title="${t("nav.profile")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
+    ${opts.local ? emptyHtml : notificationsBell(notificationsActive, t)}
+    ${opts.local ? emptyHtml : helpCircle(helpActive, t)}
+    ${opts.local ? emptyHtml : settingsGear(settingsActive, t)}
   </div>`;
 }
 

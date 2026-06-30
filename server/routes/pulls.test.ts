@@ -1073,6 +1073,40 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(409);
       await expect(res.json()).resolves.toMatchObject({ reason: "unknown", mergeable: true });
     });
+
+    it("POST /pulls/:n/merge on a closed-but-existing PR returns 409 closed, not a 404 'no longer exists'", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
+        .mockResolvedValueOnce(new Response("pull request is closed", { status: 404 })) // merge: Forgejo 404 on a non-open PR
+        .mockResolvedValueOnce(ok(pull({ state: "closed", merged: false }))); // re-read: the PR still exists, closed
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "squash" }),
+      });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: "conflict", reason: "closed", state: "closed", merged: false });
+    });
+
+    it("POST /pulls/:n/merge on a genuinely missing PR still returns 404 not-found", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
+        .mockResolvedValueOnce(new Response("not found", { status: 404 })) // merge: 404
+        .mockResolvedValueOnce(new Response("not found", { status: 404 })); // re-read: PR truly gone
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "squash" }),
+      });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ code: "not_found" });
+    });
   });
 
   describe("classifyMergeFailure (#94)", () => {
@@ -1087,6 +1121,11 @@ describe("pulls + branches routes", () => {
     it("flags a gone PR (null) as stale with null shas", () => {
       const r = classifyMergeFailure(null, noGate, false);
       expect(r).toMatchObject({ reason: "stale", head_sha: null, base_sha: null, mergeable: null });
+    });
+    it("flags a closed-but-unmerged PR as closed (not conflict), state closed", () => {
+      const r = classifyMergeFailure(p({ state: "closed", merged: false, mergeable: false }), noGate, false);
+      expect(r).toMatchObject({ reason: "closed", state: "closed", merged: false });
+      expect(r.error).toBe("This pull request is closed; reopen it before merging.");
     });
     it("flags an unmet approval gate as blocked", () => {
       const gate = { requiredApprovals: 2, approvals: 1, rejections: 0 };
@@ -1116,10 +1155,12 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "read");
+      const mainSha = "1111111111111111111111111111111111111111";
+      const wipSha = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
       fetchMock.mockResolvedValueOnce(
         ok([
-          { name: "main", commit: { id: "m", url: "http://forgejo.test/owner/w/commit/m" } },
-          { name: "agent/wip", commit: { id: "a1", url: "http://forgejo.test/owner/w/commit/a1" } },
+          { name: "main", commit: { id: mainSha, url: `http://forgejo.test/owner/w/commit/${mainSha}` } },
+          { name: "agent/wip", commit: { id: wipSha, url: `http://forgejo.test/owner/w/commit/${wipSha}` } },
         ]),
       );
       const res = await appFor(db).request("/api/v1/repos/owner/w/branches", {
@@ -1128,10 +1169,23 @@ describe("pulls + branches routes", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toEqual([
-        { name: "main", commit: { id: "m", url: "http://localhost/owner/w/commit/m" } },
-        { name: "agent/wip", commit: { id: "a1", url: "http://localhost/owner/w/commit/a1" } },
+        { name: "main", commit: { id: mainSha, url: `http://localhost/owner/w/commit/${mainSha}` } },
+        { name: "agent/wip", commit: { id: wipSha, url: `http://localhost/owner/w/commit/${wipSha}` } },
       ]);
       expect(JSON.stringify(body)).not.toContain("forgejo.test");
+    });
+
+    it("GET /branches omits commit.url for a synthetic working-tree (WORKTREE) ref", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "read");
+      fetchMock.mockResolvedValueOnce(ok([{ name: "main", commit: { id: "WORKTREE" } }]));
+      const res = await appFor(db).request("/api/v1/repos/owner/w/branches", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual([{ name: "main", commit: { id: "WORKTREE", url: "" } }]);
     });
 
     it("GET /branch_protections returns an empty list for tea branches", async () => {

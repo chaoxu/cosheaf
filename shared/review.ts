@@ -66,9 +66,10 @@ export interface PrMeta {
 //  - conflict  : the branch has real merge conflicts (main moved) — rebase or close as dup
 //  - transient : mergeability still computing / "try again later" survived retries — retry after a delay
 //  - stale     : the PR is already merged or gone — treat as done
+//  - closed    : the PR still exists but was closed without merging — reopen it to merge
 //  - blocked   : a branch-protection gate (e.g. required approvals) — get a review, don't force
 //  - unknown   : unclassified precondition failure
-export type MergeFailureReason = "conflict" | "transient" | "stale" | "blocked" | "unknown";
+export type MergeFailureReason = "conflict" | "transient" | "stale" | "closed" | "blocked" | "unknown";
 
 export interface MergeFailure {
   error: string;
