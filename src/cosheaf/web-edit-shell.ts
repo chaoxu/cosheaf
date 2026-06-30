@@ -17,6 +17,7 @@ import {
   type CoflatDocumentPayload,
 } from "./coflat-document-context";
 import type { WebEditorMount } from "./web-editor";
+import { rewritePdfPreviewObjects } from "./pdf-preview-rewrite";
 import "@chaoxu/coflat/document-surface.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -338,6 +339,7 @@ function ensureFastRead(host: HTMLElement, state: WorkbenchState): Promise<Mount
     });
     renderFastRail(rail, mounted);
     await mounted.ready;
+    rewritePdfPreviewObjects(doc);
     return mounted;
   })();
   return state.fastReadReady;

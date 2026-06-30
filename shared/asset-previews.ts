@@ -41,3 +41,17 @@ export function buildPdfImagePreviewPaths(paths: readonly string[]): AssetPrevie
 export function previewAssetPath(path: string, previews?: AssetPreviewPaths): string {
   return previews?.[path] ?? path;
 }
+
+export function isPdfAssetPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".pdf");
+}
+
+// The query the raw route understands to serve a PDF's first page rendered to
+// PNG instead of the un-displayable PDF bytes.
+export const PDF_PREVIEW_QUERY = "preview=png";
+
+// Suffix appended to a *display* asset URL that points at a PDF with no sibling
+// raster: it asks the raw route to rasterize page 1 so an <img> can show it.
+export function pdfDisplaySuffix(assetPath: string): string {
+  return isPdfAssetPath(assetPath) ? `?${PDF_PREVIEW_QUERY}` : "";
+}

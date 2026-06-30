@@ -119,9 +119,15 @@ describe("resolveRepoLink", () => {
     );
   });
 
-  it("resolves PDF display assets to the raw PDF when no sibling preview exists", () => {
+  it("resolves PDF display assets to the rasterized PNG preview when no sibling preview exists", () => {
     const context = coflatDocumentContext(payload, { workspaceCrossrefs: new Map(), citations: null });
+    // No sibling raster, so the host serves the PDF's first page rendered to PNG
+    // (the raw route honors ?preview=png — see server/pdf-raster.ts).
     expect(context.fileSystem?.resolveAssetUrl("notes/figures/pipeline.pdf", { purpose: "display" })).toBe(
+      "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.pdf?preview=png",
+    );
+    // Source purpose still points at the raw PDF (for download/links, not <img>).
+    expect(context.fileSystem?.resolveAssetUrl("notes/figures/pipeline.pdf", { purpose: "source" })).toBe(
       "/chao/poa-network-game/raw/branch/main/notes/figures/pipeline.pdf",
     );
   });

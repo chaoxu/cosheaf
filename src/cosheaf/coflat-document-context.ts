@@ -7,7 +7,7 @@ import {
   resolveMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
-import { previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
+import { pdfDisplaySuffix, previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { rawRepoBranchFileHref, repoBranchFileHref } from "../../shared/url";
 
@@ -171,7 +171,10 @@ function resolveRawRepoAssetPath(payload: CoflatDocumentPayload, path: string, p
   const decodedPath = decodeMarkdownPathHref(withoutHash);
   if (!decodedPath || decodedPath.split("/").includes("..")) return null;
   const assetPath = purpose === "display" ? previewAssetPath(decodedPath, payload.assetPreviewPaths) : decodedPath;
-  return `${rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+  const url = rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), assetPath);
+  // A PDF figure with no sibling raster is served as a rendered PNG for display.
+  const preview = purpose === "display" ? pdfDisplaySuffix(assetPath) : "";
+  return `${url}${preview}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 }
 
 function rawResourceBranch(payload: CoflatDocumentPayload): string {

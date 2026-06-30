@@ -1,5 +1,7 @@
 import type { Hono } from "hono";
-import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
+import { join } from "node:path";
+import { buildPdfImagePreviewPaths, isPdfAssetPath } from "../../shared/asset-previews.js";
+import { rasterizePdfFirstPage } from "../pdf-raster.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
@@ -312,6 +314,21 @@ web.get("/:owner/:repo/raw/branch/*", webRoute(async (c, ctx) => {
   const rel = safeRel(resolved.path);
   if (!rel) return new Response("not found", { status: 404 });
   const content = await ctx.backend.getRawFileBytes(ctx.owner, ctx.repo, resolved.branch, rel);
+  // PDF figures (`![](fig.pdf)`) can't render in <img>; the display asset URL
+  // carries ?preview=png (see pdfDisplaySuffix), so rasterize page 1 to a cached
+  // PNG for those requests. Falls back to the raw bytes if rendering fails.
+  if (c.req.query("preview") === "png" && isPdfAssetPath(rel)) {
+    try {
+      const png = await rasterizePdfFirstPage(Buffer.from(content), {
+        cacheDir: join(c.get("config").dataDir, "cache", "pdf-png"),
+      });
+      return new Response(png, {
+        headers: { "content-type": "image/png", "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" },
+      });
+    } catch (_err) {
+      // Corrupt/encrypted PDF — serve the raw bytes rather than 500.
+    }
+  }
   return new Response(content, { headers: repositoryRawHeadersForPath(rel, content) });
 }));
 

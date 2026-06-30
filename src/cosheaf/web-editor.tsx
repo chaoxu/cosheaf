@@ -28,7 +28,7 @@ import type { ReactNode, Ref } from "react";
 import { createRef, lazy, StrictMode, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
+import { pdfDisplaySuffix, previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import {
   MAX_ASSET_BYTES,
@@ -546,13 +546,13 @@ function WebEditor({
       deleteFile: unsupportedWrite,
       writeFileBinary: unsupportedWrite,
       readFileBinary,
-      resolveAssetUrl: (path: string, options?: { purpose?: "source" | "display" }): string =>
-        rawRepoFileHref(
-          config.owner,
-          config.repo,
-          readExistingBranch(),
-          options?.purpose === "source" ? path : displayAssetPath(path),
-        ),
+      resolveAssetUrl: (path: string, options?: { purpose?: "source" | "display" }): string => {
+        const display = options?.purpose !== "source";
+        const assetPath = display ? displayAssetPath(path) : path;
+        const url = rawRepoFileHref(config.owner, config.repo, readExistingBranch(), assetPath);
+        // A PDF figure with no sibling raster renders to a PNG for display.
+        return display ? `${url}${pdfDisplaySuffix(assetPath)}` : url;
+      },
     };
   }, [config.assetPreviewPaths, config.branch, config.formatId, config.owner, config.repo]);
 

@@ -26,6 +26,7 @@ import {
   sanitizeAndRewriteRefsFragment,
 } from "./ref-rewriter";
 import { markChangedBlocks, markChangeStops, markRichGapContentAnchors, markRichInlineRanges, richDiffBlockForLine } from "./reader-diff-marking";
+import { rewritePdfPreviewObjects } from "./pdf-preview-rewrite";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 const observedScrollTop = new WeakMap<HTMLElement, number>();
@@ -90,6 +91,7 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   const scrollContainer = root.closest<HTMLElement>(".doc-main, .app-content");
   const scrollTopBeforeRender = scrollContainer?.scrollTop ?? 0;
   root.replaceChildren(fragment);
+  rewritePdfPreviewObjects(root);
   const latestScrollTop = scrollContainer ? Math.max(scrollTopBeforeRender, observedScrollTop.get(scrollContainer) ?? 0) : 0;
   if (scrollContainer && latestScrollTop > 0) {
     scrollContainer.scrollTop = latestScrollTop;
