@@ -13,6 +13,7 @@ import { compress } from "hono/compress";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { repoHref } from "../../shared/url.js";
 import { registerNotificationActivityRoutes } from "../routes/web-activity.js";
+import { registerBranchRoutes } from "../routes/web-branches.js";
 import { globalRoute, htmlResponse, redirect, requestOrigin, resolveWebRepo, safeWebRedirect, stringField } from "../routes/web-context.js";
 import { registerDiagnosticsRoutes } from "../routes/web-diagnostics.js";
 import { registerFileRoutes } from "../routes/web-files.js";
@@ -252,7 +253,7 @@ const CONNECT_TITLES: Record<string, string> = {
 // connected core, render the Connect prompt instead of letting the shared route
 // call ctx.collab (which would throw NoCoreConnectedError). When a core IS
 // connected, fall through to the shared route that reads the connected core.
-function coreConnectGate(active: RepoTab): MiddlewareHandler<AppEnv> {
+function coreConnectGate(active: RepoTab, titleLabel?: string): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const owner = c.req.param("owner");
     const repo = c.req.param("repo");
@@ -262,7 +263,9 @@ function coreConnectGate(active: RepoTab): MiddlewareHandler<AppEnv> {
     if (!entry || entry.remote) return next();
     const ctx = await resolveWebRepo(c);
     if (!ctx.ok) return ctx.response;
-    const title = `${CONNECT_TITLES[active] ?? active} - ${ctx.repo}`;
+    // titleLabel overrides the tab→title map for surfaces (e.g. branches) that
+    // share a tab with a differently-named page.
+    const title = `${titleLabel ?? CONNECT_TITLES[active] ?? active} - ${ctx.repo}`;
     return htmlResponse(repoPageShell(ctx, active, title, notConnectedBody(ctx, entry, c.req.query("toast") ?? null)));
   };
 }
@@ -399,6 +402,12 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   localWeb.use("/:owner/:repo/issues/*", coreConnectGate("issues"));
   localWeb.use("/:owner/:repo/pulls", coreConnectGate("pulls"));
   localWeb.use("/:owner/:repo/pulls/*", coreConnectGate("pulls"));
+  // Branches list its branches from the connected core (ctx.collab.listBranches),
+  // so gate it like the other collaboration surfaces; it renders under the files
+  // tab, hence the explicit "Branches" title. The /commits/:sha detail page is
+  // NOT gated — it reads the local git working tree through ctx.backend.
+  localWeb.use("/:owner/:repo/branches", coreConnectGate("files", "Branches"));
+  localWeb.use("/:owner/:repo/branches/*", coreConnectGate("files", "Branches"));
   localWeb.use("/:owner/:repo/notifications", coreConnectGate("notifications"));
   localWeb.use("/:owner/:repo/notifications/*", coreConnectGate("notifications"));
   localWeb.use("/:owner/:repo/activity", coreConnectGate("activity"));
@@ -406,6 +415,9 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   localWeb.use("/:owner/:repo/settings/*", coreConnectGate("settings"));
   registerIssueRoutes(localWeb);
   registerPullRoutes(localWeb);
+  // Branches list (gated above) + the local /commits/:sha detail page. Mounted in
+  // the same relative order as the hosted router (after pulls, before activity).
+  registerBranchRoutes(localWeb);
   registerNotificationActivityRoutes(localWeb);
   registerSettingsRoutes(localWeb);
 

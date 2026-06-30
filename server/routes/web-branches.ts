@@ -1,10 +1,9 @@
 import type { Hono } from "hono";
 import { validBranchName } from "../branch-path.js";
-import { ForgejoError } from "../forgejo.js";
-import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoBranch } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 import { branchIcon } from "./icons.js";
 import {
   badRequestPage,
@@ -25,9 +24,13 @@ import { branchOptions, repoPageShell } from "./web-page.js";
 
 export function registerBranchRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/branches", webRoute(async (_c, ctx) => {
+    // Branches + open-PR heads come from the collaboration source (the forge
+    // hosted; the connected core in the local Workbench). Local mode gates this
+    // route behind a connected core, so ctx.collab is never the unconnected
+    // sentinel here.
     const [branches, pulls] = await Promise.all([
-      ctx.fj.listBranches(ctx.owner, ctx.repo),
-      ctx.fj.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
+      ctx.collab.listBranches(ctx.owner, ctx.repo),
+      ctx.collab.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
     ]);
     const openHeads = new Set(pulls.map((pull) => pull.head.ref));
     return htmlResponse(
@@ -46,9 +49,9 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
     if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
     if (!validBranchName(base)) return badRequestPage(ctx.user, "Valid base branch is required.");
     try {
-      await ctx.fj.createBranch(ctx.owner, ctx.repo, { newBranchName: name, oldBranchName: base });
+      await ctx.backend.createBranch(ctx.owner, ctx.repo, { newBranchName: name, oldBranchName: base });
     } catch (err) {
-      if (err instanceof ForgejoError && err.status === 409) {
+      if (err instanceof WorkspaceBackendError && err.status === 409) {
         return badRequestPage(ctx.user, "Branch already exists.");
       }
       throw err;
@@ -62,9 +65,9 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
     const name = stringField(form.name);
     if (!validBranchName(name) || name === "main") return badRequestPage(ctx.user, "Valid non-main branch name is required.");
     try {
-      await ctx.fj.deleteBranch(ctx.owner, ctx.repo, name);
+      await ctx.backend.deleteBranch(ctx.owner, ctx.repo, name);
     } catch (err) {
-      if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+      if (!(err instanceof WorkspaceBackendError && err.status === 404)) throw err;
     }
     invalidateRepoTrees(ctx.owner, ctx.repo);
     const redirectTo = branchDeleteRedirect(ctx, stringField(form.redirect_to));
@@ -74,8 +77,30 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
     const sha = c.req.param("sha");
     if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
-    const commit = await ctx.fj.getCommit(ctx.owner, ctx.repo, sha).catch(onForgejo404(null));
-    if (!commit) return notFoundPage(ctx.user, "Commit not found");
+    // Commit content comes from the data-access backend (the forge hosted; the
+    // local git working tree in the Workbench), so a commit that the local clone
+    // actually has renders, and a core-side sha it doesn't have degrades below
+    // instead of 500ing.
+    const commit = await ctx.backend.getCommit(ctx.owner, ctx.repo, sha);
+    if (!commit) {
+      // Local Workbench: the sha isn't in this working tree (e.g. a core commit
+      // linked from activity that was never fetched). Show a clear state rather
+      // than the hosted "not found" 404.
+      if (ctx.writeMode === "direct") {
+        return htmlResponse(
+          repoPageShell(ctx, "activity", `Commit - ${ctx.repo}`, html`
+            <div class="page-title compact">
+              <div>
+                <p class="eyebrow">Commit</p>
+                <h1>${sha.slice(0, 10)}</h1>
+              </div>
+            </div>
+            <div class="empty" data-testid="commit-unavailable">This commit isn't in the local working tree. Fetch it from the connected Cosheaf server to view it here.</div>
+          `),
+        );
+      }
+      return notFoundPage(ctx.user, "Commit not found");
+    }
     return htmlResponse(
       repoPageShell(ctx, "activity", `${commit.sha.slice(0, 10)} - ${ctx.repo}`, html`
         <div class="page-title compact">
@@ -85,8 +110,8 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
           </div>
         </div>
         <div class="commit-card">
-          <pre>${commit.commit.message.trim() || "(no commit message)"}</pre>
-          <p>${displayLogin(commit.commit.author?.name ?? commit.author?.login)} - ${timeEl(commit.commit.author?.date)}</p>
+          <pre>${commit.message.trim() || "(no commit message)"}</pre>
+          <p>${displayLogin(commit.author_name ?? commit.author_login)} - ${timeEl(commit.date)}</p>
           <code>${commit.sha}</code>
         </div>
       `),
@@ -102,7 +127,10 @@ function branchDeleteRedirect(ctx: WebCtx, redirectTo: string | null): string {
 }
 
 function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Html {
-  if (ctx.ws.role === "read") return emptyHtml;
+  // Read-only members can't create branches; the local Workbench has no
+  // seam to create a branch on the connected core (CollaborationClient has no
+  // create-branch), so its branch list is read-only too.
+  if (ctx.ws.role === "read" || ctx.writeMode === "direct") return emptyHtml;
   return html`<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
     <label>New branch
       <input name="name" placeholder="user/${ctx.user}/work" required data-testid="branch-create-name">
@@ -126,7 +154,7 @@ function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: 
         <a class="inline-link branch-ref" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}`}">${branchIcon({ size: 13 })}<strong>${branch.name}</strong></a>
         <span>${branch.commit.id.slice(0, 10)}${hasOpenPr ? html` <span class="meta-pill">open PR</span>` : ""}</span>
         ${
-          ctx.ws.role === "read" || branch.name === "main" || hasOpenPr
+          ctx.ws.role === "read" || ctx.writeMode === "direct" || branch.name === "main" || hasOpenPr
             ? html`<span></span>`
             : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
                 <input type="hidden" name="name" value="${branch.name}">

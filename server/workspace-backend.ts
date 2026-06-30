@@ -89,6 +89,18 @@ export interface WsRepo {
   open_issues_count?: number;
 }
 
+// The commit fields the commit-detail page renders. `author_name` is the commit
+// author's display name; `author_login` is the forge account login (absent for a
+// local git commit, which has no forge identity). Kept flat so the hosted forge
+// commit and a local `git show` map onto the same shape.
+export interface WsCommit {
+  sha: string;
+  message: string;
+  author_name?: string;
+  author_login?: string;
+  date?: string;
+}
+
 // The pull-request fields the mounted routes read for branch/edit-branch state
 // (retired-edit-branch detection, "branch has an open PR"). The full PR/review
 // surface stays on the hosted `Forgejo` client, outside this seam.
@@ -148,4 +160,6 @@ export interface WorkspaceBackend {
   // repo meta + pulls
   getRepo(owner: string, repo: string): Promise<WsRepo | null>;
   listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<WsPull[]>;
+  // commit detail (null when the sha is unknown to the backend)
+  getCommit(owner: string, repo: string, sha: string): Promise<WsCommit | null>;
 }

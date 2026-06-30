@@ -288,6 +288,19 @@ describe("issues routes", () => {
     await expect(res.json()).resolves.toEqual({ ok: true, state: "closed" });
   });
 
+  it("GET /issues/:number 404s on a missing issue instead of 500", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockResolvedValueOnce(empty(404));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/999", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ code: "not_found" });
+  });
+
   it("PATCH /issues/:number edits the Forgejo issue title and body", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

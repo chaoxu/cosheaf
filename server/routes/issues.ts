@@ -10,7 +10,6 @@ import type {
   TimelineEvent,
 } from "../../shared/issues.js";
 import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
-import { ForgejoError } from "../forgejo.js";
 import { is404 } from "../forgejo-errors.js";
 import {
   type ForgejoIssue,
@@ -269,7 +268,9 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
     if (claims.length) detail.claims = claims;
     return c.json(detail);
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 404) {
+    // Status-bearing so a missing issue 404s identically in hosted (ForgejoError)
+    // and local Workbench (RemoteCosheafError) modes, not a 500.
+    if (is404(err)) {
       return c.json(...notFound());
     }
     throw err;

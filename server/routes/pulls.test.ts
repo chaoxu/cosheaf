@@ -1304,6 +1304,31 @@ describe("pulls + branches routes", () => {
       expect(body.approvals).toBe(0);
       expect(body.rejections).toBe(0);
     });
+
+    // BUG E: the typed reviews list must surface the CALLER'S OWN pending draft
+    // (as decision "pending") so the staged pending-review flow round-trips
+    // through the Origin client in the local Workbench — while still hiding other
+    // users' drafts. The caller here is "alice".
+    it("GET /pulls/:n/reviews includes the caller's own pending review but hides others'", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      const reviews = [
+        { id: 1, state: "APPROVED", body: "lgtm", user: { login: "vera" }, submitted_at: "2026-05-16T00:00:00Z" },
+        { id: 2, state: "PENDING", body: "", user: { login: "alice" }, submitted_at: "2026-05-16T00:01:00Z" },
+        { id: 3, state: "PENDING", body: "", user: { login: "mallory" }, submitted_at: "2026-05-16T00:02:00Z" },
+      ];
+      fetchMock.mockResolvedValueOnce(ok(reviews)).mockResolvedValueOnce(ok(reviews));
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { reviews: Array<{ id: number; username: string; decision: string }> };
+      expect(body.reviews.find((r) => r.id === 2)).toMatchObject({ username: "alice", decision: "pending" });
+      // Other users' pending drafts stay hidden; submitted verdicts pass through.
+      expect(body.reviews.find((r) => r.id === 3)).toBeUndefined();
+      expect(body.reviews.find((r) => r.id === 1)).toMatchObject({ decision: "approve" });
+    });
   });
 
   describe("line comments", () => {

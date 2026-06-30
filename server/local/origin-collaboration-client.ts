@@ -308,19 +308,28 @@ function prMetaToPullShape(p: PrMeta): PullShape {
   };
 }
 
-// The typed reviews endpoint flattens to a verdict DTO (and pre-filters out
-// PENDING/DISMISSED). Re-expand `decision` to the forge review state the
-// timeline reads; `comment` (nullable) becomes the review body.
+// The typed reviews endpoint flattens to a verdict DTO. It pre-filters out
+// DISMISSED and other users' PENDING reviews, but DOES surface the CALLER'S OWN
+// pending (draft) review as decision "pending" so the staged pending-review flow
+// can resolve the draft here (#262). Re-expand `decision` to the forge review
+// state the timeline + requireOwnPendingReview read; `comment` (nullable)
+// becomes the review body.
 interface ReviewDto {
   id: number;
   username: string;
-  decision: "approve" | "request_changes" | "comment";
+  decision: "approve" | "request_changes" | "comment" | "pending";
   comment: string | null;
   created_at: number;
 }
 function reviewDtoToShape(r: ReviewDto): ReviewShape {
   const state =
-    r.decision === "approve" ? "APPROVED" : r.decision === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
+    r.decision === "approve"
+      ? "APPROVED"
+      : r.decision === "request_changes"
+        ? "REQUEST_CHANGES"
+        : r.decision === "pending"
+          ? "PENDING"
+          : "COMMENT";
   return {
     id: r.id,
     body: r.comment ?? "",

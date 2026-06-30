@@ -14,13 +14,14 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import {
-  WorkspaceBackendError,
   type WorkspaceBackend,
+  WorkspaceBackendError,
   type WsBranch,
+  type WsCommit,
   type WsCreateBranch,
   type WsDeleteFile,
   type WsFileMeta,
@@ -259,6 +260,33 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // (Tier 2), reached through CosheafOriginClient, not this backend.
   async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return [];
+  }
+
+  // Resolve a commit from the working tree's git history (the commit-detail page).
+  // Returns null when the folder is not a git repo or the sha is unknown locally
+  // — e.g. a core-side commit linked from the activity feed that was never fetched
+  // into this clone — so the page degrades to a clear "not available" state rather
+  // than 500ing. `author_login` is absent: a local commit has no forge identity.
+  async getCommit(_owner: string, _repo: string, sha: string): Promise<WsCommit | null> {
+    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+    if (!(await this.isGitRepo())) return null;
+    let out: string;
+    try {
+      // NUL-separated fields so a commit message with newlines stays intact in
+      // the trailing %B body.
+      out = await this.git(["show", "-s", "--format=%H%x00%an%x00%aI%x00%B", sha, "--"]);
+    } catch (_err) {
+      return null;
+    }
+    const parts = out.split("\0");
+    const fullSha = parts[0]?.trim();
+    if (!fullSha) return null;
+    return {
+      sha: fullSha,
+      message: parts.slice(3).join("\0"),
+      author_name: parts[1] || undefined,
+      date: parts[2] || undefined,
+    };
   }
 
   // ---------------- Tier 1: git operations ----------------

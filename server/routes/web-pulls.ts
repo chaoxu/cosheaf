@@ -5,6 +5,8 @@ import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
 import type { ForgejoBranch, ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment } from "../forgejo-types.js";
+import { resolveLocalWorkspace } from "../local/local-mode.js";
+import { openLocalPull } from "../local/local-pulls.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
@@ -120,9 +122,26 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
-  const branches = await ctx.collab.listBranches(ctx.owner, ctx.repo);
   const head = stringField(c.req.query("head"));
   const base = stringField(c.req.query("base")) ?? "main";
+  // Local Workbench: head is the user's actual working-tree branch (from the
+  // local backend), not a core branch — the working branch usually isn't pushed
+  // yet. The base lives on the core, so its options come from ctx.collab; a
+  // disconnected workspace degrades to no base options (the New PR flow can't
+  // reach the core anyway). See docs/workbench-origin-split.md.
+  if (ctx.writeMode === "direct") {
+    const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
+    if (!entry) return notFoundPage(ctx.user, "Repository not found");
+    const [baseBranches, headBranches, currentBranch] = await Promise.all([
+      ctx.collab.listBranches(ctx.owner, ctx.repo).catch(() => [] as ForgejoBranch[]),
+      entry.backend.listBranches(ctx.owner, ctx.repo),
+      entry.backend.currentBranch(),
+    ]);
+    return htmlResponse(
+      repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, baseBranches, { head, base }, { headBranches, currentBranch })),
+    );
+  }
+  const branches = await ctx.collab.listBranches(ctx.owner, ctx.repo);
   return htmlResponse(
     repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, { head, base })),
   );
@@ -130,12 +149,35 @@ web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
 
 web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
-  const branches = await ctx.collab.listBranches(ctx.owner, ctx.repo);
   const head = stringField(form.head);
   const base = stringField(form.base) ?? "main";
   const title = stringField(form.title);
   const body = textField(form.body) ?? "";
   const values = { head, base, title: title ?? "", body };
+  // Local Workbench: a PR can't be created from ctx.collab.createPull (no push
+  // step) — the head branch lives only in the working tree until it's pushed.
+  // Route through the shared commit→push→openPull flow (local-pulls.ts), the
+  // same path the editor island's typed POST uses, and re-render the compare
+  // page with its friendly error on failure.
+  if (ctx.writeMode === "direct") {
+    const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
+    if (!entry) return notFoundPage(ctx.user, "Repository not found");
+    const result = await openLocalPull(entry, ctx.owner, ctx.repo, { head: head ?? undefined, base, title: title ?? undefined, body });
+    if (result.ok) {
+      c.get("sse").publish(ctx.ws.slug, { type: "pull", number: result.number, action: "opened" });
+      return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${result.number}`));
+    }
+    const [baseBranches, headBranches, currentBranch] = await Promise.all([
+      ctx.collab.listBranches(ctx.owner, ctx.repo).catch(() => [] as ForgejoBranch[]),
+      entry.backend.listBranches(ctx.owner, ctx.repo),
+      entry.backend.currentBranch(),
+    ]);
+    return htmlResponse(
+      repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, baseBranches, { ...values, error: result.message }, { headBranches, currentBranch })),
+      result.status,
+    );
+  }
+  const branches = await ctx.collab.listBranches(ctx.owner, ctx.repo);
   const branchNames = new Set(branches.map((branch) => branch.name));
   const error =
     !head
@@ -633,9 +675,20 @@ function pullCreatePage(
   ctx: WebCtx,
   branches: readonly ForgejoBranch[],
   values: { head?: string | null; base?: string | null; title?: string; body?: string; error?: string } = {},
+  // Local Workbench only: head branches come from the working tree (not the core)
+  // and head defaults to the checked-out branch. Hosted leaves this undefined and
+  // keeps the original compare form byte-for-byte.
+  local?: { headBranches: readonly ForgejoBranch[]; currentBranch: string | null },
 ): Html {
   const base = values.base ?? "main";
-  const head = values.head ?? branchAfter(branches, base);
+  const headBranches = local ? local.headBranches : branches;
+  const head = values.head ?? (local ? local.currentBranch ?? "" : branchAfter(branches, base));
+  // Local: the user is on the base branch itself (e.g. `main`), so there is
+  // nothing to propose. Show a friendly "create a feature branch" state instead
+  // of a form that could only produce a self-PR.
+  if (local && (!head || head === base)) {
+    return pullCreateLocalNoBranch(ctx, head || base);
+  }
   return html`
     <div class="form-page">
       <div class="page-title compact">
@@ -654,7 +707,7 @@ function pullCreatePage(
           </label>
           <label>Head
             <select name="head" required data-testid="pull-create-head" data-option-icon="branch">
-              ${branchOptions(branches, head)}
+              ${branchOptions(headBranches, head)}
             </select>
           </label>
         </div>
@@ -669,6 +722,24 @@ function pullCreatePage(
         </div>
       </form>
       ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
+    </div>
+  `;
+}
+
+// Local Workbench compare page when the working tree is on the base branch:
+// there is no feature branch to open a pull request from yet.
+function pullCreateLocalNoBranch(ctx: WebCtx, branch: string): Html {
+  return html`
+    <div class="form-page">
+      <div class="page-title compact">
+        <div>
+          <h1>New PR</h1>
+        </div>
+        <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>
+      </div>
+      <div class="empty" data-testid="pull-create-no-branch">
+        You're on branch <code>${branch}</code>. Switch to or create a feature branch in your working tree to open a pull request.
+      </div>
     </div>
   `;
 }

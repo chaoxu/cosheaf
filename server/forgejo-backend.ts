@@ -9,9 +9,10 @@
 
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import {
-  WorkspaceBackendError,
   type WorkspaceBackend,
+  WorkspaceBackendError,
   type WsBranch,
+  type WsCommit,
   type WsCreateBranch,
   type WsDeleteFile,
   type WsFileMeta,
@@ -99,5 +100,22 @@ export class ForgejoWorkspaceBackend implements WorkspaceBackend {
 
   listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return tx(() => this.fj.listPulls(owner, repo, state));
+  }
+
+  async getCommit(owner: string, repo: string, sha: string): Promise<WsCommit | null> {
+    try {
+      const c = await this.fj.getCommit(owner, repo, sha);
+      return {
+        sha: c.sha,
+        message: c.commit.message,
+        author_name: c.commit.author?.name,
+        author_login: c.author?.login,
+        date: c.commit.author?.date,
+      };
+    } catch (err) {
+      const mapped = toWorkspaceBackendError(err);
+      if (mapped instanceof WorkspaceBackendError && mapped.code === "not_found") return null;
+      throw mapped;
+    }
   }
 }

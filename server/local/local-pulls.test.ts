@@ -89,6 +89,26 @@ function appWithBinding(
   return createApp({ config, db, localRegistry: registry });
 }
 
+// A connected core (so the web /pulls coreConnectGate passes) with no gitRemote
+// binding (so validatePublishBinding short-circuits past the unparseable local
+// bare-repo path), exercising the full local commit→push→openPull happy path
+// through the server-rendered POST.
+function appConnectedNoBinding(dir: string, remoteClient: RemotePullClient): Hono<AppEnv> {
+  const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
+  const db = freshTestDb("wb-pulls-conn-");
+  const registry = new WorkspaceRegistry(db, { user: IDENTITY.user });
+  registry.register({
+    slug: workspaceSlug(IDENTITY.owner, IDENTITY.repo),
+    path: "",
+    identity: IDENTITY,
+    backend: new LocalGitWorkspaceBackend(dir),
+    remote: { url: "https://remote.example", token: "token" },
+    gitRemote: null,
+    remoteClient,
+  });
+  return createApp({ config, db, localRegistry: registry });
+}
+
 function appWithConnectedRegistry(dir: string, remoteClient: RemotePullClient): Hono<AppEnv> {
   return appWithBinding(dir, remoteClient, {
     name: "origin",
@@ -267,5 +287,203 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     // The shared PRs page (heading + empty state), not the old remote-PR-list page.
     expect(body).toContain("<h1>PRs</h1>");
     expect(body).toContain("No matching pull requests");
+  });
+
+  // The /pulls/new compare page must be local-aware: head defaults to the
+  // checked-out working-tree branch (sourced from the LOCAL backend), not a core
+  // branch — otherwise base and head both default to "main" and no PR can be
+  // opened. Stub the core /branches call for the base selector.
+  function stubBranches(): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).includes("/branches")) return Response.json([{ name: "main", commit: { id: "x" } }]);
+        return Response.json({});
+      }),
+    );
+  }
+
+  it("/pulls/new preselects the working-tree branch as head, not main", async () => {
+    const { work } = repoWithOrigin(); // checked out on `feature`
+    stubBranches();
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/me/notes/pulls/new");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="pull-create-form"');
+    expect(body).toContain('<option value="feature" selected>feature</option>');
+    expect(body).not.toContain('data-testid="pull-create-no-branch"');
+  });
+
+  it("/pulls/new shows a friendly create-a-branch state when on the base branch", async () => {
+    const { work } = repoWithOrigin();
+    git(work, ["checkout", "-q", "main"]);
+    stubBranches();
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/me/notes/pulls/new");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="pull-create-no-branch"');
+    expect(body).toContain("create a feature branch");
+    expect(body).not.toContain('data-testid="pull-create-form"');
+  });
+
+  it("POST /pulls/new routes through the local commit→push→openPull flow", async () => {
+    const { work, bare } = repoWithOrigin(); // on `feature` with a pending edit
+    const calls: Array<Record<string, unknown>> = [];
+    const remote = fakeRemote({
+      branchHead: async () => git(work, ["rev-parse", "HEAD"]).trim(),
+      openPull: async (owner, repo, body) => {
+        calls.push({ owner, repo, ...body });
+        return { number: 9 };
+      },
+    });
+    const res = await appConnectedNoBinding(work, remote).request("/me/notes/pulls/new", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: new URLSearchParams({ head: "feature", base: "main", title: "edit hello", body: "b" }).toString(),
+    });
+    // Server-rendered POST redirects to the new PR on success.
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/me/notes/pulls/9");
+    // The branch was actually committed and pushed to origin, then opened on the core.
+    expect(git(bare, ["rev-parse", "--verify", "feature"]).trim()).toMatch(/^[0-9a-f]{40}$/);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ owner: "me", repo: "notes", head: "feature", base: "main", title: "edit hello" });
+  });
+});
+
+// Typed PR API in the local Workbench (#262). These hit the SAME typed routes
+// the agent-facing API and editor island use, served by the local app whose
+// ctx.collab is an OriginCollaborationClient against a connected core. Before the
+// fix these 500'd by eagerly reaching for a co-located forge client the local
+// Workbench does not have. Global fetch is stubbed so the Origin API calls
+// resolve without a live core.
+describe("local Workbench typed PR API (#262 BUG B/E)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Minimal PrMeta the core's typed routes return; prMetaToPullShape reads the
+  // arrays, so they must be present.
+  function prMeta(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      number: 7,
+      title: "t",
+      body: "",
+      state: "open",
+      merged: false,
+      merged_at: null,
+      mergeable: true,
+      additions_total: 0,
+      deletions_total: 0,
+      files_changed: 0,
+      labels: [],
+      milestone: null,
+      requested_reviewers: [],
+      requested_reviewer_teams: [],
+      head_ref: "feature",
+      head_sha: "h",
+      base_ref: "main",
+      base_sha: "b",
+      author_username: "other",
+      created_at: 0,
+      ...over,
+    };
+  }
+
+  // Record every Origin API call and route the response by method + path suffix.
+  function stubCore(route: (method: string, path: string) => unknown): Array<{ method: string; path: string; body: unknown }> {
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = (init?.method ?? "GET").toUpperCase();
+        const path = url.pathname;
+        calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+        const payload = route(method, path);
+        return payload === undefined ? Response.json({}) : Response.json(payload);
+      }),
+    );
+    return calls;
+  }
+
+  it("BUG B: merges a PR through the core and skips the local-absent forge branch cleanup", async () => {
+    const { work } = repoWithOrigin();
+    const calls = stubCore((method, path) => {
+      if (method === "POST" && path.endsWith("/pulls/7/merge")) return { ok: true };
+      if (method === "GET" && path.endsWith("/pulls/7")) return { pull: prMeta() };
+      return {};
+    });
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/pulls/7/merge", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ Do: "squash" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // The proxied merge ran; no forge branch-delete call (the core owns cleanup).
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/pulls/7/merge"))).toBe(true);
+    expect(calls.some((c) => c.method === "DELETE" && /\/branches\//.test(c.path))).toBe(false);
+  });
+
+  it("BUG B: replaces repo topics through the core's typed route", async () => {
+    const { work } = repoWithOrigin();
+    const calls = stubCore(() => ({ ok: true }));
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/topics", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ topics: ["cosheaf-format-coflat", "math"] }),
+    });
+    expect(res.status).toBe(200);
+    const put = calls.find((c) => c.method === "PUT" && c.path.endsWith("/topics"));
+    expect(put?.body).toEqual({ topics: ["cosheaf-format-coflat", "math"] });
+  });
+
+  it("BUG B: updates min_approvals through the core's typed settings route", async () => {
+    const { work } = repoWithOrigin();
+    const calls = stubCore((method) => (method === "GET" ? { min_approvals: 1 } : { min_approvals: 2 }));
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ min_approvals: 2 }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { min_approvals: number }).toMatchObject({ min_approvals: 2 });
+    const put = calls.find((c) => c.method === "PUT" && c.path.endsWith("/settings"));
+    expect(put?.body).toEqual({ min_approvals: 2 });
+  });
+
+  it("BUG B: rejects a document-format change cleanly (not 500) in the local Workbench", async () => {
+    const { work } = repoWithOrigin();
+    const calls = stubCore(() => ({}));
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("local Workbench") });
+    // No core write happened — the guard returns before any branch-protection read.
+    expect(calls.some((c) => c.method !== "GET")).toBe(false);
+  });
+
+  it("BUG E: submits a staged pending review, resolving the caller's own draft via the core", async () => {
+    const { work } = repoWithOrigin();
+    const calls = stubCore((method, path) => {
+      if (method === "GET" && path.endsWith("/pulls/7")) return { pull: prMeta({ author_username: "other" }) };
+      if (method === "GET" && path.endsWith("/pulls/7/reviews")) {
+        return { reviews: [{ id: 9, username: "me", decision: "pending", comment: null, created_at: 0 }], approvals: 0, rejections: 0 };
+      }
+      return { ok: true };
+    });
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/pulls/7/pending-review/9/submit", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ event: "approve" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const submit = calls.find((c) => c.method === "POST" && c.path.endsWith("/pending-review/9/submit"));
+    expect(submit?.body).toMatchObject({ event: "approve" });
   });
 });

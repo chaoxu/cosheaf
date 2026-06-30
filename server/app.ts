@@ -186,6 +186,13 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     app.route("/api/v1/repos", issues);
     app.route("/api/v1/repos", notifications);
     app.route("/api/v1", localNotifications);
+    // The local Workbench does not mount the global notification mark-read
+    // routes (`/api/v1/notifications/read-all`, `/api/v1/notifications/:id/read`)
+    // — nothing in local calls them. But the web router is the "/" catch-all, so
+    // an unmatched /api/v1/* would otherwise fall through to its HTML 404 page.
+    // Answer the typed JSON envelope here instead so API callers get a parseable
+    // 404, not chrome HTML.
+    app.all("/api/v1/*", (c) => c.json({ error: "not found" }, 404));
   } else if (provider.mountsHostedAuth && provider.mountsHostedCollaboration) {
     app.route("/api/v1", auth);
     app.route("/api/v1/workspaces", workspaces);

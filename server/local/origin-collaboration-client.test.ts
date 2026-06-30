@@ -182,6 +182,26 @@ describe("OriginCollaborationClient write methods", () => {
     expect(JSON.parse(String(fake.calls[2]?.init?.body))).toEqual({ event: "comment", body: "" });
     expect(review).toMatchObject({ id: 9, state: "COMMENT" });
   });
+
+  // BUG E round-trip: the core's GET /reviews surfaces the caller's own draft as
+  // decision "pending"; listReviews must re-expand it to a PENDING ReviewShape so
+  // findOrCreatePendingReview / requireOwnPendingReview can resolve the draft.
+  it("maps the caller's own pending draft (decision 'pending') back to a PENDING review", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        reviews: [
+          { id: 3, username: "vera", decision: "approve", comment: "lgtm", created_at: 0 },
+          { id: 9, username: "me", decision: "pending", comment: null, created_at: 0 },
+        ],
+        approvals: 1,
+        rejections: 0,
+      }),
+    );
+    const reviews = await clientWith(fake.fetch).listReviews("me", "notes", 4);
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/pulls/4/reviews");
+    expect(reviews.find((r) => r.id === 9)).toMatchObject({ state: "PENDING", user: { login: "me" } });
+    expect(reviews.find((r) => r.id === 3)).toMatchObject({ state: "APPROVED" });
+  });
 });
 
 describe("localMemberSetter", () => {

@@ -220,13 +220,15 @@ export function isLocalMode(c: Context<AppEnv>): boolean {
   return c.get("config").mode === "local";
 }
 
-// Accessor for the hosted-only review/issue/notification routes that still call
-// the raw Forgejo client. `repoCtx.fj` is optional (undefined in local mode),
-// but these routes are never mounted in local mode, so asserting it here keeps
-// their many destructure sites unchanged while the type stays honest.
+// Accessor for the raw Forgejo client used by hosted-only code paths. `repoCtx.fj`
+// is undefined in local mode, so callers must guard on `isLocalMode(c)` before
+// reaching here (some typed routes are mounted in BOTH modes but only touch the
+// forge client on their hosted branch — e.g. post-merge head-branch cleanup and
+// the format-topic reindex). Asserting `fj` keeps those destructure sites
+// unchanged while the type stays honest.
 export function repoCtxForgejo(c: Context<AppEnv>): { fj: Forgejo; owner: string; repo: string } {
   const { fj, owner, repo } = c.get("repoCtx");
-  if (!fj) throw new Error("forgejo client unavailable: this route is not mounted in local mode");
+  if (!fj) throw new Error("forgejo client unavailable: this code path is hosted-only and must not run in local mode");
   return { fj, owner, repo };
 }
 

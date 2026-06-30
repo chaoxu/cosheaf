@@ -45,55 +45,59 @@ async function validatePublishBinding(entry: WorkspaceEntry, owner: string, repo
   return null;
 }
 
-localPulls.post("/:owner/:repo/pulls", async (c) => {
-  const owner = c.req.param("owner");
-  const repo = c.req.param("repo");
-  const entry = resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry;
-  if (!entry) return c.json({ error: "workspace not found", code: "not_found" }, 404);
+// The local commit→push→openPull flow, shared by this typed route and the
+// server-rendered /pulls/new POST (web-pulls.ts). Returns a discriminated result
+// so each caller maps it to its own surface (JSON envelope vs. a re-rendered
+// form); the friendly messages stay identical between them.
+export type OpenLocalPullResult =
+  | { ok: true; number: number }
+  | { ok: false; status: 400 | 409; message: string };
+
+export async function openLocalPull(
+  entry: WorkspaceEntry,
+  owner: string,
+  repo: string,
+  input: { head?: string; base?: string; title?: string; body?: string },
+): Promise<OpenLocalPullResult> {
   const remote = entry.remoteClient;
   if (!remote) {
-    return c.json(
-      ...conflict(
+    return {
+      ok: false,
+      status: 409,
+      message:
         "No Cosheaf server connected. Add { url, token } to .cosheaf/remote.json (gitignored) to push local git branches and open remote pull requests.",
-      ),
-    );
+    };
   }
   const backend = entry.backend;
-  const body = (await c.req.json().catch(() => null)) as {
-    head?: string;
-    base?: string;
-    title?: string;
-    body?: string;
-  } | null;
-  const head = body?.head?.trim();
-  const base = body?.base?.trim() || "main";
-  if (!head) return c.json(...bad("head branch required"));
-  if (head === base) return c.json(...bad("head and base are the same branch (nothing to review)"));
+  const head = input.head?.trim();
+  const base = input.base?.trim() || "main";
+  if (!head) return { ok: false, status: 400, message: "head branch required" };
+  if (head === base) return { ok: false, status: 400, message: "head and base are the same branch (nothing to review)" };
   // Validate before either reaches `git push` as an argument (also blocks a
   // leading "-" being read as a git option).
-  if (!validBranchName(head)) return c.json(...bad("invalid head branch name"));
-  if (base !== "main" && !validBranchName(base)) return c.json(...bad("invalid base branch name"));
+  if (!validBranchName(head)) return { ok: false, status: 400, message: "invalid head branch name" };
+  if (base !== "main" && !validBranchName(base)) return { ok: false, status: 400, message: "invalid base branch name" };
   // The commit lands on the checked-out branch, so it must match the branch we
   // push — otherwise the edit lands on one branch and an empty `head` is pushed.
   // A null current (detached/unborn HEAD) would commit to an orphan ref while
   // pushing a stale named branch, silently stranding the edit — reject it.
   const current = await backend.currentBranch();
   if (!current) {
-    return c.json(...bad("HEAD is detached or on an unborn branch; check out a branch before opening a pull request"));
+    return { ok: false, status: 400, message: "HEAD is detached or on an unborn branch; check out a branch before opening a pull request" };
   }
   if (current !== head) {
-    return c.json(...bad(`open the pull request from the checked-out branch ("${current}"), not "${head}"`));
+    return { ok: false, status: 400, message: `open the pull request from the checked-out branch ("${current}"), not "${head}"` };
   }
-  const title = body?.title?.trim() || `Update ${head}`;
-  const prBody = typeof body?.body === "string" ? body.body : title;
+  const title = input.title?.trim() || `Update ${head}`;
+  const prBody = typeof input.body === "string" ? input.body : title;
 
   const bindingError = await validatePublishBinding(entry, owner, repo);
-  if (bindingError) return c.json(...bad(bindingError));
+  if (bindingError) return { ok: false, status: 400, message: bindingError };
   try {
     const who = await remote.whoami();
-    if (!who) return c.json(...bad("Remote Cosheaf server check failed before committing: the configured token was rejected."));
+    if (!who) return { ok: false, status: 400, message: "Remote Cosheaf server check failed before committing: the configured token was rejected." };
   } catch (err) {
-    return c.json(...bad(`Remote Cosheaf server check failed before committing: ${friendlyLine(err)}`));
+    return { ok: false, status: 400, message: `Remote Cosheaf server check failed before committing: ${friendlyLine(err)}` };
   }
 
   // Commit local edits, push the branch over the user's git transport, then ask
@@ -101,28 +105,49 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
   try {
     await backend.commitAll(title);
   } catch (err) {
-    return c.json(...bad(`Commit step failed: ${friendlyLine(err)}`));
+    return { ok: false, status: 400, message: `Commit step failed: ${friendlyLine(err)}` };
   }
   const localHead = await backend.currentHeadSha();
   try {
     await backend.push(head);
   } catch (err) {
-    return c.json(...bad(`Committed local changes, but push to "${backend.getPushRemoteName()}" failed: ${friendlyLine(err)}`));
+    return { ok: false, status: 400, message: `Committed local changes, but push to "${backend.getPushRemoteName()}" failed: ${friendlyLine(err)}` };
   }
   try {
     const remoteHead = await remote.branchHead(owner, repo, head);
-    if (!remoteHead) return c.json(...bad(`Pushed "${head}", but the Cosheaf server does not see that branch yet.`));
+    if (!remoteHead) return { ok: false, status: 400, message: `Pushed "${head}", but the Cosheaf server does not see that branch yet.` };
     if (localHead && remoteHead !== localHead) {
-      return c.json(...bad(`Pushed "${head}", but the Cosheaf server sees ${remoteHead.slice(0, 12)} instead of ${localHead.slice(0, 12)}.`));
+      return { ok: false, status: 400, message: `Pushed "${head}", but the Cosheaf server sees ${remoteHead.slice(0, 12)} instead of ${localHead.slice(0, 12)}.` };
     }
   } catch (err) {
-    return c.json(...bad(`Pushed "${head}", but couldn't verify the branch on the Cosheaf server: ${friendlyLine(err)}`));
+    return { ok: false, status: 400, message: `Pushed "${head}", but couldn't verify the branch on the Cosheaf server: ${friendlyLine(err)}` };
   }
 
   try {
     const pr = await remote.openPull(owner, repo, { head, base, title, body: prBody });
-    return c.json({ number: pr.number });
+    return { ok: true, number: pr.number };
   } catch (err) {
-    return c.json(...bad(`Pushed "${head}", but couldn't open the remote pull request: ${friendlyLine(err)}`));
+    return { ok: false, status: 400, message: `Pushed "${head}", but couldn't open the remote pull request: ${friendlyLine(err)}` };
   }
+}
+
+localPulls.post("/:owner/:repo/pulls", async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const entry = resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry;
+  if (!entry) return c.json({ error: "workspace not found", code: "not_found" }, 404);
+  const body = (await c.req.json().catch(() => null)) as {
+    head?: string;
+    base?: string;
+    title?: string;
+    body?: string;
+  } | null;
+  const result = await openLocalPull(entry, owner, repo, {
+    head: body?.head,
+    base: body?.base,
+    title: body?.title,
+    body: body?.body,
+  });
+  if (result.ok) return c.json({ number: result.number });
+  return result.status === 409 ? c.json(...conflict(result.message)) : c.json(...bad(result.message));
 });

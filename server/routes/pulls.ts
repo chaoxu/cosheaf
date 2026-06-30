@@ -36,11 +36,12 @@ import type { CollaborationClient } from "../collaboration-client.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { ForgejoError, mergePullWithRetry } from "../forgejo.js";
-import { errorStatus, is4xx } from "../forgejo-errors.js";
+import { errorStatus, is4xx, is404 } from "../forgejo-errors.js";
 import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
 import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
 import { allDocumentFormats } from "../format-registry.js";
 import {
+  isLocalMode,
   repoCtxCollab,
   repoCtxForgejo,
   requireAdminFresh,
@@ -392,8 +393,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const body = await readJsonObject(c.req);
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const { collab } = repoCtxCollab(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   // Admins can bypass the required-approvals branch protection rule by
   // passing `force: true`. Callers default to false (normal review flow).
   if (body.Do !== undefined && body.Do !== "squash" && body.Do !== "merge" && body.Do !== "rebase") {
@@ -421,7 +421,13 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   }
   const pull = await collab.getPull(owner, repo, n);
   // Never delete main even if it was somehow the head (mirrors the web route).
-  if (pull && pull.head.ref && pull.head.ref !== "main") await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
+  // In local mode the head branch lives on the connected core; the proxied merge
+  // owns its cleanup and there is no local forge client to delete it — so only
+  // the hosted app touches the raw forge client here.
+  if (!isLocalMode(c) && pull && pull.head.ref && pull.head.ref !== "main") {
+    const { fj } = repoCtxForgejo(c);
+    await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
+  }
   // Invalidate eagerly so the post-merge tree fetch sees the new main
   // commit before the push webhook lands (in tests/dev the webhook may
   // never fire, leaving stale entries up to the 5min TTL otherwise).
@@ -501,18 +507,23 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   if (!path) return c.json(...bad("path required"));
   if (side !== "base" && side !== "head")
     return c.json(...bad("side must be base or head"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const { collab } = repoCtxCollab(c);
+  const { backend } = c.get("repoCtx");
+  const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   const file = { path, previous_path: side === "base" ? await previousPathFor(collab, owner, repo, n, path) : undefined };
   const read = prSideRefAndPath(pull, file, side);
   try {
-    const content = await fj.getRawFile(owner, repo, read.ref, read.path);
+    const content = await backend.getRawFile(owner, repo, read.ref, read.path);
     return c.json({ content });
   } catch (err) {
-    if (err instanceof ForgejoError && err.status === 404)
-      return c.json(...notFound("file not present at this side"));
+    // Local Workbench: a PR's per-side content lives on the connected core at the
+    // PR's immutable base/head SHAs, which the single-working-tree local backend
+    // can't resolve. Degrade to empty rather than 500 — the rich split/after diff
+    // is unavailable locally anyway and the unified patch renders the diff
+    // elsewhere (mirrors the web files page's local fallback).
+    if (isLocalMode(c)) return c.json({ content: "" });
+    if (is404(err)) return c.json(...notFound("file not present at this side"));
     throw err;
   }
 });
@@ -542,8 +553,23 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const reviews = await collab.listReviews(owner, repo, n);
+  // Include the caller's OWN pending (draft) review. This lets the staged
+  // pending-review flow round-trip through this typed route in the local
+  // Workbench, where requireOwnPendingReview / findOrCreatePendingReview read
+  // reviews via the Origin client (#262) — the core's GET /reviews is the only
+  // way they can see the draft. Showing a reviewer their own draft is correct;
+  // other users' pending reviews stay hidden. Hosted reads pending straight off
+  // the forge client, so the only consumer of the extra entry is the Origin
+  // client (the web timeline filters via isVisibleReview independently).
+  const me = c.get("user").username;
   const out = reviews
-    .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
+    .filter(
+      (r) =>
+        r.state === "APPROVED" ||
+        r.state === "REQUEST_CHANGES" ||
+        r.state === "COMMENT" ||
+        (r.state === "PENDING" && userLogin(r.user) === me),
+    )
     .map((r) => ({
       id: r.id,
       username: userLogin(r.user),
@@ -552,7 +578,9 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
           ? ("approve" as const)
           : r.state === "REQUEST_CHANGES"
             ? ("request_changes" as const)
-            : ("comment" as const),
+            : r.state === "PENDING"
+              ? ("pending" as const)
+              : ("comment" as const),
       comment: r.body || null,
       created_at: toEpochMs(r.submitted_at),
     }));
@@ -934,8 +962,11 @@ pulls.put("/:owner/:repo/topics", requireAdminFresh, async (c) => {
   if (!Array.isArray(topics) || !topics.every((t) => typeof t === "string")) {
     return c.json(...bad("topics must be an array of strings"));
   }
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  await fj.replaceRepoTopics(owner, repo, topics);
+  // Collaboration seam: hosted writes the forge directly, local proxies to the
+  // connected core's PUT /topics. requireAdminFresh (above) is already
+  // local-aware, so no forge round-trip is needed for the admin gate.
+  const { collab, owner, repo } = repoCtxCollab(c);
+  await collab.replaceRepoTopics(owner, repo, topics);
   return c.json({ ok: true });
 });
 
@@ -975,20 +1006,27 @@ pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
   if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format)) {
     return c.json(...bad("unknown markdown format"));
   }
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  // Format storage is a Forgejo repo topic and the reindex walks Forgejo's main
+  // tree — both need the forge client, which the local Workbench does not have.
+  // The local document format is fixed by the opened folder, so reject the change
+  // cleanly here (before any write) instead of 500ing on repoCtxForgejo.
+  if (body.default_md_format !== undefined && isLocalMode(c)) {
+    return c.json(...bad("changing the document format isn't supported in the local Workbench"));
+  }
+  const { collab, owner, repo } = repoCtxCollab(c);
 
   let minApprovals: number;
   try {
-    const existing = await fj.getBranchProtection(owner, repo, "main");
+    const existing = await collab.getBranchProtection(owner, repo, "main");
     minApprovals = body.min_approvals ?? existing?.required_approvals ?? 1;
     if (body.min_approvals !== undefined) {
       if (!existing) {
-        await fj.createBranchProtection(owner, repo, {
+        await collab.createBranchProtection(owner, repo, {
           branch_name: "main",
           required_approvals: body.min_approvals,
         });
       } else {
-        await fj.updateBranchProtection(owner, repo, "main", { required_approvals: body.min_approvals });
+        await collab.updateBranchProtection(owner, repo, "main", { required_approvals: body.min_approvals });
       }
     }
   } catch (err) {
@@ -1002,6 +1040,9 @@ pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
     ? normalizeDocumentFormatId(body.default_md_format)
     : normalizeDocumentFormatId(c.get("workspace").defaultMdFormat);
   if (body.default_md_format !== undefined) {
+    // Hosted-only: local format changes were rejected above, so the forge client
+    // is guaranteed present here.
+    const { fj } = repoCtxForgejo(c);
     try {
       // Format storage is a Forgejo repo topic. Update the topic before
       // re-indexing so the reindex picks up the new format.

@@ -1,22 +1,30 @@
-// App-level error mapping. A ForgejoError (hosted forge call) or
-// WorkspaceBackendError (the WorkspaceBackend seam — file/tree/branch routes)
+// App-level error mapping. A ForgejoError (hosted forge call),
+// WorkspaceBackendError (the WorkspaceBackend seam — file/tree/branch routes),
+// or RemoteCosheafError (the local Workbench's bound remote core, server/local/)
 // that escapes a route handler is translated into the surface the caller
 // expects: the typed JSON envelope on /api/* and a styled error page on
-// server-rendered web routes. Both carry `.status`, so they share one mapping.
-// Everything else falls through to Hono's default 500.
+// server-rendered web routes. All three carry `.status`, so they share one
+// mapping. RemoteCosheafError never occurs hosted, so hosted behavior is
+// unaffected. Everything else falls through to Hono's default 500.
 
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { ForgejoError } from "../forgejo.js";
-import { WorkspaceBackendError } from "../workspace-backend.js";
+import { RemoteCosheafError } from "../local/remote-cosheaf-client.js";
 import { AUTH_COOKIE, invalidateBearerCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 import { badGateway, forbidden, notFound } from "./responses.js";
 import { errorPage, forbiddenPage, notFoundPage, redirect } from "./web-context.js";
 
 export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Response> {
   const isApi = c.req.path.startsWith("/api/");
-  if (!(err instanceof ForgejoError) && !(err instanceof WorkspaceBackendError)) throw err;
+  if (
+    !(err instanceof ForgejoError) &&
+    !(err instanceof WorkspaceBackendError) &&
+    !(err instanceof RemoteCosheafError)
+  )
+    throw err;
 
   // A 401 from the backing forge means the caller's token was rejected
   // (revoked, rotated). Invalidate the cache so the next request re-checks;

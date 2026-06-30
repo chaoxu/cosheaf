@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForgejoError } from "../forgejo.js";
+import { RemoteCosheafError } from "../local/remote-cosheaf-client.js";
 import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests, resolveAuth } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";
@@ -23,6 +24,26 @@ function appThrowingBackend(status: number, code = "error"): Hono<AppEnv> {
   });
   app.get("/owner/repo/src/branch/main/x.md", () => {
     throw new WorkspaceBackendError(status, code, "boom");
+  });
+  return app;
+}
+
+// A RemoteCosheafError (the local Workbench's bound remote core) that escapes a
+// typed local route must map the same way as a ForgejoError — both carry
+// `.status`. Without this, any core 4xx that escapes a route becomes a bare 500
+// with no body in local mode.
+function appThrowingRemote(status: number): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.onError(handleAppError);
+  app.use("*", async (c, next) => {
+    c.set("user", { username: "chao" });
+    await next();
+  });
+  app.get("/api/v1/repos/owner/w/issues", () => {
+    throw new RemoteCosheafError(status, "remote cosheaf boom");
+  });
+  app.get("/owner/repo/issues", () => {
+    throw new RemoteCosheafError(status, "remote cosheaf boom");
   });
   return app;
 }
@@ -85,6 +106,30 @@ describe("handleAppError", () => {
     const rejected = await appThrowingBackend(401).request("/api/v1/repos/owner/w/file");
     expect(rejected.status).toBe(401);
     await expect(rejected.json()).resolves.toMatchObject({ code: "pat_invalid" });
+  });
+
+  it("maps RemoteCosheafError the same as Forgejo (404 / 403 / 502 / 401 on /api)", async () => {
+    const notFound = await appThrowingRemote(404).request("/api/v1/repos/owner/w/issues");
+    expect(notFound.status).toBe(404);
+    await expect(notFound.json()).resolves.toMatchObject({ code: "not_found" });
+
+    const forbidden = await appThrowingRemote(403).request("/api/v1/repos/owner/w/issues");
+    expect(forbidden.status).toBe(403);
+    await expect(forbidden.json()).resolves.toMatchObject({ code: "forbidden" });
+
+    const gateway = await appThrowingRemote(409).request("/api/v1/repos/owner/w/issues");
+    expect(gateway.status).toBe(502);
+    await expect(gateway.json()).resolves.toMatchObject({ code: "bad_gateway" });
+
+    const rejected = await appThrowingRemote(401).request("/api/v1/repos/owner/w/issues");
+    expect(rejected.status).toBe(401);
+    await expect(rejected.json()).resolves.toMatchObject({ code: "pat_invalid" });
+  });
+
+  it("renders an HTML error page for a RemoteCosheafError on a web route", async () => {
+    const res = await appThrowingRemote(404).request("/owner/repo/issues");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toContain("text/html");
   });
 
   it("sends a web WorkspaceBackendError 401 back to /login", async () => {
