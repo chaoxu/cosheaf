@@ -30,3 +30,26 @@ describe("friendlyGitError", () => {
     expect(friendlyLine(new Error("Author identity unknown"))).toMatch(/who you are.*Profile/i);
   });
 });
+
+describe("friendlyLine network/TLS causes (Tier-2 Connect)", () => {
+  const fetchErr = (code: string) => Object.assign(new TypeError("fetch failed"), { cause: { code } });
+
+  it("maps an untrusted TLS cert to a CA hint instead of 'fetch failed'", () => {
+    const line = friendlyLine(fetchErr("UNABLE_TO_GET_ISSUER_CERT_LOCALLY"));
+    expect(line).not.toMatch(/^fetch failed/);
+    expect(line).toMatch(/TLS certificate isn't trusted/i);
+    expect(line).toMatch(/NODE_EXTRA_CA_CERTS/);
+  });
+
+  it("maps connection refused", () => {
+    expect(friendlyLine(fetchErr("ECONNREFUSED"))).toMatch(/Connection refused/i);
+  });
+
+  it("maps a DNS failure", () => {
+    expect(friendlyLine(fetchErr("ENOTFOUND"))).toMatch(/resolve that host/i);
+  });
+
+  it("falls back to the message for an unmapped cause", () => {
+    expect(friendlyLine(fetchErr("EWEIRD"))).toBe("fetch failed");
+  });
+});
