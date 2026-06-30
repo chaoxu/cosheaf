@@ -16,7 +16,7 @@ import { fileKindForPath } from "../../shared/file-kind.js";
 import { indexCitationFile, indexPage } from "../indexer.js";
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
-import { type LocalGitRemote, deriveLocalWorkspace } from "./local-workspace.js";
+import { type LocalGitRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
 import { type RemotePullClient, RemoteCosheafClient } from "./remote-cosheaf-client.js";
 
 // The fixed single user every local workspace is served as. The Workbench is
@@ -55,8 +55,21 @@ function ensureSidecarIgnored(dir: string): void {
   }
 }
 
+// A profile is valid only with a non-blank name AND email; anything else (blank,
+// missing, wrong type) normalizes to null. Shared by setProfile (typed input)
+// and readConfig (untrusted JSON), so both gates agree.
+function normalizeProfile(name: unknown, email: unknown): WorkbenchProfile | null {
+  if (typeof name !== "string" || typeof email !== "string") return null;
+  const n = name.trim();
+  const e = email.trim();
+  return n && e ? { name: n, email: e } : null;
+}
+
 export class WorkspaceRegistry {
   private readonly entries = new Map<string, WorkspaceEntry>();
+  // The Workbench user's git authorship identity, loaded from the config and set
+  // on the Profile page. Backends read it lazily as a commit-time fallback.
+  private profile: WorkbenchProfile | null = null;
 
   constructor(
     private readonly db: Database.Database,
@@ -66,6 +79,16 @@ export class WorkspaceRegistry {
   // The fixed local user (see LOCAL_USER); overridable for tests/back-compat.
   get user(): string {
     return this.opts.user ?? LOCAL_USER;
+  }
+
+  getProfile(): WorkbenchProfile | null {
+    return this.profile;
+  }
+
+  // Set (or clear, with null/blank) the git authorship identity and persist it.
+  setProfile(profile: WorkbenchProfile | null): void {
+    this.profile = normalizeProfile(profile?.name, profile?.email);
+    this.persist();
   }
 
   get(slug: string): WorkspaceEntry | undefined {
@@ -109,7 +132,7 @@ export class WorkspaceRegistry {
       // Tier 2: opening a PR needs a configured remote + Cosheaf token.
       canOpenPull: cfg.remote !== null,
     };
-    const backend = new LocalGitWorkspaceBackend(path, { pushRemote: cfg.gitRemote?.name });
+    const backend = new LocalGitWorkspaceBackend(path, { pushRemote: cfg.gitRemote?.name, author: () => this.getProfile() });
     const remoteClient = cfg.remote ? new RemoteCosheafClient(cfg.remote.url, cfg.remote.token) : undefined;
     return { slug, path, identity, backend, gitRemote: cfg.gitRemote, remoteClient };
   }
@@ -154,6 +177,17 @@ export class WorkspaceRegistry {
     return removed;
   }
 
+  // Re-derive a registered entry from disk (without re-indexing) so a sidecar
+  // change — connecting a remote via .cosheaf/remote.json — takes effect:
+  // remoteClient / canOpenPull / gitRemote are recomputed. Null if not registered.
+  rebuild(slug: string): WorkspaceEntry | null {
+    const existing = this.entries.get(slug);
+    if (!existing) return null;
+    const entry = this.buildEntry(existing.path);
+    this.register(entry);
+    return entry;
+  }
+
   // Load persisted folder paths and open each. Missing folders are skipped (the
   // user may have moved/deleted one); they drop out of the persisted set.
   async load(): Promise<void> {
@@ -171,12 +205,18 @@ export class WorkspaceRegistry {
     this.persist();
   }
 
+  // Read the persisted config: load the profile (a side effect, so a freshly
+  // built backend's author getter sees it) and return the workspace paths.
   private readConfig(): string[] {
     const file = this.opts.configPath;
     if (!file || !existsSync(file)) return [];
     try {
-      const raw = JSON.parse(readFileSync(file, "utf8")) as { workspaces?: Array<{ path?: unknown }> };
-      return (raw.workspaces ?? []).map((w) => w.path).filter((p): p is string => typeof p === "string");
+      const raw = JSON.parse(readFileSync(file, "utf8")) as {
+        workspaces?: Array<{ path?: unknown }>;
+        profile?: { name?: unknown; email?: unknown };
+      };
+      this.profile = normalizeProfile(raw.profile?.name, raw.profile?.email);
+      return (raw.workspaces ?? []).map((w) => w.path).filter((path): path is string => typeof path === "string");
     } catch (_err) {
       return [];
     }
@@ -186,7 +226,10 @@ export class WorkspaceRegistry {
     const file = this.opts.configPath;
     if (!file) return;
     mkdirSync(dirname(file), { recursive: true });
-    const workspaces = this.list().map((e) => ({ path: e.path }));
-    writeFileSync(file, `${JSON.stringify({ workspaces }, null, 2)}\n`);
+    const config: { workspaces: { path: string }[]; profile?: WorkbenchProfile } = {
+      workspaces: this.list().map((e) => ({ path: e.path })),
+    };
+    if (this.profile) config.profile = this.profile;
+    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   }
 }

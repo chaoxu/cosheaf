@@ -44,6 +44,17 @@ const IDENTITY: LocalWorkspaceIdentity = {
   canOpenPull: true,
 };
 
+// A fake remote with sensible defaults; override only what a test asserts on.
+function fakeRemote(over: Partial<RemotePullClient> = {}): RemotePullClient {
+  return {
+    whoami: async () => ({ username: "me" }),
+    openPull: async () => ({ number: 1 }),
+    listPulls: async () => [],
+    pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
+    ...over,
+  };
+}
+
 function app(dir: string, remoteClient?: RemotePullClient): Hono<AppEnv> {
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   return createApp({
@@ -69,13 +80,12 @@ describe("local Workbench Tier 2 (push + PR)", () => {
   it("commits, pushes the branch to origin, and opens a PR on the remote", async () => {
     const { work, bare } = repoWithOrigin();
     const calls: Array<Record<string, unknown>> = [];
-    const remote: RemotePullClient = {
+    const remote = fakeRemote({
       openPull: async (owner, repo, body) => {
         calls.push({ owner, repo, ...body });
         return { number: 7 };
       },
-      pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
-    };
+    });
 
     const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
@@ -95,7 +105,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
   it("409s opening a PR from a detached HEAD (no silent orphan commit)", async () => {
     const { work } = repoWithOrigin();
     git(work, ["checkout", "-q", "--detach"]);
-    const remote: RemotePullClient = { openPull: async () => ({ number: 1 }), pullUrl: () => "x" };
+    const remote = fakeRemote();
     const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
@@ -106,10 +116,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
 
   it("rejects a PR whose head equals its base", async () => {
     const { work } = repoWithOrigin();
-    const remote: RemotePullClient = {
-      openPull: async () => ({ number: 1 }),
-      pullUrl: () => "x",
-    };
+    const remote = fakeRemote();
     const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
@@ -120,10 +127,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
 
   it("redirects /pulls/:n to the remote PR url", async () => {
     const { work } = repoWithOrigin();
-    const remote: RemotePullClient = {
-      openPull: async () => ({ number: 7 }),
-      pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
-    };
+    const remote = fakeRemote({ openPull: async () => ({ number: 7 }) });
     const res = await app(work, remote).request("/me/notes/pulls/7");
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("https://remote.example/me/notes/pulls/7");

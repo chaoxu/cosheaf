@@ -31,6 +31,15 @@ import {
   type WsRepo,
   type WsTreeEntry,
 } from "../workspace-backend.js";
+import type { WorkbenchProfile } from "./local-workspace.js";
+
+// Outcome of a Tier-2 sync (fetch + fast-forward), reported back to the UI.
+export interface SyncResult {
+  fastForwarded: boolean;
+  ahead: number;
+  behind: number;
+  message: string;
+}
 
 // The synthetic commit id every ref reports. The working tree is the only
 // snapshot the local backend exposes, so reads against any ref read disk.
@@ -72,10 +81,14 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // to the working tree's actual upstream name (e.g. `cosheaf`) so a repo whose
   // upstream isn't called `origin` can still push for Tier-2 Open-PR.
   private readonly pushRemote: string;
+  // Lazy getter for the Workbench profile (git authorship fallback). Read at
+  // commit time so a profile set after the backend was built still applies.
+  private readonly author: (() => WorkbenchProfile | null) | undefined;
 
-  constructor(rootDir: string, opts: { pushRemote?: string } = {}) {
+  constructor(rootDir: string, opts: { pushRemote?: string; author?: () => WorkbenchProfile | null } = {}) {
     this.root = resolve(rootDir);
     this.pushRemote = opts.pushRemote ?? "origin";
+    this.author = opts.author;
   }
 
   // Resolve a repo-relative path to an absolute path inside the root, rejecting
@@ -314,8 +327,20 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     await this.git(["add", "-A"]);
     const status = await this.git(["status", "--porcelain=v1"]);
     if (status.trim() === "") return null;
-    await this.git(["commit", "-m", message]);
+    await this.git([...(await this.commitIdentityArgs()), "commit", "-m", message]);
     return (await this.git(["rev-parse", "HEAD"])).trim();
+  }
+
+  // Fill `user.name`/`user.email` from the Workbench profile ONLY when the repo's
+  // own git config has none — so a freshly-cloned folder commits without git's
+  // "author identity unknown" error, while an existing git identity is respected.
+  private async commitIdentityArgs(): Promise<string[]> {
+    const name = (await this.git(["config", "user.name"]).catch(() => "")).trim();
+    const email = (await this.git(["config", "user.email"]).catch(() => "")).trim();
+    if (name && email) return [];
+    const profile = this.author?.();
+    if (!profile?.name || !profile?.email) return [];
+    return ["-c", `user.name=${profile.name}`, "-c", `user.email=${profile.email}`];
   }
 
   // Tier 2: push a branch to the working tree's upstream remote over the user's
@@ -324,5 +349,60 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   async push(branch: string): Promise<void> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
     await this.git(["push", this.pushRemote, branch]);
+  }
+
+  // True when the current branch tracks an upstream (so Sync has somewhere to
+  // fetch from). False for Tier 0/1 or a branch with no @{u}.
+  async hasUpstream(): Promise<boolean> {
+    try {
+      await this.git(["rev-parse", "--abbrev-ref", "@{u}"]);
+      return true;
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  // Commits the current branch is ahead/behind its upstream. 0/0 when there is no
+  // upstream (so callers can treat "no upstream" as "nothing to sync").
+  async aheadBehind(): Promise<{ ahead: number; behind: number }> {
+    try {
+      const parts = (await this.git(["rev-list", "--left-right", "--count", "@{u}...HEAD"])).trim().split(/\s+/);
+      return { behind: Number(parts[0]) || 0, ahead: Number(parts[1]) || 0 };
+    } catch (_err) {
+      return { ahead: 0, behind: 0 };
+    }
+  }
+
+  // Tier 2: fetch the upstream and fast-forward the current branch. Never merges
+  // or force-updates: if histories diverged it reports that and leaves the tree
+  // untouched for the user to resolve in their terminal.
+  async sync(): Promise<SyncResult> {
+    if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
+    if (!(await this.currentBranch())) {
+      throw new WorkspaceBackendError(409, "detached_head", "HEAD is detached; check out a branch before syncing");
+    }
+    if (!(await this.hasUpstream())) {
+      throw new WorkspaceBackendError(409, "no_upstream", "this branch has no upstream to sync with");
+    }
+    await this.git(["fetch", this.pushRemote]);
+    const { ahead, behind } = await this.aheadBehind();
+    if (behind === 0) {
+      return {
+        fastForwarded: false,
+        ahead,
+        behind,
+        message: ahead > 0 ? `Up to date; ${ahead} local commit${ahead === 1 ? "" : "s"} to push.` : "Already up to date.",
+      };
+    }
+    if (ahead > 0) {
+      return {
+        fastForwarded: false,
+        ahead,
+        behind,
+        message: `Local and remote diverged (${ahead} ahead, ${behind} behind). Merge or rebase in your terminal.`,
+      };
+    }
+    await this.git(["merge", "--ff-only", "@{u}"]);
+    return { fastForwarded: true, ahead: 0, behind, message: `Fast-forwarded ${behind} commit${behind === 1 ? "" : "s"} from the remote.` };
   }
 }

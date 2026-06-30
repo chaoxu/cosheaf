@@ -9,6 +9,7 @@ import { validBranchName } from "../branch-path.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import { bad, conflict } from "../routes/responses.js";
 import type { AppEnv } from "../types.js";
+import { friendlyLine } from "./git-errors.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 
 export const localPulls = new Hono<AppEnv>();
@@ -64,13 +65,13 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
     await backend.commitAll(title);
     await backend.push(head);
   } catch (err) {
-    return c.json(...bad(`push failed: ${(err as Error).message}`));
+    return c.json(...bad(friendlyLine(err)));
   }
 
   try {
     const pr = await remote.openPull(owner, repo, { head, base, title, body: prBody });
     return c.json({ number: pr.number });
   } catch (err) {
-    return c.json(...bad(`open pull request failed: ${(err as Error).message}`));
+    return c.json(...bad(`Couldn't open the pull request: ${friendlyLine(err)}`));
   }
 });

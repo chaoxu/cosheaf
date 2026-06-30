@@ -95,11 +95,12 @@ export function globalSidebar(
   user?: string,
   avatarSrc: string | null = null,
   t: T = enT,
-  opts: { siteAdmin?: boolean } = {},
+  opts: { siteAdmin?: boolean; profile?: boolean } = {},
 ): Html {
   return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account", active === "help")}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
+      ${opts.profile ? html`<a class="${active === "account" ? "active" : ""}" href="/_profile">Profile</a>` : emptyHtml}
       ${opts.siteAdmin ? html`<a class="${active === "admin" ? "active" : ""}" href="/admin">Admin</a>` : emptyHtml}
     </nav>`;
 }

@@ -103,7 +103,11 @@ export function repoPage(opts: {
 }): string {
   const t = opts.t;
   const nav = opts.local
-    ? [tab(opts, "files", t("tab.files"), ""), tab(opts, "commit", "Commit", "/commit")]
+    ? [
+        tab(opts, "files", t("tab.files"), ""),
+        tab(opts, "commit", "Commit", "/commit"),
+        tab(opts, "pulls", t("tab.pulls"), "/pulls"),
+      ]
     : REPO_TABS.map(([id, key, suffix]) => tab(opts, id, t(key), suffix));
   const activeKey = REPO_TABS.find(([id]) => id === opts.active)?.[1];
   const activeLabel = activeKey ? t(activeKey) : opts.active;

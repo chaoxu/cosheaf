@@ -17,6 +17,7 @@ import { emptyHtml, html, type Html } from "../routes/web-html.js";
 import { pageShell, globalSidebar } from "../routes/web-shell.js";
 import { registerFileRoutes } from "../routes/web-files.js";
 import { registerLocalCommitRoutes } from "./local-commit.js";
+import { registerLocalRemoteRoutes } from "./local-remote.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
@@ -150,7 +151,7 @@ function browsePage(user: string, dir: string, notice: string | null): string {
     }
     <p class="browse-back"><a href="/">← back to workspaces</a></p>
   </main>`;
-  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user), body });
+  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true }), body });
 }
 
 function switcherPage(registry: WorkspaceRegistry, user: string, notice: string | null): string {
@@ -174,7 +175,29 @@ function switcherPage(registry: WorkspaceRegistry, user: string, notice: string 
       </form>
     </div>
   </main>`;
-  return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user), body });
+  return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true }), body });
+}
+
+// The Workbench profile page: a git authorship identity (name + email) used to
+// sign commits when a folder's own git config has none. Stored centrally in the
+// registry config, not per-folder.
+function profilePage(registry: WorkspaceRegistry, user: string, notice: string | null): string {
+  const profile = registry.getProfile();
+  const body = html`<main class="page workbench-home">
+    <div class="page-title compact"><div><h1>Profile</h1></div></div>
+    <p class="workbench-subtitle">Your git authorship identity. Used to sign commits when a folder's own git config has none — so a freshly-cloned repo can commit without setup.</p>
+    ${notice ? html`<p class="muted" data-testid="profile-notice">${notice}</p>` : emptyHtml}
+    <form class="profile-form" method="post" action="/_profile" data-testid="profile-form">
+      <label>Name
+        <input name="name" required value="${profile?.name ?? ""}" placeholder="Ada Lovelace" autocomplete="off" data-testid="profile-name">
+      </label>
+      <label>Email
+        <input name="email" type="email" required value="${profile?.email ?? ""}" placeholder="ada@example.com" autocomplete="off" data-testid="profile-email">
+      </label>
+      <div class="form-actions"><button class="button primary" type="submit">Save</button></div>
+    </form>
+  </main>`;
+  return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true }), body });
 }
 
 export function createLocalWebRouter(): Hono<AppEnv> {
@@ -231,6 +254,23 @@ export function createLocalWebRouter(): Hono<AppEnv> {
     }),
   );
 
+  // Workbench profile (git authorship identity). Global, not per-workspace.
+  localWeb.get(
+    "/_profile",
+    globalRoute((c) => htmlResponse(profilePage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null))),
+  );
+  localWeb.post(
+    "/_profile",
+    globalRoute(async (c) => {
+      const form = await c.req.parseBody();
+      const name = stringField(form.name)?.trim() ?? "";
+      const email = stringField(form.email)?.trim() ?? "";
+      if (!name || !email) return redirect(`/_profile?toast=${encodeURIComponent("Both a name and email are required.")}`);
+      c.get("localRegistry").setProfile({ name, email });
+      return redirect(`/_profile?toast=${encodeURIComponent("Profile saved.")}`);
+    }),
+  );
+
   // Local mode has no auth, so /login can never be reached legitimately. Keep a
   // backstop redirect so a stray bounce (e.g. the editor island's api.ts 401
   // path) lands on the switcher instead of dead-ending on a missing route.
@@ -253,6 +293,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   // ctx.backend, so they work against the registered working tree unchanged.
   registerFileRoutes(localWeb);
   registerLocalCommitRoutes(localWeb);
+  registerLocalRemoteRoutes(localWeb);
 
   return localWeb;
 }

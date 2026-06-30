@@ -17,6 +17,7 @@ import {
 } from "../routes/web-context.js";
 import { emptyHtml, html } from "../routes/web-html.js";
 import { repoPageShell } from "../routes/web-page.js";
+import { friendlyLine } from "./git-errors.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 
 // The web ctx's backend is always the resolved workspace's LocalGitWorkspaceBackend
@@ -27,7 +28,10 @@ function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
 
 export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/commit", webRoute(async (c, ctx) => {
-    const status = await localBackend(ctx).gitStatus();
+    const backend = localBackend(ctx);
+    const status = await backend.gitStatus();
+    const hasUpstream = status.branch !== null && (await backend.hasUpstream());
+    const counts = hasUpstream ? await backend.aheadBehind() : { ahead: 0, behind: 0 };
     const notice = c.req.query("toast");
     const body = html`
       <div class="page-title compact"><div><h1>Commit</h1></div></div>
@@ -36,7 +40,18 @@ export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
         status.branch === null
           ? html`<div class="empty" data-testid="commit-not-git">This folder is not a git repository. Saves are written to disk; run <code>git init</code> to enable commits.</div>`
           : html`
-            <p>Branch <strong>${status.branch}</strong></p>
+            <div class="commit-branchline" data-testid="commit-branchline">
+              <p>Branch <strong>${status.branch}</strong></p>
+              ${
+                hasUpstream
+                  ? html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, "/sync")}" class="commit-sync">
+                      ${counts.behind > 0 ? html`<span class="badge" data-testid="commit-behind">${counts.behind} behind</span>` : emptyHtml}
+                      ${counts.ahead > 0 ? html`<span class="badge" data-testid="commit-ahead">${counts.ahead} ahead</span>` : emptyHtml}
+                      <button class="button subtle" type="submit" data-testid="commit-sync">↓ Sync</button>
+                    </form>`
+                  : emptyHtml
+              }
+            </div>
             ${
               status.entries.length === 0
                 ? html`<div class="empty" data-testid="commit-clean">Working tree clean — nothing to commit.</div>`
@@ -64,7 +79,7 @@ export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
     try {
       sha = await localBackend(ctx).commitAll(message);
     } catch (err) {
-      return badRequestPage(ctx.user, err instanceof Error ? err.message : "Commit failed.");
+      return badRequestPage(ctx.user, friendlyLine(err));
     }
     const toast = sha ? `Committed ${sha.slice(0, 8)}` : "Nothing to commit";
     return redirect(`${repoHref(ctx.owner, ctx.repo, "/commit")}?toast=${encodeURIComponent(toast)}`);

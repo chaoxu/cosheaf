@@ -42,3 +42,26 @@ describe("WorkspaceRegistry sidecar protection", () => {
     expect(entry.identity.canOpenPull).toBe(false);
   });
 });
+
+describe("WorkspaceRegistry profile", () => {
+  it("persists the git authorship profile and reloads it from the config file", async () => {
+    const cfg = join(mkdtempSync(join(tmpdir(), "cosheaf-reg-prof-")), "workspaces.json");
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-prof-db-"), { configPath: cfg });
+    await reg.load();
+    expect(reg.getProfile()).toBeNull();
+    reg.setProfile({ name: "Ada Lovelace", email: "ada@x.test" });
+    expect(reg.getProfile()).toEqual({ name: "Ada Lovelace", email: "ada@x.test" });
+
+    // A fresh registry over the same config file reloads the profile.
+    const reg2 = new WorkspaceRegistry(freshTestDb("cosheaf-prof-db2-"), { configPath: cfg });
+    await reg2.load();
+    expect(reg2.getProfile()).toEqual({ name: "Ada Lovelace", email: "ada@x.test" });
+  });
+
+  it("ignores a blank profile", () => {
+    const cfg = join(mkdtempSync(join(tmpdir(), "cosheaf-reg-prof2-")), "workspaces.json");
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-prof-db3-"), { configPath: cfg });
+    reg.setProfile({ name: "  ", email: "" });
+    expect(reg.getProfile()).toBeNull();
+  });
+});

@@ -4,7 +4,7 @@
 // here without tripping the no-forge gate).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 
@@ -27,6 +27,15 @@ export interface LocalRemote {
   url: string;
   // Opaque Cosheaf API token (NOT a forge token) used for open-PR / status.
   token: string;
+}
+
+// The Workbench user's git authorship identity, set on the Profile page. Used to
+// fill `user.name`/`user.email` when a folder's own git config has none, so a
+// freshly-cloned repo can commit without git's "author identity unknown" error.
+// Lives here (not in the registry) so the git backend can import it cycle-free.
+export interface WorkbenchProfile {
+  name: string;
+  email: string;
 }
 
 // The working tree's git upstream, parsed for display + push. This is the
@@ -97,6 +106,14 @@ export function parseGitRemote(remoteUrl: string): { host: string; owner: string
   const hostMatch = cleaned.match(/^(?:[a-z]+:\/\/)?(?:[^@/]+@)?([^/:]+)(?::(\d+))?/i);
   const host = hostMatch ? hostMatch[1] + (hostMatch[2] ? `:${hostMatch[2]}` : "") : "";
   return { host, owner: ownerRepo[1], repo: ownerRepo[2] };
+}
+
+// Write the Tier-2 remote into `<dir>/.cosheaf/remote.json` (the Connect flow).
+// The sidecar dir is gitignored by the registry, so the token never lands in a
+// commit. Overwrites any existing remote.json (reconnecting replaces it).
+export function writeRemote(dir: string, remote: LocalRemote): void {
+  mkdirSync(join(dir, ".cosheaf"), { recursive: true });
+  writeFileSync(join(dir, REMOTE_FILE), `${JSON.stringify({ url: remote.url, token: remote.token }, null, 2)}\n`);
 }
 
 // Read the Tier-2 remote from `<dir>/.cosheaf/remote.json` (gitignored). Absent
