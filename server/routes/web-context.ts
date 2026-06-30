@@ -2,22 +2,24 @@ import type Database from "better-sqlite3";
 import type { Context } from "hono";
 import { setCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
-import { repoHref, urlPath, userHref } from "../../shared/url.js";
-import { Forgejo } from "../forgejo.js";
-import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
-import type { WorkspaceBackend } from "../workspace-backend.js";
-import { resolveLocalWorkspace } from "../local/local-mode.js";
-import { DELETED_USER_LOGIN } from "../forgejo-types.js";
-import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
 import type { Role } from "../../shared/roles.js";
+import { repoHref, urlPath, userHref } from "../../shared/url.js";
+import type { CollaborationClient } from "../collaboration-client.js";
+import { Forgejo } from "../forgejo.js";
+import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
+import { DELETED_USER_LOGIN } from "../forgejo-types.js";
+import { resolveLocalWorkspace } from "../local/local-mode.js";
+import { localCollaborationClient } from "../local/origin-collaboration-client.js";
+import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
+import { workspaceReadmeTitle } from "../page-search.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
+import type { WorkspaceBackend } from "../workspace-backend.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
-import { workspaceReadmeTitle } from "../page-search.js";
 import { forgeAvatarSrc } from "./avatar.js";
 import { parsePositiveIntId } from "./query-params.js";
-import { html, type Html, raw } from "./web-html.js";
+import { type Html, html, raw } from "./web-html.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
 
 export interface WebCtx {
@@ -27,6 +29,10 @@ export interface WebCtx {
   // Data-access seam (file/tree/branch reads+writes) the page modules use.
   backend: WorkspaceBackend;
   fj: Forgejo;
+  // Collaboration seam (#262): issues/pulls/reviews/notifications/settings pages
+  // read this instead of `fj`. Hosted = the Forgejo client; local = an
+  // OriginCollaborationClient bound to the connected core.
+  collab: CollaborationClient;
   ws: WorkspaceContext;
   db: Database.Database;
   // The workspace's display title (indexed README title, falling back to the
@@ -179,11 +185,12 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     const { entry, ws } = resolved;
     const backend = entry.backend;
     c.set("workspace", ws);
-    c.set("repoCtx", { backend, owner, repo });
-    // Local mode has no Forgejo: the local web router mounts only backend-driven
-    // pages, so ctx.fj is never read. The typed-undefined placeholder keeps
-    // WebCtx.fj's type without a forge connection and without churning the
-    // hosted-only page modules to an optional fj.
+    // Local collaboration source (#262): the connected core via Origin API, or a
+    // not-connected sentinel the migrated routes render as a Connect prompt.
+    const collab = localCollaborationClient(entry);
+    c.set("repoCtx", { backend, collab, owner, repo });
+    // Local mode has no Forgejo: ctx.fj stays a typed-undefined placeholder (the
+    // collaboration pages read ctx.collab, not ctx.fj).
     return {
       ok: true,
       owner,
@@ -191,6 +198,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       user: auth.user.username,
       backend,
       fj: undefined as unknown as Forgejo,
+      collab,
       ws,
       db: c.get("db"),
       wsTitle: entry.identity.title,
@@ -215,13 +223,13 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
   const backend = new ForgejoWorkspaceBackend(fj);
-  c.set("repoCtx", { backend, fj, owner, repo });
+  c.set("repoCtx", { backend, fj, collab: fj, owner, repo });
   const db = c.get("db");
   const [wsTitle, userAvatarSrc] = await Promise.all([
     resolveWorkspaceDisplayTitle(db, fj, ws),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", canOpenPull: true, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", canOpenPull: true, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(
@@ -332,7 +340,7 @@ export async function configReposForUser(c: Context<AppEnv>) {
     .filter((repo) => repo.role !== "none");
 }
 
-export { parseListState, type ListState as WebListState } from "./query-params.js";
+export { type ListState as WebListState, parseListState } from "./query-params.js";
 
 export function queryText(c: Context<AppEnv>, name: string): string {
   return c.req.query(name)?.trim() ?? "";
