@@ -8,6 +8,7 @@
 // via its typed API client. One shared SQLite sidecar holds every workspace's
 // rebuildable index, scoped by the workspace_slug column the schema already has.
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type Database from "better-sqlite3";
@@ -16,8 +17,8 @@ import { fileKindForPath } from "../../shared/file-kind.js";
 import { indexCitationFile, indexPage } from "../indexer.js";
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
-import { type LocalGitRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
-import { type RemotePullClient, RemoteCosheafClient } from "./remote-cosheaf-client.js";
+import { type LocalGitRemote, type LocalRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
+import { CosheafOriginClient, type RemotePullClient } from "./remote-cosheaf-client.js";
 
 // The fixed single user every local workspace is served as. The Workbench is
 // single-person; this handle only colours the sidebar identity and any branch
@@ -32,6 +33,8 @@ export interface WorkspaceEntry {
   path: string;
   identity: LocalWorkspaceIdentity;
   backend: LocalGitWorkspaceBackend;
+  // Tier 2 open-PR config from the gitignored sidecar, if connected.
+  remote: LocalRemote | null;
   // Working-tree git upstream (display + push target), or null for local-only.
   gitRemote: LocalGitRemote | null;
   // Tier 2 open-PR client (present iff .cosheaf/remote.json configured a token).
@@ -63,6 +66,10 @@ function normalizeProfile(name: unknown, email: unknown): WorkbenchProfile | nul
   const n = name.trim();
   const e = email.trim();
   return n && e ? { name: n, email: e } : null;
+}
+
+function originIdForPath(path: string): string {
+  return `local-${createHash("sha256").update(path).digest("hex").slice(0, 16)}`;
 }
 
 export class WorkspaceRegistry {
@@ -131,10 +138,11 @@ export class WorkspaceRegistry {
       title: cfg.repo,
       // Tier 2: opening a PR needs a configured remote + Cosheaf token.
       canOpenPull: cfg.remote !== null,
+      originId: originIdForPath(path),
     };
     const backend = new LocalGitWorkspaceBackend(path, { pushRemote: cfg.gitRemote?.name, author: () => this.getProfile() });
-    const remoteClient = cfg.remote ? new RemoteCosheafClient(cfg.remote.url, cfg.remote.token) : undefined;
-    return { slug, path, identity, backend, gitRemote: cfg.gitRemote, remoteClient };
+    const remoteClient = cfg.remote ? new CosheafOriginClient(cfg.remote.url, cfg.remote.token) : undefined;
+    return { slug, path, identity, backend, remote: cfg.remote, gitRemote: cfg.gitRemote, remoteClient };
   }
 
   // Index a workspace's markdown + bib files into the shared sidecar, scoped by

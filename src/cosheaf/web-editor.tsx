@@ -82,6 +82,9 @@ interface EditorConfig {
   // Whether opening a PR is available (hosted: always; local: only at Tier 2
   // with a configured remote). Gates the Open-PR / Merge-to-main affordances.
   canOpenPull: boolean;
+  // Optional local Workbench origin scope. Hosted pages omit it, preserving the
+  // legacy owner/repo/branch/path draft key.
+  originId?: string;
   mathMacros: Record<string, string>;
   bibliography?: string;
   csl?: string;
@@ -213,6 +216,7 @@ function readConfig(): { config: EditorConfig; content: string } {
       resetEditBranch: mount.dataset.resetEditBranch === "1",
       writeMode: mount.dataset.writeMode === "direct" ? "direct" : "branch",
       canOpenPull: mount.dataset.canOpenPull !== "0",
+      ...(mount.dataset.originId ? { originId: mount.dataset.originId } : {}),
       mathMacros: repoConfig.mathMacros ?? {},
       assetPreviewPaths,
       ...(repoConfig.bibliography ? { bibliography: repoConfig.bibliography } : {}),
@@ -324,6 +328,7 @@ function WebEditor({
   const savedShaRef = useRef<string | null | undefined>(config.baseSha);
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
   const resetEditBranchRef = useRef(config.resetEditBranch);
+  const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
   const contextLoadedRef = useRef(config.formatId !== COFLAT_FORMAT_ID);
   branchRef.current = branch;
   branchExistsRef.current = branchExists;
@@ -408,7 +413,7 @@ function WebEditor({
   // file (#162). Runs once on mount; the banner lets the user restore or discard
   // so the committed file is never silently overwritten.
   useEffect(() => {
-    const draft = readDraft(config.owner, config.repo, config.branch, config.path);
+    const draft = readDraft(config.owner, config.repo, config.branch, config.path, draftScope);
     if (draft && (draft.source !== initialContent || (draft.path && draft.path !== config.path))) setPendingDraft(draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -569,10 +574,10 @@ function WebEditor({
         ...(baseSha === undefined ? {} : { baseSha, baseShaKnown: true as const }),
         ...(sourceSha === undefined ? {} : { sourceSha, sourceShaKnown: true as const }),
         savedAt: Date.now(),
-      });
+      }, draftScope);
       return { ok: true };
     },
-    [config.owner, config.repo],
+    [config.owner, config.repo, draftScope],
   );
 
   // Explicit commit (Save / Cmd-S): the real Forgejo write. Creates the edit
@@ -614,15 +619,15 @@ function WebEditor({
         setCurrentPath(nextPath);
         setPathDirty(false);
         setUncommitted(false);
-        clearDraft(config.owner, config.repo, config.branch, config.path);
-        if (previousPath !== nextPath) clearDraft(config.owner, config.repo, result.branch, previousPath);
-        clearDraft(config.owner, config.repo, result.branch, nextPath);
+        clearDraft(config.owner, config.repo, config.branch, config.path, draftScope);
+        if (previousPath !== nextPath) clearDraft(config.owner, config.repo, result.branch, previousPath, draftScope);
+        clearDraft(config.owner, config.repo, result.branch, nextPath, draftScope);
         return { ok: true, branch: result.branch, path: nextPath };
       } catch (err) {
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo, config.branch, config.path, setEditorContent],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, setEditorContent],
   );
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
@@ -813,9 +818,9 @@ function WebEditor({
   }, [pendingDraft, setEditorContent]);
 
   const discardDraft = useCallback(() => {
-    clearDraft(config.owner, config.repo, config.branch, config.path);
+    clearDraft(config.owner, config.repo, config.branch, config.path, draftScope);
     setPendingDraft(null);
-  }, [config.owner, config.repo, config.branch, config.path]);
+  }, [config.owner, config.repo, config.branch, config.path, draftScope]);
 
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {
@@ -1100,7 +1105,7 @@ function WebEditor({
                 </button>
               ) : null}
               <button type="button" onClick={() => void openPullRequest(false)} disabled={busy}>
-                Open PR
+                {config.writeMode === "direct" ? "Open remote PR" : "Open PR"}
               </button>
             </span>
           ) : null}

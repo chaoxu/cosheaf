@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -39,6 +39,20 @@ describe("WorkspaceRegistry sidecar protection", () => {
     const entry = await reg.addFolder(dir);
     expect(entry.identity.owner).toBe("local");
     expect(entry.gitRemote).toBeNull();
+    expect(entry.identity.canOpenPull).toBe(false);
+    expect(entry.identity.originId).toMatch(/^local-[0-9a-f]{16}$/);
+  });
+
+  it("ignores an invalid remote sidecar instead of enabling open PR", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-reg-badremote-"));
+    mkdirSync(join(dir, ".cosheaf"), { recursive: true });
+    writeFileSync(join(dir, ".cosheaf", "remote.json"), JSON.stringify({ url: "ftp://cosheaf.example", token: "secret" }));
+    writeFileSync(join(dir, "a.md"), "# A\n");
+
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-reg-db3-"));
+    const entry = await reg.addFolder(dir);
+    expect(entry.remote).toBeNull();
+    expect(entry.remoteClient).toBeUndefined();
     expect(entry.identity.canOpenPull).toBe(false);
   });
 });

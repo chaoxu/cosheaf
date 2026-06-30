@@ -46,6 +46,10 @@ export interface LocalWorkspaceIdentity {
   // Tier 2 (remote + Cosheaf token configured) — gates the editor's Open-PR /
   // Merge affordances. false for Tier 0/1.
   canOpenPull: boolean;
+  // Stable opaque scope for browser-local Workbench state. Derived from the
+  // opened folder, not the Forgejo-shaped owner/repo slug, so same-slug local
+  // clones do not share localStorage drafts.
+  originId?: string;
 }
 
 export interface AppEnv {

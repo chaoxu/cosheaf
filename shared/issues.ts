@@ -17,9 +17,10 @@ export interface Label {
   scope: string | null;
 }
 
-// An optional live-work lease on an issue (#95). Pure coordination state, not
-// durable knowledge: it expires and carries no Forgejo source. Lets concurrent
-// runners avoid duplicating work on the same issue.
+// An optional advisory live-work lease on an issue (#95). Pure coordination
+// state, not durable knowledge, issue assignment, or server authority: it
+// expires and carries no Forgejo source. Lets concurrent runners avoid
+// duplicating work on the same issue.
 export interface IssueClaim {
   id: string;
   issue_number: number;

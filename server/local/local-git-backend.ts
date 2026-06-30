@@ -256,7 +256,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   // No pull requests locally: the review/merge surface is the remote Cosheaf
-  // (Tier 2), reached through RemoteCosheafClient, not this backend.
+  // (Tier 2), reached through CosheafOriginClient, not this backend.
   async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return [];
   }
@@ -337,6 +337,29 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // Tier 2: push a branch to the working tree's upstream remote over the user's
   // configured git transport (SSH key). Cosheaf is never in this path — the
   // remote service only opens the PR afterward.
+  getPushRemoteName(): string {
+    return this.pushRemote;
+  }
+
+  async pushRemoteUrl(): Promise<string | null> {
+    if (!(await this.isGitRepo())) return null;
+    try {
+      const out = await this.git(["remote", "get-url", this.pushRemote]);
+      return out.trim() || null;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  async currentHeadSha(): Promise<string | null> {
+    if (!(await this.isGitRepo())) return null;
+    try {
+      return (await this.git(["rev-parse", "HEAD"])).trim();
+    } catch (_err) {
+      return null;
+    }
+  }
+
   async push(branch: string): Promise<void> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
     await this.git(["push", this.pushRemote, branch]);

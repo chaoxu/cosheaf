@@ -19,6 +19,7 @@ import { files } from "./routes/files.js";
 import { handleAppError } from "./routes/error-handler.js";
 import { issues } from "./routes/issues.js";
 import { globalNotifications, notifications } from "./routes/notifications.js";
+import { origin } from "./routes/origin.js";
 import { pulls } from "./routes/pulls.js";
 import { web } from "./routes/web.js";
 import { webhooks } from "./routes/webhooks.js";
@@ -75,6 +76,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
         path: "",
         identity: id,
         backend: options.workspaceBackend as LocalGitWorkspaceBackend,
+        remote: null,
         gitRemote: null,
         remoteClient: options.remoteClient,
       });
@@ -120,6 +122,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   app.onError(handleAppError);
 
   app.use("/api/v1/*", rejectCrossOriginCookieApiMutation);
+  app.route("/api/v1", origin);
 
   if (local) {
     // No notifications in local mode, so neuter the chrome's notification poller:

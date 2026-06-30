@@ -17,6 +17,7 @@ const IDENTITY: LocalWorkspaceIdentity = {
   user: "me",
   title: "notes",
   canOpenPull: false,
+  originId: "local-test-origin",
 };
 
 function localApp(seed: Record<string, string> = {}): { app: Hono<AppEnv>; dir: string } {
@@ -111,7 +112,19 @@ describe("local Workbench app (Tier 0)", () => {
     // The single registered workspace is listed and links to its landing.
     expect(body).toContain('href="/me/notes"');
     // A local-only folder (no git upstream) is labelled as such.
-    expect(body).toContain("local-only");
+    expect(body).toContain("Local-only workspace");
+    expect(body).toContain("Collaboration features need a connected Cosheaf server");
+  });
+
+  it("labels the PR tab as remote server collaboration when disconnected", async () => {
+    const { app } = localApp();
+    const res = await app.request("/me/notes/pulls");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Remote pull requests");
+    expect(body).toContain("Local git state only");
+    expect(body).toContain("no connected Cosheaf server");
+    expect(body).toContain("open remote pull requests");
   });
 
   it("renders the edit page in direct write-mode with PR affordances off", async () => {
@@ -122,6 +135,7 @@ describe("local Workbench app (Tier 0)", () => {
     expect(body).toContain('id="web-editor-root"');
     expect(body).toContain('data-write-mode="direct"');
     expect(body).toContain('data-can-open-pull="0"');
+    expect(body).toContain('data-origin-id="local-test-origin"');
     expect(body).toContain('data-branch="main"');
   });
 });

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
@@ -11,6 +12,7 @@ import { freshTestDb } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import type { RemotePullClient } from "./remote-cosheaf-client.js";
+import { WorkspaceRegistry } from "./workspace-registry.js";
 
 function git(dir: string, args: string[]): string {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -50,6 +52,7 @@ function fakeRemote(over: Partial<RemotePullClient> = {}): RemotePullClient {
     whoami: async () => ({ username: "me" }),
     openPull: async () => ({ number: 1 }),
     listPulls: async () => [],
+    branchHead: async () => null,
     pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
     ...over,
   };
@@ -66,6 +69,40 @@ function app(dir: string, remoteClient?: RemotePullClient): Hono<AppEnv> {
   });
 }
 
+function appWithBinding(
+  dir: string,
+  remoteClient: RemotePullClient,
+  gitRemote: { name: string; host: string; owner: string; repo: string; url: string },
+): Hono<AppEnv> {
+  const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
+  const db = freshTestDb("wb-pulls-bound-");
+  const registry = new WorkspaceRegistry(db, { user: IDENTITY.user });
+  registry.register({
+    slug: workspaceSlug(IDENTITY.owner, IDENTITY.repo),
+    path: dir,
+    identity: IDENTITY,
+    backend: new LocalGitWorkspaceBackend(dir, { pushRemote: gitRemote.name }),
+    remote: { url: `https://${gitRemote.host}`, token: "token" },
+    gitRemote,
+    remoteClient,
+  });
+  return createApp({ config, db, localRegistry: registry });
+}
+
+function appWithConnectedRegistry(dir: string, remoteClient: RemotePullClient): Hono<AppEnv> {
+  return appWithBinding(dir, remoteClient, {
+    name: "origin",
+    host: "remote.example",
+    owner: IDENTITY.owner,
+    repo: IDENTITY.repo,
+    url: git(dir, ["remote", "get-url", "origin"]).trim(),
+  });
+}
+
+function commitCount(dir: string): number {
+  return Number(git(dir, ["rev-list", "--count", "HEAD"]).trim());
+}
+
 describe("local Workbench Tier 2 (push + PR)", () => {
   it("409s opening a PR with no remote configured", async () => {
     const { work } = repoWithOrigin();
@@ -75,12 +112,14 @@ describe("local Workbench Tier 2 (push + PR)", () => {
       body: JSON.stringify({ head: "feature", base: "main", title: "t" }),
     });
     expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("No Cosheaf server connected") });
   });
 
   it("commits, pushes the branch to origin, and opens a PR on the remote", async () => {
     const { work, bare } = repoWithOrigin();
     const calls: Array<Record<string, unknown>> = [];
     const remote = fakeRemote({
+      branchHead: async () => git(work, ["rev-parse", "HEAD"]).trim(),
       openPull: async (owner, repo, body) => {
         calls.push({ owner, repo, ...body });
         return { number: 7 };
@@ -100,6 +139,70 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     // The PR was opened on the remote with the right head/base.
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ owner: "me", repo: "notes", head: "feature", base: "main", title: "edit hello" });
+  });
+
+  it("checks the configured remote before committing", async () => {
+    const { work } = repoWithOrigin();
+    let opened = false;
+    const remote = fakeRemote({
+      whoami: async () => null,
+      openPull: async () => {
+        opened = true;
+        return { number: 1 };
+      },
+    });
+
+    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ head: "feature", base: "main", title: "edit hello" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("before committing") });
+    expect(opened).toBe(false);
+    expect(commitCount(work)).toBe(1);
+  });
+
+  it("rejects a push remote that points at a different owner/repo before committing", async () => {
+    const { work } = repoWithOrigin();
+    const url = "ssh://git@remote.example/other/notes.git";
+    git(work, ["remote", "set-url", "origin", url]);
+
+    const res = await appWithBinding(work, fakeRemote(), {
+      name: "origin",
+      host: "remote.example",
+      owner: "me",
+      repo: "notes",
+      url,
+    }).request("/api/v1/repos/me/notes/pulls", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ head: "feature", base: "main", title: "edit hello" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("points at other/notes") });
+    expect(commitCount(work)).toBe(1);
+  });
+
+  it("stops after push when the Cosheaf server does not observe the pushed head", async () => {
+    const { work } = repoWithOrigin();
+    let opened = false;
+    const remote = fakeRemote({
+      branchHead: async () => "0000000000000000000000000000000000000000",
+      openPull: async () => {
+        opened = true;
+        return { number: 1 };
+      },
+    });
+
+    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ head: "feature", base: "main", title: "edit hello" }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("server sees 000000000000") });
+    expect(opened).toBe(false);
   });
 
   it("409s opening a PR from a detached HEAD (no silent orphan commit)", async () => {
@@ -131,5 +234,30 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     const res = await app(work, remote).request("/me/notes/pulls/7");
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("https://remote.example/me/notes/pulls/7");
+  });
+
+  it("labels the local PR list as remote Cosheaf server state", async () => {
+    const { work } = repoWithOrigin();
+    const remote = fakeRemote({
+      listPulls: async () => [
+        {
+          number: 7,
+          title: "Review branch",
+          state: "open",
+          merged: false,
+          author_username: "me",
+          head_ref: "feature",
+          base_ref: "main",
+        },
+      ],
+    });
+    const res = await appWithConnectedRegistry(work, remote).request("/me/notes/pulls");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Remote pull requests");
+    expect(body).toContain("Cosheaf server connected");
+    expect(body).toContain("remote.example");
+    expect(body).toContain("Remote PR #7 Review branch");
+    expect(body).toContain("Local commits stay in this folder until pushed");
   });
 });
