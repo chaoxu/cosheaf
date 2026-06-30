@@ -122,6 +122,15 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   app.use("/api/v1/*", rejectCrossOriginCookieApiMutation);
 
   if (local) {
+    // No notifications in local mode, so neuter the chrome's notification poller:
+    // serve an empty cosheaf-notifications.js (registered before the static asset
+    // routes, so it wins). That stops the per-page EventSource to
+    // /api/v1/notifications/events — a long-lived SSE that pins an HTTP/1.1
+    // connection; with several tabs/navigations open they saturate the browser's
+    // ~6-connection-per-origin pool and the next request "loads forever".
+    app.get("/cosheaf-notifications.js", (c) =>
+      c.body("", 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600" }),
+    );
     // Local Workbench: only the forge-free, backend-driven typed routes the page
     // islands call, plus the local pulls router (commit + push + open PR on the
     // remote Cosheaf). No auth/workspaces/issues/notifications/webhooks.
