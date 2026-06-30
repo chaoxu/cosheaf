@@ -47,16 +47,21 @@ import { webEditShellAssets, webEditorAssets } from "./web-shell.js";
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
     const { owner, repo, backend, ws, user } = ctx;
-    const [files, branches, repoMeta] = await Promise.all([
-      repoFiles(backend, owner, repo, "main").catch(() => []),
+    const repoMeta = await backend.getRepo(owner, repo).catch(() => null);
+    // The default branch is whatever the backend reports — "main" hosted, but the
+    // working tree's checked-out branch in the local Workbench — so the landing,
+    // file tree, and edit links route to the branch actually in use (not a
+    // hardcoded "main" the local backend would then refuse to match).
+    const defaultBranch = repoMeta?.default_branch || "main";
+    const [files, branches] = await Promise.all([
+      repoFiles(backend, owner, repo, defaultBranch).catch(() => []),
       backend.listBranches(owner, repo).catch(() => []),
-      backend.getRepo(owner, repo).catch(() => null),
     ]);
     const titles = workspacePageTitles(ctx.db, ws.slug);
     // No clone panel in local mode (it has no real remote), so skip the URL too.
     const cloneUrl = ctx.writeMode === "direct" ? null : sshCloneUrl(c.get("config").forgejoUrl, owner, repo, repoMeta?.ssh_url);
     const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
-    const readme = await repoReadme(ctx, "main", files, assetPreviewPaths);
+    const readme = await repoReadme(ctx, defaultBranch, files, assetPreviewPaths);
     const stats = {
       pages: files.filter((file) => /\.md$/i.test(file.path)).length,
       branches: branches.length,
@@ -69,15 +74,15 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
         <div class="page-title compact page-title--actions-only">
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
-            <span class="toolbar-actions">${ws.role === "read" ? "" : newFileControl(owner, repo, user, "main")}</span>
+            <span class="toolbar-actions">${ws.role === "read" ? "" : newFileControl(owner, repo, user, defaultBranch)}</span>
           </div>
         </div>
         ${repoHomeHeader(ctx, owner, repo, stats)}
         ${cloneUrl ? clonePanel(cloneUrl) : emptyHtml}
-        ${repoLanding(ctx, "main", files, titles, readme)}
+        ${repoLanding(ctx, defaultBranch, files, titles, readme)}
       `, {
         readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
-        sidebarPanels: [fileTreePanel(owner, repo, "main", files, null, titles, branches, user, ws.role !== "read")],
+        sidebarPanels: [fileTreePanel(owner, repo, defaultBranch, files, null, titles, branches, user, ws.role !== "read")],
       }),
     );
   }));

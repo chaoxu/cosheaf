@@ -97,7 +97,7 @@ describe("LocalGitWorkspaceBackend", () => {
     expect((await backend.getTree(O, R, "main")).map((e) => e.path)).not.toContain("link.md");
   });
 
-  it("pins writes to the checked-out branch (Tier 1)", async () => {
+  it("writes the working tree regardless of the requested branch, and reports the checked-out branch (Tier 1)", async () => {
     const dir = tmpRepo();
     const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { stdio: ["ignore", "pipe", "ignore"] });
     git(["init", "-q", "-b", "main"]);
@@ -108,14 +108,14 @@ describe("LocalGitWorkspaceBackend", () => {
     git(["commit", "-qm", "i"]);
     git(["checkout", "-q", "-b", "feature"]);
     const backend = new LocalGitWorkspaceBackend(dir);
-    // Checked out on "feature": writing to "main" would land on the wrong branch.
+    // The working tree is the single source: a write with any branch label lands
+    // on the checked-out tree — the work is always on the current branch.
     await expect(
       backend.putFile(O, R, { branch: "main", path: "a.md", content: "y", message: "m" }),
-    ).rejects.toMatchObject({ code: "wrong_branch" });
-    // Writing to the current branch is fine.
-    await expect(
-      backend.putFile(O, R, { branch: "feature", path: "a.md", content: "y", message: "m" }),
     ).resolves.toMatchObject({ content: { sha: expect.any(String) } });
+    expect(readFileSync(join(dir, "a.md"), "utf8")).toBe("y");
+    // getRepo reports the checked-out branch as the default, so the UI routes there.
+    expect((await backend.getRepo(O, R))?.default_branch).toBe("feature");
   });
 });
 

@@ -187,24 +187,12 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return this.putFileBytes(owner, repo, { ...opts, content: Buffer.from(opts.content, "utf8") });
   }
 
-  // Every ref aliases the working tree, which in a git repo is exactly the
-  // checked-out branch. A write whose target branch differs would land on the
-  // wrong branch (silent data loss / misattribution), so reject it loudly.
-  // Tier 0 (no git) and a detached/unborn HEAD impose no branch.
-  private async assertOnBranch(branch: string): Promise<void> {
-    if (!(await this.isGitRepo())) return;
-    const cur = await this.currentBranch();
-    if (cur && branch !== cur) {
-      throw new WorkspaceBackendError(
-        409,
-        "wrong_branch",
-        `the working tree is on "${cur}", not "${branch}" — switch branches to edit it`,
-      );
-    }
-  }
-
+  // The Workbench has a single working tree, so the work is always on whatever
+  // branch is checked out. Reads already alias every ref to that tree; writes do
+  // the same — the requested branch is advisory and never rejected, since there
+  // is no other branch to write to. getRepo() reports the checked-out branch so
+  // the UI routes there in the first place (no hardcoded "main" mismatch).
   async putFileBytes(_owner: string, _repo: string, opts: WsPutFileBytes): Promise<WsFileWrite> {
-    await this.assertOnBranch(opts.branch);
     const full = this.abs(opts.path);
     await mkdir(resolve(full, ".."), { recursive: true });
     // Write to a temp sibling then rename so a reader never sees a half-written
@@ -217,7 +205,6 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   async deleteFile(_owner: string, _repo: string, opts: WsDeleteFile): Promise<void> {
-    await this.assertOnBranch(opts.branch);
     const full = this.abs(opts.path);
     try {
       await rm(full);
@@ -261,7 +248,11 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   async getRepo(_owner: string, _repo: string): Promise<WsRepo | null> {
-    return { default_branch: "main", description: "", ssh_url: "", open_issues_count: 0 };
+    // The default branch is whatever the working tree has checked out, so the
+    // repo landing, file tree, and edit links all route to the current branch —
+    // the Workbench edits the current branch, never a hardcoded "main".
+    const branch = (await this.currentBranch()) ?? "main";
+    return { default_branch: branch, description: "", ssh_url: "", open_issues_count: 0 };
   }
 
   // No pull requests locally: the review/merge surface is the remote Cosheaf
