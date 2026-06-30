@@ -688,6 +688,24 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
   return c.json({ issue: toDependencyRow(updated) });
 });
 
+// Remove a "blocks" edge. Mirrors the dependency DELETE convention (blocking
+// issue number in the body); the forge's removeIssueBlock returns void, so the
+// response is a bare ok.
+issues.delete("/:owner/:repo/issues/:number/blocks", async (c) => {
+  const number = parsePositiveIntId(c.req.param("number"));
+  if (number === null) return c.json(...bad("bad number"));
+  const body = await readJsonObject(c.req);
+  const index = parsePositiveIntId(body.index);
+  if (index === null) {
+    return c.json(...bad("block issue number required"));
+  }
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const target = await requireTypedIssue(c, number);
+  if (target instanceof Response) return target;
+  await collab.removeIssueBlock(owner, repo, number, index);
+  return c.json({ ok: true });
+});
+
 // Typed because Forgejo activities encode references in JSON-ish strings;
 // clients get parsed issue refs and normalized timestamps.
 issues.get("/:owner/:repo/activities", async (c) => {

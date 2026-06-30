@@ -782,6 +782,14 @@ export class OriginCollaborationClient {
     return dependencyRowToShape(r.issue);
   }
 
+  // Remove a "blocks" edge (this issue blocks `blockIndex`). The forge's
+  // removeIssueBlock returns void; the typed DELETE /blocks route mirrors the
+  // dependency convention (issue number in the body) and the callers ignore the
+  // return, so nothing is mapped back.
+  async removeIssueBlock(owner: string, repo: string, number: number, blockIndex: number): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/issues/${number}/blocks`), { body: { index: blockIndex } });
+  }
+
   // ---- pulls / reviews ----
 
   async listPulls(
@@ -940,6 +948,41 @@ export class OriginCollaborationClient {
     return { id: reviewId, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
   }
 
+  // Add an inline comment to an existing pending review. The shared route already
+  // resolved the diff anchor to forge positions (new_position/old_position), so
+  // this forwards those to the typed pending-review review-comments route, which
+  // maps them straight onto the core's addCommentToReview. The forge returns the
+  // created comment, but every caller ignores it, so a minimal shape is synthesized
+  // from the inputs (position fields mirror lineCommentToShape's anchor mapping).
+  async addCommentToReview(
+    owner: string,
+    repo: string,
+    index: number,
+    reviewId: number,
+    opts: { path: string; body: string; new_position?: number; old_position?: number },
+  ): Promise<PullCommentShape> {
+    await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/review-comments`), {
+      path: opts.path,
+      body: opts.body,
+      ...(opts.new_position !== undefined ? { new_position: opts.new_position } : {}),
+      ...(opts.old_position !== undefined ? { old_position: opts.old_position } : {}),
+    });
+    return {
+      id: 0,
+      pull_request_review_id: reviewId,
+      path: opts.path,
+      body: opts.body,
+      position: opts.new_position ?? null,
+      original_position: opts.old_position ?? null,
+      commit_id: "",
+      original_commit_id: "",
+      diff_hunk: "",
+      user: null,
+      created_at: iso(0),
+      updated_at: iso(0),
+    };
+  }
+
   async deleteReviewComment(owner: string, repo: string, index: number, reviewId: number, commentId: number): Promise<void> {
     await this.del(this.repoPath(owner, repo, `/pulls/${index}/comments/${commentId}`), { query: { review_id: reviewId } });
   }
@@ -1009,6 +1052,33 @@ export class OriginCollaborationClient {
     return this.getOrNull<RepoShape>(this.repoPath(owner, repo, ""));
   }
 
+  // Patch repo metadata. The settings meta form sends description, visibility
+  // (mapped to `private`), and default_branch; only the set fields are forwarded.
+  // The typed PATCH route returns the same forge-repo-compatible object getRepo
+  // does, so it maps straight to RepoShape.
+  async editRepo(
+    owner: string,
+    repo: string,
+    patch: { description?: string; private?: boolean; default_branch?: string },
+  ): Promise<RepoShape> {
+    const body: Record<string, unknown> = {};
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.private !== undefined) body.private = patch.private;
+    if (patch.default_branch !== undefined) body.default_branch = patch.default_branch;
+    return this.patch<RepoShape>(this.repoPath(owner, repo, ""), body);
+  }
+
+  // Delete the repo. Idempotent: a 404 means the repo is already gone, which the
+  // hosted settings-delete path also swallows.
+  async deleteRepo(owner: string, repo: string): Promise<void> {
+    try {
+      await this.del(this.repoPath(owner, repo, ""));
+    } catch (err) {
+      if (err instanceof RemoteCosheafError && err.status === 404) return;
+      throw err;
+    }
+  }
+
   // The typed surface exposes only the main-branch review policy via /settings;
   // every caller reads this for "main", and `min_approvals` is that branch's
   // required-approvals count.
@@ -1076,9 +1146,15 @@ export class OriginCollaborationClient {
 // lands the issue reads; the write surfaces (issues/pulls/reviews/notifications/
 // repo + settings) land with their owning agents. Implemented methods delegate
 // (bound to the real instance so their internal `this.get` works); anything else
-// is a loud stub. Still stubbed deliberately: `editRepo`/`deleteRepo` have no
-// typed core endpoint yet — rare Workbench ops, tracked separately. The cast is
-// the "cast unimplemented methods" the seam allows.
+// is a loud stub. The settings write surface (`editRepo`/`deleteRepo`), inline
+// pending-review comments (`addCommentToReview`), and the issue-block removal
+// (`removeIssueBlock`) are now backed by typed core endpoints (#267/#269). Still
+// stubbed deliberately: the notification mutation surface
+// (`getNotificationThread`/`markNotificationRead`/`markRepoNotificationsRead`)
+// and `getRepoPermission` have no typed core endpoint yet (tracked with the
+// notifications work, #265/#266); `createReview` with inline comments also still
+// throws — that standalone-comment path is a separate documented limitation. The
+// cast is the "cast unimplemented methods" the seam allows.
 function withUnimplementedStubs(client: OriginCollaborationClient): CollaborationClient {
   return new Proxy(client, {
     get(target, prop, receiver) {

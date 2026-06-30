@@ -127,6 +127,91 @@ describe("GET /api/v1/repos/:owner/:repo", () => {
   });
 });
 
+describe("PATCH /api/v1/repos/:owner/:repo", () => {
+  it("forwards only set metadata fields to the forge after a fresh admin check", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
+    let patchBody: unknown = null;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", () => responseOk({ permission: "admin" }));
+      forge.patch("/api/v1/repos/owner/w", async (c) => {
+        patchBody = await c.req.json();
+        return responseOk({ id: 12, name: "w", full_name: "owner/w", default_branch: "trunk", description: "New", private: true, owner: { id: 1, login: "owner" } });
+      });
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ description: "New", private: true, default_branch: "trunk" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(patchBody).toEqual({ description: "New", private: true, default_branch: "trunk" });
+    const body = (await res.json()) as { description: string; default_branch: string };
+    expect(body).toMatchObject({ description: "New", default_branch: "trunk" });
+  });
+
+  it("rejects non-admins before touching the forge", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "write", owner: "owner", repo: "w" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", () => responseOk({ permission: "write" }));
+      forge.patch("/api/v1/repos/owner/w", () => responseOk({}));
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ description: "x" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("DELETE /api/v1/repos/:owner/:repo", () => {
+  it("deletes the repo after a fresh admin check", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
+    let deleted = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", () => responseOk({ permission: "admin" }));
+      forge.delete("/api/v1/repos/owner/w", () => {
+        deleted = true;
+        return new Response(null, { status: 204 });
+      });
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(deleted).toBe(true);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("treats a forge 404 on delete as success (idempotent)", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", () => responseOk({ permission: "admin" }));
+      forge.delete("/api/v1/repos/owner/w", (c) => c.text("gone", 404));
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("POST /api/v1/workspaces", () => {
   it("creates a workspace in the caller's namespace and writes the cosheaf-format topic", async () => {
     const { app, db } = appFor();
@@ -415,6 +500,7 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
         calls.push({ url: c.req.url, method: c.req.method, body: raw ? JSON.parse(raw) : null });
         await next();
       });
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
       forge.put("/api/v1/repos/owner/w/collaborators/test-vera", (c) => c.body(null, 204));
       forge.get("/api/v1/repos/owner/w/branch_protections/main", (c) => c.json({ push_whitelist_usernames: ["chao"] }));
@@ -443,6 +529,7 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
 
     let whitelistPatch: unknown = null;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
       forge.put("/api/v1/repos/owner/w/collaborators/test-vera", (c) => c.body(null, 204));
       forge.get("/api/v1/repos/owner/w/branch_protections/main", (c) => c.json({ push_whitelist_usernames: ["chao"] }));
@@ -472,6 +559,7 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
     _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "write" }));
     }));
 
@@ -506,6 +594,7 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
     _seedFormatCacheForTests("owner", "w", "coflat");
     let mutated = false;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
       forge.put("/api/v1/repos/owner/w/collaborators/bad%20name", () => {
         mutated = true;
@@ -533,6 +622,7 @@ describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
 
     let removed = false;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
       forge.delete("/api/v1/repos/owner/w/collaborators/test-vera", (c) => {
         removed = true;
@@ -556,6 +646,7 @@ describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
     _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
       forge.delete("/api/v1/repos/owner/w/collaborators/test-vera", (c) => c.body(null, 404));
     }));
@@ -575,6 +666,7 @@ describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
     _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
       forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "write" }));
     }));
 

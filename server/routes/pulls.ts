@@ -847,6 +847,39 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
   return c.json({ ok: true });
 });
 
+// Origin-proxy variant of the route above: the local Workbench resolves the diff
+// anchor to forge positions against the connected core's diff, then forwards the
+// already-resolved {path, body, new_position?, old_position?} here. This route
+// skips the local line→position resolution and hands the positions straight to
+// addCommentToReview. The same own-pending-review gate applies.
+pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/review-comments", async (c) => {
+  const n = parsePositiveIntId(c.req.param("n"));
+  const rid = parsePositiveIntId(c.req.param("rid"));
+  if (n === null || rid === null) return c.json(...bad("bad ids"));
+  const ws = c.get("workspace");
+  const body = await readJsonObject(c.req);
+  const path = typeof body.path === "string" ? safeRel(body.path) : null;
+  if (!path) return c.json(...bad("path required (safe relative)"));
+  if (typeof body.body !== "string" || body.body.trim() === "") return c.json(...bad("body required"));
+  const nonNegInt = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+  const newPos = nonNegInt(body.new_position) ? body.new_position : undefined;
+  const oldPos = nonNegInt(body.old_position) ? body.old_position : undefined;
+  if (newPos === undefined && oldPos === undefined) {
+    return c.json(...bad("new_position or old_position required"));
+  }
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const review = await requireOwnPendingReview(c, n, rid);
+  if (review instanceof Response) return review;
+  await collab.addCommentToReview(owner, repo, n, rid, {
+    path,
+    body: body.body,
+    ...(newPos !== undefined ? { new_position: newPos } : {}),
+    ...(oldPos !== undefined ? { old_position: oldPos } : {}),
+  });
+  c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "commented" });
+  return c.json({ ok: true });
+});
+
 pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   const rid = parsePositiveIntId(c.req.param("rid"));

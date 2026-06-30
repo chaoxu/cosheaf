@@ -605,6 +605,28 @@ describe("issues routes", () => {
     });
   });
 
+  it("fills Forgejo owner/repo when removing an issue block", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock
+      .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/7/blocks", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ index: 9 }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/blocks");
+    expect(fetchMock.mock.calls[1][1]?.method).toBe("DELETE");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ index: 9, owner: "owner", repo: "w" });
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
   it("maps dependency and block lists to compact DTOs", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });

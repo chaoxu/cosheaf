@@ -182,6 +182,49 @@ members.get("/:owner/:repo", requireMembership(), async (c) => {
   return c.json(publicRepoShape(c, found));
 });
 
+// Patch repo metadata (the settings meta form: description + visibility +
+// default branch). Admin-only and fresh-checked, mirroring the destructive
+// settings surface. Forgejo PATCH accepts a partial body, so only the fields the
+// caller set are forwarded; the response is the same forge-repo-compatible shape
+// GET /:owner/:repo returns.
+members.patch("/:owner/:repo", requireMembership(), requireAdminFresh, async (c) => {
+  const { fj, owner, repo } = repoCtxForgejo(c);
+  const body = (await c.req.json().catch(() => null)) as {
+    description?: unknown;
+    private?: unknown;
+    default_branch?: unknown;
+  } | null;
+  if (!body || typeof body !== "object") return c.json(...bad("body required"));
+  const patch: { description?: string; private?: boolean; default_branch?: string } = {};
+  if (body.description !== undefined) {
+    if (typeof body.description !== "string") return c.json(...bad("description must be a string"));
+    patch.description = body.description;
+  }
+  if (body.private !== undefined) {
+    if (typeof body.private !== "boolean") return c.json(...bad("private must be a boolean"));
+    patch.private = body.private;
+  }
+  if (body.default_branch !== undefined) {
+    if (typeof body.default_branch !== "string" || !body.default_branch.trim())
+      return c.json(...bad("default_branch must be a non-empty string"));
+    patch.default_branch = body.default_branch;
+  }
+  const updated = await fj.editRepo(owner, repo, patch);
+  return c.json(publicRepoShape(c, updated));
+});
+
+// Delete the repo. Admin-only and fresh-checked. Idempotent: a 404 means the
+// repo is already gone, matching the hosted settings-delete swallow.
+members.delete("/:owner/:repo", requireMembership(), requireAdminFresh, async (c) => {
+  const { fj, owner, repo } = repoCtxForgejo(c);
+  try {
+    await fj.deleteRepo(owner, repo);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+  }
+  return c.json({ ok: true });
+});
+
 members.put("/:owner/:repo/members/:username", requireMembership(), requireAdminFresh, async (c) => {
   const username = c.req.param("username")?.trim();
   if (!username) return c.json(...bad("username required"));

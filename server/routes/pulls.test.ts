@@ -866,6 +866,49 @@ describe("pulls + branches routes", () => {
         }
       }
     });
+
+    // The position-form review-comments route is the Origin-proxy entry point:
+    // the local Workbench resolves the diff anchor itself and forwards the forge
+    // positions, so this route forwards them straight to addCommentToReview
+    // without a local line→position resolution step.
+    it("POST /pulls/:n/pending-review/:rid/review-comments forwards positions to the forge", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      let commentBody: unknown;
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(pull({ user: { login: "bob" } })));
+        forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () =>
+          Response.json([{ id: 9, state: "PENDING", body: "", user: { login: "alice" } }]),
+        );
+        forge.post("/api/v1/repos/owner/w/pulls/7/reviews/9/comments", async (c) => {
+          commentBody = await c.req.json();
+          return Response.json({ id: 5 });
+        });
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review/9/review-comments", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ path: "x.md", body: "nit", new_position: 12 }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(commentBody).toEqual({ path: "x.md", body: "nit", new_position: 12 });
+    });
+
+    it("POST /pulls/:n/pending-review/:rid/review-comments rejects missing positions before the forge", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review/9/review-comments", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ path: "x.md", body: "nit" }),
+      });
+      expect(res.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /pulls/:n/file raw side reads", () => {
