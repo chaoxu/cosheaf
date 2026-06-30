@@ -7,7 +7,8 @@ on:
     branches: [main]
 
 env:
-  COFLAT_REF: 98eb78f62e99354ab326be7a7132fe953425d8b6
+  # Coflat is unpinned: CI checks out its latest main. Set a 40-hex SHA to pin a run.
+  COFLAT_REF: main
 
 jobs:
   static:

@@ -23,7 +23,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 
-const COFLAT_PIN = "98eb78f62e99354ab326be7a7132fe953425d8b6";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coflatSrc = resolve(repoRoot, "..", "coflat");
 const outDir = join(repoRoot, "dist-workbench");
@@ -49,8 +48,18 @@ function step(msg) {
   console.log(`\n=== ${msg} ===`);
 }
 
+// The exact coflat commit baked into this bundle (coflat is unpinned, so record
+// what was actually built for traceability). "unknown" if the sibling isn't a git checkout.
+function coflatSha() {
+  try {
+    return execFileSync("git", ["-C", coflatSrc, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch (_err) {
+    return "unknown";
+  }
+}
+
 if (!existsSync(join(coflatSrc, "dist", "editor.css"))) {
-  console.error(`coflat dist not found at ${coflatSrc}/dist — build the pinned ../coflat first (pin ${COFLAT_PIN}).`);
+  console.error(`coflat dist not found at ${coflatSrc}/dist — build the ../coflat sibling first (pnpm setup:deps).`);
   process.exit(1);
 }
 
@@ -182,7 +191,7 @@ Node rejects the lab Caddy root by default. Point it at the CA bundle:
 (or set \`NODE_EXTRA_CA_CERTS\` yourself). The plain-HTTP tailnet endpoint needs
 no CA.
 
-Coflat pin: ${COFLAT_PIN}
+Coflat: ${coflatSha()} (built from the ../coflat sibling; unpinned — tracks latest)
 `;
 writeFileSync(join(outDir, "README.md"), readme);
 

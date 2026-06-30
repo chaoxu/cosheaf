@@ -8,18 +8,23 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Command } from "commander";
 
+// Coflat is unpinned (the sites carry `main` by default). This tool is the
+// re-pin escape hatch: rewrite the current ref (a SHA or `main`) across every
+// site to an explicit SHA, for a deliberate reproducible build. The match is
+// ref-agnostic so it works whether the sites currently hold `main` or a SHA.
+const REF = "([0-9a-f]{40}|main)";
 const SITES = [
   {
     file: "scripts/check-coflat-ref.mjs",
-    re: /(export const DEFAULT_COFLAT_REF = ")[0-9a-f]{40}(";)/,
-    repl: (sha) => `$1${sha}$2`,
+    re: new RegExp(`(export const DEFAULT_COFLAT_REF = ")${REF}(";)`),
+    repl: (sha) => `$1${sha}$3`,
   },
-  { file: "README.md", re: /(coflat checkout )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
-  { file: "AGENTS.md", re: /(coflat checkout )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
-  { file: "Dockerfile", re: /(ARG COFLAT_GIT_REF=)[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
-  { file: "compose.yaml", re: /(COFLAT_GIT_REF: \$\{COFLAT_GIT_REF:-)[0-9a-f]{40}(\})/g, repl: (sha) => `$1${sha}$2` },
-  { file: ".github/workflows/ci.yml", re: /(COFLAT_REF: )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
-  { file: ".gitea/workflows/ci.yml", re: /(COFLAT_REF: )[0-9a-f]{40}/, repl: (sha) => `$1${sha}` },
+  { file: "README.md", re: new RegExp(`(coflat checkout )${REF}`), repl: (sha) => `$1${sha}` },
+  { file: "AGENTS.md", re: new RegExp(`(coflat checkout )${REF}`), repl: (sha) => `$1${sha}` },
+  { file: "Dockerfile", re: new RegExp(`(ARG COFLAT_GIT_REF=)${REF}`), repl: (sha) => `$1${sha}` },
+  { file: "compose.yaml", re: new RegExp(`(COFLAT_GIT_REF: \\$\\{COFLAT_GIT_REF:-)${REF}(\\})`, "g"), repl: (sha) => `$1${sha}$3` },
+  { file: ".github/workflows/ci.yml", re: new RegExp(`(COFLAT_REF: )${REF}`), repl: (sha) => `$1${sha}` },
+  { file: ".gitea/workflows/ci.yml", re: new RegExp(`(COFLAT_REF: )${REF}`), repl: (sha) => `$1${sha}` },
 ];
 
 export function bumpCoflat({ sha, repoRoot = process.cwd() }) {

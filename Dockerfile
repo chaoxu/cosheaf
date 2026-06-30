@@ -37,11 +37,12 @@ RUN --mount=type=cache,id=cosheaf-apt-cache,target=/var/cache/apt,sharing=locked
     exit 2; \
   fi
 
-# Coflat is sourced from the lab Gitea at the same pinned ref used by local
-# setup/CI. Override COFLAT_GIT_REF explicitly for a deliberate Coflat bump.
-# gitea.lab uses the lab internal CA, so the fetch skips TLS verification.
+# Coflat is sourced from the lab Gitea. It is unpinned: builds track its latest
+# `main`. Override COFLAT_GIT_REF with a 40-hex SHA for a deliberate
+# reproducible/one-off build. gitea.lab uses the lab internal CA, so the fetch
+# skips TLS verification.
 ARG COFLAT_GIT_REPO=https://gitea.lab/chaoxu/coflat.git
-ARG COFLAT_GIT_REF=98eb78f62e99354ab326be7a7132fe953425d8b6
+ARG COFLAT_GIT_REF=main
 
 RUN echo "coflat ${COFLAT_GIT_REF}" \
   && git init coflat \

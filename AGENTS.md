@@ -287,9 +287,9 @@ data/             # default COSHEAF_DATA_DIR; db.sqlite sidecar
 ```bash
 cd ..
 git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
-git -C coflat checkout 98eb78f62e99354ab326be7a7132fe953425d8b6
+git -C coflat checkout main   # Coflat is unpinned; track its latest (git -C coflat pull to update)
 cd cosheaf
-pnpm setup:deps              # verify and build pinned sibling ../coflat
+pnpm setup:deps              # verify the ../coflat sibling exists and build it
 pnpm install
 cp .env.example .env.dev
 pnpm setup:dev              # seed local chao / Flushing Coin / Hello fixture

@@ -10,11 +10,18 @@ import { fileURLToPath } from "node:url";
 // the repo root is even when invoked from a subdirectory.
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Single source of truth for the pinned sibling-Coflat revision. The setup
-// docs (README, AGENTS) must agree with this; `checkDocPins` enforces it so a
-// `bump:coflat` that misses a doc site is caught by setup:deps, not by a
-// developer following a stale README into a failing checkout.
-export const DEFAULT_COFLAT_REF = "98eb78f62e99354ab326be7a7132fe953425d8b6";
+// Single source of truth for the Coflat ref every build resolves. Coflat is
+// UNPINNED: the default is the branch `main`, so dev/CI/prod track its latest.
+// Override with a 40-hex SHA via COFLAT_REF for a deliberate reproducible build.
+// The setup docs and Docker/CI sites must agree with this; `checkDocPins`
+// enforces that so a stale site is caught by setup:deps.
+export const DEFAULT_COFLAT_REF = "main";
+
+// True for an explicit 40-hex pin (the COFLAT_REF escape hatch) vs. a branch
+// name. A SHA ref is enforced strictly against the sibling HEAD; a branch ref
+// only requires the sibling to exist (the dev/builder controls which commit of
+// that branch is checked out).
+export const isSha = (ref) => /^[0-9a-f]{40}$/.test(ref);
 
 // Files that pin the Coflat SHA. Keep these in sync with bump-coflat.mjs.
 export const DOC_PIN_FILES = ["README.md", "AGENTS.md"];
@@ -76,6 +83,12 @@ export function checkCoflatRef({
     };
   }
 
+  // Branch ref (unpinned default): the sibling exists and is a git checkout,
+  // which is all we enforce — the dev/builder owns which commit is checked out.
+  if (!isSha(expectedRef)) {
+    return { ok: true, actualRef, expectedRef };
+  }
+
   if (actualRef !== expectedRef) {
     let dirty = false;
     try {
@@ -118,7 +131,10 @@ export function checkDocPins({
       continue;
     }
     const found = pinnedCoflatRefs(rel, text);
-    const invalid = CONFIG_PIN_FILES.includes(rel)
+    // A SHA pin (COFLAT_REF override) must be 40-hex in the config sites; the
+    // unpinned branch default ("main") only needs every site to carry the same
+    // ref string, which the mismatch check below covers.
+    const invalid = isSha(expectedRef) && CONFIG_PIN_FILES.includes(rel)
       ? found.find((ref) => !/^[0-9a-f]{40}$/.test(ref))
       : null;
     const mismatch = found.find((ref) => ref !== expectedRef);

@@ -54,22 +54,31 @@ describe("checkCoflatRef", () => {
     }
   });
 
-  it("rejects a mismatched sibling checkout", () => {
+  it("accepts any sibling checkout for the unpinned branch default", () => {
+    // Coflat is unpinned: a branch ref only requires the sibling to exist.
     const result = checkCoflatRef({
       coflatDir: ".",
-      expectedRef: "expected",
-      execFile: (_cmd, args) => (args.includes("status") ? "" : "actual\n"),
+      execFile: () => `${hex("b")}\n`,
     });
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain("expected expected");
-    expect(result.message).toContain("Run: git -C . fetch origin expected && git -C . checkout expected");
+    expect(result).toEqual({ ok: true, actualRef: hex("b"), expectedRef: "main" });
   });
 
-  it("warns before switching a dirty mismatched sibling checkout", () => {
+  it("rejects a mismatched sibling checkout when pinned to an explicit SHA", () => {
     const result = checkCoflatRef({
       coflatDir: ".",
-      expectedRef: "expected",
-      execFile: (_cmd, args) => (args.includes("status") ? " M src/file.ts\n" : "actual\n"),
+      expectedRef: hex("a"),
+      execFile: (_cmd, args) => (args.includes("status") ? "" : `${hex("b")}\n`),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain(`expected ${hex("a")}`);
+    expect(result.message).toContain(`Run: git -C . fetch origin ${hex("a")} && git -C . checkout ${hex("a")}`);
+  });
+
+  it("warns before switching a dirty mismatched SHA-pinned sibling checkout", () => {
+    const result = checkCoflatRef({
+      coflatDir: ".",
+      expectedRef: hex("a"),
+      execFile: (_cmd, args) => (args.includes("status") ? " M src/file.ts\n" : `${hex("b")}\n`),
     });
     expect(result.ok).toBe(false);
     expect(result.message).toContain("has local changes");
@@ -253,7 +262,7 @@ describe("bumpCoflat", () => {
     writeFileSync(join(root, "README.md"), `git -C coflat checkout ${old}\n`);
     writeFileSync(join(root, "AGENTS.md"), `git -C coflat checkout ${old}\n`);
     writeFileSync(join(root, "Dockerfile"), `ARG COFLAT_GIT_REF=${old}\n`);
-    writeFileSync(join(root, "compose.yaml"), "COFLAT_GIT_REF: ${COFLAT_GIT_REF:-main}\n");
+    writeFileSync(join(root, "compose.yaml"), "COFLAT_GIT_REF: ${COFLAT_GIT_REF:-zzz}\n");
     writeFileSync(join(root, ".github/workflows/ci.yml"), `COFLAT_REF: ${old}\n`);
 
     expect(() => bumpCoflat({ sha: next, repoRoot: root })).toThrow(/compose\.yaml/);

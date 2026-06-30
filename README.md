@@ -81,9 +81,9 @@ agent/API calls, all with `Authorization: Bearer <token>`:
 ```bash
 cd ..
 git clone https://github.com/chaoxu/coflat.git coflat  # if ../coflat is not present
-git -C coflat checkout 98eb78f62e99354ab326be7a7132fe953425d8b6
+git -C coflat checkout main  # Coflat is unpinned; track its latest (git -C coflat pull to update)
 cd cosheaf
-pnpm setup:deps  # verifies the pinned Coflat checkout, then builds it
+pnpm setup:deps  # verifies the ../coflat sibling exists, then builds it
 pnpm install
 cp .env.example .env.dev
 # Prerequisite: a Forgejo reachable at COSHEAF_FORGEJO_URL (default :3002).
