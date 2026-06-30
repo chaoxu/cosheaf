@@ -56,12 +56,45 @@ export interface CreateAppOptions {
   remoteClient?: RemotePullClient;
 }
 
+export type AppContentProvider = "forgejo" | "local-git";
+export type AppCollaborationProvider = "self" | "federated";
+
+export interface AppProviderCapabilities {
+  content: AppContentProvider;
+  collaboration: AppCollaborationProvider;
+  mountsLocalWorkbench: boolean;
+  mountsHostedAuth: boolean;
+  mountsHostedCollaboration: boolean;
+}
+
+export function appProviderCapabilities(config: Pick<Config, "mode">): AppProviderCapabilities {
+  if (config.mode === "local") {
+    return {
+      content: "local-git",
+      collaboration: "federated",
+      mountsLocalWorkbench: true,
+      mountsHostedAuth: false,
+      mountsHostedCollaboration: false,
+    };
+  }
+  return {
+    content: "forgejo",
+    collaboration: "self",
+    mountsLocalWorkbench: false,
+    mountsHostedAuth: true,
+    mountsHostedCollaboration: true,
+  };
+}
+
 export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   const { config, db } = options;
-  const local = config.mode === "local";
+  const provider = appProviderCapabilities(config);
+  const local = provider.mountsLocalWorkbench;
   // No admin forge client in local mode — webhooks/provisioning aren't mounted
   // and the Workbench is Forgejo-free.
-  const fjAdmin = local ? undefined : options.fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken });
+  const fjAdmin = provider.mountsHostedCollaboration
+    ? options.fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken })
+    : undefined;
   const sse = options.sse ?? new SSEHub();
 
   // Resolve the local registry: an explicit one from the launcher, or (tests) a
@@ -86,7 +119,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.use("*", requestId());
-  if (local) {
+  if (provider.mountsLocalWorkbench) {
     // The single-user Workbench writes a timestamped request+timing line to
     // <dataDir>/server.log (appended) so it can always be inspected after the
     // fact: slow requests show a high duration, and errors still get a line.
@@ -106,7 +139,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     c.set("db", db);
     c.set("config", config);
     if (fjAdmin) c.set("fjAdmin", fjAdmin);
-    if (local && registry) c.set("localRegistry", registry);
+    if (provider.mountsLocalWorkbench && registry) c.set("localRegistry", registry);
     c.set("sse", sse);
     const locale = resolveLocale(c);
     c.set("locale", locale);
@@ -124,7 +157,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
   app.use("/api/v1/*", rejectCrossOriginCookieApiMutation);
   app.route("/api/v1", origin);
 
-  if (local) {
+  if (provider.mountsLocalWorkbench) {
     // No notifications in local mode, so neuter the chrome's notification poller:
     // serve an empty cosheaf-notifications.js (registered before the static asset
     // routes, so it wins). That stops the per-page EventSource to
@@ -147,7 +180,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     app.route("/api/v1/repos", branches);
     app.route("/api/v1/repos", localPulls);
     app.route("/api/v1", localNotifications);
-  } else {
+  } else if (provider.mountsHostedAuth && provider.mountsHostedCollaboration) {
     app.route("/api/v1", auth);
     app.route("/api/v1/workspaces", workspaces);
     app.route("/api/v1/repos", members);
