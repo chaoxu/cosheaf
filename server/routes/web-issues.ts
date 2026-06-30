@@ -195,7 +195,7 @@ web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => 
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
   const [allLabels, collaborators, milestones] = await Promise.all([
     ctx.collab.listLabels(ctx.owner, ctx.repo).catch(() => []),
-    ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
+    ctx.collab.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
     ctx.collab.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
   ]);
   return htmlResponse(
