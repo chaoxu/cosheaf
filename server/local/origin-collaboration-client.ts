@@ -145,6 +145,27 @@ function issueDetailToShape(d: IssueDetail): IssueShape {
   };
 }
 
+// Build an issue shape from the compact create/edit response. The issue write
+// routes read only number/title/body/state off the returned object; the rest
+// default like the other compact mappers.
+function writtenIssueToShape(d: { number: number; title: string; body?: string; state: "open" | "closed" }): IssueShape {
+  return {
+    id: d.number,
+    number: d.number,
+    title: d.title,
+    body: d.body ?? "",
+    state: d.state,
+    user: null,
+    assignees: null,
+    labels: [],
+    milestone: null,
+    comments: 0,
+    created_at: "",
+    updated_at: "",
+    closed_at: null,
+  };
+}
+
 // The pinned DTO is compact (no labels/created_at/body); routes that consume
 // pinned issues read number/title/state/comments/updated_at/author only.
 interface PinnedRow {
@@ -460,6 +481,45 @@ export class OriginCollaborationClient {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  // Shared write transport for PUT/PATCH/DELETE: bearer auth, JSON body when
+  // present, optional query (the typed delete routes take ids in the query),
+  // never a forge path. Mirrors `post`'s status-bearing error.
+  private async send<T>(
+    method: "PUT" | "PATCH" | "DELETE",
+    path: string,
+    opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {},
+  ): Promise<T> {
+    const url = new URL(`${this.base}${path}`);
+    if (opts.query) {
+      for (const [k, v] of Object.entries(opts.query)) {
+        if (v !== undefined) url.searchParams.set(k, String(v));
+      }
+    }
+    const headers: Record<string, string> = { authorization: `Bearer ${this.token}`, accept: "application/json" };
+    if (opts.body !== undefined) headers["content-type"] = "application/json";
+    const res = await this.fetchFn(url.toString(), {
+      method,
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  private put<T>(path: string, body: unknown): Promise<T> {
+    return this.send<T>("PUT", path, { body });
+  }
+  private patch<T>(path: string, body: unknown): Promise<T> {
+    return this.send<T>("PATCH", path, { body });
+  }
+  private del<T>(path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {}): Promise<T> {
+    return this.send<T>("DELETE", path, opts);
+  }
+
   async listIssues(owner: string, repo: string, opts: IssueListOpts = {}): Promise<IssueShape[]> {
     const r = await this.get<{ issues: IssueRow[] }>(this.repoPath(owner, repo, "/issues"), {
       state: opts.state,
@@ -516,6 +576,145 @@ export class OriginCollaborationClient {
     return (r.issues ?? []).map(dependencyRowToShape);
   }
 
+  // ---- issue writes ----
+
+  // The typed create route returns only {number,title,state}; the issue routes
+  // read just those off the result. `assignees` has no typed create endpoint and
+  // is dropped (no route passes it on create).
+  async createIssue(
+    owner: string,
+    repo: string,
+    opts: { title: string; body: string; assignees?: string[]; labels?: number[] },
+  ): Promise<IssueShape> {
+    const r = await this.post<{ number: number; title: string; state: "open" | "closed" }>(
+      this.repoPath(owner, repo, "/issues"),
+      { title: opts.title, body: opts.body, ...(opts.labels?.length ? { labels: opts.labels } : {}) },
+    );
+    return writtenIssueToShape(r);
+  }
+
+  // The forge editIssue is one method; the typed API splits it into three routes
+  // (title/body, state, milestone). Dispatch by which fields the patch carries —
+  // the routes only ever send one group, but combined title/body+milestone (the
+  // web edit form) is handled by running both. `assignees` has no typed endpoint
+  // and is dropped. A null/0 milestone clears it (the typed route reads id=null
+  // as clear).
+  async editIssue(
+    owner: string,
+    repo: string,
+    number: number,
+    patch: { title?: string; body?: string; state?: "open" | "closed"; milestone?: number; assignees?: string[] },
+  ): Promise<IssueShape> {
+    let shape: IssueShape | undefined;
+    if (patch.title !== undefined || patch.body !== undefined) {
+      const tb: { title?: string; body?: string } = {};
+      if (patch.title !== undefined) tb.title = patch.title;
+      if (patch.body !== undefined) tb.body = patch.body;
+      shape = writtenIssueToShape(
+        await this.patch<{ number: number; title: string; body: string; state: "open" | "closed" }>(
+          this.repoPath(owner, repo, `/issues/${number}`),
+          tb,
+        ),
+      );
+    }
+    if (patch.state !== undefined) {
+      const r = await this.patch<{ state: "open" | "closed" }>(
+        this.repoPath(owner, repo, `/issues/${number}/state`),
+        { state: patch.state },
+      );
+      shape = writtenIssueToShape({ number, title: shape?.title ?? "", state: r.state });
+    }
+    if (patch.milestone !== undefined) {
+      await this.patch(this.repoPath(owner, repo, `/issues/${number}/milestone`), {
+        id: patch.milestone === 0 ? null : patch.milestone,
+      });
+    }
+    return shape ?? writtenIssueToShape({ number, title: "", state: "open" });
+  }
+
+  async createIssueComment(owner: string, repo: string, number: number, body: string): Promise<CommentShape> {
+    const r = await this.post<IssueComment>(this.repoPath(owner, repo, `/issues/${number}/comments`), { body });
+    return commentToShape(r);
+  }
+
+  // Returns the issue's labels after the set; the typed route wraps them as
+  // {labels}. Other call sites ignore the return.
+  async setIssueLabels(owner: string, repo: string, number: number, labels: number[]): Promise<LabelShape[]> {
+    const r = await this.put<{ labels: Label[] }>(this.repoPath(owner, repo, `/issues/${number}/labels`), { labels });
+    return (r.labels ?? []).map(toLabelShape);
+  }
+
+  async pinIssue(owner: string, repo: string, number: number): Promise<void> {
+    await this.post(this.repoPath(owner, repo, `/issues/${number}/pin`), {});
+  }
+
+  async unpinIssue(owner: string, repo: string, number: number): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/issues/${number}/pin`));
+  }
+
+  async createLabel(
+    owner: string,
+    repo: string,
+    opts: { name: string; color: string; description?: string; exclusive?: boolean; is_archived?: boolean },
+  ): Promise<LabelShape> {
+    const r = await this.post<Label>(this.repoPath(owner, repo, "/labels"), {
+      name: opts.name,
+      color: opts.color,
+      description: opts.description,
+      exclusive: opts.exclusive,
+    });
+    return toLabelShape(r);
+  }
+
+  async editLabel(
+    owner: string,
+    repo: string,
+    id: number,
+    patch: { name?: string; color?: string; description?: string; exclusive?: boolean; is_archived?: boolean },
+  ): Promise<LabelShape> {
+    const r = await this.patch<Label>(this.repoPath(owner, repo, `/labels/${id}`), patch);
+    return toLabelShape(r);
+  }
+
+  async deleteLabel(owner: string, repo: string, id: number): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/labels/${id}`));
+  }
+
+  async createMilestone(owner: string, repo: string, opts: { title: string; description?: string }): Promise<MilestoneShape> {
+    const r = await this.post<Milestone>(this.repoPath(owner, repo, "/milestones"), opts);
+    return milestoneToShape(r);
+  }
+
+  async editMilestone(
+    owner: string,
+    repo: string,
+    id: number,
+    patch: { title?: string; description?: string; state?: "open" | "closed" },
+  ): Promise<MilestoneShape> {
+    const r = await this.patch<Milestone>(this.repoPath(owner, repo, `/milestones/${id}`), patch);
+    return milestoneToShape(r);
+  }
+
+  async deleteMilestone(owner: string, repo: string, id: number): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/milestones/${id}`));
+  }
+
+  // The typed dependency routes take the dependency issue number in the body and
+  // return the updated issue as a compact {issue} dependency row.
+  async addIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<IssueShape> {
+    const r = await this.post<{ issue: DependencyRow }>(this.repoPath(owner, repo, `/issues/${number}/dependencies`), {
+      index: dependencyIndex,
+    });
+    return dependencyRowToShape(r.issue);
+  }
+
+  async removeIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<IssueShape> {
+    const r = await this.del<{ issue: DependencyRow }>(this.repoPath(owner, repo, `/issues/${number}/dependencies`), {
+      body: { index: dependencyIndex },
+    });
+    return dependencyRowToShape(r.issue);
+  }
+
   // ---- pulls / reviews ----
 
   async listPulls(
@@ -570,6 +769,117 @@ export class OriginCollaborationClient {
     return (r.reviews ?? []).map(reviewDtoToShape);
   }
 
+  // ---- pull / review writes ----
+
+  // The typed create route returns the PR metadata directly; it also de-dupes an
+  // existing head→base PR to 200. On a genuine empty-diff/validation reject it
+  // 409s, which surfaces here as a status-bearing error.
+  async createPull(
+    owner: string,
+    repo: string,
+    opts: { head: string; base: string; title: string; body: string },
+  ): Promise<PullShape> {
+    const r = await this.post<PrMeta>(this.repoPath(owner, repo, "/pulls"), opts);
+    return prMetaToPullShape(r);
+  }
+
+  // The forge editPull is one method; the typed API splits it (title/body PATCH,
+  // labels PUT, state via close/reopen). Milestone has no typed pull endpoint and
+  // is dropped. Title/body and labels return the updated PR; a state-only change
+  // re-reads it (callers of the state-only path ignore the return).
+  async editPull(
+    owner: string,
+    repo: string,
+    index: number,
+    patch: { title?: string; body?: string; state?: "open" | "closed"; labels?: number[]; milestone?: number },
+  ): Promise<PullShape> {
+    let pull: PullShape | undefined;
+    if (patch.title !== undefined || patch.body !== undefined) {
+      const tb: { title?: string; body?: string } = {};
+      if (patch.title !== undefined) tb.title = patch.title;
+      if (patch.body !== undefined) tb.body = patch.body;
+      const r = await this.patch<{ pull: PrMeta }>(this.repoPath(owner, repo, `/pulls/${index}`), tb);
+      pull = prMetaToPullShape(r.pull);
+    }
+    if (patch.labels !== undefined) {
+      const r = await this.put<{ pull: PrMeta }>(this.repoPath(owner, repo, `/pulls/${index}/labels`), { labels: patch.labels });
+      pull = prMetaToPullShape(r.pull);
+    }
+    if (patch.state !== undefined) {
+      await this.post(this.repoPath(owner, repo, `/pulls/${index}/${patch.state === "closed" ? "close" : "reopen"}`), {});
+    }
+    if (pull) return pull;
+    const fetched = await this.getPull(owner, repo, index);
+    if (!fetched) throw new RemoteCosheafError(404, `remote cosheaf 404: pull ${index} not found`);
+    return fetched;
+  }
+
+  async mergePull(
+    owner: string,
+    repo: string,
+    index: number,
+    opts: { Do: "merge" | "squash" | "rebase"; message?: string; force?: boolean },
+  ): Promise<void> {
+    await this.post(this.repoPath(owner, repo, `/pulls/${index}/merge`), { Do: opts.Do, force: opts.force ?? false });
+  }
+
+  // The typed verdict route accepts only a simple {event,body} and returns
+  // counts, not the review object; PENDING maps to the find-or-create route
+  // (which returns the new review id, the one field findOrCreatePendingReview
+  // reads). Inline diff-position comments have no typed endpoint, so that path
+  // throws. The synthesized review carries the fields callers read.
+  async createReview(
+    owner: string,
+    repo: string,
+    index: number,
+    opts: {
+      event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
+      body: string;
+      comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
+      commit_id?: string;
+    },
+  ): Promise<ReviewShape> {
+    if (opts.comments && opts.comments.length > 0) {
+      throw new Error("OriginCollaborationClient.createReview with inline review comments has no core endpoint");
+    }
+    if (opts.event === "PENDING") {
+      const r = await this.post<{ review_id: number }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review`), {});
+      return { id: r.review_id, body: opts.body, state: "PENDING", user: null, submitted_at: iso(0) };
+    }
+    const event = opts.event === "APPROVED" ? "APPROVE" : opts.event;
+    await this.post(this.repoPath(owner, repo, `/pulls/${index}/reviews`), { event, body: opts.body });
+    return { id: 0, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
+  }
+
+  // Submit a previously-created pending review; the typed route takes a
+  // lowercase verdict and returns {ok}. Callers ignore the return.
+  async submitPullReview(
+    owner: string,
+    repo: string,
+    index: number,
+    reviewId: number,
+    opts: { event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT"; body: string },
+  ): Promise<ReviewShape> {
+    const event = opts.event === "APPROVED" ? "approve" : opts.event === "REQUEST_CHANGES" ? "request_changes" : "comment";
+    await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
+      event,
+      body: opts.body,
+    });
+    return { id: reviewId, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
+  }
+
+  async deleteReviewComment(owner: string, repo: string, index: number, reviewId: number, commentId: number): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/pulls/${index}/comments/${commentId}`), { query: { review_id: reviewId } });
+  }
+
+  async createPullReviewRequests(owner: string, repo: string, index: number, reviewers: string[]): Promise<void> {
+    await this.post(this.repoPath(owner, repo, `/pulls/${index}/review-requests`), { reviewers });
+  }
+
+  async deletePullReviewRequests(owner: string, repo: string, index: number, reviewers: string[]): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/pulls/${index}/review-requests`), { body: { reviewers } });
+  }
+
   // ---- repo / settings reads ----
 
   async listBranches(owner: string, repo: string): Promise<BranchShape[]> {
@@ -588,6 +898,33 @@ export class OriginCollaborationClient {
   // required-approvals count.
   async getBranchProtection(owner: string, repo: string, branch: string): Promise<BranchProtectionShape | null> {
     const r = await this.get<{ min_approvals: number }>(this.repoPath(owner, repo, "/settings"));
+    return { branch_name: branch, required_approvals: r.min_approvals };
+  }
+
+  // The typed surface exposes the main-branch review policy only as
+  // PUT /settings {min_approvals}; both create and update map onto it (every
+  // caller targets "main"). Push-whitelist and non-main branches aren't
+  // expressible and aren't used by the migrated settings routes.
+  async createBranchProtection(
+    owner: string,
+    repo: string,
+    opts: { branch_name: string; required_approvals?: number; push_whitelist_usernames?: string[] },
+  ): Promise<BranchProtectionShape> {
+    const r = await this.put<{ min_approvals: number }>(this.repoPath(owner, repo, "/settings"), {
+      min_approvals: opts.required_approvals ?? 1,
+    });
+    return { branch_name: opts.branch_name, required_approvals: r.min_approvals };
+  }
+
+  async updateBranchProtection(
+    owner: string,
+    repo: string,
+    branch: string,
+    patch: { required_approvals?: number },
+  ): Promise<BranchProtectionShape> {
+    const r = await this.put<{ min_approvals: number }>(this.repoPath(owner, repo, "/settings"), {
+      min_approvals: patch.required_approvals,
+    });
     return { branch_name: branch, required_approvals: r.min_approvals };
   }
 

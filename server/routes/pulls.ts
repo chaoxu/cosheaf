@@ -29,7 +29,8 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
-import type { MergeFailure, MergeFailureReason, PrFileStatus, PrMeta, PrState } from "../../shared/review.js";
+import type { RepoCollaborator } from "../../shared/repo.js";
+import type { MergeFailure, MergeFailureReason, PrCommit, PrFileStatus, PrMeta, PrState } from "../../shared/review.js";
 import { validBranchName } from "../branch-path.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
@@ -468,6 +469,21 @@ pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
   return c.json({ files });
 });
 
+pulls.get("/:owner/:repo/pulls/:n/commits", async (c) => {
+  const n = parsePositiveIntId(c.req.param("n"));
+  if (n === null) return c.json(...bad("bad pull number"));
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const commits = await collab.listPullCommits(owner, repo, n);
+  const out: PrCommit[] = commits.map((commit) => ({
+    sha: commit.sha,
+    message: commit.commit.message,
+    author_username: commit.author?.login ?? null,
+    author_name: commit.commit.author?.name ?? null,
+    date: toEpochMsOrNull(commit.commit.author?.date),
+  }));
+  return c.json({ commits: out });
+});
+
 pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
@@ -845,6 +861,30 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "reviewed" });
   return c.json({ ok: true });
+});
+
+// ---------- repo access + topics (settings surface reads) ----------
+
+pulls.get("/:owner/:repo/collaborators", async (c) => {
+  const { fj, owner, repo } = repoCtxForgejo(c);
+  const members = await fj.listCollaborators(owner, repo);
+  // Forgejo's collaborators list returns users without their access role, so
+  // resolve each role separately. A read for a single user may 403 (the caller
+  // can't see another user's permission) — degrade that entry to null rather
+  // than failing the whole list.
+  const collaborators: RepoCollaborator[] = await Promise.all(
+    members.map(async (member) => ({
+      login: member.login,
+      permission: await fj.getRepoPermission(owner, repo, member.login).then((p) => (p === "none" ? null : p)).catch(() => null),
+    })),
+  );
+  return c.json({ collaborators });
+});
+
+pulls.get("/:owner/:repo/topics", async (c) => {
+  const { fj, owner, repo } = repoCtxForgejo(c);
+  const topics = await fj.listRepoTopics(owner, repo);
+  return c.json({ topics });
 });
 
 // ---------- settings (min_approvals on main) ----------

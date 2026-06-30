@@ -6,14 +6,14 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppEnv } from "../types.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { Role } from "../../shared/roles.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
-import { classifyMergeFailure, pulls } from "./pulls.js";
+import type { AppEnv } from "../types.js";
 import { branches } from "./branches.js";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { fakeForgejo, freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { classifyMergeFailure, pulls } from "./pulls.js";
+import { responseEmpty as empty, fakeForgejo, freshTestDb, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("pulls");
 
@@ -1515,5 +1515,103 @@ describe("POST /pulls duplicate-PR resolution (#181)", () => {
     });
 
     expect(res.status).toBe(409);
+  });
+
+  it("GET /pulls/:n/commits returns stable Cosheaf commit DTOs", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7/commits", (c) =>
+          c.json([
+            {
+              sha: "abc123",
+              commit: { message: "first commit", author: { name: "Alice", email: "a@x", date: "2026-05-16T00:00:00Z" } },
+              author: { login: "alice" },
+            },
+            {
+              sha: "def456",
+              commit: { message: "second commit", author: { name: "Nobody", email: "n@x", date: "2026-05-17T00:00:00Z" } },
+              author: null,
+            },
+          ]),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/commits", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      commits: [
+        { sha: "abc123", message: "first commit", author_username: "alice", author_name: "Alice", date: Date.parse("2026-05-16T00:00:00Z") },
+        { sha: "def456", message: "second commit", author_username: null, author_name: "Nobody", date: Date.parse("2026-05-17T00:00:00Z") },
+      ],
+    });
+  });
+
+  it("GET /collaborators returns logins with resolved permissions", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "admin");
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/collaborators", (c) => c.json([{ login: "alice" }, { login: "bob" }]));
+        forge.get("/api/v1/repos/owner/w/collaborators/alice/permission", (c) => c.json({ permission: "admin" }));
+        forge.get("/api/v1/repos/owner/w/collaborators/bob/permission", (c) => c.json({ permission: "write" }));
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/collaborators", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      collaborators: [
+        { login: "alice", permission: "admin" },
+        { login: "bob", permission: "write" },
+      ],
+    });
+  });
+
+  it("GET /collaborators degrades an unreadable permission to null", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/collaborators", (c) => c.json([{ login: "bob" }]));
+        forge.get("/api/v1/repos/owner/w/collaborators/bob/permission", (c) => c.text("forbidden", 403 as 200));
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/collaborators", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ collaborators: [{ login: "bob", permission: null }] });
+  });
+
+  it("GET /topics returns the repo topics", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/topics", (c) => c.json({ topics: ["cosheaf-format-coflat", "math"] }));
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/topics", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ topics: ["cosheaf-format-coflat", "math"] });
   });
 });
