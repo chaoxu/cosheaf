@@ -19,6 +19,7 @@
 // avatar/email, label `scope`), but the issue routes only read the subset that
 // survives — see the #263 report.
 
+import type { LineComment } from "../../shared/comments.js";
 import type {
   DependencyRow,
   IssueComment,
@@ -26,8 +27,10 @@ import type {
   IssueRow,
   Label,
   Milestone,
+  NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
+import type { PrFile, PrMeta } from "../../shared/review.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -40,6 +43,15 @@ type CommentShape = Awaited<ReturnType<CollaborationClient["listIssueComments"]>
 type LabelShape = Awaited<ReturnType<CollaborationClient["listLabels"]>>[number];
 type MilestoneShape = Awaited<ReturnType<CollaborationClient["listMilestones"]>>[number];
 type TimelineShape = Awaited<ReturnType<CollaborationClient["listIssueTimeline"]>>[number];
+// pulls / reviews / repo / notifications surfaces (this pass).
+type PullShape = NonNullable<Awaited<ReturnType<CollaborationClient["getPull"]>>>;
+type ReviewShape = Awaited<ReturnType<CollaborationClient["listReviews"]>>[number];
+type PullFileShape = Awaited<ReturnType<CollaborationClient["listPullFiles"]>>[number];
+type PullCommentShape = Awaited<ReturnType<CollaborationClient["listPullComments"]>>[number];
+type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
+type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
+type BranchProtectionShape = NonNullable<Awaited<ReturnType<CollaborationClient["getBranchProtection"]>>>;
+type NotificationThreadShape = Awaited<ReturnType<CollaborationClient["listRepoNotifications"]>>[number];
 
 // True when no core is connected for this workspace; the migrated collaboration
 // routes branch on this to show the Connect form instead of data.
@@ -238,6 +250,131 @@ function timelineToShape(e: TimelineEvent): TimelineShape {
   };
 }
 
+// ----- pulls / reviews -----
+
+// The typed PR DTO drops the forge pull `id`, the issue-style comment count, and
+// `updated_at`; the pull surfaces don't read `id`/`updated_at` and render the
+// missing comment count as 0 (its own list-row fallback). head `label` is unread.
+function prMetaToPullShape(p: PrMeta): PullShape {
+  return {
+    id: 0,
+    number: p.number,
+    title: p.title,
+    body: p.body,
+    state: p.state,
+    merged: p.merged,
+    merged_at: isoOrNull(p.merged_at),
+    mergeable: p.mergeable,
+    additions: p.additions_total,
+    deletions: p.deletions_total,
+    changed_files: p.files_changed,
+    labels: p.labels.map(toLabelShape),
+    milestone: p.milestone ? { id: p.milestone.id, title: p.milestone.title, state: "open" } : null,
+    requested_reviewers: p.requested_reviewers.map((login) => ({ id: 0, login })),
+    requested_reviewers_teams: p.requested_reviewer_teams.map((name) => ({ id: 0, name })),
+    head: { ref: p.head_ref, sha: p.head_sha, label: "" },
+    base: { ref: p.base_ref, sha: p.base_sha },
+    user: { id: 0, login: p.author_username },
+    comments: 0,
+    created_at: iso(p.created_at),
+    updated_at: iso(p.created_at),
+  };
+}
+
+// The typed reviews endpoint flattens to a verdict DTO (and pre-filters out
+// PENDING/DISMISSED). Re-expand `decision` to the forge review state the
+// timeline reads; `comment` (nullable) becomes the review body.
+interface ReviewDto {
+  id: number;
+  username: string;
+  decision: "approve" | "request_changes" | "comment";
+  comment: string | null;
+  created_at: number;
+}
+function reviewDtoToShape(r: ReviewDto): ReviewShape {
+  const state =
+    r.decision === "approve" ? "APPROVED" : r.decision === "request_changes" ? "REQUEST_CHANGES" : "COMMENT";
+  return {
+    id: r.id,
+    body: r.comment ?? "",
+    state,
+    user: { id: 0, login: r.username },
+    submitted_at: iso(r.created_at),
+  };
+}
+
+function prFileToShape(f: PrFile): PullFileShape {
+  return {
+    filename: f.path,
+    status: f.status,
+    additions: f.additions,
+    deletions: f.deletions,
+    changes: f.additions + f.deletions,
+    previous_filename: f.previous_path,
+  };
+}
+
+// Invert the typed comment DTO's resolved (line, side) back into the forge's
+// absolute position / original_position so the route's resolveLineComment
+// re-derives the same anchor: head → position, base → original_position; an
+// outdated comment (line === null) leaves both at 0. commit/diff_hunk fields are
+// unread by the PR routes.
+function lineCommentToShape(cm: LineComment): PullCommentShape {
+  const position = cm.side === "head" && cm.line !== null ? cm.line : 0;
+  const original = cm.side === "base" && cm.line !== null ? cm.line : 0;
+  return {
+    id: cm.id,
+    pull_request_review_id: cm.review_id,
+    path: cm.path,
+    body: cm.body,
+    position,
+    original_position: original,
+    commit_id: "",
+    original_commit_id: "",
+    diff_hunk: "",
+    user: { id: 0, login: cm.author_username },
+    created_at: iso(cm.created_at),
+    updated_at: iso(cm.updated_at),
+  };
+}
+
+// The /branches list returns a branch object (the local content backend's
+// WsBranch, plus a commit `url`); the pull/settings surfaces read only `name`.
+interface BranchJson {
+  name: string;
+  commit?: { id?: string; timestamp?: string; author?: { username?: string; name?: string; email?: string } };
+}
+function branchToShape(b: BranchJson): BranchShape {
+  return { name: b.name, commit: { id: b.commit?.id ?? "", timestamp: b.commit?.timestamp, author: b.commit?.author } };
+}
+
+// ----- notifications -----
+
+// NotificationRow is already the mapped repo-notification DTO; rebuild the
+// thread shape the notification routes re-map. The typed feed is unread-only, so
+// `unread` is true and `pinned` false. Synthesize a subject url carrying the
+// issue/pull number so the routes' number-from-url parse still resolves.
+function notificationRowToShape(row: NotificationRow): NotificationThreadShape {
+  const type = row.kind === "pr" ? "Pull" : "Issue";
+  const segment = row.kind === "pr" ? "pulls" : "issues";
+  const name = row.repo.includes("/") ? row.repo.slice(row.repo.indexOf("/") + 1) : row.repo;
+  return {
+    id: row.id,
+    unread: true,
+    pinned: false,
+    updated_at: iso(row.updated_at),
+    url: "",
+    subject: {
+      title: row.title,
+      url: `/${segment}/${row.number}`,
+      latest_comment_url: "",
+      html_url: row.url,
+      type,
+    },
+    repository: { full_name: row.repo, name },
+  };
+}
+
 type IssueListOpts = {
   state?: "open" | "closed" | "all";
   page?: number;
@@ -282,6 +419,38 @@ export class OriginCollaborationClient {
     }
     const res = await this.fetchFn(url.toString(), {
       headers: { authorization: `Bearer ${this.token}`, accept: "application/json" },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  // For resources the forge client returns as `T | null` on a 404 (getPull,
+  // getRepo): swallow the status-bearing 404 into null, re-throw anything else.
+  private async getOrNull<T>(
+    path: string,
+    query?: Record<string, string | number | undefined>,
+  ): Promise<T | null> {
+    try {
+      return await this.get<T>(path, query);
+    } catch (err) {
+      if (err instanceof RemoteCosheafError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  private async post<T>(path: string, body: unknown): Promise<T> {
+    const res = await this.fetchFn(`${this.base}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.token}`,
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -345,6 +514,100 @@ export class OriginCollaborationClient {
   async listIssueBlocks(owner: string, repo: string, number: number): Promise<IssueShape[]> {
     const r = await this.get<{ issues: DependencyRow[] }>(this.repoPath(owner, repo, `/issues/${number}/blocks`));
     return (r.issues ?? []).map(dependencyRowToShape);
+  }
+
+  // ---- pulls / reviews ----
+
+  async listPulls(
+    owner: string,
+    repo: string,
+    opts:
+      | { state?: "open" | "closed" | "all"; labels?: number[]; milestone?: number; poster?: string; sort?: string }
+      | "open"
+      | "closed"
+      | "all" = {},
+  ): Promise<PullShape[]> {
+    const o = typeof opts === "string" ? { state: opts } : opts;
+    const r = await this.get<{ pulls: PrMeta[] }>(this.repoPath(owner, repo, "/pulls"), {
+      state: o.state,
+      sort: "sort" in o ? o.sort : undefined,
+      milestone: "milestone" in o ? o.milestone : undefined,
+      // The typed /pulls route reads the poster filter from the `author` query.
+      author: "poster" in o ? o.poster : undefined,
+      labels: "labels" in o ? o.labels?.join(",") : undefined,
+    });
+    return (r.pulls ?? []).map(prMetaToPullShape);
+  }
+
+  async getPull(owner: string, repo: string, index: number): Promise<PullShape | null> {
+    const r = await this.getOrNull<{ pull: PrMeta }>(this.repoPath(owner, repo, `/pulls/${index}`));
+    return r ? prMetaToPullShape(r.pull) : null;
+  }
+
+  // The typed /pulls/:n/files response carries each file's per-file patch slice
+  // (each starting at a `diff --git` header), so concatenating them reproduces a
+  // unified diff the route's split-by-file parser re-splits correctly.
+  async getPullDiff(owner: string, repo: string, index: number): Promise<string> {
+    const r = await this.get<{ files: PrFile[] }>(this.repoPath(owner, repo, `/pulls/${index}/files`));
+    return (r.files ?? [])
+      .map((f) => f.patch)
+      .filter((patch) => patch.length > 0)
+      .join("\n");
+  }
+
+  async listPullFiles(owner: string, repo: string, index: number): Promise<PullFileShape[]> {
+    const r = await this.get<{ files: PrFile[] }>(this.repoPath(owner, repo, `/pulls/${index}/files`));
+    return (r.files ?? []).map(prFileToShape);
+  }
+
+  async listPullComments(owner: string, repo: string, index: number): Promise<PullCommentShape[]> {
+    const r = await this.get<{ comments: LineComment[] }>(this.repoPath(owner, repo, `/pulls/${index}/comments`));
+    return (r.comments ?? []).map(lineCommentToShape);
+  }
+
+  async listReviews(owner: string, repo: string, index: number): Promise<ReviewShape[]> {
+    const r = await this.get<{ reviews: ReviewDto[] }>(this.repoPath(owner, repo, `/pulls/${index}/reviews`));
+    return (r.reviews ?? []).map(reviewDtoToShape);
+  }
+
+  // ---- repo / settings reads ----
+
+  async listBranches(owner: string, repo: string): Promise<BranchShape[]> {
+    const r = await this.get<BranchJson[]>(this.repoPath(owner, repo, "/branches"));
+    return (r ?? []).map(branchToShape);
+  }
+
+  async getRepo(owner: string, repo: string): Promise<RepoShape | null> {
+    // The typed repo route returns a forge-repo-compatible object (description,
+    // visibility, default branch, owner, topics-when-present).
+    return this.getOrNull<RepoShape>(this.repoPath(owner, repo, ""));
+  }
+
+  // The typed surface exposes only the main-branch review policy via /settings;
+  // every caller reads this for "main", and `min_approvals` is that branch's
+  // required-approvals count.
+  async getBranchProtection(owner: string, repo: string, branch: string): Promise<BranchProtectionShape | null> {
+    const r = await this.get<{ min_approvals: number }>(this.repoPath(owner, repo, "/settings"));
+    return { branch_name: branch, required_approvals: r.min_approvals };
+  }
+
+  async renderMarkdown(owner: string, repo: string, text: string): Promise<string> {
+    const r = await this.post<{ html: string }>(this.repoPath(owner, repo, "/markdown/render"), { text });
+    return r.html ?? "";
+  }
+
+  // ---- notifications ----
+
+  // The typed feed is already filtered to unread Issue/Pull threads, so the
+  // forge-style status/subject opts are accepted for signature parity and
+  // ignored here.
+  async listRepoNotifications(
+    owner: string,
+    repo: string,
+    _opts: { statusTypes?: readonly string[]; subjectTypes?: readonly string[] } = {},
+  ): Promise<NotificationThreadShape[]> {
+    const r = await this.get<{ notifications: NotificationRow[] }>(this.repoPath(owner, repo, "/notifications"));
+    return (r.notifications ?? []).map(notificationRowToShape);
   }
 }
 

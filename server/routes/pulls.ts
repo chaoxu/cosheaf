@@ -26,29 +26,31 @@
 //
 // Branches live in routes/branches.ts.
 
-import { Hono, type Context, type MiddlewareHandler } from "hono";
-import type { AppEnv } from "../types.js";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
+import type { LineComment } from "../../shared/comments.js";
+import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
+import type { MergeFailure, MergeFailureReason, PrFileStatus, PrMeta, PrState } from "../../shared/review.js";
+import { validBranchName } from "../branch-path.js";
+import type { CollaborationClient } from "../collaboration-client.js";
+import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
+import { splitUnifiedDiff } from "../diff-splitter.js";
+import { type Forgejo, ForgejoError, mergePullWithRetry } from "../forgejo.js";
+import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
+import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
+import { allDocumentFormats } from "../format-registry.js";
 import {
+  repoCtxCollab,
   repoCtxForgejo,
   requireAdminFresh,
   requireAuth,
   requireMembership,
   requireWriteOnMutation,
 } from "../middleware.js";
-import { ForgejoError, mergePullWithRetry, type Forgejo } from "../forgejo.js";
-import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
-import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
-import { invalidateRepoTrees } from "../tree-cache.js";
-import { splitUnifiedDiff } from "../diff-splitter.js";
-import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
 import { prSideRefAndPath } from "../pr-side.js";
-import { safeRel } from "./files.js";
-import { validBranchName } from "../branch-path.js";
-import { allDocumentFormats } from "../format-registry.js";
+import { invalidateRepoTrees } from "../tree-cache.js";
+import type { AppEnv } from "../types.js";
 import { lockedReindexWorkspaceFromForgejo, setWorkspaceFormatTopic } from "../workspace-provisioning.js";
-import type { LineComment } from "../../shared/comments.js";
-import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
-import type { MergeFailure, MergeFailureReason, PrMeta, PrFileStatus, PrState } from "../../shared/review.js";
+import { safeRel } from "./files.js";
 import { parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
 import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
 import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
@@ -112,12 +114,12 @@ function parsePullSort(value: string | undefined): PullSort {
 
 // Latest-per-user approval count, ignoring older reviews from the same user.
 async function approvalCounts(
-  fj: Forgejo,
+  collab: CollaborationClient,
   owner: string,
   repo: string,
   prNumber: number,
 ): Promise<{ approvals: number; rejections: number }> {
-  const reviews = await fj.listReviews(owner, repo, prNumber);
+  const reviews = await collab.listReviews(owner, repo, prNumber);
   const latestByUser = new Map<string, ForgejoReview>();
   const ordered = [...reviews].sort((a, b) => {
     const at = toEpochMs(a.submitted_at);
@@ -150,7 +152,7 @@ async function approvalCounts(
 type MergeFailureResult = { ok: false; status: number; message: string; transientExhausted: boolean };
 
 async function mergeWithRetry(
-  fj: Forgejo,
+  collab: CollaborationClient,
   owner: string,
   repo: string,
   prNumber: number,
@@ -158,7 +160,7 @@ async function mergeWithRetry(
 ): Promise<{ ok: true } | MergeFailureResult> {
   const Do = opts.Do ?? "squash";
   try {
-    await mergePullWithRetry(() => fj.mergePull(owner, repo, prNumber, { Do, force: opts.force }));
+    await mergePullWithRetry(() => collab.mergePull(owner, repo, prNumber, { Do, force: opts.force }));
     return { ok: true };
   } catch (err) {
     return forgejoErrToResult(err);
@@ -277,8 +279,8 @@ function mergeStatusMessage(status: number): string {
 
 
 pulls.get("/:owner/:repo/pulls", async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const rows = await fj.listPulls(owner, repo, {
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const rows = await collab.listPulls(owner, repo, {
     state: parseListState(c.req.query("state")),
     labels: parsePositiveIntList(c.req.query("labels")),
     milestone: parsePositiveInt(c.req.query("milestone")),
@@ -293,8 +295,8 @@ pulls.get("/:owner/:repo/pulls", async (c) => {
 pulls.get("/:owner/:repo/pulls/:n", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   return c.json({ pull: prMeta(pull) });
 });
@@ -308,9 +310,9 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
   if (!validBranchName(base)) return c.json(...bad("valid base branch name required"));
   if (body.title !== undefined && typeof body.title !== "string") return c.json(...bad("title must be a string"));
   if (body.body !== undefined && typeof body.body !== "string") return c.json(...bad("body must be a string"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   try {
-    const pr = await fj.createPull(owner, repo, {
+    const pr = await collab.createPull(owner, repo, {
       head,
       base,
       title: typeof body.title === "string" ? body.title : head,
@@ -332,7 +334,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
       // internal forge URL.
       // Don't silently swallow a dedup-lookup failure into the generic message —
       // log it (with the request id) so a real listPulls error is debuggable.
-      const all = await fj.listPulls(owner, repo, "all").catch((e: unknown) => {
+      const all = await collab.listPulls(owner, repo, "all").catch((e: unknown) => {
         console.error(`[${c.get("requestId") ?? ""}] dedup listPulls failed for ${owner}/${repo}: ${e instanceof Error ? e.message : String(e)}`);
         return [];
       });
@@ -349,8 +351,8 @@ pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const parsed = parseTitleBodyPatch(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.editPull(owner, repo, n, parsed.patch);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const pull = await collab.editPull(owner, repo, n, parsed.patch);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
   return c.json({ pull: prMeta(pull) });
 });
@@ -364,14 +366,15 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
     return c.json(...bad("labels must be positive integer ids"));
   }
   const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab } = repoCtxCollab(c);
   const [allLabels, pull] = await Promise.all([
     fj.listLabels(owner, repo),
-    fj.getPull(owner, repo, n),
+    collab.getPull(owner, repo, n),
   ]);
   if (!pull) return c.json(...notFound());
   const validation = validateLabelSelection(labelIds, allLabels, pull.labels ?? []);
   if (!validation.ok) return c.json(...bad(validation.message));
-  const updated = await fj.editPull(owner, repo, n, { labels: labelIds });
+  const updated = await collab.editPull(owner, repo, n, { labels: labelIds });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
   return c.json({ pull: prMeta(updated) });
 });
@@ -382,13 +385,14 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const body = await readJsonObject(c.req);
   const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab } = repoCtxCollab(c);
   // Admins can bypass the required-approvals branch protection rule by
   // passing `force: true`. Callers default to false (normal review flow).
   if (body.Do !== undefined && body.Do !== "squash" && body.Do !== "merge" && body.Do !== "rebase") {
     return c.json(...bad("Do must be squash, merge, or rebase"));
   }
   const mergeMethod = body.Do;
-  const result = await mergeWithRetry(fj, owner, repo, n, { Do: mergeMethod, force: body.force === true });
+  const result = await mergeWithRetry(collab, owner, repo, n, { Do: mergeMethod, force: body.force === true });
   if (!result.ok) {
     // Capture Forgejo's raw reason server-side (it carries internal URLs we must
     // not leak to the client) so a failure can be debugged by request id.
@@ -397,7 +401,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
     // the agent can tell a real conflict from transient / needs-approval / stale
     // and pick the right recovery instead of blindly retrying (#94).
     if (result.status === 409) {
-      const pull = await fj.getPull(owner, repo, n);
+      const pull = await collab.getPull(owner, repo, n);
       // Only the ambiguous case (PR present, no real conflict, not already
       // merged) needs the review-gate read to tell "blocked" from "transient".
       const ambiguous = pull !== null && pull.merged !== true && pull.mergeable !== false;
@@ -407,7 +411,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
     return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);
   }
-  const pull = await fj.getPull(owner, repo, n);
+  const pull = await collab.getPull(owner, repo, n);
   // Never delete main even if it was somehow the head (mirrors the web route).
   if (pull && pull.head.ref && pull.head.ref !== "main") await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
   // Invalidate eagerly so the post-merge tree fetch sees the new main
@@ -422,8 +426,8 @@ pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  await fj.editPull(owner, repo, n, { state: "closed" });
+  const { collab, owner, repo } = repoCtxCollab(c);
+  await collab.editPull(owner, repo, n, { state: "closed" });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
   return c.json({ ok: true });
 });
@@ -432,8 +436,8 @@ pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  await fj.editPull(owner, repo, n, { state: "open" });
+  const { collab, owner, repo } = repoCtxCollab(c);
+  await collab.editPull(owner, repo, n, { state: "open" });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reopened" });
   return c.json({ ok: true });
 });
@@ -443,10 +447,10 @@ pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
 pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const [metas, unified] = await Promise.all([
-    fj.listPullFiles(owner, repo, n),
-    fj.getPullDiff(owner, repo, n),
+    collab.listPullFiles(owner, repo, n),
+    collab.getPullDiff(owner, repo, n),
   ]);
   const patches = splitUnifiedDiff(unified);
   const byPath = new Map(patches.map((p) => [p.path, p]));
@@ -475,9 +479,10 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   if (side !== "base" && side !== "head")
     return c.json(...bad("side must be base or head"));
   const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab } = repoCtxCollab(c);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  const file = { path, previous_path: side === "base" ? await previousPathFor(fj, owner, repo, n, path) : undefined };
+  const file = { path, previous_path: side === "base" ? await previousPathFor(collab, owner, repo, n, path) : undefined };
   const read = prSideRefAndPath(pull, file, side);
   try {
     const content = await fj.getRawFile(owner, repo, read.ref, read.path);
@@ -489,8 +494,8 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
   }
 });
 
-async function previousPathFor(fj: Forgejo, owner: string, repo: string, n: number, path: string): Promise<string | undefined> {
-  const files = await fj.listPullFiles(owner, repo, n);
+async function previousPathFor(collab: CollaborationClient, owner: string, repo: string, n: number, path: string): Promise<string | undefined> {
+  const files = await collab.listPullFiles(owner, repo, n);
   return files.find((file) => file.filename === path)?.previous_filename;
 }
 
@@ -512,8 +517,8 @@ function parseOptionalReviewBody(value: unknown): { ok: true; body: string } | {
 pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const reviews = await fj.listReviews(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const reviews = await collab.listReviews(owner, repo, n);
   const out = reviews
     .filter((r) => r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "COMMENT")
     .map((r) => ({
@@ -528,7 +533,7 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
       comment: r.body || null,
       created_at: toEpochMs(r.submitted_at),
     }));
-  const counts = await approvalCounts(fj, owner, repo, n);
+  const counts = await approvalCounts(collab, owner, repo, n);
   return c.json({ reviews: out, approvals: counts.approvals, rejections: counts.rejections });
 });
 
@@ -544,20 +549,20 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   if (!reviewBody.ok) return c.json(...bad(reviewBody.message));
 
   const ws = c.get("workspace");
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (EVENT_MAP[reviewEvent] !== "COMMENT" && pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
-  await fj.createReview(owner, repo, n, {
+  await collab.createReview(owner, repo, n, {
     event: EVENT_MAP[reviewEvent],
     body: reviewBody.body,
   });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reviewed" });
 
-  const counts = await approvalCounts(fj, owner, repo, n);
+  const counts = await approvalCounts(collab, owner, repo, n);
   return c.json({ ok: true, approvals: counts.approvals, rejections: counts.rejections });
 });
 
@@ -571,10 +576,10 @@ function parseReviewers(raw: unknown): string[] | null {
 pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const [pull, reviewers] = await Promise.all([
-    fj.getPull(owner, repo, n),
-    fj.listPullReviewers(owner, repo),
+    collab.getPull(owner, repo, n),
+    collab.listPullReviewers(owner, repo),
   ]);
   if (!pull) return c.json(...notFound());
   return c.json({
@@ -590,9 +595,9 @@ pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const body = await readJsonObject(c.req);
   const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  await fj.createPullReviewRequests(owner, repo, n, reviewers);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  await collab.createPullReviewRequests(owner, repo, n, reviewers);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
   return c.json({ pull: prMeta(pull) }, 201);
@@ -604,9 +609,9 @@ pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const body = await readJsonObject(c.req);
   const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  await fj.deletePullReviewRequests(owner, repo, n, reviewers);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  await collab.deletePullReviewRequests(owner, repo, n, reviewers);
+  const pull = await collab.getPull(owner, repo, n);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
   return c.json({ pull: pull ? prMeta(pull) : null });
 });
@@ -630,13 +635,13 @@ function parseCommentInput(raw: unknown): CommentInput | null {
 }
 
 async function resolveLinePosition(
-  fj: Forgejo,
+  collab: CollaborationClient,
   owner: string,
   repo: string,
   n: number,
   input: CommentInput,
 ): Promise<{ new_position?: number; old_position?: number } | { error: string }> {
-  const unified = await fj.getPullDiff(owner, repo, n);
+  const unified = await collab.getPullDiff(owner, repo, n);
   const filePatch = splitUnifiedDiff(unified).find((p) => p.path === input.path)?.patch;
   if (!filePatch) return { error: "file not part of this PR" };
   const pos = fileLineToWritePosition(filePatch, input.line, input.side);
@@ -645,25 +650,25 @@ async function resolveLinePosition(
 }
 
 async function requirePullComment(
-  fj: Forgejo,
+  collab: CollaborationClient,
   owner: string,
   repo: string,
   pullNumber: number,
   commentId: number,
 ): Promise<ForgejoPullReviewComment | null> {
-  const comments = await fj.listPullComments(owner, repo, pullNumber);
+  const comments = await collab.listPullComments(owner, repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
 
 pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   // Comment line/side come straight from Forgejo's position/original_position
   // (absolute file lines), so the read path no longer needs the unified diff.
   const [allComments, metas] = await Promise.all([
-    fj.listPullComments(owner, repo, n),
-    fj.listPullFiles(owner, repo, n),
+    collab.listPullComments(owner, repo, n),
+    collab.listPullFiles(owner, repo, n),
   ]);
   const status = new Map(metas.map((m) => [m.filename, m.status]));
   const out: LineComment[] = allComments.map((cm) => {
@@ -699,14 +704,14 @@ pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
       400,
     );
   const ws = c.get("workspace");
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (pull.state === "closed") return c.json(...forbidden("cannot comment on a closed pull request"));
-  const pos = await resolveLinePosition(fj, owner, repo, n, input);
+  const pos = await resolveLinePosition(collab, owner, repo, n, input);
   if ("error" in pos) return c.json(...bad(pos.error));
 
-  await fj.createReview(owner, repo, n, {
+  await collab.createReview(owner, repo, n, {
     event: "COMMENT",
     body: "",
     comments: [{ path: input.path, body: input.body, ...pos }],
@@ -724,7 +729,8 @@ pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
   const { fj, owner, repo } = repoCtxForgejo(c);
-  const comment = await requirePullComment(fj, owner, repo, n, cid);
+  const { collab } = repoCtxCollab(c);
+  const comment = await requirePullComment(collab, owner, repo, n, cid);
   if (!comment) return c.json(...notFound("comment not found"));
   await fj.editIssueComment(owner, repo, cid, text);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
@@ -738,11 +744,11 @@ pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   if (cid === null) return c.json(...bad("bad comment id"));
   if (rid === null) return c.json(...bad("bad review id"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const comment = await requirePullComment(fj, owner, repo, n, cid);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const comment = await requirePullComment(collab, owner, repo, n, cid);
   if (!comment) return c.json(...notFound("comment not found"));
   if (comment.pull_request_review_id !== rid) return c.json(...bad("review id does not match comment"));
-  await fj.deleteReviewComment(owner, repo, n, rid, cid);
+  await collab.deleteReviewComment(owner, repo, n, rid, cid);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
 });
@@ -750,16 +756,16 @@ pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
 // ---------- pending reviews ----------
 
 async function findOrCreatePendingReview(
-  fj: Forgejo,
+  collab: CollaborationClient,
   owner: string,
   repo: string,
   n: number,
   forgejoUsername: string,
 ): Promise<number> {
-  const reviews = await fj.listReviews(owner, repo, n);
+  const reviews = await collab.listReviews(owner, repo, n);
   const existing = reviews.find((r) => r.state === "PENDING" && r.user?.login === forgejoUsername);
   if (existing) return existing.id;
-  const created = await fj.createReview(owner, repo, n, {
+  const created = await collab.createReview(owner, repo, n, {
     event: "PENDING",
     body: "(pending)",
   });
@@ -771,14 +777,14 @@ async function requireOwnPendingReview(
   n: number,
   rid: number,
 ): Promise<ForgejoReview | Response> {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
-  const reviews = await fj.listReviews(owner, repo, n);
+  const reviews = await collab.listReviews(owner, repo, n);
   const review = reviews.find((item) => item.id === rid);
   if (!review || review.state !== "PENDING" || review.user?.login !== c.get("user").username) {
     return c.json(...notFound("pending review not found"));
@@ -789,12 +795,12 @@ async function requireOwnPendingReview(
 pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const pull = await fj.getPull(owner, repo, n);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   if (pull.user?.login === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
-  const review_id = await findOrCreatePendingReview(fj, owner, repo, n, c.get("user").username);
+  const review_id = await findOrCreatePendingReview(collab, owner, repo, n, c.get("user").username);
   return c.json({ review_id });
 });
 
@@ -805,12 +811,12 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
   const ws = c.get("workspace");
   const input = parseCommentInput(await readJsonBody(c.req));
   if (!input) return c.json(...bad("path, line, side, body required"));
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const review = await requireOwnPendingReview(c, n, rid);
   if (review instanceof Response) return review;
-  const pos = await resolveLinePosition(fj, owner, repo, n, input);
+  const pos = await resolveLinePosition(collab, owner, repo, n, input);
   if ("error" in pos) return c.json(...bad(pos.error));
-  await fj.addCommentToReview(owner, repo, n, rid, {
+  await collab.addCommentToReview(owner, repo, n, rid, {
     path: input.path,
     body: input.body,
     ...pos,
@@ -830,10 +836,10 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   if (!Object.hasOwn(eventMap, event)) return c.json(...bad("invalid event"));
   const reviewBody = parseOptionalReviewBody(body.body);
   if (!reviewBody.ok) return c.json(...bad(reviewBody.message));
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const review = await requireOwnPendingReview(c, n, rid);
   if (review instanceof Response) return review;
-  await fj.submitPullReview(owner, repo, n, rid, {
+  await collab.submitPullReview(owner, repo, n, rid, {
     event: eventMap[event as keyof typeof eventMap],
     body: reviewBody.body,
   });

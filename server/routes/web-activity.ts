@@ -8,25 +8,25 @@ import {
 } from "../activity-feed.js";
 import type { ForgejoActivity, ForgejoNotificationThread } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
+import { parsePositiveIntId } from "./query-params.js";
 import {
-  timeEl,
   htmlResponse,
   notFoundPage,
   positiveInt,
   redirect,
   repoHref,
-  userLink,
+  timeEl,
   urlPath,
-  webRoute,
+  userLink,
   type WebCtx,
+  webRoute,
 } from "./web-context.js";
-import { emptyHtml, html, type Html } from "./web-html.js";
+import { emptyHtml, type Html, html } from "./web-html.js";
 import { repoPageShell } from "./web-page.js";
-import { parsePositiveIntId } from "./query-params.js";
 
 export function registerNotificationActivityRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/notifications", webRoute(async (_c, ctx) => {
-  const threads = await ctx.fj.listRepoNotifications(ctx.owner, ctx.repo, {
+  const threads = await ctx.collab.listRepoNotifications(ctx.owner, ctx.repo, {
     statusTypes: ["unread"],
     subjectTypes: ["Issue", "Pull"],
   });
@@ -38,19 +38,19 @@ web.get("/:owner/:repo/notifications", webRoute(async (_c, ctx) => {
 web.post("/:owner/:repo/notifications/:id/read", webRoute(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return notFoundPage(ctx.user, "Notification not found");
-  const thread = await ctx.fj.getNotificationThread(id).catch(() => null);
+  const thread = await ctx.collab.getNotificationThread(id).catch(() => null);
   if (!thread || thread.repository.full_name !== `${ctx.owner}/${ctx.repo}`) return notFoundPage(ctx.user, "Notification not found");
-  await ctx.fj.markNotificationRead(id);
+  await ctx.collab.markNotificationRead(id);
   return redirect(repoHref(ctx.owner, ctx.repo, "/notifications"));
 }));
 
 web.post("/:owner/:repo/notifications/read-all", webRoute(async (_c, ctx) => {
-  await ctx.fj.markRepoNotificationsRead(ctx.owner, ctx.repo);
+  await ctx.collab.markRepoNotificationsRead(ctx.owner, ctx.repo);
   return redirect(repoHref(ctx.owner, ctx.repo, "/notifications"));
 }));
 
 web.get("/:owner/:repo/activity", webRoute(async (_c, ctx) => {
-  const activities = await ctx.fj.listRepoActivities(ctx.owner, ctx.repo, { limit: 50 }).catch(() => []);
+  const activities = await ctx.collab.listRepoActivities(ctx.owner, ctx.repo, { limit: 50 }).catch(() => []);
   return htmlResponse(
     repoPageShell(ctx, "activity", `Activity - ${ctx.repo}`, html`<div class="page-title compact"><h1>Activity</h1></div>
         ${activityList(ctx, activities)}`),

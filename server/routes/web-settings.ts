@@ -1,44 +1,44 @@
 import type { Hono } from "hono";
-import { ROLES, type Role } from "../../shared/roles.js";
 import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
-import { ForgejoError } from "../forgejo.js";
-import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { isFormatTopic } from "../../shared/document-format.js";
+import { ROLES, type Role } from "../../shared/roles.js";
+import { ForgejoError } from "../forgejo.js";
+import { is404 } from "../forgejo-errors.js";
+import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalidateWorkspaceTitleCache } from "../middleware.js";
-import type { AppEnv } from "../types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
+import type { AppEnv } from "../types.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
 import { setWorkspaceMember } from "../workspace-members.js";
+import { normalizeLabelColor } from "./label-utils.js";
 import {
   badRequestPage,
   displayLogin,
   htmlResponse,
-  notFoundPage,
   nonNegativeInt,
+  notFoundPage,
   positiveInt,
   redirect,
   repoHref,
   stringField,
   textField,
+  type WebCtx,
   webRoute,
   webRouteForAdmin,
-  type WebCtx,
 } from "./web-context.js";
-import { is404 } from "../forgejo-errors.js";
-import { html, type Html } from "./web-html.js";
+import { type Html, html } from "./web-html.js";
 import { addDisclosure, labelChip, repoPageShell } from "./web-page.js";
-import { normalizeLabelColor } from "./label-utils.js";
 import { pageShell } from "./web-shell.js";
 
 export function registerSettingsRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/settings", webRoute(async (c, ctx) => {
   const isAdmin = ctx.ws.role === "admin";
   const [repo, protection, labels, milestones, collaborators, branches] = await Promise.all([
-    ctx.fj.getRepo(ctx.owner, ctx.repo).catch(() => null),
-    ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null),
+    ctx.collab.getRepo(ctx.owner, ctx.repo).catch(() => null),
+    ctx.collab.getBranchProtection(ctx.owner, ctx.repo, "main").catch(() => null),
     ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
-    isAdmin ? ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
+    isAdmin ? ctx.collab.listCollaborators(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
     isAdmin ? ctx.fj.listBranches(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
   ]);
   const accessUpdated = c.req.query("access");
@@ -85,9 +85,9 @@ web.post("/:owner/:repo/settings", webRouteForAdmin(async (c, ctx) => {
     return badRequestPage(ctx.user, "Required approvals must be a non-negative integer.");
   }
   return runFreshAdminSettingsAction(ctx, async () => {
-    const current = await ctx.fj.getBranchProtection(ctx.owner, ctx.repo, "main");
-    if (current) await ctx.fj.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
-    else await ctx.fj.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
+    const current = await ctx.collab.getBranchProtection(ctx.owner, ctx.repo, "main");
+    if (current) await ctx.collab.updateBranchProtection(ctx.owner, ctx.repo, "main", { required_approvals: approvals });
+    else await ctx.collab.createBranchProtection(ctx.owner, ctx.repo, { branch_name: "main", required_approvals: approvals });
   });
 }));
 
@@ -201,7 +201,7 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
   const visibility = stringField(form.visibility);
   const defaultBranch = stringField(form.default_branch) ?? undefined;
   return runFreshAdminSettingsAction(ctx, async () => {
-    await ctx.fj.editRepo(ctx.owner, ctx.repo, {
+    await ctx.collab.editRepo(ctx.owner, ctx.repo, {
       description,
       private: visibility === "private" ? true : visibility === "public" ? false : undefined,
       default_branch: defaultBranch,
@@ -210,8 +210,8 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
     // Topics: the user edits only the free topics; the cosheaf-format-* topic is
     // managed by the document format and must survive a topics edit.
     if (form.topics !== undefined) {
-      const existing = await ctx.fj.listRepoTopics(ctx.owner, ctx.repo).catch(() => []);
-      await ctx.fj.replaceRepoTopics(ctx.owner, ctx.repo, mergeRepoTopics(existing, stringField(form.topics) ?? ""));
+      const existing = await ctx.collab.listRepoTopics(ctx.owner, ctx.repo).catch(() => []);
+      await ctx.collab.replaceRepoTopics(ctx.owner, ctx.repo, mergeRepoTopics(existing, stringField(form.topics) ?? ""));
     }
   });
 }));
@@ -224,7 +224,7 @@ web.post("/:owner/:repo/settings/access/remove", webRouteForAdmin(async (c, ctx)
     ctx,
     async () => {
       try {
-        await ctx.fj.removeCollaborator(ctx.owner, ctx.repo, username);
+        await ctx.collab.removeCollaborator(ctx.owner, ctx.repo, username);
       } catch (err) {
         if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
       }
@@ -250,7 +250,7 @@ web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
     return redirect("/");
   }
   try {
-    await ctx.fj.deleteRepo(ctx.owner, ctx.repo);
+    await ctx.collab.deleteRepo(ctx.owner, ctx.repo);
   } catch (err) {
     if (!(err instanceof ForgejoError && err.status === 404)) throw err;
   }

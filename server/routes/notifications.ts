@@ -1,12 +1,12 @@
 import { Hono } from "hono";
-import type { AppEnv } from "../types.js";
-import { repoCtxForgejo, requireAuth, requireMembership } from "../middleware.js";
 import { notificationChannel } from "../../shared/conventions.js";
-import type { ForgejoNotificationThread } from "../forgejo.js";
 import type { NotificationRow } from "../../shared/issues.js";
+import type { ForgejoNotificationThread } from "../forgejo.js";
 import { toEpochMs } from "../forgejo-types.js";
-import { bad, notFound } from "./responses.js";
+import { repoCtxCollab, requireAuth, requireMembership } from "../middleware.js";
+import type { AppEnv } from "../types.js";
 import { parsePositiveIntId } from "./query-params.js";
+import { bad, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
 
 export const notifications = new Hono<AppEnv>();
@@ -81,8 +81,8 @@ function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
 // GET /api/v1/repos/:owner/:repo/notifications — unread notifications for the
 // calling user in this workspace's Forgejo repo.
 notifications.get("/:owner/:repo/notifications", async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const threads = await fj.listRepoNotifications(owner, repo, {
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const threads = await collab.listRepoNotifications(owner, repo, {
     statusTypes: ["unread"],
     subjectTypes: ["Issue", "Pull"],
   });
@@ -93,17 +93,17 @@ notifications.get("/:owner/:repo/notifications", async (c) => {
 notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
   const id = parsePositiveIntId(c.req.param("id"));
   if (id === null) return c.json(...bad("bad id"));
-  const { fj } = repoCtxForgejo(c);
+  const { collab } = repoCtxCollab(c);
   // A stale/cross-repo/unreadable id should 404, not 500 — normalize the fetch.
-  const thread = await fj.getNotificationThread(id).catch(() => null);
+  const thread = await collab.getNotificationThread(id).catch(() => null);
   if (!thread || thread.repository?.full_name !== c.get("workspace").slug) return c.json(...notFound());
-  await fj.markNotificationRead(id);
+  await collab.markNotificationRead(id);
   return c.json({ ok: true });
 });
 
 // POST /api/v1/repos/:owner/:repo/notifications/read-all
 notifications.post("/:owner/:repo/notifications/read-all", async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  await fj.markRepoNotificationsRead(owner, repo);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  await collab.markRepoNotificationsRead(owner, repo);
   return c.json({ ok: true });
 });

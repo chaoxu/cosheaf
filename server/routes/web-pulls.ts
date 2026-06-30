@@ -9,6 +9,8 @@ import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { safeRel } from "./files.js";
+import { branchIcon } from "./icons.js";
+import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
 import {
   badRequestPage,
   forbiddenPage,
@@ -25,30 +27,28 @@ import {
   textField,
   urlPath,
   userLink,
+  type WebCtx,
+  type WebListState,
   webRoute,
   webRouteForAdmin,
   webRouteForWrite,
-  type WebCtx,
-  type WebListState,
 } from "./web-context.js";
-import { emptyHtml, html, type Html } from "./web-html.js";
-import { branchIcon } from "./icons.js";
-import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
+import { emptyHtml, type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { webCommentEditorAssets } from "./web-shell.js";
+import { branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import {
   diffModeControls,
   mapLineComments,
+  type PrFileAssetPreviewPaths,
   parseDiffMode,
   parseDiffShape,
-  type PrFileAssetPreviewPaths,
-  prFileVersions,
   prFilesHref,
+  prFileVersions,
   renderFileCommentSummary,
   renderPrFileView,
   splitDiffByFile,
 } from "./web-pulls-diff.js";
-import { USERNAME_DATALIST_ID, branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle } from "./web-page.js";
+import { webCommentEditorAssets } from "./web-shell.js";
 import {
   isVisibleReview,
   labelSelectionPatch,
@@ -58,8 +58,8 @@ import {
   pullEditPage,
   pullStateForm,
   renderPullTimeline,
-  reviewForms,
   reviewersPanel,
+  reviewForms,
   threadDescription,
   threadLayout,
   threadParticipantsBar,
@@ -70,7 +70,7 @@ async function pullCommentFor(
   pullNumber: number,
   commentId: number,
 ): Promise<ForgejoPullReviewComment | null> {
-  const comments = await ctx.fj.listPullComments(ctx.owner, ctx.repo, pullNumber);
+  const comments = await ctx.collab.listPullComments(ctx.owner, ctx.repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
 
@@ -87,7 +87,7 @@ export function registerPullRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
   const filters = parsePullListFilters(c);
   const [pulls, labels, milestones] = await Promise.all([
-    ctx.fj.listPulls(ctx.owner, ctx.repo, {
+    ctx.collab.listPulls(ctx.owner, ctx.repo, {
       state: filters.state,
       labels: filters.labels.length > 0 ? filters.labels : undefined,
       milestone: filters.milestone,
@@ -120,7 +120,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
-  const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
+  const branches = await ctx.collab.listBranches(ctx.owner, ctx.repo);
   const head = stringField(c.req.query("head"));
   const base = stringField(c.req.query("base")) ?? "main";
   return htmlResponse(
@@ -130,7 +130,7 @@ web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
 
 web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   const form = await c.req.parseBody();
-  const branches = await ctx.fj.listBranches(ctx.owner, ctx.repo);
+  const branches = await ctx.collab.listBranches(ctx.owner, ctx.repo);
   const head = stringField(form.head);
   const base = stringField(form.base) ?? "main";
   const title = stringField(form.title);
@@ -157,7 +157,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   }
   if (!head || !title) return badRequestPage(ctx.user, "Pull request head and title are required.");
   try {
-    const pull = await ctx.fj.createPull(ctx.owner, ctx.repo, { head, base, title, body });
+    const pull = await ctx.collab.createPull(ctx.owner, ctx.repo, { head, base, title, body });
     c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "opened" });
     return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
   } catch (err) {
@@ -167,7 +167,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
     // A 409 usually means a PR already exists for this head->base (open OR closed-
     // unmerged); navigate to it instead of erroring (#181). Other 409/422 get a
     // clean canned message.
-    const existing = (await ctx.fj.listPulls(ctx.owner, ctx.repo, "all").catch(() => []))
+    const existing = (await ctx.collab.listPulls(ctx.owner, ctx.repo, "all").catch(() => []))
       .find((p) => p.head.ref === head && p.base.ref === base && !p.merged);
     if (existing) return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${existing.number}`));
     return htmlResponse(
@@ -186,11 +186,11 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   const canRequestReview = ctx.ws.role !== "read" && pull.state !== "closed";
   const [issueComments, reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
     ctx.fj.listIssueComments(ctx.owner, ctx.repo, pull.number),
-    ctx.fj.listReviews(ctx.owner, ctx.repo, pull.number),
-    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number),
+    ctx.collab.listReviews(ctx.owner, ctx.repo, pull.number),
+    ctx.collab.listPullComments(ctx.owner, ctx.repo, pull.number),
     ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number),
-    ctx.fj.listPullCommits(ctx.owner, ctx.repo, pull.number),
-    canRequestReview ? ctx.fj.listPullReviewers(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
+    ctx.collab.listPullCommits(ctx.owner, ctx.repo, pull.number),
+    canRequestReview ? ctx.collab.listPullReviewers(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
     ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const timelineHtml = await renderPullTimeline(ctx, pull.number, issueComments, reviews, comments, timeline, commits);
@@ -276,7 +276,7 @@ web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => 
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   const milestonePatch = milestoneFormValue(form.milestone);
   if (!milestonePatch.ok) return badRequestPage(ctx.user, milestonePatch.message);
-  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, {
+  await ctx.collab.editPull(ctx.owner, ctx.repo, pull.number, {
     title,
     body,
     labels: labelPatch.labels,
@@ -303,7 +303,7 @@ web.post("/:owner/:repo/pulls/:number/state", webRouteForWrite(async (c, ctx) =>
   if (pull.merged) return forbiddenPage(ctx.user);
   const state = stringField((await c.req.parseBody()).state);
   if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
-  await ctx.fj.editPull(ctx.owner, ctx.repo, pull.number, { state });
+  await ctx.collab.editPull(ctx.owner, ctx.repo, pull.number, { state });
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: state === "closed" ? "closed" : "reopened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -315,7 +315,7 @@ web.post("/:owner/:repo/pulls/:number/review-requests", webRouteForWrite(async (
   const form = await c.req.parseBody({ all: true });
   const reviewers = stringFields(form.reviewers);
   if (reviewers.length === 0) return badRequestPage(ctx.user, "At least one reviewer is required.");
-  await ctx.fj.createPullReviewRequests(ctx.owner, ctx.repo, pull.number, reviewers);
+  await ctx.collab.createPullReviewRequests(ctx.owner, ctx.repo, pull.number, reviewers);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -325,7 +325,7 @@ web.post("/:owner/:repo/pulls/:number/review-requests/delete", webRouteForWrite(
   if (pull.state === "closed") return forbiddenPage(ctx.user);
   const reviewer = stringField((await c.req.parseBody()).reviewer);
   if (!reviewer) return badRequestPage(ctx.user, "Reviewer is required.");
-  await ctx.fj.deletePullReviewRequests(ctx.owner, ctx.repo, pull.number, [reviewer]);
+  await ctx.collab.deletePullReviewRequests(ctx.owner, ctx.repo, pull.number, [reviewer]);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -339,7 +339,7 @@ web.post("/:owner/:repo/pulls/:number/reviews", webRoute(async (c, ctx) => {
   if (event !== "APPROVED" && event !== "REQUEST_CHANGES" && event !== "COMMENT")
     return badRequestPage(ctx.user, "Review event is required.");
   if (event !== "COMMENT" && pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
-  await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
+  await ctx.collab.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -364,7 +364,7 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRoute(async (c, c
   const comment = await pullCommentFor(ctx, pull.number, id);
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
   if (comment.pull_request_review_id !== reviewId) return badRequestPage(ctx.user, "Review id does not match comment.");
-  await ctx.fj.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
+  await ctx.collab.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -402,11 +402,11 @@ web.post("/:owner/:repo/pulls/:number/comments", webRoute(async (c, ctx) => {
   if (!path || (side !== "base" && side !== "head") || !line || !body) {
     return badRequestPage(ctx.user, "Line comment requires path, side, line, and body.");
   }
-  const patch = splitDiffByFile(await ctx.fj.getPullDiff(ctx.owner, ctx.repo, pull.number)).get(path);
+  const patch = splitDiffByFile(await ctx.collab.getPullDiff(ctx.owner, ctx.repo, pull.number)).get(path);
   if (!patch) return badRequestPage(ctx.user, "File is not part of this pull request.");
   const pos = fileLineToWritePosition(patch, line, side);
   if (!pos) return badRequestPage(ctx.user, "Line is not part of the pull request diff.");
-  await ctx.fj.createReview(ctx.owner, ctx.repo, pull.number, {
+  await ctx.collab.createReview(ctx.owner, ctx.repo, pull.number, {
     event: "COMMENT",
     body: "",
     comments: [{ path, body, ...pos }],
@@ -435,7 +435,7 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   // a real content conflict.
   const force = (await c.req.parseBody()).force === "true";
   try {
-    await mergePullWithRetry(() => ctx.fj.mergePull(ctx.owner, ctx.repo, pull.number, { Do: "squash", force }));
+    await mergePullWithRetry(() => ctx.collab.mergePull(ctx.owner, ctx.repo, pull.number, { Do: "squash", force }));
   } catch (err) {
     if (!(err instanceof ForgejoError)) throw err;
     // Never surface Forgejo's raw body — it carries the internal backend URL.
@@ -444,7 +444,7 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
     // Re-read the PR — the pre-merge snapshot's mergeable can be stale/null. A real
     // content conflict (mergeable === false) isn't an approvals problem and "Merge
     // anyway" won't fix it; a still-null mergeable is transient, not approvals (#7).
-    const fresh2 = blocked ? await ctx.fj.getPull(ctx.owner, ctx.repo, pull.number).catch(() => null) : null;
+    const fresh2 = blocked ? await ctx.collab.getPull(ctx.owner, ctx.repo, pull.number).catch(() => null) : null;
     const msg = !blocked
       ? "The merge service is unavailable — try again in a moment."
       : fresh2?.mergeable === false
@@ -469,7 +469,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const [files, allComments] = await Promise.all([
     pullFiles(ctx, pull.number),
-    ctx.fj.listPullComments(ctx.owner, ctx.repo, pull.number),
+    ctx.collab.listPullComments(ctx.owner, ctx.repo, pull.number),
   ]);
   const selected = c.req.query("file") ?? files[0]?.path ?? "";
   const file = files.find((f) => f.path === selected) ?? files[0] ?? null;
@@ -543,13 +543,13 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
 async function pullForParam(ctx: WebCtx, raw: string | undefined): Promise<ForgejoPull | null> {
   const number = positiveInt(raw);
   if (!number) return null;
-  return ctx.fj.getPull(ctx.owner, ctx.repo, number);
+  return ctx.collab.getPull(ctx.owner, ctx.repo, number);
 }
 
 async function pullFiles(ctx: WebCtx, number: number) {
   const [metas, unified] = await Promise.all([
-    ctx.fj.listPullFiles(ctx.owner, ctx.repo, number),
-    ctx.fj.getPullDiff(ctx.owner, ctx.repo, number),
+    ctx.collab.listPullFiles(ctx.owner, ctx.repo, number),
+    ctx.collab.getPullDiff(ctx.owner, ctx.repo, number),
   ]);
   const sections = splitDiffByFile(unified);
   return metas.map((meta) => ({
