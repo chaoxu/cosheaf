@@ -29,7 +29,7 @@ import {
   heartbeatClaim,
   releaseClaim,
 } from "../issue-claims.js";
-import { repoCtxCollab, repoCtxForgejo, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import { repoCtxCollab, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { normalizeLabelColor, parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
 import { parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
@@ -658,8 +658,8 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
 // clients get parsed issue refs and normalized timestamps.
 issues.get("/:owner/:repo/activities", async (c) => {
   const limit = parseBoundedPositiveInt(c.req.query("limit"), 50, 100);
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const raw = await fj.listRepoActivities(owner, repo, { limit });
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const raw = await collab.listRepoActivities(owner, repo, { limit });
   const safe = collapseNoisyEditBranchCommits(raw ?? []);
   return c.json({
     activities: safe.map<ActivityRow>((item) => {
