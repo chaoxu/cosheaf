@@ -35,7 +35,7 @@ import { validBranchName } from "../branch-path.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
-import { type Forgejo, ForgejoError, mergePullWithRetry } from "../forgejo.js";
+import { ForgejoError, mergePullWithRetry } from "../forgejo.js";
 import { errorStatus, is4xx } from "../forgejo-errors.js";
 import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
 import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
@@ -212,15 +212,15 @@ export interface ReviewGate {
 // Best-effort: a missing protection or unreadable reviews collapse to a
 // non-blocking gate so we don't mislabel a transient failure as blocked.
 async function readReviewGate(
-  fj: Forgejo,
+  collab: CollaborationClient,
   owner: string,
   repo: string,
   prNumber: number,
   baseRef: string,
 ): Promise<ReviewGate> {
   const [bp, counts] = await Promise.all([
-    fj.getBranchProtection(owner, repo, baseRef).catch(() => null),
-    approvalCounts(fj, owner, repo, prNumber).catch(() => null),
+    collab.getBranchProtection(owner, repo, baseRef).catch(() => null),
+    approvalCounts(collab, owner, repo, prNumber).catch(() => null),
   ]);
   if (!counts) return { requiredApprovals: 0, approvals: 0, rejections: 0 };
   return { requiredApprovals: bp?.required_approvals ?? 0, approvals: counts.approvals, rejections: counts.rejections };
@@ -374,10 +374,9 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
   if (labelIds === null) {
     return c.json(...bad("labels must be positive integer ids"));
   }
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const { collab } = repoCtxCollab(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const [allLabels, pull] = await Promise.all([
-    fj.listLabels(owner, repo),
+    collab.listLabels(owner, repo),
     collab.getPull(owner, repo, n),
   ]);
   if (!pull) return c.json(...notFound());
@@ -414,7 +413,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
       // Only the ambiguous case (PR present, no real conflict, not already
       // merged) needs the review-gate read to tell "blocked" from "transient".
       const ambiguous = pull !== null && pull.merged !== true && pull.mergeable !== false;
-      const reviewGate = ambiguous ? await readReviewGate(fj, owner, repo, n, pull.base.ref) : null;
+      const reviewGate = ambiguous ? await readReviewGate(collab, owner, repo, n, pull.base.ref) : null;
       return c.json(classifyMergeFailure(pull, reviewGate, result.transientExhausted), 409);
     }
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
@@ -752,11 +751,10 @@ pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const { collab } = repoCtxCollab(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const comment = await requirePullComment(collab, owner, repo, n, cid);
   if (!comment) return c.json(...notFound("comment not found"));
-  await fj.editIssueComment(owner, repo, cid, text);
+  await collab.editIssueComment(owner, repo, cid, text);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
 });
@@ -874,8 +872,8 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
 // ---------- repo access + topics (settings surface reads) ----------
 
 pulls.get("/:owner/:repo/collaborators", async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const members = await fj.listCollaborators(owner, repo);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const members = await collab.listCollaborators(owner, repo);
   // Forgejo's collaborators list returns users without their access role, so
   // resolve each role separately. A read for a single user may 403 (the caller
   // can't see another user's permission) — degrade that entry to null rather
@@ -883,23 +881,23 @@ pulls.get("/:owner/:repo/collaborators", async (c) => {
   const collaborators: RepoCollaborator[] = await Promise.all(
     members.map(async (member) => ({
       login: member.login,
-      permission: await fj.getRepoPermission(owner, repo, member.login).then((p) => (p === "none" ? null : p)).catch(() => null),
+      permission: await collab.getRepoPermission(owner, repo, member.login).then((p) => (p === "none" ? null : p)).catch(() => null),
     })),
   );
   return c.json({ collaborators });
 });
 
 pulls.get("/:owner/:repo/topics", async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const topics = await fj.listRepoTopics(owner, repo);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const topics = await collab.listRepoTopics(owner, repo);
   return c.json({ topics });
 });
 
 // ---------- settings (min_approvals on main) ----------
 
 pulls.get("/:owner/:repo/settings", async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const bp = await fj.getBranchProtection(owner, repo, "main");
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const bp = await collab.getBranchProtection(owner, repo, "main");
   return c.json({
     min_approvals: bp?.required_approvals ?? 1,
     default_md_format: normalizeDocumentFormatId(c.get("workspace").defaultMdFormat),
