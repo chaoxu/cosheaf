@@ -84,6 +84,13 @@ async function run(dirArg: string | undefined, opts: { port?: string }): Promise
 
   const app = createApp({ config, db, localRegistry: registry });
 
+  // Loopback HTTP/1.1, no TLS — the right call for a single-user local tool:
+  // loopback can't be eavesdropped and `localhost` is already a secure context,
+  // so TLS would only add cert/trust friction. HTTP/2 would need that cert for no
+  // real gain on loopback. The one HTTP/1.1 caveat (~6 connections/origin) only
+  // bites when connections are pinned, so local mode keeps no idle long-lived
+  // connections (no notification SSE — see app.ts) and SSE handlers release on
+  // disconnect (see streamHubChannel), not on a timer.
   const server = serve({ fetch: app.fetch, port: config.port, hostname: "127.0.0.1" }, (info) => {
     const root = `http://127.0.0.1:${info.port}/`;
     // Land on the opened workspace when a dir was passed, else the switcher.
