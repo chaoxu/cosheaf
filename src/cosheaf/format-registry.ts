@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
+import type { RequestHandler } from "@chaoxu/coflat/editor-lazy";
 import {
   COFLAT_FORMAT_ID,
   DEFAULT_DOCUMENT_FORMAT_ID,
@@ -30,6 +31,7 @@ interface EditorProps {
   statusEvents?: EditorStatusEvents;
   assetUploader?: EditorAssetUploader;
   autocompleteSources?: readonly EditorAutocompleteSource[];
+  requestHandler?: RequestHandler;
   sidenotesCollapsed?: boolean;
 }
 

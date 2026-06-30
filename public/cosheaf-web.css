@@ -281,3 +281,45 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 /* mobile */
 @media(max-width:900px){#web-editor-root{margin:0}.web-editor-shell .cm-scroller{padding-right:0}.web-editor-outline{display:none}}
 @media(max-width:800px){.app-main{flex-direction:column}.app-sidebar{width:auto;flex-direction:row;align-items:center;flex-wrap:wrap;gap:4px 10px;padding:6px 8px;border-right:0;border-bottom:1px solid var(--cf-border)}.app-sidebar .sidebar-identity{padding:0 4px}.app-sidebar .sidebar-topnav{padding:0 4px}.sidebar-workspace{padding:0 6px;flex:none}.repo-tabs{flex-direction:row;flex-wrap:wrap;gap:2px 8px}.repo-tabs a{white-space:nowrap}.repo-tabs a.active{box-shadow:inset 0 -2px 0 var(--cf-accent)}.thread-layout{grid-template-columns:1fr}.thread-rail{position:static}.file-tree{display:none}.repo-clone{grid-template-columns:1fr}.repo-clone-row{flex-wrap:wrap}.repo-clone-row .clone-url{flex-basis:100%}.filter-panel,.branch-compare,.relation-grid{grid-template-columns:1fr}.filter-advanced-grid{grid-template-columns:1fr}.filter-basic{align-items:stretch}.filter-actions{width:100%}.list-row,.relation-row,.branch-row{grid-template-columns:1fr}.list-row.issue-row,.list-row.pull-row,.activity-row{grid-template-columns:1fr}.settings-section,.settings-row,.settings-inline-controls{grid-template-columns:1fr}.user-profile-header{grid-template-columns:1fr}.user-profile-edit{justify-self:start}.user-profile-main{grid-template-columns:72px minmax(0,1fr);gap:12px}.user-profile-avatar .avatar-chip,.user-profile-avatar .avatar-link{width:72px;height:72px}.user-profile-avatar .avatar-chip{font-size:24px}.user-profile-identity h1{font-size:28px}.chat-bubble{max-width:none}.chat-app{flex-direction:column;height:auto}.chat-sidebar{flex:none;width:auto;max-height:200px;border-right:0;border-bottom:1px solid var(--cf-border)}.chat-main-head{display:grid}}
+
+/* Bibliography file picker (document-properties panel "Browse…"). */
+.cosheaf-bib-picker {
+  border: 1px solid var(--cf-border);
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 18rem;
+  max-width: 90vw;
+  background: var(--cf-bg);
+  color: var(--cf-fg);
+}
+.cosheaf-bib-picker-title {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+.cosheaf-bib-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+.cosheaf-bib-picker-item {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  background: var(--cf-bg);
+  color: var(--cf-fg);
+  cursor: pointer;
+  font-family: var(--cf-font-mono, ui-monospace, monospace);
+}
+.cosheaf-bib-picker-item:hover {
+  background: var(--cf-hover);
+}
+.cosheaf-bib-picker-cancel {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  background: var(--cf-bg);
+  color: var(--cf-fg);
+  cursor: pointer;
+}

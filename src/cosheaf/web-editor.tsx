@@ -54,6 +54,8 @@ import {
   liveEditorSource,
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
+import type { RequestHandler } from "@chaoxu/coflat/editor-lazy";
+import { createBibliographyPicker } from "./bibliography-picker";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { getClientDocumentFormat } from "./format-registry";
 import type { MountedEditor } from "./document-format/coflat";
@@ -742,6 +744,18 @@ function WebEditor({
     [branchForWrite, busy, config.owner, config.path, config.repo, content, setEditorContent],
   );
 
+  const requestHandler = useMemo<RequestHandler>(
+    () => ({
+      openBibliographyPicker: createBibliographyPicker({
+        owner: config.owner,
+        repo: config.repo,
+        branch,
+        docPath: currentPath.trim() || config.path,
+      }),
+    }),
+    [config.owner, config.repo, config.path, branch, currentPath],
+  );
+
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
     () =>
       // `[@id]` cross-refs only resolve in Coflat workspaces; for
@@ -977,6 +991,7 @@ function WebEditor({
                 statusEvents={statusEvents}
                 assetUploader={assetUploader}
                 autocompleteSources={autocompleteSources}
+                requestHandler={requestHandler}
                 sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
               />
             ) : (

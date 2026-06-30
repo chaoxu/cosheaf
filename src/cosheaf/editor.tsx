@@ -14,6 +14,7 @@ import {
   type StatusEvents,
   type AssetUploader,
   type AutocompleteSource,
+  type RequestHandler,
   mountLazyEditor,
 } from "@chaoxu/coflat/editor-lazy";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
@@ -45,6 +46,8 @@ interface Props {
   assetUploader?: AssetUploader;
   /** Trigger-based suggestion sources, e.g. `[@`. */
   autocompleteSources?: readonly AutocompleteSource[];
+  /** Request/response host UI (e.g. the document-properties bibliography picker). */
+  requestHandler?: RequestHandler;
   sidenotesCollapsed?: boolean;
 }
 
@@ -105,6 +108,7 @@ export function MarkdownEditor({
   statusEvents,
   assetUploader,
   autocompleteSources,
+  requestHandler,
   sidenotesCollapsed,
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -118,12 +122,14 @@ export function MarkdownEditor({
   const saveRef = useRef(saveHandler);
   const statusRef = useRef(statusEvents);
   const assetRef = useRef(assetUploader);
+  const requestHandlerRef = useRef(requestHandler);
   onChangeRef.current = onChange;
   onDocumentChangeRef.current = onDocumentChange;
   const effectiveMode = coflatEditorMode(mode, readOnly);
   modeRef.current = effectiveMode;
   saveRef.current = saveHandler;
   statusRef.current = statusEvents;
+  requestHandlerRef.current = requestHandler;
   assetRef.current = assetUploader;
 
   useEffect(() => {
@@ -165,6 +171,13 @@ export function MarkdownEditor({
       cancel: (file) => assetRef.current?.cancel?.(file),
     };
 
+    const stableRequestHandler: RequestHandler | undefined = requestHandler
+      ? {
+          openBibliographyPicker: (req) =>
+            requestHandlerRef.current?.openBibliographyPicker?.(req) ?? Promise.resolve(null),
+        }
+      : undefined;
+
     const editor = mountLazyEditor({
       parent: containerRef.current,
       doc: value,
@@ -184,6 +197,7 @@ export function MarkdownEditor({
       ...(autocompleteSources && autocompleteSources.length > 0
         ? { autocompleteSources: autocompleteSources }
         : {}),
+      ...(stableRequestHandler ? { requestHandler: stableRequestHandler } : {}),
       ...(sidenotesCollapsed !== undefined ? { sidenotesCollapsed } : {}),
     });
     editorRef.current = editor;
