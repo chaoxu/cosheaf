@@ -128,7 +128,7 @@ function listChildDirs(dir: string): { name: string; path: string; git: boolean 
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function browsePage(user: string, dir: string, notice: string | null): string {
+function browsePage(user: string, dir: string, notice: string | null, signOut: boolean): string {
   const parent = dirname(dir);
   const home = homedir();
   const children = listChildDirs(dir);
@@ -164,10 +164,10 @@ function browsePage(user: string, dir: string, notice: string | null): string {
     }
     <p class="browse-back"><a href="/">← back to workspaces</a></p>
   </main>`;
-  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true }), body });
+  return pageShell({ title: "Pick a folder", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true, signOut }), body });
 }
 
-function switcherPage(registry: WorkspaceRegistry, user: string, notice: string | null): string {
+function switcherPage(registry: WorkspaceRegistry, user: string, notice: string | null, signOut: boolean): string {
   const workspaces = registry.list();
   const body = html`<main class="page workbench-home">
     <div class="page-title compact"><div><h1>Workspaces</h1></div></div>
@@ -188,13 +188,13 @@ function switcherPage(registry: WorkspaceRegistry, user: string, notice: string 
       </form>
     </div>
   </main>`;
-  return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true }), body });
+  return pageShell({ title: "Workspaces", user, sidebar: globalSidebar("workspaces", user, null, undefined, { profile: true, signOut }), body });
 }
 
 // The Workbench profile page: a git authorship identity (name + email) used to
 // sign commits when a folder's own git config has none. Stored centrally in the
 // registry config, not per-folder.
-function profilePage(registry: WorkspaceRegistry, user: string, notice: string | null): string {
+function profilePage(registry: WorkspaceRegistry, user: string, notice: string | null, signOut: boolean): string {
   const profile = registry.getProfile();
   const body = html`<main class="page workbench-home">
     <div class="page-title compact"><div><h1>Profile</h1></div></div>
@@ -210,7 +210,7 @@ function profilePage(registry: WorkspaceRegistry, user: string, notice: string |
       <div class="form-actions"><button class="button primary" type="submit">Save</button></div>
     </form>
   </main>`;
-  return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true }), body });
+  return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true, signOut }), body });
 }
 
 // The Workbench access-token sign-in page, shown only when COSHEAF_WORKBENCH_TOKEN
@@ -243,7 +243,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   // Home → the workspace switcher over all opened folders.
   localWeb.get(
     "/",
-    globalRoute((c) => htmlResponse(switcherPage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null))),
+    globalRoute((c) => htmlResponse(switcherPage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null, Boolean(c.get("config").accessToken)))),
   );
 
   // Folder picker: browse the server's filesystem to choose a folder. A browser
@@ -258,7 +258,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
       } catch (_err) {
         dir = homedir();
       }
-      return htmlResponse(browsePage(c.get("user").username, dir, c.req.query("toast") ?? null));
+      return htmlResponse(browsePage(c.get("user").username, dir, c.req.query("toast") ?? null, Boolean(c.get("config").accessToken)));
     }),
   );
 
@@ -293,7 +293,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   // Workbench profile (git authorship identity). Global, not per-workspace.
   localWeb.get(
     "/_profile",
-    globalRoute((c) => htmlResponse(profilePage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null))),
+    globalRoute((c) => htmlResponse(profilePage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null, Boolean(c.get("config").accessToken)))),
   );
   localWeb.post(
     "/_profile",
@@ -343,7 +343,9 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   });
   localWeb.get("/logout", (c) => {
     deleteCookie(c, WORKBENCH_COOKIE, { path: "/" });
-    return redirect(c.get("config").accessToken ? "/login" : "/");
+    // c.redirect so the cookie-clearing Set-Cookie survives (a fresh Response
+    // from the redirect() helper would drop it).
+    return c.redirect(c.get("config").accessToken ? "/login" : "/", 303);
   });
 
   // Tier 2: after the editor opens a PR it navigates to /:owner/:repo/pulls/:n.

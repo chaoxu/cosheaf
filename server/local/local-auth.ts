@@ -52,7 +52,10 @@ export function localAuthGate(): MiddlewareHandler<AppEnv> {
     if (!expected) return next();
     if (EXEMPT_PATHS.has(c.req.path)) return next();
     if (hasWorkbenchAccess(c, expected)) return next();
-    if (c.req.path.startsWith("/api/")) return c.json({ error: "unauthorized" }, 401);
+    // `code: "unauthorized"` so the editor/reader island's api.ts bounces to
+    // /login when a remote session's cookie expires mid-edit (it keys the
+    // redirect on the code, not the status alone).
+    if (c.req.path.startsWith("/api/")) return c.json({ error: "unauthorized", code: "unauthorized" }, 401);
     return c.redirect(`/login?next=${encodeURIComponent(c.req.path)}`, 303);
   };
 }

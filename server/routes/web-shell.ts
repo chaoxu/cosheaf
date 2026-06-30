@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DEFAULT_LOCALE, type LocaleId, localeDir, makeT, type T } from "../../shared/i18n/index.js";
@@ -95,13 +95,14 @@ export function globalSidebar(
   user?: string,
   avatarSrc: string | null = null,
   t: T = enT,
-  opts: { siteAdmin?: boolean; profile?: boolean } = {},
+  opts: { siteAdmin?: boolean; profile?: boolean; signOut?: boolean } = {},
 ): Html {
   return html`${sidebarIdentity(user, active === "notifications", avatarSrc, t, active === "account", active === "help")}
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
       ${opts.profile ? html`<a class="${active === "account" ? "active" : ""}" href="/_profile">Profile</a>` : emptyHtml}
       ${opts.siteAdmin ? html`<a class="${active === "admin" ? "active" : ""}" href="/admin">Admin</a>` : emptyHtml}
+      ${opts.signOut ? html`<a href="/logout" data-testid="workbench-signout">Sign out</a>` : emptyHtml}
     </nav>`;
 }
 

@@ -45,6 +45,11 @@ describe("local Workbench access gate", () => {
       expect((await app.request("/me/notes")).status).toBe(200);
     });
 
+    it("renders no Sign out link when there is no token", async () => {
+      const res = await localApp(null).request("/");
+      expect(await res.text()).not.toContain('data-testid="workbench-signout"');
+    });
+
     it("bounces /login to the switcher (no auth to perform)", async () => {
       const res = await localApp(null).request("/login");
       expect(res.status).toBe(303);
@@ -59,9 +64,23 @@ describe("local Workbench access gate", () => {
       expect(res.headers.get("location")).toBe(`/login?next=${encodeURIComponent("/me/notes")}`);
     });
 
-    it("401s an unauthenticated API call", async () => {
+    it("401s an unauthenticated API call with code:unauthorized (so the island bounces to /login)", async () => {
       const res = await localApp(TOKEN).request("/api/v1/repos/me/notes/tree?branch=main");
       expect(res.status).toBe(401);
+      expect(((await res.json()) as { code?: string }).code).toBe("unauthorized");
+    });
+
+    it("renders a Sign out link in the switcher chrome when token auth is on", async () => {
+      const res = await localApp(TOKEN).request("/", { headers: { cookie: `cosheaf_wb=${TOKEN}` } });
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain('data-testid="workbench-signout"');
+    });
+
+    it("logout clears the cookie and bounces to /login", async () => {
+      const res = await localApp(TOKEN).request("/logout", { headers: { cookie: `cosheaf_wb=${TOKEN}` } });
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe("/login");
+      expect(res.headers.getSetCookie().some((c) => /^cosheaf_wb=/.test(c) && /Max-Age=0|Expires=/i.test(c))).toBe(true);
     });
 
     it("accepts a correct Bearer token on the API", async () => {
