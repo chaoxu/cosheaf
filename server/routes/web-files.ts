@@ -115,6 +115,21 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
   );
 }));
 
+// "More" menu listing alternate representations of a Coflat document (PDF
+// export, raw source). Rendered identically in the read view and at the top of
+// the editor shell, so the export affordances are reachable in both.
+function fileRepresentationsMenu(owner: string, repo: string, branch: string, rel: string): Html {
+  return html`<div class="doc-reader-chrome">
+    <details class="doc-reader-more">
+      <summary>More</summary>
+      <div class="doc-reader-more-menu" aria-label="File representations">
+        <a href="${pdfExportOptionsHref(owner, repo, branch, rel)}">PDF</a>
+        <a href="${rawFileHref(owner, repo, branch, rel)}">Raw</a>
+      </div>
+    </details>
+  </div>`;
+}
+
 web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const { owner, repo, backend, ws, user } = ctx;
   // Direct write-mode (local Workbench): edit the resolved ref in place rather
@@ -208,15 +223,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       : null;
   const fileHref = `${repoHref(owner, repo, "/src/branch")}/${urlPath(resolved.branch)}/${urlPath(rel)}`;
   const readerChrome = coflatMarkdownDocument
-    ? html`<div class="doc-reader-chrome">
-        <details class="doc-reader-more">
-          <summary>More</summary>
-          <div class="doc-reader-more-menu" aria-label="File representations">
-            <a href="${pdfExportOptionsHref(ctx.owner, ctx.repo, resolved.branch, rel)}">PDF</a>
-            <a href="${rawFileHref(ctx.owner, ctx.repo, resolved.branch, rel)}">Raw</a>
-          </div>
-        </details>
-      </div>`
+    ? fileRepresentationsMenu(ctx.owner, ctx.repo, resolved.branch, rel)
     : emptyHtml;
   // Coflat-rendered markdown gets a shared document rail: view-switch actions
   // at the top and the table of contents below. The reader island fills the TOC
@@ -372,6 +379,7 @@ async function editPageResponse(
   return htmlResponse(
     repoPageShell(ctx, "files", `Edit ${rel}`, coflatMarkdownEdit ? html`
         <section class="edit-page" data-edit-shell data-initial-mode="${initialMode}" data-mode="${initialMode}">
+          ${fileRepresentationsMenu(ctx.owner, ctx.repo, readBranch, rel)}
           <div
             id="web-editor-root"
             data-owner="${ctx.owner}"

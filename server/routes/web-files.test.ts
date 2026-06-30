@@ -159,7 +159,9 @@ describe("web file editor route", () => {
     expect(body).toContain('data-can-open-pull="1"');
     expect(body).toContain("/src/cosheaf/web-edit-shell.ts");
     expect(body).not.toContain("/src/cosheaf/web-reader.ts");
-    expect(body).not.toContain('class="doc-reader-chrome"');
+    // The editor shell surfaces the same "More" (PDF/Raw export) menu the read
+    // view has, at the top.
+    expect(body).toContain('class="doc-reader-chrome"');
 
     const sourceRes = await appFor(db).request("/owner/w/src/branch/main/notes.md?view=source", { headers: authHeaders(token) });
     expect(sourceRes.status).toBe(200);
