@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { IssueClaim } from "../shared/issues.js";
 
-// Optional live-work leases (#95): ephemeral, local coordination state with no
-// Forgejo source. A claim is an exclusive lease per (workspace, issue): a
-// second runner gets a 409 carrying the active claim so it knows who holds it.
-// Leases expire and are disposable; nothing here is durable knowledge.
+// Optional live-work leases (#95): ephemeral, local advisory coordination state
+// with no Forgejo or Origin API authority. A claim is an exclusive lease only
+// inside this Cosheaf server process and workspace sidecar: a second runner gets
+// a 409 carrying the active claim so it can avoid duplicate work. Leases expire
+// and are disposable; nothing here is durable knowledge or collaboration state.
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 // Bound the lease so a crashed runner can never hold an issue forever.

@@ -54,6 +54,21 @@ Cosheaf Workbench into a second server or a local Forgejo clone.
   git state is pushed or translated into a server branch, then the server owns
   the PR lifecycle.
 
+### Issue Claims
+
+`issue_claims` are local advisory coordination leases. They are stored in the
+SQLite sidecar to help automation attached to one Cosheaf server process avoid
+duplicating work for a short TTL, but they are not Forgejo issues, not Origin
+API authority, and not durable collaboration state.
+
+- A claim is meaningful only within the Cosheaf server process and workspace
+  sidecar that created it.
+- Claims may be dropped, expired, or rebuilt away without changing issue state.
+- Cross-workbench or cross-server coordination must use a server-owned typed
+  contract before it can rely on claim semantics.
+- UI and API copy should describe claims as advisory live-work leases, not as
+  ownership, assignment, locking, or review authority.
+
 ## User-Facing Naming
 
 Avoid "origin" in visible product copy when it can collide with Git's `origin`

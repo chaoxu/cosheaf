@@ -40,7 +40,7 @@ export interface IssueRow {
   comment_count: number;
   created_at: number;
   updated_at: number;
-  /** Active non-expired live-work leases (#95); omitted when none. */
+  /** Active non-expired advisory live-work leases (#95); omitted when none. */
   claims?: IssueClaim[];
 }
 
@@ -57,7 +57,7 @@ export interface IssueDetail {
   created_at: number;
   updated_at: number;
   closed_at: number | null;
-  /** Active non-expired live-work leases (#95); omitted when none. */
+  /** Active non-expired advisory live-work leases (#95); omitted when none. */
   claims?: IssueClaim[];
 }
 

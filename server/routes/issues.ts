@@ -276,9 +276,9 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
   }
 });
 
-// Optional live-work lease so concurrent runners don't duplicate work (#95).
-// Exclusive per (workspace, issue): a second runner gets 409 with the active
-// claim. Ephemeral local coordination state — not durable knowledge.
+// Optional advisory live-work lease so runners attached to this server/sidecar
+// can avoid duplicate work (#95). This is local coordination state, not durable
+// issue ownership or cross-server collaboration authority.
 issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
   const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
