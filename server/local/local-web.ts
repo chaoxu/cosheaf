@@ -20,6 +20,15 @@ import { registerLocalCommitRoutes } from "./local-commit.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
+// A compact path for the card: abbreviate the home dir to ~ and elide a deep
+// middle so it stays readable; the full path is kept in the title tooltip.
+function shortPath(full: string): string {
+  const home = homedir();
+  const p = full === home ? "~" : full.startsWith(home + sep) ? `~${full.slice(home.length)}` : full;
+  const segs = p.split(sep);
+  return segs.length <= 4 ? p : `${segs[0]}${sep}…${sep}${segs.slice(-2).join(sep)}`;
+}
+
 // One workspace card on the switcher: name + slug, the folder path, and whether
 // it is backed by a remote (so the user can tell a remote-connected workspace
 // from a local-only one at a glance).
@@ -37,7 +46,7 @@ function workspaceCard(entry: WorkspaceEntry): Html {
   return html`<li class="workspace-card" data-testid="workspace-card" data-slug="${entry.slug}">
     <div class="workspace-card__main">
       <a class="workspace-card__title" href="${href}"><strong>${entry.identity.title}</strong> <span class="muted">${entry.slug}</span></a>
-      <div class="workspace-card__path muted"><code>${entry.path || "(in-memory)"}</code></div>
+      <div class="workspace-card__path" title="${entry.path}"><code>${entry.path ? shortPath(entry.path) : "(in-memory)"}</code></div>
       ${remoteRow}
     </div>
     <form class="workspace-card__remove" method="post" action="/_workspace/remove">
@@ -148,6 +157,7 @@ function switcherPage(registry: WorkspaceRegistry, user: string, notice: string 
   const workspaces = registry.list();
   const body = html`<main class="page workbench-home">
     <div class="page-title compact"><div><h1>Workspaces</h1></div></div>
+    <p class="workbench-subtitle">Open a folder as a Coflat workspace — edit, commit, and open pull requests locally.</p>
     ${notice ? html`<p class="muted" data-testid="workspace-notice">${notice}</p>` : emptyHtml}
     ${
       workspaces.length === 0
