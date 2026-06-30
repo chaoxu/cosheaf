@@ -6,7 +6,7 @@ import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { handleAppError } from "./error-handler.js";
 import { globalNotifications, notifications } from "./notifications.js";
-import { freshTestDb, responseEmpty as empty, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { responseEmpty as empty, freshTestDb, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
 
 const config = testConfig("notifications");
 
@@ -211,6 +211,61 @@ describe("notifications route", () => {
     expect(url.searchParams.get("status-types")).toBe("unread");
     expect(url.searchParams.get("to-status")).toBe("read");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PUT" });
+  });
+
+  it("returns a single notification thread by global id (Issue/Pull only)", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(
+      ok({
+        id: 101,
+        subject: {
+          type: "Issue",
+          title: "Bug A",
+          url: "http://forgejo.test/api/v1/repos/owner/w/issues/42",
+          html_url: "http://forgejo.test/owner/w/issues/42",
+        },
+        repository: { full_name: "owner/w" },
+        updated_at: "2026-05-17T10:00:00Z",
+      }),
+    );
+    const res = await appFor(db).request("/api/v1/notifications/threads/101", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/notifications/threads/101");
+    const body = (await res.json()) as { notification: { id: number; kind: string; number: number; repo: string } };
+    expect(body.notification).toMatchObject({ id: 101, kind: "issue", number: 42, repo: "owner/w" });
+  });
+
+  it("404s a single-thread fetch when the subject is not an Issue/Pull", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(
+      ok({
+        id: 103,
+        subject: { type: "Commit", title: "fix", url: "...", html_url: "..." },
+        repository: { full_name: "owner/w" },
+        updated_at: "2026-05-17T12:00:00Z",
+      }),
+    );
+    const res = await appFor(db).request("/api/v1/notifications/threads/103", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("marks one thread read by global id via the forge per-thread PATCH", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    fetchMock.mockResolvedValueOnce(empty(204));
+    const res = await appFor(db).request("/api/v1/notifications/101/read", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/notifications/threads/101");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
   });
 
   it("does not write to any SQLite tables for notifications (Forgejo is SoT)", async () => {

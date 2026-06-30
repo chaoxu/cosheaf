@@ -906,8 +906,11 @@ export class OriginCollaborationClient {
   // The typed verdict route accepts only a simple {event,body} and returns
   // counts, not the review object; PENDING maps to the find-or-create route
   // (which returns the new review id, the one field findOrCreatePendingReview
-  // reads). Inline diff-position comments have no typed endpoint, so that path
-  // throws. The synthesized review carries the fields callers read.
+  // reads). The standalone single-comment path arrives with already-resolved
+  // diff positions, which the verdict route has no form for — so it maps onto
+  // the same pending-review → add-comment(s) → submit sequence the
+  // addCommentToReview path uses. The synthesized review carries the fields
+  // callers read.
   async createReview(
     owner: string,
     repo: string,
@@ -920,7 +923,30 @@ export class OriginCollaborationClient {
     },
   ): Promise<ReviewShape> {
     if (opts.comments && opts.comments.length > 0) {
-      throw new Error("OriginCollaborationClient.createReview with inline review comments has no core endpoint");
+      // Open (or reuse) a pending review, attach each already-resolved position
+      // comment, then submit it as the verdict. The standalone comment path
+      // always sends event=COMMENT, but approve/request_changes-with-comments
+      // map the same way.
+      const created = await this.post<{ review_id: number }>(
+        this.repoPath(owner, repo, `/pulls/${index}/pending-review`),
+        {},
+      );
+      const reviewId = created.review_id;
+      for (const cm of opts.comments) {
+        await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/review-comments`), {
+          path: cm.path,
+          body: cm.body,
+          ...(cm.new_position !== undefined ? { new_position: cm.new_position } : {}),
+          ...(cm.old_position !== undefined ? { old_position: cm.old_position } : {}),
+        });
+      }
+      const verdict =
+        opts.event === "APPROVED" ? "approve" : opts.event === "REQUEST_CHANGES" ? "request_changes" : "comment";
+      await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
+        event: verdict,
+        body: opts.body,
+      });
+      return { id: reviewId, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
     }
     if (opts.event === "PENDING") {
       const r = await this.post<{ review_id: number }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review`), {});
@@ -1139,22 +1165,47 @@ export class OriginCollaborationClient {
     });
     return (r.activities ?? []).map(activityRowToShape);
   }
+
+  // ---- notification writes ----
+
+  // Resolve a single notification thread by its global forge id. The core's
+  // typed global route maps the forge thread to a NotificationRow (Issue/Pull
+  // only); rebuild the thread shape the notification route reads — it checks
+  // `repository.full_name` to scope the thread to this workspace before marking
+  // it read. A non-issue/pull or unreadable thread 404s, which the route's
+  // `.catch(() => null)` degrades to a not-found rather than a 500.
+  async getNotificationThread(id: number): Promise<NotificationThreadShape> {
+    const r = await this.get<{ notification: NotificationRow }>(`/api/v1/notifications/threads/${id}`);
+    return notificationRowToShape(r.notification);
+  }
+
+  // Mark one thread read by its global forge id (the core's typed global route
+  // forwards to the forge's per-thread mark-read). The thread id is global, so
+  // no owner/repo is needed here — the calling route already did the per-repo
+  // ownership check via getNotificationThread.
+  async markNotificationRead(id: number): Promise<void> {
+    await this.post(`/api/v1/notifications/${id}/read`, {});
+  }
+
+  // Mark every unread thread in this repo read (the core's typed repo route
+  // forwards to the forge's repo-scoped bulk mark-read).
+  async markRepoNotificationsRead(owner: string, repo: string): Promise<void> {
+    await this.post(this.repoPath(owner, repo, "/notifications/read-all"), {});
+  }
 }
 
-// Wrap a read-capable origin client so every not-yet-implemented
-// CollaborationClient method throws clearly instead of being `undefined`. #263
-// lands the issue reads; the write surfaces (issues/pulls/reviews/notifications/
-// repo + settings) land with their owning agents. Implemented methods delegate
-// (bound to the real instance so their internal `this.get` works); anything else
-// is a loud stub. The settings write surface (`editRepo`/`deleteRepo`), inline
-// pending-review comments (`addCommentToReview`), and the issue-block removal
-// (`removeIssueBlock`) are now backed by typed core endpoints (#267/#269). Still
-// stubbed deliberately: the notification mutation surface
+// Wrap a read-capable origin client so any not-yet-implemented
+// CollaborationClient method throws clearly instead of being `undefined`. The
+// issue/pull/review/notification/repo + settings surfaces are all backed by
+// typed core endpoints now; the notification mutation surface
 // (`getNotificationThread`/`markNotificationRead`/`markRepoNotificationsRead`)
-// and `getRepoPermission` have no typed core endpoint yet (tracked with the
-// notifications work, #265/#266); `createReview` with inline comments also still
-// throws — that standalone-comment path is a separate documented limitation. The
-// cast is the "cast unimplemented methods" the seam allows.
+// and `createReview` with inline comments are the latest to land. Implemented
+// methods delegate (bound to the real instance so their internal `this.get`
+// works); anything else is a loud stub. Still stubbed deliberately:
+// `getRepoPermission` has no typed core endpoint — its only `ctx.collab` caller
+// (the PR reviewer-permission column) is `.catch(() => null)`-degraded, so the
+// async-rejecting stub returns null rather than 500ing. The cast is the "cast
+// unimplemented methods" the seam allows.
 function withUnimplementedStubs(client: OriginCollaborationClient): CollaborationClient {
   return new Proxy(client, {
     get(target, prop, receiver) {

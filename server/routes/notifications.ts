@@ -42,6 +42,27 @@ globalNotifications.get("/notifications/events", (c) =>
   streamHubChannel(c, c.get("sse"), notificationChannel(c.get("user").username)),
 );
 
+// GET /api/v1/notifications/threads/:id — a single notification thread by its
+// global forge id, mapped to a NotificationRow (Issue/Pull only). The Origin
+// API reads this so the local Workbench can resolve a thread's repo before
+// marking it read; the per-repo ownership check stays on the repo route below.
+globalNotifications.get("/notifications/threads/:id", async (c) => {
+  const id = parsePositiveIntId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad id"));
+  const row = mapThread(await c.get("fjUser").getNotificationThread(id));
+  if (!row) return c.json(...notFound());
+  return c.json({ notification: row });
+});
+
+// POST /api/v1/notifications/:id/read — mark one thread read by its global
+// forge id (forwards to the forge's per-thread mark-read).
+globalNotifications.post("/notifications/:id/read", async (c) => {
+  const id = parsePositiveIntId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad id"));
+  await c.get("fjUser").markNotificationRead(id);
+  return c.json({ ok: true });
+});
+
 // Parse "/api/v1/repos/owner/repo/issues/42" or ".../pulls/42" → 42.
 function numberFromSubjectUrl(url: string): number | null {
   const m = url.match(/\/(?:issues|pulls)\/(\d+)(?:[?#]|$)/);

@@ -125,6 +125,63 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.init?.method).toBe("DELETE");
     expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ index: 7 });
   });
+
+  it("resolves a single notification thread by its global id", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        notification: {
+          id: 101,
+          kind: "issue",
+          number: 42,
+          title: "Bug A",
+          repo: "me/notes",
+          updated_at: 0,
+          url: "http://core/me/notes/issues/42",
+        },
+      }),
+    );
+    const thread = await clientWith(fake.fetch).getNotificationThread(101);
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/notifications/threads/101");
+    expect(fake.calls[0]?.init?.method ?? "GET").toBe("GET");
+    expect(thread).toMatchObject({ id: 101, repository: { full_name: "me/notes" } });
+  });
+
+  it("marks a single notification thread read by its global id", async () => {
+    const fake = recordingFetch(() => Response.json({ ok: true }));
+    await clientWith(fake.fetch).markNotificationRead(101);
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/notifications/101/read");
+    expect(fake.calls[0]?.init?.method).toBe("POST");
+  });
+
+  it("marks every thread in a repo read through the repo read-all route", async () => {
+    const fake = recordingFetch(() => Response.json({ ok: true }));
+    await clientWith(fake.fetch).markRepoNotificationsRead("me", "notes");
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/notifications/read-all");
+    expect(fake.calls[0]?.init?.method).toBe("POST");
+  });
+
+  it("creates a single-comment review via pending-review → comment → submit", async () => {
+    const fake = recordingFetch((call) =>
+      call.input.endsWith("/pending-review") ? Response.json({ review_id: 9 }) : Response.json({ ok: true }),
+    );
+    const review = await clientWith(fake.fetch).createReview("me", "notes", 4, {
+      event: "COMMENT",
+      body: "",
+      comments: [{ path: "doc.md", body: "nit", new_position: 12 }],
+    });
+
+    expect(fake.calls.map((c) => c.input)).toEqual([
+      "https://core.example/api/v1/repos/me/notes/pulls/4/pending-review",
+      "https://core.example/api/v1/repos/me/notes/pulls/4/pending-review/9/review-comments",
+      "https://core.example/api/v1/repos/me/notes/pulls/4/pending-review/9/submit",
+    ]);
+    expect(JSON.parse(String(fake.calls[1]?.init?.body))).toEqual({ path: "doc.md", body: "nit", new_position: 12 });
+    expect(JSON.parse(String(fake.calls[2]?.init?.body))).toEqual({ event: "comment", body: "" });
+    expect(review).toMatchObject({ id: 9, state: "COMMENT" });
+  });
 });
 
 describe("localMemberSetter", () => {
