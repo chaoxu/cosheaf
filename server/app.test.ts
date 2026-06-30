@@ -1,11 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp } from "./app.js";
+import { appProviderCapabilities, createApp } from "./app.js";
 import { seedAuthUser } from "./test-helpers.js";
 import { freshTestDb, testConfig } from "./routes/test-fixtures.js";
 
 describe("createApp API route assembly", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("names the hosted and local provider capabilities used for route mounting", () => {
+    expect(appProviderCapabilities(testConfig("app-assembly-hosted"))).toEqual({
+      content: "forgejo",
+      collaboration: "self",
+      mountsLocalWorkbench: false,
+      mountsHostedAuth: true,
+      mountsHostedCollaboration: true,
+    });
+
+    expect(appProviderCapabilities(testConfig("app-assembly-local", { mode: "local" }))).toEqual({
+      content: "local-git",
+      collaboration: "federated",
+      mountsLocalWorkbench: true,
+      mountsHostedAuth: false,
+      mountsHostedCollaboration: false,
+    });
   });
 
   it("mounts the cookie API CSRF guard before typed API mutations", async () => {
