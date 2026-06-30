@@ -366,6 +366,7 @@ async function editPageResponse(
             data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
             data-write-mode="${ctx.writeMode}"
             data-can-open-pull="${ctx.canOpenPull ? "1" : "0"}"
+            data-origin-id="${ctx.originId ?? ""}"
           ><div class="web-editor-loading">Loading editor...</div></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>
@@ -391,6 +392,7 @@ async function editPageResponse(
             data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
             data-write-mode="${ctx.writeMode}"
             data-can-open-pull="${ctx.canOpenPull ? "1" : "0"}"
+            data-origin-id="${ctx.originId ?? ""}"
           ></div>
           <script id="web-editor-content" type="application/json">${jsonScript(content)}</script>
           <script id="web-editor-repo-config" type="application/json">${jsonScript(repoConfig ?? {})}</script>

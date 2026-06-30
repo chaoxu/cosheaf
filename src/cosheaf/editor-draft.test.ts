@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
+import { clearDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 
 function stubLocalStorage(): Map<string, string> {
   const storage = new Map<string, string>();
@@ -75,6 +75,44 @@ describe("editor drafts", () => {
       baseShaKnown: true,
       savedAt: 123,
     });
+  });
+
+  it("scopes drafts by origin id when provided", () => {
+    const storage = stubLocalStorage();
+
+    writeDraft("owner", "repo", "branch", "notes.md", {
+      source: "# Scoped draft\n",
+      savedAt: 123,
+    }, { originId: "worktree-a" });
+
+    expect(storage.has("cosheaf:draft:owner/repo/branch/notes.md")).toBe(false);
+    expect(storage.has("cosheaf:draft:worktree-a:owner/repo/branch/notes.md")).toBe(true);
+    expect(readDraft("owner", "repo", "branch", "notes.md", { originId: "worktree-a" })).toEqual({
+      source: "# Scoped draft\n",
+      savedAt: 123,
+    });
+    expect(readDraft("owner", "repo", "branch", "notes.md", { originId: "worktree-b" })).toBeNull();
+  });
+
+  it("falls back to a legacy unscoped draft under an origin scope", () => {
+    const storage = stubLocalStorage();
+    storage.set("cosheaf:draft:owner/repo/main/notes.md", JSON.stringify({ source: "# Legacy draft\n", savedAt: 456 }));
+
+    expect(readDraft("owner", "repo", "main", "notes.md", { originId: "worktree-a" })).toEqual({
+      source: "# Legacy draft\n",
+      savedAt: 456,
+    });
+  });
+
+  it("clears scoped and legacy draft keys for the same page", () => {
+    const storage = stubLocalStorage();
+    storage.set("cosheaf:draft:owner/repo/main/notes.md", JSON.stringify({ source: "# Legacy draft\n", savedAt: 1 }));
+    storage.set("cosheaf:draft:worktree-a:owner/repo/main/notes.md", JSON.stringify({ source: "# Scoped draft\n", savedAt: 2 }));
+
+    clearDraft("owner", "repo", "main", "notes.md", { originId: "worktree-a" });
+
+    expect(storage.has("cosheaf:draft:owner/repo/main/notes.md")).toBe(false);
+    expect(storage.has("cosheaf:draft:worktree-a:owner/repo/main/notes.md")).toBe(false);
   });
 
   it("round-trips a known-absent base sha for current drafts", () => {

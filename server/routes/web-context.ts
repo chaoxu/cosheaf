@@ -43,6 +43,8 @@ export interface WebCtx {
   // Whether the editor may open a pull request (hosted always; local only at
   // Tier 2 with a configured remote).
   canOpenPull: boolean;
+  // Optional local Workbench browser-state scope. Hosted pages leave this empty.
+  originId?: string;
   // Per-request UI locale and a locale-bound translate, threaded into repo-page
   // chrome/renderers (no AsyncLocalStorage).
   locale: LocaleId;
@@ -195,6 +197,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       userAvatarSrc: null,
       writeMode: "direct",
       canOpenPull: entry.identity.canOpenPull,
+      originId: entry.identity.originId,
       locale: c.get("locale"),
       t: c.get("t"),
     };

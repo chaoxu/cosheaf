@@ -23,6 +23,10 @@ export interface DraftFreshness {
   sourceSha: string | undefined;
 }
 
+export interface DraftScope {
+  originId?: string;
+}
+
 export function restoredDraftFreshness(current: DraftFreshness, draft: EditorDraft): DraftFreshness {
   const baseSha = draft.baseShaKnown ? (draft.baseSha ?? null) : current.baseSha;
   let sourceSha = current.sourceSha;
@@ -34,14 +38,23 @@ export function restoredDraftFreshness(current: DraftFreshness, draft: EditorDra
   return { baseSha, sourceSha };
 }
 
-function draftKey(owner: string, repo: string, branch: string, path: string): string {
+function legacyDraftKey(owner: string, repo: string, branch: string, path: string): string {
   return `cosheaf:draft:${owner}/${repo}/${branch}/${path}`;
 }
 
-export function readDraft(owner: string, repo: string, branch: string, path: string): EditorDraft | null {
+function scopedOriginId(scope?: DraftScope): string | null {
+  const originId = scope?.originId?.trim();
+  return originId ? encodeURIComponent(originId) : null;
+}
+
+function draftKey(owner: string, repo: string, branch: string, path: string, scope?: DraftScope): string {
+  const originId = scopedOriginId(scope);
+  return originId ? `cosheaf:draft:${originId}:${owner}/${repo}/${branch}/${path}` : legacyDraftKey(owner, repo, branch, path);
+}
+
+function parseDraft(raw: string | null): EditorDraft | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(draftKey(owner, repo, branch, path));
-    if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<EditorDraft> | null;
     if (typeof parsed?.source !== "string") return null;
     const baseShaKnown = parsed.baseShaKnown === true || typeof parsed.baseSha === "string";
@@ -64,22 +77,33 @@ export function readDraft(owner: string, repo: string, branch: string, path: str
       savedAt: typeof parsed.savedAt === "number" ? parsed.savedAt : 0,
     };
   } catch (_err) {
+    return null;
+  }
+}
+
+export function readDraft(owner: string, repo: string, branch: string, path: string, scope?: DraftScope): EditorDraft | null {
+  try {
+    const scoped = parseDraft(localStorage.getItem(draftKey(owner, repo, branch, path, scope)));
+    if (scoped || !scopedOriginId(scope)) return scoped;
+    return parseDraft(localStorage.getItem(legacyDraftKey(owner, repo, branch, path)));
+  } catch (_err) {
     // Corrupt/blocked storage: treat as no draft rather than break the editor.
     return null;
   }
 }
 
-export function writeDraft(owner: string, repo: string, branch: string, path: string, draft: EditorDraft): void {
+export function writeDraft(owner: string, repo: string, branch: string, path: string, draft: EditorDraft, scope?: DraftScope): void {
   try {
-    localStorage.setItem(draftKey(owner, repo, branch, path), JSON.stringify(draft));
+    localStorage.setItem(draftKey(owner, repo, branch, path, scope), JSON.stringify(draft));
   } catch (_err) {
     // Storage full / disabled (private mode): drafting is best-effort.
   }
 }
 
-export function clearDraft(owner: string, repo: string, branch: string, path: string): void {
+export function clearDraft(owner: string, repo: string, branch: string, path: string, scope?: DraftScope): void {
   try {
-    localStorage.removeItem(draftKey(owner, repo, branch, path));
+    localStorage.removeItem(draftKey(owner, repo, branch, path, scope));
+    if (scopedOriginId(scope)) localStorage.removeItem(legacyDraftKey(owner, repo, branch, path));
   } catch (_err) {
     // Nothing to recover from when clearing fails.
   }

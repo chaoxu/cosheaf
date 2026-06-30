@@ -36,14 +36,17 @@ function shortPath(full: string): string {
 function workspaceCard(entry: WorkspaceEntry): Html {
   const href = repoHref(entry.identity.owner, entry.identity.repo);
   const remote = entry.gitRemote;
+  const cosheafServer = entry.remote ? serverLabel(entry.remote.url) : null;
   const remoteRow = remote
     ? html`<div class="workspace-card__remote" data-testid="workspace-remote">
-        <span class="badge">remote</span>
+        <span class="badge">git remote</span>
         <code>${remote.host}/${remote.owner}/${remote.repo}</code>
         <span class="muted">via <code>${remote.name}</code></span>
-        ${entry.identity.canOpenPull ? html`<span class="badge badge--ok" title="A Cosheaf token is configured (.cosheaf/remote.json)">open-PR ready</span>` : html`<span class="muted" title="Add { url, token } to .cosheaf/remote.json to open pull requests">read-only remote</span>`}
+        ${cosheafServer
+          ? html`<span class="badge badge--ok" title="Remote Cosheaf server from .cosheaf/remote.json">Cosheaf server: ${cosheafServer}</span>`
+          : html`<span class="muted" title="Add { url, token } to .cosheaf/remote.json to open remote pull requests">local git only; connect a Cosheaf server for collaboration</span>`}
       </div>`
-    : html`<div class="workspace-card__remote muted" data-testid="workspace-remote">local-only (no git upstream)</div>`;
+    : html`<div class="workspace-card__remote muted" data-testid="workspace-remote">Local-only workspace. Collaboration features need a connected Cosheaf server.</div>`;
   return html`<li class="workspace-card" data-testid="workspace-card" data-slug="${entry.slug}">
     <div class="workspace-card__main">
       <a class="workspace-card__title" href="${href}"><strong>${entry.identity.title}</strong> <span class="muted">${entry.slug}</span></a>
@@ -55,6 +58,14 @@ function workspaceCard(entry: WorkspaceEntry): Html {
       <button class="button subtle" type="submit" title="Forget this workspace (does not delete files)">Remove</button>
     </form>
   </li>`;
+}
+
+function serverLabel(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch (_err) {
+    return url;
+  }
 }
 
 // --- Folder picker -------------------------------------------------------
@@ -158,7 +169,7 @@ function switcherPage(registry: WorkspaceRegistry, user: string, notice: string 
   const workspaces = registry.list();
   const body = html`<main class="page workbench-home">
     <div class="page-title compact"><div><h1>Workspaces</h1></div></div>
-    <p class="workbench-subtitle">Open a folder as a Coflat workspace — edit, commit, and open pull requests locally.</p>
+    <p class="workbench-subtitle">Open a local folder as a Coflat workspace. Edits and commits stay in local git; pull requests live on the connected Cosheaf server.</p>
     ${notice ? html`<p class="muted" data-testid="workspace-notice">${notice}</p>` : emptyHtml}
     ${
       workspaces.length === 0

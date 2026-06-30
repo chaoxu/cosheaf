@@ -46,29 +46,38 @@ function connectForm(ctx: WebCtx, entry: WorkspaceEntry | undefined, submitLabel
       <input name="token" type="password" required placeholder="opaque Cosheaf token" autocomplete="off" spellcheck="false" data-testid="connect-token">
     </label>
     <p class="muted">Stored in <code>.cosheaf/remote.json</code> (gitignored) — never committed. Create a token in your Cosheaf account settings.</p>
-    ${noGitRemote ? html`<p class="form-warning" data-testid="connect-no-git-remote">This folder has no git remote, so pushes have nowhere to go. Add one with <code>git remote add origin &lt;url&gt;</code> before opening a pull request.</p>` : emptyHtml}
+    ${noGitRemote ? html`<p class="form-warning" data-testid="connect-no-git-remote">Local git step blocked: this folder has no git remote, so pushes have nowhere to go. Add one with <code>git remote add origin &lt;url&gt;</code> before opening a remote pull request.</p>` : emptyHtml}
     <div class="form-actions"><button class="button primary" type="submit">${submitLabel}</button></div>
   </form>`;
 }
 
 function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined, notice: string | null): Html {
   return html`
-    <div class="page-title compact"><div><h1>Pull requests</h1></div></div>
+    <div class="page-title compact"><div><h1>Remote pull requests</h1></div></div>
     ${notice ? html`<p class="muted" data-testid="pulls-notice">${notice}</p>` : emptyHtml}
-    <div class="empty" data-testid="pulls-disconnected">Not connected to a remote Cosheaf. Connect one to push branches and open pull requests from here.</div>
+    <div class="empty" data-testid="pulls-disconnected">Local git state only: no connected Cosheaf server. Connect a workspace server to push branches and open remote pull requests from here.</div>
     ${connectForm(ctx, entry, "Connect")}`;
 }
 
 function prList(ctx: WebCtx, pulls: RemotePullSummary[]): Html {
   if (pulls.length === 0) {
-    return html`<div class="empty" data-testid="pulls-empty">No open pull requests. Commit on a branch, then use “Open PR” in the editor.</div>`;
+    return html`<div class="empty" data-testid="pulls-empty">No open remote pull requests on the workspace server. Commit on a local branch, then use “Open remote PR” in the editor.</div>`;
   }
   return html`<ul class="pr-list" data-testid="pr-list">${pulls.map(
     (p) => html`<li class="pr-item">
-      <a class="pr-item__title" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${p.number}`)}">#${p.number} ${p.title}</a>
+      <a class="pr-item__title" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${p.number}`)}">Remote PR #${p.number} ${p.title}</a>
       <span class="pr-item__meta muted"><code>${p.head_ref}</code> → <code>${p.base_ref}</code> · ${p.author_username}</span>
     </li>`,
   )}</ul>`;
+}
+
+function serverLabel(url: string | null): string {
+  if (!url) return "workspace server";
+  try {
+    return new URL(url).host;
+  } catch (_err) {
+    return url;
+  }
 }
 
 function connectedBody(
@@ -79,16 +88,17 @@ function connectedBody(
   error: string | null,
   notice: string | null,
 ): Html {
-  const host = entry.gitRemote?.host ?? "remote";
+  const host = serverLabel(entry.remote?.url ?? null);
   return html`
-    <div class="page-title compact"><div><h1>Pull requests</h1></div></div>
+    <div class="page-title compact"><div><h1>Remote pull requests</h1></div></div>
     ${notice ? html`<p class="muted" data-testid="pulls-notice">${notice}</p>` : emptyHtml}
     ${error ? html`<p class="form-error" data-testid="pulls-error">${error}</p>` : emptyHtml}
     <div class="connect-status" data-testid="connect-status">
-      <span class="badge badge--ok">connected</span>
+      <span class="badge badge--ok">Cosheaf server connected</span>
       <code>${host}</code>
       ${who ? html`<span class="muted">as <strong>${who.username}</strong></span>` : html`<span class="form-error">token not recognized</span>`}
     </div>
+    <p class="muted">Remote PRs are read from the connected Cosheaf workspace server. Local commits stay in this folder until pushed.</p>
     ${prList(ctx, pulls)}
     <details class="connect-reconnect">
       <summary>Reconnect or change token</summary>

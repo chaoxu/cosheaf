@@ -30,12 +30,20 @@ export interface RemotePullClient {
   ): Promise<{ number: number }>;
   // The remote's open/closed pull requests, for the read-only local PR list.
   listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<RemotePullSummary[]>;
+  // The commit id the remote Cosheaf server observes for a branch, or null when
+  // the branch is not visible there yet.
+  branchHead(owner: string, repo: string, branch: string): Promise<string | null>;
   // Browser URL of a PR on the remote, for linking/redirecting the user.
   pullUrl(owner: string, repo: string, n: number): string;
 }
 
 export interface CosheafMeResponse {
   user: { username: string } | null;
+}
+
+interface CosheafBranchResponse {
+  name: string;
+  commit?: { id?: string };
 }
 
 export class RemoteCosheafError extends Error {
@@ -110,6 +118,11 @@ export class CosheafOriginClient implements RemotePullClient {
       `${this.repoPath(owner, repo, "/pulls")}?state=${encodeURIComponent(state)}`,
     );
     return r.pulls ?? [];
+  }
+
+  async branchHead(owner: string, repo: string, branch: string): Promise<string | null> {
+    const branches = await this.req<CosheafBranchResponse[]>(this.repoPath(owner, repo, "/branches"));
+    return branches.find((candidate) => candidate.name === branch)?.commit?.id ?? null;
   }
 
   pullUrl(owner: string, repo: string, n: number): string {

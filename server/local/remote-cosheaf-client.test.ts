@@ -99,6 +99,24 @@ describe("CosheafOriginClient", () => {
     expect(fake.calls[0]?.init?.body).toBe(JSON.stringify({ head: "feature", base: "main", title: "Proposal", body: "Details" }));
   });
 
+  it("reads the remote branch head through the typed branches endpoint", async () => {
+    const fake = fakeFetch(() =>
+      jsonResponse([
+        { name: "main", commit: { id: "main-sha" } },
+        { name: "feature", commit: { id: "feature-sha" } },
+      ]),
+    );
+    const client = new CosheafOriginClient("https://cosheaf.example", "tok", { fetch: fake.fetch });
+
+    await expect(client.branchHead("owner", "repo", "feature")).resolves.toBe("feature-sha");
+    await expect(client.branchHead("owner", "repo", "missing")).resolves.toBeNull();
+
+    expect(fake.calls.map((call) => call.input)).toEqual([
+      "https://cosheaf.example/api/v1/repos/owner/repo/branches",
+      "https://cosheaf.example/api/v1/repos/owner/repo/branches",
+    ]);
+  });
+
   it("encodes owner and repo path segments", async () => {
     const fake = fakeFetch(() => jsonResponse({ pulls: [] }));
     const client = new CosheafOriginClient("https://cosheaf.example/base/", "tok", { fetch: fake.fetch });

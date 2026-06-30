@@ -112,8 +112,25 @@ export function parseGitRemote(remoteUrl: string): { host: string; owner: string
 // The sidecar dir is gitignored by the registry, so the token never lands in a
 // commit. Overwrites any existing remote.json (reconnecting replaces it).
 export function writeRemote(dir: string, remote: LocalRemote): void {
+  const normalized = normalizeRemote(remote.url, remote.token);
+  if (!normalized) throw new Error("invalid remote Cosheaf config");
   mkdirSync(join(dir, ".cosheaf"), { recursive: true });
-  writeFileSync(join(dir, REMOTE_FILE), `${JSON.stringify({ url: remote.url, token: remote.token }, null, 2)}\n`);
+  writeFileSync(join(dir, REMOTE_FILE), `${JSON.stringify(normalized, null, 2)}\n`);
+}
+
+export function normalizeRemote(url: unknown, token: unknown): LocalRemote | null {
+  if (typeof url !== "string" || typeof token !== "string") return null;
+  const trimmedUrl = url.trim();
+  const trimmedToken = token.trim();
+  if (!trimmedUrl || !trimmedToken) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmedUrl);
+  } catch (_err) {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return { url: trimmedUrl.replace(/\/+$/, ""), token: trimmedToken };
 }
 
 // Read the Tier-2 remote from `<dir>/.cosheaf/remote.json` (gitignored). Absent
@@ -124,8 +141,7 @@ function readRemote(dir: string): LocalRemote | null {
   try {
     const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     const { url, token } = raw;
-    if (typeof url !== "string" || !url.trim() || typeof token !== "string" || !token.trim()) return null;
-    return { url: url.trim(), token: token.trim() };
+    return normalizeRemote(url, token);
   } catch (_err) {
     return null;
   }

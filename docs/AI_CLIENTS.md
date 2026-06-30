@@ -148,6 +148,7 @@ Use the local development URL, `http://127.0.0.1:3030`, when running
 
 | Workflow | Typed route |
 | --- | --- |
+| Origin capability manifest | `GET /api/v1/origin` |
 | Repository metadata | `GET /api/v1/repos/$OWNER/$REPO` |
 | List branches | `GET /api/v1/repos/$OWNER/$REPO/branches` |
 | Create branch | `POST /api/v1/repos/$OWNER/$REPO/branches` |
