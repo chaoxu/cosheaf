@@ -1,3 +1,4 @@
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { ForgejoPull } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type {
@@ -13,27 +14,26 @@ import type {
 } from "../forgejo-types.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { type AvatarUser, avatarLinkForUser } from "./avatar.js";
+import { chevronIcon, editIcon } from "./icons.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue } from "./web-chat.js";
 import {
   badRequestPage,
   displayLogin,
-  timeEl,
   notFoundPage,
   positiveInt,
   positiveIntFields,
   repoHref,
   stringField,
+  timeEl,
   userLink,
   type WebCtx,
 } from "./web-context.js";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
-import { emptyHtml, html, type Html, joinHtml } from "./web-html.js";
+import { emptyHtml, type Html, html, joinHtml } from "./web-html.js";
 import { composeField, renderMarkdownSurface } from "./web-markdown.js";
-import { webCommentEditorAssets } from "./web-shell.js";
-import { chevronIcon, editIcon } from "./icons.js";
 import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { type Panel, panel, renderRegion } from "./web-panels.js";
+import { webCommentEditorAssets } from "./web-shell.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
 export function issueEditPage(
@@ -77,7 +77,7 @@ export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
 }
 
 export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<Response | null> {
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
+  const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : null;
 }

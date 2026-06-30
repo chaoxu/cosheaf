@@ -7,7 +7,6 @@ import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue, stripChatMetadata } from "./web-chat.js";
 import {
   badRequestPage,
-  timeEl,
   htmlResponse,
   notFoundPage,
   parseListState,
@@ -19,15 +18,16 @@ import {
   stringField,
   stringFields,
   textField,
+  timeEl,
   userLink,
-  webRoute,
-  webRouteForWrite,
   type WebCtx,
   type WebListState,
+  webRoute,
+  webRouteForWrite,
 } from "./web-context.js";
-import { emptyHtml, html, type Html } from "./web-html.js";
+import { emptyHtml, type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { USERNAME_DATALIST_ID, labelChip, labelChips, repoPageShell, selected, sortField, stateToggle } from "./web-page.js";
+import { labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import { webCommentEditorAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
@@ -45,7 +45,7 @@ import {
 } from "./web-thread.js";
 
 async function rejectMissingIssueComment(ctx: WebCtx, number: number, id: number): Promise<Response | null> {
-  const comments = await ctx.fj.listIssueComments(ctx.owner, ctx.repo, number);
+  const comments = await ctx.collab.listIssueComments(ctx.owner, ctx.repo, number);
   return comments.some((comment) => comment.id === id) ? null : notFoundPage(ctx.user, "Comment not found");
 }
 
@@ -53,7 +53,7 @@ export function registerIssueRoutes(web: Hono<AppEnv>): void {
 web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
   const filters = parseIssueListFilters(c);
   const [issues, labels, milestones] = await Promise.all([
-    ctx.fj.listIssues(ctx.owner, ctx.repo, {
+    ctx.collab.listIssues(ctx.owner, ctx.repo, {
       state: filters.state,
       limit: 50,
       q: filters.q || undefined,
@@ -64,8 +64,8 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
       mentioned_by: filters.mentionedBy || undefined,
       sort: filters.sort || undefined,
     }),
-    ctx.fj.listLabels(ctx.owner, ctx.repo),
-    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
+    ctx.collab.listLabels(ctx.owner, ctx.repo),
+    ctx.collab.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "issues", `Issues - ${ctx.repo}`, html`
@@ -81,7 +81,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/issues/new", webRouteForWrite(async (_c, ctx) => {
-  const labels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
+  const labels = await ctx.collab.listLabels(ctx.owner, ctx.repo).catch(() => []);
   return htmlResponse(
     repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels)),
   );
@@ -92,7 +92,7 @@ web.post("/:owner/:repo/issues/new", webRouteForWrite(async (c, ctx) => {
   const title = stringField(form.title);
   const body = textField(form.body) ?? "";
   const labelIds = positiveIntFields(form.labels);
-  const labels = await ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []);
+  const labels = await ctx.collab.listLabels(ctx.owner, ctx.repo).catch(() => []);
   if (labelIds === null) {
     return htmlResponse(
       repoPageShell(ctx, "issues", `New issue - ${ctx.repo}`, issueCreatePage(ctx, labels, { title: title ?? "", body, labelIds: [], error: "Labels must be positive integer ids." })),
@@ -112,7 +112,7 @@ web.post("/:owner/:repo/issues/new", webRouteForWrite(async (c, ctx) => {
       400,
     );
   }
-  const issue = await ctx.fj.createIssue(ctx.owner, ctx.repo, { title, body, labels: labelIds });
+  const issue = await ctx.collab.createIssue(ctx.owner, ctx.repo, { title, body, labels: labelIds });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number: issue.number, action: "opened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}`));
 }));
@@ -121,12 +121,12 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const [issue, comments, timeline, dependencies, blocks, pinnedIssues] = await Promise.all([
-    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null)),
-    ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
-    ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, number).catch(() => []),
-    ctx.fj.listIssueDependencies(ctx.owner, ctx.repo, number).catch(() => []),
-    ctx.fj.listIssueBlocks(ctx.owner, ctx.repo, number).catch(() => []),
-    ctx.fj.listPinnedIssues(ctx.owner, ctx.repo).catch(() => []),
+    ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null)),
+    ctx.collab.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.collab.listIssueTimeline(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.collab.listIssueDependencies(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.collab.listIssueBlocks(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.collab.listPinnedIssues(ctx.owner, ctx.repo).catch(() => []),
   ]);
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   const chatBackedIssue = isChatIssue(issue);
@@ -137,7 +137,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   const canEditIssue = ctx.ws.role !== "read" && !chatBackedIssue;
   // Repo labels back the rail's inline editor; only fetched when editing is
   // possible (read role and chat-backed issues show chips only).
-  const allLabels = canEditIssue ? await ctx.fj.listLabels(ctx.owner, ctx.repo) : [];
+  const allLabels = canEditIssue ? await ctx.collab.listLabels(ctx.owner, ctx.repo) : [];
   const main = html`${threadParticipantsBar(issue.user, comments)}
     ${await threadDescription(ctx, bodyText)}
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
@@ -190,13 +190,13 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
 web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
+  const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
   const [allLabels, collaborators, milestones] = await Promise.all([
-    ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.collab.listLabels(ctx.owner, ctx.repo).catch(() => []),
     ctx.fj.listCollaborators(ctx.owner, ctx.repo).catch(() => []),
-    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
+    ctx.collab.listMilestones(ctx.owner, ctx.repo, "all").catch(() => []),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "issues", `Edit #${issue.number} - ${ctx.repo}`, issueEditPage(ctx, issue, allLabels, collaborators, milestones)),
@@ -212,7 +212,7 @@ web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) =>
   const title = stringField(form.title);
   const body = textField(form.body);
   if (!title || body === null) return badRequestPage(ctx.user, "Issue title and description are required.");
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number);
+  const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number);
   const labelPatch = await labelSelectionPatch(ctx, form, issue.labels);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   // The assignee fieldset always emits assignees_present for issues; the
@@ -222,13 +222,13 @@ web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) =>
   // clear; only include it in the patch when the field was actually present.
   const milestonePatch = milestoneFormValue(form.milestone);
   if (!milestonePatch.ok) return badRequestPage(ctx.user, milestonePatch.message);
-  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, {
+  await ctx.collab.editIssue(ctx.owner, ctx.repo, number, {
     title,
     body,
     ...(assignees ? { assignees } : {}),
     ...(milestonePatch.milestone !== undefined ? { milestone: milestonePatch.milestone } : {}),
   });
-  if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
+  if (labelPatch.labels) await ctx.collab.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
@@ -240,11 +240,11 @@ web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) 
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const immutable = await rejectChatIssueMutation(ctx, number);
   if (immutable) return immutable;
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
+  const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue) return notFoundPage(ctx.user, "Issue not found");
   const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), issue.labels);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
-  if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
+  if (labelPatch.labels) await ctx.collab.setIssueLabels(ctx.owner, ctx.repo, number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
@@ -256,7 +256,7 @@ web.post("/:owner/:repo/issues/:number/comments", webRoute(async (c, ctx) => {
   if (immutable) return immutable;
   const body = stringField((await c.req.parseBody()).body);
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
-  await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, body);
+  await ctx.collab.createIssueComment(ctx.owner, ctx.repo, number, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
@@ -270,7 +270,7 @@ web.post("/:owner/:repo/issues/:number/comments/:id/edit", webRoute(async (c, ct
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   const missing = await rejectMissingIssueComment(ctx, number, id);
   if (missing) return missing;
-  await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
+  await ctx.collab.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
@@ -282,7 +282,7 @@ web.post("/:owner/:repo/issues/:number/comments/:id/delete", webRoute(async (c, 
   if (immutable) return immutable;
   const missing = await rejectMissingIssueComment(ctx, number, id);
   if (missing) return missing;
-  await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
+  await ctx.collab.deleteIssueComment(ctx.owner, ctx.repo, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
 
@@ -292,8 +292,8 @@ web.post("/:owner/:repo/issues/:number/pin", webRouteForWrite(async (c, ctx) => 
   const immutable = await rejectChatIssueMutation(ctx, number);
   if (immutable) return immutable;
   const pinned = stringField((await c.req.parseBody()).pinned);
-  if (pinned === "true") await ctx.fj.pinIssue(ctx.owner, ctx.repo, number);
-  else if (pinned === "false") await ctx.fj.unpinIssue(ctx.owner, ctx.repo, number);
+  if (pinned === "true") await ctx.collab.pinIssue(ctx.owner, ctx.repo, number);
+  else if (pinned === "false") await ctx.collab.unpinIssue(ctx.owner, ctx.repo, number);
   else return badRequestPage(ctx.user, "Pinned state is required.");
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
@@ -308,8 +308,8 @@ web.post("/:owner/:repo/issues/:number/dependencies", webRouteForWrite(async (c,
   const index = positiveInt(stringField(form.index) ?? undefined);
   const relation = stringField(form.relation);
   if (!index || index === number) return badRequestPage(ctx.user, "A different issue number is required.");
-  if (relation === "blocks") await ctx.fj.addIssueDependency(ctx.owner, ctx.repo, index, number);
-  else if (relation === "depends_on") await ctx.fj.addIssueDependency(ctx.owner, ctx.repo, number, index);
+  if (relation === "blocks") await ctx.collab.addIssueDependency(ctx.owner, ctx.repo, index, number);
+  else if (relation === "depends_on") await ctx.collab.addIssueDependency(ctx.owner, ctx.repo, number, index);
   else return badRequestPage(ctx.user, "Relation is required.");
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
@@ -324,8 +324,8 @@ web.post("/:owner/:repo/issues/:number/dependencies/delete", webRouteForWrite(as
   const index = positiveInt(stringField(form.index) ?? undefined);
   const relation = stringField(form.relation);
   if (!index) return badRequestPage(ctx.user, "Issue number is required.");
-  if (relation === "blocks") await ctx.fj.removeIssueBlock(ctx.owner, ctx.repo, number, index);
-  else if (relation === "depends_on") await ctx.fj.removeIssueDependency(ctx.owner, ctx.repo, number, index);
+  if (relation === "blocks") await ctx.collab.removeIssueBlock(ctx.owner, ctx.repo, number, index);
+  else if (relation === "depends_on") await ctx.collab.removeIssueDependency(ctx.owner, ctx.repo, number, index);
   else return badRequestPage(ctx.user, "Relation is required.");
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
@@ -338,7 +338,7 @@ web.post("/:owner/:repo/issues/:number/state", webRouteForWrite(async (c, ctx) =
   if (immutable) return immutable;
   const state = stringField((await c.req.parseBody()).state);
   if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
-  await ctx.fj.editIssue(ctx.owner, ctx.repo, number, { state });
+  await ctx.collab.editIssue(ctx.owner, ctx.repo, number, { state });
   c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: state === "closed" ? "closed" : "reopened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/issues/${number}`));
 }));
