@@ -9,6 +9,8 @@ import { freshTestDb } from "./routes/test-fixtures.js";
 
 const config: Config = {
   mode: "hosted",
+  host: "127.0.0.1",
+  accessToken: null,
   dataDir: "/tmp/cosheaf-api-csrf-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",

@@ -80,6 +80,8 @@ export function testConfig(name: string, overrides: Partial<Config> = {}): Confi
     mode: "hosted",
     dataDir: `/tmp/cosheaf-${name}-test`,
     port: 3030,
+    host: "127.0.0.1",
+    accessToken: null,
     forgejoUrl: "http://forgejo.test",
     forgejoToken: "admin-token",
     forgejoAdminToken: "admin-token",

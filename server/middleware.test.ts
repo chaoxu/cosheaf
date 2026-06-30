@@ -28,6 +28,8 @@ import { seedAuthUser } from "./test-helpers.js";
 
 const config: Config = {
   mode: "hosted",
+  host: "127.0.0.1",
+  accessToken: null,
   dataDir: "/tmp/cosheaf-middleware-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",

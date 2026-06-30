@@ -26,6 +26,15 @@ export interface Config {
   mode: "hosted" | "local";
   dataDir: string;
   port: number;
+  // Local Workbench only. The loopback bind address (default 127.0.0.1) and an
+  // optional shared access token. With no token the Workbench stays a loopback,
+  // no-auth single-user tool (today's behavior). A token gates every request so
+  // the operator can safely expose the Workbench on a non-loopback `host` and
+  // reach it from another device; how it is exposed (tunnel/proxy/VPN) and where
+  // TLS terminates is the operator's responsibility. Both are inert in hosted
+  // mode (which uses `port`/its own auth and binds via the launcher).
+  host: string;
+  accessToken: string | null;
   forgejoUrl: string;
   // Non-site-admin runtime token. This is the token name exposed in normal
   // app env and should not carry Forgejo site-admin privileges.
@@ -123,6 +132,29 @@ export function parsePort(raw: string | undefined, fallback: number): number {
   return port;
 }
 
+// True for an address that is only reachable from the same machine. Used to
+// decide whether the Workbench may bind without an access token: loopback is
+// safe auth-free, anything else needs COSHEAF_WORKBENCH_TOKEN.
+export function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase();
+  return h === "127.0.0.1" || h === "::1" || h === "localhost" || h === "[::1]";
+}
+
+// Refuse to expose the local Workbench beyond loopback without an access token.
+// A non-loopback bind makes the ambient local-file authority reachable from the
+// network, so it must be gated. Returns an error message to print + exit on, or
+// null when the (host, token) combination is safe to serve. Pure for tests.
+export function refuseRemoteWithoutToken(host: string, token: string | null): string | null {
+  if (isLoopbackHost(host) || token) return null;
+  return (
+    `refusing to bind the Workbench on ${host} without an access token.\n` +
+    `  A non-loopback bind is reachable from the network and would expose local\n` +
+    `  file read/write with no authentication. Set COSHEAF_WORKBENCH_TOKEN to a\n` +
+    `  secret first (clients send it as 'Authorization: Bearer <token>' or via the\n` +
+    `  /login page). Exposing the port and terminating TLS is up to you.`
+  );
+}
+
 export function parseNonNegativeInteger(raw: string | undefined, fallback: number): number {
   const value = optionalEnvValue(raw);
   if (!value) return fallback;
@@ -181,6 +213,8 @@ export function loadConfig(): Config {
     mode: "hosted",
     dataDir,
     port: serverPort(),
+    host: "127.0.0.1",
+    accessToken: null,
     forgejoUrl,
     forgejoToken: required("COSHEAF_FORGEJO_TOKEN"),
     forgejoAdminToken: required("COSHEAF_FORGEJO_ADMIN_TOKEN"),
@@ -202,7 +236,12 @@ export function loadConfig(): Config {
 // (never read in local mode). Kept here, outside server/local/**, so the
 // Workbench source never even names a forge field (enforced by
 // scripts/check-no-forgejo-in-workbench.mjs).
-export function buildLocalConfig(opts: { dataDir: string; port: number }): Config {
+export function buildLocalConfig(opts: {
+  dataDir: string;
+  port: number;
+  host?: string;
+  accessToken?: string | null;
+}): Config {
   mkdirSync(opts.dataDir, { recursive: true });
   // The sidecar lives inside the user's workspace folder; keep git from ever
   // staging it (the commit page's `git add -A` would otherwise commit and push
@@ -212,6 +251,8 @@ export function buildLocalConfig(opts: { dataDir: string; port: number }): Confi
     mode: "local",
     dataDir: opts.dataDir,
     port: opts.port,
+    host: opts.host ?? "127.0.0.1",
+    accessToken: opts.accessToken ?? null,
     forgejoUrl: "http://127.0.0.1:0",
     forgejoToken: "",
     forgejoAdminToken: "",

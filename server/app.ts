@@ -1,22 +1,32 @@
-import { Hono } from "hono";
-import { compress } from "hono/compress";
-import { logger } from "hono/logger";
-import { requestId } from "hono/request-id";
 import { createWriteStream, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { contentTypeForPath } from "./content-type.js";
+import type Database from "better-sqlite3";
+import { Hono } from "hono";
+import { compress } from "hono/compress";
+import { logger } from "hono/logger";
+import { requestId } from "hono/request-id";
+import { workspaceSlug } from "../shared/conventions.js";
+import { makeT } from "../shared/i18n/index.js";
+import { rejectCrossOriginCookieApiMutation } from "./api-csrf.js";
 import { resolveAppRoot, resolveCoflatDistDir } from "./app-root.js";
+import { contentTypeForPath } from "./content-type.js";
 import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { healthPayload, healthStatus } from "./health.js";
+import { localAuthGate } from "./local/local-auth.js";
+import type { LocalGitWorkspaceBackend } from "./local/local-git-backend.js";
+import { localNotifications } from "./local/local-notifications.js";
+import { localPulls } from "./local/local-pulls.js";
+import { createLocalWebRouter } from "./local/local-web.js";
+import type { RemotePullClient } from "./local/remote-cosheaf-client.js";
+import { WorkspaceRegistry } from "./local/workspace-registry.js";
 import { resolveLocale } from "./locale.js";
-import { rejectCrossOriginCookieApiMutation } from "./api-csrf.js";
 import { auth } from "./routes/auth.js";
 import { branches } from "./routes/branches.js";
-import { files } from "./routes/files.js";
 import { handleAppError } from "./routes/error-handler.js";
+import { files } from "./routes/files.js";
 import { issues } from "./routes/issues.js";
 import { globalNotifications, notifications } from "./routes/notifications.js";
 import { origin } from "./routes/origin.js";
@@ -26,19 +36,9 @@ import { webhooks } from "./routes/webhooks.js";
 import { members, workspaces } from "./routes/workspaces.js";
 import { SSEHub } from "./sse.js";
 import { listPublicAssetPaths } from "./static-assets.js";
-import { createLocalWebRouter } from "./local/local-web.js";
-import { localNotifications } from "./local/local-notifications.js";
-import { localPulls } from "./local/local-pulls.js";
-import type { RemotePullClient } from "./local/remote-cosheaf-client.js";
-import type { LocalGitWorkspaceBackend } from "./local/local-git-backend.js";
-import { WorkspaceRegistry } from "./local/workspace-registry.js";
-import { workspaceSlug } from "../shared/conventions.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "./types.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
 import { viteDevOrigin } from "./vite-dev-origin.js";
-import { makeT } from "../shared/i18n/index.js";
-
-import type Database from "better-sqlite3";
+import type { WorkspaceBackend } from "./workspace-backend.js";
 
 export interface CreateAppOptions {
   config: Config;
@@ -134,6 +134,12 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     app.get("/cosheaf-notifications.js", (c) =>
       c.body("", 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600" }),
     );
+    // Access gate: a no-op unless COSHEAF_WORKBENCH_TOKEN is set. When set, the
+    // typed API the islands/agents call requires the token (Bearer or cookie),
+    // mirroring the web router's gate. Mounted after the CSRF guard above and
+    // before the local API routes; /api/v1/health and /api/v1/origin are mounted
+    // earlier and stay reachable for liveness/discovery.
+    app.use("/api/v1/*", localAuthGate());
     // Local Workbench: only the forge-free, backend-driven typed routes the page
     // islands call, plus the local pulls router (commit + push + open PR on the
     // remote Cosheaf). No auth/workspaces/issues/notifications/webhooks.

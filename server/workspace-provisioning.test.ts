@@ -22,6 +22,8 @@ function freshDb(): Database.Database {
 
 const config: Config = {
   mode: "hosted",
+  host: "127.0.0.1",
+  accessToken: null,
   dataDir: "/tmp/cosheaf-test",
   port: 3030,
   forgejoUrl: "http://forgejo.test",

@@ -17,7 +17,7 @@ import { Command } from "commander";
 import open from "open";
 import { createApp } from "../app.js";
 import { resolveAppRoot } from "../app-root.js";
-import { buildLocalConfig, getDb } from "../db.js";
+import { buildLocalConfig, getDb, isLoopbackHost, refuseRemoteWithoutToken } from "../db.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 
 function openBrowser(url: string): void {
@@ -39,7 +39,7 @@ function resolvePort(raw: string | undefined): number {
   return n;
 }
 
-async function run(dirArg: string | undefined, opts: { port?: string }): Promise<void> {
+async function run(dirArg: string | undefined, opts: { port?: string; host?: string }): Promise<void> {
   // The editor island loads from the built manifest; force production asset mode
   // and require the build to exist.
   process.env.NODE_ENV = "production";
@@ -65,7 +65,14 @@ async function run(dirArg: string | undefined, opts: { port?: string }): Promise
   }
 
   const home = join(homedir(), ".cosheaf", "workbench");
-  const config = buildLocalConfig({ dataDir: home, port: resolvePort(opts.port) });
+  const host = (opts.host ?? process.env.COSHEAF_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
+  const accessToken = process.env.COSHEAF_WORKBENCH_TOKEN?.trim() || null;
+  const refusal = refuseRemoteWithoutToken(host, accessToken);
+  if (refusal) {
+    console.error(`\n  ${refusal}\n`);
+    process.exit(1);
+  }
+  const config = buildLocalConfig({ dataDir: home, port: resolvePort(opts.port), host, accessToken });
   const db = getDb(config);
   const registry = new WorkspaceRegistry(db, { configPath: join(home, "workspaces.json") });
 
@@ -84,20 +91,34 @@ async function run(dirArg: string | undefined, opts: { port?: string }): Promise
 
   const app = createApp({ config, db, localRegistry: registry });
 
-  // Loopback HTTP/1.1, no TLS — the right call for a single-user local tool:
-  // loopback can't be eavesdropped and `localhost` is already a secure context,
-  // so TLS would only add cert/trust friction. HTTP/2 would need that cert for no
-  // real gain on loopback. The one HTTP/1.1 caveat (~6 connections/origin) only
-  // bites when connections are pinned, so local mode keeps no idle long-lived
-  // connections (no notification SSE — see app.ts) and SSE handlers release on
-  // disconnect (see streamHubChannel), not on a timer.
-  const server = serve({ fetch: app.fetch, port: config.port, hostname: "127.0.0.1" }, (info) => {
-    const root = `http://127.0.0.1:${info.port}/`;
+  // Defaults to loopback HTTP/1.1, no TLS — the right call for a single-user
+  // local tool: loopback can't be eavesdropped and `localhost` is already a
+  // secure context, so TLS would only add cert/trust friction. HTTP/2 would need
+  // that cert for no real gain on loopback. The one HTTP/1.1 caveat (~6
+  // connections/origin) only bites when connections are pinned, so local mode
+  // keeps no idle long-lived connections (no notification SSE — see app.ts) and
+  // SSE handlers release on disconnect (see streamHubChannel), not on a timer.
+  // A non-loopback `host` (operator opt-in, token-gated) lets a chosen exposure
+  // tool reach it; transport/TLS is then the operator's responsibility.
+  const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
+    // 0.0.0.0 / :: bind to all interfaces, so loopback still reaches them; show
+    // and (maybe) open a loopback URL. A specific non-loopback bind isn't
+    // loopback-reachable, so show that host and skip the auto-open.
+    const wildcard = config.host === "0.0.0.0" || config.host === "::";
+    const loopbackReachable = isLoopbackHost(config.host) || wildcard;
+    const displayHost = loopbackReachable ? "127.0.0.1" : config.host;
+    const root = `http://${displayHost}:${info.port}/`;
     // Land on the opened workspace when a dir was passed, else the switcher.
     const url = opened ? `${root}${opened.owner}/${opened.repo}` : root;
     console.log(`\n  Cosheaf Workbench`);
     console.log(`  data:      ${home}`);
     console.log(`  logs:      ${join(home, "server.log")}`);
+    console.log(`  bind:      ${config.host}:${info.port}`);
+    console.log(
+      config.accessToken
+        ? `  access:    token required (COSHEAF_WORKBENCH_TOKEN) — open ${root}login`
+        : `  access:    none (loopback, single user)`,
+    );
     const list = registry.list();
     if (list.length === 0) {
       console.log(`  workspaces: none yet — add a folder from the home page`);
@@ -109,7 +130,9 @@ async function run(dirArg: string | undefined, opts: { port?: string }): Promise
       }
     }
     console.log(`\n  → ${url}\n`);
-    if (process.env.COSHEAF_NO_OPEN !== "1") openBrowser(url);
+    // Auto-open only a loopback-reachable URL; a specific non-loopback bind is a
+    // headless dev-box exposure the operator reaches from elsewhere.
+    if (loopbackReachable && process.env.COSHEAF_NO_OPEN !== "1") openBrowser(url);
   });
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
@@ -125,8 +148,12 @@ program
   .name("cosheaf-workbench")
   .description("Open the Cosheaf Workbench. With no folder, reopens your registered workspaces; with a folder, also opens it.")
   .argument("[dir]", "folder to open as a workspace")
-  .option("-p, --port <port>", "loopback port to listen on (default: a random free port; or COSHEAF_PORT)")
-  .action((dir: string | undefined, opts: { port?: string }) => {
+  .option("-p, --port <port>", "port to listen on (default: a random free port; or COSHEAF_PORT)")
+  .option(
+    "--host <addr>",
+    "bind address (default: 127.0.0.1; or COSHEAF_HOST). A non-loopback host requires COSHEAF_WORKBENCH_TOKEN.",
+  )
+  .action((dir: string | undefined, opts: { port?: string; host?: string }) => {
     void run(dir, opts);
   });
 program.parse();

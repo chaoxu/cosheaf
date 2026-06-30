@@ -10,15 +10,17 @@ import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
+import { deleteCookie, setCookie } from "hono/cookie";
 import { repoHref } from "../../shared/url.js";
-import type { AppEnv } from "../types.js";
-import { globalRoute, htmlResponse, redirect, stringField } from "../routes/web-context.js";
-import { emptyHtml, html, type Html } from "../routes/web-html.js";
-import { pageShell, globalSidebar } from "../routes/web-shell.js";
+import { globalRoute, htmlResponse, redirect, requestOrigin, safeWebRedirect, stringField } from "../routes/web-context.js";
 import { registerFileRoutes } from "../routes/web-files.js";
+import { emptyHtml, type Html, html } from "../routes/web-html.js";
+import { globalSidebar, pageShell } from "../routes/web-shell.js";
+import type { AppEnv } from "../types.js";
+import { hasWorkbenchAccess, localAuthGate, tokenMatches, WORKBENCH_COOKIE } from "./local-auth.js";
 import { registerLocalCommitRoutes } from "./local-commit.js";
-import { registerLocalRemoteRoutes } from "./local-remote.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
+import { registerLocalRemoteRoutes } from "./local-remote.js";
 import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
 // A compact path for the card: abbreviate the home dir to ~ and elide a deep
@@ -211,9 +213,32 @@ function profilePage(registry: WorkspaceRegistry, user: string, notice: string |
   return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true }), body });
 }
 
+// The Workbench access-token sign-in page, shown only when COSHEAF_WORKBENCH_TOKEN
+// is set (the operator exposed the Workbench beyond loopback). A single token
+// field; no username — the Workbench is single-user. `next` is a same-site path
+// to return to after login.
+function loginPage(next: string, error: boolean): string {
+  const body = html`<main class="auth-page">
+    <form class="auth-card" method="post" action="/login" data-testid="workbench-login">
+      <h1>Cosheaf Workbench</h1>
+      ${error ? html`<p class="auth-notice auth-notice--error" role="alert">That access token was not recognized.</p>` : emptyHtml}
+      <p class="muted">This Workbench requires an access token.</p>
+      <input type="hidden" name="next" value="${next}">
+      <label>Access token <input name="token" type="password" autocomplete="current-password" required autofocus data-testid="workbench-login-token"></label>
+      <button type="submit">Sign in</button>
+    </form>
+  </main>`;
+  return pageShell({ title: "Sign in", body });
+}
+
+
 export function createLocalWebRouter(): Hono<AppEnv> {
   const localWeb = new Hono<AppEnv>();
   localWeb.use("*", compress());
+  // Access gate: a no-op unless COSHEAF_WORKBENCH_TOKEN is set, in which case
+  // every page (except /login, /logout) requires the token. Runs before the
+  // routes so an unauthenticated browser bounces to /login.
+  localWeb.use("*", localAuthGate());
 
   // Home → the workspace switcher over all opened folders.
   localWeb.get(
@@ -282,11 +307,44 @@ export function createLocalWebRouter(): Hono<AppEnv> {
     }),
   );
 
-  // Local mode has no auth, so /login can never be reached legitimately. Keep a
-  // backstop redirect so a stray bounce (e.g. the editor island's api.ts 401
-  // path) lands on the switcher instead of dead-ending on a missing route.
-  localWeb.get("/login", () => redirect("/"));
-  localWeb.get("/logout", () => redirect("/"));
+  // Sign-in for the access-token gate. With no token configured the Workbench is
+  // loopback no-auth, so /login just bounces to the switcher (also the backstop
+  // for a stray 401 from the editor island's api.ts). With a token, GET renders
+  // the form (or skips it when already signed in) and POST validates the token.
+  localWeb.get("/login", (c) => {
+    const expected = c.get("config").accessToken;
+    if (!expected) return redirect("/");
+    const next = safeWebRedirect(c.req.query("next") ?? null) ?? "/";
+    if (hasWorkbenchAccess(c, expected)) return redirect(next);
+    return htmlResponse(loginPage(next, c.req.query("error") === "1"));
+  });
+  localWeb.post("/login", async (c) => {
+    const expected = c.get("config").accessToken;
+    if (!expected) return redirect("/");
+    const form = await c.req.parseBody();
+    const next = safeWebRedirect(stringField(form.next)) ?? "/";
+    if (!tokenMatches(stringField(form.token) ?? null, expected)) {
+      return redirect(`/login?error=1&next=${encodeURIComponent(next)}`);
+    }
+    setCookie(c, WORKBENCH_COOKIE, expected, {
+      httpOnly: true,
+      sameSite: "Lax",
+      path: "/",
+      // Mark Secure when the browser-facing scheme is https — directly (the
+      // request URL) or via the operator's TLS proxy (X-Forwarded-Proto). Local
+      // mode trusts no proxy hops, so requestOrigin alone would always see http;
+      // reading the header here is fail-safe: a spoofed https only makes the
+      // cookie Secure (then unsent over http), never leaks it.
+      secure: requestOrigin(c).startsWith("https://") || c.req.header("x-forwarded-proto") === "https",
+    });
+    // c.redirect (not the redirect() helper) so the Set-Cookie just written to
+    // c.res survives — a fresh Response would drop it.
+    return c.redirect(next, 303);
+  });
+  localWeb.get("/logout", (c) => {
+    deleteCookie(c, WORKBENCH_COOKIE, { path: "/" });
+    return redirect(c.get("config").accessToken ? "/login" : "/");
+  });
 
   // Tier 2: after the editor opens a PR it navigates to /:owner/:repo/pulls/:n.
   // The PR lives on the remote Cosheaf, so bounce there. 404 when no remote.
