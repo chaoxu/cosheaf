@@ -6,9 +6,9 @@ import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { issues } from "./issues.js";
 import {
+  responseEmpty as empty,
   fakeForgejo,
   freshTestDb,
-  responseEmpty as empty,
   responseOk as ok,
   seedTestWorkspace,
   testApp,
@@ -210,6 +210,61 @@ describe("issues routes", () => {
     expect(del.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/comments?page=1&limit=50");
+  });
+
+  it("edits an issue comment by id through the number-less route", async () => {
+    const db = freshDb();
+    // A read-access member may edit (Forgejo enforces author/admin), so the
+    // write gate is bypassed for comment mutations.
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockResolvedValueOnce(ok({
+      id: 55,
+      body: "updated body",
+      user: { login: "alice" },
+      created_at: "2026-05-20T00:00:00Z",
+      updated_at: "2026-05-20T00:05:00Z",
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/comments/55", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ body: "updated body" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/comments/55");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("PATCH");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ body: "updated body" });
+    await expect(res.json()).resolves.toMatchObject({ id: 55, body: "updated body", author_username: "alice" });
+  });
+
+  it("deletes an issue comment by id through the number-less route", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockResolvedValueOnce(empty());
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/comments/55", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/comments/55");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    await expect(res.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects a bad comment id on the number-less route before contacting Forgejo", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const res = await appFor(db).request("/api/v1/repos/owner/w/issues/comments/0", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("updates issue state through a typed route", async () => {

@@ -9,7 +9,6 @@ import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalida
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { deleteSidecarForWorkspace } from "../workspace-cleanup.js";
-import { setWorkspaceMember } from "../workspace-members.js";
 import { normalizeLabelColor } from "./label-utils.js";
 import {
   badRequestPage,
@@ -178,15 +177,9 @@ web.post("/:owner/:repo/settings/access", webRouteForAdmin(async (c, ctx) => {
   return runFreshAdminSettingsAction(
     ctx,
     async () => {
-      // The caller is repo admin (gated above) — their own PAT carries the
-      // collaborator-management rights; no admin token needed.
-      await setWorkspaceMember({
-        forgejo: ctx.fj,
-        owner: ctx.owner,
-        repo: ctx.repo,
-        username,
-        role: role as Role,
-      });
+      // The caller is repo admin (gated above). Hosted runs setWorkspaceMember
+      // against the forge; local proxies to the connected core's members route.
+      await ctx.setMember(username, role as Role);
       invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
     },
     `${repoHref(ctx.owner, ctx.repo, "/settings")}?access=${encodeURIComponent(`${username} · ${role}`)}`,

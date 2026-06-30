@@ -79,7 +79,7 @@ async function pullIssueCommentFor(
   pullNumber: number,
   commentId: number,
 ): Promise<ForgejoIssueComment | null> {
-  const comments = await ctx.fj.listIssueComments(ctx.owner, ctx.repo, pullNumber);
+  const comments = await ctx.collab.listIssueComments(ctx.owner, ctx.repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
 
@@ -185,13 +185,13 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const canRequestReview = ctx.ws.role !== "read" && pull.state !== "closed";
   const [issueComments, reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
-    ctx.fj.listIssueComments(ctx.owner, ctx.repo, pull.number),
+    ctx.collab.listIssueComments(ctx.owner, ctx.repo, pull.number),
     ctx.collab.listReviews(ctx.owner, ctx.repo, pull.number),
     ctx.collab.listPullComments(ctx.owner, ctx.repo, pull.number),
-    ctx.fj.listIssueTimeline(ctx.owner, ctx.repo, pull.number),
+    ctx.collab.listIssueTimeline(ctx.owner, ctx.repo, pull.number),
     ctx.collab.listPullCommits(ctx.owner, ctx.repo, pull.number),
     canRequestReview ? ctx.collab.listPullReviewers(ctx.owner, ctx.repo).catch(() => []) : Promise.resolve([]),
-    ctx.ws.role === "read" ? Promise.resolve([]) : ctx.fj.listLabels(ctx.owner, ctx.repo).catch(() => []),
+    ctx.ws.role === "read" ? Promise.resolve([]) : ctx.collab.listLabels(ctx.owner, ctx.repo).catch(() => []),
   ]);
   const timelineHtml = await renderPullTimeline(ctx, pull.number, issueComments, reviews, comments, timeline, commits);
   // The participants bar must reflect the conversation the timeline shows —
@@ -256,8 +256,8 @@ web.get("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   if (pull.state === "closed") return forbiddenPage(ctx.user);
   const [allLabels, milestones] = await Promise.all([
-    ctx.fj.listLabels(ctx.owner, ctx.repo),
-    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
+    ctx.collab.listLabels(ctx.owner, ctx.repo),
+    ctx.collab.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "pulls", `Edit #${pull.number} - ${ctx.repo}`, pullEditPage(ctx, pull, allLabels, milestones)),
@@ -292,7 +292,7 @@ web.post("/:owner/:repo/pulls/:number/labels", webRouteForWrite(async (c, ctx) =
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), pull.labels ?? []);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
-  if (labelPatch.labels) await ctx.fj.setIssueLabels(ctx.owner, ctx.repo, pull.number, labelPatch.labels);
+  if (labelPatch.labels) await ctx.collab.setIssueLabels(ctx.owner, ctx.repo, pull.number, labelPatch.labels);
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -352,7 +352,7 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRoute(async (c, ctx
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   const comment = await pullCommentFor(ctx, pull.number, id);
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
-  await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
+  await ctx.collab.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -376,7 +376,7 @@ web.post("/:owner/:repo/pulls/:number/issue-comments/:id/edit", webRoute(async (
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   const comment = await pullIssueCommentFor(ctx, pull.number, id);
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
-  await ctx.fj.editIssueComment(ctx.owner, ctx.repo, id, body);
+  await ctx.collab.editIssueComment(ctx.owner, ctx.repo, id, body);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -386,7 +386,7 @@ web.post("/:owner/:repo/pulls/:number/issue-comments/:id/delete", webRoute(async
   if (!pull || !id) return notFoundPage(ctx.user, "Comment not found");
   const comment = await pullIssueCommentFor(ctx, pull.number, id);
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
-  await ctx.fj.deleteIssueComment(ctx.owner, ctx.repo, id);
+  await ctx.collab.deleteIssueComment(ctx.owner, ctx.repo, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -424,7 +424,9 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   // Merge is irreversible: re-check admin against Forgejo (bypassing the 30s role
   // cache), mirroring requireAdminFresh on the typed route and the repo-delete
   // route — so a just-demoted admin can't merge in the stale window.
-  const fresh = await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  // Local Workbench (writeMode "direct") has no forge client; the local user is
+  // the workspace admin and the core enforces admin on the proxied merge.
+  const fresh = ctx.writeMode === "direct" ? ctx.ws.role : await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
@@ -456,7 +458,9 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
             : "This pull request needs its required approvals. Use “Merge anyway” to bypass them.";
     return redirect(`${prHref}?toast=${encodeURIComponent(msg)}&toastKind=error`);
   }
-  if (pull.head.ref && pull.head.ref !== "main") {
+  // In local mode the head branch lives on the remote core; the proxied merge
+  // owns its cleanup, and there is no local forge client to delete it.
+  if (ctx.writeMode !== "direct" && pull.head.ref && pull.head.ref !== "main") {
     await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, pull.head.ref);
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
@@ -564,8 +568,8 @@ async function pullFiles(ctx: WebCtx, number: number) {
 
 async function prAssetPreviewPaths(ctx: WebCtx, pull: ForgejoPull): Promise<PrFileAssetPreviewPaths> {
   const [baseTree, headTree] = await Promise.all([
-    ctx.fj.getTree(ctx.owner, ctx.repo, pull.base.sha, true),
-    ctx.fj.getTree(ctx.owner, ctx.repo, pull.head.sha, true),
+    ctx.backend.getTree(ctx.owner, ctx.repo, pull.base.sha, true),
+    ctx.backend.getTree(ctx.owner, ctx.repo, pull.head.sha, true),
   ]);
   return {
     base: buildPdfImagePreviewPaths(baseTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),

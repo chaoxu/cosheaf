@@ -893,6 +893,19 @@ pulls.get("/:owner/:repo/topics", async (c) => {
   return c.json({ topics });
 });
 
+// Replace the full topic set. Admin-only (topics carry the cosheaf-format-*
+// convention); callers send the complete list — Forgejo replaces, not merges.
+pulls.put("/:owner/:repo/topics", requireAdminFresh, async (c) => {
+  const body = await readJsonObject(c.req);
+  const topics = body.topics;
+  if (!Array.isArray(topics) || !topics.every((t) => typeof t === "string")) {
+    return c.json(...bad("topics must be an array of strings"));
+  }
+  const { fj, owner, repo } = repoCtxForgejo(c);
+  await fj.replaceRepoTopics(owner, repo, topics);
+  return c.json({ ok: true });
+});
+
 // ---------- settings (min_approvals on main) ----------
 
 pulls.get("/:owner/:repo/settings", async (c) => {

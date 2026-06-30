@@ -319,7 +319,7 @@ export async function labelSelectionPatch(
   if (!stringField(form.labels_present)) return { ok: true };
   const labelIds = positiveIntFields(form.labels);
   if (labelIds === null) return { ok: false, message: "Labels must be positive integer ids." };
-  const allLabels = await ctx.fj.listLabels(ctx.owner, ctx.repo);
+  const allLabels = await ctx.collab.listLabels(ctx.owner, ctx.repo);
   const validation = validateLabelSelection(labelIds, allLabels, [...current]);
   if (!validation.ok) return { ok: false, message: validation.message };
   return { ok: true, labels: labelIds };

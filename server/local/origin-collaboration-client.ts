@@ -32,6 +32,7 @@ import type {
   TimelineEvent,
 } from "../../shared/issues.js";
 import type { PrCommit, PrFile, PrMeta } from "../../shared/review.js";
+import type { Role } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -690,6 +691,18 @@ export class OriginCollaborationClient {
     return commentToShape(r);
   }
 
+  // The forge addresses a comment by id without an issue number; the core's
+  // number-less typed routes (issues/comments/:id) match that, so these only
+  // need the comment id. The PATCH route returns the updated IssueComment DTO.
+  async editIssueComment(owner: string, repo: string, id: number, body: string): Promise<CommentShape> {
+    const r = await this.patch<IssueComment>(this.repoPath(owner, repo, `/issues/comments/${id}`), { body });
+    return commentToShape(r);
+  }
+
+  async deleteIssueComment(owner: string, repo: string, id: number): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/issues/comments/${id}`));
+  }
+
   // Returns the issue's labels after the set; the typed route wraps them as
   // {labels}. Other call sites ignore the return.
   async setIssueLabels(owner: string, repo: string, number: number, labels: number[]): Promise<LabelShape[]> {
@@ -957,6 +970,27 @@ export class OriginCollaborationClient {
     return r.topics ?? [];
   }
 
+  // Replace the full topic set. The core's PUT /topics route forwards to the
+  // forge (which replaces, not merges); the caller composes the merged list.
+  async replaceRepoTopics(owner: string, repo: string, topics: string[]): Promise<void> {
+    await this.put(this.repoPath(owner, repo, "/topics"), { topics });
+  }
+
+  // The core's DELETE /members/:username route removes the collaborator on the
+  // forge (idempotent: a missing member is a 404/422 the route swallows).
+  async removeCollaborator(owner: string, repo: string, username: string): Promise<void> {
+    await this.del(this.repoPath(owner, repo, `/members/${encodeURIComponent(username)}`));
+  }
+
+  // Add or update a collaborator's role. Not part of the CollaborationClient
+  // surface, so it is called directly off the instance via `localMemberSetter`.
+  // The core's PUT /members/:username route runs the full member-set
+  // (collaborator + branch-protection push-whitelist) server-side, matching the
+  // hosted add path.
+  async setMember(owner: string, repo: string, username: string, role: Role): Promise<void> {
+    await this.put(this.repoPath(owner, repo, `/members/${encodeURIComponent(username)}`), { role });
+  }
+
   async getRepo(owner: string, repo: string): Promise<RepoShape | null> {
     // The typed repo route returns a forge-repo-compatible object (description,
     // visibility, default branch, owner, topics-when-present).
@@ -1027,10 +1061,12 @@ export class OriginCollaborationClient {
 
 // Wrap a read-capable origin client so every not-yet-implemented
 // CollaborationClient method throws clearly instead of being `undefined`. #263
-// lands the issue reads; write methods and the pulls/notifications/repo/settings
-// surfaces arrive with their owning agents. Implemented methods delegate (bound
-// to the real instance so their internal `this.get` works); anything else is a
-// loud stub. The cast is the "cast unimplemented methods" the seam allows.
+// lands the issue reads; the write surfaces (issues/pulls/reviews/notifications/
+// repo + settings) land with their owning agents. Implemented methods delegate
+// (bound to the real instance so their internal `this.get` works); anything else
+// is a loud stub. Still stubbed deliberately: `editRepo`/`deleteRepo` have no
+// typed core endpoint yet — rare Workbench ops, tracked separately. The cast is
+// the "cast unimplemented methods" the seam allows.
 function withUnimplementedStubs(client: OriginCollaborationClient): CollaborationClient {
   return new Proxy(client, {
     get(target, prop, receiver) {
@@ -1050,4 +1086,22 @@ export function localCollaborationClient(entry: WorkspaceEntry): CollaborationCl
     return withUnimplementedStubs(new OriginCollaborationClient(entry.remote.url, entry.remote.token));
   }
   return unconnectedClient();
+}
+
+// Add/update-collaborator capability for the local settings page. `setMember`
+// isn't on the CollaborationClient surface, so the web context binds this
+// closure: connected → proxy to the core members route; unconnected → throw the
+// Connect sentinel.
+export function localMemberSetter(
+  entry: WorkspaceEntry,
+  owner: string,
+  repo: string,
+): (username: string, role: Role) => Promise<void> {
+  if (entry.remote) {
+    const client = new OriginCollaborationClient(entry.remote.url, entry.remote.token);
+    return (username, role) => client.setMember(owner, repo, username, role);
+  }
+  return () => {
+    throw new NoCoreConnectedError();
+  };
 }

@@ -141,7 +141,7 @@ function parseIssueSort(value: string | undefined): IssueSort | undefined {
   return value && allowed.has(value) ? value as IssueSort : undefined;
 }
 
-const issueCommentMutationRe = /\/issues\/\d+\/comments(?:\/\d+)?$/;
+const issueCommentMutationRe = /\/issues\/(?:\d+\/comments(?:\/\d+)?|comments\/\d+)$/;
 
 const requireIssueWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
   const method = c.req.method.toUpperCase();
@@ -435,6 +435,40 @@ issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   const target = await requireIssueComment(c, number, id);
   if (target instanceof Response) return target;
   await collab.deleteIssueComment(owner, repo, id);
+  return c.json({ ok: true });
+});
+
+// Number-less comment edit/delete. The forge addresses a comment by id alone
+// (issues/comments/:id), so a client that holds only the comment id (the local
+// Workbench's OriginCollaborationClient) can target it without the issue number.
+// The number-scoped routes above stay for clients that have the number and want
+// the cross-issue safety check; here Forgejo enforces author/admin rights on the
+// mutation and that the comment belongs to this repo.
+issues.patch("/:owner/:repo/issues/comments/:id", async (c) => {
+  const id = parsePositiveIntId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad comment id"));
+  const parsed = requireCommentBody(await readJsonBody(c.req));
+  if (!parsed.ok) return c.json(...bad(parsed.message));
+  const { collab, owner, repo } = repoCtxCollab(c);
+  try {
+    const comment = await collab.editIssueComment(owner, repo, id, parsed.text);
+    return c.json(toIssueComment(comment));
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("comment not found"));
+    throw err;
+  }
+});
+
+issues.delete("/:owner/:repo/issues/comments/:id", async (c) => {
+  const id = parsePositiveIntId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad comment id"));
+  const { collab, owner, repo } = repoCtxCollab(c);
+  try {
+    await collab.deleteIssueComment(owner, repo, id);
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("comment not found"));
+    throw err;
+  }
   return c.json({ ok: true });
 });
 

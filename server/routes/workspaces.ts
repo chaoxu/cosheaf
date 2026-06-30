@@ -1,18 +1,18 @@
 import { Hono } from "hono";
-import type { AppEnv } from "../types.js";
-import type { Role } from "../../shared/roles.js";
-import { ROLES } from "../../shared/roles.js";
 import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
-import { ForgejoError, type ForgejoRepo } from "../forgejo.js";
-import { invalidateWorkspacePermissionCache, repoCtxForgejo, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
-import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
-import { provisionWorkspace, type WorkspaceVisibility } from "../workspace-provisioning.js";
-import { setWorkspaceMember } from "../workspace-members.js";
 import {
   documentFormatFromTopics,
   isDocumentFormatId,
   normalizeDocumentFormatId,
 } from "../../shared/document-format.js";
+import type { Role } from "../../shared/roles.js";
+import { ROLES } from "../../shared/roles.js";
+import { ForgejoError, type ForgejoRepo } from "../forgejo.js";
+import { invalidateWorkspacePermissionCache, repoCtxForgejo, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
+import type { AppEnv } from "../types.js";
+import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
+import { setWorkspaceMember } from "../workspace-members.js";
+import { provisionWorkspace, type WorkspaceVisibility } from "../workspace-provisioning.js";
 import { bad, conflict, notFound } from "./responses.js";
 
 export const workspaces = new Hono<AppEnv>();
@@ -214,4 +214,24 @@ members.put("/:owner/:repo/members/:username", requireMembership(), requireAdmin
 
   invalidateWorkspacePermissionCache(ws.owner, ws.repo, username);
   return c.json({ ok: true, username, role });
+});
+
+members.delete("/:owner/:repo/members/:username", requireMembership(), requireAdminFresh, async (c) => {
+  const username = c.req.param("username")?.trim();
+  if (!username) return c.json(...bad("username required"));
+  if (!FORGEJO_NAME_RE.test(username)) return c.json(...bad("invalid username"));
+
+  const ws = c.get("workspace");
+  // The caller passed requireAdminFresh — their own PAT carries the
+  // collaborator-management rights. Removing is idempotent: a 404/422 means the
+  // user is already gone, mirroring the hosted web-settings remove path.
+  const fj = c.get("fjUser");
+  try {
+    await fj.removeCollaborator(ws.owner, ws.repo, username);
+  } catch (err) {
+    if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
+  }
+
+  invalidateWorkspacePermissionCache(ws.owner, ws.repo, username);
+  return c.json({ ok: true, username });
 });

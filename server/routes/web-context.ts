@@ -10,13 +10,14 @@ import { Forgejo } from "../forgejo.js";
 import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
-import { localCollaborationClient } from "../local/origin-collaboration-client.js";
+import { localCollaborationClient, localMemberSetter } from "../local/origin-collaboration-client.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import { workspaceReadmeTitle } from "../page-search.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
 import type { WorkspaceBackend } from "../workspace-backend.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
+import { setWorkspaceMember } from "../workspace-members.js";
 import { forgeAvatarSrc } from "./avatar.js";
 import { parsePositiveIntId } from "./query-params.js";
 import { type Html, html, raw } from "./web-html.js";
@@ -49,6 +50,11 @@ export interface WebCtx {
   // Whether the editor may open a pull request (hosted always; local only at
   // Tier 2 with a configured remote).
   canOpenPull: boolean;
+  // Add/update a collaborator's role. Hosted runs setWorkspaceMember against the
+  // forge (collaborator + branch-protection whitelist); local proxies to the
+  // connected core's members route. Kept off `collab` because the member-setter
+  // is not part of CollaborationClient (Pick<Forgejo>).
+  setMember: (username: string, role: Role) => Promise<void>;
   // Optional local Workbench browser-state scope. Hosted pages leave this empty.
   originId?: string;
   // Per-request UI locale and a locale-bound translate, threaded into repo-page
@@ -205,6 +211,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       userAvatarSrc: null,
       writeMode: "direct",
       canOpenPull: entry.identity.canOpenPull,
+      setMember: localMemberSetter(entry, owner, repo),
       originId: entry.identity.originId,
       locale: c.get("locale"),
       t: c.get("t"),
@@ -229,7 +236,8 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     resolveWorkspaceDisplayTitle(db, fj, ws),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", canOpenPull: true, locale: c.get("locale"), t: c.get("t") };
+  const setMember = (username: string, role: Role) => setWorkspaceMember({ forgejo: fj, owner, repo, username, role });
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(

@@ -1,12 +1,11 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetMiddlewareCachesForTests,
   _seedFormatCacheForTests,
 } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
+import { fakeForgejo, freshTestDb, responseOk, testApp, testConfig } from "./test-fixtures.js";
 import { members, workspaces } from "./workspaces.js";
-import { freshTestDb, testApp, testConfig } from "./test-fixtures.js";
-import { fakeForgejo, responseOk } from "./test-fixtures.js";
 
 const config = testConfig("workspaces");
 
@@ -523,5 +522,67 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({ error: "invalid username" });
     expect(mutated).toBe(false);
+  });
+});
+
+describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
+  it("lets a workspace admin remove a collaborator", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
+    _seedFormatCacheForTests("owner", "w", "coflat");
+
+    let removed = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
+      forge.delete("/api/v1/repos/owner/w/collaborators/test-vera", (c) => {
+        removed = true;
+        return c.body(null, 204);
+      });
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w/members/test-vera", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, username: "test-vera" });
+    expect(removed).toBe(true);
+  });
+
+  it("is idempotent when the collaborator is already gone", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
+    _seedFormatCacheForTests("owner", "w", "coflat");
+
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "admin" }));
+      forge.delete("/api/v1/repos/owner/w/collaborators/test-vera", (c) => c.body(null, 404));
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w/members/test-vera", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, username: "test-vera" });
+  });
+
+  it("rejects non-admin callers", async () => {
+    const { app, db } = appFor();
+    const token = seedAuthUser(db, config, { username: "chao", role: "write", owner: "owner", repo: "w" });
+    _seedFormatCacheForTests("owner", "w", "coflat");
+
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/collaborators/chao/permission", (c) => c.json({ permission: "write" }));
+    }));
+
+    const res = await app.request("/api/v1/repos/owner/w/members/test-vera", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(403);
   });
 });

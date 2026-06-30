@@ -1614,4 +1614,56 @@ describe("POST /pulls duplicate-PR resolution (#181)", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ topics: ["cosheaf-format-coflat", "math"] });
   });
+
+  it("PUT /topics replaces the topic set for an admin", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "admin");
+    let replaced: unknown = null;
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/collaborators/alice/permission", (c) => c.json({ permission: "admin" }));
+        forge.put("/api/v1/repos/owner/w/topics", async (c) => {
+          replaced = await c.req.json();
+          return c.body(null, 204);
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/topics", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ topics: ["cosheaf-format-coflat", "math"] }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    expect(replaced).toEqual({ topics: ["cosheaf-format-coflat", "math"] });
+  });
+
+  it("PUT /topics rejects a write user with 403", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "write");
+    fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
+    const res = await appFor(db).request("/api/v1/repos/owner/w/topics", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ topics: ["math"] }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("PUT /topics rejects a non-string-array payload", async () => {
+    const db = freshDb();
+    seedWorkspace(db);
+    const token = seedUser(db, 1, "alice", "admin");
+    fetchMock.mockResolvedValueOnce(ok({ permission: "admin" }));
+    const res = await appFor(db).request("/api/v1/repos/owner/w/topics", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ topics: [1, 2] }),
+    });
+    expect(res.status).toBe(400);
+  });
 });

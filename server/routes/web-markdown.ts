@@ -1,14 +1,14 @@
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
 import {
+  type CoflatReaderSurface,
   coflatReaderIslandClass,
   coflatReaderSurfaceClass,
-  type CoflatReaderSurface,
 } from "../../shared/coflat-reader-surface.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { loadRepoConfig } from "../repo-config.js";
 import type { WebCtx } from "./web-context.js";
-import { emptyHtml, html, type Html, jsonScript, raw } from "./web-html.js";
+import { emptyHtml, type Html, html, jsonScript, raw } from "./web-html.js";
 
 export type MarkdownSurface = CoflatReaderSurface;
 
@@ -91,7 +91,7 @@ export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceO
   const { body } = parseFrontmatterYaml(source);
   // Forgejo's repo-scoped /markdown endpoint returns sanitized HTML; it is
   // the rendered document, not text content.
-  return raw(await ctx.fj.renderMarkdown(ctx.owner, ctx.repo, body));
+  return raw(await ctx.collab.renderMarkdown(ctx.owner, ctx.repo, body));
 }
 
 export async function renderMarkdownSurface(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
