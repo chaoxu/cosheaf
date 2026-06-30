@@ -1,8 +1,8 @@
-// Tier 2: talk to a remote Cosheaf service for the pull-request surface the
-// local Workbench can't provide itself. Uses the remote's typed Cosheaf API with
-// an opaque Cosheaf token (per docs/AI_CLIENTS.md) — never a forge token, never
-// a forge path. Git push itself goes over the working tree's `origin` remote
-// (the user's SSH key); this client only opens / reads the PR.
+// Tier 2: talk to a remote Cosheaf service for the surface the local Workbench
+// can't provide itself. Uses the remote's typed Cosheaf API with an opaque
+// Cosheaf token (per docs/AI_CLIENTS.md) — never a forge token, never a forge
+// path. Git push itself goes over the working tree's `origin` remote (the user's
+// SSH key); this client opens / reads the PR and probes remote identity.
 
 // A pull request as the Workbench displays it — the subset of the remote's
 // typed PrMeta the read-only PR list needs.
@@ -34,6 +34,10 @@ export interface RemotePullClient {
   pullUrl(owner: string, repo: string, n: number): string;
 }
 
+export interface CosheafMeResponse {
+  user: { username: string } | null;
+}
+
 export class RemoteCosheafError extends Error {
   constructor(
     public status: number,
@@ -44,18 +48,31 @@ export class RemoteCosheafError extends Error {
   }
 }
 
-export class RemoteCosheafClient implements RemotePullClient {
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+export class CosheafOriginClient implements RemotePullClient {
   private readonly base: string;
+  private readonly fetchFn: FetchLike;
 
   constructor(
     baseUrl: string,
-    private token: string,
+    private readonly token: string,
+    opts: { fetch?: FetchLike } = {},
   ) {
     this.base = baseUrl.replace(/\/+$/, "");
+    this.fetchFn = opts.fetch ?? fetch;
+  }
+
+  private apiPath(...segments: string[]): string {
+    return `/api/v1/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
+  }
+
+  private repoPath(owner: string, repo: string, suffix: string): string {
+    return `${this.apiPath("repos", owner, repo)}${suffix}`;
   }
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.base}${path}`, {
+    const res = await this.fetchFn(`${this.base}${path}`, {
       ...init,
       headers: {
         authorization: `Bearer ${this.token}`,
@@ -71,8 +88,12 @@ export class RemoteCosheafClient implements RemotePullClient {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  me(): Promise<CosheafMeResponse> {
+    return this.req(this.apiPath("me"));
+  }
+
   async whoami(): Promise<{ username: string } | null> {
-    const r = await this.req<{ user: { username: string } | null }>("/api/v1/me");
+    const r = await this.me();
     return r.user;
   }
 
@@ -81,17 +102,19 @@ export class RemoteCosheafClient implements RemotePullClient {
     repo: string,
     body: { head: string; base: string; title: string; body: string },
   ): Promise<{ number: number }> {
-    return this.req(`/api/v1/repos/${owner}/${repo}/pulls`, { method: "POST", body: JSON.stringify(body) });
+    return this.req(this.repoPath(owner, repo, "/pulls"), { method: "POST", body: JSON.stringify(body) });
   }
 
   async listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<RemotePullSummary[]> {
     const r = await this.req<{ pulls: RemotePullSummary[] }>(
-      `/api/v1/repos/${owner}/${repo}/pulls?state=${encodeURIComponent(state)}`,
+      `${this.repoPath(owner, repo, "/pulls")}?state=${encodeURIComponent(state)}`,
     );
     return r.pulls ?? [];
   }
 
   pullUrl(owner: string, repo: string, n: number): string {
-    return `${this.base}/${owner}/${repo}/pulls/${n}`;
+    return `${this.base}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${n}`;
   }
 }
+
+export const RemoteCosheafClient = CosheafOriginClient;

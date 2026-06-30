@@ -25,7 +25,7 @@ import { friendlyLine } from "./git-errors.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { writeRemote } from "./local-workspace.js";
-import { RemoteCosheafClient, type RemotePullSummary } from "./remote-cosheaf-client.js";
+import { CosheafOriginClient, type RemotePullSummary } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
@@ -149,7 +149,7 @@ export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
       }
       let who: { username: string } | null;
       try {
-        who = await new RemoteCosheafClient(url, token).whoami();
+        who = await new CosheafOriginClient(url, token).whoami();
       } catch (err) {
         return badRequestPage(ctx.user, `Couldn't reach that Cosheaf: ${friendlyLine(err)}`);
       }
