@@ -398,7 +398,7 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
           <input type="hidden" name="reviewer" value="${reviewer}">
           <button class="button" type="submit">Remove</button>
         </form>`;
-  return html`<span class="meta-pill">${userLink(reviewer)}${remove}</span>`;
+  return html`<span class="meta-pill">${userLink(reviewer, ctx.writeMode === "direct")}${remove}</span>`;
 }
 
 type WebTimelineItem =
@@ -447,9 +447,10 @@ export function listRowSide(
   author: AvatarUser | null | undefined,
   createdAt: string | undefined,
   comments: number | undefined,
+  local = false,
 ): Html {
   return html`<span class="list-row-side">
-    ${avatarLinkForUser(author)}<span class="row-who">${userLink(author?.login)}</span>
+    ${avatarLinkForUser(author, local)}<span class="row-who">${userLink(author?.login, local)}</span>
     <span class="row-sep">·</span>${timeEl(createdAt)}
     <span class="row-sep">·</span><span class="row-count" title="comments">(${comments ?? 0})</span>
   </span>`;
@@ -462,6 +463,7 @@ export function listRowSide(
 export function threadParticipantsBar(
   author: AvatarUser | null | undefined,
   comments: readonly { user?: AvatarUser | null; created_at?: string }[],
+  local = false,
 ): Html {
   const seen = new Set<string>();
   const participants: AvatarUser[] = [];
@@ -473,9 +475,9 @@ export function threadParticipantsBar(
   }
   const last = comments[comments.length - 1];
   return html`<div class="thread-bar" data-testid="thread-bar">
-    <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarLinkForUser(user))}</span>
+    <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarLinkForUser(user, local))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
-      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${userLink(last.user?.login)}` : emptyHtml
+      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${userLink(last.user?.login, local)}` : emptyHtml
     }</span>
     ${comments.length ? html`<a class="thread-jump" href="#thread-bottom">Jump to latest ↓</a>` : emptyHtml}
   </div>`;
@@ -529,7 +531,7 @@ export async function renderPullTimeline(
         run.push((items[i] as Extract<WebTimelineItem, { kind: "commit" }>).commit);
         i++;
       }
-      rendered.push(run.length === 1 ? compactCommitRow(run[0]) : commitGroup(run));
+      rendered.push(run.length === 1 ? compactCommitRow(run[0]) : commitGroup(run, ctx.writeMode === "direct"));
     } else {
       rendered.push(renderTimelineItem(ctx, items[i]));
       i++;
@@ -597,11 +599,11 @@ function pullIssueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIs
 
 // Compact comment: avatar gutter + a single (author · time) byline + body, with
 // the hover edit affordance floated top-right.
-function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html }): Html {
+function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html; local?: boolean }): Html {
   return html`<article class="comment" id="${opts.anchorId}">
-    <span class="comment-avatar">${avatarLinkForUser(opts.author)}</span>
+    <span class="comment-avatar">${avatarLinkForUser(opts.author, opts.local)}</span>
     <div class="comment-body">
-      <div class="comment-byline"><span class="comment-who">${userLink(opts.author?.login)}</span> ${opts.whenHtml}</div>
+      <div class="comment-byline"><span class="comment-who">${userLink(opts.author?.login, opts.local)}</span> ${opts.whenHtml}</div>
       <div class="comment-text">${opts.body}</div>
       ${opts.actions}
     </div>
@@ -616,11 +618,11 @@ function compactCommitRow(commit: ForgejoCommit): Html {
 
 // A run of adjacent commits collapses behind one expandable summary so a PR
 // built from many editor autosaves doesn't bury the conversation (#111).
-function commitGroup(commits: readonly ForgejoCommit[]): Html {
+function commitGroup(commits: readonly ForgejoCommit[], local = false): Html {
   const authors = new Set(commits.map((c) => c.author?.login ?? c.commit.author?.name ?? null));
   const label =
     authors.size === 1
-      ? html`${userLink([...authors][0])} pushed ${commits.length} commits`
+      ? html`${userLink([...authors][0], local)} pushed ${commits.length} commits`
       : html`${commits.length} commits`;
   return html`<details class="commit-group">
     <summary>${chevronIcon({ size: 12, class: "disclosure-chevron" })}<span>${label}</span> ${timeEl(commitDateMs(commits[commits.length - 1]))}</summary>
@@ -629,6 +631,7 @@ function commitGroup(commits: readonly ForgejoCommit[]): Html {
 }
 
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<Html> {
+  const local = ctx.writeMode === "direct";
   if (item.kind === "comment") {
     return commentEntry({
       author: item.comment.user,
@@ -636,6 +639,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
       whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
       actions: issueCommentActions(ctx, item.number, item.comment),
+      local,
     });
   }
   if (item.kind === "pull-comment") {
@@ -645,6 +649,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
       whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
       actions: pullIssueCommentActions(ctx, item.number, item.comment),
+      local,
     });
   }
   if (item.kind === "line-comment") {
@@ -654,6 +659,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
       whenHtml: html`<span class="comment-on">on ${item.comment.path}</span> · ${timeEl(item.comment.created_at)}`,
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
       actions: pullCommentActions(ctx, item.number, item.comment),
+      local,
     });
   }
   if (item.kind === "review") {
@@ -661,7 +667,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
     return html`<div class="timeline-event timeline-review">
       <div class="timeline-event-meta">
-        <strong>${userLink(item.review.user?.login)}</strong>
+        <strong>${userLink(item.review.user?.login, local)}</strong>
         <span>${label}</span>
         <small>${timeEl(item.review.submitted_at)}</small>
       </div>
@@ -676,7 +682,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   // collapsed by renderIssueTimeline.
   if (!webTimelineDescriptionText(item.event)) return emptyHtml;
   return html`<p class="timeline-note">${
-    item.event.user?.login ? html`${userLink(item.event.user.login)} ` : emptyHtml
+    item.event.user?.login ? html`${userLink(item.event.user.login, local)} ` : emptyHtml
   }${webTimelineDescriptionHtml(item.event)} · ${timeEl(item.event.created_at)}</p>`;
 }
 

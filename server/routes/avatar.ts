@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
 import { DELETED_USER_LOGIN, type ForgejoUser } from "../forgejo-types.js";
-import { emptyHtml, html, type Html } from "./web-html.js";
+import { emptyHtml, type Html, html } from "./web-html.js";
 
 // The user fields needed to render an avatar: login plus the Forgejo avatar_url
 // and email used to tell a real upload from a generated identicon.
@@ -77,9 +77,12 @@ export function avatarForUser(user: AvatarUser | null | undefined): Html {
   return avatar(user?.login, forgeAvatarSrc(user));
 }
 
-export function avatarLinkForUser(user: AvatarUser | null | undefined): Html {
+// In local Workbench mode there is no `/users/:username` profile page to link to,
+// so the avatar renders as a bare chip/image with no wrapping anchor. Hosted
+// keeps the profile link (#177).
+export function avatarLinkForUser(user: AvatarUser | null | undefined, local = false): Html {
   const chipHtml = avatarForUser(user);
-  const href = userProfileHref(user?.login);
+  const href = local ? null : userProfileHref(user?.login);
   return href ? html`<a class="avatar-link" href="${href}" aria-label="${user?.login} profile">${chipHtml}</a>` : chipHtml;
 }
 

@@ -66,4 +66,13 @@ describe("avatarLinkForUser", () => {
     expect(String(avatarLinkForUser(null))).not.toContain('class="avatar-link"');
     expect(String(avatarLinkForUser({ login: "(deleted)", avatar_url: "", email: EMAIL }))).not.toContain('class="avatar-link"');
   });
+
+  it("renders a bare chip with no profile link in local mode", () => {
+    const body = String(avatarLinkForUser({ login: "alice", avatar_url: "", email: EMAIL }, true));
+    expect(body).not.toContain('class="avatar-link"');
+    expect(body).not.toContain("/users/");
+    // The avatar chip itself still renders (name/initials visible).
+    expect(body).toContain("avatar-chip");
+    expect(body).toContain('aria-label="alice"');
+  });
 });

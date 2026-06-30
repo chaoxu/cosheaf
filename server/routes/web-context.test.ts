@@ -11,8 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
-import { clientIp, globalRoute, positiveInt, positiveIntFields, webRoute, webRouteForAdmin, webRouteForWrite } from "./web-context.js";
 import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { clientIp, globalRoute, positiveInt, positiveIntFields, userLink, webRoute, webRouteForAdmin, webRouteForWrite } from "./web-context.js";
 
 const config = testConfig("web-context");
 const proxiedConfig = testConfig("web-context-proxy", { trustedProxyHops: 1 });
@@ -112,6 +112,21 @@ describe("web numeric parsers", () => {
     expect(positiveIntFields(["1", " 2 "])).toEqual([1, 2]);
     expect(positiveIntFields(["1e2", "3.0", "4"])).toBeNull();
     expect(positiveIntFields([4])).toBeNull();
+  });
+});
+
+describe("userLink", () => {
+  it("links the author to their profile in hosted mode", () => {
+    const body = String(userLink("alice"));
+    expect(body).toContain('href="/users/alice"');
+    expect(body).toContain("alice");
+  });
+
+  it("renders the author name as plain text (no /users/ link) in local mode", () => {
+    const body = String(userLink("alice", true));
+    expect(body).not.toContain("/users/");
+    expect(body).not.toContain("<a");
+    expect(body).toContain("alice");
   });
 });
 

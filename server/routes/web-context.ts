@@ -436,9 +436,12 @@ export function displayLogin(login: string | null | undefined): string {
   return login || DELETED_USER_LOGIN;
 }
 
-export function userLink(login: string | null | undefined): Html {
+// The local Workbench mounts no `/users/:username` profile pages (only the local
+// user's own `/_profile`), so in local mode author/participant names render as
+// plain text instead of a dead link that 404s. Hosted keeps the profile link.
+export function userLink(login: string | null | undefined, local = false): Html {
   const label = displayLogin(login);
-  if (!login || login === DELETED_USER_LOGIN || !FORGEJO_NAME_RE.test(login)) return html`${label}`;
+  if (local || !login || login === DELETED_USER_LOGIN || !FORGEJO_NAME_RE.test(login)) return html`${label}`;
   return html`<a class="user-link" href="${userHref(login)}">${label}</a>`;
 }
 

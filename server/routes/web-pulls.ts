@@ -114,7 +114,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New PR</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
-        ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.")}
+        ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.", ctx.writeMode === "direct")}
         <script src="/cosheaf-user-autocomplete.js" defer></script>
       `,
     ),
@@ -268,14 +268,14 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>by ${userLink(pull.user?.login)}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
+            <p>by ${userLink(pull.user?.login, ctx.writeMode === "direct")}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
           ${threadLayout(
-            html`${threadParticipantsBar(pull.user, conversation)}
+            html`${threadParticipantsBar(pull.user, conversation, ctx.writeMode === "direct")}
               ${await threadDescription(ctx, pull.body ?? "")}
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
@@ -788,7 +788,7 @@ function pullFilterForm(
   </form>`;
 }
 
-function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests."): Html {
+function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests.", local = false): Html {
   const rows = pulls.map((pull) => {
     const state = pull.merged ? "merged" : pull.state;
     // The head branch name is noise; the base only matters when it isn't main.
@@ -801,7 +801,7 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
         <span class="list-row-title"><span class="state ${state}">${state}</span><a class="list-row-title-link" href="${href}"><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></a></span>
         ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
       </span>
-      ${listRowSide(pull.user, pull.created_at, pull.comments)}
+      ${listRowSide(pull.user, pull.created_at, pull.comments, local)}
     </div>`;
   });
   return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;

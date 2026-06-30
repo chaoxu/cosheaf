@@ -74,7 +74,7 @@ web.get("/:owner/:repo/issues", webRoute(async (c, ctx) => {
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/issues/new")}">New issue</a>`}
         </div>
         ${issueFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
-        ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.")}
+        ${issueList(ctx.owner, ctx.repo, issues.filter((issue) => !isChatIssue(issue)), "No matching issues.", ctx.writeMode === "direct")}
         <script src="/cosheaf-user-autocomplete.js" defer></script>
       `),
   );
@@ -138,7 +138,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   // Repo labels back the rail's inline editor; only fetched when editing is
   // possible (read role and chat-backed issues show chips only).
   const allLabels = canEditIssue ? await ctx.collab.listLabels(ctx.owner, ctx.repo) : [];
-  const main = html`${threadParticipantsBar(issue.user, comments)}
+  const main = html`${threadParticipantsBar(issue.user, comments, ctx.writeMode === "direct")}
     ${await threadDescription(ctx, bodyText)}
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
@@ -178,7 +178,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
                   : ""
               }
             </div>
-            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.user?.login)} - ${timeEl(issue.created_at)}</p>
+            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.user?.login, ctx.writeMode === "direct")} - ${timeEl(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI.</div>` : ""}
           ${threadLayout(main, railPanels)}
@@ -470,7 +470,7 @@ function issueFilterForm(
   </form>`;
 }
 
-function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues."): Html {
+function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues.", local = false): Html {
   return html`<div class="list">${
     issues.length === 0
       ? html`<div class="empty">${emptyText}</div>`
@@ -482,7 +482,7 @@ function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyTex
         <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><a class="list-row-title-link" href="${href}"><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></a></span>
         ${hasMeta ? html`<span class="list-meta">${issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : ""}${labelChips(issue.labels)}</span>` : ""}
       </span>
-      ${listRowSide(issue.user, issue.created_at, issue.comments)}
+      ${listRowSide(issue.user, issue.created_at, issue.comments, local)}
     </div>`;
         })
   }</div>`;
