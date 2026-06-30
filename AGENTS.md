@@ -119,6 +119,32 @@ Editing, rich review/diff controls, and future Coflat-editor interactions
 should reuse package contracts and typed Cosheaf API routes inside a
 page-owned island.
 
+## Local Workbench architecture
+
+Cosheaf Workbench is the local authoring surface. It owns local content and
+proxies remote collaboration; it must not become a second implementation of the
+hosted server.
+
+- Local content belongs to the Workbench: files, git working tree state,
+  branch checkout, commits, offline editing, rendering, indexing, and local
+  profile fallback for git authorship.
+- Collaboration belongs to the remote Cosheaf server: pull requests, issues,
+  reviews, merge gates, notifications, collaborator permissions, labels, and
+  milestones.
+- Workbench code may render live remote collaboration views by calling typed
+  Cosheaf APIs through a per-workspace remote client. It must not persist local
+  state for remote collaboration concepts. Do not add local issues, pull
+  requests, review state, merge status, notification state, labels, milestones,
+  or permission caches under `server/local/` or `.cosheaf/`.
+- Each opened folder may point at a different remote Cosheaf instance through
+  its gitignored `.cosheaf/remote.json`; there is no global "the server" for
+  the Workbench. Folders with no remote remain useful as local-only editors.
+- Keep the current boundary: content operations go through
+  `WorkspaceBackend`/`LocalGitWorkspaceBackend`; remote collaboration operations
+  go through `RemoteCosheafClient` and typed `/api/v1/repos/:owner/:repo/*`
+  routes. Do not import forge clients or construct backend forge paths in
+  `server/local/**`.
+
 When changing a durable web surface, run a feature-parity checklist against
 the server-rendered route:
 

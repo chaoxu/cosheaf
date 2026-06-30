@@ -81,6 +81,26 @@ attaches the tarball as a release asset.
 Opens a loopback server + your browser. Edits save to disk; commit and (with a
 configured remote) open-PR are explicit UI actions.
 
+## Architecture boundary
+
+The Workbench is a local editor, not a local copy of hosted Cosheaf.
+
+- It owns local content: files, the git working tree, branch checkout, commits,
+  rendering, search/index sidecars, and offline editing.
+- A remote Cosheaf server owns collaboration: pull requests, issues, reviews,
+  merge gates, notifications, collaborator permissions, labels, and milestones.
+- When a folder is connected to a remote, Workbench collaboration surfaces are
+  live proxy views through the typed Cosheaf API (`RemoteCosheafClient`). The
+  Workbench stores no local issues, PRs, reviews, merge state, notifications,
+  labels, milestones, or permissions.
+- The only per-folder remote state is the gitignored `.cosheaf/remote.json`
+  connection token and URL. Different folders may point at different Cosheaf
+  remotes, and folders with no remote stay local-only.
+
+This boundary is intentional: local features should go through the
+`LocalGitWorkspaceBackend`; collaboration features should go through a typed
+remote client, not a local reimplementation.
+
 ### Stable port + remote access
 
 By default it picks a random free port and opens the browser on the same
