@@ -17,7 +17,7 @@ import { Command } from "commander";
 import open from "open";
 import { createApp } from "../app.js";
 import { resolveAppRoot } from "../app-root.js";
-import { buildLocalConfig, getDb, isLoopbackHost, refuseRemoteWithoutToken } from "../db.js";
+import { buildLocalConfig, getDb, isLoopbackHost, normalizeOptionalOrigin, refuseRemoteWithoutToken } from "../db.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 
 function openBrowser(url: string): void {
@@ -72,7 +72,17 @@ async function run(dirArg: string | undefined, opts: { port?: string; host?: str
     console.error(`\n  ${refusal}\n`);
     process.exit(1);
   }
-  const config = buildLocalConfig({ dataDir: home, port: resolvePort(opts.port), host, accessToken });
+  // The public origin the browser sees behind a TLS proxy. Required for https
+  // exposure: without it, same-origin CSRF checks and the cookie Secure flag are
+  // derived from the internal plain-http request, so https writes are rejected.
+  let publicOrigin: string | null;
+  try {
+    publicOrigin = normalizeOptionalOrigin(process.env.COSHEAF_PUBLIC_ORIGIN ?? undefined);
+  } catch (_err) {
+    console.error("invalid COSHEAF_PUBLIC_ORIGIN: expected an http(s) URL");
+    process.exit(1);
+  }
+  const config = buildLocalConfig({ dataDir: home, port: resolvePort(opts.port), host, accessToken, publicOrigin });
   const db = getDb(config);
   const registry = new WorkspaceRegistry(db, { configPath: join(home, "workspaces.json") });
 
@@ -114,11 +124,21 @@ async function run(dirArg: string | undefined, opts: { port?: string; host?: str
     console.log(`  data:      ${home}`);
     console.log(`  logs:      ${join(home, "server.log")}`);
     console.log(`  bind:      ${config.host}:${info.port}`);
+    const loginUrl = `${config.publicOrigin ? `${config.publicOrigin}/` : root}login`;
     console.log(
       config.accessToken
-        ? `  access:    token required (COSHEAF_WORKBENCH_TOKEN) — open ${root}login`
+        ? `  access:    token required (COSHEAF_WORKBENCH_TOKEN) — open ${loginUrl}`
         : `  access:    none (loopback, single user)`,
     );
+    if (config.publicOrigin) console.log(`  public:    ${config.publicOrigin}`);
+    // Behind an HTTPS proxy without a declared public origin, same-origin CSRF
+    // checks see the internal http request and reject every write with 403.
+    else if (config.accessToken && !loopbackReachable) {
+      console.log(
+        `  note:      if you front this with an HTTPS proxy, set COSHEAF_PUBLIC_ORIGIN=https://<host>\n` +
+          `             or browser writes (save/commit) will be rejected with 403.`,
+      );
+    }
     const list = registry.list();
     if (list.length === 0) {
       console.log(`  workspaces: none yet — add a folder from the home page`);

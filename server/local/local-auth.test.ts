@@ -24,10 +24,10 @@ const TOKEN = "s3cret-workbench-token";
 
 // Build a fresh single-workspace local app. Created per test (the test db is
 // closed on teardown, so an app must not outlive its `it`).
-function localApp(accessToken: string | null): Hono<AppEnv> {
+function localApp(accessToken: string | null, publicOrigin: string | null = null): Hono<AppEnv> {
   const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-auth-"));
   writeFileSync(join(dir, "hello.md"), "# Hello\n");
-  const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0, accessToken });
+  const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0, accessToken, publicOrigin });
   const db = freshTestDb("cosheaf-local-auth-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
   return createApp({ config, db, workspaceBackend: backend, localWorkspace: IDENTITY });
@@ -175,6 +175,37 @@ describe("local Workbench access gate", () => {
   });
 });
 
+describe("COSHEAF_PUBLIC_ORIGIN (exposure behind a TLS proxy)", () => {
+  const PUB = "https://wb.example";
+  // A cross-origin (scheme-mismatched) mutation as a browser behind an https
+  // proxy sends it: Origin https://wb.example while the server runs plain http.
+  function mutate(app: Hono<AppEnv>) {
+    return app.request("/api/v1/repos/me/notes/branches", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: PUB, host: "wb.example", authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ name: "wip-x", from: "main" }),
+    });
+  }
+
+  it("without a public origin, an https-proxied write is wrongly 403'd by the CSRF guard", async () => {
+    // Documents the failure mode the option fixes: requestOrigin sees plain http.
+    expect((await mutate(localApp(TOKEN, null))).status).toBe(403);
+  });
+
+  it("with the public origin set, the same https write passes the CSRF guard", async () => {
+    expect((await mutate(localApp(TOKEN, PUB))).status).not.toBe(403);
+  });
+
+  it("derives the cookie Secure flag from the public origin (no X-Forwarded-Proto needed)", async () => {
+    const res = await localApp(TOKEN, PUB).request("/login", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: PUB },
+      body: new URLSearchParams({ token: TOKEN, next: "/" }).toString(),
+    });
+    expect(res.headers.getSetCookie().some((c) => /^cosheaf_wb=/.test(c) && /Secure/i.test(c))).toBe(true);
+  });
+});
+
 describe("local Workbench /origin manifest", () => {
   it("describes a federated, local-git provider (no native collaboration)", async () => {
     const res = await localApp(null).request("/api/v1/origin");
@@ -223,14 +254,14 @@ describe("refuseRemoteWithoutToken", () => {
 });
 
 describe("isLoopbackHost", () => {
-  it("recognizes loopback addresses", () => {
-    for (const h of ["127.0.0.1", "::1", "[::1]", "localhost", "LOCALHOST", " 127.0.0.1 "]) {
+  it("recognizes the whole loopback block and IPv4-mapped loopback", () => {
+    for (const h of ["127.0.0.1", "127.0.0.2", "127.1.2.3", "::1", "[::1]", "::ffff:127.0.0.1", "localhost", "LOCALHOST", " 127.0.0.1 "]) {
       expect(isLoopbackHost(h)).toBe(true);
     }
   });
 
-  it("rejects non-loopback addresses", () => {
-    for (const h of ["0.0.0.0", "::", "10.0.0.1", "192.168.1.2", "example.com"]) {
+  it("rejects non-loopback addresses (stays strict in the dangerous direction)", () => {
+    for (const h of ["0.0.0.0", "::", "10.0.0.1", "192.168.1.2", "128.0.0.1", "27.0.0.1", "example.com", "::ffff:10.0.0.1"]) {
       expect(isLoopbackHost(h)).toBe(false);
     }
   });

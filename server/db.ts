@@ -136,8 +136,15 @@ export function parsePort(raw: string | undefined, fallback: number): number {
 // decide whether the Workbench may bind without an access token: loopback is
 // safe auth-free, anything else needs COSHEAF_WORKBENCH_TOKEN.
 export function isLoopbackHost(host: string): boolean {
-  const h = host.trim().toLowerCase();
-  return h === "127.0.0.1" || h === "::1" || h === "localhost" || h === "[::1]";
+  // Strip surrounding brackets so "[::1]" normalizes to "::1". Matches the whole
+  // 127.0.0.0/8 loopback block (not just 127.0.0.1 — 127.0.0.2 etc. are valid
+  // loopback aliases) and IPv4-mapped loopback. Stays strict in the dangerous
+  // direction: never matches a non-loopback address.
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h === "::1") return true;
+  if (/^127(?:\.\d{1,3}){3}$/.test(h)) return true;
+  if (/^::ffff:127(?:\.\d{1,3}){3}$/.test(h)) return true;
+  return false;
 }
 
 // Refuse to expose the local Workbench beyond loopback without an access token.
@@ -241,6 +248,11 @@ export function buildLocalConfig(opts: {
   port: number;
   host?: string;
   accessToken?: string | null;
+  // The public origin the browser sees (e.g. https://wb.example) when the
+  // Workbench is fronted by a TLS-terminating proxy. Without it, same-origin
+  // CSRF checks and the cookie Secure flag derive from the internal plain-http
+  // request and reject https writes — set it when exposing behind an https proxy.
+  publicOrigin?: string | null;
 }): Config {
   mkdirSync(opts.dataDir, { recursive: true });
   // The sidecar lives inside the user's workspace folder; keep git from ever
@@ -258,7 +270,7 @@ export function buildLocalConfig(opts: {
     forgejoAdminToken: "",
     webhookSecret: "",
     webhookUrl: "",
-    publicOrigin: null,
+    publicOrigin: opts.publicOrigin ?? null,
     registrationOpen: false,
     trustedProxyHops: 0,
     coverifyCmd: "",

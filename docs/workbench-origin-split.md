@@ -149,7 +149,10 @@ Cosheaf authority.
   the N=1 case of the forge provider's multi-user token auth. Transport, TLS,
   and reachability (tunnel, reverse proxy, VPN) are the operator's
   responsibility and out of scope for the Workbench — no transport is assumed or
-  bundled.
+  bundled. When fronted by a TLS-terminating proxy, set `COSHEAF_PUBLIC_ORIGIN`
+  to the browser-facing `https://host` so same-origin CSRF checks and the cookie
+  `Secure` flag are derived from the public origin rather than the internal
+  plain-http request — otherwise browser writes are rejected with 403.
 - A configured workspace server binding must make the target server and
   workspace visible enough that publishing a PR cannot silently go to the wrong
   server.
