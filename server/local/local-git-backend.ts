@@ -265,7 +265,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   // No pull requests locally: the review/merge surface is the remote Cosheaf
-  // (Tier 2), reached through RemoteCosheafClient, not this backend.
+  // (Tier 2), reached through CosheafOriginClient, not this backend.
   async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return [];
   }

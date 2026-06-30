@@ -17,7 +17,7 @@ import { indexCitationFile, indexPage } from "../indexer.js";
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { type LocalGitRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
-import { type RemotePullClient, RemoteCosheafClient } from "./remote-cosheaf-client.js";
+import { CosheafOriginClient, type RemotePullClient } from "./remote-cosheaf-client.js";
 
 // The fixed single user every local workspace is served as. The Workbench is
 // single-person; this handle only colours the sidebar identity and any branch
@@ -133,7 +133,7 @@ export class WorkspaceRegistry {
       canOpenPull: cfg.remote !== null,
     };
     const backend = new LocalGitWorkspaceBackend(path, { pushRemote: cfg.gitRemote?.name, author: () => this.getProfile() });
-    const remoteClient = cfg.remote ? new RemoteCosheafClient(cfg.remote.url, cfg.remote.token) : undefined;
+    const remoteClient = cfg.remote ? new CosheafOriginClient(cfg.remote.url, cfg.remote.token) : undefined;
     return { slug, path, identity, backend, gitRemote: cfg.gitRemote, remoteClient };
   }
 
