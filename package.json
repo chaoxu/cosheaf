@@ -34,6 +34,7 @@
     "workbench": "tsx server/local/launch.ts",
     "workbench:pack": "node scripts/pack-workbench.mjs",
     "workbench:release": "node scripts/release-workbench.mjs",
+    "workbench:update": "node scripts/update-workbench.mjs",
     "check:no-forgejo-workbench": "node scripts/check-no-forgejo-in-workbench.mjs",
     "cli": "tsx server/cli.ts",
     "build": "vite build",
