@@ -80,7 +80,7 @@ export function avatarForUser(user: AvatarUser | null | undefined): Html {
 // In local Workbench mode there is no `/users/:username` profile page to link to,
 // so the avatar renders as a bare chip/image with no wrapping anchor. Hosted
 // keeps the profile link (#177).
-export function avatarLinkForUser(user: AvatarUser | null | undefined, local = false): Html {
+export function avatarLinkForUser(user: AvatarUser | null | undefined, local: boolean): Html {
   const chipHtml = avatarForUser(user);
   const href = local ? null : userProfileHref(user?.login);
   return href ? html`<a class="avatar-link" href="${href}" aria-label="${user?.login} profile">${chipHtml}</a>` : chipHtml;

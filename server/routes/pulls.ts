@@ -430,7 +430,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
       return c.json(...notFound("this pull request no longer exists"));
     }
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
-    return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 404 | 422 | 429);
+    return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 422 | 429);
   }
   const pull = await collab.getPull(owner, repo, n);
   // Never delete main even if it was somehow the head (mirrors the web route).

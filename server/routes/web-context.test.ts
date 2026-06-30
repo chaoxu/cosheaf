@@ -117,7 +117,7 @@ describe("web numeric parsers", () => {
 
 describe("userLink", () => {
   it("links the author to their profile in hosted mode", () => {
-    const body = String(userLink("alice"));
+    const body = String(userLink("alice", false));
     expect(body).toContain('href="/users/alice"');
     expect(body).toContain("alice");
   });

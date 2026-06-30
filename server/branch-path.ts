@@ -35,6 +35,13 @@ export async function resolveBranchPath(
   return resolveBranchPathFromNames(names, rest);
 }
 
+// A string shaped like an abbreviated-or-full git commit sha (7-40 hex chars).
+// A validation sieve over an opaque id, not a structural parse — gates
+// /commit/<sha> pages and rejects the local Workbench's synthetic "WORKTREE" id.
+export function isCommitSha(s: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(s);
+}
+
 // A syntactically valid Forgejo branch name: the allowlisted charset, no `..`
 // traversal, and no leading/trailing slash. Does NOT reject "main" — callers
 // that forbid main add `=== "main"` themselves (base branches may be main).

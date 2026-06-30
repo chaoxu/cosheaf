@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { isCommitSha } from "../branch-path.js";
 import {
   type WorkspaceBackend,
   WorkspaceBackendError,
@@ -268,7 +269,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // into this clone — so the page degrades to a clear "not available" state rather
   // than 500ing. `author_login` is absent: a local commit has no forge identity.
   async getCommit(_owner: string, _repo: string, sha: string): Promise<WsCommit | null> {
-    if (!/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+    if (!isCommitSha(sha)) return null;
     if (!(await this.isGitRepo())) return null;
     let out: string;
     try {

@@ -398,7 +398,7 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
           <input type="hidden" name="reviewer" value="${reviewer}">
           <button class="button" type="submit">Remove</button>
         </form>`;
-  return html`<span class="meta-pill">${userLink(reviewer, ctx.writeMode === "direct")}${remove}</span>`;
+  return html`<span class="meta-pill">${userLink(reviewer, ctx.local)}${remove}</span>`;
 }
 
 type WebTimelineItem =
@@ -531,7 +531,7 @@ export async function renderPullTimeline(
         run.push((items[i] as Extract<WebTimelineItem, { kind: "commit" }>).commit);
         i++;
       }
-      rendered.push(run.length === 1 ? compactCommitRow(run[0]) : commitGroup(run, ctx.writeMode === "direct"));
+      rendered.push(run.length === 1 ? compactCommitRow(run[0]) : commitGroup(run, ctx.local));
     } else {
       rendered.push(renderTimelineItem(ctx, items[i]));
       i++;
@@ -599,7 +599,7 @@ function pullIssueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIs
 
 // Compact comment: avatar gutter + a single (author · time) byline + body, with
 // the hover edit affordance floated top-right.
-function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html; local?: boolean }): Html {
+function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: string; whenHtml: Html; body: Html; actions: Html; local: boolean }): Html {
   return html`<article class="comment" id="${opts.anchorId}">
     <span class="comment-avatar">${avatarLinkForUser(opts.author, opts.local)}</span>
     <div class="comment-body">
@@ -631,7 +631,7 @@ function commitGroup(commits: readonly ForgejoCommit[], local = false): Html {
 }
 
 async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<Html> {
-  const local = ctx.writeMode === "direct";
+  const local = ctx.local;
   if (item.kind === "comment") {
     return commentEntry({
       author: item.comment.user,

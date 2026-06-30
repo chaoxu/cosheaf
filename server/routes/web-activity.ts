@@ -106,7 +106,7 @@ function activityRow(ctx: WebCtx, item: ActivityFeedItem): Html {
   const rendered = renderActivity(ctx, item);
   const count = item.repeatCount > 1 ? html`<small class="activity-count">${item.repeatCount} commits</small>` : emptyHtml;
   return html`<div class="list-row activity-row" data-testid="activity-row">
-    <strong>${userLink(item.activity.act_user?.login, ctx.writeMode === "direct")}</strong>
+    <strong>${userLink(item.activity.act_user?.login, ctx.local)}</strong>
     <span>${rendered.summary}${count}</span>
     <small>${timeEl(item.activity.created)}</small>
   </div>`;

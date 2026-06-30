@@ -577,7 +577,7 @@ web.get("/users/:username", globalRoute(async (c, auth) => {
         <section class="settings-section user-profile-card">
           <div class="user-profile-header">
             <div class="user-profile-main">
-              <div class="user-profile-avatar">${avatarLinkForUser(profile)}</div>
+              <div class="user-profile-avatar">${avatarLinkForUser(profile, false)}</div>
               <div class="user-profile-identity">
                 <h1>${displayName}</h1>
                 <p>${profile.login}</p>

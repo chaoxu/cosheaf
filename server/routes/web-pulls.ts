@@ -114,7 +114,7 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
           ${ctx.ws.role === "read" ? "" : html`<a class="button primary" href="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}">New PR</a>`}
         </div>
         ${pullFilterForm(ctx.owner, ctx.repo, filters, labels, milestones)}
-        ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.", ctx.writeMode === "direct")}
+        ${pullList(ctx.owner, ctx.repo, visible, "No matching pull requests.", ctx.local)}
         <script src="/cosheaf-user-autocomplete.js" defer></script>
       `,
     ),
@@ -129,7 +129,7 @@ web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   // yet. The base lives on the core, so its options come from ctx.collab; a
   // disconnected workspace degrades to no base options (the New PR flow can't
   // reach the core anyway). See docs/workbench-origin-split.md.
-  if (ctx.writeMode === "direct") {
+  if (ctx.local) {
     const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
     if (!entry) return notFoundPage(ctx.user, "Repository not found");
     const [baseBranches, headBranches, currentBranch] = await Promise.all([
@@ -159,7 +159,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
   // Route through the shared commit→push→openPull flow (local-pulls.ts), the
   // same path the editor island's typed POST uses, and re-render the compare
   // page with its friendly error on failure.
-  if (ctx.writeMode === "direct") {
+  if (ctx.local) {
     const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
     if (!entry) return notFoundPage(ctx.user, "Repository not found");
     const result = await openLocalPull(entry, ctx.owner, ctx.repo, { head: head ?? undefined, base, title: title ?? undefined, body });
@@ -268,14 +268,14 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>by ${userLink(pull.user?.login, ctx.writeMode === "direct")}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
+            <p>by ${userLink(pull.user?.login, ctx.local)}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
           ${threadLayout(
-            html`${threadParticipantsBar(pull.user, conversation, ctx.writeMode === "direct")}
+            html`${threadParticipantsBar(pull.user, conversation, ctx.local)}
               ${await threadDescription(ctx, pull.body ?? "")}
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
@@ -468,7 +468,7 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   // route — so a just-demoted admin can't merge in the stale window.
   // Local Workbench (writeMode "direct") has no forge client; the local user is
   // the workspace admin and the core enforces admin on the proxied merge.
-  const fresh = ctx.writeMode === "direct" ? ctx.ws.role : await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  const fresh = ctx.local ? ctx.ws.role : await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
@@ -502,7 +502,7 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   }
   // In local mode the head branch lives on the remote core; the proxied merge
   // owns its cleanup, and there is no local forge client to delete it.
-  if (ctx.writeMode !== "direct" && pull.head.ref && pull.head.ref !== "main") {
+  if (!ctx.local && pull.head.ref && pull.head.ref !== "main") {
     await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, pull.head.ref);
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
@@ -527,12 +527,12 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   // PR's base+head SHAs) can't be sourced. Fall back to the unified source patch
   // — the same documented behavior as a passthrough workspace's rich diff.
   const richOk =
-    ctx.writeMode !== "direct" &&
+    !ctx.local &&
     ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID &&
     file !== null &&
     fileKindForPath(file.path) === "markdown";
-  const mode = ctx.writeMode === "direct" ? "source" : parseDiffMode(c.req.query("mode"), richOk);
-  const shape = ctx.writeMode === "direct" ? "unified" : parseDiffShape(c.req.query("shape"), mode);
+  const mode = ctx.local ? "source" : parseDiffMode(c.req.query("mode"), richOk);
+  const shape = ctx.local ? "unified" : parseDiffShape(c.req.query("shape"), mode);
   const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file) : null;
   const fileComments = file ? await mapLineComments(ctx, file, allComments) : [];
   const assetPreviewPaths = file && mode === "rich" ? await prAssetPreviewPaths(ctx, pull) : {};
@@ -621,7 +621,7 @@ async function prAssetPreviewPaths(ctx: WebCtx, pull: ForgejoPull): Promise<PrFi
   // Workbench the content backend is the opened folder, which does not hold the
   // PR's core-side commits, so the tree lookup can't resolve those SHAs —
   // degrade to no previews (the diff itself still renders from the core).
-  if (ctx.writeMode === "direct") return { base: {}, head: {} };
+  if (ctx.local) return { base: {}, head: {} };
   const [baseTree, headTree] = await Promise.all([
     ctx.backend.getTree(ctx.owner, ctx.repo, pull.base.sha, true),
     ctx.backend.getTree(ctx.owner, ctx.repo, pull.head.sha, true),

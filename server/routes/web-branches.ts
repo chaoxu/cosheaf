@@ -1,9 +1,9 @@
 import type { Hono } from "hono";
-import { validBranchName } from "../branch-path.js";
+import { isCommitSha, validBranchName } from "../branch-path.js";
+import { is404, isStatus } from "../forgejo-errors.js";
 import type { ForgejoBranch } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { WorkspaceBackendError } from "../workspace-backend.js";
 import { branchIcon } from "./icons.js";
 import {
   badRequestPage,
@@ -51,7 +51,7 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
     try {
       await ctx.backend.createBranch(ctx.owner, ctx.repo, { newBranchName: name, oldBranchName: base });
     } catch (err) {
-      if (err instanceof WorkspaceBackendError && err.status === 409) {
+      if (isStatus(err, 409)) {
         return badRequestPage(ctx.user, "Branch already exists.");
       }
       throw err;
@@ -67,7 +67,7 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
     try {
       await ctx.backend.deleteBranch(ctx.owner, ctx.repo, name);
     } catch (err) {
-      if (!(err instanceof WorkspaceBackendError && err.status === 404)) throw err;
+      if (!is404(err)) throw err;
     }
     invalidateRepoTrees(ctx.owner, ctx.repo);
     const redirectTo = branchDeleteRedirect(ctx, stringField(form.redirect_to));
@@ -76,7 +76,7 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
 
   web.get("/:owner/:repo/commits/:sha", webRoute(async (c, ctx) => {
     const sha = c.req.param("sha");
-    if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return notFoundPage(ctx.user, "Commit not found");
+    if (!sha || !isCommitSha(sha)) return notFoundPage(ctx.user, "Commit not found");
     // Commit content comes from the data-access backend (the forge hosted; the
     // local git working tree in the Workbench), so a commit that the local clone
     // actually has renders, and a core-side sha it doesn't have degrades below
@@ -86,7 +86,7 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
       // Local Workbench: the sha isn't in this working tree (e.g. a core commit
       // linked from activity that was never fetched). Show a clear state rather
       // than the hosted "not found" 404.
-      if (ctx.writeMode === "direct") {
+      if (ctx.local) {
         return htmlResponse(
           repoPageShell(ctx, "activity", `Commit - ${ctx.repo}`, html`
             <div class="page-title compact">
@@ -130,7 +130,7 @@ function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Htm
   // Read-only members can't create branches; the local Workbench has no
   // seam to create a branch on the connected core (CollaborationClient has no
   // create-branch), so its branch list is read-only too.
-  if (ctx.ws.role === "read" || ctx.writeMode === "direct") return emptyHtml;
+  if (ctx.ws.role === "read" || ctx.local) return emptyHtml;
   return html`<form class="filter-panel" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/new")}" data-testid="branch-create-form">
     <label>New branch
       <input name="name" placeholder="user/${ctx.user}/work" required data-testid="branch-create-name">
@@ -154,7 +154,7 @@ function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: 
         <a class="inline-link branch-ref" href="${`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(branch.name)}`}">${branchIcon({ size: 13 })}<strong>${branch.name}</strong></a>
         <span>${branch.commit.id.slice(0, 10)}${hasOpenPr ? html` <span class="meta-pill">open PR</span>` : ""}</span>
         ${
-          ctx.ws.role === "read" || ctx.writeMode === "direct" || branch.name === "main" || hasOpenPr
+          ctx.ws.role === "read" || ctx.local || branch.name === "main" || hasOpenPr
             ? html`<span></span>`
             : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/branches/delete")}">
                 <input type="hidden" name="name" value="${branch.name}">

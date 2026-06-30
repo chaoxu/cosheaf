@@ -9,7 +9,7 @@
 //   DELETE /branches/:name        — delete a branch
 
 import { Hono } from "hono";
-import { validBranchName } from "../branch-path.js";
+import { isCommitSha, validBranchName } from "../branch-path.js";
 import {
   requireAuth,
   requireMembership,
@@ -34,12 +34,12 @@ function publicBranch(c: import("hono").Context<AppEnv>, branch: WsBranch): Reco
   // branch to the working tree and reports a synthetic "WORKTREE" id, which has
   // no /commit/<sha> page — emitting a link for it would 404. Hosted branches
   // carry full 40-char shas and are unaffected.
-  const isCommitSha = /^[0-9a-f]{7,40}$/i.test(commitId);
+  const isSha = isCommitSha(commitId);
   return {
     ...branch,
     commit: {
       ...branch.commit,
-      url: isCommitSha ? `${origin}/${owner}/${repo}/commit/${commitId}` : "",
+      url: isSha ? `${origin}/${owner}/${repo}/commit/${commitId}` : "",
     },
   };
 }

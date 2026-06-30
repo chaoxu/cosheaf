@@ -66,7 +66,7 @@ export function repoPageShell(
     // Local Workbench (direct write-mode): trim the repo nav to the surfaces the
     // local app actually mounts (files + commit); the hosted issue/pull/settings
     // tabs would 404.
-    local: ctx.writeMode === "direct",
+    local: ctx.local,
     locale: ctx.locale,
     t: ctx.t,
   });

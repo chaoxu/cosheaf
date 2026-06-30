@@ -50,6 +50,10 @@ export interface WebCtx {
   // Whether the editor may open a pull request (hosted always; local only at
   // Tier 2 with a configured remote).
   canOpenPull: boolean;
+  // Whether this is a local Workbench workspace (writeMode "direct"). The single
+  // "am I local" flag the page modules branch on, derived once here so call sites
+  // read `ctx.local` instead of re-deriving `ctx.writeMode === "direct"`.
+  local: boolean;
   // Add/update a collaborator's role. Hosted runs setWorkspaceMember against the
   // forge (collaborator + branch-protection whitelist); local proxies to the
   // connected core's members route. Kept off `collab` because the member-setter
@@ -210,6 +214,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       wsTitle: entry.identity.title,
       userAvatarSrc: null,
       writeMode: "direct",
+      local: true,
       canOpenPull: entry.identity.canOpenPull,
       setMember: localMemberSetter(entry, owner, repo),
       originId: entry.identity.originId,
@@ -237,7 +242,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
   const setMember = (username: string, role: Role) => setWorkspaceMember({ forgejo: fj, owner, repo, username, role });
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(
@@ -439,7 +444,7 @@ export function displayLogin(login: string | null | undefined): string {
 // The local Workbench mounts no `/users/:username` profile pages (only the local
 // user's own `/_profile`), so in local mode author/participant names render as
 // plain text instead of a dead link that 404s. Hosted keeps the profile link.
-export function userLink(login: string | null | undefined, local = false): Html {
+export function userLink(login: string | null | undefined, local: boolean): Html {
   const label = displayLogin(login);
   if (local || !login || login === DELETED_USER_LOGIN || !FORGEJO_NAME_RE.test(login)) return html`${label}`;
   return html`<a class="user-link" href="${userHref(login)}">${label}</a>`;

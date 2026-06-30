@@ -56,15 +56,15 @@ describe("isForgeAvatarPath", () => {
 
 describe("avatarLinkForUser", () => {
   it("links a valid user avatar to that user's profile", () => {
-    const body = String(avatarLinkForUser({ login: "alice", avatar_url: "", email: EMAIL }));
+    const body = String(avatarLinkForUser({ login: "alice", avatar_url: "", email: EMAIL }, false));
     expect(body).toContain('class="avatar-link"');
     expect(body).toContain('href="/users/alice"');
     expect(body).toContain('aria-label="alice profile"');
   });
 
   it("does not link missing or deleted users", () => {
-    expect(String(avatarLinkForUser(null))).not.toContain('class="avatar-link"');
-    expect(String(avatarLinkForUser({ login: "(deleted)", avatar_url: "", email: EMAIL }))).not.toContain('class="avatar-link"');
+    expect(String(avatarLinkForUser(null, false))).not.toContain('class="avatar-link"');
+    expect(String(avatarLinkForUser({ login: "(deleted)", avatar_url: "", email: EMAIL }, false))).not.toContain('class="avatar-link"');
   });
 
   it("renders a bare chip with no profile link in local mode", () => {
