@@ -21,6 +21,7 @@
 
 import type { LineComment } from "../../shared/comments.js";
 import type {
+  ActivityRow,
   DependencyRow,
   IssueComment,
   IssueDetail,
@@ -30,7 +31,7 @@ import type {
   NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
-import type { PrFile, PrMeta } from "../../shared/review.js";
+import type { PrCommit, PrFile, PrMeta } from "../../shared/review.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -47,7 +48,10 @@ type TimelineShape = Awaited<ReturnType<CollaborationClient["listIssueTimeline"]
 type PullShape = NonNullable<Awaited<ReturnType<CollaborationClient["getPull"]>>>;
 type ReviewShape = Awaited<ReturnType<CollaborationClient["listReviews"]>>[number];
 type PullFileShape = Awaited<ReturnType<CollaborationClient["listPullFiles"]>>[number];
+type PullCommitShape = Awaited<ReturnType<CollaborationClient["listPullCommits"]>>[number];
 type PullCommentShape = Awaited<ReturnType<CollaborationClient["listPullComments"]>>[number];
+type CollaboratorShape = Awaited<ReturnType<CollaborationClient["listCollaborators"]>>[number];
+type ActivityShape = Awaited<ReturnType<CollaborationClient["listRepoActivities"]>>[number];
 type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
 type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
 type BranchProtectionShape = NonNullable<Awaited<ReturnType<CollaborationClient["getBranchProtection"]>>>;
@@ -324,6 +328,24 @@ function reviewDtoToShape(r: ReviewDto): ReviewShape {
   };
 }
 
+// The typed PR-commits DTO is flat (sha/message/author_username/author_name/
+// date-as-epoch-ms); rebuild the nested commit shape the pull timeline reads:
+// sha, commit.message, commit.author.{name,date}, and author.login. A null
+// author/date leaves the corresponding fields empty.
+function prCommitToShape(commit: PrCommit): PullCommitShape {
+  return {
+    sha: commit.sha,
+    commit: {
+      message: commit.message,
+      author: {
+        name: commit.author_name ?? undefined,
+        date: commit.date === null ? undefined : iso(commit.date),
+      },
+    },
+    author: commit.author_username ? { id: 0, login: commit.author_username } : null,
+  };
+}
+
 function prFileToShape(f: PrFile): PullFileShape {
   return {
     filename: f.path,
@@ -393,6 +415,37 @@ function notificationRowToShape(row: NotificationRow): NotificationThreadShape {
       type,
     },
     repository: { full_name: row.repo, name },
+  };
+}
+
+// The typed collaborators DTO is {login, permission}; the settings route reads
+// only `login` off each member. `permission` has no consumer here and is dropped.
+function collaboratorToShape(member: { login: string; permission: string }): CollaboratorShape {
+  return { id: 0, login: member.login };
+}
+
+// The typed /activities DTO is the already-collapsed ActivityRow (flat fields
+// the core extracted from the forge's JSON-ish `content`). The activity page
+// re-collapses and re-parses `content`, so rebuild a minimal `content` from the
+// flattened fields its parsers actually read: a commit ref ({Commits:[{Sha1,
+// Message}]}) when a commit sha survives, otherwise the [index, label] array the
+// pull/issue ref parsers expect. `repeat_count` is unreconstructable through the
+// local re-collapse and is dropped (documented #263 lossy field); the consumer
+// .catch-degrades on any gap.
+function activityRowToShape(a: ActivityRow): ActivityShape {
+  let content: string | undefined;
+  if (a.commit_sha) {
+    content = JSON.stringify({ Commits: [{ Sha1: a.commit_sha, Message: a.commit_message ?? "" }] });
+  } else if (a.ref_index !== null) {
+    content = JSON.stringify([a.ref_index, a.comment_body ?? ""]);
+  }
+  return {
+    id: a.id,
+    op_type: a.op_type,
+    act_user: a.author_username ? { id: 0, login: a.author_username } : undefined,
+    ref_name: a.ref_name ?? undefined,
+    content,
+    created: iso(a.created_at),
   };
 }
 
@@ -759,6 +812,11 @@ export class OriginCollaborationClient {
     return (r.files ?? []).map(prFileToShape);
   }
 
+  async listPullCommits(owner: string, repo: string, index: number): Promise<PullCommitShape[]> {
+    const r = await this.get<{ commits: PrCommit[] }>(this.repoPath(owner, repo, `/pulls/${index}/commits`));
+    return (r.commits ?? []).map(prCommitToShape);
+  }
+
   async listPullComments(owner: string, repo: string, index: number): Promise<PullCommentShape[]> {
     const r = await this.get<{ comments: LineComment[] }>(this.repoPath(owner, repo, `/pulls/${index}/comments`));
     return (r.comments ?? []).map(lineCommentToShape);
@@ -887,6 +945,18 @@ export class OriginCollaborationClient {
     return (r ?? []).map(branchToShape);
   }
 
+  async listCollaborators(owner: string, repo: string): Promise<CollaboratorShape[]> {
+    const r = await this.get<{ collaborators: Array<{ login: string; permission: string }> }>(
+      this.repoPath(owner, repo, "/collaborators"),
+    );
+    return (r.collaborators ?? []).map(collaboratorToShape);
+  }
+
+  async listRepoTopics(owner: string, repo: string): Promise<string[]> {
+    const r = await this.get<{ topics: string[] }>(this.repoPath(owner, repo, "/topics"));
+    return r.topics ?? [];
+  }
+
   async getRepo(owner: string, repo: string): Promise<RepoShape | null> {
     // The typed repo route returns a forge-repo-compatible object (description,
     // visibility, default branch, owner, topics-when-present).
@@ -945,6 +1015,13 @@ export class OriginCollaborationClient {
   ): Promise<NotificationThreadShape[]> {
     const r = await this.get<{ notifications: NotificationRow[] }>(this.repoPath(owner, repo, "/notifications"));
     return (r.notifications ?? []).map(notificationRowToShape);
+  }
+
+  async listRepoActivities(owner: string, repo: string, opts: { limit?: number } = {}): Promise<ActivityShape[]> {
+    const r = await this.get<{ activities: ActivityRow[] }>(this.repoPath(owner, repo, "/activities"), {
+      limit: opts.limit,
+    });
+    return (r.activities ?? []).map(activityRowToShape);
   }
 }
 

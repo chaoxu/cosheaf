@@ -36,6 +36,7 @@ import type { CollaborationClient } from "../collaboration-client.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { type Forgejo, ForgejoError, mergePullWithRetry } from "../forgejo.js";
+import { errorStatus, is4xx } from "../forgejo-errors.js";
 import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
 import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
 import { allDocumentFormats } from "../format-registry.js";
@@ -169,23 +170,29 @@ async function mergeWithRetry(
 }
 
 function forgejoErrToResult(err: unknown): MergeFailureResult {
-  if (err instanceof ForgejoError) {
-    const message = err.bodyText || "backend rejected request";
+  // Status-bearing so a local Workbench merge (RemoteCosheafError) classifies the
+  // same as a hosted forge merge (ForgejoError) — both carry a numeric `status`.
+  const status = errorStatus(err);
+  if (status !== null) {
+    // `bodyText` is forge-specific; the remote core carries its detail on the
+    // error message instead. Keep the forge body parsing working for hosted.
+    const bodyText = err instanceof ForgejoError ? err.bodyText : err instanceof Error ? err.message : "";
+    const message = bodyText || "backend rejected request";
     // A 405 "try again later" that survived all of mergePullWithRetry's retries:
     // the merge stayed transient, not a hard conflict. Flagged so the handler
     // can classify the eventual 409 without re-parsing the error.
-    const transientExhausted = err.status === 405 && /try again/i.test(err.bodyText);
+    const transientExhausted = status === 405 && /try again/i.test(bodyText);
     // Pass distinguishable 4xx through so the client can show the right
     // affordance — auth/permission, missing target, validation, rate limit —
-    // instead of collapsing every Forgejo precondition failure into 409.
-    if (err.status === 401 || err.status === 403) return { ok: false, status: err.status, message, transientExhausted };
-    if (err.status === 404) return { ok: false, status: 404, message, transientExhausted };
-    if (err.status === 422) return { ok: false, status: 422, message, transientExhausted };
-    if (err.status === 429) return { ok: false, status: 429, message, transientExhausted };
+    // instead of collapsing every precondition failure into 409.
+    if (status === 401 || status === 403) return { ok: false, status, message, transientExhausted };
+    if (status === 404) return { ok: false, status: 404, message, transientExhausted };
+    if (status === 422) return { ok: false, status: 422, message, transientExhausted };
+    if (status === 429) return { ok: false, status: 429, message, transientExhausted };
     // 405 (conflict: e.g. "Please try again later", "PR has conflicts"), 409,
     // and any other 4xx we don't separate map to 409 — the caller violated a
     // merge precondition. 5xx → backend upstream is sick: 502.
-    if (err.status >= 500) return { ok: false, status: 502, message, transientExhausted };
+    if (status >= 500) return { ok: false, status: 502, message, transientExhausted };
     return { ok: false, status: 409, message, transientExhausted };
   }
   return { ok: false, status: 500, message: (err as Error)?.message ?? "merge failed", transientExhausted: false };
@@ -322,10 +329,11 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
     return c.json(prMeta(pr), 201);
   } catch (err) {
-    // Forgejo POST /pulls returns 409 for several reasons — empty diff, an
-    // existing PR for this head→base, or a duplicate title — and 422 for
-    // validation.
-    if (err instanceof ForgejoError && (err.status === 409 || err.status === 422)) {
+    // POST /pulls returns 409 for several reasons — empty diff, an existing PR
+    // for this head→base, or a duplicate title — and 422 for validation. Match on
+    // status so a local Workbench write (RemoteCosheafError) recovers the same way
+    // as a hosted forge write (ForgejoError).
+    if (is4xx(err, 409, 422)) {
       // The common 409 is an existing PR for this head→base (e.g. the editor
       // re-clicking "Open PR"). Forgejo blocks a duplicate against any UNMERGED
       // PR — open OR closed — so resolve across all states and return it, letting

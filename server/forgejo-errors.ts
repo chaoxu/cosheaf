@@ -8,13 +8,36 @@ import { ForgejoError } from "./forgejo.js";
 // predicate the collaboration seam needs (#262/#268) so the same route handles
 // not-found identically in both modes.
 export function is404(err: unknown): boolean {
-  if (err instanceof ForgejoError) return err.status === 404;
-  return (
+  return isStatus(err, 404);
+}
+
+// The numeric HTTP status of any status-bearing error, or null. Covers BOTH the
+// co-located forge (ForgejoError) and the bound remote core (RemoteCosheafError)
+// — both carry a numeric `status` — so collaboration routes classify write
+// conflicts identically in hosted and local Workbench modes.
+export function errorStatus(err: unknown): number | null {
+  if (err instanceof ForgejoError) return err.status;
+  if (
     typeof err === "object" &&
     err !== null &&
     "status" in err &&
-    (err as { status: unknown }).status === 404
-  );
+    typeof (err as { status: unknown }).status === "number"
+  ) {
+    return (err as { status: number }).status;
+  }
+  return null;
+}
+
+// True when the error carries exactly `status`.
+export function isStatus(err: unknown, status: number): boolean {
+  return errorStatus(err) === status;
+}
+
+// True when the error carries any of the given statuses (e.g. the
+// duplicate-PR/empty-diff 409|422 recovery on POST /pulls).
+export function is4xx(err: unknown, ...statuses: number[]): boolean {
+  const s = errorStatus(err);
+  return s !== null && statuses.includes(s);
 }
 
 // `.catch` handler that swallows a Forgejo 404 into `fallback` and rethrows
