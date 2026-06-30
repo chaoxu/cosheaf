@@ -1,16 +1,16 @@
-import type { Context } from "hono";
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import type { AppEnv } from "./types.js";
+import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
+import { type DocumentFormatId, documentFormatFromTopics } from "../shared/document-format.js";
 import type { Role } from "../shared/roles.js";
-import { resolveApiToken, type ResolvedApiToken } from "./api-tokens.js";
+import { type ResolvedApiToken, resolveApiToken } from "./api-tokens.js";
+import type { CollaborationClient } from "./collaboration-client.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ForgejoWorkspaceBackend } from "./forgejo-backend.js";
 import { resolveLocalWorkspace } from "./local/local-mode.js";
-import type { User } from "./users.js";
 import { TTLCache } from "./ttl-cache.js";
-import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
-import { type DocumentFormatId, documentFormatFromTopics } from "../shared/document-format.js";
+import type { AppEnv } from "./types.js";
+import type { User } from "./users.js";
 
 interface AuthResolution {
   user: User;
@@ -189,7 +189,11 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
 
   const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
   c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat, role });
-  c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, owner, repo });
+  // The Forgejo client structurally satisfies CollaborationClient, so hosted
+  // `collab` is just `fj` — collaboration routes migrating off `ctx.fj` onto
+  // `ctx.collab` (#262) see no behavior change. Local injects an Origin-backed
+  // impl instead.
+  c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, collab: fj, owner, repo });
   await next();
 };
 
@@ -206,6 +210,15 @@ export function repoCtxForgejo(c: Context<AppEnv>): { fj: Forgejo; owner: string
   const { fj, owner, repo } = c.get("repoCtx");
   if (!fj) throw new Error("forgejo client unavailable: this route is not mounted in local mode");
   return { fj, owner, repo };
+}
+
+// The collaboration seam accessor (#262): the forge (hosted) or the bound core
+// (local), plus owner/repo. Collaboration routes call this instead of
+// repoCtxForgejo as they migrate, so the same route serves both modes.
+export function repoCtxCollab(c: Context<AppEnv>): { collab: CollaborationClient; owner: string; repo: string } {
+  const { collab, owner, repo } = c.get("repoCtx");
+  if (!collab) throw new Error("collaboration client unavailable: no forge and no connected core for this workspace");
+  return { collab, owner, repo };
 }
 
 // Same TTL discipline as the role cache — format changes propagate quickly

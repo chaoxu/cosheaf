@@ -1,11 +1,12 @@
 import type Database from "better-sqlite3";
-import type { User } from "./users.js";
+import type { LocaleId, T } from "../shared/i18n/index.js";
+import type { Role } from "../shared/roles.js";
+import type { CollaborationClient } from "./collaboration-client.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
 import type { SSEHub } from "./sse.js";
-import type { Role } from "../shared/roles.js";
-import type { LocaleId, T } from "../shared/i18n/index.js";
+import type { User } from "./users.js";
+import type { WorkspaceBackend } from "./workspace-backend.js";
 
 export interface WorkspaceContext {
   // Forgejo repo owner (user or org) and repo name — the workspace identity.
@@ -28,6 +29,12 @@ export interface WorkspaceContext {
 export interface RepoCtx {
   backend: WorkspaceBackend;
   fj?: Forgejo;
+  // The collaboration seam (#262): issues/pulls/reviews/notifications/settings
+  // read this instead of `fj` directly. Hosted injects the Forgejo client (which
+  // structurally satisfies CollaborationClient); the local Workbench injects an
+  // OriginCollaborationClient bound to the connected core. Optional during the
+  // migration; once every collaboration route reads `collab`, `fj` retires.
+  collab?: CollaborationClient;
   owner: string;
   repo: string;
 }
