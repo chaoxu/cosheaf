@@ -1,8 +1,11 @@
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
-import { Prec, type Extension } from "@codemirror/state";
+import { EditorSelection, EditorState, Prec, type Extension } from "@codemirror/state";
 import { insertTab } from "@codemirror/commands";
 import { keymap } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
+import { type Diagnostic, linter } from "@codemirror/lint";
+import { frontmatterField } from "@chaoxu/coflat";
 import {
   type MountedLazyEditor,
   type LazyEditorDocumentChange as MountedDocumentChange,
@@ -49,6 +52,43 @@ export function coflatEditorMode(mode: StandaloneEditorMode, readOnly?: boolean)
   return readOnly && mode === "rich" ? "rich-readonly" : mode;
 }
 
+const FRONTMATTER_TAB = "  ";
+
+function selectionInsideFrontmatter(state: EditorState): boolean {
+  const frontmatter = state.field(frontmatterField, false);
+  if (!frontmatter || frontmatter.end <= 0) return false;
+  return state.selection.ranges.every((range) => range.from < frontmatter.end && range.to <= frontmatter.end);
+}
+
+export function insertFrontmatterSpaces(view: EditorView): boolean {
+  const transaction = view.state.changeByRange((range) => ({
+    changes: { from: range.from, to: range.to, insert: FRONTMATTER_TAB },
+    range: EditorSelection.cursor(range.from + FRONTMATTER_TAB.length),
+  }));
+  view.dispatch(transaction, {
+    scrollIntoView: true,
+    userEvent: "input.indent",
+  });
+  return true;
+}
+
+export function sourceModeTab(view: EditorView): boolean {
+  if (!selectionInsideFrontmatter(view.state)) return insertTab(view);
+  return insertFrontmatterSpaces(view);
+}
+
+export function frontmatterYamlDiagnostics(state: EditorState): Diagnostic[] {
+  const frontmatter = state.field(frontmatterField, false);
+  if (!frontmatter || frontmatter.status.state !== "error") return [];
+  return [{
+    from: frontmatter.status.from,
+    to: Math.max(frontmatter.status.from + 1, frontmatter.status.to),
+    severity: "error",
+    source: "YAML frontmatter",
+    message: frontmatter.status.message,
+  }];
+}
+
 export function MarkdownEditor({
   value,
   mode,
@@ -91,10 +131,14 @@ export function MarkdownEditor({
     const sourceModeTabExtension = Prec.highest(keymap.of([
       {
         key: "Tab",
-        run: (view) => modeRef.current === "source" && insertTab(view),
+        run: (view) => modeRef.current === "source" && sourceModeTab(view),
       },
     ]));
-    const mountExtensions: Extension[] = [sourceModeTabExtension, ...(extensions ?? [])];
+    const mountExtensions: Extension[] = [
+      sourceModeTabExtension,
+      linter((view) => frontmatterYamlDiagnostics(view.state)),
+      ...(extensions ?? []),
+    ];
 
     // Stable host-API wrappers that always read the latest prop value via ref.
     const stableSaveHandler: SaveHandler = {

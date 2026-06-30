@@ -29,6 +29,9 @@ importers:
       '@codemirror/language':
         specifier: ^6.12.2
         version: 6.12.3
+      '@codemirror/lint':
+        specifier: ^6.9.6
+        version: 6.9.6
       '@codemirror/search':
         specifier: ^6.6.0
         version: 6.7.0
