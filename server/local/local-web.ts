@@ -8,19 +8,25 @@
 import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { compress } from "hono/compress";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { repoHref } from "../../shared/url.js";
-import { globalRoute, htmlResponse, redirect, requestOrigin, safeWebRedirect, stringField } from "../routes/web-context.js";
+import { registerNotificationActivityRoutes } from "../routes/web-activity.js";
+import { globalRoute, htmlResponse, redirect, requestOrigin, resolveWebRepo, safeWebRedirect, stringField } from "../routes/web-context.js";
+import { registerDiagnosticsRoutes } from "../routes/web-diagnostics.js";
 import { registerFileRoutes } from "../routes/web-files.js";
 import { emptyHtml, type Html, html } from "../routes/web-html.js";
+import { registerIssueRoutes } from "../routes/web-issues.js";
+import { type RepoTab, repoPageShell } from "../routes/web-page.js";
+import { registerPullRoutes } from "../routes/web-pulls.js";
+import { registerSettingsRoutes } from "../routes/web-settings.js";
 import { globalSidebar, pageShell } from "../routes/web-shell.js";
 import type { AppEnv } from "../types.js";
 import { hasWorkbenchAccess, localAuthGate, tokenMatches, WORKBENCH_COOKIE } from "./local-auth.js";
 import { registerLocalCommitRoutes } from "./local-commit.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
-import { registerLocalRemoteRoutes } from "./local-remote.js";
+import { notConnectedBody, registerLocalRemoteRoutes } from "./local-remote.js";
 import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
 // A compact path for the card: abbreviate the home dir to ~ and elide a deep
@@ -232,6 +238,35 @@ function loginPage(next: string, error: boolean): string {
 }
 
 
+// The <title> label for a gated collaboration surface shown in its not-connected
+// Connect state.
+const CONNECT_TITLES: Record<string, string> = {
+  issues: "Issues",
+  pulls: "Pull requests",
+  notifications: "Notifications",
+  activity: "Activity",
+  settings: "Settings",
+};
+
+// The connect gate for a collaboration surface (#268): when the workspace has no
+// connected core, render the Connect prompt instead of letting the shared route
+// call ctx.collab (which would throw NoCoreConnectedError). When a core IS
+// connected, fall through to the shared route that reads the connected core.
+function coreConnectGate(active: RepoTab): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const owner = c.req.param("owner");
+    const repo = c.req.param("repo");
+    const entry = owner && repo ? resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry : undefined;
+    // Unknown workspace → let the shared route resolve and 404. Connected core →
+    // the shared route renders the real page.
+    if (!entry || entry.remote) return next();
+    const ctx = await resolveWebRepo(c);
+    if (!ctx.ok) return ctx.response;
+    const title = `${CONNECT_TITLES[active] ?? active} - ${ctx.repo}`;
+    return htmlResponse(repoPageShell(ctx, active, title, notConnectedBody(ctx, entry, c.req.query("toast") ?? null)));
+  };
+}
+
 export function createLocalWebRouter(): Hono<AppEnv> {
   const localWeb = new Hono<AppEnv>();
   localWeb.use("*", compress());
@@ -348,22 +383,34 @@ export function createLocalWebRouter(): Hono<AppEnv> {
     return c.redirect(c.get("config").accessToken ? "/login" : "/", 303);
   });
 
-  // Tier 2: after the editor opens a PR it navigates to /:owner/:repo/pulls/:n.
-  // The PR lives on the remote Cosheaf, so bounce there. 404 when no remote.
-  localWeb.get("/:owner/:repo/pulls/:n{[0-9]+}", (c) => {
-    const owner = c.req.param("owner");
-    const repo = c.req.param("repo");
-    const entry = resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry;
-    const remote = entry?.remoteClient;
-    if (!remote) return c.notFound();
-    return redirect(remote.pullUrl(owner, repo, Number(c.req.param("n"))));
-  });
-
   // The repo landing, file tree/src/raw pages, and the read/edit workbench —
   // all resolve through resolveWebRepo (which looks up the registry) and read
   // ctx.backend, so they work against the registered working tree unchanged.
+  // Diagnostics reads the local SQLite sidecar, so it needs no connected core.
   registerFileRoutes(localWeb);
   registerLocalCommitRoutes(localWeb);
+  registerDiagnosticsRoutes(localWeb);
+
+  // Collaboration surfaces (#268): gate on a connected core first — no core →
+  // the Connect prompt; a connected core → the SAME shared routes the hosted app
+  // mounts, reading the core through ctx.collab. The gate `.use()` calls MUST be
+  // registered before the shared routes so they run first in Hono's chain.
+  localWeb.use("/:owner/:repo/issues", coreConnectGate("issues"));
+  localWeb.use("/:owner/:repo/issues/*", coreConnectGate("issues"));
+  localWeb.use("/:owner/:repo/pulls", coreConnectGate("pulls"));
+  localWeb.use("/:owner/:repo/pulls/*", coreConnectGate("pulls"));
+  localWeb.use("/:owner/:repo/notifications", coreConnectGate("notifications"));
+  localWeb.use("/:owner/:repo/notifications/*", coreConnectGate("notifications"));
+  localWeb.use("/:owner/:repo/activity", coreConnectGate("activity"));
+  localWeb.use("/:owner/:repo/settings", coreConnectGate("settings"));
+  localWeb.use("/:owner/:repo/settings/*", coreConnectGate("settings"));
+  registerIssueRoutes(localWeb);
+  registerPullRoutes(localWeb);
+  registerNotificationActivityRoutes(localWeb);
+  registerSettingsRoutes(localWeb);
+
+  // The Connect / Sync actions (local-only). The not-connected Connect prompt is
+  // served by the gate above; this just keeps the POST /connect and /sync flows.
   registerLocalRemoteRoutes(localWeb);
 
   return localWeb;

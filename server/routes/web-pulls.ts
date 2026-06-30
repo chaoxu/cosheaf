@@ -94,8 +94,8 @@ web.get("/:owner/:repo/pulls", webRoute(async (c, ctx) => {
       poster: filters.author || undefined,
       sort: filters.sort || undefined,
     }),
-    ctx.fj.listLabels(ctx.owner, ctx.repo),
-    ctx.fj.listMilestones(ctx.owner, ctx.repo, "all"),
+    ctx.collab.listLabels(ctx.owner, ctx.repo),
+    ctx.collab.listMilestones(ctx.owner, ctx.repo, "all"),
   ]);
   // Forgejo's /pulls has no title-search param, so filter the fetched page in
   // memory (a thin pass-through, not a SQLite mirror).

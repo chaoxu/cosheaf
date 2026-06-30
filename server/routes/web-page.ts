@@ -1,11 +1,11 @@
+import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import type { ForgejoBranch, ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
-import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
-import { emptyHtml, html, type Html, joinHtml, raw } from "./web-html.js";
-import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
-import { type Panel, renderRegion } from "./web-panels.js";
-import { pageShell, sidebarIdentity, type StatusCrumb } from "./web-shell.js";
 import { backIcon } from "./icons.js";
+import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
+import { emptyHtml, type Html, html, joinHtml, raw } from "./web-html.js";
+import { type Panel, renderRegion } from "./web-panels.js";
+import { pageShell, type StatusCrumb, sidebarIdentity } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings" | "commit";
 
@@ -104,9 +104,17 @@ export function repoPage(opts: {
   const t = opts.t;
   const nav = opts.local
     ? [
+        // Local Workbench: files + the local-only Commit surface, then the shared
+        // collaboration tabs (#268) the local app now mounts against the
+        // connected core (or a Connect prompt when none is connected).
         tab(opts, "files", t("tab.files"), ""),
         tab(opts, "commit", "Commit", "/commit"),
+        tab(opts, "issues", t("tab.issues"), "/issues"),
         tab(opts, "pulls", t("tab.pulls"), "/pulls"),
+        tab(opts, "notifications", t("nav.notifications"), "/notifications"),
+        tab(opts, "activity", t("tab.activity"), "/activity"),
+        tab(opts, "diagnostics", t("tab.diagnostics"), "/diagnostics"),
+        tab(opts, "settings", t("settings.title"), "/settings"),
       ]
     : REPO_TABS.map(([id, key, suffix]) => tab(opts, id, t(key), suffix));
   const activeKey = REPO_TABS.find(([id]) => id === opts.active)?.[1];

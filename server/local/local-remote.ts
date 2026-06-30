@@ -1,31 +1,30 @@
-// Tier 2 remote surface for the local Workbench: the "Pull requests" page, which
-// doubles as the Connect-to-a-remote-Cosheaf flow, plus the Sync action.
+// Tier 2 remote surface for the local Workbench: the Connect-to-a-remote-Cosheaf
+// flow and the Sync action.
 //
-// A workspace with no remote shows a Connect form (Cosheaf URL + token, validated
-// by a whoami probe, written to the gitignored .cosheaf/remote.json). A connected
-// workspace shows who the token authenticates as and the remote's open pull
-// requests, read through the typed Cosheaf API (never a forge call). Sync fetches
-// the upstream and fast-forwards. Mounted only by the local web router.
+// A workspace with no connected core shows a Connect form (Cosheaf URL + token,
+// validated by a whoami probe, written to the gitignored .cosheaf/remote.json).
+// The not-connected Connect body (`notConnectedBody`) is rendered by the local
+// web router's connect gate for every collaboration surface; once connected, the
+// shared issue/pull/notification/activity/settings routes render the real pages
+// from the connected core (#268). Sync fetches the upstream and fast-forwards.
+// Mounted only by the local web router.
 
 import type { Hono } from "hono";
-import type { AppEnv } from "../types.js";
 import {
   badRequestPage,
-  htmlResponse,
   redirect,
   repoHref,
   stringField,
   type WebCtx,
-  webRoute,
   webRouteForWrite,
 } from "../routes/web-context.js";
-import { emptyHtml, html, type Html } from "../routes/web-html.js";
-import { repoPageShell } from "../routes/web-page.js";
+import { emptyHtml, type Html, html } from "../routes/web-html.js";
+import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { writeRemote } from "./local-workspace.js";
-import { CosheafOriginClient, type RemotePullSummary } from "./remote-cosheaf-client.js";
+import { CosheafOriginClient } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
@@ -51,7 +50,11 @@ function connectForm(ctx: WebCtx, entry: WorkspaceEntry | undefined, submitLabel
   </form>`;
 }
 
-function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined, notice: string | null): Html {
+// The not-connected Connect body, rendered by the local web router's connect gate
+// for any collaboration surface (issues/pulls/notifications/activity/settings)
+// when the workspace has no connected core. The shared collaboration routes take
+// over once a core is connected (#268).
+export function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined, notice: string | null): Html {
   return html`
     <div class="page-title compact"><div><h1>Remote pull requests</h1></div></div>
     ${notice ? html`<p class="muted" data-testid="pulls-notice">${notice}</p>` : emptyHtml}
@@ -59,85 +62,7 @@ function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined, notice
     ${connectForm(ctx, entry, "Connect")}`;
 }
 
-function prList(ctx: WebCtx, pulls: RemotePullSummary[]): Html {
-  if (pulls.length === 0) {
-    return html`<div class="empty" data-testid="pulls-empty">No open remote pull requests on the workspace server. Commit on a local branch, then use “Open remote PR” in the editor.</div>`;
-  }
-  return html`<ul class="pr-list" data-testid="pr-list">${pulls.map(
-    (p) => html`<li class="pr-item">
-      <a class="pr-item__title" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${p.number}`)}">Remote PR #${p.number} ${p.title}</a>
-      <span class="pr-item__meta muted"><code>${p.head_ref}</code> → <code>${p.base_ref}</code> · ${p.author_username}</span>
-    </li>`,
-  )}</ul>`;
-}
-
-function serverLabel(url: string | null): string {
-  if (!url) return "workspace server";
-  try {
-    return new URL(url).host;
-  } catch (_err) {
-    return url;
-  }
-}
-
-function connectedBody(
-  ctx: WebCtx,
-  entry: WorkspaceEntry,
-  who: { username: string } | null,
-  pulls: RemotePullSummary[],
-  error: string | null,
-  notice: string | null,
-): Html {
-  const host = serverLabel(entry.remote?.url ?? null);
-  return html`
-    <div class="page-title compact"><div><h1>Remote pull requests</h1></div></div>
-    ${notice ? html`<p class="muted" data-testid="pulls-notice">${notice}</p>` : emptyHtml}
-    ${error ? html`<p class="form-error" data-testid="pulls-error">${error}</p>` : emptyHtml}
-    <div class="connect-status" data-testid="connect-status">
-      <span class="badge badge--ok">Cosheaf server connected</span>
-      <code>${host}</code>
-      ${who ? html`<span class="muted">as <strong>${who.username}</strong></span>` : html`<span class="form-error">token not recognized</span>`}
-    </div>
-    <p class="muted">Remote PRs are read from the connected Cosheaf workspace server. Local commits stay in this folder until pushed.</p>
-    ${prList(ctx, pulls)}
-    <details class="connect-reconnect">
-      <summary>Reconnect or change token</summary>
-      ${connectForm(ctx, entry, "Save")}
-    </details>`;
-}
-
 export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
-  // The "Pull requests" tab: Connect form when no remote; remote identity + open
-  // PRs when connected.
-  web.get(
-    "/:owner/:repo/pulls",
-    webRoute(async (c, ctx) => {
-      const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
-      const notice = c.req.query("toast") ?? null;
-      const remote = entry?.remoteClient;
-      let body: Html;
-      if (!remote) {
-        body = notConnectedBody(ctx, entry, notice);
-      } else {
-        let who: { username: string } | null = null;
-        let pulls: RemotePullSummary[] = [];
-        let error: string | null = null;
-        try {
-          who = await remote.whoami();
-        } catch (err) {
-          error = friendlyLine(err);
-        }
-        try {
-          pulls = await remote.listPulls(ctx.owner, ctx.repo, "open");
-        } catch (err) {
-          error = error ?? friendlyLine(err);
-        }
-        body = connectedBody(ctx, entry, who, pulls, error, notice);
-      }
-      return htmlResponse(repoPageShell(ctx, "pulls", `Pull requests - ${ctx.repo}`, body));
-    }),
-  );
-
   // Connect (or reconnect) a workspace to a remote Cosheaf: validate the token
   // with a whoami probe, then write the gitignored remote.json and rebuild the
   // entry so its remoteClient / open-PR capability light up.

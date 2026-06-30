@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
@@ -228,36 +228,44 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("redirects /pulls/:n to the remote PR url", async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // The pre-#268 external bounce on /pulls/:n is gone. A workspace with no
+  // connected core (the back-compat remoteClient path leaves entry.remote null)
+  // now renders the Connect prompt for every collaboration surface, including a
+  // PR detail path, rather than redirecting to an external forge URL.
+  it("shows the Connect prompt on /pulls/:n when no core is connected", async () => {
     const { work } = repoWithOrigin();
     const remote = fakeRemote({ openPull: async () => ({ number: 7 }) });
     const res = await app(work, remote).request("/me/notes/pulls/7");
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("https://remote.example/me/notes/pulls/7");
-  });
-
-  it("labels the local PR list as remote Cosheaf server state", async () => {
-    const { work } = repoWithOrigin();
-    const remote = fakeRemote({
-      listPulls: async () => [
-        {
-          number: 7,
-          title: "Review branch",
-          state: "open",
-          merged: false,
-          author_username: "me",
-          head_ref: "feature",
-          base_ref: "main",
-        },
-      ],
-    });
-    const res = await appWithConnectedRegistry(work, remote).request("/me/notes/pulls");
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("Remote pull requests");
-    expect(body).toContain("Cosheaf server connected");
-    expect(body).toContain("remote.example");
-    expect(body).toContain("Remote PR #7 Review branch");
-    expect(body).toContain("Local commits stay in this folder until pushed");
+    expect(body).toContain("no connected Cosheaf server");
+    expect(body).toContain('data-testid="connect-form"');
+  });
+
+  // With a connected core, the local PR list is the SAME shared route the hosted
+  // app uses, reading the core through ctx.collab (an OriginCollaborationClient).
+  // Stub global fetch so the Origin API calls resolve without a live server.
+  it("renders the shared PR list against the connected core (#268)", async () => {
+    const { work } = repoWithOrigin();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/pulls")) return Response.json({ pulls: [] });
+        if (url.includes("/labels")) return Response.json({ labels: [] });
+        if (url.includes("/milestones")) return Response.json({ milestones: [] });
+        return Response.json({});
+      }),
+    );
+    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/me/notes/pulls");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // The shared PRs page (heading + empty state), not the old remote-PR-list page.
+    expect(body).toContain("<h1>PRs</h1>");
+    expect(body).toContain("No matching pull requests");
   });
 });

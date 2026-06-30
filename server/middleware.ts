@@ -8,6 +8,7 @@ import type { CollaborationClient } from "./collaboration-client.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ForgejoWorkspaceBackend } from "./forgejo-backend.js";
 import { resolveLocalWorkspace } from "./local/local-mode.js";
+import { localCollaborationClient } from "./local/origin-collaboration-client.js";
 import { TTLCache } from "./ttl-cache.js";
 import type { AppEnv } from "./types.js";
 import type { User } from "./users.js";
@@ -122,6 +123,14 @@ export function invalidateWorkspacePermissionCache(owner: string, repo: string, 
 // cache TTL.
 export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   const ws = c.get("workspace");
+  // Local Workbench has no forge client to re-check against, and the single local
+  // person is admin on their own folder (resolveLocalWorkspace returns role
+  // "admin"). The connected core enforces admin on the actual write, so gate on
+  // the resolved workspace role instead of a fresh forge round-trip.
+  if (isLocalMode(c)) {
+    if (ws.role !== "admin") return c.json({ error: "admin required", code: "forbidden" }, 403);
+    return next();
+  }
   const fj = c.get("fjUser");
   const fjName = c.get("user").username;
   const fresh = await fj.getRepoPermission(ws.owner, ws.repo, fjName);
@@ -178,7 +187,16 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
     const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
     if (!resolved) return c.json({ error: "workspace not found", code: "not_found" }, 404);
     c.set("workspace", resolved.ws);
-    c.set("repoCtx", { backend: resolved.entry.backend, owner, repo });
+    // Local collaboration source (#262/#268): the connected core via the Origin
+    // API, or a not-connected sentinel the migrated typed routes surface as a
+    // 404/Connect prompt. Mirrors resolveWebRepo's local branch so the typed API
+    // and the web pages share one client.
+    c.set("repoCtx", {
+      backend: resolved.entry.backend,
+      collab: localCollaborationClient(resolved.entry),
+      owner,
+      repo,
+    });
     return next();
   }
   const fj = c.get("fjUser");

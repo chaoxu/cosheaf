@@ -173,12 +173,18 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     // before the local API routes; /api/v1/health and /api/v1/origin are mounted
     // earlier and stay reachable for liveness/discovery.
     app.use("/api/v1/*", localAuthGate());
-    // Local Workbench: only the forge-free, backend-driven typed routes the page
-    // islands call, plus the local pulls router (commit + push + open PR on the
-    // remote Cosheaf). No auth/workspaces/issues/notifications/webhooks.
+    // Local Workbench: the forge-free, backend-driven content routes the page
+    // islands call, plus the shared collaboration API reading the connected core
+    // via ctx.collab (#268). localPulls is mounted before the typed pulls router
+    // so its POST /pulls (local commit + push + open PR on the connected core)
+    // wins over the typed create-PR handler; the typed router serves the GET
+    // reads. localNotifications keeps the chrome's global poller + SSE silent.
     app.route("/api/v1/repos", files);
     app.route("/api/v1/repos", branches);
     app.route("/api/v1/repos", localPulls);
+    app.route("/api/v1/repos", pulls);
+    app.route("/api/v1/repos", issues);
+    app.route("/api/v1/repos", notifications);
     app.route("/api/v1", localNotifications);
   } else if (provider.mountsHostedAuth && provider.mountsHostedCollaboration) {
     app.route("/api/v1", auth);

@@ -2,13 +2,15 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
 import { freshTestDb } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
+import { WorkspaceRegistry } from "./workspace-registry.js";
 
 const IDENTITY: LocalWorkspaceIdentity = {
   owner: "me",
@@ -125,6 +127,76 @@ describe("local Workbench app (Tier 0)", () => {
     expect(body).toContain("Local git state only");
     expect(body).toContain("no connected Cosheaf server");
     expect(body).toContain("open remote pull requests");
+  });
+
+  // A workspace WITH a connected core (#268): the shared collaboration routes are
+  // mounted locally and read the connected core through ctx.collab (an
+  // OriginCollaborationClient). Stub global fetch so the Origin API calls resolve
+  // without a live server.
+  function connectedApp(): { app: Hono<AppEnv> } {
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-connected-"));
+    writeFileSync(join(dir, "hello.md"), "# Hello\n");
+    const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
+    const db = freshTestDb("cosheaf-local-connected-db-");
+    const backend = new LocalGitWorkspaceBackend(dir);
+    const registry = new WorkspaceRegistry(db, { user: "me" });
+    registry.register({
+      slug: workspaceSlug(IDENTITY.owner, IDENTITY.repo),
+      path: dir,
+      identity: { ...IDENTITY, canOpenPull: true },
+      backend,
+      remote: { url: "https://core.example", token: "tok" },
+      gitRemote: null,
+    });
+    const app = createApp({ config, db, localRegistry: registry });
+    return { app };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("renders the issues page against a connected core via the shared route", async () => {
+    const { app } = connectedApp();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/issues")) {
+        return Response.json({
+          issues: [
+            {
+              number: 7,
+              title: "Connected core issue",
+              state: "open",
+              author_username: "me",
+              labels: [],
+              comment_count: 0,
+              created_at: 0,
+              updated_at: 0,
+            },
+          ],
+        });
+      }
+      if (url.includes("/labels")) return Response.json({ labels: [] });
+      if (url.includes("/milestones")) return Response.json({ milestones: [] });
+      return Response.json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await app.request("/me/notes/issues");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Connected core issue");
+    // The shared issues route called the Origin API on the connected core.
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("https://core.example/api/v1/repos/me/notes/issues"))).toBe(true);
+  });
+
+  it("shows the Connect prompt on a collaboration surface when no core is connected", async () => {
+    const { app } = localApp({ "hello.md": "# Hello\n" });
+    const res = await app.request("/me/notes/issues");
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // The connect gate intercepts before ctx.collab is called (no NoCoreConnectedError).
+    expect(body).toContain("no connected Cosheaf server");
+    expect(body).toContain('data-testid="connect-form"');
   });
 
   it("renders the edit page in direct write-mode with PR affordances off", async () => {
