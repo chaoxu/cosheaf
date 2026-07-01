@@ -113,6 +113,25 @@ describe("forgejo webhooks", () => {
     warn.mockRestore();
   });
 
+  it("dedupes a replayed body even when the delivery header is changed (replay guard)", async () => {
+    // x-forgejo-delivery is outside the signed body, so dedup must key off the
+    // body hash — a captured valid (body, signature) delivery can't be replayed
+    // by simply varying the header.
+    const db = freshDb();
+    const forgejo = { getRawFile: vi.fn(async () => "# ok\n") } as unknown as Forgejo;
+    const app = appFor(db, forgejo);
+    const body = JSON.stringify({
+      ref: "refs/heads/main",
+      repository: { full_name: "owner/w" },
+      commits: [{ added: ["a.md"] }],
+    });
+    const first = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "delivery-A"));
+    expect(first.status).toBe(200);
+    const replay = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "delivery-B-attacker"));
+    expect(await replay.json()).toMatchObject({ dedup: true });
+    expect(db.prepare("SELECT count(*) AS count FROM webhook_log").get()).toEqual({ count: 1 });
+  });
+
   it("does not process an in-flight duplicate delivery twice", async () => {
     const db = freshDb();
     let releaseGate: (() => void) | undefined;

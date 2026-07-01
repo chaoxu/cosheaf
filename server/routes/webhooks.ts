@@ -51,8 +51,12 @@ webhooks.post("/forgejo", async (c) => {
     return c.json(...unauthorized("bad signature"));
   }
   const event = c.req.header("x-forgejo-event") ?? "unknown";
-  const deliveryHeader = c.req.header("x-forgejo-delivery");
-  const deliveryId = deliveryHeader ?? `body:${createHash("sha256").update(raw).digest("hex")}`;
+  // Dedup on the signed body, not the client-controlled x-forgejo-delivery
+  // header: the header is outside the HMAC, so trusting it lets a captured valid
+  // (body, signature) delivery be replayed unboundedly by varying the header.
+  // The body IS signed, so the same signed payload dedups correctly — and a
+  // genuine retry of an identical event is idempotent against reconciliation.
+  const deliveryId = `body:${createHash("sha256").update(raw).digest("hex")}`;
 
   const db = c.get("db");
   const exists = db.prepare("SELECT 1 FROM webhook_log WHERE delivery_id = ?").get(deliveryId) as unknown;
