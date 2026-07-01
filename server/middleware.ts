@@ -18,7 +18,11 @@ interface AuthResolution {
   forgejoToken: string;
 }
 
-const BEARER_TTL_MS = 30_000;
+// One 30s TTL for the auth-path in-process caches (bearer→user, repo-permission,
+// and (owner,repo)→format/title). Kept as one value so the documented "cached
+// in-process for 30s" behavior can't drift between them.
+const AUTH_CACHE_TTL_MS = 30_000;
+const BEARER_TTL_MS = AUTH_CACHE_TTL_MS;
 const BEARER_CACHE = new TTLCache<string, ResolvedApiToken>(BEARER_TTL_MS);
 
 export function _seedBearerAuthCacheForTests(token: string, username: string): void {
@@ -100,7 +104,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 // In-process cache of Forgejo collaborator-permission lookups. Forgejo is SoT;
 // this avoids a Forgejo round-trip on every workspace request. TTL is short so
 // permission revocations propagate quickly enough for our use.
-const PERM_TTL_MS = 30_000;
+const PERM_TTL_MS = AUTH_CACHE_TTL_MS;
 const PERM_CACHE = new TTLCache<string, Role | "none">(PERM_TTL_MS);
 
 export function _resetPermCacheForTests(): void {
@@ -246,7 +250,7 @@ export function repoCtxCollab(c: Context<AppEnv>): { collab: CollaborationClient
 
 // Same TTL discipline as the role cache — format changes propagate quickly
 // enough, and a topic flip is a rare admin action.
-const FORMAT_TTL_MS = 30_000;
+const FORMAT_TTL_MS = AUTH_CACHE_TTL_MS;
 
 // Cached per-workspace markdown format derived from repo topics; untagged
 // repos fall back to the default (forgejo-passthrough). Cosheaf is a frontend
