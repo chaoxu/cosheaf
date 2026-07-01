@@ -18,6 +18,7 @@ import type {
   NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
+import { parseWorkspaceSlug } from "../../shared/conventions.js";
 import type { PrCommit, PrFile, PrMeta } from "../../shared/review.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 
@@ -368,7 +369,7 @@ export function branchToShape(b: BranchJson): BranchShape {
 export function notificationRowToShape(row: NotificationRow): NotificationThreadShape {
   const type = row.kind === "pr" ? "Pull" : "Issue";
   const segment = row.kind === "pr" ? "pulls" : "issues";
-  const name = row.repo.includes("/") ? row.repo.slice(row.repo.indexOf("/") + 1) : row.repo;
+  const name = parseWorkspaceSlug(row.repo)?.repo ?? row.repo;
   return {
     id: row.id,
     unread: true,

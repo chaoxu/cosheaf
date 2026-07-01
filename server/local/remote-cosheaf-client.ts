@@ -4,17 +4,15 @@
 // path. Git push itself goes over the working tree's `origin` remote (the user's
 // SSH key); this client opens / reads the PR and probes remote identity.
 
-// A pull request as the Workbench displays it — the subset of the remote's
-// typed PrMeta the read-only PR list needs.
-export interface RemotePullSummary {
-  number: number;
-  title: string;
-  state: "open" | "closed";
-  merged: boolean;
-  author_username: string;
-  head_ref: string;
-  base_ref: string;
-}
+import type { PrMeta } from "../../shared/review.js";
+
+// A pull request as the Workbench displays it — derived as the exact subset of
+// the remote's typed PrMeta the read-only PR list needs, so a rename on PrMeta
+// is a compile error here instead of a silent mis-map.
+export type RemotePullSummary = Pick<
+  PrMeta,
+  "number" | "title" | "state" | "merged" | "author_username" | "head_ref" | "base_ref"
+>;
 
 // The remote operations the local Workbench needs. An interface so tests can
 // inject a fake without a live remote.

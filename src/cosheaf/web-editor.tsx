@@ -30,7 +30,7 @@ import {
 import {
   documentRailModel,
 } from "../../shared/document-rail";
-import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+import { COFLAT_FORMAT_ID, DEFAULT_DOCUMENT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { repoBranchFileHref, repoHref } from "../../shared/url";
@@ -150,7 +150,7 @@ function readConfig(): { config: EditorConfig; content: string } {
       readBranch: mount.dataset.readBranch ?? "main",
       username: mount.dataset.username ?? "",
       role: (mount.dataset.role ?? "read") as EditorConfig["role"],
-      formatId: (mount.dataset.formatId ?? "forgejo-passthrough") as DocumentFormatId,
+      formatId: (mount.dataset.formatId as DocumentFormatId) ?? DEFAULT_DOCUMENT_FORMAT_ID,
       baseSha: mount.dataset.baseSha || null,
       sourceSha: mount.dataset.sourceSha || null,
       resetEditBranch: mount.dataset.resetEditBranch === "1",
