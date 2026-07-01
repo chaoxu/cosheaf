@@ -142,10 +142,15 @@ Cosheaf authority.
   owns backend forge credentials.
 - Local workbench HTTP service stays loopback + no-auth by default. It has
   ambient local file authority and must reject cross-origin cookie-style
-  mutations. Exposing it beyond loopback requires an access token
+  mutations. In no-token mode, requests must also present a loopback Host
+  header (`localhost`, `127.0.0.0/8`, or `[::1]`) so DNS rebinding cannot turn
+  an attacker-controlled hostname into same-origin loopback access. Exposing it
+  through any non-loopback browser-facing host, including a same-box reverse
+  proxy, requires an access token
   (`COSHEAF_WORKBENCH_TOKEN`): the launcher refuses a non-loopback bind without
-  one, and the token gate then guards every request (Bearer for API/agents, the
-  `cosheaf_wb` HttpOnly cookie for browsers via `/login`). The access token is
+  one, and the request Host gate plus token gate then guard every request
+  (Bearer for API/agents, the `cosheaf_wb` HttpOnly cookie for browsers via
+  `/login`). The access token is
   the N=1 case of the forge provider's multi-user token auth. Transport, TLS,
   and reachability (tunnel, reverse proxy, VPN) are the operator's
   responsibility and out of scope for the Workbench — no transport is assumed or

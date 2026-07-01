@@ -9,6 +9,7 @@ import { buildLocalConfig, isLoopbackHost, refuseRemoteWithoutToken } from "../d
 import { freshTestDb } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
+import { hostHeaderName } from "./local-auth.js";
 
 const IDENTITY: LocalWorkspaceIdentity = {
   owner: "me",
@@ -43,6 +44,21 @@ describe("local Workbench access gate", () => {
     it("serves web pages without credentials", async () => {
       const app = localApp(null);
       expect((await app.request("/me/notes")).status).toBe(200);
+    });
+
+    it("rejects a non-loopback Host header to block DNS rebinding reads", async () => {
+      const res = await localApp(null).request("/api/v1/repos/me/notes/tree?branch=main", {
+        headers: { host: "attacker.example:3030", origin: "http://attacker.example:3030" },
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("accepts loopback Host header forms in no-token mode", async () => {
+      const app = localApp(null);
+      for (const host of ["localhost:3030", "127.0.0.1:3030", "127.0.0.2", "[::1]:3030"]) {
+        const res = await app.request("/api/v1/repos/me/notes/tree?branch=main", { headers: { host } });
+        expect(res.status, host).toBe(200);
+      }
     });
 
     it("renders no Sign out link when there is no token", async () => {
@@ -172,6 +188,13 @@ describe("local Workbench access gate", () => {
       });
       expect(res.headers.getSetCookie().some((c) => /^cosheaf_wb=/.test(c) && /Secure/i.test(c))).toBe(false);
     });
+
+    it("allows a non-loopback Host when the shared token is configured and presented", async () => {
+      const res = await localApp(TOKEN).request("/api/v1/repos/me/notes/tree?branch=main", {
+        headers: { host: "wb.example:3030", authorization: `Bearer ${TOKEN}` },
+      });
+      expect(res.status).toBe(200);
+    });
   });
 });
 
@@ -264,5 +287,18 @@ describe("isLoopbackHost", () => {
     for (const h of ["0.0.0.0", "::", "10.0.0.1", "192.168.1.2", "128.0.0.1", "27.0.0.1", "example.com", "::ffff:10.0.0.1"]) {
       expect(isLoopbackHost(h)).toBe(false);
     }
+  });
+});
+
+describe("hostHeaderName", () => {
+  it("extracts a hostname from normal Host header forms", () => {
+    expect(hostHeaderName("localhost:3030")).toBe("localhost");
+    expect(hostHeaderName("127.0.0.1")).toBe("127.0.0.1");
+    expect(hostHeaderName("[::1]:3030")).toBe("::1");
+  });
+
+  it("rejects malformed or blank Host headers", () => {
+    expect(hostHeaderName("")).toBeNull();
+    expect(hostHeaderName("[::1")).toBeNull();
   });
 });
