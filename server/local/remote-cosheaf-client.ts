@@ -56,6 +56,19 @@ export class RemoteCosheafError extends Error {
   }
 }
 
+// The shared Origin-response contract both remote clients (this one and
+// OriginCollaborationClient) use: non-2xx becomes a status-bearing
+// RemoteCosheafError (body truncated so an internal URL never leaks), and an
+// empty body parses to undefined.
+export async function parseOriginResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export class CosheafOriginClient implements RemotePullClient {
@@ -88,12 +101,7 @@ export class CosheafOriginClient implements RemotePullClient {
         ...(init?.headers ?? {}),
       },
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
-    }
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
+    return parseOriginResponse<T>(res);
   }
 
   me(): Promise<CosheafMeResponse> {

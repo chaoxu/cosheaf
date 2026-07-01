@@ -34,7 +34,7 @@ import type {
 import type { PrCommit, PrFile, PrMeta } from "../../shared/review.js";
 import type { Role } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
-import { RemoteCosheafError } from "./remote-cosheaf-client.js";
+import { parseOriginResponse, RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 // The forge-client object shapes, derived from the CollaborationClient surface so
@@ -516,12 +516,7 @@ export class OriginCollaborationClient {
       headers,
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
-    }
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
+    return parseOriginResponse<T>(res);
   }
 
   private get<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
