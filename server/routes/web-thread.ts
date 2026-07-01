@@ -1,3 +1,4 @@
+import { canWrite } from "../../shared/roles.js";
 import type { ForgejoPull } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type {
@@ -66,7 +67,7 @@ export function issueEditPage(
 }
 
 export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
-  if (ctx.ws.role === "read" || pull.merged) return emptyHtml;
+  if (!canWrite(ctx.ws.role) || pull.merged) return emptyHtml;
   const nextState = pull.state === "open" ? "closed" : "open";
   const label = pull.state === "open" ? "Close PR" : "Reopen PR";
   return html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/state`)}">
@@ -134,7 +135,7 @@ function issueRelationList(
         <a class="inline-link" href="${repoHref(ctx.owner, ctx.repo, `/issues/${item.number}`)}">#${item.number} ${item.title}</a>
         <span class="state ${item.state}">${item.state}</span>
         ${
-          ctx.ws.role === "read"
+          !canWrite(ctx.ws.role)
             ? ""
             : html`<form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies/delete`)}">
                 <input type="hidden" name="relation" value="${relation}">
@@ -145,7 +146,7 @@ function issueRelationList(
       </div>`,
   );
   const form =
-    ctx.ws.role === "read"
+    !canWrite(ctx.ws.role)
       ? emptyHtml
       : addDisclosure("add", html`<form class="inline-add-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/dependencies`)}">
           <input type="hidden" name="relation" value="${relation}">
@@ -194,7 +195,7 @@ export function labelsRailPanel(opts: {
 }): Html {
   const currentIds = new Set(opts.current.map((label) => label.id));
   const editor =
-    opts.ctx.ws.role === "read" || opts.allLabels.length === 0
+    !canWrite(opts.ctx.ws.role) || opts.allLabels.length === 0
       ? emptyHtml
       : addDisclosure(
           "edit",
@@ -379,7 +380,7 @@ export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableRevi
           ${requestedTeams.map((team) => html`<span class="meta-pill">${team.username ?? team.name}</span>`)}
         </div>`;
   const requestForm =
-    ctx.ws.role === "read" || pull.state === "closed"
+    !canWrite(ctx.ws.role) || pull.state === "closed"
       ? emptyHtml
       : addDisclosure("request", html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests`)}">
           <label>Request reviewers
@@ -402,7 +403,7 @@ export function reviewersPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewer
 
 function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): Html {
   const remove =
-    ctx.ws.role === "read" || pull.state === "closed"
+    !canWrite(ctx.ws.role) || pull.state === "closed"
       ? ""
       : html`<form method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/review-requests/delete`)}">
           <input type="hidden" name="reviewer" value="${reviewer}">
@@ -628,7 +629,7 @@ function commentActions(opts: { ctx: WebCtx; testId: string; formId: string; edi
 }
 
 function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
-  if (ctx.ws.role === "read" && comment.user?.login !== ctx.user) return emptyHtml;
+  if (!canWrite(ctx.ws.role) && comment.user?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "issue-comment-actions",
@@ -640,7 +641,7 @@ function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueC
 }
 
 function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): Html {
-  if (ctx.ws.role === "read" && comment.user?.login !== ctx.user) return emptyHtml;
+  if (!canWrite(ctx.ws.role) && comment.user?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "pull-comment-actions",
@@ -653,7 +654,7 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
 }
 
 function pullIssueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
-  if (ctx.ws.role === "read" && comment.user?.login !== ctx.user) return emptyHtml;
+  if (!canWrite(ctx.ws.role) && comment.user?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "pull-issue-comment-actions",

@@ -7,10 +7,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
 
 // Same shape the forge enforces for owner/repo names: start with an
 // alphanumeric or underscore, then alphanumerics / _ / . / -.
-const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 // Fixed owner for a folder with no upstream remote. The Workbench is single-user
 // and forge-free, so there is no meaningful account name to qualify the slug —
@@ -67,7 +67,7 @@ export interface LocalWorkspaceConfig {
 
 function sanitizeName(raw: string, fallback: string): string {
   const cleaned = raw.replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^[^A-Za-z0-9_]+/, "");
-  return NAME_RE.test(cleaned) ? cleaned : fallback;
+  return FORGEJO_NAME_RE.test(cleaned) ? cleaned : fallback;
 }
 
 function git(dir: string, args: string[]): string | null {

@@ -4,7 +4,7 @@ import { setCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
-import type { Role } from "../../shared/roles.js";
+import { canWrite, type Role } from "../../shared/roles.js";
 import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { Forgejo } from "../forgejo.js";
@@ -276,7 +276,7 @@ async function resolveWithMinRole(
 
 // The write gate every mutating web handler needs (read-only members get 404).
 export function resolveWebRepoForWrite(c: Context<AppEnv>): Promise<WebRepoResult> {
-  return resolveWithMinRole(c, (role) => role === "write" || role === "admin");
+  return resolveWithMinRole(c, canWrite);
 }
 
 // The admin gate for admin-only web pages/POSTs (settings, repo deletion, PR

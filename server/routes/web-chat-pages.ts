@@ -1,3 +1,4 @@
+import { canWrite, type Role } from "../../shared/roles.js";
 import type { Hono } from "hono";
 import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js";
 import type { Forgejo } from "../forgejo.js";
@@ -64,11 +65,11 @@ function chatSidebar(
   repo: string,
   chats: ForgejoIssue[],
   active: number | null,
-  role: string,
+  role: Role,
   canStartChat: boolean,
 ): Html {
   const newChat =
-    role === "read" || !canStartChat
+    !canWrite(role) || !canStartChat
       ? emptyHtml
       : html`<a class="chat-new-link${active === null ? " active" : ""}" href="${repoHref(owner, repo, "/chat")}">+ New chat</a>`;
   const sessions =
@@ -95,7 +96,7 @@ web.get("/:owner/:repo/chat", webRoute(async (c, ctx) => {
           <section class="chat-main">
             <p class="chat-notice">${eyeIcon({ size: 14 })}Everyone with access to this workspace can see these chats — they're not private.</p>
             ${
-              ctx.ws.role === "read"
+              !canWrite(ctx.ws.role)
                 ? html`<div class="chat-blank">Read-only access — you can't start chats here.</div>`
                 : !canStartChat
                   ? html`<div class="chat-blank">Chat is not configured for this Cosheaf instance. Existing chat issues remain readable.</div>`

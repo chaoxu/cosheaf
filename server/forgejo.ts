@@ -30,6 +30,7 @@ import type {
   ForgejoTreeEntry,
   ForgejoUser,
 } from "./forgejo-types.js";
+import type { Role } from "../shared/roles.js";
 
 export interface ForgejoConfig {
   baseUrl: string;
@@ -390,7 +391,7 @@ export class Forgejo {
     });
   }
 
-  async addCollaborator(owner: string, repo: string, username: string, permission: "read" | "write" | "admin"): Promise<void> {
+  async addCollaborator(owner: string, repo: string, username: string, permission: Role): Promise<void> {
     await this.req(this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}`), {
       method: "PUT",
       body: { permission },
@@ -416,7 +417,7 @@ export class Forgejo {
     owner: string,
     repo: string,
     username: string,
-  ): Promise<"admin" | "write" | "read" | "none"> {
+  ): Promise<Role | "none"> {
     const r = await this.reqOpt<{ permission?: string }>(
       this.repoPath(owner, repo, `collaborators/${encodeURIComponent(username)}/permission`),
     );

@@ -1,3 +1,4 @@
+import { canWrite } from "../../shared/roles.js";
 import type { Hono } from "hono";
 import { join } from "node:path";
 import { buildPdfImagePreviewPaths, isPdfAssetPath } from "../../shared/asset-previews.js";
@@ -75,7 +76,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
         <div class="page-title compact page-title--actions-only">
           <div class="toolbar-actions">
             ${pageSearchForm(owner, repo)}
-            <span class="toolbar-actions">${ws.role === "read" ? "" : newFileControl(owner, repo, user, defaultBranch)}</span>
+            <span class="toolbar-actions">${!canWrite(ws.role) ? "" : newFileControl(owner, repo, user, defaultBranch)}</span>
           </div>
         </div>
         ${repoHomeHeader(ctx, owner, repo, stats)}
@@ -171,7 +172,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
           <div class="page-title compact page-title--actions-only">
             <div class="toolbar-actions">
               ${
-                ws.role === "read"
+                !canWrite(ws.role)
                   ? ""
                   : html`${resolved.branch === "main" ? "" : html`<a class="button primary" href="${`${repoHref(owner, repo, "/pulls/new")}?head=${encodeURIComponent(resolved.branch)}&base=main`}">Open PR</a>`}
                     ${newFileControl(owner, repo, user, resolved.branch)}`
