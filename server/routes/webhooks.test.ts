@@ -396,6 +396,33 @@ describe("forgejo webhooks", () => {
       ).toEqual({ target_id: "b" });
     });
 
+    it("full-reconciles when a large commit file list may be truncated", async () => {
+      const db = freshDb();
+      db.prepare(
+        "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run("foo-1", "owner/w", "foo.md", "Stale", Date.now());
+      db.prepare(
+        "INSERT INTO notes_fts (workspace_slug, cosheaf_id, path, title, body) VALUES (?, ?, ?, ?, ?)",
+      ).run("owner/w", "foo-1", "foo.md", "Stale", "stale body");
+      const fj = mockedForgejo({ "foo.md": "---\nid: foo-1\n---\n# Fresh\n\nfresh body\n" });
+      const app = appFor(db, fj);
+      const body = JSON.stringify({
+        ref: "refs/heads/main",
+        repository: { full_name: "owner/w" },
+        commits: [{ modified: Array.from({ length: 300 }, (_value, index) => `large-${index}.txt`) }],
+      });
+
+      const res = await app.request("/api/v1/webhooks/forgejo", signedPush(body, "large-file-list-1"));
+
+      expect(res.status).toBe(200);
+      expect(db.prepare("SELECT title FROM doc_map WHERE workspace_slug = 'owner/w'").get()).toEqual({
+        title: "Fresh",
+      });
+      expect(db.prepare("SELECT body FROM notes_fts WHERE workspace_slug = 'owner/w'").get()).toEqual({
+        body: "# Fresh\n\nfresh body\n",
+      });
+    });
+
     it("resolves backlinks between markdown files added in the same push", async () => {
       const db = freshDb();
       const fj = {
