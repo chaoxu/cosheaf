@@ -316,6 +316,7 @@ function WebEditor({
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLElement | null>(null);
   const pathInputRef = useRef<HTMLInputElement | null>(null);
   const assetInputRef = useRef<HTMLInputElement | null>(null);
@@ -341,6 +342,25 @@ function WebEditor({
   useEffect(() => {
     callbacks.onDirtyChange?.(uncommitted || pathDirty);
   }, [callbacks, pathDirty, uncommitted]);
+
+  // Reveal the editor's overlay scrollbar only while actively scrolling, then let
+  // it fade out (the .is-scrolling rule in cosheaf-web.css). A capturing listener
+  // catches scroll from CodeMirror's inner .cm-scroller, since scroll doesn't bubble.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    let timer: number | undefined;
+    const onScroll = () => {
+      shell.classList.add("is-scrolling");
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => shell.classList.remove("is-scrolling"), 700);
+    };
+    shell.addEventListener("scroll", onScroll, true);
+    return () => {
+      shell.removeEventListener("scroll", onScroll, true);
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   useImperativeHandle(handleRef, () => ({
     preview: () => ({
@@ -951,7 +971,7 @@ function WebEditor({
   }, [outlineMathMacros, railModel]);
 
   return (
-    <div className={readerClass}>
+    <div className={readerClass} ref={shellRef}>
       {pendingDraft ? (
         <div className="editor-draft-banner" data-testid="editor-draft-banner" role="status">
           <span>Unsaved local draft from {new Date(pendingDraft.savedAt).toLocaleString()}.</span>
