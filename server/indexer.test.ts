@@ -30,6 +30,78 @@ describe("indexPage", () => {
     expect(parsed.frontmatter.id).toBe(r.cosheafId);
   });
 
+  it("injects missing ids into existing frontmatter without reserializing it", () => {
+    const db = freshDb();
+    const source = [
+      "---",
+      "# keep this comment",
+      "title: Foo",
+      "target: \"\"",
+      "status: null",
+      "---",
+      "# Foo",
+      "",
+    ].join("\n");
+
+    const r = indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "foo.md",
+      bodyText: source,
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    expect(r.rewrittenContent).toBe([
+      "---",
+      `id: ${r.cosheafId}`,
+      "# keep this comment",
+      "title: Foo",
+      "target: \"\"",
+      "status: null",
+      "---",
+      "# Foo",
+      "",
+    ].join("\n"));
+  });
+
+  it("rewrites duplicate frontmatter ids without compacting neighboring metadata", () => {
+    const db = freshDb();
+    indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "a.md",
+      bodyText: "---\nid: same\n---\n# A\n",
+      formatId: COFLAT_FORMAT_ID,
+    });
+    const source = [
+      "---",
+      "# keep this comment",
+      "id: same",
+      "target: \"\"",
+      "status: null",
+      "---",
+      "# B",
+      "",
+    ].join("\n");
+
+    const r = indexPage(db, {
+      workspaceSlug: "owner/w",
+      filePath: "b.md",
+      bodyText: source,
+      formatId: COFLAT_FORMAT_ID,
+    });
+
+    expect(r.cosheafId).not.toBe("same");
+    expect(r.rewrittenContent).toBe([
+      "---",
+      "# keep this comment",
+      `id: ${r.cosheafId}`,
+      "target: \"\"",
+      "status: null",
+      "---",
+      "# B",
+      "",
+    ].join("\n"));
+  });
+
   it("preserves an existing frontmatter id across re-indexing", () => {
     const db = freshDb();
     const first = indexPage(db, {
