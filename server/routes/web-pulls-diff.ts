@@ -10,10 +10,10 @@ import type { LineComment } from "../../shared/comments.js";
 import type { PrMeta } from "../../shared/review.js";
 import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
-import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
 import { sourceInlineDiff, sourceInlineDiffRanges, type SourceInlineDiffSegment } from "../source-inline-diff.js";
 import { sourceSplitRows, type SourceSplitCell, type SourceSplitRow } from "../source-split-rows.js";
+import { onWorkspaceNotFound } from "../workspace-backend.js";
 import { displayLogin, timeEl, repoHref, type WebCtx } from "./web-context.js";
 import { rawFileHref } from "./web-file-links.js";
 import { html, joinHtml, raw, type Html } from "./web-html.js";
@@ -86,7 +86,7 @@ export function parseDiffShape(value: string | undefined, mode: DiffMode): DiffS
 }
 
 export async function prFileVersions(ctx: WebCtx, pull: PrMeta, file: { path: string; previous_path?: string }): Promise<PrFileVersions> {
-  const read = (ref: string, p: string) => ctx.backend.getRawFile(ctx.owner, ctx.repo, ref, p).catch(onForgejo404(""));
+  const read = (ref: string, p: string) => ctx.backend.getRawFile(ctx.owner, ctx.repo, ref, p).catch(onWorkspaceNotFound(""));
   const baseSide = prSideRefAndPath(pull, file, "base");
   const headSide = prSideRefAndPath(pull, file, "head");
   const [base, head] = await Promise.all([read(baseSide.ref, baseSide.path), read(headSide.ref, headSide.path)]);
