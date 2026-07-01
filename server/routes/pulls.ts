@@ -31,6 +31,7 @@ import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { RepoCollaborator } from "../../shared/repo.js";
 import type { MergeFailure, MergeFailureReason, PrCommit, PrFileStatus, PrMeta, PrState } from "../../shared/review.js";
+import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { validBranchName } from "../branch-path.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
@@ -940,7 +941,7 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   // Author self-review gate lives here (not at pending-review creation) so an
   // author can still submit a plain COMMENT review on their own PR; only an
   // approve/request_changes verdict is forbidden.
-  if (event !== "comment") {
+  if (reviewRequiresNonAuthor(event)) {
     const pull = await collab.getPull(owner, repo, n);
     if (pull?.user?.login === c.get("user").username)
       return c.json(...forbidden("cannot approve or request changes on your own pull request"));

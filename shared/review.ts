@@ -37,6 +37,15 @@ export interface PrCommits {
 // distinguished by the `merged: true` flag on a closed PR.
 export type PrState = "open" | "closed";
 
+// The author self-review gate: a PR author may leave a plain COMMENT review on
+// their own PR, but not approve / request-changes (that would game the
+// required-approvals threshold). This owns the "which review events are exempt"
+// decision for both the typed PR API and the server-rendered review route, which
+// spell the event differently ("comment" vs "COMMENT"), so it normalizes case.
+export function reviewRequiresNonAuthor(event: string): boolean {
+  return event.toUpperCase() !== "COMMENT";
+}
+
 export interface PrMeta {
   number: number;
   title: string;

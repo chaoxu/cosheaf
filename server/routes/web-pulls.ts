@@ -1,5 +1,6 @@
 import type { Context, Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
+import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
@@ -385,7 +386,7 @@ web.post("/:owner/:repo/pulls/:number/reviews", webRoute(async (c, ctx) => {
   const body = stringField(form.body) ?? "";
   if (event !== "APPROVED" && event !== "REQUEST_CHANGES" && event !== "COMMENT")
     return badRequestPage(ctx.user, "Review event is required.");
-  if (event !== "COMMENT" && pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
+  if (reviewRequiresNonAuthor(event) && pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
   await ctx.collab.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
