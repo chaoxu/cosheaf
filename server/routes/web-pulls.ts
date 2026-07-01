@@ -3,7 +3,8 @@ import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
-import { ForgejoError, type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
+import { type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
+import { errorStatus } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { openLocalPull } from "../local/local-pulls.js";
@@ -203,9 +204,13 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
     c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "opened" });
     return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
   } catch (err) {
-    if (!(err instanceof ForgejoError) || !(err.status === 409 || err.status === 422)) throw err;
+    // Status-based (not instanceof ForgejoError) so it also catches the local
+    // Workbench's RemoteCosheafError — otherwise duplicate-PR recovery is dead
+    // in local mode and a 409/422 rethrows to a generic error page.
+    const status = errorStatus(err);
+    if (status !== 409 && status !== 422) throw err;
     // Never echo Forgejo's body into the form — it leaks the internal forge URL.
-    console.error(`[${c.get("requestId") ?? ""}] create PR ${ctx.owner}/${ctx.repo} ${head}->${base} failed (${err.status})`);
+    console.error(`[${c.get("requestId") ?? ""}] create PR ${ctx.owner}/${ctx.repo} ${head}->${base} failed (${status})`);
     // A 409 usually means a PR already exists for this head->base (open OR closed-
     // unmerged); navigate to it instead of erroring (#181). Other 409/422 get a
     // clean canned message.
@@ -217,7 +222,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
         ...values,
         error: "Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid.",
       })),
-      err.status,
+      status,
     );
   }
 }));
@@ -481,10 +486,14 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   try {
     await mergePullWithRetry(() => ctx.collab.mergePull(ctx.owner, ctx.repo, pull.number, { Do: "squash", force }));
   } catch (err) {
-    if (!(err instanceof ForgejoError)) throw err;
-    // Never surface Forgejo's raw body — it carries the internal backend URL.
-    console.error(`[${c.get("requestId") ?? ""}] web merge ${ctx.owner}/${ctx.repo}#${pull.number} failed (${err.status})`);
-    const blocked = err.status === 405 || err.status === 409;
+    // Status-based (not instanceof ForgejoError) so it also catches the local
+    // Workbench's RemoteCosheafError — otherwise the blocked-merge toast UX
+    // (needs approvals / conflict / try-again) is dead in local mode.
+    const status = errorStatus(err);
+    if (status == null) throw err;
+    // Never surface the raw error body — it carries the internal backend URL.
+    console.error(`[${c.get("requestId") ?? ""}] web merge ${ctx.owner}/${ctx.repo}#${pull.number} failed (${status})`);
+    const blocked = status === 405 || status === 409;
     // Re-read the PR — the pre-merge snapshot's mergeable can be stale/null. A real
     // content conflict (mergeable === false) isn't an approvals problem and "Merge
     // anyway" won't fix it; a still-null mergeable is transient, not approvals (#7).
