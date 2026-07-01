@@ -37,6 +37,13 @@ export interface PrCommits {
 // distinguished by the `merged: true` flag on a closed PR.
 export type PrState = "open" | "closed";
 
+// Forgejo review states / submit events. One owner for the vocabulary the forge
+// client, forge types, and the Origin collaboration client all spell out. A
+// submitted review can never be PENDING (that's the unsubmitted draft state).
+export const REVIEW_STATES = ["APPROVED", "REQUEST_CHANGES", "COMMENT", "PENDING"] as const;
+export type ReviewState = (typeof REVIEW_STATES)[number];
+export type ReviewSubmitEvent = Exclude<ReviewState, "PENDING">;
+
 // The author self-review gate: a PR author may leave a plain COMMENT review on
 // their own PR, but not approve / request-changes (that would game the
 // required-approvals threshold). This owns the "which review events are exempt"

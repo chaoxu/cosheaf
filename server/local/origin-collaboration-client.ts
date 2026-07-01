@@ -31,7 +31,7 @@ import type {
   NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
-import type { PrCommit, PrFile, PrMeta } from "../../shared/review.js";
+import type { PrCommit, PrFile, PrMeta, ReviewState, ReviewSubmitEvent } from "../../shared/review.js";
 import type { Role } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import {
@@ -545,7 +545,7 @@ export class OriginCollaborationClient {
     repo: string,
     index: number,
     opts: {
-      event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
+      event: ReviewState;
       body: string;
       comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
       commit_id?: string;
@@ -593,7 +593,7 @@ export class OriginCollaborationClient {
     repo: string,
     index: number,
     reviewId: number,
-    opts: { event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT"; body: string },
+    opts: { event: ReviewSubmitEvent; body: string },
   ): Promise<ReviewShape> {
     const event = opts.event === "APPROVED" ? "approve" : opts.event === "REQUEST_CHANGES" ? "request_changes" : "comment";
     await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {

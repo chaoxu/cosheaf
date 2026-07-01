@@ -3,6 +3,8 @@
 // type defs. Imported by forgejo.ts; route code generally goes through
 // shared/ for response shapes, not these directly.
 
+import type { ReviewState } from "../shared/review.js";
+
 // A bare user reference (id + login) as Forgejo attaches to assignees, activity
 // actors, and timeline assign/resolve events — distinct from the full ForgejoUser
 // (which also carries avatar_url/email for rendering).
@@ -285,7 +287,7 @@ export interface ForgejoPullReviewComment {
 export interface ForgejoReview {
   id: number;
   body: string;
-  state: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING" | string;
+  state: ReviewState | string;
   user: ForgejoUser | null;
   submitted_at?: string;
 }

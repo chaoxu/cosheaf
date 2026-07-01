@@ -31,6 +31,7 @@ import type {
   ForgejoUser,
 } from "./forgejo-types.js";
 import type { Role } from "../shared/roles.js";
+import type { ReviewState, ReviewSubmitEvent } from "../shared/review.js";
 
 export interface ForgejoConfig {
   baseUrl: string;
@@ -741,7 +742,7 @@ export class Forgejo {
   }
 
   async createReview(owner: string, repo: string, index: number, opts: {
-    event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
+    event: ReviewState;
     body: string;
     comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
     commit_id?: string;
@@ -756,7 +757,7 @@ export class Forgejo {
   }
 
   async submitPullReview(owner: string, repo: string, index: number, reviewId: number, opts: {
-    event: "APPROVED" | "REQUEST_CHANGES" | "COMMENT";
+    event: ReviewSubmitEvent;
     body: string;
   }): Promise<ForgejoReview> {
     return this.req<ForgejoReview>(
