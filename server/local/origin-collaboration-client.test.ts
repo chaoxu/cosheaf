@@ -211,20 +211,16 @@ describe("localMemberSetter", () => {
   });
 });
 
-describe("unimplemented stubs", () => {
-  // Regression: a not-yet-backed method (e.g. getRepoPermission) must reject
-  // ASYNCHRONOUSLY, never throw synchronously. Call sites wrap optional methods
-  // in `.catch(() => [])` (the PR page's listPullReviewers); a sync throw fires
-  // before the promise exists, so `.catch` can't attach and the page 500s.
-  it("reject asynchronously so .catch can degrade", async () => {
+describe("getRepoPermission", () => {
+  // The connected Origin client now implements the full CollaborationClient
+  // surface (no unimplemented-stub Proxy). The core exposes no per-user
+  // permission endpoint, so getRepoPermission resolves to "none" — which the sole
+  // caller (the PR reviewer-permission column) maps to an empty cell — rather than
+  // rejecting.
+  it('resolves to "none" instead of rejecting', async () => {
     const client = localCollaborationClient({
       remote: { url: "https://core.example", token: "t" },
     } as unknown as WorkspaceEntry);
-    const result = (client.getRepoPermission as (...a: unknown[]) => unknown)("me", "notes", "vera");
-    expect(result).toBeInstanceOf(Promise);
-    await expect(result as Promise<unknown>).rejects.toThrow(/not implemented/);
-    await expect(
-      (client.getRepoPermission as (...a: unknown[]) => Promise<unknown>)("me", "notes", "vera").catch(() => "ok"),
-    ).resolves.toBe("ok");
+    await expect(client.getRepoPermission("me", "notes", "vera")).resolves.toBe("none");
   });
 });

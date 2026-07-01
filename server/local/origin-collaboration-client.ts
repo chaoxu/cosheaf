@@ -119,9 +119,9 @@ type IssueListOpts = {
 
 // The connected-core collaboration source. Bound to {baseUrl, token}; every read
 // hits the core's typed Cosheaf API with `Authorization: Bearer <token>` and
-// never a forge path. Only the issue-read surface (#263) is implemented; the
-// remaining CollaborationClient methods are supplied as throwing stubs by
-// `withUnimplementedStubs` until their owning agents land them.
+// never a forge path. It implements the full CollaborationClient surface, so it
+// satisfies the seam directly (the type checker verifies this — there is no
+// stub Proxy or cast).
 export class OriginCollaborationClient {
   private readonly base: string;
   private readonly fetchFn: FetchLike;
@@ -820,41 +820,22 @@ export class OriginCollaborationClient {
   async markRepoNotificationsRead(owner: string, repo: string): Promise<void> {
     await this.post(this.repoPath(owner, repo, "/notifications/read-all"), {});
   }
-}
 
-// Wrap a read-capable origin client so any not-yet-implemented
-// CollaborationClient method throws clearly instead of being `undefined`. The
-// issue/pull/review/notification/repo + settings surfaces are all backed by
-// typed core endpoints now; the notification mutation surface
-// (`getNotificationThread`/`markNotificationRead`/`markRepoNotificationsRead`)
-// and `createReview` with inline comments are the latest to land. Implemented
-// methods delegate (bound to the real instance so their internal `this.get`
-// works); anything else is a loud stub. Still stubbed deliberately:
-// `getRepoPermission` has no typed core endpoint — its only `ctx.collab` caller
-// (the PR reviewer-permission column) is `.catch(() => null)`-degraded, so the
-// async-rejecting stub returns null rather than 500ing. The cast is the "cast
-// unimplemented methods" the seam allows.
-function withUnimplementedStubs(client: OriginCollaborationClient): CollaborationClient {
-  return new Proxy(client, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") return value.bind(target);
-      // Reject ASYNCHRONOUSLY, not a synchronous throw: every CollaborationClient
-      // method is async, and call sites wrap optional ones in `.catch(() => [])`
-      // (e.g. listPullReviewers on the PR page). A sync throw fires before the
-      // promise exists, so `.catch` never attaches and the page 500s; a rejected
-      // promise lets those guards degrade gracefully.
-      return () =>
-        Promise.reject(new Error(`OriginCollaborationClient.${String(prop)} is not implemented yet`));
-    },
-  }) as unknown as CollaborationClient;
+  // The core exposes no per-user permission endpoint. The sole caller (the PR
+  // reviewer-permission column) treats "none" as "unknown" and renders empty, so
+  // returning "none" fully implements the seam without a stub-Proxy layer.
+  async getRepoPermission(_owner: string, _repo: string, _user: string): Promise<Role | "none"> {
+    return "none";
+  }
 }
 
 // The collaboration source for a local workspace: the connected core via the
-// Origin API, or the unconnected sentinel.
+// Origin API, or the unconnected sentinel. OriginCollaborationClient implements
+// the full CollaborationClient surface, so it satisfies the seam directly — no
+// stub Proxy.
 export function localCollaborationClient(entry: WorkspaceEntry): CollaborationClient {
   if (entry.remote) {
-    return withUnimplementedStubs(new OriginCollaborationClient(entry.remote.url, entry.remote.token));
+    return new OriginCollaborationClient(entry.remote.url, entry.remote.token);
   }
   return unconnectedClient();
 }
