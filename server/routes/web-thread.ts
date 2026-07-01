@@ -494,6 +494,35 @@ export function threadListRow(opts: {
     </div>`;
 }
 
+// The shared new-issue / new-PR compose page shell: title + Cancel, an optional
+// error banner, the compose <form>, and the Coflat comment-editor assets. Callers
+// supply the heading, cancel/action hrefs, form test id, and the inner fields.
+export function composePage(opts: {
+  ctx: WebCtx;
+  heading: string;
+  cancelHref: string;
+  action: string;
+  testId: string;
+  error?: string;
+  fields: Html;
+}): Html {
+  return html`
+    <div class="form-page">
+      <div class="page-title compact">
+        <div>
+          <h1>${opts.heading}</h1>
+        </div>
+        <a class="button subtle" href="${opts.cancelHref}">Cancel</a>
+      </div>
+      ${opts.error ? html`<div class="form-error" role="alert">${opts.error}</div>` : ""}
+      <form class="compose-form" method="post" action="${opts.action}" data-testid="${opts.testId}">
+        ${opts.fields}
+      </form>
+      ${coflatCommentAssets(opts.ctx.coflat)}
+    </div>
+  `;
+}
+
 // Participants bar at the top of an issue/PR thread: who has taken part, the
 // reply count, last activity, and a jump-to-latest anchor (targets
 // #thread-bottom by the composer). Generic over issue/PR comment shapes so both

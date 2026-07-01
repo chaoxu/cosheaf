@@ -30,6 +30,7 @@ import { filterPanel, labelChip, repoPageShell, selected, sortField, stateToggle
 import { coflatCommentAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
+  composePage,
   dependenciesPanel,
   issueEditPage,
   labelSelectionPatch,
@@ -374,17 +375,14 @@ function issueCreatePage(
   values: { title?: string; body?: string; labelIds?: number[]; error?: string } = {},
 ): Html {
   const selectedIds = new Set(values.labelIds ?? []);
-  return html`
-    <div class="form-page">
-      <div class="page-title compact">
-        <div>
-          <h1>New issue</h1>
-        </div>
-        <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/issues")}">Cancel</a>
-      </div>
-      ${values.error ? html`<div class="form-error" role="alert">${values.error}</div>` : ""}
-      <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/issues/new")}" data-testid="issue-create-form">
-        <label>Title
+  return composePage({
+    ctx,
+    heading: "New issue",
+    cancelHref: repoHref(ctx.owner, ctx.repo, "/issues"),
+    action: repoHref(ctx.owner, ctx.repo, "/issues/new"),
+    testId: "issue-create-form",
+    error: values.error,
+    fields: html`<label>Title
           <input name="title" value="${values.title ?? ""}" required autofocus data-testid="issue-create-title">
         </label>
         <label>Description
@@ -393,11 +391,8 @@ function issueCreatePage(
         ${labelCheckboxes(labels, selectedIds)}
         <div class="form-actions">
           <button class="button primary" type="submit" data-testid="issue-create-submit">Create issue</button>
-        </div>
-      </form>
-      ${coflatCommentAssets(ctx.coflat)}
-    </div>
-  `;
+        </div>`,
+  });
 }
 
 function labelCheckboxes(labels: readonly ForgejoLabel[], selectedIds: ReadonlySet<number>): Html {

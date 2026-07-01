@@ -52,6 +52,7 @@ import {
 } from "./web-pulls-diff.js";
 import { coflatCommentAssets } from "./web-shell.js";
 import {
+  composePage,
   isVisibleReview,
   labelSelectionPatch,
   labelsPanel,
@@ -697,17 +698,14 @@ function pullCreatePage(
   if (local && (!head || head === base)) {
     return pullCreateLocalNoBranch(ctx, head || base);
   }
-  return html`
-    <div class="form-page">
-      <div class="page-title compact">
-        <div>
-          <h1>New PR</h1>
-        </div>
-        <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/pulls")}">Cancel</a>
-      </div>
-      ${values.error ? html`<div class="form-error" role="alert">${values.error}</div>` : ""}
-      <form class="compose-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/pulls/new")}" data-testid="pull-create-form">
-        <div class="branch-compare">
+  return composePage({
+    ctx,
+    heading: "New PR",
+    cancelHref: repoHref(ctx.owner, ctx.repo, "/pulls"),
+    action: repoHref(ctx.owner, ctx.repo, "/pulls/new"),
+    testId: "pull-create-form",
+    error: values.error,
+    fields: html`<div class="branch-compare">
           <label>Base
             <select name="base" required data-testid="pull-create-base" data-option-icon="branch">
               ${branchOptions(branches, base)}
@@ -727,11 +725,8 @@ function pullCreatePage(
         </label>
         <div class="form-actions">
           <button class="button primary" type="submit" data-testid="pull-create-submit">Create PR</button>
-        </div>
-      </form>
-      ${coflatCommentAssets(ctx.coflat)}
-    </div>
-  `;
+        </div>`,
+  });
 }
 
 // Local Workbench compare page when the working tree is on the base branch:
