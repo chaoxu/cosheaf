@@ -167,7 +167,7 @@ describe("web pull request routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
-        forge.put("/api/v1/repos/owner/w/issues/7/labels", () => {
+        forge.put("/api/v1/repos/owner/w/pulls/7/labels", () => {
           labelsMutated = true;
           return Response.json([]);
         });
@@ -200,9 +200,9 @@ describe("web pull request routes", () => {
             { id: 2, name: "docs", color: "0055ee" },
           ]),
         );
-        forge.put("/api/v1/repos/owner/w/issues/7/labels", async (c) => {
+        forge.patch("/api/v1/repos/owner/w/pulls/7", async (c) => {
           labelBody = await c.req.json();
-          return Response.json([]);
+          return Response.json({ ...forgejoPull(), labels: [{ id: 1, name: "bug", color: "ee0000" }, { id: 2, name: "docs", color: "0055ee" }] });
         });
       }),
     );

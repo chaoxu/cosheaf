@@ -1,6 +1,7 @@
 import type { BranchRow } from "../../shared/branches.js";
 import type { Label, DependencyRow, IssueComment, IssueDetail, IssueRow, Milestone, NotificationKind, NotificationRow, TimelineEvent, UserRef } from "../../shared/issues.js";
-import type { PrCommit, PrFileStatus, PrMeta, ReviewDto } from "../../shared/review.js";
+import type { LineComment } from "../../shared/comments.js";
+import type { PrCommit, PrFile, PrFileStatus, PrMeta, ReviewDto } from "../../shared/review.js";
 import type {
   ForgejoBranch,
   ForgejoCommit,
@@ -11,6 +12,7 @@ import type {
   ForgejoNotificationThread,
   ForgejoPull,
   ForgejoPullFile,
+  ForgejoPullReviewComment,
   ForgejoReview,
   ForgejoTimelineEvent,
   ForgejoUser,
@@ -208,7 +210,9 @@ export function forgeReviewToDto(r: ForgejoReview): ReviewDto {
           ? "request_changes"
           : r.state === "PENDING"
             ? "pending"
-            : "comment",
+            : r.state === "DISMISSED"
+              ? "dismissed"
+              : "comment",
     comment: r.body || null,
     created_at: toEpochMs(r.submitted_at),
   };
@@ -216,6 +220,35 @@ export function forgeReviewToDto(r: ForgejoReview): ReviewDto {
 
 export function forgePullFileToStatus(file: ForgejoPullFile): PrFileStatus {
   return normalizePrFileStatus(file.status);
+}
+
+export function forgePullFileToDto(file: ForgejoPullFile, patch = ""): PrFile {
+  return {
+    path: file.filename,
+    previous_path: file.previous_filename,
+    status: normalizePrFileStatus(file.status),
+    additions: file.additions,
+    deletions: file.deletions,
+    patch,
+  };
+}
+
+export function forgePullCommentToDto(
+  cm: ForgejoPullReviewComment,
+  resolved: Pick<LineComment, "line" | "side" | "outdated">,
+): LineComment {
+  return {
+    id: cm.id,
+    review_id: cm.pull_request_review_id,
+    path: cm.path,
+    line: resolved.line,
+    side: resolved.side,
+    body: cm.body,
+    author_username: userLogin(cm.user),
+    created_at: toEpochMs(cm.created_at),
+    updated_at: toEpochMs(cm.updated_at),
+    outdated: resolved.outdated,
+  };
 }
 
 // Parse "/api/v1/repos/owner/repo/issues/42" or ".../pulls/42" -> 42.

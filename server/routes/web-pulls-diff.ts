@@ -4,13 +4,12 @@
 // file stays focused; the handlers import the small exported surface here.
 
 import { changedLines, changeStops, commentableLines, patchRows } from "../diff-lines.js";
-import { resolveLineComment, type Side } from "../diff-position.js";
+import type { Side } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
-import type { ForgejoPull } from "../forgejo.js";
-import type { ForgejoPullReviewComment } from "../forgejo-types.js";
+import type { LineComment } from "../../shared/comments.js";
+import type { PrMeta } from "../../shared/review.js";
 import type { AssetPreviewPaths } from "../../shared/asset-previews.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
-import { toEpochMs } from "../forgejo-types.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import { prSideRefAndPath } from "../pr-side.js";
 import { sourceInlineDiff, sourceInlineDiffRanges, type SourceInlineDiffSegment } from "../source-inline-diff.js";
@@ -86,8 +85,8 @@ export function parseDiffShape(value: string | undefined, mode: DiffMode): DiffS
   return mode === "rich" && shape === "unified" ? "after" : shape;
 }
 
-export async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, file: { path: string; previous_path?: string }): Promise<PrFileVersions> {
-  const read = (ref: string, p: string) => ctx.fj.getRawFile(ctx.owner, ctx.repo, ref, p).catch(onForgejo404(""));
+export async function prFileVersions(ctx: WebCtx, pull: PrMeta, file: { path: string; previous_path?: string }): Promise<PrFileVersions> {
+  const read = (ref: string, p: string) => ctx.backend.getRawFile(ctx.owner, ctx.repo, ref, p).catch(onForgejo404(""));
   const baseSide = prSideRefAndPath(pull, file, "base");
   const headSide = prSideRefAndPath(pull, file, "head");
   const [base, head] = await Promise.all([read(baseSide.ref, baseSide.path), read(headSide.ref, headSide.path)]);
@@ -96,7 +95,7 @@ export async function prFileVersions(ctx: WebCtx, pull: ForgejoPull, file: { pat
 
 export async function renderPrFileView(
   ctx: WebCtx,
-  pull: ForgejoPull,
+  pull: PrMeta,
   file: PrFileView,
   mode: DiffMode,
   shape: DiffShape,
@@ -163,7 +162,7 @@ export async function renderPrFileView(
   return html`<div data-testid="diff-pane-after" class="rich-after cosheaf-document-reader cf-theme-scope">${head}</div>`;
 }
 
-function renderPdfPrFileView(ctx: WebCtx, pull: ForgejoPull, file: PrFileView, shape: DiffShape): Html {
+function renderPdfPrFileView(ctx: WebCtx, pull: PrMeta, file: PrFileView, shape: DiffShape): Html {
   if (shape === "split") {
     const base = file.status === "added" ? diffSideEmptyNotice(file.status, "base") : prPdfObject(ctx, pull, file, "base");
     const head = file.status === "deleted" ? diffSideEmptyNotice(file.status, "head") : prPdfObject(ctx, pull, file, "head");
@@ -176,7 +175,7 @@ function renderPdfPrFileView(ctx: WebCtx, pull: ForgejoPull, file: PrFileView, s
   return html`<div data-testid="diff-pane-after" class="pr-pdf-after">${head}</div>`;
 }
 
-function prPdfObject(ctx: WebCtx, pull: ForgejoPull, file: PrFileView, side: Side): Html {
+function prPdfObject(ctx: WebCtx, pull: PrMeta, file: PrFileView, side: Side): Html {
   const { ref, path } = prSideRefAndPath(pull, file, side);
   const href = rawFileHref(ctx.owner, ctx.repo, ref, path);
   return html`<article class="file-preview file-preview-embed pr-file-pdf-preview">
@@ -513,7 +512,7 @@ interface LineCommentFormOptions {
 
 function commentFormOptions(
   ctx: WebCtx,
-  pull: ForgejoPull,
+  pull: PrMeta,
   filePath: string,
   mode: DiffMode,
   shape: DiffShape,
@@ -571,21 +570,20 @@ function lineCommentBody(comment: WebLineComment, includeTestId = false): Html {
 export async function mapLineComments(
   ctx: WebCtx,
   file: PrFileView,
-  comments: readonly ForgejoPullReviewComment[],
+  comments: readonly LineComment[],
 ): Promise<WebLineComment[]> {
   const mine = comments.filter((comment) => comment.path === file.path);
   return Promise.all(
     mine.map(async (comment) => {
-      const { line, side, outdated } = resolveLineComment(comment, file.status);
       return {
         id: comment.id,
-        line,
-        side,
+        line: comment.line,
+        side: comment.side,
         body: comment.body,
         bodyHtml: await renderMarkdownSurface(ctx, comment.body, { surface: "thread" }),
-        author: displayLogin(comment.user?.login),
-        createdAt: toEpochMs(comment.created_at),
-        outdated,
+        author: displayLogin(comment.author_username),
+        createdAt: comment.created_at,
+        outdated: comment.outdated,
       };
     }),
   );

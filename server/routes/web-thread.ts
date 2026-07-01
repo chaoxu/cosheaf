@@ -1,15 +1,12 @@
 import { canWrite } from "../../shared/roles.js";
+import type { LineComment } from "../../shared/comments.js";
 import type { DependencyRow, IssueComment, IssueDetail, Label, TimelineEvent, UserRef } from "../../shared/issues.js";
-import type { ForgejoPull } from "../forgejo.js";
+import type { PrCommit, PrMeta, ReviewDto } from "../../shared/review.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type {
-  ForgejoCommit,
   ForgejoLabel,
-  ForgejoPullReviewComment,
-  ForgejoReview,
   ForgejoTimelineEvent,
 } from "../forgejo-types.js";
-import { toEpochMs } from "../forgejo-types.js";
 import { type AvatarUser, avatarLinkForUser } from "./avatar.js";
 import { chevronIcon, editIcon } from "./icons.js";
 import { validateLabelSelection } from "./label-utils.js";
@@ -65,7 +62,7 @@ export function issueEditPage(
   });
 }
 
-export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
+export function pullStateForm(ctx: WebCtx, pull: PrMeta): Html {
   if (!canWrite(ctx.ws.role) || pull.merged) return emptyHtml;
   const nextState = pull.state === "open" ? "closed" : "open";
   const label = pull.state === "open" ? "Close PR" : "Reopen PR";
@@ -342,7 +339,7 @@ export function milestoneFormValue(raw: unknown): { ok: true; milestone?: number
 
 export function pullEditPage(
   ctx: WebCtx,
-  pull: ForgejoPull,
+  pull: PrMeta,
   allLabels: readonly ForgejoLabel[],
   milestones: readonly WebMilestone[],
 ): Html {
@@ -361,17 +358,17 @@ export function pullEditPage(
   });
 }
 
-export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): Html {
+export function reviewRequestPanel(ctx: WebCtx, pull: PrMeta, availableReviewers: readonly { login: string }[]): Html {
   const requested = pull.requested_reviewers ?? [];
-  const requestedTeams = pull.requested_reviewers_teams ?? [];
-  const requestedLogins = new Set(requested.map((reviewer) => reviewer.login));
+  const requestedTeams = pull.requested_reviewer_teams ?? [];
+  const requestedLogins = new Set(requested);
   const available = availableReviewers.filter((reviewer) => !requestedLogins.has(reviewer.login));
   const requestedHtml =
     requested.length === 0 && requestedTeams.length === 0
       ? html`<div class="empty">No requested reviewers.</div>`
       : html`<div class="label-chips">
-          ${requested.map((reviewer) => reviewerRequestChip(ctx, pull, reviewer.login))}
-          ${requestedTeams.map((team) => html`<span class="meta-pill">${team.username ?? team.name}</span>`)}
+          ${requested.map((reviewer) => reviewerRequestChip(ctx, pull, reviewer))}
+          ${requestedTeams.map((team) => html`<span class="meta-pill">${team}</span>`)}
         </div>`;
   const requestForm =
     !canWrite(ctx.ws.role) || pull.state === "closed"
@@ -391,11 +388,11 @@ export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableRevi
   </section>`;
 }
 
-export function reviewersPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): Html {
+export function reviewersPanel(ctx: WebCtx, pull: PrMeta, availableReviewers: readonly { login: string }[]): Html {
   return reviewRequestPanel(ctx, pull, availableReviewers);
 }
 
-function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): Html {
+function reviewerRequestChip(ctx: WebCtx, pull: PrMeta, reviewer: string): Html {
   const remove =
     !canWrite(ctx.ws.role) || pull.state === "closed"
       ? ""
@@ -410,9 +407,9 @@ type WebTimelineItem =
   | { kind: "comment"; ts: number; number: number; comment: IssueComment }
   | { kind: "pull-comment"; ts: number; number: number; comment: IssueComment }
   | { kind: "event"; ts: number; event: ForgejoTimelineEvent | TimelineEvent }
-  | { kind: "review"; ts: number; review: ForgejoReview }
-  | { kind: "line-comment"; ts: number; number: number; comment: ForgejoPullReviewComment }
-  | { kind: "commit"; ts: number; commit: ForgejoCommit };
+  | { kind: "review"; ts: number; review: ReviewDto }
+  | { kind: "line-comment"; ts: number; number: number; comment: LineComment }
+  | { kind: "commit"; ts: number; commit: PrCommit };
 
 export async function renderIssueTimeline(
   ctx: WebCtx,
@@ -562,18 +559,18 @@ export function threadParticipantsBar(
 // Which reviews are worth surfacing: not a PENDING (unsubmitted) review, and not
 // an empty bare-COMMENT review. The timeline and the participants bar/count MUST
 // agree on this, so they share the one predicate (#14).
-export function isVisibleReview(review: Pick<ForgejoReview, "state" | "body">): boolean {
-  return review.state !== "PENDING" && (review.state !== "COMMENT" || Boolean(review.body?.trim()));
+export function isVisibleReview(review: Pick<ReviewDto, "decision" | "comment">): boolean {
+  return review.decision !== "pending" && review.decision !== "dismissed" && (review.decision !== "comment" || Boolean(review.comment?.trim()));
 }
 
 export async function renderPullTimeline(
   ctx: WebCtx,
   number: number,
   issueComments: readonly IssueComment[],
-  reviews: readonly ForgejoReview[],
-  comments: readonly ForgejoPullReviewComment[],
+  reviews: readonly ReviewDto[],
+  comments: readonly LineComment[],
   timeline: readonly (ForgejoTimelineEvent | TimelineEvent)[],
-  commits: readonly ForgejoCommit[],
+  commits: readonly PrCommit[],
 ): Promise<Html> {
   const items: WebTimelineItem[] = [
     ...timeline
@@ -587,10 +584,10 @@ export async function renderPullTimeline(
     })),
     ...reviews
       .filter(isVisibleReview)
-      .map((review) => ({ kind: "review" as const, ts: toEpochMs(review.submitted_at), review })),
+      .map((review) => ({ kind: "review" as const, ts: review.created_at, review })),
     ...comments.map((comment) => ({
       kind: "line-comment" as const,
-      ts: toEpochMs(comment.created_at),
+      ts: comment.created_at,
       number,
       comment,
     })),
@@ -602,7 +599,7 @@ export async function renderPullTimeline(
   const rendered: Array<Html | Promise<Html>> = [];
   for (let i = 0; i < items.length; ) {
     if (items[i].kind === "commit") {
-      const run: ForgejoCommit[] = [];
+      const run: PrCommit[] = [];
       while (i < items.length && items[i].kind === "commit") {
         run.push((items[i] as Extract<WebTimelineItem, { kind: "commit" }>).commit);
         i++;
@@ -648,8 +645,8 @@ function issueCommentActions(ctx: WebCtx, number: number, comment: IssueComment)
   });
 }
 
-function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullReviewComment): Html {
-  if (!canWrite(ctx.ws.role) && comment.user?.login !== ctx.user) return emptyHtml;
+function pullCommentActions(ctx: WebCtx, number: number, comment: LineComment): Html {
+  if (!canWrite(ctx.ws.role) && comment.author_username !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "pull-comment-actions",
@@ -657,7 +654,7 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
     editAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/edit`),
     deleteAction: repoHref(ctx.owner, ctx.repo, `/pulls/${number}/comments/${comment.id}/delete`),
     body: comment.body,
-    deleteHidden: html`<input type="hidden" name="review_id" value="${comment.pull_request_review_id}">`,
+    deleteHidden: html`<input type="hidden" name="review_id" value="${comment.review_id}">`,
   });
 }
 
@@ -688,14 +685,14 @@ function commentEntry(opts: { author: AvatarUser | null | undefined; anchorId: s
 
 // One muted line per commit: short sha + first message line. Used for lone
 // commits and inside a collapsed commit group (#111).
-function compactCommitRow(commit: ForgejoCommit): Html {
-  return html`<div class="commit-row"><code>${commit.sha.slice(0, 7)}</code> <span class="commit-msg">${firstCommitLine(commit.commit.message)}</span></div>`;
+function compactCommitRow(commit: PrCommit): Html {
+  return html`<div class="commit-row"><code>${commit.sha.slice(0, 7)}</code> <span class="commit-msg">${firstCommitLine(commit.message)}</span></div>`;
 }
 
 // A run of adjacent commits collapses behind one expandable summary so a PR
 // built from many editor autosaves doesn't bury the conversation (#111).
-function commitGroup(commits: readonly ForgejoCommit[], local = false): Html {
-  const authors = new Set(commits.map((c) => c.author?.login ?? c.commit.author?.name ?? null));
+function commitGroup(commits: readonly PrCommit[], local = false): Html {
+  const authors = new Set(commits.map((c) => c.author_username ?? c.author_name ?? null));
   const label =
     authors.size === 1
       ? html`${userLink([...authors][0], local)} pushed ${commits.length} commits`
@@ -730,7 +727,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   }
   if (item.kind === "line-comment") {
     return commentEntry({
-      author: item.comment.user,
+      author: { login: item.comment.author_username },
       anchorId: `comment-${item.comment.id}`,
       whenHtml: html`<span class="comment-on">on ${item.comment.path}</span> · ${timeEl(item.comment.created_at)}`,
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
@@ -739,13 +736,13 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
     });
   }
   if (item.kind === "review") {
-    const label = reviewStateLabel(item.review.state);
-    const body = item.review.body ? await renderMarkdownSurface(ctx, item.review.body, { surface: "thread" }) : "";
+    const label = reviewStateLabel(reviewDecisionToStateLabel(item.review.decision));
+    const body = item.review.comment ? await renderMarkdownSurface(ctx, item.review.comment, { surface: "thread" }) : "";
     return html`<div class="timeline-event timeline-review">
       <div class="timeline-event-meta">
-        <strong>${userLink(item.review.user?.login, local)}</strong>
+        <strong>${userLink(item.review.username, local)}</strong>
         <span>${label}</span>
-        <small>${timeEl(item.review.submitted_at)}</small>
+        <small>${timeEl(item.review.created_at)}</small>
       </div>
       ${body ? html`<div class="timeline-event-body">${body}</div>` : emptyHtml}
     </div>`;
@@ -766,8 +763,8 @@ function compareTimelineItems(a: WebTimelineItem, b: WebTimelineItem): number {
   return compareWebTimelineItems(a, b);
 }
 
-function commitDateMs(commit: ForgejoCommit): number {
-  return toEpochMs(commit.commit.author?.date ?? commit.commit.committer?.date);
+function commitDateMs(commit: PrCommit): number {
+  return commit.date ?? 0;
 }
 
 function firstCommitLine(message: string): string {
@@ -787,9 +784,16 @@ function reviewStateLabel(state: string): string {
   }
 }
 
-export function reviewForms(ctx: WebCtx, pull: ForgejoPull, redirectTo?: string): Html {
+function reviewDecisionToStateLabel(decision: ReviewDto["decision"]): string {
+  if (decision === "approve") return "APPROVED";
+  if (decision === "request_changes") return "REQUEST_CHANGES";
+  if (decision === "pending") return "PENDING";
+  return "COMMENT";
+}
+
+export function reviewForms(ctx: WebCtx, pull: PrMeta, redirectTo?: string): Html {
   if (pull.state === "closed") return emptyHtml;
-  const isAuthor = pull.user?.login === ctx.user;
+  const isAuthor = pull.author_username === ctx.user;
   const canVerdict = ctx.ws.role !== "read" && !isAuthor;
   return html`<div>
     <form class="review-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/reviews`)}">

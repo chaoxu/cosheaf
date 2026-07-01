@@ -98,6 +98,74 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.init?.method).toBe("DELETE");
   });
 
+  it("forwards issue assignees through the typed issue patch route", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        number: 3,
+        title: "Bug",
+        body: "body",
+        state: "open",
+        author_username: "me",
+        assignees: ["vera"],
+        labels: [],
+        milestone: null,
+        comment_count: 0,
+        created_at: 0,
+        updated_at: 0,
+        closed_at: null,
+      }),
+    );
+    const detail = await clientWith(fake.fetch).editIssue("me", "notes", 3, {
+      title: "Bug",
+      body: "body",
+      assignees: ["vera"],
+    });
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/issues/3");
+    expect(fake.calls[0]?.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ title: "Bug", body: "body", assignees: ["vera"] });
+    expect(detail.assignees).toEqual(["vera"]);
+  });
+
+  it("forwards PR milestones through the typed pull patch route", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        pull: {
+          number: 4,
+          title: "PR",
+          body: "body",
+          state: "open",
+          merged: false,
+          author_username: "me",
+          created_at: 0,
+          merged_at: null,
+          mergeable: true,
+          head_ref: "topic",
+          head_sha: "h",
+          base_ref: "main",
+          base_sha: "b",
+          additions_total: 0,
+          deletions_total: 0,
+          files_changed: 0,
+          comment_count: 0,
+          labels: [],
+          milestone: { id: 7, title: "v1" },
+          requested_reviewers: [],
+          requested_reviewer_teams: [],
+        },
+      }),
+    );
+    const pull = await clientWith(fake.fetch).editPull("me", "notes", 4, {
+      title: "PR",
+      milestone: 7,
+    });
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/pulls/4");
+    expect(fake.calls[0]?.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ title: "PR", milestone: 7 });
+    expect(pull.milestone).toEqual({ id: 7, title: "v1" });
+  });
+
   it("treats a 404 on delete as success (idempotent)", async () => {
     const fake = recordingFetch(() => new Response("gone", { status: 404 }));
     await expect(clientWith(fake.fetch).deleteRepo("me", "notes")).resolves.toBeUndefined();
@@ -114,7 +182,7 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/pulls/4/pending-review/9/review-comments");
     expect(fake.calls[0]?.init?.method).toBe("POST");
     expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ path: "doc.md", body: "nit", new_position: 12 });
-    expect(shape).toMatchObject({ path: "doc.md", body: "nit", position: 12, pull_request_review_id: 9 });
+    expect(shape).toMatchObject({ path: "doc.md", body: "nit", line: 12, side: "head", review_id: 9 });
   });
 
   it("removes an issue block edge with the blocking number in the body", async () => {
@@ -180,13 +248,13 @@ describe("OriginCollaborationClient write methods", () => {
     ]);
     expect(JSON.parse(String(fake.calls[1]?.init?.body))).toEqual({ path: "doc.md", body: "nit", new_position: 12 });
     expect(JSON.parse(String(fake.calls[2]?.init?.body))).toEqual({ event: "comment", body: "" });
-    expect(review).toMatchObject({ id: 9, state: "COMMENT" });
+    expect(review).toMatchObject({ id: 9, decision: "comment" });
   });
 
   // BUG E round-trip: the core's GET /reviews surfaces the caller's own draft as
-  // decision "pending"; listReviews must re-expand it to a PENDING ReviewShape so
-  // findOrCreatePendingReview / requireOwnPendingReview can resolve the draft.
-  it("maps the caller's own pending draft (decision 'pending') back to a PENDING review", async () => {
+  // decision "pending"; listReviews must preserve it so findOrCreatePendingReview
+  // / requireOwnPendingReview can resolve the draft.
+  it("preserves the caller's own pending draft review DTO", async () => {
     const fake = recordingFetch(() =>
       Response.json({
         reviews: [
@@ -199,8 +267,8 @@ describe("OriginCollaborationClient write methods", () => {
     );
     const reviews = await clientWith(fake.fetch).listReviews("me", "notes", 4);
     expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/pulls/4/reviews");
-    expect(reviews.find((r) => r.id === 9)).toMatchObject({ state: "PENDING", user: { login: "me" } });
-    expect(reviews.find((r) => r.id === 3)).toMatchObject({ state: "APPROVED" });
+    expect(reviews.find((r) => r.id === 9)).toMatchObject({ decision: "pending", username: "me" });
+    expect(reviews.find((r) => r.id === 3)).toMatchObject({ decision: "approve", username: "vera" });
   });
 });
 

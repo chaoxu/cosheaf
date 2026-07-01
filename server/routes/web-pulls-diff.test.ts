@@ -174,7 +174,7 @@ describe("renderPrFileView", () => {
   it("previews PDF pull-request files instead of rendering raw PDF bytes", async () => {
     const rendered = await renderPrFileView(
       { owner: "chao", repo: "milk" } as never,
-      { base: { sha: "base-sha" }, head: { sha: "head-sha" } } as never,
+      { base_sha: "base-sha", head_sha: "head-sha" } as never,
       { path: "img/complexity.pdf", status: "modified", additions: 1, deletions: 1, patch: "" },
       "source",
       "after",
@@ -191,7 +191,7 @@ describe("renderPrFileView", () => {
   it("previews both sides of modified PDF pull-request files in split mode", async () => {
     const rendered = await renderPrFileView(
       { owner: "chao", repo: "milk" } as never,
-      { base: { sha: "base-sha" }, head: { sha: "head-sha" } } as never,
+      { base_sha: "base-sha", head_sha: "head-sha" } as never,
       { path: "img/complexity.pdf", status: "modified", additions: 1, deletions: 1, patch: "" },
       "source",
       "split",

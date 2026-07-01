@@ -1,7 +1,10 @@
 import type { CollaborationClient } from "../collaboration-client.js";
+import { resolveLineComment } from "../diff-position.js";
 import type { Forgejo } from "../forgejo.js";
+import { splitUnifiedDiff } from "../diff-splitter.js";
 import {
   forgeBranchToRow,
+  forgeCommitToPrCommit,
   forgeIssueCommentToDto,
   forgeIssueToDependencyRow,
   forgeIssueToDetail,
@@ -9,6 +12,10 @@ import {
   forgeMilestoneToDto,
   forgeNotificationThreadToRow,
   forgeNotificationThreadsToRows,
+  forgePullCommentToDto,
+  forgePullFileToDto,
+  forgePullToMeta,
+  forgeReviewToDto,
   forgeTimelineEventToDto,
   toLabel,
 } from "./forge-dto.js";
@@ -102,6 +109,71 @@ export function forgeCoreCollaborationClient(fj: Forgejo): CollaborationClient {
       if (prop === "listIssueBlocks") {
         return async (...args: Parameters<Forgejo["listIssueBlocks"]>) =>
           (await target.listIssueBlocks(...args)).map(forgeIssueToDependencyRow);
+      }
+      if (prop === "listPulls") {
+        return async (...args: Parameters<Forgejo["listPulls"]>) =>
+          (await target.listPulls(...args)).map(forgePullToMeta);
+      }
+      if (prop === "getPull") {
+        return async (...args: Parameters<Forgejo["getPull"]>) => {
+          const pull = await target.getPull(...args);
+          return pull ? forgePullToMeta(pull) : null;
+        };
+      }
+      if (prop === "createPull") {
+        return async (...args: Parameters<Forgejo["createPull"]>) =>
+          forgePullToMeta(await target.createPull(...args));
+      }
+      if (prop === "editPull") {
+        return async (...args: Parameters<Forgejo["editPull"]>) =>
+          forgePullToMeta(await target.editPull(...args));
+      }
+      if (prop === "listPullFiles") {
+        return async (...args: Parameters<Forgejo["listPullFiles"]>) => {
+          const [files, unified] = await Promise.all([
+            target.listPullFiles(...args),
+            target.getPullDiff(...args).catch(() => ""),
+          ]);
+          const patches = splitUnifiedDiff(unified);
+          const byPath = new Map(patches.map((p) => [p.path, p]));
+          return files.map((file) => forgePullFileToDto(file, byPath.get(file.filename)?.patch ?? ""));
+        };
+      }
+      if (prop === "listPullCommits") {
+        return async (...args: Parameters<Forgejo["listPullCommits"]>) =>
+          (await target.listPullCommits(...args)).map(forgeCommitToPrCommit);
+      }
+      if (prop === "listPullComments") {
+        return async (...args: Parameters<Forgejo["listPullComments"]>) => {
+          const [comments, files] = await Promise.all([
+            target.listPullComments(...args),
+            target.listPullFiles(args[0], args[1], args[2]).catch(() => []),
+          ]);
+          const status = new Map(files.map((file) => [file.filename, file.status]));
+          return comments.map((comment) =>
+            forgePullCommentToDto(comment, resolveLineComment(comment, status.get(comment.path) ?? "")),
+          );
+        };
+      }
+      if (prop === "listReviews") {
+        return async (...args: Parameters<Forgejo["listReviews"]>) =>
+          (await target.listReviews(...args)).map(forgeReviewToDto);
+      }
+      if (prop === "createReview") {
+        return async (...args: Parameters<Forgejo["createReview"]>) =>
+          forgeReviewToDto(await target.createReview(...args));
+      }
+      if (prop === "submitPullReview") {
+        return async (...args: Parameters<Forgejo["submitPullReview"]>) =>
+          forgeReviewToDto(await target.submitPullReview(...args));
+      }
+      if (prop === "addCommentToReview") {
+        return async (...args: Parameters<Forgejo["addCommentToReview"]>) =>
+          forgePullCommentToDto(await target.addCommentToReview(...args), {
+            line: args[4].new_position ?? args[4].old_position ?? null,
+            side: args[4].new_position !== undefined ? "head" : "base",
+            outdated: false,
+          });
       }
       if (prop === "listRepoNotifications") {
         return async (...args: Parameters<Forgejo["listRepoNotifications"]>) =>

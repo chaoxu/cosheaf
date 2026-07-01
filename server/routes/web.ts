@@ -763,7 +763,7 @@ web.post("/new", globalRoute(async (c, auth) => {
 web.get("/:owner/:repo/user-suggestions", webRoute(async (c, ctx) => {
   const q = c.req.query("q")?.trim() ?? "";
   if (q.length < 1) return Response.json({ users: [] });
-  const users = await ctx.fj.searchUsers(q, 10).catch(() => []);
+  const users = await ctx.collab.searchUsers(q, 10).catch(() => []);
   const suggestions = users
     .map((user) => user.login)
     .filter(Boolean)

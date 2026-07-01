@@ -8,16 +8,8 @@
 // returns either an OriginCollaborationClient (connected) or that sentinel.
 //
 // Shape contract: CollaborationClient is the exact method surface the routes
-// call, so every method here must return the SAME object shape the hosted forge
-// client returns. Those shapes are derived structurally from CollaborationClient
-// (the `*Shape` aliases below) — this file is forge-name-free by the Workbench
-// boundary rule (the no-forge-in-workbench lint), so the seam's forge reference
-// lives only in server/collaboration-client.ts, never here. The core's typed
-// Cosheaf API returns narrower Cosheaf DTOs (IssueRow/IssueDetail/…); we map
-// those back up to the shapes the routes consume. The mapping is lossy for shape
-// fields the typed API does not expose (issue `id`, full author `user`
-// avatar/email, label `scope`), but the issue routes only read the subset that
-// survives — see the #263 report.
+// call. Migrated surfaces return the core DTOs directly; narrow repo/settings
+// compatibility shapes live here until those routes have shared DTOs too.
 
 import type { LineComment } from "../../shared/comments.js";
 import type { BranchRow } from "../../shared/branches.js";
@@ -35,29 +27,40 @@ import type {
 import type { PrCommit, PrFile, PrMeta, ReviewDto, ReviewState, ReviewSubmitEvent } from "../../shared/review.js";
 import type { Role } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
-import {
-  activityRowToShape,
-  type ActivityShape,
-  type BranchProtectionShape,
-  type BranchShape,
-  type CollaboratorShape,
-  collaboratorToShape,
-  iso,
-  lineCommentToShape,
-  prCommitToShape,
-  prFileToShape,
-  prMetaToPullShape,
-  type PullCommentShape,
-  type PullCommitShape,
-  type PullFileShape,
-  type PullShape,
-  type RepoShape,
-  reviewDtoToShape,
-  type ReviewerShape,
-  type ReviewShape,
-} from "./origin-shapes.js";
 import { parseOriginResponse, RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
+
+type ActivityShape = Awaited<ReturnType<CollaborationClient["listRepoActivities"]>>[number];
+type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
+type CollaboratorShape = Awaited<ReturnType<CollaborationClient["listCollaborators"]>>[number];
+type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
+type ReviewerShape = Awaited<ReturnType<CollaborationClient["listPullReviewers"]>>[number];
+type BranchProtectionShape = NonNullable<Awaited<ReturnType<CollaborationClient["getBranchProtection"]>>>;
+
+function iso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+function collaboratorToShape(member: { login: string; permission: string }): CollaboratorShape {
+  return { id: 0, login: member.login };
+}
+
+function activityRowToShape(a: ActivityRow): ActivityShape {
+  let content: string | undefined;
+  if (a.commit_sha) {
+    content = JSON.stringify({ Commits: [{ Sha1: a.commit_sha, Message: a.commit_message ?? "" }] });
+  } else if (a.ref_index !== null) {
+    content = JSON.stringify([a.ref_index, a.comment_body ?? ""]);
+  }
+  return {
+    id: a.id,
+    op_type: a.op_type,
+    act_user: a.author_username ? { id: 0, login: a.author_username } : undefined,
+    ref_name: a.ref_name ?? undefined,
+    content,
+    created: iso(a.created_at),
+  };
+}
 
 // True when no core is connected for this workspace; the migrated collaboration
 // routes branch on this to show the Connect form instead of data.
@@ -98,6 +101,13 @@ type IssueListOpts = {
   sort?: string;
   q?: string;
 };
+
+function reviewStateToDecision(state: ReviewState): ReviewDto["decision"] {
+  if (state === "APPROVED") return "approve";
+  if (state === "REQUEST_CHANGES") return "request_changes";
+  if (state === "PENDING") return "pending";
+  return "comment";
+}
 
 // The connected-core collaboration source. Bound to {baseUrl, token}; every read
 // hits the core's typed Cosheaf API with `Authorization: Bearer <token>` and
@@ -270,12 +280,8 @@ export class OriginCollaborationClient {
     };
   }
 
-  // The forge editIssue is one method; the typed API splits it into three routes
-  // (title/body, state, milestone). Dispatch by which fields the patch carries —
-  // the routes only ever send one group, but combined title/body+milestone (the
-  // web edit form) is handled by running both. `assignees` has no typed endpoint
-  // and is dropped. A null/0 milestone clears it (the typed route reads id=null
-  // as clear).
+  // The forge editIssue is one method; the typed API splits milestone/state into
+  // separate routes, while title/body/assignees share PATCH /issues/:number.
   async editIssue(
     owner: string,
     repo: string,
@@ -283,10 +289,11 @@ export class OriginCollaborationClient {
     patch: { title?: string; body?: string; state?: "open" | "closed"; milestone?: number; assignees?: string[] },
   ): Promise<IssueDetail> {
     let detail: IssueDetail | undefined;
-    if (patch.title !== undefined || patch.body !== undefined) {
-      const tb: { title?: string; body?: string } = {};
+    if (patch.title !== undefined || patch.body !== undefined || patch.assignees !== undefined) {
+      const tb: { title?: string; body?: string; assignees?: string[] } = {};
       if (patch.title !== undefined) tb.title = patch.title;
       if (patch.body !== undefined) tb.body = patch.body;
+      if (patch.assignees !== undefined) tb.assignees = patch.assignees;
       detail = await this.patch<IssueDetail>(
           this.repoPath(owner, repo, `/issues/${number}`),
           tb,
@@ -414,7 +421,7 @@ export class OriginCollaborationClient {
       | "open"
       | "closed"
       | "all" = {},
-  ): Promise<PullShape[]> {
+  ): Promise<PrMeta[]> {
     const o = typeof opts === "string" ? { state: opts } : opts;
     const r = await this.get<{ pulls: PrMeta[] }>(this.repoPath(owner, repo, "/pulls"), {
       state: o.state,
@@ -424,12 +431,12 @@ export class OriginCollaborationClient {
       author: "poster" in o ? o.poster : undefined,
       labels: "labels" in o ? o.labels?.join(",") : undefined,
     });
-    return (r.pulls ?? []).map(prMetaToPullShape);
+    return r.pulls ?? [];
   }
 
-  async getPull(owner: string, repo: string, index: number): Promise<PullShape | null> {
+  async getPull(owner: string, repo: string, index: number): Promise<PrMeta | null> {
     const r = await this.getOrNull<{ pull: PrMeta }>(this.repoPath(owner, repo, `/pulls/${index}`));
-    return r ? prMetaToPullShape(r.pull) : null;
+    return r ? r.pull : null;
   }
 
   // The typed /pulls/:n/files response carries each file's per-file patch slice
@@ -443,24 +450,24 @@ export class OriginCollaborationClient {
       .join("\n");
   }
 
-  async listPullFiles(owner: string, repo: string, index: number): Promise<PullFileShape[]> {
+  async listPullFiles(owner: string, repo: string, index: number): Promise<PrFile[]> {
     const r = await this.get<{ files: PrFile[] }>(this.repoPath(owner, repo, `/pulls/${index}/files`));
-    return (r.files ?? []).map(prFileToShape);
+    return r.files ?? [];
   }
 
-  async listPullCommits(owner: string, repo: string, index: number): Promise<PullCommitShape[]> {
+  async listPullCommits(owner: string, repo: string, index: number): Promise<PrCommit[]> {
     const r = await this.get<{ commits: PrCommit[] }>(this.repoPath(owner, repo, `/pulls/${index}/commits`));
-    return (r.commits ?? []).map(prCommitToShape);
+    return r.commits ?? [];
   }
 
-  async listPullComments(owner: string, repo: string, index: number): Promise<PullCommentShape[]> {
+  async listPullComments(owner: string, repo: string, index: number): Promise<LineComment[]> {
     const r = await this.get<{ comments: LineComment[] }>(this.repoPath(owner, repo, `/pulls/${index}/comments`));
-    return (r.comments ?? []).map(lineCommentToShape);
+    return r.comments ?? [];
   }
 
-  async listReviews(owner: string, repo: string, index: number): Promise<ReviewShape[]> {
+  async listReviews(owner: string, repo: string, index: number): Promise<ReviewDto[]> {
     const r = await this.get<{ reviews: ReviewDto[] }>(this.repoPath(owner, repo, `/pulls/${index}/reviews`));
-    return (r.reviews ?? []).map(reviewDtoToShape);
+    return r.reviews ?? [];
   }
 
   // ---- pull / review writes ----
@@ -472,32 +479,31 @@ export class OriginCollaborationClient {
     owner: string,
     repo: string,
     opts: { head: string; base: string; title: string; body: string },
-  ): Promise<PullShape> {
+  ): Promise<PrMeta> {
     const r = await this.post<PrMeta>(this.repoPath(owner, repo, "/pulls"), opts);
-    return prMetaToPullShape(r);
+    return r;
   }
 
-  // The forge editPull is one method; the typed API splits it (title/body PATCH,
-  // labels PUT, state via close/reopen). Milestone has no typed pull endpoint and
-  // is dropped. Title/body and labels return the updated PR; a state-only change
-  // re-reads it (callers of the state-only path ignore the return).
+  // The forge editPull is one method; the typed API splits labels and state into
+  // separate routes. Title/body/milestone share PATCH /pulls/:number.
   async editPull(
     owner: string,
     repo: string,
     index: number,
     patch: { title?: string; body?: string; state?: "open" | "closed"; labels?: number[]; milestone?: number },
-  ): Promise<PullShape> {
-    let pull: PullShape | undefined;
-    if (patch.title !== undefined || patch.body !== undefined) {
-      const tb: { title?: string; body?: string } = {};
+  ): Promise<PrMeta> {
+    let pull: PrMeta | undefined;
+    if (patch.title !== undefined || patch.body !== undefined || patch.milestone !== undefined) {
+      const tb: { title?: string; body?: string; milestone?: number | null } = {};
       if (patch.title !== undefined) tb.title = patch.title;
       if (patch.body !== undefined) tb.body = patch.body;
+      if (patch.milestone !== undefined) tb.milestone = patch.milestone === 0 ? null : patch.milestone;
       const r = await this.patch<{ pull: PrMeta }>(this.repoPath(owner, repo, `/pulls/${index}`), tb);
-      pull = prMetaToPullShape(r.pull);
+      pull = r.pull;
     }
     if (patch.labels !== undefined) {
       const r = await this.put<{ pull: PrMeta }>(this.repoPath(owner, repo, `/pulls/${index}/labels`), { labels: patch.labels });
-      pull = prMetaToPullShape(r.pull);
+      pull = r.pull;
     }
     if (patch.state !== undefined) {
       await this.post(this.repoPath(owner, repo, `/pulls/${index}/${patch.state === "closed" ? "close" : "reopen"}`), {});
@@ -535,7 +541,7 @@ export class OriginCollaborationClient {
       comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
       commit_id?: string;
     },
-  ): Promise<ReviewShape> {
+  ): Promise<ReviewDto> {
     if (opts.comments && opts.comments.length > 0) {
       // Open (or reuse) a pending review, attach each already-resolved position
       // comment, then submit it as the verdict. The standalone comment path
@@ -560,15 +566,15 @@ export class OriginCollaborationClient {
         event: verdict,
         body: opts.body,
       });
-      return { id: reviewId, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
+      return { id: reviewId, username: "", decision: reviewStateToDecision(opts.event), comment: opts.body || null, created_at: 0 };
     }
     if (opts.event === "PENDING") {
       const r = await this.post<{ review_id: number }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review`), {});
-      return { id: r.review_id, body: opts.body, state: "PENDING", user: null, submitted_at: iso(0) };
+      return { id: r.review_id, username: "", decision: "pending", comment: opts.body || null, created_at: 0 };
     }
     const event = opts.event === "APPROVED" ? "APPROVE" : opts.event;
     await this.post(this.repoPath(owner, repo, `/pulls/${index}/reviews`), { event, body: opts.body });
-    return { id: 0, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
+    return { id: 0, username: "", decision: reviewStateToDecision(opts.event), comment: opts.body || null, created_at: 0 };
   }
 
   // Submit a previously-created pending review; the typed route takes a
@@ -579,28 +585,28 @@ export class OriginCollaborationClient {
     index: number,
     reviewId: number,
     opts: { event: ReviewSubmitEvent; body: string },
-  ): Promise<ReviewShape> {
+  ): Promise<ReviewDto> {
     const event = opts.event === "APPROVED" ? "approve" : opts.event === "REQUEST_CHANGES" ? "request_changes" : "comment";
     await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
       event,
       body: opts.body,
     });
-    return { id: reviewId, body: opts.body, state: opts.event, user: null, submitted_at: iso(0) };
+    return { id: reviewId, username: "", decision: reviewStateToDecision(opts.event), comment: opts.body || null, created_at: 0 };
   }
 
   // Add an inline comment to an existing pending review. The shared route already
   // resolved the diff anchor to forge positions (new_position/old_position), so
   // this forwards those to the typed pending-review review-comments route, which
   // maps them straight onto the core's addCommentToReview. The forge returns the
-  // created comment, but every caller ignores it, so a minimal shape is synthesized
-  // from the inputs (position fields mirror lineCommentToShape's anchor mapping).
+  // created comment, but every caller ignores it, so a minimal DTO is synthesized
+  // from the inputs.
   async addCommentToReview(
     owner: string,
     repo: string,
     index: number,
     reviewId: number,
     opts: { path: string; body: string; new_position?: number; old_position?: number },
-  ): Promise<PullCommentShape> {
+  ): Promise<LineComment> {
     await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/review-comments`), {
       path: opts.path,
       body: opts.body,
@@ -609,17 +615,15 @@ export class OriginCollaborationClient {
     });
     return {
       id: 0,
-      pull_request_review_id: reviewId,
+      review_id: reviewId,
       path: opts.path,
       body: opts.body,
-      position: opts.new_position ?? null,
-      original_position: opts.old_position ?? null,
-      commit_id: "",
-      original_commit_id: "",
-      diff_hunk: "",
-      user: null,
-      created_at: iso(0),
-      updated_at: iso(0),
+      line: opts.new_position ?? opts.old_position ?? null,
+      side: opts.new_position !== undefined ? "head" : "base",
+      author_username: "",
+      created_at: 0,
+      updated_at: 0,
+      outdated: false,
     };
   }
 
@@ -657,6 +661,21 @@ export class OriginCollaborationClient {
       this.repoPath(owner, repo, "/collaborators"),
     );
     return (r.collaborators ?? []).map((m) => ({ id: 0, login: m.login }) as ReviewerShape);
+  }
+
+  async searchUsers(query: string, limit = 10): Promise<Array<{ login: string }>> {
+    const needle = query.toLowerCase();
+    const repos: { workspaces?: Array<{ owner?: string; repo?: string }> } = await this.get<{ workspaces?: Array<{ owner?: string; repo?: string }> }>("/api/v1/workspaces").catch(() => ({}));
+    const seen = new Set<string>();
+    for (const workspace of repos.workspaces ?? []) {
+      if (!workspace.owner || !workspace.repo) continue;
+      const collaborators = await this.listCollaborators(workspace.owner, workspace.repo).catch(() => []);
+      for (const collaborator of collaborators) {
+        if (collaborator.login.toLowerCase().includes(needle)) seen.add(collaborator.login);
+      }
+      if (seen.size >= limit) break;
+    }
+    return [...seen].slice(0, limit).map((login) => ({ login }));
   }
 
   async listRepoTopics(owner: string, repo: string): Promise<string[]> {

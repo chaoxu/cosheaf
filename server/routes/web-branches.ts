@@ -32,7 +32,7 @@ export function registerBranchRoutes(web: Hono<AppEnv>): void {
       ctx.collab.listBranches(ctx.owner, ctx.repo),
       ctx.collab.listPulls(ctx.owner, ctx.repo, "open").catch(() => []),
     ]);
-    const openHeads = new Set(pulls.map((pull) => pull.head.ref));
+    const openHeads = new Set(pulls.map((pull) => pull.head_ref));
     return htmlResponse(
       repoPageShell(ctx, "files", `Branches - ${ctx.repo}`, html`
         <div class="page-title compact"><h1>Branches</h1></div>

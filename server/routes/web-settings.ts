@@ -238,9 +238,7 @@ web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
   if (confirm !== ctx.ws.slug) {
     return badRequestPage(ctx.user, `Type ${ctx.ws.slug} to confirm deletion.`);
   }
-  // Local Workbench: no forge client; the core owns the repo and enforces admin
-  // on the proxied delete. Hosted re-checks fresh against the forge.
-  const fresh = ctx.local ? ctx.ws.role : await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  const fresh = ctx.local ? ctx.ws.role : await ctx.collab.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") {
     const gone = fresh === "none" && !(await c.get("fjAdmin").getRepo(ctx.owner, ctx.repo));
     if (!gone) return notFoundPage(ctx.user, "Repository not found");
@@ -260,10 +258,7 @@ web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
 }
 
 async function requireFreshAdminPage(ctx: WebCtx): Promise<Response | null> {
-  // Local Workbench (writeMode "direct") has no forge client; the local user is
-  // admin on their own folder and the connected core enforces admin on the real
-  // write. Hosted does a fresh forge re-check (mirroring requireAdminFresh).
-  const fresh = ctx.local ? ctx.ws.role : await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  const fresh = ctx.local ? ctx.ws.role : await ctx.collab.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   return null;
 }

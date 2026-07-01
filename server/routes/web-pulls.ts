@@ -1,18 +1,18 @@
 import type { Context, Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import type { BranchRow } from "../../shared/branches.js";
+import type { LineComment } from "../../shared/comments.js";
 import type { IssueComment, Label, Milestone } from "../../shared/issues.js";
+import type { PrMeta } from "../../shared/review.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
-import { type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
+import { mergePullWithRetry } from "../forgejo.js";
 import { errorStatus } from "../forgejo-errors.js";
-import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { openLocalPull } from "../local/local-pulls.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { safeRel } from "./files.js";
 import { branchIcon } from "./icons.js";
 import { parsePositiveInt, parsePositiveIntList } from "./query-params.js";
@@ -75,7 +75,7 @@ async function pullCommentFor(
   ctx: WebCtx,
   pullNumber: number,
   commentId: number,
-): Promise<ForgejoPullReviewComment | null> {
+): Promise<LineComment | null> {
   const comments = await ctx.collab.listPullComments(ctx.owner, ctx.repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
@@ -218,7 +218,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
     // unmerged); navigate to it instead of erroring (#181). Other 409/422 get a
     // clean canned message.
     const existing = (await ctx.collab.listPulls(ctx.owner, ctx.repo, "all").catch(() => []))
-      .find((p) => p.head.ref === head && p.base.ref === base && !p.merged);
+      .find((p) => p.head_ref === head && p.base_ref === base && !p.merged);
     if (existing) return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${existing.number}`));
     return htmlResponse(
       repoPageShell(ctx, "pulls", `New PR - ${ctx.repo}`, pullCreatePage(ctx, branches, {
@@ -252,8 +252,8 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
     ...issueComments.map((c) => ({ author: c.author, author_username: c.author_username, created_at: c.created_at })),
     ...reviews
       .filter(isVisibleReview)
-      .map((r) => ({ user: r.user, created_at: r.submitted_at })),
-    ...comments.map((c) => ({ user: c.user, created_at: c.created_at })),
+      .map((r) => ({ author_username: r.username, created_at: r.created_at })),
+    ...comments.map((c) => ({ author_username: c.author_username, created_at: c.created_at })),
   ].sort((a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
   return htmlResponse(
     repoPageShell(
@@ -272,18 +272,18 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                     ? ""
                     : html`<a class="button" data-testid="pull-edit-link" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/edit`)}">Edit PR</a>`
                 }
-                ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>`}
+                ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head_ref)}">View branch output</a>`}
                 ${pullStateForm(ctx, pull)}
               </div>
             </div>
-            <p>by ${userLink(pull.user?.login, ctx.local)}${pull.base.ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base.ref}</code>` : ""}</p>
+            <p>by ${userLink(pull.author_username, ctx.local)}${pull.base_ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base_ref}</code>` : ""}</p>
             <nav class="subtabs">
               <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
               <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
             </nav>
           </header>
           ${threadLayout(
-            html`${threadParticipantsBar(pull.user, conversation, ctx.local)}
+            html`${threadParticipantsBar({ login: pull.author_username }, conversation, ctx.local)}
               ${await threadDescription(ctx, pull.body ?? "")}
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
@@ -342,7 +342,7 @@ web.post("/:owner/:repo/pulls/:number/labels", webRouteForWrite(async (c, ctx) =
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
   const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), pull.labels ?? []);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
-  if (labelPatch.labels) await ctx.collab.setIssueLabels(ctx.owner, ctx.repo, pull.number, labelPatch.labels);
+  if (labelPatch.labels) await ctx.collab.editPull(ctx.owner, ctx.repo, pull.number, { labels: labelPatch.labels });
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "edited" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -388,7 +388,7 @@ web.post("/:owner/:repo/pulls/:number/reviews", webRoute(async (c, ctx) => {
   const body = stringField(form.body) ?? "";
   if (event !== "APPROVED" && event !== "REQUEST_CHANGES" && event !== "COMMENT")
     return badRequestPage(ctx.user, "Review event is required.");
-  if (reviewRequiresNonAuthor(event) && pull.user?.login === ctx.user) return forbiddenPage(ctx.user);
+  if (reviewRequiresNonAuthor(event) && pull.author_username === ctx.user) return forbiddenPage(ctx.user);
   await ctx.collab.createReview(ctx.owner, ctx.repo, pull.number, { event, body });
   const redirectTo = safeWebRedirect(stringField(form.redirect_to));
   return redirect(redirectTo ?? repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
@@ -413,7 +413,7 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRoute(async (c, c
   if (!pull || !id || !reviewId) return notFoundPage(ctx.user, "Comment not found");
   const comment = await pullCommentFor(ctx, pull.number, id);
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
-  if (comment.pull_request_review_id !== reviewId) return badRequestPage(ctx.user, "Review id does not match comment.");
+  if (comment.review_id !== reviewId) return badRequestPage(ctx.user, "Review id does not match comment.");
   await ctx.collab.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -476,7 +476,7 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   // route — so a just-demoted admin can't merge in the stale window.
   // Local Workbench (writeMode "direct") has no forge client; the local user is
   // the workspace admin and the core enforces admin on the proxied merge.
-  const fresh = ctx.local ? ctx.ws.role : await ctx.fj.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
+  const fresh = ctx.local ? ctx.ws.role : await ctx.collab.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
   const pull = await pullForParam(ctx, c.req.param("number"));
   if (!pull) return notFoundPage(ctx.user, "Pull request not found");
@@ -514,8 +514,8 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   }
   // In local mode the head branch lives on the remote core; the proxied merge
   // owns its cleanup, and there is no local forge client to delete it.
-  if (!ctx.local && pull.head.ref && pull.head.ref !== "main") {
-    await deleteBranchQuietly(ctx.fj, ctx.owner, ctx.repo, pull.head.ref);
+  if (!ctx.local && pull.head_ref && pull.head_ref !== "main") {
+    await ctx.backend.deleteBranch(ctx.owner, ctx.repo, pull.head_ref).catch(() => undefined);
   }
   invalidateRepoTrees(ctx.owner, ctx.repo);
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: "merged" });
@@ -558,7 +558,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
           <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
           <div class="thread-title-row">
             <h1>${pull.title} <span>#${pull.number}</span></h1>
-            ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head.ref)}">View branch output</a>`}
+            ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head_ref)}">View branch output</a>`}
           </div>
           <nav class="subtabs">
             <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
@@ -606,37 +606,25 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
 }));
 }
 
-async function pullForParam(ctx: WebCtx, raw: string | undefined): Promise<ForgejoPull | null> {
+async function pullForParam(ctx: WebCtx, raw: string | undefined): Promise<PrMeta | null> {
   const number = positiveInt(raw);
   if (!number) return null;
   return ctx.collab.getPull(ctx.owner, ctx.repo, number);
 }
 
 async function pullFiles(ctx: WebCtx, number: number) {
-  const [metas, unified] = await Promise.all([
-    ctx.collab.listPullFiles(ctx.owner, ctx.repo, number),
-    ctx.collab.getPullDiff(ctx.owner, ctx.repo, number),
-  ]);
-  const sections = splitDiffByFile(unified);
-  return metas.map((meta) => ({
-    path: meta.filename,
-    previous_path: meta.previous_filename,
-    status: meta.status,
-    additions: meta.additions,
-    deletions: meta.deletions,
-    patch: sections.get(meta.filename) ?? "",
-  }));
+  return ctx.collab.listPullFiles(ctx.owner, ctx.repo, number);
 }
 
-async function prAssetPreviewPaths(ctx: WebCtx, pull: ForgejoPull): Promise<PrFileAssetPreviewPaths> {
+async function prAssetPreviewPaths(ctx: WebCtx, pull: PrMeta): Promise<PrFileAssetPreviewPaths> {
   // Inline PDF/image previews need the base+head file trees. In the local
   // Workbench the content backend is the opened folder, which does not hold the
   // PR's core-side commits, so the tree lookup can't resolve those SHAs —
   // degrade to no previews (the diff itself still renders from the core).
   if (ctx.local) return { base: {}, head: {} };
   const [baseTree, headTree] = await Promise.all([
-    ctx.backend.getTree(ctx.owner, ctx.repo, pull.base.sha, true),
-    ctx.backend.getTree(ctx.owner, ctx.repo, pull.head.sha, true),
+    ctx.backend.getTree(ctx.owner, ctx.repo, pull.base_sha, true),
+    ctx.backend.getTree(ctx.owner, ctx.repo, pull.head_sha, true),
   ]);
   return {
     base: buildPdfImagePreviewPaths(baseTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
@@ -786,11 +774,11 @@ function pullFilterForm(
   });
 }
 
-function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests.", local = false): Html {
+function pullList(owner: string, repo: string, pulls: PrMeta[], emptyText = "No pull requests.", local = false): Html {
   const rows = pulls.map((pull) => {
     const state = pull.merged ? "merged" : pull.state;
     // The head branch name is noise; the base only matters when it isn't main.
-    const basesNonMain = pull.base.ref !== "main";
+    const basesNonMain = pull.base_ref !== "main";
     const labels = pull.labels ?? [];
     return threadListRow({
       rowClass: "pull-row",
@@ -798,12 +786,12 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
       state,
       title: pull.title,
       number: pull.number,
-      metaPills: html`${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}`,
+      metaPills: html`${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base_ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}`,
       hasMeta: basesNonMain || Boolean(pull.milestone) || labels.length > 0,
       labels,
-      author: pull.user,
+      author: { login: pull.author_username },
       createdAt: pull.created_at,
-      comments: pull.comments,
+      comments: pull.comment_count,
       local,
     });
   });

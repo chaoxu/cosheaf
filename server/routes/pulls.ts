@@ -30,21 +30,17 @@ import { type Context, Hono, type MiddlewareHandler } from "hono";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { RepoCollaborator } from "../../shared/repo.js";
-import type { MergeFailure, MergeFailureReason, PrState } from "../../shared/review.js";
+import type { MergeFailure, MergeFailureReason, PrMeta, PrState, ReviewDto } from "../../shared/review.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { validBranchName } from "../branch-path.js";
 import type { CollaborationClient } from "../collaboration-client.js";
-import { forgeCommitToPrCommit, forgePullToMeta, forgeReviewToDto, normalizePrFileStatus } from "../core/forge-dto.js";
-import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
+import { fileLineToWritePosition } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { ForgejoError, mergePullWithRetry } from "../forgejo.js";
 import { errorStatus, is4xx, is404 } from "../forgejo-errors.js";
-import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
-import { toEpochMs, userLogin } from "../forgejo-types.js";
 import {
   isLocalMode,
   repoCtxCollab,
-  repoCtxForgejo,
   requireAdminFresh,
   requireAuth,
   requireMembership,
@@ -75,7 +71,6 @@ const requirePullWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) =>
 
 pulls.use("/:owner/:repo/*", requirePullWriteOnMutation);
 
-import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict, forbidden, notFound } from "./responses.js";
 
 type PullSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
@@ -83,6 +78,15 @@ type PullSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mos
 function parsePullSort(value: string | undefined): PullSort {
   const allowed = new Set(["oldest", "recentupdate", "recentclose", "leastupdate", "mostcomment", "leastcomment", "priority"]);
   return (value && allowed.has(value) ? value : "recentupdate") as PullSort;
+}
+
+function teaPullShape(pull: PrMeta) {
+  return {
+    ...pull,
+    head: { ref: pull.head_ref, sha: pull.head_sha },
+    base: { ref: pull.base_ref, sha: pull.base_sha },
+    user: { login: pull.author_username },
+  };
 }
 
 // Latest-per-user approval count, ignoring older reviews from the same user.
@@ -93,29 +97,29 @@ async function approvalCounts(
   prNumber: number,
 ): Promise<{ approvals: number; rejections: number }> {
   const reviews = await collab.listReviews(owner, repo, prNumber);
-  const latestByUser = new Map<string, ForgejoReview>();
+  const latestByUser = new Map<string, ReviewDto>();
   const ordered = [...reviews].sort((a, b) => {
-    const at = toEpochMs(a.submitted_at);
-    const bt = toEpochMs(b.submitted_at);
+    const at = a.created_at;
+    const bt = b.created_at;
     return at - bt || (a.id ?? 0) - (b.id ?? 0);
   });
   for (const r of ordered) {
     // Forgejo may keep deleted-account reviews with user=null, but without a
     // stable reviewer identity we cannot collapse to "latest verdict per user"
     // without risking overcounts. Leave merge authority to Forgejo itself.
-    if (!r.user) continue;
+    if (!r.username) continue;
     // #56: DISMISSED must invalidate an earlier APPROVED/REQUEST_CHANGES from
     // the same user, otherwise stale approvals/rejections persist after
     // Forgejo has already dismissed them.
-    if (r.state === "APPROVED" || r.state === "REQUEST_CHANGES" || r.state === "DISMISSED") {
-      latestByUser.set(r.user.login, r);
+    if (r.decision === "approve" || r.decision === "request_changes" || r.decision === "dismissed") {
+      latestByUser.set(r.username, r);
     }
   }
   let approvals = 0;
   let rejections = 0;
   for (const r of latestByUser.values()) {
-    if (r.state === "APPROVED") approvals++;
-    else if (r.state === "REQUEST_CHANGES") rejections++;
+    if (r.decision === "approve") approvals++;
+    else if (r.decision === "request_changes") rejections++;
   }
   return { approvals, rejections };
 }
@@ -204,12 +208,12 @@ async function readReviewGate(
 // needed — i.e. the PR is gone/merged or has a real content conflict), and
 // `transientExhausted` is whether the retried path stayed transient.
 export function classifyMergeFailure(
-  pull: ForgejoPull | null,
+  pull: PrMeta | null,
   reviewGate: ReviewGate | null,
   transientExhausted: boolean,
 ): MergeFailure {
-  const head_sha = pull?.head.sha ?? null;
-  const base_sha = pull?.base.sha ?? null;
+  const head_sha = pull?.head_sha ?? null;
+  const base_sha = pull?.base_sha ?? null;
   const state: PrState = pull?.state === "closed" ? "closed" : "open";
   const merged = pull?.merged ?? false;
   const mergeable = pull?.mergeable ?? null;
@@ -269,9 +273,8 @@ pulls.get("/:owner/:repo/pulls", async (c) => {
     poster: c.req.query("author")?.trim() || undefined,
     sort: parsePullSort(c.req.query("sort")),
   });
-  if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, rows));
-  const out = rows.map(forgePullToMeta);
-  return c.json({ pulls: out });
+  if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, rows.map(teaPullShape)));
+  return c.json({ pulls: rows });
 });
 
 pulls.get("/:owner/:repo/pulls/:n", async (c) => {
@@ -280,7 +283,7 @@ pulls.get("/:owner/:repo/pulls/:n", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  return c.json({ pull: forgePullToMeta(pull) });
+  return c.json({ pull });
 });
 
 pulls.post("/:owner/:repo/pulls", async (c) => {
@@ -301,7 +304,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
       body: typeof body.body === "string" ? body.body : "",
     });
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
-    return c.json(forgePullToMeta(pr), 201);
+    return c.json(pr, 201);
   } catch (err) {
     // POST /pulls returns 409 for several reasons — empty diff, an existing PR
     // for this head→base, or a duplicate title — and 422 for validation. Match on
@@ -321,8 +324,8 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
         console.error(`[${c.get("requestId") ?? ""}] dedup listPulls failed for ${owner}/${repo}: ${e instanceof Error ? e.message : String(e)}`);
         return [];
       });
-      const existing = all.find((p) => p.head.ref === head && p.base.ref === base && !p.merged);
-      if (existing) return c.json(forgePullToMeta(existing), 200);
+      const existing = all.find((p) => p.head_ref === head && p.base_ref === base && !p.merged);
+      if (existing) return c.json(existing, 200);
       return c.json(...conflict("Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid."));
     }
     throw err;
@@ -332,12 +335,25 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
 pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
-  const parsed = parseTitleBodyPatch(await readJsonBody(c.req));
+  const body = await readJsonObject(c.req);
+  const parsed = parseTitleBodyPatch(body);
   if (!parsed.ok) return c.json(...bad(parsed.message));
+  const milestone =
+    body.milestone === undefined
+      ? undefined
+      : body.milestone === null || body.milestone === 0
+        ? 0
+        : typeof body.milestone === "number"
+          ? parsePositiveIntId(body.milestone)
+          : null;
+  if (milestone === null) return c.json(...bad("milestone must be a positive integer or null"));
   const { collab, owner, repo } = repoCtxCollab(c);
-  const pull = await collab.editPull(owner, repo, n, parsed.patch);
+  const pull = await collab.editPull(owner, repo, n, {
+    ...parsed.patch,
+    ...(milestone !== undefined ? { milestone } : {}),
+  });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
-  return c.json({ pull: forgePullToMeta(pull) });
+  return c.json({ pull });
 });
 
 pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
@@ -358,7 +374,7 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
   if (!validation.ok) return c.json(...bad(validation.message));
   const updated = await collab.editPull(owner, repo, n, { labels: labelIds });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
-  return c.json({ pull: forgePullToMeta(updated) });
+  return c.json({ pull: updated });
 });
 
 
@@ -386,7 +402,7 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
       // Only the ambiguous case (PR present, no real conflict, not already
       // merged) needs the review-gate read to tell "blocked" from "transient".
       const ambiguous = pull !== null && pull.merged !== true && pull.mergeable !== false;
-      const reviewGate = ambiguous ? await readReviewGate(collab, owner, repo, n, pull.base.ref) : null;
+      const reviewGate = ambiguous ? await readReviewGate(collab, owner, repo, n, pull.base_ref) : null;
       return c.json(classifyMergeFailure(pull, reviewGate, result.transientExhausted), 409);
     }
     if (result.status === 404) {
@@ -407,9 +423,8 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
   // In local mode the head branch lives on the connected core; the proxied merge
   // owns its cleanup and there is no local forge client to delete it — so only
   // the hosted app touches the raw forge client here.
-  if (!isLocalMode(c) && pull && pull.head.ref && pull.head.ref !== "main") {
-    const { fj } = repoCtxForgejo(c);
-    await deleteBranchQuietly(fj, owner, repo, pull.head.ref);
+  if (!isLocalMode(c) && pull && pull.head_ref && pull.head_ref !== "main") {
+    await c.get("repoCtx").backend.deleteBranch(owner, repo, pull.head_ref).catch(() => undefined);
   }
   // Invalidate eagerly so the post-merge tree fetch sees the new main
   // commit before the push webhook lands (in tests/dev the webhook may
@@ -445,23 +460,7 @@ pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { collab, owner, repo } = repoCtxCollab(c);
-  const [metas, unified] = await Promise.all([
-    collab.listPullFiles(owner, repo, n),
-    collab.getPullDiff(owner, repo, n),
-  ]);
-  const patches = splitUnifiedDiff(unified);
-  const byPath = new Map(patches.map((p) => [p.path, p]));
-  const files = metas.map((m) => {
-    const slice = byPath.get(m.filename);
-    return {
-      path: m.filename,
-      previous_path: m.previous_filename ?? slice?.previous_path,
-      status: normalizePrFileStatus(m.status),
-      additions: m.additions,
-      deletions: m.deletions,
-      patch: slice?.patch ?? "",
-    };
-  });
+  const files = await collab.listPullFiles(owner, repo, n);
   return c.json({ files });
 });
 
@@ -470,7 +469,7 @@ pulls.get("/:owner/:repo/pulls/:n/commits", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const commits = await collab.listPullCommits(owner, repo, n);
-  return c.json({ commits: commits.map(forgeCommitToPrCommit) });
+  return c.json({ commits });
 });
 
 pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
@@ -506,7 +505,7 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
 
 async function previousPathFor(collab: CollaborationClient, owner: string, repo: string, n: number, path: string): Promise<string | undefined> {
   const files = await collab.listPullFiles(owner, repo, n);
-  return files.find((file) => file.filename === path)?.previous_filename;
+  return files.find((file) => file.path === path)?.previous_path;
 }
 
 // ---------- reviews (approve / request-changes / comment) ----------
@@ -541,12 +540,12 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const out = reviews
     .filter(
       (r) =>
-        r.state === "APPROVED" ||
-        r.state === "REQUEST_CHANGES" ||
-        r.state === "COMMENT" ||
-        (r.state === "PENDING" && userLogin(r.user) === me),
+        r.decision === "approve" ||
+        r.decision === "request_changes" ||
+        r.decision === "comment" ||
+        (r.decision === "pending" && r.username === me),
     )
-    .map(forgeReviewToDto);
+    .map((r) => r);
   const counts = await approvalCounts(collab, owner, repo, n);
   return c.json({ reviews: out, approvals: counts.approvals, rejections: counts.rejections });
 });
@@ -566,7 +565,7 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  if (EVENT_MAP[reviewEvent] !== "COMMENT" && pull.user?.login === c.get("user").username)
+  if (EVENT_MAP[reviewEvent] !== "COMMENT" && pull.author_username === c.get("user").username)
     return c.json(...forbidden("cannot review your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
@@ -597,9 +596,9 @@ pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   ]);
   if (!pull) return c.json(...notFound());
   return c.json({
-    requested_reviewers: forgePullToMeta(pull).requested_reviewers,
-    requested_reviewer_teams: forgePullToMeta(pull).requested_reviewer_teams,
-    available_reviewers: reviewers.map((u) => u.login).filter((login) => login !== pull.user?.login),
+    requested_reviewers: pull.requested_reviewers,
+    requested_reviewer_teams: pull.requested_reviewer_teams,
+    available_reviewers: reviewers.map((u) => u.login).filter((login) => login !== pull.author_username),
   });
 });
 
@@ -614,7 +613,7 @@ pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
-  return c.json({ pull: forgePullToMeta(pull) }, 201);
+  return c.json({ pull }, 201);
 });
 
 pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
@@ -627,7 +626,7 @@ pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   await collab.deletePullReviewRequests(owner, repo, n, reviewers);
   const pull = await collab.getPull(owner, repo, n);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
-  return c.json({ pull: pull ? forgePullToMeta(pull) : null });
+  return c.json({ pull });
 });
 
 // ---------- line comments ----------
@@ -669,7 +668,7 @@ async function requirePullComment(
   repo: string,
   pullNumber: number,
   commentId: number,
-): Promise<ForgejoPullReviewComment | null> {
+): Promise<LineComment | null> {
   const comments = await collab.listPullComments(owner, repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
@@ -678,29 +677,8 @@ pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
   const { collab, owner, repo } = repoCtxCollab(c);
-  // Comment line/side come straight from Forgejo's position/original_position
-  // (absolute file lines), so the read path no longer needs the unified diff.
-  const [allComments, metas] = await Promise.all([
-    collab.listPullComments(owner, repo, n),
-    collab.listPullFiles(owner, repo, n),
-  ]);
-  const status = new Map(metas.map((m) => [m.filename, m.status]));
-  const out: LineComment[] = allComments.map((cm) => {
-    const { line, side, outdated } = resolveLineComment(cm, status.get(cm.path) ?? "");
-    return {
-      id: cm.id,
-      review_id: cm.pull_request_review_id,
-      path: cm.path,
-      line,
-      side,
-      body: cm.body,
-      author_username: userLogin(cm.user),
-      created_at: toEpochMs(cm.created_at),
-      updated_at: toEpochMs(cm.updated_at),
-      outdated,
-    };
-  });
-  return c.json({ comments: out });
+  const comments = await collab.listPullComments(owner, repo, n);
+  return c.json({ comments });
 });
 
 pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
@@ -760,7 +738,7 @@ pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const comment = await requirePullComment(collab, owner, repo, n, cid);
   if (!comment) return c.json(...notFound("comment not found"));
-  if (comment.pull_request_review_id !== rid) return c.json(...bad("review id does not match comment"));
+  if (comment.review_id !== rid) return c.json(...bad("review id does not match comment"));
   await collab.deleteReviewComment(owner, repo, n, rid, cid);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
@@ -776,7 +754,7 @@ async function findOrCreatePendingReview(
   forgejoUsername: string,
 ): Promise<number> {
   const reviews = await collab.listReviews(owner, repo, n);
-  const existing = reviews.find((r) => r.state === "PENDING" && r.user?.login === forgejoUsername);
+  const existing = reviews.find((r) => r.decision === "pending" && r.username === forgejoUsername);
   if (existing) return existing.id;
   const created = await collab.createReview(owner, repo, n, {
     event: "PENDING",
@@ -789,7 +767,7 @@ async function requireOwnPendingReview(
   c: Context<AppEnv>,
   n: number,
   rid: number,
-): Promise<ForgejoReview | Response> {
+): Promise<ReviewDto | Response> {
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
@@ -800,7 +778,7 @@ async function requireOwnPendingReview(
 
   const reviews = await collab.listReviews(owner, repo, n);
   const review = reviews.find((item) => item.id === rid);
-  if (!review || review.state !== "PENDING" || review.user?.login !== c.get("user").username) {
+  if (!review || review.decision !== "pending" || review.username !== c.get("user").username) {
     return c.json(...notFound("pending review not found"));
   }
   return review;
@@ -891,7 +869,7 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   // approve/request_changes verdict is forbidden.
   if (reviewRequiresNonAuthor(event)) {
     const pull = await collab.getPull(owner, repo, n);
-    if (pull?.user?.login === c.get("user").username)
+    if (pull?.author_username === c.get("user").username)
       return c.json(...forbidden("cannot approve or request changes on your own pull request"));
   }
   await collab.submitPullReview(owner, repo, n, rid, {

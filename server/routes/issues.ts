@@ -283,12 +283,23 @@ issues.patch("/:owner/:repo/issues/:number", async (c) => {
   const ws = c.get("workspace");
   const number = parsePositiveIntId(c.req.param("number"));
   if (number === null) return c.json(...bad("bad number"));
-  const parsed = parseTitleBodyPatch(await readJsonBody(c.req));
+  const body = await readJsonObject(c.req);
+  const parsed = parseTitleBodyPatch(body);
   if (!parsed.ok) return c.json(...bad(parsed.message));
+  const assignees =
+    body.assignees === undefined
+      ? undefined
+      : Array.isArray(body.assignees) && body.assignees.every((item) => typeof item === "string")
+        ? body.assignees
+        : null;
+  if (assignees === null) return c.json(...bad("assignees must be an array of usernames"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
-  const issue = await collab.editIssue(owner, repo, number, parsed.patch);
+  const issue = await collab.editIssue(owner, repo, number, {
+    ...parsed.patch,
+    ...(assignees !== undefined ? { assignees } : {}),
+  });
   c.get("sse").publish(ws.slug, { type: "issue", number, action: "edited" });
   return c.json({
     number: issue.number,

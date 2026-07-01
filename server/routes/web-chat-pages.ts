@@ -1,9 +1,8 @@
 import { canWrite, type Role } from "../../shared/roles.js";
 import type { Hono } from "hono";
 import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js";
-import type { Forgejo } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
-import type { ForgejoIssue } from "../forgejo-types.js";
+import type { IssueRow } from "../../shared/issues.js";
 import type { AppEnv } from "../types.js";
 import {
   CHAT_LABEL,
@@ -37,11 +36,11 @@ import { branchOptions, repoPageShell } from "./web-page.js";
 
 // Find the "chat" label id, creating it once if missing. Chats are issues
 // carrying this label, applied only by the chat "new" route.
-async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promise<number> {
-  const labels = await fj.listLabels(owner, repo);
+async function ensureChatLabel(ctx: WebCtx): Promise<number> {
+  const labels = await ctx.collab.listLabels(ctx.owner, ctx.repo);
   const existing = labels.find((label) => label.name === CHAT_LABEL);
   if (existing) return existing.id;
-  const created = await fj.createLabel(owner, repo, { name: CHAT_LABEL, color: "8b5cf6", description: "Coverify chat" });
+  const created = await ctx.collab.createLabel(ctx.owner, ctx.repo, { name: CHAT_LABEL, color: "8b5cf6", description: "Coverify chat" });
   return created.id;
 }
 
@@ -49,21 +48,21 @@ async function ensureChatLabel(fj: Forgejo, owner: string, repo: string): Promis
 // with the active issue highlighted. Shared by the list and thread views.
 function listChats(ctx: WebCtx) {
   return Promise.all([
-    ctx.fj.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
-    ctx.fj.listIssues(ctx.owner, ctx.repo, { state: "open", limit: 50 }).catch(() => [] as ForgejoIssue[]),
+    ctx.collab.listIssues(ctx.owner, ctx.repo, { labels: CHAT_LABEL, state: "open", limit: 50 }).catch(() => [] as IssueRow[]),
+    ctx.collab.listIssues(ctx.owner, ctx.repo, { state: "open", limit: 50 }).catch(() => [] as IssueRow[]),
   ]).then(([labeled, recent]) => {
-    const byNumber = new Map<number, ForgejoIssue>();
+    const byNumber = new Map<number, IssueRow>();
     for (const issue of [...labeled, ...recent]) {
       if (isChatIssue(issue)) byNumber.set(issue.number, issue);
     }
-    return [...byNumber.values()].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+    return [...byNumber.values()].sort((a, b) => b.updated_at - a.updated_at);
   });
 }
 
 function chatSidebar(
   owner: string,
   repo: string,
-  chats: ForgejoIssue[],
+  chats: IssueRow[],
   active: number | null,
   role: Role,
   canStartChat: boolean,
@@ -87,7 +86,7 @@ web.get("/:owner/:repo/chat", webRoute(async (c, ctx) => {
   const canStartChat = ctx.ws.role !== "read" && isCoverifyChatEnabled(c.get("config"));
   const [chats, branches] = await Promise.all([
     listChats(ctx),
-    canStartChat ? ctx.fj.listBranches(ctx.owner, ctx.repo) : Promise.resolve([]),
+    canStartChat ? ctx.collab.listBranches(ctx.owner, ctx.repo) : Promise.resolve([]),
   ]);
   return htmlResponse(
     repoPageShell(ctx, "chat", `Chat - ${ctx.repo}`, html`
@@ -122,10 +121,10 @@ web.post("/:owner/:repo/chat/new", webRouteForWrite(async (c, ctx) => {
   if (!message) return redirect(repoHref(ctx.owner, ctx.repo, "/chat"));
   const branch = stringField(form.branch) || "main";
   if (!validBranchName(branch)) return badRequestPage(ctx.user, "Valid branch name is required.");
-  const branchExists = await ctx.fj.getBranch(ctx.owner, ctx.repo, branch);
+  const branchExists = (await ctx.collab.listBranches(ctx.owner, ctx.repo)).some((item) => item.name === branch);
   if (!branchExists) return badRequestPage(ctx.user, "Branch does not exist.");
-  const labelId = await ensureChatLabel(ctx.fj, ctx.owner, ctx.repo);
-  const issue = await ctx.fj.createIssue(ctx.owner, ctx.repo, {
+  const labelId = await ensureChatLabel(ctx);
+  const issue = await ctx.collab.createIssue(ctx.owner, ctx.repo, {
     title: chatTitleFrom(message),
     body: chatIssueBody(message, branch),
     labels: [labelId],
@@ -139,11 +138,11 @@ web.get("/:owner/:repo/chat/:number", webRoute(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
   const [issue, comments, chats] = await Promise.all([
-    ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null)),
-    ctx.fj.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
+    ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null)),
+    ctx.collab.listIssueComments(ctx.owner, ctx.repo, number).catch(() => []),
     listChats(ctx),
   ]);
-  if (!issue || issue.pull_request || !isChatIssue(issue)) {
+  if (!issue || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
   }
   const chatBranch = chatBranchFromBody(issue.body ?? "") ?? "main";
@@ -190,13 +189,13 @@ web.post("/:owner/:repo/chat/:number/send", webRouteForWrite(async (c, ctx) => {
   if (!isCoverifyChatEnabled(c.get("config"))) return badRequestPage(ctx.user, "Chat is not configured.");
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
-  const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
-  if (!issue || issue.pull_request || !isChatIssue(issue)) {
+  const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
+  if (!issue || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
   }
   const message = stringField((await c.req.parseBody()).message);
   if (message) {
-    await ctx.fj.createIssueComment(ctx.owner, ctx.repo, number, message);
+    await ctx.collab.createIssueComment(ctx.owner, ctx.repo, number, message);
     c.get("sse").publish(ctx.ws.slug, { type: "issue", number, action: "commented" });
     runCoverifyChatReply(c.get("config"), { workspace: ctx.ws.slug, issue: number });
   }

@@ -14,6 +14,8 @@
 
 import type { BranchRow } from "../shared/branches.js";
 import type { DependencyRow, IssueComment, IssueDetail, IssueRow, Label, Milestone, NotificationRow, TimelineEvent } from "../shared/issues.js";
+import type { LineComment } from "../shared/comments.js";
+import type { PrCommit, PrFile, PrMeta, ReviewDto, ReviewState, ReviewSubmitEvent } from "../shared/review.js";
 import type { Forgejo, NotificationListOpts } from "./forgejo.js";
 
 // The exact methods the collaboration routes/pages need from the forge/core.
@@ -88,6 +90,7 @@ type ForgejoCollaborationClient = Pick<
   | "replaceRepoTopics"
   | "renderMarkdown"
   | "listBranches"
+  | "searchUsers"
 >;
 
 export type CollaborationClient = Omit<
@@ -112,9 +115,21 @@ export type CollaborationClient = Omit<
   | "addIssueDependency"
   | "removeIssueDependency"
   | "listIssueBlocks"
+  | "listPulls"
+  | "getPull"
+  | "createPull"
+  | "editPull"
+  | "listPullFiles"
+  | "listPullCommits"
+  | "listPullComments"
+  | "listReviews"
+  | "createReview"
+  | "submitPullReview"
+  | "addCommentToReview"
   | "listRepoNotifications"
   | "getNotificationThread"
   | "listBranches"
+  | "searchUsers"
 > & {
   listIssues(owner: string, repo: string, opts?: Parameters<Forgejo["listIssues"]>[2]): Promise<IssueRow[]>;
   getIssue(owner: string, repo: string, number: number): Promise<IssueDetail>;
@@ -136,7 +151,41 @@ export type CollaborationClient = Omit<
   addIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<DependencyRow>;
   removeIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<DependencyRow>;
   listIssueBlocks(owner: string, repo: string, number: number): Promise<DependencyRow[]>;
+  listPulls(owner: string, repo: string, opts?: Parameters<Forgejo["listPulls"]>[2]): Promise<PrMeta[]>;
+  getPull(owner: string, repo: string, number: number): Promise<PrMeta | null>;
+  createPull(owner: string, repo: string, opts: Parameters<Forgejo["createPull"]>[2]): Promise<PrMeta>;
+  editPull(owner: string, repo: string, number: number, patch: Parameters<Forgejo["editPull"]>[3]): Promise<PrMeta>;
+  listPullFiles(owner: string, repo: string, number: number): Promise<PrFile[]>;
+  listPullCommits(owner: string, repo: string, number: number): Promise<PrCommit[]>;
+  listPullComments(owner: string, repo: string, number: number): Promise<LineComment[]>;
+  listReviews(owner: string, repo: string, number: number): Promise<ReviewDto[]>;
+  createReview(
+    owner: string,
+    repo: string,
+    number: number,
+    opts: {
+      event: ReviewState;
+      body: string;
+      comments?: Array<{ path: string; body: string; new_position?: number; old_position?: number }>;
+      commit_id?: string;
+    },
+  ): Promise<ReviewDto>;
+  submitPullReview(
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number,
+    opts: { event: ReviewSubmitEvent; body: string },
+  ): Promise<ReviewDto>;
+  addCommentToReview(
+    owner: string,
+    repo: string,
+    number: number,
+    reviewId: number,
+    opts: { path: string; body: string; new_position?: number; old_position?: number },
+  ): Promise<LineComment>;
   listRepoNotifications(owner: string, repo: string, opts?: NotificationListOpts): Promise<NotificationRow[]>;
   getNotificationThread(id: number): Promise<NotificationRow | null>;
   listBranches(owner: string, repo: string): Promise<BranchRow[]>;
+  searchUsers(query: string, limit?: number): Promise<Array<{ login: string }>>;
 };

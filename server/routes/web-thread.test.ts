@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ForgejoPull } from "../forgejo.js";
+import type { PrMeta } from "../../shared/review.js";
 import type { WebCtx } from "./web-context.js";
 import { initials, reviewForms, tint } from "./web-thread.js";
 
@@ -41,7 +41,7 @@ describe("reviewForms merge controls (#180 admin bypass)", () => {
     String(
       reviewForms(
         { ws: { role }, user, owner: "chao", repo: "w" } as unknown as WebCtx,
-        { number: 7, state, user: { login: prAuthor } } as unknown as ForgejoPull,
+        { number: 7, state, merged: false, author_username: prAuthor } as unknown as PrMeta,
       ),
     );
 
