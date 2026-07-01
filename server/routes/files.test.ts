@@ -149,6 +149,32 @@ describe("Gitea-shaped contents compatibility", () => {
     expect(body.content.sha).toBe("new-sha");
     expect(body.commit.sha).toBe("commit-sha");
   });
+
+  it("PUT /contents/:path without a sha refuses to overwrite an existing file (#277)", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    let wrote = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/work", () => Response.json({ name: "work", commit: { id: "head-sha" } }));
+      forge.get("/api/v1/repos/owner/w/contents/exists.md", () =>
+        Response.json({ path: "exists.md", sha: "current-sha", content: Buffer.from("old\n", "utf8").toString("base64"), encoding: "base64" }),
+      );
+      forge.put("/api/v1/repos/owner/w/contents/exists.md", () => {
+        wrote = true;
+        return Response.json({ commit: { sha: "x" }, content: { sha: "y" } });
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/contents/exists.md", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ branch: "work", message: "blind overwrite", content: Buffer.from("new\n", "utf8").toString("base64") }),
+    });
+
+    expect(res.status).toBe(409);
+    expect((await res.json() as { details: { current_sha: string } }).details.current_sha).toBe("current-sha");
+    expect(wrote).toBe(false);
+  });
 });
 
 describe("files validation route", () => {

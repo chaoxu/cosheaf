@@ -358,6 +358,13 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
   const { backend, owner, repo } = c.get("repoCtx");
   const ws = c.get("workspace");
   const existing = await backend.getFileMeta(owner, repo, branch, rel);
+  if (existing && (typeof body?.sha !== "string" || body.sha.trim() === "")) {
+    // Updating an existing file requires its sha (compare-and-set), matching
+    // Gitea's contents API and this route's own DELETE. A blind write without a
+    // sha would silently clobber a concurrent commit (lost update). Creating a
+    // new file needs no sha. The conflict body carries current_sha to retry with.
+    return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, undefined)));
+  }
   if (typeof body?.sha === "string" && (existing?.sha ?? null) !== body.sha) {
     return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, body.sha)));
   }
