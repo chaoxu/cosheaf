@@ -26,7 +26,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { labelChip, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
+import { filterPanel, labelChip, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import { coflatCommentAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
@@ -422,21 +422,16 @@ function issueFilterForm(
   milestones: readonly ForgejoMilestone[],
 ): Html {
   const action = repoHref(owner, repo, "/issues");
-  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="issue-filters" data-list-prefs="issues">
-    <datalist id="${USERNAME_DATALIST_ID}"></datalist>
-    <div class="filter-basic">
-      ${stateToggle(filters.state)}
-      <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search issues"></label>
-      ${sortField(filters.sort, ISSUE_SORT_OPTIONS)}
-      <div class="filter-actions">
-        <button class="link-button" type="submit">apply</button>
-        <a class="link-button" href="${action}">reset</a>
-      </div>
-    </div>
-    <details class="filter-advanced">
-      <summary>Advanced filters</summary>
-      <div class="filter-advanced-grid">
-        <label>Label
+  const suggestUrl = repoHref(owner, repo, "/user-suggestions");
+  return filterPanel({
+    action,
+    testId: "issue-filters",
+    listPrefs: "issues",
+    q: filters.q,
+    searchAriaLabel: "Search issues",
+    stateToggle: stateToggle(filters.state),
+    sort: sortField(filters.sort, ISSUE_SORT_OPTIONS),
+    advancedFields: html`<label>Label
           <select name="labels" aria-label="Label filter">
             <option value="">Any label</option>
             ${labels.map((label) => html`<option value="${label.name}"${selected(filters.labels, label.name)}>${label.name}</option>`)}
@@ -448,12 +443,10 @@ function issueFilterForm(
             ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestones, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="created_by" value="${filters.createdBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Author filter"></label>
-        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Assignee filter"></label>
-        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Mentioned filter"></label>
-      </div>
-    </details>
-  </form>`;
+        <label>Author <input name="created_by" value="${filters.createdBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${suggestUrl}" placeholder="username" aria-label="Author filter"></label>
+        <label>Assignee <input name="assigned_by" value="${filters.assignedBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${suggestUrl}" placeholder="username" aria-label="Assignee filter"></label>
+        <label>Mentioned <input name="mentioned_by" value="${filters.mentionedBy}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${suggestUrl}" placeholder="username" aria-label="Mentioned filter"></label>`,
+  });
 }
 
 function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues.", local = false): Html {

@@ -37,7 +37,7 @@ import {
 } from "./web-context.js";
 import { type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { branchOptions, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
+import { branchOptions, filterPanel, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import {
   diffModeControls,
   mapLineComments,
@@ -764,21 +764,15 @@ function pullFilterForm(
   milestones: readonly ForgejoMilestone[],
 ): Html {
   const action = repoHref(owner, repo, "/pulls");
-  return html`<form class="filter-panel filter-panel--compact" method="get" action="${action}" data-testid="pull-filters" data-list-prefs="pulls">
-    <datalist id="${USERNAME_DATALIST_ID}"></datalist>
-    <div class="filter-basic">
-      ${stateToggle(filters.state)}
-      <label class="filter-search">Search <input name="q" value="${filters.q}" placeholder="title text" aria-label="Search pull requests"></label>
-      ${sortField(filters.sort, PULL_SORT_OPTIONS)}
-      <div class="filter-actions">
-        <button class="link-button" type="submit">apply</button>
-        <a class="link-button" href="${action}">reset</a>
-      </div>
-    </div>
-    <details class="filter-advanced">
-      <summary>Advanced filters</summary>
-      <div class="filter-advanced-grid">
-        <label>Label
+  return filterPanel({
+    action,
+    testId: "pull-filters",
+    listPrefs: "pulls",
+    q: filters.q,
+    searchAriaLabel: "Search pull requests",
+    stateToggle: stateToggle(filters.state),
+    sort: sortField(filters.sort, PULL_SORT_OPTIONS),
+    advancedFields: html`<label>Label
           <select name="labels" aria-label="Label filter">
             <option value="">Any label</option>
             ${labels.map((label) => html`<option value="${label.id}"${selected(filters.labelValue, String(label.id))}>${label.name}</option>`)}
@@ -790,10 +784,8 @@ function pullFilterForm(
             ${milestones.map((milestone) => html`<option value="${milestone.id}"${selected(filters.milestoneValue, String(milestone.id))}>${milestone.title}</option>`)}
           </select>
         </label>
-        <label>Author <input name="author" value="${filters.author}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Author filter"></label>
-      </div>
-    </details>
-  </form>`;
+        <label>Author <input name="author" value="${filters.author}" autocomplete="off" list="${USERNAME_DATALIST_ID}" data-user-autocomplete="${repoHref(owner, repo, "/user-suggestions")}" placeholder="username" aria-label="Author filter"></label>`,
+  });
 }
 
 function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText = "No pull requests.", local = false): Html {

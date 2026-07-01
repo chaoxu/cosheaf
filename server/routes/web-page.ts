@@ -353,6 +353,40 @@ export function selected(current: string, value: string): Html {
   return current === value ? html` selected` : emptyHtml;
 }
 
+// The shared issue/pull filter panel shell: the compact form with the state
+// toggle, title search, sort field, apply/reset, and an advanced-filters
+// <details> whose grid contents differ per list (labels/milestone/user fields).
+// Callers pass the pre-rendered stateToggle + sort and their advanced fields.
+export function filterPanel(opts: {
+  action: string;
+  testId: string;
+  listPrefs: string;
+  q: string;
+  searchAriaLabel: string;
+  stateToggle: Html;
+  sort: Html;
+  advancedFields: Html;
+}): Html {
+  return html`<form class="filter-panel filter-panel--compact" method="get" action="${opts.action}" data-testid="${opts.testId}" data-list-prefs="${opts.listPrefs}">
+    <datalist id="${USERNAME_DATALIST_ID}"></datalist>
+    <div class="filter-basic">
+      ${opts.stateToggle}
+      <label class="filter-search">Search <input name="q" value="${opts.q}" placeholder="title text" aria-label="${opts.searchAriaLabel}"></label>
+      ${opts.sort}
+      <div class="filter-actions">
+        <button class="link-button" type="submit">apply</button>
+        <a class="link-button" href="${opts.action}">reset</a>
+      </div>
+    </div>
+    <details class="filter-advanced">
+      <summary>Advanced filters</summary>
+      <div class="filter-advanced-grid">
+        ${opts.advancedFields}
+      </div>
+    </details>
+  </form>`;
+}
+
 export function labelChips(labels: readonly ForgejoLabel[]): Html {
   if (labels.length === 0) return emptyHtml;
   return html`<span class="label-chips">${labels.map(labelChip)}</span>`;
