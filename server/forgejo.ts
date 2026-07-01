@@ -118,12 +118,19 @@ export interface NotificationListOpts {
   subjectTypes?: Array<"Issue" | "Pull" | "Commit" | "Repository">;
 }
 
+// Forgejo's list page size — the per-page limit AND the "was this a full page,
+// fetch another?" threshold in every pagination loop. One value so bumping the
+// size can't leave a stale break condition that silently truncates results.
+export const FORGEJO_PAGE_SIZE = 50;
+// Runaway guard on page-walking loops (FORGEJO_PAGE_SIZE * this = max rows).
+const FORGEJO_MAX_PAGES = 50;
+
 function notificationQuery(opts: NotificationListOpts): Record<string, string | number | undefined> {
   return {
     all: opts.all ? "true" : undefined,
     "status-types": opts.statusTypes?.join(","),
     "subject-type": opts.subjectTypes?.join(","),
-    limit: opts.limit ?? 50,
+    limit: opts.limit ?? FORGEJO_PAGE_SIZE,
   };
 }
 
@@ -201,11 +208,11 @@ export class Forgejo {
     limitParam: "limit" | "per_page" = "limit",
   ): Promise<T[]> {
     const out: T[] = [];
-    for (let page = 1; page <= 50; page++) {
-      const batch = await this.req<T[]>(p, { query: { ...query, page, [limitParam]: 50 } });
+    for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
+      const batch = await this.req<T[]>(p, { query: { ...query, page, [limitParam]: FORGEJO_PAGE_SIZE } });
       if (!batch || batch.length === 0) break;
       out.push(...batch);
-      if (batch.length < 50) break;
+      if (batch.length < FORGEJO_PAGE_SIZE) break;
     }
     return out;
   }
@@ -255,14 +262,14 @@ export class Forgejo {
 
   async listUsers(): Promise<ForgejoUser[]> {
     const out: ForgejoUser[] = [];
-    for (let page = 1; page <= 50; page++) {
+    for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
       const result = await this.req<ForgejoUserSearchResponse>("/api/v1/users/search", {
-        query: { q: "", page, limit: 50 },
+        query: { q: "", page, limit: FORGEJO_PAGE_SIZE },
       });
       const batch = result.data ?? [];
       if (batch.length === 0) break;
       out.push(...batch);
-      if (batch.length < 50) break;
+      if (batch.length < FORGEJO_PAGE_SIZE) break;
     }
     return out;
   }
@@ -369,14 +376,14 @@ export class Forgejo {
   // ones; untagged repos default to forgejo-passthrough.
   async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
     const out: ForgejoRepo[] = [];
-    for (let page = 1; page <= 50; page++) {
+    for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
       const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
-        query: { page, limit: 50 },
+        query: { page, limit: FORGEJO_PAGE_SIZE },
       });
       const batch = res.data ?? [];
       if (batch.length === 0) break;
       out.push(...batch);
-      if (batch.length < 50) break;
+      if (batch.length < FORGEJO_PAGE_SIZE) break;
     }
     return out;
   }
@@ -387,7 +394,7 @@ export class Forgejo {
 
   async listUserRepos(owner: string, opts: { limit?: number; page?: number } = {}): Promise<ForgejoRepo[]> {
     return this.req<ForgejoRepo[]>(`/api/v1/users/${encodeURIComponent(owner)}/repos`, {
-      query: { limit: opts.limit ?? 50, page: opts.page ?? 1 },
+      query: { limit: opts.limit ?? FORGEJO_PAGE_SIZE, page: opts.page ?? 1 },
     });
   }
 
@@ -588,12 +595,12 @@ export class Forgejo {
     while (true) {
       const r = await this.req<{ tree: ForgejoTreeEntry[]; truncated: boolean }>(
         this.repoPath(owner, repo, `git/trees/${encodeURIComponent(ref)}`),
-        { query: { recursive: recursive ? "true" : "false", page, per_page: 50 } },
+        { query: { recursive: recursive ? "true" : "false", page, per_page: FORGEJO_PAGE_SIZE } },
       );
       out.push(...(r.tree ?? []));
       if (!r.truncated || (r.tree ?? []).length === 0) break;
       page++;
-      if (page > 50) break;
+      if (page > FORGEJO_MAX_PAGES) break;
     }
     return out;
   }
