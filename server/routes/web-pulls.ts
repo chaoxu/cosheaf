@@ -37,7 +37,7 @@ import {
 } from "./web-context.js";
 import { type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
+import { branchOptions, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import {
   diffModeControls,
   mapLineComments,
@@ -55,7 +55,6 @@ import {
   isVisibleReview,
   labelSelectionPatch,
   labelsPanel,
-  listRowSide,
   milestoneFormValue,
   pullEditPage,
   pullStateForm,
@@ -64,6 +63,7 @@ import {
   reviewForms,
   threadDescription,
   threadLayout,
+  threadListRow,
   threadParticipantsBar,
 } from "./web-thread.js";
 
@@ -802,15 +802,20 @@ function pullList(owner: string, repo: string, pulls: ForgejoPull[], emptyText =
     // The head branch name is noise; the base only matters when it isn't main.
     const basesNonMain = pull.base.ref !== "main";
     const labels = pull.labels ?? [];
-    const hasMeta = basesNonMain || Boolean(pull.milestone) || labels.length > 0;
-    const href = repoHref(owner, repo, `/pulls/${pull.number}`);
-    return html`<div class="list-row pull-row">
-      <span class="list-row-main">
-        <span class="list-row-title"><span class="state ${state}">${state}</span><a class="list-row-title-link" href="${href}"><strong>${pull.title}</strong><span class="muted">#${pull.number}</span></a></span>
-        ${hasMeta ? html`<span class="list-meta">${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}${labelChips(labels)}</span>` : ""}
-      </span>
-      ${listRowSide(pull.user, pull.created_at, pull.comments, local)}
-    </div>`;
+    return threadListRow({
+      rowClass: "pull-row",
+      href: repoHref(owner, repo, `/pulls/${pull.number}`),
+      state,
+      title: pull.title,
+      number: pull.number,
+      metaPills: html`${basesNonMain ? html`<span class="meta-pill branch-ref">${branchIcon({ size: 11 })}${pull.base.ref}</span>` : ""}${pull.milestone ? html`<span class="meta-pill">${pull.milestone.title}</span>` : ""}`,
+      hasMeta: basesNonMain || Boolean(pull.milestone) || labels.length > 0,
+      labels,
+      author: pull.user,
+      createdAt: pull.created_at,
+      comments: pull.comments,
+      local,
+    });
   });
   return html`<div class="list">${rows.length ? rows : html`<div class="empty">${emptyText}</div>`}</div>`;
 }

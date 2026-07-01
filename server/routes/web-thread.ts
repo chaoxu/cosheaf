@@ -466,6 +466,34 @@ export function listRowSide(
   </span>`;
 }
 
+// One list row shared by the issue and pull lists — identical structure (state
+// badge + title link + #number, optional .list-meta with pills + label chips,
+// listRowSide). Callers supply the row class, state, the extra meta pills
+// (milestone, and the base-branch pill for pulls), and whether to show the meta
+// section.
+export function threadListRow(opts: {
+  rowClass: "issue-row" | "pull-row";
+  href: string;
+  state: string;
+  title: string;
+  number: number;
+  metaPills: Html;
+  hasMeta: boolean;
+  labels: readonly ForgejoLabel[];
+  author: AvatarUser | null | undefined;
+  createdAt: string | undefined;
+  comments: number | undefined;
+  local: boolean;
+}): Html {
+  return html`<div class="list-row ${opts.rowClass}">
+      <span class="list-row-main">
+        <span class="list-row-title"><span class="state ${opts.state}">${opts.state}</span><a class="list-row-title-link" href="${opts.href}"><strong>${opts.title}</strong><span class="muted">#${opts.number}</span></a></span>
+        ${opts.hasMeta ? html`<span class="list-meta">${opts.metaPills}${labelChips(opts.labels)}</span>` : ""}
+      </span>
+      ${listRowSide(opts.author, opts.createdAt, opts.comments, opts.local)}
+    </div>`;
+}
+
 // Participants bar at the top of an issue/PR thread: who has taken part, the
 // reply count, last activity, and a jump-to-latest anchor (targets
 // #thread-bottom by the composer). Generic over issue/PR comment shapes so both

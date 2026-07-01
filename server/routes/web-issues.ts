@@ -26,7 +26,7 @@ import {
 } from "./web-context.js";
 import { emptyHtml, type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
-import { labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
+import { labelChip, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import { coflatCommentAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
@@ -34,13 +34,13 @@ import {
   issueEditPage,
   labelSelectionPatch,
   labelsPanel,
-  listRowSide,
   milestoneFormValue,
   rejectChatIssueMutation,
   renderIssueTimeline,
   resolveMutableIssue,
   threadDescription,
   threadLayout,
+  threadListRow,
   threadParticipantsBar,
 } from "./web-thread.js";
 
@@ -460,16 +460,21 @@ function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyTex
   return html`<div class="list">${
     issues.length === 0
       ? html`<div class="empty">${emptyText}</div>`
-      : issues.map((issue) => {
-          const hasMeta = Boolean(issue.milestone) || issue.labels.length > 0;
-          const href = repoHref(owner, repo, `/issues/${issue.number}`);
-          return html`<div class="list-row issue-row">
-      <span class="list-row-main">
-        <span class="list-row-title"><span class="state ${issue.state}">${issue.state}</span><a class="list-row-title-link" href="${href}"><strong>${issue.title}</strong><span class="muted">#${issue.number}</span></a></span>
-        ${hasMeta ? html`<span class="list-meta">${issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : ""}${labelChips(issue.labels)}</span>` : ""}
-      </span>
-      ${listRowSide(issue.user, issue.created_at, issue.comments, local)}
-    </div>`;
-        })
+      : issues.map((issue) =>
+          threadListRow({
+            rowClass: "issue-row",
+            href: repoHref(owner, repo, `/issues/${issue.number}`),
+            state: issue.state,
+            title: issue.title,
+            number: issue.number,
+            metaPills: issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : emptyHtml,
+            hasMeta: Boolean(issue.milestone) || issue.labels.length > 0,
+            labels: issue.labels,
+            author: issue.user,
+            createdAt: issue.created_at,
+            comments: issue.comments,
+            local,
+          }),
+        )
   }</div>`;
 }
