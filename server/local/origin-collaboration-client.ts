@@ -54,8 +54,6 @@ import {
   lineCommentToShape,
   type MilestoneShape,
   milestoneToShape,
-  type NotificationThreadShape,
-  notificationRowToShape,
   type PinnedRow,
   pinnedRowToShape,
   prCommitToShape,
@@ -775,16 +773,15 @@ export class OriginCollaborationClient {
 
   // ---- notifications ----
 
-  // The typed feed is already filtered to unread Issue/Pull threads, so the
-  // forge-style status/subject opts are accepted for signature parity and
-  // ignored here.
+  // The typed feed is already filtered to unread Issue/Pull rows, so the
+  // forge-style status/subject opts are accepted for signature parity.
   async listRepoNotifications(
     owner: string,
     repo: string,
     _opts: { statusTypes?: readonly string[]; subjectTypes?: readonly string[] } = {},
-  ): Promise<NotificationThreadShape[]> {
+  ): Promise<NotificationRow[]> {
     const r = await this.get<{ notifications: NotificationRow[] }>(this.repoPath(owner, repo, "/notifications"));
-    return (r.notifications ?? []).map(notificationRowToShape);
+    return r.notifications ?? [];
   }
 
   async listRepoActivities(owner: string, repo: string, opts: { limit?: number } = {}): Promise<ActivityShape[]> {
@@ -796,15 +793,11 @@ export class OriginCollaborationClient {
 
   // ---- notification writes ----
 
-  // Resolve a single notification thread by its global forge id. The core's
-  // typed global route maps the forge thread to a NotificationRow (Issue/Pull
-  // only); rebuild the thread shape the notification route reads — it checks
-  // `repository.full_name` to scope the thread to this workspace before marking
-  // it read. A non-issue/pull or unreadable thread 404s, which the route's
-  // `.catch(() => null)` degrades to a not-found rather than a 500.
-  async getNotificationThread(id: number): Promise<NotificationThreadShape> {
+  // Resolve a single notification thread by its global forge id. A non-issue/
+  // pull or unreadable thread 404s, which callers degrade to not-found.
+  async getNotificationThread(id: number): Promise<NotificationRow> {
     const r = await this.get<{ notification: NotificationRow }>(`/api/v1/notifications/threads/${id}`);
-    return notificationRowToShape(r.notification);
+    return r.notification;
   }
 
   // Mark one thread read by its global forge id (the core's typed global route

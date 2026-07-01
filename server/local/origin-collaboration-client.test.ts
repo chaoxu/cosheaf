@@ -144,7 +144,7 @@ describe("OriginCollaborationClient write methods", () => {
 
     expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/notifications/threads/101");
     expect(fake.calls[0]?.init?.method ?? "GET").toBe("GET");
-    expect(thread).toMatchObject({ id: 101, repository: { full_name: "me/notes" } });
+    expect(thread).toMatchObject({ id: 101, repo: "me/notes", kind: "issue", number: 42 });
   });
 
   it("marks a single notification thread read by its global id", async () => {

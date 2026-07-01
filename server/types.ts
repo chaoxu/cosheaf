@@ -30,10 +30,10 @@ export interface RepoCtx {
   backend: WorkspaceBackend;
   fj?: Forgejo;
   // The collaboration seam (#262): issues/pulls/reviews/notifications/settings
-  // read this instead of `fj` directly. Hosted injects the Forgejo client (which
-  // structurally satisfies CollaborationClient); the local Workbench injects an
-  // OriginCollaborationClient bound to the connected core. Optional during the
-  // migration; once every collaboration route reads `collab`, `fj` retires.
+  // read this instead of `fj` directly. Hosted injects an in-process Core
+  // adapter over Forgejo; the local Workbench injects an OriginCollaborationClient
+  // bound to the connected core. Optional during the migration; once every
+  // collaboration route reads `collab`, `fj` retires.
   collab?: CollaborationClient;
   owner: string;
   repo: string;

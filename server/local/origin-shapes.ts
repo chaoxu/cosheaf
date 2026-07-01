@@ -16,10 +16,8 @@ import type {
   IssueState,
   Label,
   Milestone,
-  NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
-import { parseWorkspaceSlug } from "../../shared/conventions.js";
 import type { PrCommit, PrFile, PrMeta, ReviewDto } from "../../shared/review.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 
@@ -43,7 +41,6 @@ export type ActivityShape = Awaited<ReturnType<CollaborationClient["listRepoActi
 export type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
 export type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
 export type BranchProtectionShape = NonNullable<Awaited<ReturnType<CollaborationClient["getBranchProtection"]>>>;
-export type NotificationThreadShape = Awaited<ReturnType<CollaborationClient["listRepoNotifications"]>>[number];
 
 // Cosheaf DTOs serialize timestamps as epoch-ms; the forge shapes carry ISO-8601
 // strings (which the routes immediately re-parse with toEpochMs). Round-trip
@@ -352,33 +349,6 @@ export interface BranchJson {
 }
 export function branchToShape(b: BranchJson): BranchShape {
   return { name: b.name, commit: { id: b.commit?.id ?? "", timestamp: b.commit?.timestamp, author: b.commit?.author } };
-}
-
-// ----- notifications -----
-
-// NotificationRow is already the mapped repo-notification DTO; rebuild the
-// thread shape the notification routes re-map. The typed feed is unread-only, so
-// `unread` is true and `pinned` false. Synthesize a subject url carrying the
-// issue/pull number so the routes' number-from-url parse still resolves.
-export function notificationRowToShape(row: NotificationRow): NotificationThreadShape {
-  const type = row.kind === "pr" ? "Pull" : "Issue";
-  const segment = row.kind === "pr" ? "pulls" : "issues";
-  const name = parseWorkspaceSlug(row.repo)?.repo ?? row.repo;
-  return {
-    id: row.id,
-    unread: true,
-    pinned: false,
-    updated_at: iso(row.updated_at),
-    url: "",
-    subject: {
-      title: row.title,
-      url: `/${segment}/${row.number}`,
-      latest_comment_url: "",
-      html_url: row.url,
-      type,
-    },
-    repository: { full_name: row.repo, name },
-  };
 }
 
 // The typed collaborators DTO is {login, permission}; the settings route reads

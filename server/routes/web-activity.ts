@@ -6,7 +6,8 @@ import {
   collapseNoisyEditBranchCommits,
   parseActivityContent,
 } from "../activity-feed.js";
-import type { ForgejoActivity, ForgejoNotificationThread } from "../forgejo-types.js";
+import type { NotificationRow } from "../../shared/issues.js";
+import type { ForgejoActivity } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import { parsePositiveIntId } from "./query-params.js";
 import {
@@ -39,7 +40,7 @@ web.post("/:owner/:repo/notifications/:id/read", webRoute(async (c, ctx) => {
   const id = positiveInt(c.req.param("id"));
   if (!id) return notFoundPage(ctx.user, "Notification not found");
   const thread = await ctx.collab.getNotificationThread(id).catch(() => null);
-  if (!thread || thread.repository.full_name !== `${ctx.owner}/${ctx.repo}`) return notFoundPage(ctx.user, "Notification not found");
+  if (!thread || thread.repo !== `${ctx.owner}/${ctx.repo}`) return notFoundPage(ctx.user, "Notification not found");
   await ctx.collab.markNotificationRead(id);
   return redirect(repoHref(ctx.owner, ctx.repo, "/notifications"));
 }));
@@ -58,7 +59,7 @@ web.get("/:owner/:repo/activity", webRoute(async (_c, ctx) => {
 }));
 }
 
-function notificationsPage(ctx: WebCtx, threads: readonly ForgejoNotificationThread[]): Html {
+function notificationsPage(ctx: WebCtx, threads: readonly NotificationRow[]): Html {
   return html`
     <div class="page-title compact">
       <div><h1>Notifications</h1></div>
@@ -76,11 +77,11 @@ function notificationsPage(ctx: WebCtx, threads: readonly ForgejoNotificationThr
   `;
 }
 
-function notificationRow(ctx: WebCtx, thread: ForgejoNotificationThread): Html {
+function notificationRow(ctx: WebCtx, thread: NotificationRow): Html {
   const href = notificationHref(ctx, thread);
-  const kind = thread.subject.type === "Pull" ? "Pull request" : thread.subject.type;
+  const kind = thread.kind === "pr" ? "Pull request" : "Issue";
   return html`<div class="list-row">
-    <a class="inline-link" href="${href}"><strong>${thread.subject.title}</strong></a>
+    <a class="inline-link" href="${href}"><strong>${thread.title}</strong></a>
     <span>${kind} - ${timeEl(thread.updated_at)}</span>
     <form class="inline-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/notifications/${thread.id}/read`)}">
       <button class="button" type="submit">Mark read</button>
@@ -88,13 +89,10 @@ function notificationRow(ctx: WebCtx, thread: ForgejoNotificationThread): Html {
   </div>`;
 }
 
-function notificationHref(ctx: WebCtx, thread: ForgejoNotificationThread): string {
-  const match = thread.subject.url.match(/\/(?:issues|pulls)\/(\d+)(?:$|[?#])/);
-  const number = match ? Number(match[1]) : null;
-  if (!number) return repoHref(ctx.owner, ctx.repo, "/notifications");
-  return thread.subject.type === "Pull"
-    ? repoHref(ctx.owner, ctx.repo, `/pulls/${number}`)
-    : repoHref(ctx.owner, ctx.repo, `/issues/${number}`);
+function notificationHref(ctx: WebCtx, thread: NotificationRow): string {
+  return thread.kind === "pr"
+    ? repoHref(ctx.owner, ctx.repo, `/pulls/${thread.number}`)
+    : repoHref(ctx.owner, ctx.repo, `/issues/${thread.number}`);
 }
 
 function activityList(ctx: WebCtx, activities: ForgejoActivity[]): Html {

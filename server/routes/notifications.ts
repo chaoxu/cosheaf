@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { notificationChannel } from "../../shared/conventions.js";
-import type { NotificationKind, NotificationRow } from "../../shared/issues.js";
+import type { NotificationRow } from "../../shared/issues.js";
+import { forgeNotificationThreadToRow, forgeNotificationThreadsToRows } from "../core/forge-dto.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
-import { toEpochMs } from "../forgejo-types.js";
 import { repoCtxCollab, requireAuth, requireMembership } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { parsePositiveIntId } from "./query-params.js";
@@ -63,51 +63,26 @@ globalNotifications.post("/notifications/:id/read", async (c) => {
   return c.json({ ok: true });
 });
 
-// Parse "/api/v1/repos/owner/repo/issues/42" or ".../pulls/42" → 42.
-function numberFromSubjectUrl(url: string): number | null {
-  const m = url.match(/\/(?:issues|pulls)\/(\d+)(?:[?#]|$)/);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
-}
-
 // Map a batch of Forgejo notification threads to cosheaf NotificationRows,
 // dropping non-Issue/Pull subjects and sorting newest first. Shared by the
 // typed repo route and the home inbox.
 export function mapThreads(threads: readonly ForgejoNotificationThread[]): NotificationRow[] {
-  return threads
-    .map(mapThread)
-    .filter((row): row is NotificationRow => row !== null)
-    .sort((a, b) => b.updated_at - a.updated_at);
+  return forgeNotificationThreadsToRows(threads);
 }
 
-function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
-  const subjectType = t.subject.type;
-  const kind: NotificationKind | null =
-    subjectType === "Issue" ? "issue" : subjectType === "Pull" ? "pr" : null;
-  if (!kind) return null;
-  const number = numberFromSubjectUrl(t.subject.url);
-  if (number == null) return null;
-  return {
-    id: t.id,
-    kind,
-    number,
-    title: t.subject.title,
-    repo: t.repository.full_name,
-    updated_at: toEpochMs(t.updated_at),
-    url: t.subject.html_url ?? t.subject.url,
-  };
+function mapThread(thread: ForgejoNotificationThread): NotificationRow | null {
+  return forgeNotificationThreadToRow(thread);
 }
 
 // GET /api/v1/repos/:owner/:repo/notifications — unread notifications for the
 // calling user in this workspace's Forgejo repo.
 notifications.get("/:owner/:repo/notifications", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
-  const threads = await collab.listRepoNotifications(owner, repo, {
+  const notifications = await collab.listRepoNotifications(owner, repo, {
     statusTypes: ["unread"],
     subjectTypes: ["Issue", "Pull"],
   });
-  return c.json({ notifications: mapThreads(threads) });
+  return c.json({ notifications });
 });
 
 // POST /api/v1/repos/:owner/:repo/notifications/:id/read
@@ -117,7 +92,7 @@ notifications.post("/:owner/:repo/notifications/:id/read", async (c) => {
   const { collab } = repoCtxCollab(c);
   // A stale/cross-repo/unreadable id should 404, not 500 — normalize the fetch.
   const thread = await collab.getNotificationThread(id).catch(() => null);
-  if (!thread || thread.repository?.full_name !== c.get("workspace").slug) return c.json(...notFound());
+  if (!thread || thread.repo !== c.get("workspace").slug) return c.json(...notFound());
   await collab.markNotificationRead(id);
   return c.json({ ok: true });
 });

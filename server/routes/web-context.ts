@@ -7,6 +7,7 @@ import type { LocaleId, T } from "../../shared/i18n/index.js";
 import { canWrite, type Role } from "../../shared/roles.js";
 import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import type { CollaborationClient } from "../collaboration-client.js";
+import { forgeCoreCollaborationClient } from "../core/collaboration.js";
 import { Forgejo } from "../forgejo.js";
 import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
@@ -239,14 +240,15 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);
   const backend = new ForgejoWorkspaceBackend(fj);
-  c.set("repoCtx", { backend, fj, collab: fj, owner, repo });
+  const collab = forgeCoreCollaborationClient(fj);
+  c.set("repoCtx", { backend, fj, collab, owner, repo });
   const db = c.get("db");
   const [wsTitle, userAvatarSrc] = await Promise.all([
     resolveWorkspaceDisplayTitle(db, fj, ws),
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
   const setMember = (username: string, role: Role) => setWorkspaceMember({ forgejo: fj, owner, repo, username, role });
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID, canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID, canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(

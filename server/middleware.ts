@@ -5,6 +5,7 @@ import { type DocumentFormatId, documentFormatFromTopics } from "../shared/docum
 import type { Role } from "../shared/roles.js";
 import { type ResolvedApiToken, resolveApiToken } from "./api-tokens.js";
 import type { CollaborationClient } from "./collaboration-client.js";
+import { forgeCoreCollaborationClient } from "./core/collaboration.js";
 import { Forgejo, ForgejoError } from "./forgejo.js";
 import { ForgejoWorkspaceBackend } from "./forgejo-backend.js";
 import { resolveLocalWorkspace } from "./local/local-mode.js";
@@ -214,11 +215,7 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
 
   const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
   c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat, role });
-  // The Forgejo client structurally satisfies CollaborationClient, so hosted
-  // `collab` is just `fj` — collaboration routes migrating off `ctx.fj` onto
-  // `ctx.collab` (#262) see no behavior change. Local injects an Origin-backed
-  // impl instead.
-  c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, collab: fj, owner, repo });
+  c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, collab: forgeCoreCollaborationClient(fj), owner, repo });
   await next();
 };
 

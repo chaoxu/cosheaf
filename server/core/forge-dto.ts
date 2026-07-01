@@ -1,4 +1,4 @@
-import type { Label, DependencyRow, IssueComment, IssueRow, Milestone, TimelineEvent } from "../../shared/issues.js";
+import type { Label, DependencyRow, IssueComment, IssueRow, Milestone, NotificationKind, NotificationRow, TimelineEvent } from "../../shared/issues.js";
 import type { PrCommit, PrFileStatus, PrMeta, ReviewDto } from "../../shared/review.js";
 import type {
   ForgejoCommit,
@@ -6,6 +6,7 @@ import type {
   ForgejoIssueComment,
   ForgejoLabel,
   ForgejoMilestone,
+  ForgejoNotificationThread,
   ForgejoPull,
   ForgejoPullFile,
   ForgejoReview,
@@ -171,4 +172,36 @@ export function forgeReviewToDto(r: ForgejoReview): ReviewDto {
 
 export function forgePullFileToStatus(file: ForgejoPullFile): PrFileStatus {
   return normalizePrFileStatus(file.status);
+}
+
+// Parse "/api/v1/repos/owner/repo/issues/42" or ".../pulls/42" -> 42.
+function numberFromSubjectUrl(url: string): number | null {
+  const m = url.match(/\/(?:issues|pulls)\/(\d+)(?:[?#]|$)/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function forgeNotificationThreadToRow(thread: ForgejoNotificationThread): NotificationRow | null {
+  const subjectType = thread.subject.type;
+  const kind: NotificationKind | null = subjectType === "Issue" ? "issue" : subjectType === "Pull" ? "pr" : null;
+  if (!kind) return null;
+  const number = numberFromSubjectUrl(thread.subject.url);
+  if (number === null) return null;
+  return {
+    id: thread.id,
+    kind,
+    number,
+    title: thread.subject.title,
+    repo: thread.repository.full_name,
+    updated_at: toEpochMs(thread.updated_at),
+    url: thread.subject.html_url ?? thread.subject.url,
+  };
+}
+
+export function forgeNotificationThreadsToRows(threads: readonly ForgejoNotificationThread[]): NotificationRow[] {
+  return threads
+    .map(forgeNotificationThreadToRow)
+    .filter((row): row is NotificationRow => row !== null)
+    .sort((a, b) => b.updated_at - a.updated_at);
 }
