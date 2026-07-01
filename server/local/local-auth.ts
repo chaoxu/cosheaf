@@ -1,8 +1,10 @@
 // The local Workbench's optional access gate.
 //
 // By default the Workbench is a loopback, single-user tool with no auth — opening
-// any registered folder grants full local file authority. That is safe only
-// because nothing off-box can reach 127.0.0.1. To let the operator run the
+// any registered folder grants full local file authority. That is safe only when
+// the request's browser-facing host is also loopback; the no-token path rejects
+// non-loopback Host headers so DNS rebinding cannot turn an attacker-controlled
+// name into same-origin access to 127.0.0.1. To let the operator run the
 // Workbench on a dev box and reach it from another device, `COSHEAF_WORKBENCH_TOKEN`
 // turns on a single shared access token: every request must present it (as
 // `Authorization: Bearer <token>` for API/agents, or the `cosheaf_wb` HttpOnly
@@ -16,6 +18,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
+import { isLoopbackHost } from "../db.js";
 import { bearerToken } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 
@@ -43,13 +46,40 @@ export function hasWorkbenchAccess(c: Context<AppEnv>, expected: string): boolea
   return tokenMatches(presented, expected);
 }
 
-// The gate middleware. With no configured token it is a pass-through (today's
-// loopback no-auth behavior). With a token, unauthenticated requests get a 401
-// (API paths) or a redirect to /login (browser pages); exempt paths always pass.
+export function hostHeaderName(value: string): string | null {
+  const host = value.trim();
+  if (!host) return null;
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    if (end < 0) return null;
+    return host.slice(1, end);
+  }
+  const colon = host.lastIndexOf(":");
+  return colon >= 0 ? host.slice(0, colon) : host;
+}
+
+function requestHostName(c: Context<AppEnv>): string | null {
+  const rawHost = c.req.header("host") ?? new URL(c.req.url).host;
+  return hostHeaderName(rawHost);
+}
+
+function rejectNonLoopbackNoTokenHost(c: Context<AppEnv>): Response | null {
+  const host = requestHostName(c);
+  if (host && isLoopbackHost(host)) return null;
+  return new Response("forbidden", { status: 403 });
+}
+
+// The gate middleware. With no configured token it allows only loopback Host
+// headers. With a token, unauthenticated requests get a 401 (API paths) or a
+// redirect to /login (browser pages); exempt paths always pass.
 export function localAuthGate(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const expected = c.get("config").accessToken;
-    if (!expected) return next();
+    if (!expected) {
+      const forbidden = rejectNonLoopbackNoTokenHost(c);
+      if (forbidden) return forbidden;
+      return next();
+    }
     if (EXEMPT_PATHS.has(c.req.path)) return next();
     if (hasWorkbenchAccess(c, expected)) return next();
     // `code: "unauthorized"` so the editor/reader island's api.ts bounces to
