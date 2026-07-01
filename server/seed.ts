@@ -254,7 +254,6 @@ export async function seedWorkspace(args: {
     user,
     forgejoUsername: options.user,
     provisionVia: "admin",
-    allowExistingLocal: true,
     rollbackCreatedRepoOnLocalFailure: true,
     defaultMdFormat: options.defaultMdFormat,
   });

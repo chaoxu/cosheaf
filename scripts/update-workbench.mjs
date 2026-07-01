@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Command } from "commander";
+import { argvWithoutForwardedDashDash } from "./lib/argv.mjs";
 import { run } from "./lib/run.mjs";
 
 const program = new Command();
@@ -31,7 +32,7 @@ program
   .option("--dir <path>", "install directory", join(homedir(), "cosheaf-workbench"))
   .option("--restart <cmd>", "shell command to restart the daemon after swap")
   .option("--dry-run", "resolve + download only; don't swap or restart")
-  .parse(process.argv.filter((a, i) => !(i >= 2 && a === "--")));
+  .parse(argvWithoutForwardedDashDash());
 const opts = program.opts();
 
 const headers = process.env.COSHEAF_GITEA_TOKEN

@@ -226,7 +226,6 @@ describe("workspace provisioning", () => {
       user,
       forgejoUsername: "chao",
       provisionVia: "admin",
-      allowExistingLocal: true,
     });
     await provisionWorkspace(db, forgejo, config, {
       owner: "owner",
@@ -235,7 +234,6 @@ describe("workspace provisioning", () => {
       user,
       forgejoUsername: "chao",
       provisionVia: "admin",
-      allowExistingLocal: true,
     });
 
     // Idempotent re-provisioning: a second call should not fail. The

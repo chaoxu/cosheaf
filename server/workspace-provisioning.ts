@@ -63,7 +63,6 @@ export interface ProvisionWorkspaceOptions {
   // when owner differs from the creator. "admin" (CLI/seed): the supplied
   // client is site-admin — create on behalf of `owner` via the admin API.
   provisionVia: "user-pat" | "admin";
-  allowExistingLocal?: boolean;
   rollbackCreatedRepoOnLocalFailure?: boolean;
   defaultMdFormat?: string;
   visibility?: WorkspaceVisibility;

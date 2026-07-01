@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
+import { argvWithoutForwardedDashDash } from "./lib/argv.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coflatSrc = resolve(repoRoot, "..", "coflat");
@@ -34,9 +35,7 @@ program
   .description("Pack the local Workbench into a self-contained plain-Node distributable")
   .option("--skip-build", "reuse existing dist/ and dist-server/ instead of rebuilding")
   .option("--no-tarball", "leave dist-workbench/ unpacked; skip the .tar.gz")
-  // `pnpm workbench:pack -- --skip-build` forwards a lone `--`; drop it so it is
-  // not parsed as an unexpected operand.
-  .parse(process.argv.filter((a, i) => !(i >= 2 && a === "--")));
+  .parse(argvWithoutForwardedDashDash());
 const opts = program.opts();
 
 function run(cmd, args, cwd = repoRoot) {
