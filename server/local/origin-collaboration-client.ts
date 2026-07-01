@@ -495,61 +495,11 @@ export class OriginCollaborationClient {
     return `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${suffix}`;
   }
 
-  private async get<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
-    const url = new URL(`${this.base}${path}`);
-    if (query) {
-      for (const [k, v] of Object.entries(query)) {
-        if (v !== undefined) url.searchParams.set(k, String(v));
-      }
-    }
-    const res = await this.fetchFn(url.toString(), {
-      headers: { authorization: `Bearer ${this.token}`, accept: "application/json" },
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
-    }
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
-  }
-
-  // For resources the forge client returns as `T | null` on a 404 (getPull,
-  // getRepo): swallow the status-bearing 404 into null, re-throw anything else.
-  private async getOrNull<T>(
-    path: string,
-    query?: Record<string, string | number | undefined>,
-  ): Promise<T | null> {
-    try {
-      return await this.get<T>(path, query);
-    } catch (err) {
-      if (err instanceof RemoteCosheafError && err.status === 404) return null;
-      throw err;
-    }
-  }
-
-  private async post<T>(path: string, body: unknown): Promise<T> {
-    const res = await this.fetchFn(`${this.base}${path}`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        accept: "application/json",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new RemoteCosheafError(res.status, `remote cosheaf ${res.status}: ${text.slice(0, 200)}`);
-    }
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
-  }
-
-  // Shared write transport for PUT/PATCH/DELETE: bearer auth, JSON body when
-  // present, optional query (the typed delete routes take ids in the query),
-  // never a forge path. Mirrors `post`'s status-bearing error.
-  private async send<T>(
-    method: "PUT" | "PATCH" | "DELETE",
+  // One transport for every verb: bearer auth, optional query, JSON body +
+  // content-type only when a body is present, status-bearing RemoteCosheafError
+  // on non-2xx, and the `text ? JSON.parse : undefined` tail. Never a forge path.
+  private async request<T>(
+    method: string,
     path: string,
     opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {},
   ): Promise<T> {
@@ -572,6 +522,36 @@ export class OriginCollaborationClient {
     }
     const text = await res.text();
     return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  private get<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
+    return this.request<T>("GET", path, { query });
+  }
+
+  // For resources the forge client returns as `T | null` on a 404 (getPull,
+  // getRepo): swallow the status-bearing 404 into null, re-throw anything else.
+  private async getOrNull<T>(
+    path: string,
+    query?: Record<string, string | number | undefined>,
+  ): Promise<T | null> {
+    try {
+      return await this.get<T>(path, query);
+    } catch (err) {
+      if (err instanceof RemoteCosheafError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  private post<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>("POST", path, { body });
+  }
+
+  private send<T>(
+    method: "PUT" | "PATCH" | "DELETE",
+    path: string,
+    opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {},
+  ): Promise<T> {
+    return this.request<T>(method, path, opts);
   }
 
   private put<T>(path: string, body: unknown): Promise<T> {
