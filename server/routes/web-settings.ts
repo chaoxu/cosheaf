@@ -2,8 +2,7 @@ import type { Hono } from "hono";
 import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
 import { isFormatTopic } from "../../shared/document-format.js";
 import { ROLES, type Role } from "../../shared/roles.js";
-import { ForgejoError } from "../forgejo.js";
-import { is404 } from "../forgejo-errors.js";
+import { is404, is4xx } from "../forgejo-errors.js";
 import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalidateWorkspaceTitleCache } from "../middleware.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
@@ -219,7 +218,9 @@ web.post("/:owner/:repo/settings/access/remove", webRouteForAdmin(async (c, ctx)
       try {
         await ctx.collab.removeCollaborator(ctx.owner, ctx.repo, username);
       } catch (err) {
-        if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
+        // Status-based so it also swallows the local Workbench's RemoteCosheafError:
+        // removing an already-gone (404) or invalid (422) collaborator is idempotent.
+        if (!is4xx(err, 404, 422)) throw err;
       }
       invalidateWorkspacePermissionCache(ctx.owner, ctx.repo, username);
     },
@@ -247,7 +248,9 @@ web.post("/:owner/:repo/settings/delete", webRouteForAdmin(async (c, ctx) => {
   try {
     await ctx.collab.deleteRepo(ctx.owner, ctx.repo);
   } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+    // Status-based so it also swallows the local Workbench's RemoteCosheafError:
+    // deleting an already-deleted repo (404) is idempotent.
+    if (!is404(err)) throw err;
   }
   cleanupDeletedWorkspace(ctx);
   return redirect("/");
