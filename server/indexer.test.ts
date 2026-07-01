@@ -134,6 +134,24 @@ describe("indexPage", () => {
     expect(rows[1]?.cosheaf_id).toBe(second.cosheafId);
   });
 
+  it("keeps a collided page's id stable across reindexes (no churn)", () => {
+    const db = freshDb();
+    const ingest = (filePath: string) => ({
+      workspaceSlug: "owner/w",
+      filePath,
+      bodyText: `---\nid: same\n---\n# ${filePath}\n`,
+      formatId: COFLAT_FORMAT_ID,
+    });
+    indexPage(db, ingest("a.md"));
+    const first = indexPage(db, ingest("b.md"));
+    // Re-indexing b.md (still carrying the duplicate frontmatter id) must reuse
+    // its already-assigned id, not mint a fresh random one on every run.
+    const second = indexPage(db, ingest("b.md"));
+    const third = indexPage(db, ingest("b.md"));
+    expect(second.cosheafId).toBe(first.cosheafId);
+    expect(third.cosheafId).toBe(first.cosheafId);
+  });
+
   it("populates FTS, backlinks, and tags on insert", () => {
     const db = freshDb();
     indexPage(db, {

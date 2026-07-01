@@ -67,7 +67,14 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
         AND forgejo_id != ?
         AND (? IS NULL OR forgejo_id != ?)`,
   ).get(p.workspaceSlug, cosheafId, p.filePath, p.replacePath ?? null, p.replacePath ?? null) as { forgejo_id: string } | undefined;
-  if (collision) cosheafId = generateDocId();
+  if (collision) {
+    // A frontmatter id duplicated across files collides. Prefer this path's
+    // already-assigned id (stable across reindexes) so we don't churn a fresh
+    // random id every run — mint one only when there's no prior id, or the
+    // prior id is itself the colliding value.
+    cosheafId =
+      existingByPath && existingByPath.cosheaf_id !== cosheafId ? existingByPath.cosheaf_id : generateDocId();
+  }
 
   const explicitTitle =
     typeof parsed.frontmatter.title === "string" && parsed.frontmatter.title.length > 0
