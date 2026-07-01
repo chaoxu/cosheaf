@@ -211,7 +211,7 @@ pnpm dev:login-state
 - PDF export pages: `server/routes/web-pdf-export.ts`
   - Verify with `pnpm exec vitest run server/routes/web-files.test.ts server/async-job-limiter.test.ts`.
 - File links and file tree panels: `server/routes/web-file-links.ts`, `server/routes/web-file-tree.ts`
-  - Verify with `pnpm exec vitest run server/routes/web-files.test.ts server/routes/web-panels.test.ts`.
+  - Verify with `pnpm exec vitest run server/routes/web-files.test.ts`.
 - Server-rendered web CSS: `public/cosheaf-web.css`
   - Verify with `pnpm check:web` and `pnpm devx:verify-route -- --route /chao/flushing-coin/activity`.
 - Static asset serving and route mounting: `server/app.ts`

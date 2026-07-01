@@ -1,12 +1,10 @@
 # Manual smoke checklist
 
 Run after `pnpm setup:dev` (or after any non-trivial change). Walks every
-user-visible path. Per-format expectations are noted where they differ.
+user-visible path.
 
 The seeded workspace is **Flushing Coin** (`chao/flushing-coin`), default
-format `coflat`. To smoke the passthrough format too, create a second
-workspace with `default_md_format = forgejo-passthrough` via the settings
-panel.
+format `coflat`.
 
 ## 1. Login + workspace switch
 - [ ] `/` → login form. Sign in as `chao` / `Cosheaf123!`.
@@ -98,15 +96,15 @@ panel.
 - [ ] New/edit/save/merge affordances are hidden or forbidden. Reading files,
       issues, pull requests, and activity still works.
 
-## Per-format expectations
+## Coflat expectations
 
-| Path | coflat | forgejo-passthrough |
-|---|---|---|
-| File rendering | Coflat reader: math, `[@id]` citations, footnotes | Forgejo's `/markdown`: GFM + repo-context linkification |
-| Backlinks panel | Populated from `[@id]` and `[text](path.md)` links | Empty (passthrough's extractLinks returns []) |
-| Linter tab | Broken-ref rows if any | Empty |
-| PR rich-diff view | Source-line-attributed side-by-side | Falls back to plain source diff |
-| Editor | `@chaoxu/coflat` MarkdownEditor | Plain textarea |
+| Path | Expectation |
+|---|---|
+| File rendering | Coflat reader: math, `[@id]` citations, footnotes |
+| Backlinks panel | Populated from `[@id]` and `[text](path.md)` links |
+| Linter tab | Broken-ref rows if any |
+| PR rich-diff view | Source-line-attributed side-by-side |
+| Editor | `@chaoxu/coflat` MarkdownEditor |
 
 Each section ~5 minutes; whole checklist runnable in ~30 min if everything
 green. Anything red → file an issue with the failing step.

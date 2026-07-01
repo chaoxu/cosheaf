@@ -13,9 +13,9 @@ fenced divs, KaTeX math, `[@id]` cross-references, citations, and LaTeX export
 conventions. Cosheaf itself stays page-oriented; it does not maintain a
 math-native theorem graph or proof dependency model.
 
-Workspaces choose a markdown format. New workspaces default to Forgejo Markdown
-passthrough for plain `.md` files, while Coflat workspaces opt into math-friendly
-rendering, backlinks, and rich review diffs.
+Cosheaf markdown is Coflat. Workspaces store ordinary `.md` files in Forgejo,
+but rendering, indexing, backlinks, and rich review diffs all use the Coflat
+format contract.
 
 The substrate is fully usable by humans alone. Automated agents such as
 [Coverify](https://github.com/chaoxu/coverify) participate as ordinary Forgejo

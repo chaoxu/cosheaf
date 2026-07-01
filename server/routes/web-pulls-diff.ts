@@ -73,10 +73,9 @@ export interface PrFileAssetPreviewPaths {
   head?: AssetPreviewPaths;
 }
 
-// Rich diff renders through the Coflat reader island, which only exists for
-// the coflat format. For forgejo-passthrough there is no rich surface, so we
-// coerce to source regardless of the requested/saved mode — the server is the
-// source of truth here, not the client default.
+// Rich diff renders through the Coflat reader island. Some callers still pass
+// `richOk=false` when the required content is unavailable, in which case source
+// remains the safe fallback.
 export function parseDiffMode(value: string | undefined, richOk: boolean): DiffMode {
   if (!richOk) return "source";
   return value === "source" ? "source" : "rich";

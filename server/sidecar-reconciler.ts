@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { COFLAT_FORMAT_ID, documentFormatFromTopics } from "../shared/document-format.js";
+import { documentFormatFromTopics } from "../shared/document-format.js";
 import type { Forgejo } from "./forgejo.js";
 import { listVisibleWorkspaceRepos } from "./workspace-discovery.js";
 import { lockedReindexWorkspaceFromForgejo } from "./workspace-provisioning.js";
@@ -20,15 +20,6 @@ export async function reconcileAllCoflatWorkspaces(
   const results: ReconcileWorkspaceResult[] = [];
   for (const repo of repos) {
     const formatId = documentFormatFromTopics(repo.topics ?? []);
-    if (formatId !== COFLAT_FORMAT_ID) {
-      results.push({
-        slug: repo.full_name,
-        status: "skipped",
-        pages: 0,
-        detail: `format=${formatId}`,
-      });
-      continue;
-    }
     try {
       const pages = await serializeWorkspace(repo.full_name, () =>
         lockedReindexWorkspaceFromForgejo(db, forgejo, {

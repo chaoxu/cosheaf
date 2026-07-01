@@ -13,7 +13,7 @@ const repoBase = `${webBase}/${owner}/${repo}`;
 // On coflat workspaces (the fixture format) a compose textarea is enhanced by
 // the web-comment-editor island: the textarea is hidden and a CodeMirror editor
 // mirrors its value back. Type into the rich editor when it mounted, else fall
-// back to the plain textarea (forgejo-passthrough / island not yet mounted).
+// back to the plain textarea when the island is not yet mounted.
 async function fillCompose(scope: Locator, text: string): Promise<void> {
   const compose = scope.locator("[data-coflat-compose]").first();
   if (await compose.count()) {

@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { COFLAT_FORMAT_ID, FORGEJO_PASSTHROUGH_FORMAT_ID } from "../../shared/document-format.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 import { indexCitationFile, indexPage } from "../indexer.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
@@ -340,8 +340,8 @@ describe("files validation route", () => {
     expect(body.duplicate_xrefs).toEqual([{ id: "thm:dup", paths: "a.md (2 definitions)", count: 2 }]);
   });
 
-  it("ignores stale Coflat xref validation rows for passthrough workspaces", async () => {
-    const db = freshDb(FORGEJO_PASSTHROUGH_FORMAT_ID);
+  it("reports stale Coflat xref validation rows for Coflat workspaces", async () => {
+    const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     seedStaleXrefs(db);
 
@@ -351,17 +351,8 @@ describe("files validation route", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as WorkspaceValidation;
-    expect(body.duplicate_xrefs).toEqual([]);
-    expect(body.broken_refs).toEqual([
-      {
-        source_id: "source",
-        source_path: "source.md",
-        source_title: "Source",
-        target_id: "thm:stale",
-        target_label: "[@thm:stale]",
-        line: 3,
-      },
-    ]);
+    expect(body.duplicate_xrefs).toEqual([{ id: "thm:dup", paths: "stale.md (2 definitions)", count: 2 }]);
+    expect(body.broken_refs).toEqual([]);
   });
 });
 
@@ -434,8 +425,8 @@ describe("files refs route", () => {
     });
   });
 
-  it("does not expose stale Coflat xrefs for passthrough workspaces", async () => {
-    const db = freshDb(FORGEJO_PASSTHROUGH_FORMAT_ID);
+  it("exposes stale Coflat xrefs for Coflat workspaces", async () => {
+    const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     seedStaleXrefs(db);
 
@@ -444,7 +435,12 @@ describe("files refs route", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ refs: [], ambiguous_refs: [] });
+    expect(await res.json()).toEqual({
+      refs: [
+        { id: "thm:stale", path: "stale.md", kind: "block", label: "Theorem 1", fragment: "thm:stale", line: 7 },
+      ],
+      ambiguous_refs: [],
+    });
   });
 
   it("resolves refs from the requested branch instead of the main sidecar", async () => {
@@ -571,8 +567,8 @@ describe("files suggest route", () => {
     }
   });
 
-  it("does not suggest stale Coflat xrefs for passthrough workspaces", async () => {
-    const db = freshDb(FORGEJO_PASSTHROUGH_FORMAT_ID);
+  it("suggests stale Coflat xrefs for Coflat workspaces", async () => {
+    const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
     seedStaleXrefs(db);
 
@@ -581,7 +577,11 @@ describe("files suggest route", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ suggestions: [] });
+    expect(await res.json()).toEqual({
+      suggestions: [
+        { id: "thm:stale", display: "thm:stale — Theorem 1 (stale.md)", insert: "[@thm:stale]" },
+      ],
+    });
   });
 
   it("adds branch-local page ids and Coflat labels that are not indexed on main", async () => {

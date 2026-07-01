@@ -374,7 +374,7 @@ export class Forgejo {
   // Forgejo visibility, and each result already carries `permissions` +
   // `topics` (no per-repo round-trip). Cosheaf is a frontend over the forge:
   // discovery shows every accessible repo, not only `cosheaf-format-*` tagged
-  // ones; untagged repos default to forgejo-passthrough.
+  // ones; Cosheaf markdown is always Coflat.
   async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
     const out: ForgejoRepo[] = [];
     for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {

@@ -29,7 +29,7 @@ interface Workspace {
   full_name: string;   // "owner/repo" — the canonical workspace slug
   name: string;
   role: Role;
-  default_md_format: "forgejo-passthrough" | "coflat";
+  default_md_format: "coflat";
 }
 
 interface DocumentMeta {
@@ -111,7 +111,7 @@ GET /workspaces
 → { "workspaces": Workspace[] }     # all owners the caller can see
 
 POST /workspaces
-{ "owner"?: string, "slug": string, "name": string, "default_md_format"?: "forgejo-passthrough" | "coflat" }
+{ "owner"?: string, "slug": string, "name": string, "default_md_format"?: "coflat" }
 → 201 Workspace
 # owner defaults to the caller; slug is the repo name under that owner
 
@@ -466,16 +466,16 @@ GET /notifications/events
 
 ```http
 GET /repos/:owner/:repo/settings
-→ { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
+→ { "min_approvals": number, "default_md_format": "coflat" }
 
 PUT /repos/:owner/:repo/settings
-{ "min_approvals"?: number, "default_md_format"?: "forgejo-passthrough" | "coflat" }
-→ { "min_approvals": number, "default_md_format": string, "formats": Array<{ "id": string, "displayName": string }> }
+{ "min_approvals"?: number, "default_md_format"?: "coflat" }
+→ { "min_approvals": number, "default_md_format": "coflat" }
 ```
 
-Approval settings map to backend branch protection on `main`. The workspace
-markdown format controls typed file indexing and server-rendered page output. Updating
-settings requires admin permission.
+Approval settings map to backend branch protection on `main`. Cosheaf markdown
+is Coflat-only; `default_md_format` is retained as a compatibility field and
+must be `coflat` when provided. Updating settings requires admin permission.
 
 ## Events
 

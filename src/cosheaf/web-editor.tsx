@@ -3,14 +3,14 @@ import type {
   AutocompleteSource as EditorAutocompleteSource,
   SaveHandler as EditorSaveHandler,
   StatusEvents as EditorStatusEvents,
-  LazyEditorSourcePosition as EditorSourcePosition,
-  LazyEditorScrollToSourcePositionOptions as ScrollToSourcePositionOptions,
-  LazyEditorDocumentChange as MountedDocumentChange,
+  EditorSourcePosition,
+  ScrollToSourcePositionOptions,
+  MountedDocumentChange,
   OutlineEntry,
-} from "@chaoxu/coflat/editor-lazy";
+} from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,
-} from "@chaoxu/coflat/editor-lazy";
+} from "@chaoxu/coflat";
 import {
   type DocumentContext,
   type FileEntry,
@@ -30,7 +30,7 @@ import {
 import {
   documentRailModel,
 } from "../../shared/document-rail";
-import { COFLAT_FORMAT_ID, DEFAULT_DOCUMENT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+import { DEFAULT_DOCUMENT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { repoBranchFileHref, repoHref } from "../../shared/url";
@@ -46,7 +46,7 @@ import {
   liveEditorSource,
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
-import type { RequestHandler } from "@chaoxu/coflat/editor-lazy";
+import type { RequestHandler } from "@chaoxu/coflat";
 import { createBibliographyPicker } from "./bibliography-picker";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { currentDocumentSuggestions, fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
@@ -216,7 +216,7 @@ function WebEditor({
   const [readOnly, setReadOnly] = useState(Boolean(initialReadOnly));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
-  const [documentContextReady, setDocumentContextReady] = useState(config.formatId !== COFLAT_FORMAT_ID);
+  const [documentContextReady, setDocumentContextReady] = useState(false);
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
@@ -236,7 +236,7 @@ function WebEditor({
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
   const resetEditBranchRef = useRef(config.resetEditBranch);
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
-  const contextLoadedRef = useRef(config.formatId !== COFLAT_FORMAT_ID);
+  const contextLoadedRef = useRef(false);
   branchRef.current = branch;
   branchExistsRef.current = branchExists;
   savedReadBranchRef.current = savedReadBranch;
@@ -353,12 +353,6 @@ function WebEditor({
   );
 
   useEffect(() => {
-    if (config.formatId !== COFLAT_FORMAT_ID) {
-      setDocumentContext(null);
-      contextLoadedRef.current = true;
-      setDocumentContextReady(true);
-      return;
-    }
     let cancelled = false;
     if (!contextLoadedRef.current) setDocumentContextReady(false);
     const sourceVersion = sourceCacheRef.current.version();
@@ -383,10 +377,9 @@ function WebEditor({
     return () => {
       cancelled = true;
     };
-  }, [branch, branchExists, config.assetPreviewPaths, config.bibliography, config.csl, config.formatId, config.mathMacros, config.owner, config.path, config.repo, contextSource, currentPath]);
+  }, [branch, branchExists, config.assetPreviewPaths, config.bibliography, config.csl, config.mathMacros, config.owner, config.path, config.repo, contextSource, currentPath]);
 
   useEffect(() => {
-    if (config.formatId !== COFLAT_FORMAT_ID) return;
     let cancelled = false;
     void api.validation(config.owner, config.repo).then((validation) => {
       if (cancelled) return;
@@ -401,7 +394,7 @@ function WebEditor({
     return () => {
       cancelled = true;
     };
-  }, [config.formatId, config.owner, config.repo]);
+  }, [config.owner, config.repo]);
 
   useEffect(() => {
     if (!documentContext) return;
@@ -446,7 +439,6 @@ function WebEditor({
   }, [config.username, config.writeMode, config.branch]);
 
   const fileSystem = useMemo<FileSystem | undefined>(() => {
-    if (config.formatId !== COFLAT_FORMAT_ID) return undefined;
     const readBranch = () => branchRef.current || config.branch || "main";
     const readExistingBranch = () => branchExistsRef.current ? readBranch() : savedReadBranchRef.current;
     const displayAssetPath = (path: string): string => previewAssetPath(path, config.assetPreviewPaths);
@@ -682,33 +674,29 @@ function WebEditor({
 
   const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
     () =>
-      // `[@id]` cross-refs only resolve in Coflat workspaces; for
-      // forgejo-passthrough the syntax is plain text, so don't offer it.
-      config.formatId !== COFLAT_FORMAT_ID
-        ? []
-        : [
-            {
-              trigger: "[@",
-              suggest: async (prefix, env) => {
-                if (env.signal.aborted) return [];
-                const local = currentDocumentSuggestions(liveEditorSource(editorRef.current, content), prefix);
-                try {
-                  const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch, limit: 10 });
-                  const seen = new Set(local.map((suggestion) => suggestion.id));
-                  return [
-                    ...local,
-                    ...result.suggestions.filter((suggestion) => {
-                      if (seen.has(suggestion.id)) return false;
-                      seen.add(suggestion.id);
-                      return true;
-                    }),
-                  ].slice(0, 10);
-                } catch (_err) {
-                  return local.slice(0, 10);
-                }
-              },
-            },
-          ],
+      [
+        {
+          trigger: "[@",
+          suggest: async (prefix, env) => {
+            if (env.signal.aborted) return [];
+            const local = currentDocumentSuggestions(liveEditorSource(editorRef.current, content), prefix);
+            try {
+              const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch, limit: 10 });
+              const seen = new Set(local.map((suggestion) => suggestion.id));
+              return [
+                ...local,
+                ...result.suggestions.filter((suggestion) => {
+                  if (seen.has(suggestion.id)) return false;
+                  seen.add(suggestion.id);
+                  return true;
+                }),
+              ].slice(0, 10);
+            } catch (_err) {
+              return local.slice(0, 10);
+            }
+          },
+        },
+      ],
     [branch, config.owner, config.repo, config.formatId, content],
   );
 
@@ -916,7 +904,7 @@ function WebEditor({
                 assetUploader={assetUploader}
                 autocompleteSources={autocompleteSources}
                 requestHandler={requestHandler}
-                sidenotesCollapsed={config.formatId === COFLAT_FORMAT_ID}
+                sidenotesCollapsed={true}
               />
             ) : (
               <div className="web-editor-loading">Loading editor...</div>
@@ -976,27 +964,25 @@ function WebEditor({
           </span>
         </>,
         <>
-          {config.formatId === COFLAT_FORMAT_ID ? (
-            <span className="web-editor-mode-toggle" aria-label="Editor mode">
-              <button
-                type="button"
-                className={mode !== "source" ? "active" : ""}
-                aria-pressed={mode !== "source"}
-                onClick={() => setEditorMode("rich")}
-              >
-                Rich
-              </button>
-              <button
-                type="button"
-                className={mode === "source" ? "active" : ""}
-                aria-pressed={mode === "source"}
-                onClick={() => setEditorMode("source")}
-              >
-                Source
-              </button>
-            </span>
-          ) : null}
-          {config.formatId === COFLAT_FORMAT_ID ? (() => {
+          <span className="web-editor-mode-toggle" aria-label="Editor mode">
+            <button
+              type="button"
+              className={mode !== "source" ? "active" : ""}
+              aria-pressed={mode !== "source"}
+              onClick={() => setEditorMode("rich")}
+            >
+              Rich
+            </button>
+            <button
+              type="button"
+              className={mode === "source" ? "active" : ""}
+              aria-pressed={mode === "source"}
+              onClick={() => setEditorMode("source")}
+            >
+              Source
+            </button>
+          </span>
+          {(() => {
             const actionable = validationSummary ? validationSummary.brokenRefs + validationSummary.duplicateLabels : null;
             const label = actionable === null ? "Problems -" : `Problems ${actionable}`;
             const detail = validationSummary
@@ -1011,7 +997,7 @@ function WebEditor({
                 {label}
               </a>
             );
-          })() : null}
+          })()}
           {(() => {
             // Glance-able, paired with the dirty-dot. title surfaces the full error.
             const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty, lastSavedAt });

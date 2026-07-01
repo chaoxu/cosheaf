@@ -42,15 +42,12 @@ review, or comment.
 
 ## Workspace Formats
 
-Cosheaf supports plain Forgejo Markdown and Coflat-flavored Markdown.
+Cosheaf Markdown is Coflat Markdown. Pages use `.md` files with math-friendly
+rendering, backlinks from `[@id]` references, richer review diffs, and stable
+page ids in YAML frontmatter.
 
-- **Forgejo Markdown** is the default for ordinary repositories.
-- **Coflat** adds math-friendly rendering, backlinks from `[@id]` references,
-  richer review diffs, and stable page ids in YAML frontmatter.
-
-The workspace format is selected by repository topics such as
-`cosheaf-format-coflat`. Untagged repositories still appear in Cosheaf and use
-Forgejo Markdown passthrough.
+The `cosheaf-format-coflat` repository topic may mark a repository as a
+Cosheaf/Coflat workspace. It does not select among Markdown modes.
 
 ## Common Tasks
 

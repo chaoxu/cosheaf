@@ -67,8 +67,8 @@ CREATE TABLE IF NOT EXISTS workspace_locks (
 
 -- No workspaces table. The workspace slug IS the Forgejo `owner/repo` full
 -- name, the display name comes from the Forgejo repo description, and the
--- workspace's default markdown format lives in a Forgejo repo topic
--- (`cosheaf-format-coflat` present → coflat, otherwise → forgejo-passthrough).
+-- workspace markdown is Coflat. A `cosheaf-format-coflat` topic may mark repos
+-- as Cosheaf/Coflat workspaces, but it no longer selects among Markdown modes.
 -- Sidecar tables key off the slug directly (`workspace_slug TEXT` holding
 -- `owner/repo`); legacy `workspace_id INTEGER` columns and bare-repo-name
 -- slugs are migrated in db.ts around this schema run.
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS backlinks (
 CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks (workspace_slug, target_id);
 
 -- Derived cross-reference targets inside Coflat Markdown pages. These are
--- rebuildable from Forgejo Markdown files and let page A resolve
+-- rebuildable from Coflat Markdown files and let page A resolve
 -- `[@thm:...]` / `[@eq:...]` labels that are defined in page B.
 CREATE TABLE IF NOT EXISTS xref_targets (
   workspace_slug TEXT NOT NULL,

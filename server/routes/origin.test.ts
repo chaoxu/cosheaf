@@ -61,7 +61,6 @@ describe("GET /api/v1/origin", () => {
     ]);
     expect(body.document_formats).toEqual([
       { id: "coflat", display_name: "Coflat Markdown", extensions: [".md"] },
-      { id: "forgejo-passthrough", display_name: "Forgejo Markdown", extensions: [".md"] },
     ]);
     expect(body.consistency.branch_reads).toContain("requested Forgejo branch");
     expect(body.consistency.main_index).toContain("may lag");

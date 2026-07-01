@@ -1,10 +1,8 @@
 import type { ComponentType } from "react";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
-import type { RequestHandler } from "@chaoxu/coflat/editor-lazy";
+import type { RequestHandler } from "@chaoxu/coflat";
 import {
   COFLAT_FORMAT_ID,
-  DEFAULT_DOCUMENT_FORMAT_ID,
-  FORGEJO_PASSTHROUGH_FORMAT_ID,
   type DocumentFormatId,
 } from "../../shared/document-format";
 import type {
@@ -58,15 +56,8 @@ register({
     })),
 });
 
-register({
-  id: FORGEJO_PASSTHROUGH_FORMAT_ID,
-  displayName: "Forgejo Markdown",
-  supportsRichDiff: false,
-  editor: () => import("./document-format/forgejo-passthrough-editor").then((m) => ({ default: m.MarkdownEditor })),
-});
-
 export function getClientDocumentFormat(formatId: DocumentFormatId): ClientDocumentFormat {
-  const format = formats.get(formatId) ?? formats.get(DEFAULT_DOCUMENT_FORMAT_ID) ?? formats.get(COFLAT_FORMAT_ID);
+  const format = formats.get(formatId) ?? formats.get(COFLAT_FORMAT_ID);
   if (!format) throw new Error("no document formats registered");
   return format;
 }

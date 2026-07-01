@@ -55,9 +55,8 @@ export interface WebCtx {
   // "am I local" flag the page modules branch on, derived once here so call sites
   // read `ctx.local` instead of re-deriving `ctx.writeMode === "direct"`.
   local: boolean;
-  // Whether the workspace renders with Coflat (vs forgejo-passthrough), derived
-  // once here so call sites read `ctx.coflat` instead of re-deriving
-  // `ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID`.
+  // Whether the workspace renders with Coflat. This is currently always true
+  // for Cosheaf Markdown, but the flag remains during route migration.
   coflat: boolean;
   // Add/update a collaborator's role. Hosted runs setWorkspaceMember against the
   // forge (collaborator + branch-protection whitelist); local proxies to the
@@ -234,9 +233,8 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     return { ok: false, response: await notFoundPage(auth.user.username, "Repository not found") };
   }
   // Cosheaf is a frontend over the forge: any repo the caller can read is a
-  // valid workspace. Untagged repos open as forgejo-passthrough — the format
-  // falls back via documentFormatFromTopics; we no longer gate on a
-  // `cosheaf-format-*` topic being present.
+  // valid workspace. Markdown is Coflat; the format marker no longer controls
+  // visibility.
   const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
   const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
   c.set("workspace", ws);

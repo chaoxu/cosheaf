@@ -1,9 +1,9 @@
 import { Text } from "@codemirror/state";
 import type {
-  LazyEditorDocumentChange as MountedDocumentChange,
-  MountedLazyEditor as MountedEditor,
-} from "@chaoxu/coflat/editor-lazy";
-import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
+  MountedDocumentChange,
+  MountedEditor,
+} from "@chaoxu/coflat";
+import type { DocumentFormatId } from "../../shared/document-format";
 
 interface EditorChangeHandlers {
   onStringChange: (value: string) => void;
@@ -18,9 +18,8 @@ export function routeEditorChangeHandlers(
   formatId: DocumentFormatId,
   handlers: EditorChangeHandlers,
 ): RoutedEditorChangeProps {
-  return formatId === COFLAT_FORMAT_ID
-    ? { onDocumentChange: handlers.onDocumentChange }
-    : { onChange: handlers.onStringChange };
+  void formatId;
+  return { onDocumentChange: handlers.onDocumentChange };
 }
 
 export function liveEditorSource(editor: Pick<MountedEditor, "getDoc"> | null | undefined, fallback: string): string {

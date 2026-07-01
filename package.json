@@ -27,7 +27,7 @@
     "devx:what-to-run": "node scripts/devx-what-to-run.mjs",
     "devx:verify-route": "node scripts/web-route-check.mjs",
     "check:pr-rich": "node scripts/page-rich-check.mjs",
-    "setup:dev": "tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace chao/flushing-coin --workspace-name \"Flushing Coin\" --default-md-format coflat",
+    "setup:dev": "tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace chao/flushing-coin --workspace-name \"Flushing Coin\"",
     "setup:dev:review": "pnpm setup:dev && tsx server/cli.ts user create test-vera Cosheaf123! && tsx server/cli.ts user create test-meri Cosheaf123! && tsx server/cli.ts workspace member chao/flushing-coin test-vera write && tsx server/cli.ts workspace member chao/flushing-coin test-meri write",
     "server": "tsx watch server/index.ts",
     "server:start": "tsx server/index.ts",
@@ -108,7 +108,7 @@
     "check:stability": "pnpm test && pnpm check:e2e",
     "clean": "rm -rf dist dist-server test-results playwright-report",
     "prepare": "lefthook install",
-    "setup:dev:manual": "pnpm setup:dev:review && tsx server/cli.ts user create test-bob Cosheaf123! && tsx server/cli.ts workspace member chao/flushing-coin test-bob read && tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace chao/passthrough-demo --workspace-name \"Passthrough Demo\" --default-md-format forgejo-passthrough && tsx server/cli.ts workspace member chao/passthrough-demo test-vera write && tsx server/cli.ts workspace member chao/passthrough-demo test-meri write && tsx server/cli.ts workspace member chao/passthrough-demo test-bob read && node scripts/manual-seed-checklist.mjs"
+    "setup:dev:manual": "pnpm setup:dev:review && tsx server/cli.ts user create test-bob Cosheaf123! && tsx server/cli.ts workspace member chao/flushing-coin test-bob read && tsx server/cli.ts seed --user chao --password Cosheaf123! --workspace chao/coflat-demo --workspace-name \"Coflat Demo\" && tsx server/cli.ts workspace member chao/coflat-demo test-vera write && tsx server/cli.ts workspace member chao/coflat-demo test-meri write && tsx server/cli.ts workspace member chao/coflat-demo test-bob read && node scripts/manual-seed-checklist.mjs"
   },
   "license": "MIT",
   "pnpm": {

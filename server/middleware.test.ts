@@ -103,7 +103,7 @@ function notFound(): Response {
 describe("requireMembership", () => {
   it("accepts Gitea-style Authorization token headers for Cosheaf tokens", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     _seedPermCacheForTests("owner", "w", "alice", "write");
 
@@ -117,7 +117,7 @@ describe("requireMembership", () => {
 
   it("rejects a direct Forgejo PAT bearer by default", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
 
     const res = await appFor(db).request("/repos/owner/w/probe", {
       headers: { authorization: "Bearer forgejo-pat-alice" },
@@ -128,7 +128,7 @@ describe("requireMembership", () => {
 
   it("rejects a direct Forgejo token header by default", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
 
     const res = await appFor(db).request("/repos/owner/w/probe", {
       headers: { authorization: "token forgejo-pat-alice" },
@@ -140,7 +140,7 @@ describe("requireMembership", () => {
   it("can temporarily accept a Forgejo PAT bearer when migration mode is enabled", async () => {
     process.env.COSHEAF_ACCEPT_FORGEJO_BEARER = "1";
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     fetchMock
       .mockResolvedValueOnce(ok({ login: "alice" }))
       .mockResolvedValueOnce(ok({ permission: "write" }));
@@ -158,7 +158,7 @@ describe("requireMembership", () => {
 
   it("resolves Forgejo collaborator permission and sets ws.role", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "write" }));
 
@@ -171,7 +171,7 @@ describe("requireMembership", () => {
 
   it("returns 404 (not 403) when Forgejo says the user has no collaborator access", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     // Forgejo returns 404 from the permission endpoint for an unknown
     // collaborator → translated to role 'none' → middleware hides the workspace.
@@ -185,7 +185,7 @@ describe("requireMembership", () => {
 
   it("treats Forgejo's owner permission as admin", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValueOnce(ok({ permission: "owner" }));
 
@@ -198,7 +198,7 @@ describe("requireMembership", () => {
 
   it("caches by (owner, repo, user) — back-to-back requests hit Forgejo once", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     fetchMock.mockResolvedValue(ok({ permission: "write" }));
 
@@ -210,8 +210,8 @@ describe("requireMembership", () => {
 
   it("does not collide across workspaces with the same user", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w1", "forgejo-passthrough");
-    _seedFormatCacheForTests("owner", "w2", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w1", "coflat");
+    _seedFormatCacheForTests("owner", "w2", "coflat");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "write" })) // w1
@@ -226,8 +226,8 @@ describe("requireMembership", () => {
 
   it("does not collide across owners with the same repo name", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("alice-org", "w1", "forgejo-passthrough");
-    _seedFormatCacheForTests("bob-org", "w1", "forgejo-passthrough");
+    _seedFormatCacheForTests("alice-org", "w1", "coflat");
+    _seedFormatCacheForTests("bob-org", "w1", "coflat");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" })) // alice-org/w1
@@ -271,7 +271,7 @@ describe("requireMembership", () => {
 describe("requireAdminFresh", () => {
   it("re-fetches Forgejo permission, ignoring the cached role", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" })) // requireMembership caches admin
@@ -286,7 +286,7 @@ describe("requireAdminFresh", () => {
 
   it("allows the request when Forgejo still reports admin", async () => {
     const db = freshDb();
-    _seedFormatCacheForTests("owner", "w", "forgejo-passthrough");
+    _seedFormatCacheForTests("owner", "w", "coflat");
     const token = seedUser(db, "alice");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "admin" }))

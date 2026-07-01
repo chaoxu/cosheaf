@@ -1,5 +1,5 @@
 import type { ForgejoLabel } from "../forgejo-types.js";
-import type { Label } from "../../shared/issues.js";
+export { toLabel } from "../core/forge-dto.js";
 
 function labelScope(label: ForgejoLabel): string | null {
   if (!label.exclusive) return null;
@@ -13,18 +13,6 @@ function labelScope(label: ForgejoLabel): string | null {
 export function normalizeLabelColor(raw: string): string | null {
   const color = raw.trim().replace(/^#/, "");
   return /^[0-9a-fA-F]{6}$/.test(color) ? color : null;
-}
-
-export function toLabel(label: ForgejoLabel): Label {
-  return {
-    id: label.id,
-    name: label.name,
-    color: label.color,
-    description: label.description,
-    exclusive: Boolean(label.exclusive),
-    is_archived: Boolean(label.is_archived),
-    scope: labelScope(label),
-  };
 }
 
 export function parsePositiveLabelIds(value: unknown): number[] | null {

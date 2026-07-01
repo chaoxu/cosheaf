@@ -4,7 +4,6 @@ import type { WorkspaceContext } from "../types.js";
 import { backIcon } from "./icons.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, type Html, html, joinHtml, raw } from "./web-html.js";
-import { type Panel, renderRegion } from "./web-panels.js";
 import { pageShell, type StatusCrumb, sidebarIdentity } from "./web-shell.js";
 
 export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings" | "commit";
@@ -47,7 +46,7 @@ export function repoPageShell(
   active: RepoTab,
   title: string,
   body: Html,
-  opts: { readerAssets?: boolean; sidebarPanels?: readonly Panel[]; statusExtra?: readonly StatusCrumb[]; statusOmitTab?: boolean } = {},
+  opts: { readerAssets?: boolean; sidebarPanels?: readonly Html[]; statusExtra?: readonly StatusCrumb[]; statusOmitTab?: boolean } = {},
 ): string {
   return repoPage({
     title,
@@ -83,9 +82,8 @@ export function repoPage(opts: {
   wsTitle: string;
   body: Html;
   readerAssets?: boolean;
-  // Portable panels rendered into the left-sidebar region under the repo tabs
-  // (#119 file tree via the #120 panel seam); other tabs leave it unset.
-  sidebarPanels?: readonly Panel[];
+  // Optional content rendered into the left-sidebar region under the repo tabs.
+  sidebarPanels?: readonly Html[];
   // Extra status-bar breadcrumb segments appended after owner/repo/tab — the
   // edit page uses this to show the branch being edited (#126).
   statusExtra?: readonly StatusCrumb[];
@@ -134,7 +132,7 @@ export function repoPage(opts: {
         <span class="role">${opts.ws.role}</span>
       </div>
       <nav class="repo-tabs">${nav}</nav>
-      ${opts.sidebarPanels?.length ? renderRegion(opts.sidebarPanels) : emptyHtml}`,
+      ${opts.sidebarPanels?.length ? joinHtml(opts.sidebarPanels) : emptyHtml}`,
     statusPath: [
       { label: opts.owner, href: opts.local ? repoHref(opts.owner, opts.repo) : `/users/${encodeURIComponent(opts.owner)}`, cls: opts.wsTitle ? "status-owner" : undefined },
       { label: opts.repo, href: repoHref(opts.owner, opts.repo), wsTitle: opts.wsTitle || undefined },

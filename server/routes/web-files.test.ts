@@ -584,17 +584,6 @@ describe("web file editor route", () => {
     expect(pandoc?.args.some((arg) => arg.startsWith("--template=") && arg.endsWith("/latex/template/lipics.tex"))).toBe(false);
   });
 
-  it("rejects PDF export for non-Coflat markdown workspaces", async () => {
-    const db = freshTestDb("cosheaf-web-files-");
-    seedTestWorkspace(db);
-    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
-
-    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/notes.md", { headers: authHeaders(token) });
-
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain("Coflat Markdown");
-  });
-
   it("rejects absolute custom PDF template paths", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
@@ -1542,7 +1531,9 @@ describe("web file editor route", () => {
     let deleted = false;
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
         forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/wip" }]));
+        forge.get("/api/v1/repos/owner/w/branches/:branch", () => Response.json({ name: "user/alice/wip" }));
         forge.get("/api/v1/repos/owner/w/git/trees/:ref", () => Response.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false }));
         forge.get("/api/v1/repos/owner/w/contents/notes.md", () => Response.json({ sha: "current-sha" }));
         forge.get("/api/v1/repos/owner/w/raw/notes.md", () => new Response("# Notes\n"));

@@ -252,9 +252,8 @@ export function repoCtxCollab(c: Context<AppEnv>): { collab: CollaborationClient
 // enough, and a topic flip is a rare admin action.
 const FORMAT_TTL_MS = AUTH_CACHE_TTL_MS;
 
-// Cached per-workspace markdown format derived from repo topics; untagged
-// repos fall back to the default (forgejo-passthrough). Cosheaf is a frontend
-// over the forge, so visibility is never gated on a format topic being present.
+// Cached per-workspace markdown format. Cosheaf markdown is Coflat; the cache
+// remains while workspace DTOs still expose the historical format field.
 const FORMAT_CACHE = new TTLCache<string, DocumentFormatId>(FORMAT_TTL_MS);
 
 export function _resetFormatCacheForTests(): void {

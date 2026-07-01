@@ -544,8 +544,8 @@ files.put("/:owner/:repo/file", async (c) => {
   // Only Markdown files are pages: parse/inject the frontmatter id and index
   // doc_map/FTS/backlinks. Plain-text companions (.bib, .csv, …) are committed
   // verbatim and never indexed (mirrors the web editor writeFile path). The
-  // workspace's declared markdown format is passed explicitly so passthrough
-  // workspaces don't inherit coflat indexing behavior (#25).
+  // workspace's declared markdown format is passed explicitly while the API
+  // still carries the historical format field.
   const isMarkdown = fileKindForPath(rel) === "markdown";
   let mainSourceMeta: Awaited<ReturnType<typeof backend.getFileMeta>> | undefined;
   if (isRename && previous && isMarkdown && fileKindForPath(previousRel as string) === "markdown") {

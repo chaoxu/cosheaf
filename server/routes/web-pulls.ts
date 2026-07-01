@@ -535,7 +535,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   // Local Workbench: the PR's per-side file content lives on the core, not the
   // opened folder, so the rich/split/after views (which read getRawFile at the
   // PR's base+head SHAs) can't be sourced. Fall back to the unified source patch
-  // — the same documented behavior as a passthrough workspace's rich diff.
+  // — the same fallback path used whenever rich diff content is unavailable.
   const richOk =
     !ctx.local &&
     ctx.coflat &&

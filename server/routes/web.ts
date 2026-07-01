@@ -2,13 +2,11 @@ import { type Context, Hono } from "hono";
 import { compress } from "hono/compress";
 import { deleteCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, WORKSPACE_SLUG_RE } from "../../shared/conventions.js";
-import { DEFAULT_CREATE_FORMAT_ID, isDocumentFormatId } from "../../shared/document-format.js";
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { mintApiToken } from "../api-tokens.js";
 import { ForgejoError } from "../forgejo.js";
 import type { ForgejoUser } from "../forgejo-types.js";
-import { allDocumentFormats } from "../format-registry.js";
 import { AUTH_COOKIE } from "../middleware.js";
 import { FixedWindowRateLimiter } from "../rate-limit.js";
 import { effectiveRegistrationOpen, isSiteAdmin, registrationInviteForToken, releaseRegistrationInvite, reserveRegistrationInvite } from "../site-admin.js";
@@ -342,13 +340,12 @@ function helpPage(): Html {
     <section class="help-grid" aria-label="Cosheaf terms">
       ${helpCard("Account", "Your Cosheaf account is your Forgejo account. Your username, profile, repository access, SSH keys, and notifications come from the forge.")}
       ${helpCard("Workspace", "A workspace is one repository, such as owner/repo. If you can read the repository in Forgejo, it can appear in Cosheaf.")}
-      ${helpCard("Page", "A page is a Markdown file. In Coflat workspaces, pages may also have math, citations, cross-references, and stable frontmatter ids.")}
+      ${helpCard("Page", "A page is a Coflat Markdown file. Pages may have math, citations, cross-references, and stable frontmatter ids.")}
       ${helpCard("Branch", "A branch is where unfinished edits live. Branches let people and agents work without changing the published main branch.")}
       ${helpCard("Pull request", "A pull request is the review record for a branch. Use it to compare changes, comment, approve, request changes, and merge.")}
       ${helpCard("Issue", "An issue tracks work or discussion. Issues can carry labels, milestones, comments, dependencies, and notifications.")}
       ${helpCard("Review", "A review is a durable approval or change request on a pull request. Cosheaf uses Forgejo's review state as the source of truth.")}
       ${helpCard("Agent", "An agent is just another collaborator with repository access. It writes branches, opens pull requests, comments, and reviews through the Cosheaf API.")}
-      ${helpCard("Format", "Forgejo Markdown workspaces render plain Markdown. Coflat workspaces add math-friendly rendering, backlinks, and richer document review.")}
     </section>
 
     <section class="help-section">
@@ -707,14 +704,6 @@ web.get("/new", globalRoute(async (c, auth) => {
                   </select>
                 </label>
                 <label class="settings-row">
-                  <span>Document format</span>
-                  <select name="default_md_format" data-testid="new-repo-format">
-                    ${allDocumentFormats().map(
-                      (f) => html`<option value="${f.id}" ${f.id === DEFAULT_CREATE_FORMAT_ID ? "selected" : ""}>${f.id}</option>`,
-                    )}
-                  </select>
-                </label>
-                <label class="settings-row">
                   <span>Required approvals</span>
                   <input name="required_approvals" type="number" min="0" value="1" data-testid="new-repo-required-approvals">
                 </label>
@@ -738,14 +727,10 @@ web.post("/new", globalRoute(async (c, auth) => {
   // same field the settings page edits); an empty one falls back to the repo
   // name on the workspace list.
   const description = stringField(form.description)?.trim() ?? "";
-  const formatRaw = stringField(form.default_md_format) ?? undefined;
   const visibility = stringField(form.visibility) ?? "private";
   const requiredApprovals = nonNegativeInt(stringField(form.required_approvals) ?? "1");
   if (!slug) return redirect("/new?error=repository+name+required");
   if (!WORKSPACE_SLUG_RE.test(slug)) return redirect("/new?error=invalid+repository+name");
-  if (formatRaw !== undefined && !isDocumentFormatId(formatRaw)) {
-    return redirect("/new?error=invalid+format");
-  }
   if (visibility !== "private" && visibility !== "public") {
     return redirect("/new?error=invalid+visibility");
   }
@@ -766,7 +751,6 @@ web.post("/new", globalRoute(async (c, auth) => {
       forgejoUsername: owner,
       provisionVia: "user-pat",
       rollbackCreatedRepoOnLocalFailure: true,
-      defaultMdFormat: formatRaw,
       visibility,
       requiredApprovals,
     });

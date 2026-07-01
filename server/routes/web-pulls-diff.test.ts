@@ -12,9 +12,9 @@ describe("parseDiffMode", () => {
     expect(parseDiffMode("rich", true)).toBe("rich");
   });
 
-  it("coerces to source for passthrough (richOk=false), ignoring the requested mode", () => {
+  it("coerces to source when rich content is unavailable", () => {
     // The server is the source of truth: a stale ?mode=rich or saved preference
-    // must not reach the (nonexistent) rich surface on a passthrough workspace.
+    // must not reach a rich surface when the route says it is unavailable.
     expect(parseDiffMode(undefined, false)).toBe("source");
     expect(parseDiffMode("rich", false)).toBe("source");
     expect(parseDiffMode("source", false)).toBe("source");

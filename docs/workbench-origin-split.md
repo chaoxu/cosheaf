@@ -1,5 +1,10 @@
 # Workbench / Server Authority Split
 
+See also `docs/client-server-design.md` for the newer product vocabulary:
+**Core Server**, **Workbench**, and **Hub**. This document remains the detailed
+authority-boundary contract for local content, server-owned collaboration, and
+Origin API storage/protocol details.
+
 This document names the workbench/server split before behavior changes land.
 It is a migration contract for keeping local authoring useful without turning
 Cosheaf Workbench into a second server or a local Forgejo clone.

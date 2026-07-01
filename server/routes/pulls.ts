@@ -30,17 +30,17 @@ import { type Context, Hono, type MiddlewareHandler } from "hono";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { RepoCollaborator } from "../../shared/repo.js";
-import type { MergeFailure, MergeFailureReason, PrCommit, PrFileStatus, PrMeta, PrState, ReviewDto } from "../../shared/review.js";
+import type { MergeFailure, MergeFailureReason, PrState } from "../../shared/review.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { validBranchName } from "../branch-path.js";
 import type { CollaborationClient } from "../collaboration-client.js";
+import { forgeCommitToPrCommit, forgePullToMeta, forgeReviewToDto, normalizePrFileStatus } from "../core/forge-dto.js";
 import { fileLineToWritePosition, resolveLineComment } from "../diff-position.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
 import { ForgejoError, mergePullWithRetry } from "../forgejo.js";
 import { errorStatus, is4xx, is404 } from "../forgejo-errors.js";
 import type { ForgejoPull, ForgejoPullReviewComment, ForgejoReview } from "../forgejo-types.js";
-import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
-import { allDocumentFormats } from "../format-registry.js";
+import { toEpochMs, userLogin } from "../forgejo-types.js";
 import {
   isLocalMode,
   repoCtxCollab,
@@ -53,9 +53,8 @@ import {
 import { prSideRefAndPath } from "../pr-side.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { lockedReindexWorkspaceFromForgejo, setWorkspaceFormatTopic } from "../workspace-provisioning.js";
 import { safeRel } from "./files.js";
-import { parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
+import { parsePositiveLabelIds, validateLabelSelection } from "./label-utils.js";
 import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
 import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
 
@@ -78,37 +77,6 @@ pulls.use("/:owner/:repo/*", requirePullWriteOnMutation);
 
 import { deleteBranchQuietly } from "../workspace-cleanup.js";
 import { bad, conflict, forbidden, notFound } from "./responses.js";
-
-function normalizeStatus(s: string): PrFileStatus {
-  if (s === "added" || s === "modified" || s === "deleted" || s === "renamed" || s === "copied") return s;
-  return "modified";
-}
-
-function prMeta(pull: ForgejoPull): PrMeta {
-  return {
-    number: pull.number,
-    title: pull.title,
-    body: pull.body ?? "",
-    state: pull.state === "closed" ? "closed" : "open",
-    merged: pull.merged ?? false,
-    author_username: userLogin(pull.user),
-    created_at: toEpochMs(pull.created_at),
-    merged_at: toEpochMsOrNull(pull.merged_at),
-    mergeable: pull.mergeable ?? null,
-    head_ref: pull.head.ref,
-    head_sha: pull.head.sha,
-    base_ref: pull.base.ref,
-    base_sha: pull.base.sha,
-    additions_total: pull.additions ?? 0,
-    deletions_total: pull.deletions ?? 0,
-    files_changed: pull.changed_files ?? 0,
-    comment_count: pull.comments ?? 0,
-    labels: (pull.labels ?? []).map(toLabel),
-    milestone: pull.milestone ? { id: pull.milestone.id, title: pull.milestone.title } : null,
-    requested_reviewers: (pull.requested_reviewers ?? []).map((u) => u.login),
-    requested_reviewer_teams: (pull.requested_reviewers_teams ?? []).map((t) => t.username ?? t.name),
-  };
-}
 
 type PullSort = "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
 
@@ -302,7 +270,7 @@ pulls.get("/:owner/:repo/pulls", async (c) => {
     sort: parsePullSort(c.req.query("sort")),
   });
   if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, rows));
-  const out = rows.map(prMeta);
+  const out = rows.map(forgePullToMeta);
   return c.json({ pulls: out });
 });
 
@@ -312,7 +280,7 @@ pulls.get("/:owner/:repo/pulls/:n", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  return c.json({ pull: prMeta(pull) });
+  return c.json({ pull: forgePullToMeta(pull) });
 });
 
 pulls.post("/:owner/:repo/pulls", async (c) => {
@@ -333,7 +301,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
       body: typeof body.body === "string" ? body.body : "",
     });
     c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: pr.number, action: "opened" });
-    return c.json(prMeta(pr), 201);
+    return c.json(forgePullToMeta(pr), 201);
   } catch (err) {
     // POST /pulls returns 409 for several reasons — empty diff, an existing PR
     // for this head→base, or a duplicate title — and 422 for validation. Match on
@@ -354,7 +322,7 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
         return [];
       });
       const existing = all.find((p) => p.head.ref === head && p.base.ref === base && !p.merged);
-      if (existing) return c.json(prMeta(existing), 200);
+      if (existing) return c.json(forgePullToMeta(existing), 200);
       return c.json(...conflict("Couldn't open a pull request — there may be no changes to propose between these branches, or the request was invalid."));
     }
     throw err;
@@ -369,7 +337,7 @@ pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.editPull(owner, repo, n, parsed.patch);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
-  return c.json({ pull: prMeta(pull) });
+  return c.json({ pull: forgePullToMeta(pull) });
 });
 
 pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
@@ -390,7 +358,7 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
   if (!validation.ok) return c.json(...bad(validation.message));
   const updated = await collab.editPull(owner, repo, n, { labels: labelIds });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "edited" });
-  return c.json({ pull: prMeta(updated) });
+  return c.json({ pull: forgePullToMeta(updated) });
 });
 
 
@@ -488,7 +456,7 @@ pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
     return {
       path: m.filename,
       previous_path: m.previous_filename ?? slice?.previous_path,
-      status: normalizeStatus(m.status),
+      status: normalizePrFileStatus(m.status),
       additions: m.additions,
       deletions: m.deletions,
       patch: slice?.patch ?? "",
@@ -502,14 +470,7 @@ pulls.get("/:owner/:repo/pulls/:n/commits", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const commits = await collab.listPullCommits(owner, repo, n);
-  const out: PrCommit[] = commits.map((commit) => ({
-    sha: commit.sha,
-    message: commit.commit.message,
-    author_username: commit.author?.login ?? null,
-    author_name: commit.commit.author?.name ?? null,
-    date: toEpochMsOrNull(commit.commit.author?.date),
-  }));
-  return c.json({ commits: out });
+  return c.json({ commits: commits.map(forgeCommitToPrCommit) });
 });
 
 pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
@@ -585,20 +546,7 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
         r.state === "COMMENT" ||
         (r.state === "PENDING" && userLogin(r.user) === me),
     )
-    .map((r): ReviewDto => ({
-      id: r.id,
-      username: userLogin(r.user),
-      decision:
-        r.state === "APPROVED"
-          ? ("approve" as const)
-          : r.state === "REQUEST_CHANGES"
-            ? ("request_changes" as const)
-            : r.state === "PENDING"
-              ? ("pending" as const)
-              : ("comment" as const),
-      comment: r.body || null,
-      created_at: toEpochMs(r.submitted_at),
-    }));
+    .map(forgeReviewToDto);
   const counts = await approvalCounts(collab, owner, repo, n);
   return c.json({ reviews: out, approvals: counts.approvals, rejections: counts.rejections });
 });
@@ -649,8 +597,8 @@ pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   ]);
   if (!pull) return c.json(...notFound());
   return c.json({
-    requested_reviewers: prMeta(pull).requested_reviewers,
-    requested_reviewer_teams: prMeta(pull).requested_reviewer_teams,
+    requested_reviewers: forgePullToMeta(pull).requested_reviewers,
+    requested_reviewer_teams: forgePullToMeta(pull).requested_reviewer_teams,
     available_reviewers: reviewers.map((u) => u.login).filter((login) => login !== pull.user?.login),
   });
 });
@@ -666,7 +614,7 @@ pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
-  return c.json({ pull: prMeta(pull) }, 201);
+  return c.json({ pull: forgePullToMeta(pull) }, 201);
 });
 
 pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
@@ -679,7 +627,7 @@ pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
   await collab.deletePullReviewRequests(owner, repo, n, reviewers);
   const pull = await collab.getPull(owner, repo, n);
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "review_requested" });
-  return c.json({ pull: pull ? prMeta(pull) : null });
+  return c.json({ pull: pull ? forgePullToMeta(pull) : null });
 });
 
 // ---------- line comments ----------
@@ -1002,7 +950,6 @@ pulls.get("/:owner/:repo/settings", async (c) => {
   return c.json({
     min_approvals: bp?.required_approvals ?? 1,
     default_md_format: normalizeDocumentFormatId(c.get("workspace").defaultMdFormat),
-    formats: allDocumentFormats().map((f) => ({ id: f.id, displayName: f.displayName })),
   });
 });
 
@@ -1012,9 +959,7 @@ pulls.get("/:owner/:repo/settings", async (c) => {
 //
 //   1. validate payload (cheap, no side effects)
 //   2. update Forgejo branch protection if min_approvals changed
-//   3. update the Forgejo repo format topic if default_md_format changed
-//   4. reindex from Forgejo if default_md_format changed (this WRITES to
-//      doc_map/backlinks/FTS with the new format's rules)
+//   3. preserve the historical default_md_format field as coflat-only
 //
 // If any step throws, the response is a 5xx with the step that failed in
 // the body. The repair path is always: PUT /settings again with the same
@@ -1029,13 +974,6 @@ pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
   }
   if (body.default_md_format !== undefined && !isDocumentFormatId(body.default_md_format)) {
     return c.json(...bad("unknown markdown format"));
-  }
-  // Format storage is a Forgejo repo topic and the reindex walks Forgejo's main
-  // tree — both need the forge client, which the local Workbench does not have.
-  // The local document format is fixed by the opened folder, so reject the change
-  // cleanly here (before any write) instead of 500ing on repoCtxForgejo.
-  if (body.default_md_format !== undefined && isLocalMode(c)) {
-    return c.json(...bad("changing the document format isn't supported in the local Workbench"));
   }
   const { collab, owner, repo } = repoCtxCollab(c);
 
@@ -1063,34 +1001,8 @@ pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
   const defaultMdFormat = body.default_md_format !== undefined
     ? normalizeDocumentFormatId(body.default_md_format)
     : normalizeDocumentFormatId(c.get("workspace").defaultMdFormat);
-  if (body.default_md_format !== undefined) {
-    // Hosted-only: local format changes were rejected above, so the forge client
-    // is guaranteed present here.
-    const { fj } = repoCtxForgejo(c);
-    try {
-      // Format storage is a Forgejo repo topic. Update the topic before
-      // re-indexing so the reindex picks up the new format.
-      await setWorkspaceFormatTopic(fj, owner, repo, defaultMdFormat);
-      await lockedReindexWorkspaceFromForgejo(c.get("db"), fj, {
-        owner,
-        repo,
-        slug: c.get("workspace").slug,
-        defaultMdFormat,
-      });
-    } catch (err) {
-      return c.json(
-        {
-          error: `reindex failed; Forgejo branch protection updated but sidecar may be partial. Re-run settings update or \`pnpm cli workspace reindex\`: ${(err as Error).message}`,
-          code: "reindex_failed",
-          step: "reindex",
-        },
-        502,
-      );
-    }
-  }
   return c.json({
     min_approvals: minApprovals,
     default_md_format: defaultMdFormat,
-    formats: allDocumentFormats().map((f) => ({ id: f.id, displayName: f.displayName })),
   });
 });

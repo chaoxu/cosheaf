@@ -6,10 +6,6 @@ import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./
 import { freshTestDb } from "./routes/test-fixtures.js";
 
 function freshDb(): Database.Database {
-  // Indexer tests want a coflat workspace because the fixtures use [@id]
-  // citation syntax; the default 'forgejo-passthrough' format wouldn't
-  // extract those into backlinks. With the workspaces table gone (#62)
-  // the format is just a parameter we pass to indexPage.
   return freshTestDb("cosheaf-idx-");
 }
 
@@ -250,21 +246,6 @@ describe("indexPage", () => {
       .prepare("SELECT tag FROM page_tags WHERE workspace_slug = 'owner/w' ORDER BY tag")
       .all() as Array<{ tag: string }>;
     expect(tags.map((t) => t.tag)).toEqual(["geometry", "lemma"]);
-  });
-
-  it("forgejo-passthrough format extracts no backlinks for `[@id]` syntax (#25)", () => {
-    const db = freshDb();
-    indexPage(db, {
-      workspaceSlug: "owner/w",
-      filePath: "src.md",
-      bodyText: "# Source\n\n[@targetid] and [link](other.md).\n",
-      formatId: "forgejo-passthrough",
-    });
-    // doc_map row still created (page metadata) — but no backlinks.
-    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 1 });
-    expect(db.prepare("SELECT count(*) AS c FROM backlinks WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 0 });
-    // FTS still indexed (search works regardless of format).
-    expect(db.prepare("SELECT count(*) AS c FROM notes_fts WHERE workspace_slug = 'owner/w'").get()).toEqual({ c: 1 });
   });
 
   it("coflat format extracts both `[@id]` and `[link](path.md)` backlinks (#25)", () => {

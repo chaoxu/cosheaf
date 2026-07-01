@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DOCUMENT_FORMAT_ID } from "../shared/document-format.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import {
@@ -196,7 +195,7 @@ describe("workspace provisioning", () => {
     expect(forgejo.addCollaborator).toHaveBeenCalledWith("owner", "notes", "coverify", "write");
   });
 
-  it("skips webhook registration for passthrough workspaces (#64)", async () => {
+  it("registers webhooks for Coflat workspaces", async () => {
     const db = freshDb();
     const forgejo = fakeForgejo();
     const user = { username: "chao" };
@@ -208,10 +207,9 @@ describe("workspace provisioning", () => {
       user,
       forgejoUsername: "chao",
       provisionVia: "admin",
-      defaultMdFormat: DEFAULT_DOCUMENT_FORMAT_ID, // forgejo-passthrough
     });
 
-    expect(forgejo.createRepoHook).not.toHaveBeenCalled();
+    expect(forgejo.createRepoHook).toHaveBeenCalled();
   });
 
   it("allows seed-style idempotent provisioning of an existing workspace", async () => {

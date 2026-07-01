@@ -2,20 +2,22 @@ import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type {
   ActivityRow,
-  DependencyRow,
-  IssueComment,
   IssueDetail,
   IssueRow,
-  Milestone,
-  TimelineEvent,
 } from "../../shared/issues.js";
 import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
+import {
+  forgeIssueCommentToDto,
+  forgeIssueToDependencyRow,
+  forgeIssueToRow,
+  forgeMilestoneToDto,
+  forgeTimelineEventToDto,
+  toLabel,
+} from "../core/forge-dto.js";
 import { is404 } from "../forgejo-errors.js";
 import {
   type ForgejoIssue,
   type ForgejoIssueComment,
-  type ForgejoMilestone,
-  type ForgejoTimelineEvent,
   toEpochMs,
   toEpochMsOrNull,
   userLogin,
@@ -30,54 +32,10 @@ import {
 } from "../issue-claims.js";
 import { repoCtxCollab, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import type { AppEnv } from "../types.js";
-import { normalizeLabelColor, parsePositiveLabelIds, toLabel, validateLabelSelection } from "./label-utils.js";
+import { normalizeLabelColor, parsePositiveLabelIds, validateLabelSelection } from "./label-utils.js";
 import { parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
 import { bad, conflict, notFound } from "./responses.js";
 import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
-
-function toIssueRow(i: ForgejoIssue): IssueRow {
-  return {
-    number: i.number,
-    title: i.title,
-    state: i.state,
-    author_username: userLogin(i.user),
-    labels: i.labels.map(toLabel),
-    comment_count: i.comments,
-    created_at: toEpochMs(i.created_at),
-    updated_at: toEpochMs(i.updated_at),
-  };
-}
-
-function toIssueComment(cm: ForgejoIssueComment): IssueComment {
-  return {
-    id: cm.id,
-    body: cm.body,
-    author_username: userLogin(cm.user),
-    created_at: toEpochMs(cm.created_at),
-    updated_at: toEpochMs(cm.updated_at),
-  };
-}
-
-function toMilestone(milestone: ForgejoMilestone): Milestone {
-  return {
-    id: milestone.id,
-    title: milestone.title,
-    description: milestone.description ?? "",
-    state: milestone.state,
-    open_issues: milestone.open_issues,
-    closed_issues: milestone.closed_issues,
-    due_on: toEpochMsOrNull(milestone.due_on),
-  };
-}
-
-function toDependencyRow(i: ForgejoIssue): DependencyRow {
-  return {
-    number: i.number,
-    title: i.title,
-    state: i.state,
-    is_pr: !!i.pull_request,
-  };
-}
 
 async function requireTypedIssue(c: Context<AppEnv>, number: number): Promise<ForgejoIssue | Response> {
   const { collab, owner, repo } = repoCtxCollab(c);
@@ -97,25 +55,6 @@ async function requireIssueComment(c: Context<AppEnv>, number: number, id: numbe
   const comments = await collab.listIssueComments(owner, repo, number);
   const comment = comments.find((item) => item.id === id);
   return comment ?? c.json(...notFound("comment not found"));
-}
-
-// Normalize a timeline event's `ref_issue` into the public causality sub-shape.
-// Forgejo serializes it as a full Issue object on ref events (with a
-// `pull_request` field when the ref is a PR) and as a bare number / 0 / absent
-// elsewhere — be defensive about both, mirroring web-timeline's number-or-object
-// read. `is_pull`/`pull_merged` let an agent tell a closing PR from a plain
-// issue reference (#93).
-function toRefIssue(
-  ref: ForgejoTimelineEvent["ref_issue"],
-): TimelineEvent["ref_issue"] {
-  if (!ref || typeof ref !== "object") return null;
-  return {
-    number: ref.number,
-    title: ref.title ?? null,
-    state: ref.state ?? null,
-    is_pull: ref.pull_request != null,
-    pull_merged: ref.pull_request ? ref.pull_request.merged ?? false : null,
-  };
 }
 
 function trimmedQuery(value: string | undefined): string | undefined {
@@ -190,7 +129,7 @@ issues.get("/:owner/:repo/issues", async (c) => {
     }
     const byNum = new Map<number, IssueRow>();
     for (const i of [...authored, ...assigned]) {
-      if (!i.pull_request) byNum.set(i.number, toIssueRow(i));
+      if (!i.pull_request) byNum.set(i.number, forgeIssueToRow(i));
     }
     const merged = Array.from(byNum.values()).sort((a, b) => b.updated_at - a.updated_at);
     const rows = attachClaims(c, merged);
@@ -208,7 +147,7 @@ issues.get("/:owner/:repo/issues", async (c) => {
   });
   const issueList = list.filter((i) => !i.pull_request);
   if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, issueList));
-  return c.json({ issues: attachClaims(c, issueList.map(toIssueRow)) });
+  return c.json({ issues: attachClaims(c, issueList.map(forgeIssueToRow)) });
 });
 
 // Decorate issue rows with their active live-work leases (#95) in one batched
@@ -395,7 +334,7 @@ issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const comments = await collab.listIssueComments(owner, repo, number);
-  return c.json({ comments: comments.map(toIssueComment) });
+  return c.json({ comments: comments.map(forgeIssueCommentToDto) });
 });
 
 issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
@@ -409,7 +348,7 @@ issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
   if (target instanceof Response) return target;
   const comment = await collab.createIssueComment(owner, repo, number, text);
   c.get("sse").publish(c.get("workspace").slug, { type: "issue", number, action: "commented" });
-  return c.json(toIssueComment(comment), 201);
+  return c.json(forgeIssueCommentToDto(comment), 201);
 });
 
 issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
@@ -424,7 +363,7 @@ issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   const target = await requireIssueComment(c, number, id);
   if (target instanceof Response) return target;
   const comment = await collab.editIssueComment(owner, repo, id, text);
-  return c.json(toIssueComment(comment));
+  return c.json(forgeIssueCommentToDto(comment));
 });
 
 issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
@@ -453,7 +392,7 @@ issues.patch("/:owner/:repo/issues/comments/:id", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
     const comment = await collab.editIssueComment(owner, repo, id, parsed.text);
-    return c.json(toIssueComment(comment));
+    return c.json(forgeIssueCommentToDto(comment));
   } catch (err) {
     if (is404(err)) return c.json(...notFound("comment not found"));
     throw err;
@@ -573,7 +512,7 @@ issues.get("/:owner/:repo/milestones", async (c) => {
   const state = parseListState(c.req.query("state"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const milestones = await collab.listMilestones(owner, repo, state);
-  return c.json({ milestones: milestones.map(toMilestone) });
+  return c.json({ milestones: milestones.map(forgeMilestoneToDto) });
 });
 
 issues.post("/:owner/:repo/milestones", async (c) => {
@@ -585,7 +524,7 @@ issues.post("/:owner/:repo/milestones", async (c) => {
     title,
     description: typeof body?.description === "string" ? body.description : undefined,
   });
-  return c.json(toMilestone(milestone), 201);
+  return c.json(forgeMilestoneToDto(milestone), 201);
 });
 
 issues.patch("/:owner/:repo/milestones/:id", async (c) => {
@@ -603,7 +542,7 @@ issues.patch("/:owner/:repo/milestones/:id", async (c) => {
   if (Object.keys(patch).length === 0) return c.json(...bad("milestone field required"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const milestone = await collab.editMilestone(owner, repo, id, patch);
-  return c.json(toMilestone(milestone));
+  return c.json(forgeMilestoneToDto(milestone));
 });
 
 issues.delete("/:owner/:repo/milestones/:id", async (c) => {
@@ -647,7 +586,7 @@ issues.get("/:owner/:repo/issues/:number/dependencies", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listIssueDependencies(owner, repo, number);
-  return c.json({ issues: list.map(toDependencyRow) });
+  return c.json({ issues: list.map(forgeIssueToDependencyRow) });
 });
 
 issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
@@ -655,7 +594,7 @@ issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listIssueBlocks(owner, repo, number);
-  return c.json({ issues: list.map(toDependencyRow) });
+  return c.json({ issues: list.map(forgeIssueToDependencyRow) });
 });
 
 issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
@@ -671,7 +610,7 @@ issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
   const updated = await collab.addIssueDependency(owner, repo, number, index);
-  return c.json({ issue: toDependencyRow(updated) }, 201);
+  return c.json({ issue: forgeIssueToDependencyRow(updated) }, 201);
 });
 
 issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
@@ -686,7 +625,7 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
   const updated = await collab.removeIssueDependency(owner, repo, number, index);
-  return c.json({ issue: toDependencyRow(updated) });
+  return c.json({ issue: forgeIssueToDependencyRow(updated) });
 });
 
 // Remove a "blocks" edge. Mirrors the dependency DELETE convention (blocking
@@ -767,25 +706,6 @@ issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
   // Forgejo returns null instead of [] for some empty issue timelines.
   const safe = events ?? [];
   return c.json({
-    events: safe.map<TimelineEvent>((e) => ({
-      id: e.id,
-      type: e.type,
-      author_username: e.user?.login ?? null,
-      body: e.body ?? null,
-      created_at: toEpochMs(e.created_at),
-      updated_at: toEpochMsOrNull(e.updated_at),
-      label: e.label ? { name: e.label.name, color: e.label.color } : null,
-      old_title: e.old_title ?? null,
-      new_title: e.new_title ?? null,
-      assignee: e.assignee?.login ?? null,
-      removed_assignee: e.removed_assignee ?? false,
-      ref_issue: toRefIssue(e.ref_issue),
-      ref_action: e.ref_action ?? null,
-      ref_commit_sha: e.ref_commit_sha ?? null,
-      milestone: e.milestone?.title ?? null,
-      dependent_issue: e.dependent_issue
-        ? { number: e.dependent_issue.number, title: e.dependent_issue.title, state: e.dependent_issue.state }
-        : null,
-    })),
+    events: safe.map(forgeTimelineEventToDto),
   });
 });

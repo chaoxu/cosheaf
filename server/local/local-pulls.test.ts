@@ -453,7 +453,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
     expect(put?.body).toEqual({ min_approvals: 2 });
   });
 
-  it("BUG B: rejects a document-format change cleanly (not 500) in the local Workbench", async () => {
+  it("accepts legacy coflat format payload without a core format write", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore(() => ({}));
     const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/settings", {
@@ -461,10 +461,9 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
     });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: expect.stringContaining("local Workbench") });
-    // No core write happened — the guard returns before any branch-protection read.
-    expect(calls.some((c) => c.method !== "GET")).toBe(false);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ default_md_format: COFLAT_FORMAT_ID });
+    expect(calls.some((c) => c.path.endsWith("/topics"))).toBe(false);
   });
 
   it("BUG E: submits a staged pending review, resolving the caller's own draft via the core", async () => {

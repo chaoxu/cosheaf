@@ -140,10 +140,9 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repo
   ><script type="application/json">${jsonScript(payload)}</script></div>`;
 }
 
-// A markdown compose/edit field. On coflat workspaces it renders a textarea
-// (the real, submitted form field) wrapped in a `[data-coflat-compose]`
-// container that the web-comment-editor island enhances with the rich coflat
-// editor; on forgejo-passthrough it renders just the plain textarea, unchanged.
+// A markdown compose/edit field. It renders a textarea (the real, submitted
+// form field) wrapped in a `[data-coflat-compose]` container that the
+// web-comment-editor island enhances with the rich Coflat editor.
 // The textarea value is escaped by the template — never interpolated raw.
 export function composeField(
   ctx: WebCtx,

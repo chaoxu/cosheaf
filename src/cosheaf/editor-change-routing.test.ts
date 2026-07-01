@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ChangeSet } from "@codemirror/state";
-import { COFLAT_FORMAT_ID, FORGEJO_PASSTHROUGH_FORMAT_ID } from "../../shared/document-format";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format";
 import {
   applyDocumentChangeText,
   IncrementalSourceCache,
@@ -17,15 +17,6 @@ describe("routeEditorChangeHandlers", () => {
 
     expect(routed.onChange).toBeUndefined();
     expect(routed.onDocumentChange).toBe(onDocumentChange);
-  });
-
-  it("uses direct string changes for Forgejo passthrough", () => {
-    const onStringChange = vi.fn();
-    const onDocumentChange = vi.fn();
-    const routed = routeEditorChangeHandlers(FORGEJO_PASSTHROUGH_FORMAT_ID, { onStringChange, onDocumentChange });
-
-    expect(routed.onChange).toBe(onStringChange);
-    expect(routed.onDocumentChange).toBeUndefined();
   });
 });
 

@@ -37,11 +37,10 @@ function parseRequiredApprovals(value: unknown): number | null {
 }
 
 workspaces.get("/", async (c) => {
-  // Workspaces are repos with a `cosheaf-format-*` topic, discovered across
-  // ALL owners the caller can see (Forgejo repo search runs under the
-  // user's resolved backend credential, so private repos respect Forgejo
-  // visibility). Permission resolution and display name come from the same repo
-  // objects.
+  // Workspaces are all repos the caller can see. Forgejo repo search runs under
+  // the user's resolved backend credential, so private repos respect Forgejo
+  // visibility. Permission resolution and display name come from the same repo
+  // objects; markdown format resolution is Coflat-only.
   const fj = c.get("fjUser");
 
   const repos = await listVisibleWorkspaceRepos(fj);

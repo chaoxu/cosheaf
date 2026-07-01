@@ -13,12 +13,11 @@ should not duplicate Coflat's parser or syntax contract.
 ## Cosheaf-Specific Behavior
 
 - Markdown pages live as `.md` files in Forgejo branches.
-- Workspaces declare one markdown format with a Forgejo repo topic:
-  `cosheaf-format-coflat` or `cosheaf-format-forgejo-passthrough`.
-- Coflat workspaces render files through `@chaoxu/coflat` and index Coflat
-  references for backlinks and rich review diffs.
-- Forgejo-passthrough workspaces render plain Markdown through Forgejo and do
-  not get Coflat-specific backlinks or rich rendered diffs.
+- Cosheaf markdown is Coflat-only. Workspaces may carry the
+  `cosheaf-format-coflat` Forgejo repo topic as a marker; obsolete format
+  topics are ignored by runtime format resolution.
+- Cosheaf renders files through `@chaoxu/coflat` and indexes Coflat references
+  for backlinks and rich review diffs.
 - YAML frontmatter is parsed by Cosheaf for stable page identity. The `id`
   field is the durable Cosheaf page id.
 - Cosheaf indexes these page links:

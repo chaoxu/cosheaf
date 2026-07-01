@@ -38,7 +38,7 @@ describe("mergeRepoTopics", () => {
   });
 
   it("does not let the user inject or change the format topic via the input", () => {
-    expect(mergeRepoTopics(["cosheaf-format-coflat"], "cosheaf-format-forgejo-passthrough notes")).toEqual([
+    expect(mergeRepoTopics(["cosheaf-format-coflat"], "cosheaf-format-legacy notes")).toEqual([
       "cosheaf-format-coflat",
       "notes",
     ]);

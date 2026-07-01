@@ -21,7 +21,6 @@ import { invalidateRepoTrees } from "./tree-cache.js";
 import { listVisibleWorkspaceRepos } from "./workspace-discovery.js";
 import {
   COFLAT_FORMAT_ID,
-  DEFAULT_CREATE_FORMAT_ID,
   documentFormatFromTopics,
   isDocumentFormatId,
   isFormatTopic,
@@ -136,7 +135,6 @@ function addSeedOptions(command: Command): Command {
     .requiredOption("--password <password>", "Forgejo password for --user")
     .requiredOption("--workspace <owner/repo>", "workspace as <owner>/<repo>")
     .option("--workspace-name <name>", "workspace display name; defaults to the repo name")
-    .option("--default-md-format <id>", "workspace markdown format", DEFAULT_CREATE_FORMAT_ID)
     .option("--profile <profile>", `seed profile (${SEED_PROFILES.join("|")})`, "all");
 }
 
@@ -160,10 +158,6 @@ export function normalizeSeedOptions(opts: {
   if (!WORKSPACE_SLUG_RE.test(parsed.repo)) {
     throw new InvalidArgumentError(`workspace repo name must match ${WORKSPACE_SLUG_RE}`);
   }
-  const defaultMdFormat = opts.defaultMdFormat ?? DEFAULT_CREATE_FORMAT_ID;
-  if (!isDocumentFormatId(defaultMdFormat)) {
-    throw new InvalidArgumentError(`--default-md-format must be a known DocumentFormatId, got: ${defaultMdFormat}`);
-  }
   const profile = opts.profile ?? "all";
   if (!isSeedProfile(profile)) {
     throw new InvalidArgumentError(`--profile must be one of ${SEED_PROFILES.join("|")}, got: ${profile}`);
@@ -174,7 +168,7 @@ export function normalizeSeedOptions(opts: {
     owner: parsed.owner,
     repo: parsed.repo,
     workspaceName: opts.workspaceName ?? parsed.repo,
-    defaultMdFormat,
+    defaultMdFormat: COFLAT_FORMAT_ID,
     profile,
   };
 }
@@ -420,9 +414,9 @@ async function doctor(): Promise<void> {
     });
   }
 
-  // Per-workspace checks. Workspaces are enumerated from Forgejo (every
-  // repo the caller can access, across owners — untagged repos open as
-  // forgejo-passthrough), not from SQLite — there's no workspaces table.
+  // Per-workspace checks. Workspaces are enumerated from Forgejo (every repo
+  // the caller can access, across owners), not from SQLite — there's no
+  // workspaces table.
   const workspaceRepos = await listVisibleWorkspaceRepos(forgejo);
   const workspaces = workspaceRepos.map((r) => ({
     owner: r.owner.login,
@@ -445,15 +439,14 @@ async function doctor(): Promise<void> {
     results.push(
       await check(`workspace ${ws.slug}: format topic well-formed`, async () => {
         const formatTopics = ws.topics.filter(isFormatTopic);
-        if (formatTopics.length === 0) {
-          // Untagged repos are valid forgejo-passthrough workspaces under
-          // all-repos discovery; absence of a topic is not an error.
-          return `no format topic → ${ws.defaultMdFormat}`;
-        }
+        if (formatTopics.length === 0) return `no format topic → ${ws.defaultMdFormat}`;
         if (formatTopics.length > 1) {
           throw new Error(`multiple format topics: ${formatTopics.join(", ")}`);
         }
         const suffix = formatTopics[0].slice("cosheaf-format-".length);
+        if (suffix === "forgejo-passthrough") {
+          return `${formatTopics[0]} is obsolete; runtime uses ${ws.defaultMdFormat} (replace with cosheaf-format-coflat)`;
+        }
         if (!isDocumentFormatId(suffix)) {
           throw new Error(`unknown format suffix in topic ${formatTopics[0]}`);
         }
@@ -464,34 +457,26 @@ async function doctor(): Promise<void> {
       }),
     );
 
-    if (ws.defaultMdFormat === COFLAT_FORMAT_ID) {
-      results.push(
-        await check(`workspace ${ws.slug}: webhook installed`, async () => {
-          const hooks = await forgejo.listRepoHooks(ws.owner, ws.repo);
-          const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
-          if (!ours) throw new Error("no push webhook on repo");
-          return `hook id=${ours.id}`;
-        }),
-      );
-      results.push(
-        await checkWarn(`workspace ${ws.slug}: sidecar in sync with Forgejo tree`, async () => {
-          const drift = await getWorkspaceMarkdownDrift(db, forgejo, ws);
-          if (drift.onlySidecar.length === 0 && drift.onlyForgejo.length === 0) {
-            return { status: "ok", detail: `${drift.inSync} pages` };
-          }
-          return {
-            status: "warn",
-            detail: `${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only; run \`pnpm cli workspace reindex ${ws.slug}\``,
-          };
-        }),
-      );
-    } else {
-      results.push({
-        name: `workspace ${ws.slug}: no webhook expected (passthrough)`,
-        status: "ok",
-        detail: `format=${ws.defaultMdFormat}`,
-      });
-    }
+    results.push(
+      await check(`workspace ${ws.slug}: webhook installed`, async () => {
+        const hooks = await forgejo.listRepoHooks(ws.owner, ws.repo);
+        const ours = hooks.find((h) => Array.isArray(h.events) && h.events.includes("push"));
+        if (!ours) throw new Error("no push webhook on repo");
+        return `hook id=${ours.id}`;
+      }),
+    );
+    results.push(
+      await checkWarn(`workspace ${ws.slug}: sidecar in sync with Forgejo tree`, async () => {
+        const drift = await getWorkspaceMarkdownDrift(db, forgejo, ws);
+        if (drift.onlySidecar.length === 0 && drift.onlyForgejo.length === 0) {
+          return { status: "ok", detail: `${drift.inSync} pages` };
+        }
+        return {
+          status: "warn",
+          detail: `${drift.inSync} in sync, ${drift.onlySidecar.length} sidecar-only, ${drift.onlyForgejo.length} forgejo-only; run \`pnpm cli workspace reindex ${ws.slug}\``,
+        };
+      }),
+    );
   }
 
   // Sidecar-orphan check: any workspace_slug in doc_map that no longer
@@ -511,8 +496,7 @@ async function doctor(): Promise<void> {
         if (!repo) {
           throw new Error(`doc_map references ${slug} but Forgejo repo is gone; run \`pnpm cli workspace rm ${slug}\``);
         }
-        // Repo exists and is accessible — any markdown format is fine
-        // (untagged = passthrough). knownSlugs is built from the same
+        // Repo exists and is accessible. knownSlugs is built from the same
         // all-accessible-repos list, so reaching here means a visibility edge.
         return "ok";
       }),

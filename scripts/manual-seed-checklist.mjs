@@ -17,8 +17,8 @@ const routes = [
   ["/chao/flushing-coin/activity", "activity feed and scroll behavior"],
   ["/chao/flushing-coin/src/branch/main/hello.md", "Coflat reader"],
   ["/chao/flushing-coin/src/branch/main?mode=edit&path=manual-seed.md&edit_branch=user%2Fchao%2Fmanual-seed", "editor island"],
-  ["/chao/passthrough-demo/issues", "passthrough issue rendering"],
-  ["/chao/passthrough-demo/pulls", "passthrough PR rendering"],
+  ["/chao/coflat-demo/issues", "second workspace issue rendering"],
+  ["/chao/coflat-demo/pulls", "second workspace PR rendering"],
 ];
 
 if (process.argv.includes("--json")) {
@@ -28,14 +28,14 @@ if (process.argv.includes("--json")) {
         baseUrl: BASE,
         forgejoUrl: "http://127.0.0.1:3002",
         users: [
-          { username: "chao", password: "Cosheaf123!", role: "admin", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
-          { username: "test-vera", password: "Cosheaf123!", role: "write", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
-          { username: "test-meri", password: "Cosheaf123!", role: "write", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
-          { username: "test-bob", password: "Cosheaf123!", role: "read", workspaces: ["chao/flushing-coin", "chao/passthrough-demo"] },
+          { username: "chao", password: "Cosheaf123!", role: "admin", workspaces: ["chao/flushing-coin", "chao/coflat-demo"] },
+          { username: "test-vera", password: "Cosheaf123!", role: "write", workspaces: ["chao/flushing-coin", "chao/coflat-demo"] },
+          { username: "test-meri", password: "Cosheaf123!", role: "write", workspaces: ["chao/flushing-coin", "chao/coflat-demo"] },
+          { username: "test-bob", password: "Cosheaf123!", role: "read", workspaces: ["chao/flushing-coin", "chao/coflat-demo"] },
         ],
         workspaces: [
           { slug: "chao/flushing-coin", format: "coflat" },
-          { slug: "chao/passthrough-demo", format: "forgejo-passthrough" },
+          { slug: "chao/coflat-demo", format: "coflat" },
         ],
         routes: routes.map(([route, covers]) => ({ url: new URL(route, BASE).toString(), covers })),
         commands: ["pnpm dev:all", "pnpm dev:login-state", "pnpm devx:verify-route", "pnpm smoke:list"],
@@ -49,7 +49,7 @@ if (process.argv.includes("--json")) {
 
 console.log(`
 ─────────────────────────────────────────────────────────────────────
- Agent seed ready. Two workspaces, four users, two markdown formats.
+ Agent seed ready. Two Coflat workspaces, four users.
 ─────────────────────────────────────────────────────────────────────
 
   Cosheaf URL: ${BASE}
@@ -68,10 +68,9 @@ console.log(`
        The math-flavored default; exercises backlinks, citations,
        and the rich diff renderer.
 
-    chao/passthrough-demo    (format: forgejo-passthrough)
-       The thin-shell flavor; backlinks panel stays empty, rich
-       diff falls back to source diff, Forgejo's /markdown handles
-       rendering.
+    chao/coflat-demo         (format: coflat)
+       A second Coflat workspace for cross-workspace navigation,
+       issues, pull requests, and membership checks.
 
   Agent route targets:
 

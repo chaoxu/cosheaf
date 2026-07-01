@@ -16,7 +16,7 @@ function freshDb(): Database.Database {
 }
 
 describe("sidecar reconciler", () => {
-  it("reindexes Coflat workspaces and skips passthrough repos", async () => {
+  it("reindexes all visible workspaces as Coflat", async () => {
     const db = freshDb();
     const files = {
       "owner/coflat": { "main.md": "---\nid: main\n---\n# Main v2\n" },
@@ -54,12 +54,12 @@ describe("sidecar reconciler", () => {
 
     const results = await reconcileAllCoflatWorkspaces(db, forgejo);
 
-    expect(summarizeReconcileResults(results)).toEqual({ reindexed: 1, skipped: 1, failed: 0, pages: 1 });
+    expect(summarizeReconcileResults(results)).toEqual({ reindexed: 2, skipped: 0, failed: 0, pages: 2 });
     expect(db.prepare("SELECT title FROM doc_map WHERE workspace_slug = 'owner/coflat'").get()).toEqual({
       title: "Main v2",
     });
-    expect(db.prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = 'owner/pass'").get()).toEqual({
-      n: 0,
+    expect(db.prepare("SELECT title FROM doc_map WHERE workspace_slug = 'owner/pass'").get()).toEqual({
+      title: "Pass",
     });
   });
 });

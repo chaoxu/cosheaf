@@ -5,21 +5,20 @@ import { insertTab } from "@codemirror/commands";
 import { keymap } from "@codemirror/view";
 import type { EditorView } from "@codemirror/view";
 import { type Diagnostic, linter } from "@codemirror/lint";
-import { frontmatterField } from "@chaoxu/coflat";
 import {
-  type MountedLazyEditor,
-  type LazyEditorDocumentChange as MountedDocumentChange,
+  frontmatterField,
+  type MountedEditor,
+  type MountedDocumentChange,
   type SaveHandler,
-  type LazyEditorMode as StandaloneEditorMode,
+  type StandaloneEditorMode,
   type StatusEvents,
   type AssetUploader,
   type AutocompleteSource,
   type RequestHandler,
-  mountLazyEditor,
-} from "@chaoxu/coflat/editor-lazy";
+  mountEditor,
+} from "@chaoxu/coflat";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
-export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource, MountedDocumentChange };
-export type MountedEditor = MountedLazyEditor;
+export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource, MountedDocumentChange, MountedEditor };
 
 interface Props {
   value: string;
@@ -112,7 +111,7 @@ export function MarkdownEditor({
   sidenotesCollapsed,
 }: Props): ReactElement {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<MountedLazyEditor | null>(null);
+  const editorRef = useRef<MountedEditor | null>(null);
   const lastValueRef = useRef(value);
   const modeRef = useRef(mode);
   const onChangeRef = useRef(onChange);
@@ -178,7 +177,7 @@ export function MarkdownEditor({
         }
       : undefined;
 
-    const editor = mountLazyEditor({
+    const editor = mountEditor({
       parent: containerRef.current,
       doc: value,
       mode: effectiveMode,

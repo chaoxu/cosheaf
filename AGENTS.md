@@ -20,12 +20,9 @@ Coflat markdown is math-friendly. Still, Cosheaf is page-oriented rather than
 math-native: do not add theorem graphs, proof dependency models, or other
 semantic math layers unless explicitly requested.
 
-Coflat markdown is one of the document formats cosheaf supports, alongside
-Forgejo Markdown passthrough. The codebase carries a `DocumentFormat` seam
-(`server/document-format/`, `src/cosheaf/document-format/`) so additional
-formats can be added cleanly later; register formats through the format
-registry rather than reaching into one implementation's internals.
-Don't add another format until one is asked for.
+Cosheaf markdown is Coflat-only. Keep rendering, indexing, editor behavior,
+and validation on the Coflat contract; do not add Forgejo Markdown passthrough
+or another document format unless one is explicitly requested.
 
 Agent/prover internals (Coverify and friends) are out of scope here. They live
 in a separate layer and participate as ordinary Forgejo write-access
@@ -486,14 +483,14 @@ API clients, as `Authorization: token <token>` by Gitea/tea-compatible clients,
 or as the `cosheaf_pat` HttpOnly cookie by server-rendered pages; Cosheaf
 resolves that token to the server-side Forgejo credential internally.
 Workspace identity is the Forgejo `(owner, repo)` pair — the same repo name
-under different owners is a different workspace; the workspace's markdown
-format lives in a Forgejo repo topic (`cosheaf-format-coflat` or
-`cosheaf-format-forgejo-passthrough`). Workspace role (`admin | write | read`)
-is resolved from Forgejo's collaborator-permission API on each request, cached
-in-process for 30s; the bearer→username and (owner, repo)→format mappings are
-cached on the same TTL. There is no `memberships` table and no sidecar
-`branches` table — branches and pull requests live entirely on Forgejo and are
-queried on demand.
+under different owners is a different workspace. Markdown format resolution is
+Coflat-only; `cosheaf-format-coflat` may exist as a marker topic, and obsolete
+format topics are ignored by runtime resolution. Workspace role
+(`admin | write | read`) is resolved from Forgejo's collaborator-permission API
+on each request, cached in-process for 30s; the bearer→username and
+(owner, repo)→format mappings are cached on the same TTL. There is no
+`memberships` table and no sidecar `branches` table — branches and pull
+requests live entirely on Forgejo and are queried on demand.
 
 ## Branch and pull request lifecycle
 
@@ -580,33 +577,25 @@ links recognized by the indexer:
 
 Bare URLs, raw HTML, and indented code blocks are intentionally out of scope.
 
-### Workspace markdown formats
+### Workspace markdown format
 
-Workspaces declare one markdown format via a Forgejo repo topic:
-`cosheaf-format-coflat` or `cosheaf-format-forgejo-passthrough`. The
-presence of `cosheaf-format-<id>` selects the format; absence falls back
-to `forgejo-passthrough` (Forgejo Markdown). Development fixtures that
-need Coflat behavior explicitly set the topic via `--default-md-format
-coflat` at seed time.
+Cosheaf markdown is Coflat-only. Workspaces may carry the
+`cosheaf-format-coflat` Forgejo repo topic as a marker; absence still resolves
+to Coflat, and obsolete format topics should be tolerated long enough to
+migrate them away.
 
 Discovery is topic-agnostic: cosheaf is a frontend over the forge, so the
 home page and `GET /api/v1/workspaces` list **every** repo the authenticated
 user can access (`Forgejo.searchAllAccessibleRepos`), not only
-`cosheaf-format-*` tagged repos. An untagged repo opens as a
-`forgejo-passthrough` workspace. The format topic therefore only selects
-rendering/indexing behavior, never visibility. Cosheaf-owned backend login
-tokens carry `write:user` and `write:organization` (alongside
-repo/issue/notification scopes) so the user can create and delete repos
-through cosheaf; if you change the scope set, existing `login_tokens` rows must
-be cleared so they re-mint.
+`cosheaf-format-*` tagged repos. An untagged repo opens as a Coflat workspace.
+Cosheaf-owned backend login tokens carry `write:user` and `write:organization`
+(alongside repo/issue/notification scopes) so the user can create and delete
+repos through cosheaf; if you change the scope set, existing `login_tokens`
+rows must be cleared so they re-mint.
 
-- `forgejo-passthrough`: plain `.md` files rendered through Forgejo's
-  repo-scoped `/markdown` API. It preserves YAML frontmatter but extracts no
-  backlinks; rich rendered diffs are unavailable and the review UI falls back
-  to source diffs.
-- `coflat`: Coflat-flavored markdown using `@chaoxu/coflat` parser and
-  reader. Coflat-only features include `[@id]` backlinks, bare-ref rewriting
-  for issue/page references, and source-line-attributed rich diffs.
+Coflat rendering uses the `@chaoxu/coflat` parser and reader. Coflat features
+include `[@id]` backlinks, bare-ref rewriting for issue/page references, and
+source-line-attributed rich diffs.
 
 Generic YAML frontmatter parsing lives in `shared/frontmatter-yaml.ts`; do not
 hide generic frontmatter behavior behind one format implementation. Server

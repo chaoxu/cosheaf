@@ -29,14 +29,14 @@ afterEach(() => {
 });
 
 describe("GET /api/v1/workspaces", () => {
-  it("lists every accessible repo across owners, untagged as passthrough, derives role from inline permissions", async () => {
+  it("lists every accessible repo across owners as Coflat, derives role from inline permissions", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao" });
 
     // Discovery is topic-agnostic: one `/repos/search` with no filter returns
     // every repo the PAT can see. Candidates: a coflat repo (admin), a
-    // passthrough repo under another owner (write), an UNTAGGED repo (read —
-    // must surface as forgejo-passthrough), and one with no access (dropped).
+    // legacy format-tagged repo under another owner (write), an untagged repo
+    // (read), and one with no access (dropped).
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/search", (c) =>
         c.json({ data: [
@@ -49,7 +49,7 @@ describe("GET /api/v1/workspaces", () => {
           {
             id: 2, name: "beta", full_name: "other/beta", default_branch: "main",
             description: "Beta", owner: { id: 2, login: "other" },
-            topics: ["cosheaf-format-forgejo-passthrough"],
+            topics: [],
             permissions: { admin: false, push: true, pull: true },
           },
           {
@@ -74,9 +74,9 @@ describe("GET /api/v1/workspaces", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { workspaces: Array<{ owner: string; repo: string; full_name: string; name: string; role: string; default_md_format: string }> };
     expect(body.workspaces).toEqual([
-      { owner: "other", repo: "beta", full_name: "other/beta", name: "Beta", role: "write", default_md_format: "forgejo-passthrough" },
+      { owner: "other", repo: "beta", full_name: "other/beta", name: "Beta", role: "write", default_md_format: "coflat" },
       { owner: "owner", repo: "alpha", full_name: "owner/alpha", name: "Alpha workspace", role: "admin", default_md_format: "coflat" },
-      { owner: "owner", repo: "plain", full_name: "owner/plain", name: "Plain notes", role: "read", default_md_format: "forgejo-passthrough" },
+      { owner: "owner", repo: "plain", full_name: "owner/plain", name: "Plain notes", role: "read", default_md_format: "coflat" },
     ]);
   });
 

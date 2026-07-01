@@ -374,19 +374,13 @@ describe("pulls + branches routes", () => {
       }
     });
 
-    it("PUT /settings writes the format topic to Forgejo before reindex", async () => {
+    it("PUT /settings accepts legacy coflat format payload as a no-op", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "admin");
-      // Sequence: requireAdminFresh → getBranchProtection → listRepoTopics →
-      // replaceRepoTopics → getTree (fails). The format topic write is the
-      // commit point; the reindex is best-effort.
       fetchMock
         .mockResolvedValueOnce(ok({ permission: "admin" }))
-        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 1 }))
-        .mockResolvedValueOnce(ok({ topics: [] }))
-        .mockResolvedValueOnce(empty(204))
-        .mockResolvedValueOnce(ok({ message: "tree failed" }, 500));
+        .mockResolvedValueOnce(ok({ branch_name: "main", required_approvals: 1 }));
 
       const res = await appFor(db).request("/api/v1/repos/owner/w/settings", {
         method: "PUT",
@@ -394,21 +388,13 @@ describe("pulls + branches routes", () => {
         body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
       });
 
-      expect(res.status).toBe(502);
-      const body = (await res.json()) as { code: string; step?: string };
-      expect(body.code).toBe("reindex_failed");
-      expect(body.step).toBe("reindex");
-      // Assert the Forgejo topics PUT was called with the new format topic.
-      // (No SQLite UPDATE to verify — workspaces table is gone in #62.)
+      expect(res.status).toBe(200);
       const topicsPutCall = fetchMock.mock.calls.find((call) => {
         const url = String(call[0] ?? "");
         const init = (call[1] ?? {}) as RequestInit;
         return url.includes("/repos/owner/w/topics") && (init.method ?? "GET").toUpperCase() === "PUT";
       });
-      expect(topicsPutCall, "Forgejo /topics PUT was not called").toBeDefined();
-      const reqInit = (topicsPutCall?.[1] ?? {}) as RequestInit;
-      const sentBody = JSON.parse(String(reqInit.body ?? "{}")) as { topics?: string[] };
-      expect(sentBody.topics).toEqual(expect.arrayContaining([`cosheaf-format-${COFLAT_FORMAT_ID}`]));
+      expect(topicsPutCall, "Forgejo /topics PUT should not be called for fixed Coflat format").toBeUndefined();
     });
   });
 
@@ -1208,7 +1194,7 @@ describe("pulls + branches routes", () => {
               commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z", author: { username: "alice" } },
             },
             {
-              name: "feature/passthrough",
+              name: "feature/docs",
               commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z", author: { username: "alice" } },
             },
             { name: "user/test-bob/wip-9", commit: { id: "b9", author: { username: "test-bob" } } },
@@ -1221,10 +1207,10 @@ describe("pulls + branches routes", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { branches: Array<{ name: string }> };
-      // wip-1 excluded (open PR by alice), feature/passthrough kept (alice
+      // wip-1 excluded (open PR by alice), feature/docs kept (alice
       // authored, no PR), test-bob excluded (different author), main excluded
       // (also has no open-PR check but does have an unrelated commit shape).
-      expect(body.branches.map((b) => b.name)).toEqual(["feature/passthrough"]);
+      expect(body.branches.map((b) => b.name)).toEqual(["feature/docs"]);
     });
 
     it("POST /branches rejects names without a valid shape", async () => {

@@ -61,8 +61,8 @@ async function ready(opts) {
     "/chao/flushing-coin/pulls",
     "/chao/flushing-coin/src/branch/main/hello.md",
     "/chao/flushing-coin/src/branch/main?mode=edit&path=devx-ready.md&edit_branch=user%2Fchao%2Fdevx-ready",
-    "/chao/passthrough-demo/issues",
-    "/chao/passthrough-demo/pulls",
+    "/chao/coflat-demo/issues",
+    "/chao/coflat-demo/pulls",
   ]) {
     console.log(`  ${new URL(route, opts.url).toString()}`);
   }

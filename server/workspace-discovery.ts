@@ -16,8 +16,8 @@ export function roleFromPermissions(
 
 // Every repo the calling token can access, in any owner's namespace. Cosheaf
 // is a thin frontend over the forge, so discovery shows all repos the caller
-// can see — not only ones carrying a `cosheaf-format-*` topic. Untagged repos
-// open as forgejo-passthrough (documentFormatFromTopics defaults them).
+// can see — not only ones carrying a `cosheaf-format-*` topic. Markdown is
+// always Coflat.
 // Forgejo repo search runs under the user's resolved backend credential, so
 // private repos respect Forgejo visibility. Dedupe by full name and sort for a
 // stable list.

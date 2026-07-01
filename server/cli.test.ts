@@ -27,19 +27,11 @@ describe("cli seed parsing", () => {
     });
   });
 
-  it("accepts --default-md-format=forgejo-passthrough and seed profiles", () => {
+  it("accepts seed profiles and uses Coflat", () => {
     expect(parseSeedOptions([
       "--user", "chao", "--password=pw", "--workspace", "chao/notes",
-      "--default-md-format", "forgejo-passthrough",
       "--profile", "rendering",
-    ])).toMatchObject({ defaultMdFormat: "forgejo-passthrough", profile: "rendering" });
-  });
-
-  it("rejects unknown markdown formats", () => {
-    expect(() => parseSeedOptions([
-      "--user", "chao", "--password=pw", "--workspace", "chao/notes",
-      "--default-md-format", "bogus",
-    ])).toThrow("--default-md-format must be a known DocumentFormatId");
+    ])).toMatchObject({ defaultMdFormat: "coflat", profile: "rendering" });
   });
 
   it("rejects unknown seed profiles", () => {

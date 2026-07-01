@@ -149,14 +149,7 @@ export async function provisionWorkspace(
       options.requiredApprovals ?? 1,
       createdRepo,
     );
-    // Webhook registration is needed only for workspaces whose sidecar we
-    // reconcile from Forgejo events. Passthrough workspaces don't index
-    // into the sidecar (no doc_map / FTS / backlinks usage), so there's
-    // nothing to reconcile and no SSE event worth firing. Skip the hook
-    // for them; coflat workspaces still get one and roll back on failure.
-    if (workspace.defaultMdFormat !== "forgejo-passthrough") {
-      await ensureWorkspaceWebhookOrThrow(forgejo, config, owner, repoName);
-    }
+    await ensureWorkspaceWebhookOrThrow(forgejo, config, owner, repoName);
     if (!repoExisted) {
       await ensureWorkspaceFile(forgejo, owner, repoName, {
         path: ".gitattributes",
