@@ -117,6 +117,34 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return real;
   }
 
+  // Write-side twin of realInside: symlink-resolve the nearest existing ancestor
+  // directory of a write/delete target and re-assert containment. abs() is
+  // lexical only, so without this a symlinked directory component in an untrusted
+  // opened folder (e.g. `sub -> ~/.ssh`) would redirect a write/delete outside
+  // the root. Walks up because a new file's parent dirs may not exist yet.
+  private async assertRealParentInside(full: string): Promise<void> {
+    const realRoot = (this.realRoot ??= await realpath(this.root));
+    let dir = resolve(full, "..");
+    for (;;) {
+      let real: string | null = null;
+      try {
+        real = await realpath(dir);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      if (real === null) {
+        const parent = resolve(dir, "..");
+        if (parent === dir) return; // reached the filesystem root without escaping
+        dir = parent;
+        continue;
+      }
+      if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+        throw new WorkspaceBackendError(400, "invalid_path", "path escapes workspace root");
+      }
+      return;
+    }
+  }
+
   private async readBytes(filepath: string): Promise<Buffer> {
     const full = this.abs(filepath);
     try {
@@ -196,6 +224,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // the UI routes there in the first place (no hardcoded "main" mismatch).
   async putFileBytes(_owner: string, _repo: string, opts: WsPutFileBytes): Promise<WsFileWrite> {
     const full = this.abs(opts.path);
+    await this.assertRealParentInside(full);
     await mkdir(resolve(full, ".."), { recursive: true });
     // Write to a temp sibling then rename so a reader never sees a half-written
     // file. The temp name is derived from the content hash (no Math.random,
@@ -208,6 +237,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
 
   async deleteFile(_owner: string, _repo: string, opts: WsDeleteFile): Promise<void> {
     const full = this.abs(opts.path);
+    await this.assertRealParentInside(full);
     try {
       await rm(full);
     } catch (err) {

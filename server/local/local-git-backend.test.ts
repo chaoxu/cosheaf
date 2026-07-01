@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -95,6 +95,24 @@ describe("LocalGitWorkspaceBackend", () => {
     expect(await backend.getFileMeta(O, R, "main", "link.md")).toBeNull();
     // The link is also not listed in the tree.
     expect((await backend.getTree(O, R, "main")).map((e) => e.path)).not.toContain("link.md");
+  });
+
+  it("does not write or delete through a symlinked directory that escapes the workspace", async () => {
+    const dir = tmpRepo();
+    const outside = mkdtempSync(join(tmpdir(), "cosheaf-wb-outside-"));
+    // `sub` inside the workspace is a symlink to a directory outside it.
+    symlinkSync(outside, join(dir, "sub"));
+    const backend = new LocalGitWorkspaceBackend(dir);
+    await expect(
+      backend.putFile(O, R, { branch: "main", path: "sub/pwned.md", content: "x", message: "m" }),
+    ).rejects.toBeInstanceOf(WorkspaceBackendError);
+    expect(existsSync(join(outside, "pwned.md"))).toBe(false);
+    // Delete through the symlinked directory is likewise refused.
+    writeFileSync(join(outside, "victim.md"), "keep");
+    await expect(
+      backend.deleteFile(O, R, { branch: "main", path: "sub/victim.md", sha: "x", message: "m" }),
+    ).rejects.toBeInstanceOf(WorkspaceBackendError);
+    expect(existsSync(join(outside, "victim.md"))).toBe(true);
   });
 
   it("writes the working tree regardless of the requested branch, and reports the checked-out branch (Tier 1)", async () => {
