@@ -58,10 +58,13 @@ export async function resolveAuth(c: Context<AppEnv>): Promise<AuthResolution | 
   const config = c.get("config");
   const bearer = bearerToken(c.req.header("authorization")) ?? getCookie(c, AUTH_COOKIE) ?? null;
   if (!bearer) return null;
-  let resolved = BEARER_CACHE.get(bearer);
-  if (!resolved) {
-    resolved = resolveApiToken(c.get("db"), bearer);
-  }
+  // Return a cache hit WITHOUT re-setting: re-setting slides the TTL forward on
+  // every request, so an actively-used token would never age out and the
+  // BEARER_TTL_MS revocation backstop would be unbounded. Only a fresh
+  // resolution (miss) seeds the cache, giving a fixed window from first use.
+  const cached = BEARER_CACHE.get(bearer);
+  if (cached) return { user: { username: cached.username }, forgejoToken: cached.forgejoToken };
+  let resolved = resolveApiToken(c.get("db"), bearer);
   if (!resolved && process.env.COSHEAF_ACCEPT_FORGEJO_BEARER === "1") {
     const fj = new Forgejo({ baseUrl: config.forgejoUrl, token: bearer });
     try {

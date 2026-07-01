@@ -7,8 +7,7 @@ import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { deleteCookie, getCookie } from "hono/cookie";
 import { deleteApiToken, mintApiToken } from "../api-tokens.js";
-import { AUTH_COOKIE, resolveAuth } from "../middleware.js";
-import { bearerToken } from "../middleware.js";
+import { AUTH_COOKIE, bearerToken, invalidateBearerCache, resolveAuth } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { bad, unauthorized } from "./responses.js";
 import { rejectCrossOriginMutation, setAuthCookie } from "./web-context.js";
@@ -312,7 +311,13 @@ auth.post("/logout", (c) => {
   const crossOrigin = rejectCrossOriginMutation(c);
   if (crossOrigin) return crossOrigin;
   const token = bearerToken(c.req.header("authorization")) ?? getCookie(c, AUTH_COOKIE) ?? null;
-  if (token) deleteApiToken(c.get("db"), token);
+  if (token) {
+    deleteApiToken(c.get("db"), token);
+    // Evict the resolved-token cache too: deleting only the DB row leaves the
+    // cached resolution (with a still-valid shared Forgejo credential) able to
+    // keep authenticating the revoked token, since no backend 401 ever fires.
+    invalidateBearerCache(token);
+  }
   deleteCookie(c, AUTH_COOKIE, { path: "/" });
   return c.json({ ok: true });
 });

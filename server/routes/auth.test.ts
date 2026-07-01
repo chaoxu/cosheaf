@@ -466,6 +466,23 @@ describe("POST /api/v1/logout", () => {
     expect(res.status).toBe(403);
     expect(await res.text()).toBe("forbidden");
   });
+
+  it("evicts the bearer cache so the revoked token stops authenticating", async () => {
+    const db = freshDb();
+    _seedBearerAuthCacheForTests("pat-gone", "iris");
+    // Resolves before logout (served from the seeded cache).
+    const before = await appFor(db).request("/api/v1/me", { headers: { authorization: "Bearer pat-gone" } });
+    expect(await before.json()).toEqual({ user: { username: "iris" } });
+    // Logout must invalidate the cached resolution, not just the DB row — otherwise
+    // the token keeps authenticating from cache since no backend 401 ever fires.
+    const out = await appFor(db).request("/api/v1/logout", {
+      method: "POST",
+      headers: { authorization: "Bearer pat-gone", origin: "http://localhost" },
+    });
+    expect(out.status).toBe(200);
+    const after = await appFor(db).request("/api/v1/me", { headers: { authorization: "Bearer pat-gone" } });
+    expect(await after.json()).toEqual({ user: null });
+  });
 });
 
 describe("GET /api/v1/me", () => {
