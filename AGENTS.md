@@ -364,15 +364,19 @@ Override only when debugging infrastructure itself: `COSHEAF_PROD_HOST`,
 To keep the public GitHub repository (`chaoxu/cosheaf`) in sync with your active development Gitea repository, there is an automated synchronization setup in Gitea's CI workflow:
 
 - Every successful push or merge to the `main` branch on your Gitea repository automatically triggers the `sync-github` job in `.gitea/workflows/ci.yml`.
-- This job executes `./scripts/mirror-github.sh --yes`, which archives the current commit tree and pushes a clean snapshot commit directly to GitHub's `main` branch. This process intentionally avoids leaking intermediate development commits or WIP branches.
+- This job executes `./scripts/mirror-github.sh --yes`, which archives the current commit tree and pushes a clean snapshot commit directly to GitHub's `main` branch via SSH. This process intentionally avoids leaking intermediate development commits or WIP branches.
 - To configure this pipeline on your Gitea instance:
   1. Navigate to your repository **Settings -> Actions -> Secrets**.
-  2. Add a new secret named `COSHEAF_GITHUB_TOKEN` containing your GitHub Personal Access Token (PAT) with repository push scopes.
+  2. Add a new secret named `COSHEAF_GITHUB_SSH_KEY` containing the private SSH key (whose corresponding public key has been configured as a Deploy Key on your GitHub repository with write access).
 
 For manual snapshots, you can run the script from your terminal:
 
 ```bash
-GITHUB_TOKEN="your-token" GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh
+# Uses local SSH credentials (git@github.com:chaoxu/cosheaf.git):
+GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh --yes
+
+# Alternatively, using a personal access token over HTTPS:
+GITHUB_TOKEN="your-token" GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh --yes
 ```
 
 ## DevX quick map
