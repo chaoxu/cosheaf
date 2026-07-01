@@ -1,9 +1,10 @@
 import type { Hono } from "hono";
 import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
+import type { BranchRow } from "../../shared/branches.js";
 import { isFormatTopic } from "../../shared/document-format.js";
 import { ROLES, type Role } from "../../shared/roles.js";
 import { is404, is4xx } from "../forgejo-errors.js";
-import type { ForgejoBranch, ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalidateWorkspaceTitleCache } from "../middleware.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
@@ -399,14 +400,14 @@ export function mergeRepoTopics(existing: readonly string[], enteredRaw: string)
   return [...new Set([...preservedFormat, ...entered])];
 }
 
-function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null, branches: readonly ForgejoBranch[]): Html {
+function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null, branches: readonly BranchRow[]): Html {
   const description = repo?.description ?? "";
   const isPrivate = repo?.private ?? true;
   const defaultBranch = repo?.default_branch ?? "main";
   const topics = editableTopics(repo?.topics);
   const branchOpts = branches.length
     ? branches
-    : [{ name: defaultBranch } as ForgejoBranch];
+    : [{ name: defaultBranch, commit: { id: "" } }];
   const inner = ctx.ws.role === "admin"
     ? html`<form class="settings-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/settings/meta")}">
         <label class="settings-row"><span>Description</span><input name="description" value="${description}" data-testid="settings-meta-description"></label>

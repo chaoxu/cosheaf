@@ -341,16 +341,6 @@ export function lineCommentToShape(cm: LineComment): PullCommentShape {
   };
 }
 
-// The /branches list returns a branch object (the local content backend's
-// WsBranch, plus a commit `url`); the pull/settings surfaces read only `name`.
-export interface BranchJson {
-  name: string;
-  commit?: { id?: string; timestamp?: string; author?: { username?: string; name?: string; email?: string } };
-}
-export function branchToShape(b: BranchJson): BranchShape {
-  return { name: b.name, commit: { id: b.commit?.id ?? "", timestamp: b.commit?.timestamp, author: b.commit?.author } };
-}
-
 // The typed collaborators DTO is {login, permission}; the settings route reads
 // only `login` off each member. `permission` has no consumer here and is dropped.
 export function collaboratorToShape(member: { login: string; permission: string }): CollaboratorShape {

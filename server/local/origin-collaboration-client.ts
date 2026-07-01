@@ -20,6 +20,7 @@
 // survives — see the #263 report.
 
 import type { LineComment } from "../../shared/comments.js";
+import type { BranchRow } from "../../shared/branches.js";
 import type {
   ActivityRow,
   DependencyRow,
@@ -37,8 +38,6 @@ import type { CollaborationClient } from "../collaboration-client.js";
 import {
   activityRowToShape,
   type ActivityShape,
-  type BranchJson,
-  branchToShape,
   type BranchProtectionShape,
   type BranchShape,
   type CollaboratorShape,
@@ -650,8 +649,7 @@ export class OriginCollaborationClient {
   // ---- repo / settings reads ----
 
   async listBranches(owner: string, repo: string): Promise<BranchShape[]> {
-    const r = await this.get<BranchJson[]>(this.repoPath(owner, repo, "/branches"));
-    return (r ?? []).map(branchToShape);
+    return this.get<BranchRow[]>(this.repoPath(owner, repo, "/branches"));
   }
 
   async listCollaborators(owner: string, repo: string): Promise<CollaboratorShape[]> {

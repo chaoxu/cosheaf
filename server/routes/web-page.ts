@@ -1,5 +1,6 @@
 import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
-import type { ForgejoBranch, ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
+import type { BranchRow } from "../../shared/branches.js";
+import type { ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
 import { backIcon } from "./icons.js";
 import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
@@ -400,7 +401,7 @@ function safeLabelColor(value: string): string {
   return /^[0-9a-fA-F]{6}$/.test(color) ? color : "71717a";
 }
 
-export function branchOptions(branches: readonly ForgejoBranch[], selectedBranch: string | null | undefined): Html {
+export function branchOptions(branches: readonly BranchRow[], selectedBranch: string | null | undefined): Html {
   return joinHtml(
     branches.map((branch) => html`<option value="${branch.name}"${selected(selectedBranch ?? "", branch.name)}>${branch.name}</option>`),
   );

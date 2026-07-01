@@ -1,11 +1,12 @@
 import type { Context, Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
+import type { BranchRow } from "../../shared/branches.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
 import { errorStatus } from "../forgejo-errors.js";
-import type { ForgejoBranch, ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment } from "../forgejo-types.js";
+import type { ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { openLocalPull } from "../local/local-pulls.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
@@ -135,7 +136,7 @@ web.get("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
     const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
     if (!entry) return notFoundPage(ctx.user, "Repository not found");
     const [baseBranches, headBranches, currentBranch] = await Promise.all([
-      ctx.collab.listBranches(ctx.owner, ctx.repo).catch(() => [] as ForgejoBranch[]),
+      ctx.collab.listBranches(ctx.owner, ctx.repo).catch(() => [] as BranchRow[]),
       entry.backend.listBranches(ctx.owner, ctx.repo),
       entry.backend.currentBranch(),
     ]);
@@ -170,7 +171,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
       return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${result.number}`));
     }
     const [baseBranches, headBranches, currentBranch] = await Promise.all([
-      ctx.collab.listBranches(ctx.owner, ctx.repo).catch(() => [] as ForgejoBranch[]),
+      ctx.collab.listBranches(ctx.owner, ctx.repo).catch(() => [] as BranchRow[]),
       entry.backend.listBranches(ctx.owner, ctx.repo),
       entry.backend.currentBranch(),
     ]);
@@ -683,12 +684,12 @@ function parsePullListFilters(c: Context<AppEnv>): PullListFilters {
 
 function pullCreatePage(
   ctx: WebCtx,
-  branches: readonly ForgejoBranch[],
+  branches: readonly BranchRow[],
   values: { head?: string | null; base?: string | null; title?: string; body?: string; error?: string } = {},
   // Local Workbench only: head branches come from the working tree (not the core)
   // and head defaults to the checked-out branch. Hosted leaves this undefined and
   // keeps the original compare form byte-for-byte.
-  local?: { headBranches: readonly ForgejoBranch[]; currentBranch: string | null },
+  local?: { headBranches: readonly BranchRow[]; currentBranch: string | null },
 ): Html {
   const base = values.base ?? "main";
   const headBranches = local ? local.headBranches : branches;
@@ -748,7 +749,7 @@ function pullCreateLocalNoBranch(ctx: WebCtx, branch: string): Html {
   `;
 }
 
-function branchAfter(branches: readonly ForgejoBranch[], base: string): string {
+function branchAfter(branches: readonly BranchRow[], base: string): string {
   return branches.find((branch) => branch.name !== base)?.name ?? branches[0]?.name ?? "";
 }
 

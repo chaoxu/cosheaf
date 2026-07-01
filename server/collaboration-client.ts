@@ -13,6 +13,7 @@
 // `WorkspaceBackend`, not here — that is the other trigger (local git vs forge).
 
 import type { NotificationRow } from "../shared/issues.js";
+import type { BranchRow } from "../shared/branches.js";
 import type { Forgejo, NotificationListOpts } from "./forgejo.js";
 
 // The exact methods the collaboration routes/pages need from the forge/core.
@@ -89,7 +90,8 @@ type ForgejoCollaborationClient = Pick<
   | "listBranches"
 >;
 
-export type CollaborationClient = Omit<ForgejoCollaborationClient, "listRepoNotifications" | "getNotificationThread"> & {
+export type CollaborationClient = Omit<ForgejoCollaborationClient, "listRepoNotifications" | "getNotificationThread" | "listBranches"> & {
   listRepoNotifications(owner: string, repo: string, opts?: NotificationListOpts): Promise<NotificationRow[]>;
   getNotificationThread(id: number): Promise<NotificationRow | null>;
+  listBranches(owner: string, repo: string): Promise<BranchRow[]>;
 };
