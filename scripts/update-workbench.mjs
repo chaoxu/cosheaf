@@ -14,12 +14,13 @@
 //
 // Auth: public releases need no token; otherwise set COSHEAF_GITEA_TOKEN.
 import { execSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Command } from "commander";
+import { run } from "./lib/run.mjs";
 
 const program = new Command();
 program
@@ -51,28 +52,37 @@ const asset = (release.assets ?? []).find((a) => a.name === "cosheaf-workbench.t
 if (!asset) throw new Error(`release ${release.tag_name} has no cosheaf-workbench.tar.gz asset`);
 console.log(`latest bundle: ${release.tag_name}`);
 
-const work = mkdtempSync(join(tmpdir(), "cosheaf-wb-"));
+// Stage on the same filesystem as the install dir so the final swap is an
+// intra-filesystem rename. os.tmpdir() is frequently a separate mount (tmpfs
+// /tmp on Linux consumers); a cross-device renameSync throws EXDEV mid-swap,
+// after the old install has already been moved aside — destroying the install.
+const dir = opts.dir;
+const work = mkdtempSync(join(dirname(dir), ".cosheaf-wb-"));
 const tarPath = join(work, "bundle.tar.gz");
 const dl = await fetch(asset.browser_download_url, { headers });
-if (!dl.ok || !dl.body) throw new Error(`download failed → ${dl.status}`);
+if (!dl.ok || !dl.body) {
+  rmSync(work, { recursive: true, force: true });
+  throw new Error(`download failed → ${dl.status}`);
+}
 await pipeline(Readable.fromWeb(dl.body), createWriteStream(tarPath));
 
 const staged = join(work, "extracted");
-execSync(`mkdir -p ${staged} && tar -xzf ${tarPath} -C ${staged}`, { stdio: "inherit" });
-// Bundles pack either as the dir contents or a single top-level folder.
-const top = readdirSync(staged);
-const bundleRoot = top.length === 1 && !existsSync(join(staged, "cosheaf-workbench")) ? join(staged, top[0]) : staged;
+mkdirSync(staged);
+run("tar", ["-xzf", tarPath, "-C", staged]);
+// pack-workbench.mjs always archives a single top-level `dist-workbench/` folder.
+const bundleRoot = join(staged, "dist-workbench");
 if (!existsSync(join(bundleRoot, "cosheaf-workbench"))) {
+  rmSync(work, { recursive: true, force: true });
   throw new Error("bundle is missing the cosheaf-workbench run shim — wrong asset?");
 }
 
 if (opts.dryRun) {
-  console.log(`dry run: bundle staged at ${bundleRoot} (not swapped)`);
+  console.log(`dry run: ${release.tag_name} downloaded and validated (shim present); not swapped`);
+  rmSync(work, { recursive: true, force: true });
   process.exit(0);
 }
 
-// Atomic-ish swap: move the new bundle into place, keeping one .bak.
-const dir = opts.dir;
+// Swap the new bundle into place with an intra-filesystem rename, keeping one .bak.
 const backup = `${dir}.bak`;
 if (existsSync(backup)) rmSync(backup, { recursive: true, force: true });
 if (existsSync(dir)) renameSync(dir, backup);

@@ -67,7 +67,7 @@ set -euo pipefail
 cd ${remoteCheckoutExpr()}
 git fetch --all --prune
 git checkout ${shellQuote(sha)}
-coflat_ref="$(git -c http.sslVerify=false ls-remote ${COFLAT_GIT_REPO} refs/heads/main 2>/dev/null | cut -f1)"
+coflat_ref="$(git -c http.sslVerify=false ls-remote ${shellQuote(COFLAT_GIT_REPO)} refs/heads/main 2>/dev/null | cut -f1)"
 if [ -z "$coflat_ref" ]; then echo "could not resolve coflat main SHA"; exit 1; fi
 health="$(curl -fsS http://127.0.0.1:3031/api/v1/health 2>/dev/null || true)"
 parse() { printf '%s' "$health" | node -e "let b='';process.stdin.on('data',d=>b+=d);process.stdin.on('end',()=>{try{console.log(JSON.parse(b).$1||'')}catch{console.log('')}})"; }
