@@ -1,4 +1,5 @@
-// Pure mapping layer for the local Workbench CollaborationClient (#262/#263):
+// Legacy mapping layer for the remaining unmigrated local Workbench surfaces
+// (#262/#288):
 // the `*Shape` aliases derived structurally from CollaborationClient, plus the
 // `*ToShape` functions that map the core's narrower Cosheaf DTOs back up to the
 // forge-client object shapes the collaboration routes consume. Split out of
@@ -7,28 +8,17 @@
 // is the CollaborationClient type, exactly as in origin-collaboration-client.ts.
 
 import type { LineComment } from "../../shared/comments.js";
-import type {
-  ActivityRow,
-  DependencyRow,
-  IssueComment,
-  IssueDetail,
-  IssueRow,
-  IssueState,
-  Label,
-  Milestone,
-  TimelineEvent,
-} from "../../shared/issues.js";
+import type { ActivityRow, Label } from "../../shared/issues.js";
 import type { PrCommit, PrFile, PrMeta, ReviewDto } from "../../shared/review.js";
+export type LabelShape = {
+  id: number;
+  name: string;
+  color: string;
+  description?: string;
+  exclusive?: boolean;
+  is_archived?: boolean;
+};
 import type { CollaborationClient } from "../collaboration-client.js";
-
-// The forge-client object shapes, derived from the CollaborationClient surface so
-// no forge type is named in this Workbench file. Each is the element the matching
-// read method resolves to.
-export type IssueShape = Awaited<ReturnType<CollaborationClient["getIssue"]>>;
-export type CommentShape = Awaited<ReturnType<CollaborationClient["listIssueComments"]>>[number];
-export type LabelShape = Awaited<ReturnType<CollaborationClient["listLabels"]>>[number];
-export type MilestoneShape = Awaited<ReturnType<CollaborationClient["listMilestones"]>>[number];
-export type TimelineShape = Awaited<ReturnType<CollaborationClient["listIssueTimeline"]>>[number];
 // pulls / reviews / repo / notifications surfaces (this pass).
 export type PullShape = NonNullable<Awaited<ReturnType<CollaborationClient["getPull"]>>>;
 export type ReviewShape = Awaited<ReturnType<CollaborationClient["listReviews"]>>[number];
@@ -62,174 +52,6 @@ export function toLabelShape(label: Label): LabelShape {
     description: label.description,
     exclusive: label.exclusive,
     is_archived: label.is_archived,
-  };
-}
-
-// The compact list-row DTO carries no body/assignees/milestone/closed_at; the
-// issue routes' toIssueRow doesn't read those, so synthesize empties.
-export function issueRowToShape(row: IssueRow): IssueShape {
-  return {
-    id: row.number,
-    number: row.number,
-    title: row.title,
-    body: "",
-    state: row.state,
-    user: { id: 0, login: row.author_username },
-    assignees: null,
-    labels: row.labels.map(toLabelShape),
-    milestone: null,
-    comments: row.comment_count,
-    created_at: iso(row.created_at),
-    updated_at: iso(row.updated_at),
-    closed_at: null,
-    // pull_request omitted: the typed API is issue-only, so the routes'
-    // !pull_request filter passes.
-  };
-}
-
-export function issueDetailToShape(d: IssueDetail): IssueShape {
-  return {
-    id: d.number,
-    number: d.number,
-    title: d.title,
-    body: d.body,
-    state: d.state,
-    user: { id: 0, login: d.author_username },
-    assignees: d.assignees.map((login) => ({ id: 0, login })),
-    labels: d.labels.map(toLabelShape),
-    // The detail DTO exposes only {id,title}; milestone.state isn't read by the
-    // issue routes (they take {id,title}), so default it.
-    milestone: d.milestone ? { id: d.milestone.id, title: d.milestone.title, state: "open" } : null,
-    comments: d.comment_count,
-    created_at: iso(d.created_at),
-    updated_at: iso(d.updated_at),
-    closed_at: isoOrNull(d.closed_at),
-  };
-}
-
-// Build an issue shape from the compact create/edit response. The issue write
-// routes read only number/title/body/state off the returned object; the rest
-// default like the other compact mappers.
-export function writtenIssueToShape(d: { number: number; title: string; body?: string; state: IssueState }): IssueShape {
-  return {
-    id: d.number,
-    number: d.number,
-    title: d.title,
-    body: d.body ?? "",
-    state: d.state,
-    user: null,
-    assignees: null,
-    labels: [],
-    milestone: null,
-    comments: 0,
-    created_at: "",
-    updated_at: "",
-    closed_at: null,
-  };
-}
-
-// The pinned DTO is compact (no labels/created_at/body); routes that consume
-// pinned issues read number/title/state/comments/updated_at/author only.
-export interface PinnedRow {
-  number: number;
-  title: string;
-  state: IssueState;
-  comment_count: number;
-  updated_at: number;
-  author_username: string;
-}
-export function pinnedRowToShape(row: PinnedRow): IssueShape {
-  return {
-    id: row.number,
-    number: row.number,
-    title: row.title,
-    body: "",
-    state: row.state,
-    user: { id: 0, login: row.author_username },
-    assignees: null,
-    labels: [],
-    milestone: null,
-    comments: row.comment_count,
-    created_at: iso(row.updated_at),
-    updated_at: iso(row.updated_at),
-    closed_at: null,
-  };
-}
-
-// Dependency/block rows carry only number/title/state/is_pr; the routes'
-// toDependencyRow reads exactly those (is_pr via !!pull_request).
-export function dependencyRowToShape(row: DependencyRow): IssueShape {
-  return {
-    id: row.number,
-    number: row.number,
-    title: row.title,
-    body: "",
-    state: row.state,
-    user: null,
-    assignees: null,
-    labels: [],
-    milestone: null,
-    comments: 0,
-    created_at: "",
-    updated_at: "",
-    closed_at: null,
-    pull_request: row.is_pr ? {} : undefined,
-  };
-}
-
-export function commentToShape(cm: IssueComment): CommentShape {
-  return {
-    id: cm.id,
-    body: cm.body,
-    user: { id: 0, login: cm.author_username },
-    created_at: iso(cm.created_at),
-    updated_at: iso(cm.updated_at),
-  };
-}
-
-export function milestoneToShape(m: Milestone): MilestoneShape {
-  return {
-    id: m.id,
-    title: m.title,
-    description: m.description,
-    state: m.state,
-    open_issues: m.open_issues,
-    closed_issues: m.closed_issues,
-    due_on: isoOrNull(m.due_on),
-    // created_at is required on the shape but unread by toMilestone.
-    created_at: "",
-  };
-}
-
-export function timelineToShape(e: TimelineEvent): TimelineShape {
-  return {
-    id: e.id,
-    type: e.type,
-    user: e.author_username ? { id: 0, login: e.author_username } : undefined,
-    body: e.body ?? undefined,
-    created_at: iso(e.created_at),
-    updated_at: e.updated_at === null ? undefined : iso(e.updated_at),
-    label: e.label ? { id: 0, name: e.label.name, color: e.label.color } : undefined,
-    old_title: e.old_title ?? undefined,
-    new_title: e.new_title ?? undefined,
-    assignee: e.assignee ? { id: 0, login: e.assignee } : undefined,
-    removed_assignee: e.removed_assignee,
-    // Routes read ref_issue.pull_request (null/object) + .merged. Invert the
-    // flattened is_pull/pull_merged the DTO carries.
-    ref_issue: e.ref_issue
-      ? {
-          number: e.ref_issue.number,
-          title: e.ref_issue.title ?? undefined,
-          state: e.ref_issue.state ?? undefined,
-          pull_request: e.ref_issue.is_pull ? { merged: e.ref_issue.pull_merged ?? false } : null,
-        }
-      : undefined,
-    ref_action: e.ref_action ?? undefined,
-    ref_commit_sha: e.ref_commit_sha ?? undefined,
-    milestone: e.milestone ? { id: 0, title: e.milestone } : undefined,
-    dependent_issue: e.dependent_issue
-      ? { id: 0, number: e.dependent_issue.number, title: e.dependent_issue.title, state: e.dependent_issue.state }
-      : undefined,
   };
 }
 

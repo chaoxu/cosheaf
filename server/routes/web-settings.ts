@@ -2,9 +2,10 @@ import type { Hono } from "hono";
 import { FORGEJO_NAME_RE } from "../../shared/conventions.js";
 import type { BranchRow } from "../../shared/branches.js";
 import { isFormatTopic } from "../../shared/document-format.js";
+import type { Label, Milestone } from "../../shared/issues.js";
 import { ROLES, type Role } from "../../shared/roles.js";
 import { is404, is4xx } from "../forgejo-errors.js";
-import type { ForgejoLabel, ForgejoMilestone, ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
 import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalidateWorkspaceTitleCache } from "../middleware.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
@@ -284,7 +285,7 @@ function cleanupDeletedWorkspace(ctx: WebCtx): void {
   invalidateWorkspaceCaches(ctx.owner, ctx.repo);
 }
 
-function labelRow(ctx: WebCtx, label: ForgejoLabel): Html {
+function labelRow(ctx: WebCtx, label: Label): Html {
   if (ctx.ws.role !== "admin") return html`<div class="list-row">${labelChip(label)}</div>`;
   const base = repoHref(ctx.owner, ctx.repo, `/settings/labels/${label.id}`);
   return html`<div class="list-row" data-testid="settings-label-row">
@@ -305,7 +306,7 @@ function labelRow(ctx: WebCtx, label: ForgejoLabel): Html {
   </div>`;
 }
 
-function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Html {
+function labelSettingsSection(ctx: WebCtx, labels: readonly Label[]): Html {
   return html`<section class="settings-section" data-testid="settings-labels">
     <div class="settings-section-header">
       <h2>Labels</h2>
@@ -328,7 +329,7 @@ function labelSettingsSection(ctx: WebCtx, labels: readonly ForgejoLabel[]): Htm
   </section>`;
 }
 
-function milestoneRow(ctx: WebCtx, milestone: ForgejoMilestone): Html {
+function milestoneRow(ctx: WebCtx, milestone: Milestone): Html {
   const meta = html`<strong>${milestone.title}</strong><span>${milestone.state} - ${milestone.open_issues} open, ${milestone.closed_issues} closed</span>`;
   if (ctx.ws.role !== "admin") return html`<div class="list-row">${meta}</div>`;
   const base = repoHref(ctx.owner, ctx.repo, `/settings/milestones/${milestone.id}`);
@@ -356,7 +357,7 @@ function milestoneRow(ctx: WebCtx, milestone: ForgejoMilestone): Html {
   </div>`;
 }
 
-function milestoneSettingsSection(ctx: WebCtx, milestones: readonly ForgejoMilestone[]): Html {
+function milestoneSettingsSection(ctx: WebCtx, milestones: readonly Milestone[]): Html {
   return html`<section class="settings-section" data-testid="settings-milestones">
     <div class="settings-section-header">
       <h2>Milestones</h2>

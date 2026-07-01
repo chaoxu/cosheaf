@@ -2,26 +2,13 @@ import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type {
   ActivityRow,
+  IssueComment,
   IssueDetail,
   IssueRow,
 } from "../../shared/issues.js";
 import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
-import {
-  forgeIssueCommentToDto,
-  forgeIssueToDependencyRow,
-  forgeIssueToRow,
-  forgeMilestoneToDto,
-  forgeTimelineEventToDto,
-  toLabel,
-} from "../core/forge-dto.js";
 import { is404 } from "../forgejo-errors.js";
-import {
-  type ForgejoIssue,
-  type ForgejoIssueComment,
-  toEpochMs,
-  toEpochMsOrNull,
-  userLogin,
-} from "../forgejo-types.js";
+import { toEpochMs } from "../forgejo-types.js";
 import {
   activeClaims,
   activeClaimsByIssue,
@@ -37,18 +24,17 @@ import { parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitle
 import { bad, conflict, notFound } from "./responses.js";
 import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
 
-async function requireTypedIssue(c: Context<AppEnv>, number: number): Promise<ForgejoIssue | Response> {
+async function requireTypedIssue(c: Context<AppEnv>, number: number): Promise<IssueDetail | Response> {
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
-    const issue = await collab.getIssue(owner, repo, number);
-    return issue.pull_request ? c.json(...notFound("issue not found")) : issue;
+    return await collab.getIssue(owner, repo, number);
   } catch (err) {
     if (is404(err)) return c.json(...notFound("issue not found"));
     throw err;
   }
 }
 
-async function requireIssueComment(c: Context<AppEnv>, number: number, id: number): Promise<ForgejoIssueComment | Response> {
+async function requireIssueComment(c: Context<AppEnv>, number: number, id: number): Promise<IssueComment | Response> {
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
@@ -60,6 +46,15 @@ async function requireIssueComment(c: Context<AppEnv>, number: number, id: numbe
 function trimmedQuery(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function teaIssueRow(row: IssueRow): Record<string, unknown> {
+  const teaIso = (ms: number) => new Date(ms).toISOString().replace(".000Z", "Z");
+  return {
+    ...row,
+    updated_at: teaIso(row.updated_at),
+    created_at: teaIso(row.created_at),
+  };
 }
 
 type IssueSort = "relevance" | "latest" | "oldest" | "recentupdate" | "leastupdate" | "mostcomment" | "leastcomment" | "nearduedate" | "farduedate";
@@ -120,17 +115,13 @@ issues.get("/:owner/:repo/issues", async (c) => {
       collab.listIssues(owner, repo, { state, q, labels, milestones, mentioned_by: mentionedBy, sort, assigned_by: username }),
     ]);
     if (wantsTeaShape(c)) {
-      const byNum = new Map<number, ForgejoIssue>();
-      for (const i of [...authored, ...assigned]) {
-        if (!i.pull_request) byNum.set(i.number, i);
-      }
-      const merged = Array.from(byNum.values()).sort((a, b) => toEpochMs(b.updated_at) - toEpochMs(a.updated_at));
-      return c.json(scrubBackendUrls(c, merged));
+      const byNum = new Map<number, IssueRow>();
+      for (const i of [...authored, ...assigned]) byNum.set(i.number, i);
+      const merged = Array.from(byNum.values()).sort((a, b) => b.updated_at - a.updated_at);
+      return c.json(scrubBackendUrls(c, merged.map(teaIssueRow)));
     }
     const byNum = new Map<number, IssueRow>();
-    for (const i of [...authored, ...assigned]) {
-      if (!i.pull_request) byNum.set(i.number, forgeIssueToRow(i));
-    }
+    for (const i of [...authored, ...assigned]) byNum.set(i.number, i);
     const merged = Array.from(byNum.values()).sort((a, b) => b.updated_at - a.updated_at);
     const rows = attachClaims(c, merged);
     return c.json({ issues: rows });
@@ -145,9 +136,9 @@ issues.get("/:owner/:repo/issues", async (c) => {
     ...(filter === "assigned" ? { assigned_by: username } : assignedBy ? { assigned_by: assignedBy } : {}),
     ...(createdBy ? { created_by: createdBy } : {}),
   });
-  const issueList = list.filter((i) => !i.pull_request);
-  if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, issueList));
-  return c.json({ issues: attachClaims(c, issueList.map(forgeIssueToRow)) });
+  const issueList = list;
+  if (wantsTeaShape(c)) return c.json(scrubBackendUrls(c, issueList.map(teaIssueRow)));
+  return c.json({ issues: attachClaims(c, issueList) });
 });
 
 // Decorate issue rows with their active live-work leases (#95) in one batched
@@ -167,16 +158,8 @@ function attachClaims(c: Context<AppEnv>, rows: IssueRow[]): IssueRow[] {
 issues.get("/:owner/:repo/issues/pinned", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listPinnedIssues(owner, repo);
-  const issuesOnly = list.filter((i) => !i.pull_request);
   return c.json({
-    issues: issuesOnly.map((i) => ({
-      number: i.number,
-      title: i.title,
-      state: i.state,
-      comment_count: i.comments,
-      updated_at: toEpochMs(i.updated_at),
-      author_username: userLogin(i.user),
-    })),
+    issues: list,
   });
 });
 
@@ -188,21 +171,7 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   try {
     const issue = await collab.getIssue(owner, repo, number);
-    if (issue.pull_request) return c.json(...notFound("not an issue"));
-    const detail: IssueDetail = {
-      number: issue.number,
-      title: issue.title,
-      body: issue.body,
-      state: issue.state,
-      author_username: userLogin(issue.user),
-      assignees: (issue.assignees ?? []).map((a) => a.login),
-      labels: issue.labels.map(toLabel),
-      milestone: issue.milestone ? { id: issue.milestone.id, title: issue.milestone.title } : null,
-      comment_count: issue.comments,
-      created_at: toEpochMs(issue.created_at),
-      updated_at: toEpochMs(issue.updated_at),
-      closed_at: toEpochMsOrNull(issue.closed_at),
-    };
+    const detail: IssueDetail = { ...issue };
     const claims = activeClaims(c.get("db"), c.get("workspace").slug, number, Date.now());
     if (claims.length) detail.claims = claims;
     return c.json(detail);
@@ -334,7 +303,7 @@ issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const comments = await collab.listIssueComments(owner, repo, number);
-  return c.json({ comments: comments.map(forgeIssueCommentToDto) });
+  return c.json({ comments });
 });
 
 issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
@@ -348,7 +317,7 @@ issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
   if (target instanceof Response) return target;
   const comment = await collab.createIssueComment(owner, repo, number, text);
   c.get("sse").publish(c.get("workspace").slug, { type: "issue", number, action: "commented" });
-  return c.json(forgeIssueCommentToDto(comment), 201);
+  return c.json(comment, 201);
 });
 
 issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
@@ -363,7 +332,7 @@ issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
   const target = await requireIssueComment(c, number, id);
   if (target instanceof Response) return target;
   const comment = await collab.editIssueComment(owner, repo, id, text);
-  return c.json(forgeIssueCommentToDto(comment));
+  return c.json(comment);
 });
 
 issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
@@ -392,7 +361,7 @@ issues.patch("/:owner/:repo/issues/comments/:id", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
     const comment = await collab.editIssueComment(owner, repo, id, parsed.text);
-    return c.json(forgeIssueCommentToDto(comment));
+    return c.json(comment);
   } catch (err) {
     if (is404(err)) return c.json(...notFound("comment not found"));
     throw err;
@@ -415,7 +384,7 @@ issues.delete("/:owner/:repo/issues/comments/:id", async (c) => {
 issues.get("/:owner/:repo/labels", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const labels = await collab.listLabels(owner, repo);
-  return c.json({ labels: labels.map(toLabel) });
+  return c.json({ labels });
 });
 
 issues.post("/:owner/:repo/labels", async (c) => {
@@ -431,7 +400,7 @@ issues.post("/:owner/:repo/labels", async (c) => {
     description: typeof body?.description === "string" ? body.description : undefined,
     exclusive: body?.exclusive === true,
   });
-  return c.json(toLabel(label), 201);
+  return c.json(label, 201);
 });
 
 issues.patch("/:owner/:repo/labels/:id", async (c) => {
@@ -454,7 +423,7 @@ issues.patch("/:owner/:repo/labels/:id", async (c) => {
   if (Object.keys(patch).length === 0) return c.json(...bad("label field required"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const label = await collab.editLabel(owner, repo, id, patch);
-  return c.json(toLabel(label));
+  return c.json(label);
 });
 
 issues.delete("/:owner/:repo/labels/:id", async (c) => {
@@ -485,7 +454,7 @@ issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
   const validation = validateLabelSelection(labelIds, allLabels, issue.labels);
   if (!validation.ok) return c.json(...bad(validation.message));
   const labels = await collab.setIssueLabels(owner, repo, number, labelIds);
-  return c.json({ labels: labels.map(toLabel) });
+  return c.json({ labels });
 });
 
 issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
@@ -512,7 +481,7 @@ issues.get("/:owner/:repo/milestones", async (c) => {
   const state = parseListState(c.req.query("state"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const milestones = await collab.listMilestones(owner, repo, state);
-  return c.json({ milestones: milestones.map(forgeMilestoneToDto) });
+  return c.json({ milestones });
 });
 
 issues.post("/:owner/:repo/milestones", async (c) => {
@@ -524,7 +493,7 @@ issues.post("/:owner/:repo/milestones", async (c) => {
     title,
     description: typeof body?.description === "string" ? body.description : undefined,
   });
-  return c.json(forgeMilestoneToDto(milestone), 201);
+  return c.json(milestone, 201);
 });
 
 issues.patch("/:owner/:repo/milestones/:id", async (c) => {
@@ -542,7 +511,7 @@ issues.patch("/:owner/:repo/milestones/:id", async (c) => {
   if (Object.keys(patch).length === 0) return c.json(...bad("milestone field required"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const milestone = await collab.editMilestone(owner, repo, id, patch);
-  return c.json(forgeMilestoneToDto(milestone));
+  return c.json(milestone);
 });
 
 issues.delete("/:owner/:repo/milestones/:id", async (c) => {
@@ -586,7 +555,7 @@ issues.get("/:owner/:repo/issues/:number/dependencies", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listIssueDependencies(owner, repo, number);
-  return c.json({ issues: list.map(forgeIssueToDependencyRow) });
+  return c.json({ issues: list });
 });
 
 issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
@@ -594,7 +563,7 @@ issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
   if (number === null) return c.json(...bad("bad number"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listIssueBlocks(owner, repo, number);
-  return c.json({ issues: list.map(forgeIssueToDependencyRow) });
+  return c.json({ issues: list });
 });
 
 issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
@@ -610,7 +579,7 @@ issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
   const updated = await collab.addIssueDependency(owner, repo, number, index);
-  return c.json({ issue: forgeIssueToDependencyRow(updated) }, 201);
+  return c.json({ issue: updated }, 201);
 });
 
 issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
@@ -625,7 +594,7 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
   const updated = await collab.removeIssueDependency(owner, repo, number, index);
-  return c.json({ issue: forgeIssueToDependencyRow(updated) });
+  return c.json({ issue: updated });
 });
 
 // Remove a "blocks" edge. Mirrors the dependency DELETE convention (blocking
@@ -706,6 +675,6 @@ issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
   // Forgejo returns null instead of [] for some empty issue timelines.
   const safe = events ?? [];
   return c.json({
-    events: safe.map(forgeTimelineEventToDto),
+    events: safe,
   });
 });

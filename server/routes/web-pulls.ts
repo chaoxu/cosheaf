@@ -1,12 +1,13 @@
 import type { Context, Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import type { BranchRow } from "../../shared/branches.js";
+import type { IssueComment, Label, Milestone } from "../../shared/issues.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
 import { errorStatus } from "../forgejo-errors.js";
-import type { ForgejoIssueComment, ForgejoLabel, ForgejoMilestone, ForgejoPullReviewComment } from "../forgejo-types.js";
+import type { ForgejoPullReviewComment } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { openLocalPull } from "../local/local-pulls.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
@@ -83,7 +84,7 @@ async function pullIssueCommentFor(
   ctx: WebCtx,
   pullNumber: number,
   commentId: number,
-): Promise<ForgejoIssueComment | null> {
+): Promise<IssueComment | null> {
   const comments = await ctx.collab.listIssueComments(ctx.owner, ctx.repo, pullNumber);
   return comments.find((comment) => comment.id === commentId) ?? null;
 }
@@ -248,12 +249,12 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
   // its count, "last reply", and chips match what's rendered below. Same review
   // filter as renderPullTimeline; sorted so "last" is latest.
   const conversation = [
-    ...issueComments.map((c) => ({ user: c.user, created_at: c.created_at })),
+    ...issueComments.map((c) => ({ author: c.author, author_username: c.author_username, created_at: c.created_at })),
     ...reviews
       .filter(isVisibleReview)
       .map((r) => ({ user: r.user, created_at: r.submitted_at })),
     ...comments.map((c) => ({ user: c.user, created_at: c.created_at })),
-  ].sort((a, b) => Date.parse(a.created_at ?? "") - Date.parse(b.created_at ?? ""));
+  ].sort((a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime());
   return htmlResponse(
     repoPageShell(
       ctx,
@@ -757,8 +758,8 @@ function pullFilterForm(
   owner: string,
   repo: string,
   filters: PullListFilters,
-  labels: readonly ForgejoLabel[],
-  milestones: readonly ForgejoMilestone[],
+  labels: readonly Label[],
+  milestones: readonly Milestone[],
 ): Html {
   const action = repoHref(owner, repo, "/pulls");
   return filterPanel({

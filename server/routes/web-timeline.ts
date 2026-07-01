@@ -1,3 +1,4 @@
+import type { TimelineEvent } from "../../shared/issues.js";
 import type { ForgejoTimelineEvent } from "../forgejo-types.js";
 import { parsePositiveIntId } from "./query-params.js";
 import { html, type Html } from "./web-html.js";
@@ -5,13 +6,13 @@ import { html, type Html } from "./web-html.js";
 export interface WebTimelineSortItem {
   kind: "comment" | "pull-comment" | "event" | "review" | "line-comment" | "commit";
   ts: number;
-  event?: Pick<ForgejoTimelineEvent, "id" | "type">;
+  event?: Pick<ForgejoTimelineEvent | TimelineEvent, "id" | "type">;
   review?: { id: number };
   comment?: { id: number };
   commit?: { sha: string };
 }
 
-export function webTimelineDescriptionHtml(event: ForgejoTimelineEvent): Html {
+export function webTimelineDescriptionHtml(event: ForgejoTimelineEvent | TimelineEvent): Html {
   return html`${webTimelineDescriptionText(event)}`;
 }
 
@@ -26,7 +27,7 @@ export function compareWebTimelineItems(a: WebTimelineSortItem, b: WebTimelineSo
   return timelineStringId(a).localeCompare(timelineStringId(b));
 }
 
-export function webTimelineDescriptionText(event: ForgejoTimelineEvent): string {
+export function webTimelineDescriptionText(event: ForgejoTimelineEvent | TimelineEvent): string {
   switch (event.type) {
     case "close":
       return "closed this";
@@ -40,14 +41,14 @@ export function webTimelineDescriptionText(event: ForgejoTimelineEvent): string 
       return event.label ? `removed the ${event.label.name} label` : "changed labels";
     case "assignees":
       return event.assignee
-        ? `${event.removed_assignee ? "unassigned" : "assigned"} ${event.assignee.login}`
+        ? `${event.removed_assignee ? "unassigned" : "assigned"} ${typeof event.assignee === "string" ? event.assignee : event.assignee.login}`
         : "changed assignees";
     case "change_title":
       return `renamed from "${event.old_title ?? ""}" to "${event.new_title ?? ""}"`;
     case "milestone":
-      return event.milestone ? `added this to milestone ${event.milestone.title}` : "changed milestone";
+      return event.milestone ? `added this to milestone ${typeof event.milestone === "string" ? event.milestone : event.milestone.title}` : "changed milestone";
     case "demilestone":
-      return event.milestone ? `removed this from milestone ${event.milestone.title}` : "changed milestone";
+      return event.milestone ? `removed this from milestone ${typeof event.milestone === "string" ? event.milestone : event.milestone.title}` : "changed milestone";
     case "commit_ref":
       return event.ref_commit_sha ? `referenced this in commit ${event.ref_commit_sha.slice(0, 10)}` : "referenced this";
     case "issue_ref":
@@ -73,7 +74,7 @@ export function webTimelineDescriptionText(event: ForgejoTimelineEvent): string 
   }
 }
 
-function refIssueNumber(event: ForgejoTimelineEvent): number | null {
+function refIssueNumber(event: ForgejoTimelineEvent | TimelineEvent): number | null {
   const ref = event.ref_issue as unknown;
   if (typeof ref === "number") return parsePositiveIntId(ref);
   if (ref && typeof ref === "object" && "number" in ref) {

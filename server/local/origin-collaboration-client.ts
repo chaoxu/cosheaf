@@ -42,19 +42,8 @@ import {
   type BranchShape,
   type CollaboratorShape,
   collaboratorToShape,
-  type CommentShape,
-  commentToShape,
-  dependencyRowToShape,
-  issueDetailToShape,
-  issueRowToShape,
-  type IssueShape,
   iso,
-  type LabelShape,
   lineCommentToShape,
-  type MilestoneShape,
-  milestoneToShape,
-  type PinnedRow,
-  pinnedRowToShape,
   prCommitToShape,
   prFileToShape,
   prMetaToPullShape,
@@ -66,10 +55,6 @@ import {
   reviewDtoToShape,
   type ReviewerShape,
   type ReviewShape,
-  type TimelineShape,
-  timelineToShape,
-  toLabelShape,
-  writtenIssueToShape,
 } from "./origin-shapes.js";
 import { parseOriginResponse, RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -200,7 +185,7 @@ export class OriginCollaborationClient {
     return this.send<T>("DELETE", path, opts);
   }
 
-  async listIssues(owner: string, repo: string, opts: IssueListOpts = {}): Promise<IssueShape[]> {
+  async listIssues(owner: string, repo: string, opts: IssueListOpts = {}): Promise<IssueRow[]> {
     const r = await this.get<{ issues: IssueRow[] }>(this.repoPath(owner, repo, "/issues"), {
       state: opts.state,
       q: opts.q,
@@ -213,47 +198,46 @@ export class OriginCollaborationClient {
       page: opts.page,
       limit: opts.limit,
     });
-    return (r.issues ?? []).map(issueRowToShape);
+    return r.issues ?? [];
   }
 
-  async getIssue(owner: string, repo: string, number: number): Promise<IssueShape> {
-    const detail = await this.get<IssueDetail>(this.repoPath(owner, repo, `/issues/${number}`));
-    return issueDetailToShape(detail);
+  async getIssue(owner: string, repo: string, number: number): Promise<IssueDetail> {
+    return this.get<IssueDetail>(this.repoPath(owner, repo, `/issues/${number}`));
   }
 
-  async listIssueComments(owner: string, repo: string, number: number): Promise<CommentShape[]> {
+  async listIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]> {
     const r = await this.get<{ comments: IssueComment[] }>(this.repoPath(owner, repo, `/issues/${number}/comments`));
-    return (r.comments ?? []).map(commentToShape);
+    return r.comments ?? [];
   }
 
-  async listIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineShape[]> {
+  async listIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineEvent[]> {
     const r = await this.get<{ events: TimelineEvent[] }>(this.repoPath(owner, repo, `/issues/${number}/timeline`));
-    return (r.events ?? []).map(timelineToShape);
+    return r.events ?? [];
   }
 
-  async listLabels(owner: string, repo: string): Promise<LabelShape[]> {
+  async listLabels(owner: string, repo: string): Promise<Label[]> {
     const r = await this.get<{ labels: Label[] }>(this.repoPath(owner, repo, "/labels"));
-    return (r.labels ?? []).map(toLabelShape);
+    return r.labels ?? [];
   }
 
-  async listMilestones(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<MilestoneShape[]> {
+  async listMilestones(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<Milestone[]> {
     const r = await this.get<{ milestones: Milestone[] }>(this.repoPath(owner, repo, "/milestones"), { state });
-    return (r.milestones ?? []).map(milestoneToShape);
+    return r.milestones ?? [];
   }
 
-  async listPinnedIssues(owner: string, repo: string): Promise<IssueShape[]> {
-    const r = await this.get<{ issues: PinnedRow[] }>(this.repoPath(owner, repo, "/issues/pinned"));
-    return (r.issues ?? []).map(pinnedRowToShape);
+  async listPinnedIssues(owner: string, repo: string): Promise<IssueRow[]> {
+    const r = await this.get<{ issues: IssueRow[] }>(this.repoPath(owner, repo, "/issues/pinned"));
+    return r.issues ?? [];
   }
 
-  async listIssueDependencies(owner: string, repo: string, number: number): Promise<IssueShape[]> {
+  async listIssueDependencies(owner: string, repo: string, number: number): Promise<DependencyRow[]> {
     const r = await this.get<{ issues: DependencyRow[] }>(this.repoPath(owner, repo, `/issues/${number}/dependencies`));
-    return (r.issues ?? []).map(dependencyRowToShape);
+    return r.issues ?? [];
   }
 
-  async listIssueBlocks(owner: string, repo: string, number: number): Promise<IssueShape[]> {
+  async listIssueBlocks(owner: string, repo: string, number: number): Promise<DependencyRow[]> {
     const r = await this.get<{ issues: DependencyRow[] }>(this.repoPath(owner, repo, `/issues/${number}/blocks`));
-    return (r.issues ?? []).map(dependencyRowToShape);
+    return r.issues ?? [];
   }
 
   // ---- issue writes ----
@@ -265,12 +249,25 @@ export class OriginCollaborationClient {
     owner: string,
     repo: string,
     opts: { title: string; body: string; assignees?: string[]; labels?: number[] },
-  ): Promise<IssueShape> {
+  ): Promise<IssueDetail> {
     const r = await this.post<{ number: number; title: string; state: "open" | "closed" }>(
       this.repoPath(owner, repo, "/issues"),
       { title: opts.title, body: opts.body, ...(opts.labels?.length ? { labels: opts.labels } : {}) },
     );
-    return writtenIssueToShape(r);
+    return {
+      number: r.number,
+      title: r.title,
+      body: opts.body,
+      state: r.state,
+      author_username: "",
+      assignees: [],
+      labels: [],
+      milestone: null,
+      comment_count: 0,
+      created_at: 0,
+      updated_at: 0,
+      closed_at: null,
+    };
   }
 
   // The forge editIssue is one method; the typed API splits it into three routes
@@ -284,17 +281,15 @@ export class OriginCollaborationClient {
     repo: string,
     number: number,
     patch: { title?: string; body?: string; state?: "open" | "closed"; milestone?: number; assignees?: string[] },
-  ): Promise<IssueShape> {
-    let shape: IssueShape | undefined;
+  ): Promise<IssueDetail> {
+    let detail: IssueDetail | undefined;
     if (patch.title !== undefined || patch.body !== undefined) {
       const tb: { title?: string; body?: string } = {};
       if (patch.title !== undefined) tb.title = patch.title;
       if (patch.body !== undefined) tb.body = patch.body;
-      shape = writtenIssueToShape(
-        await this.patch<{ number: number; title: string; body: string; state: "open" | "closed" }>(
+      detail = await this.patch<IssueDetail>(
           this.repoPath(owner, repo, `/issues/${number}`),
           tb,
-        ),
       );
     }
     if (patch.state !== undefined) {
@@ -302,27 +297,25 @@ export class OriginCollaborationClient {
         this.repoPath(owner, repo, `/issues/${number}/state`),
         { state: patch.state },
       );
-      shape = writtenIssueToShape({ number, title: shape?.title ?? "", state: r.state });
+      detail = { ...(detail ?? await this.getIssue(owner, repo, number)), state: r.state };
     }
     if (patch.milestone !== undefined) {
       await this.patch(this.repoPath(owner, repo, `/issues/${number}/milestone`), {
         id: patch.milestone === 0 ? null : patch.milestone,
       });
     }
-    return shape ?? writtenIssueToShape({ number, title: "", state: "open" });
+    return detail ?? this.getIssue(owner, repo, number);
   }
 
-  async createIssueComment(owner: string, repo: string, number: number, body: string): Promise<CommentShape> {
-    const r = await this.post<IssueComment>(this.repoPath(owner, repo, `/issues/${number}/comments`), { body });
-    return commentToShape(r);
+  async createIssueComment(owner: string, repo: string, number: number, body: string): Promise<IssueComment> {
+    return this.post<IssueComment>(this.repoPath(owner, repo, `/issues/${number}/comments`), { body });
   }
 
   // The forge addresses a comment by id without an issue number; the core's
   // number-less typed routes (issues/comments/:id) match that, so these only
   // need the comment id. The PATCH route returns the updated IssueComment DTO.
-  async editIssueComment(owner: string, repo: string, id: number, body: string): Promise<CommentShape> {
-    const r = await this.patch<IssueComment>(this.repoPath(owner, repo, `/issues/comments/${id}`), { body });
-    return commentToShape(r);
+  async editIssueComment(owner: string, repo: string, id: number, body: string): Promise<IssueComment> {
+    return this.patch<IssueComment>(this.repoPath(owner, repo, `/issues/comments/${id}`), { body });
   }
 
   async deleteIssueComment(owner: string, repo: string, id: number): Promise<void> {
@@ -331,9 +324,9 @@ export class OriginCollaborationClient {
 
   // Returns the issue's labels after the set; the typed route wraps them as
   // {labels}. Other call sites ignore the return.
-  async setIssueLabels(owner: string, repo: string, number: number, labels: number[]): Promise<LabelShape[]> {
+  async setIssueLabels(owner: string, repo: string, number: number, labels: number[]): Promise<Label[]> {
     const r = await this.put<{ labels: Label[] }>(this.repoPath(owner, repo, `/issues/${number}/labels`), { labels });
-    return (r.labels ?? []).map(toLabelShape);
+    return r.labels ?? [];
   }
 
   async pinIssue(owner: string, repo: string, number: number): Promise<void> {
@@ -348,14 +341,13 @@ export class OriginCollaborationClient {
     owner: string,
     repo: string,
     opts: { name: string; color: string; description?: string; exclusive?: boolean; is_archived?: boolean },
-  ): Promise<LabelShape> {
-    const r = await this.post<Label>(this.repoPath(owner, repo, "/labels"), {
+  ): Promise<Label> {
+    return this.post<Label>(this.repoPath(owner, repo, "/labels"), {
       name: opts.name,
       color: opts.color,
       description: opts.description,
       exclusive: opts.exclusive,
     });
-    return toLabelShape(r);
   }
 
   async editLabel(
@@ -363,18 +355,16 @@ export class OriginCollaborationClient {
     repo: string,
     id: number,
     patch: { name?: string; color?: string; description?: string; exclusive?: boolean; is_archived?: boolean },
-  ): Promise<LabelShape> {
-    const r = await this.patch<Label>(this.repoPath(owner, repo, `/labels/${id}`), patch);
-    return toLabelShape(r);
+  ): Promise<Label> {
+    return this.patch<Label>(this.repoPath(owner, repo, `/labels/${id}`), patch);
   }
 
   async deleteLabel(owner: string, repo: string, id: number): Promise<void> {
     await this.del(this.repoPath(owner, repo, `/labels/${id}`));
   }
 
-  async createMilestone(owner: string, repo: string, opts: { title: string; description?: string }): Promise<MilestoneShape> {
-    const r = await this.post<Milestone>(this.repoPath(owner, repo, "/milestones"), opts);
-    return milestoneToShape(r);
+  async createMilestone(owner: string, repo: string, opts: { title: string; description?: string }): Promise<Milestone> {
+    return this.post<Milestone>(this.repoPath(owner, repo, "/milestones"), opts);
   }
 
   async editMilestone(
@@ -382,9 +372,8 @@ export class OriginCollaborationClient {
     repo: string,
     id: number,
     patch: { title?: string; description?: string; state?: "open" | "closed" },
-  ): Promise<MilestoneShape> {
-    const r = await this.patch<Milestone>(this.repoPath(owner, repo, `/milestones/${id}`), patch);
-    return milestoneToShape(r);
+  ): Promise<Milestone> {
+    return this.patch<Milestone>(this.repoPath(owner, repo, `/milestones/${id}`), patch);
   }
 
   async deleteMilestone(owner: string, repo: string, id: number): Promise<void> {
@@ -393,18 +382,18 @@ export class OriginCollaborationClient {
 
   // The typed dependency routes take the dependency issue number in the body and
   // return the updated issue as a compact {issue} dependency row.
-  async addIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<IssueShape> {
+  async addIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<DependencyRow> {
     const r = await this.post<{ issue: DependencyRow }>(this.repoPath(owner, repo, `/issues/${number}/dependencies`), {
       index: dependencyIndex,
     });
-    return dependencyRowToShape(r.issue);
+    return r.issue;
   }
 
-  async removeIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<IssueShape> {
+  async removeIssueDependency(owner: string, repo: string, number: number, dependencyIndex: number): Promise<DependencyRow> {
     const r = await this.del<{ issue: DependencyRow }>(this.repoPath(owner, repo, `/issues/${number}/dependencies`), {
       body: { index: dependencyIndex },
     });
-    return dependencyRowToShape(r.issue);
+    return r.issue;
   }
 
   // Remove a "blocks" edge (this issue blocks `blockIndex`). The forge's

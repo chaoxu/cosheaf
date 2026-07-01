@@ -8,6 +8,12 @@
 export type IssueState = "open" | "closed";
 export type NotificationKind = "issue" | "pr";
 
+export interface UserRef {
+  login: string;
+  avatar_url?: string;
+  email?: string;
+}
+
 export interface Label {
   id: number;
   name: string;
@@ -38,6 +44,7 @@ export interface IssueRow {
   title: string;
   state: IssueState;
   author_username: string;
+  author?: UserRef;
   labels: Label[];
   comment_count: number;
   created_at: number;
@@ -52,6 +59,7 @@ export interface IssueDetail {
   body: string;
   state: IssueState;
   author_username: string;
+  author?: UserRef;
   assignees: string[];
   labels: Label[];
   milestone: { id: number; title: string } | null;
@@ -67,6 +75,7 @@ export interface IssueComment {
   id: number;
   body: string;
   author_username: string;
+  author?: UserRef;
   created_at: number;
   updated_at: number;
 }
@@ -92,6 +101,7 @@ export interface TimelineEvent {
   id: number;
   type: string;
   author_username: string | null;
+  author?: UserRef | null;
   body: string | null;
   created_at: number;
   updated_at: number | null;

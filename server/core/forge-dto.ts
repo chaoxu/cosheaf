@@ -1,5 +1,5 @@
-import type { Label, DependencyRow, IssueComment, IssueRow, Milestone, NotificationKind, NotificationRow, TimelineEvent } from "../../shared/issues.js";
 import type { BranchRow } from "../../shared/branches.js";
+import type { Label, DependencyRow, IssueComment, IssueDetail, IssueRow, Milestone, NotificationKind, NotificationRow, TimelineEvent, UserRef } from "../../shared/issues.js";
 import type { PrCommit, PrFileStatus, PrMeta, ReviewDto } from "../../shared/review.js";
 import type {
   ForgejoBranch,
@@ -13,6 +13,7 @@ import type {
   ForgejoPullFile,
   ForgejoReview,
   ForgejoTimelineEvent,
+  ForgejoUser,
 } from "../forgejo-types.js";
 import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
 
@@ -24,6 +25,15 @@ export function forgeBranchToRow(branch: ForgejoBranch): BranchRow {
       timestamp: branch.commit.timestamp,
       author: branch.commit.author,
     },
+  };
+}
+
+function userRef(user: ForgejoUser | null | undefined): UserRef | undefined {
+  if (!user) return undefined;
+  return {
+    login: user.login,
+    ...(user.avatar_url ? { avatar_url: user.avatar_url } : {}),
+    ...(user.email ? { email: user.email } : {}),
   };
 }
 
@@ -51,10 +61,29 @@ export function forgeIssueToRow(i: ForgejoIssue): IssueRow {
     title: i.title,
     state: i.state,
     author_username: userLogin(i.user),
+    author: userRef(i.user),
     labels: i.labels.map(toLabel),
     comment_count: i.comments,
     created_at: toEpochMs(i.created_at),
     updated_at: toEpochMs(i.updated_at),
+  };
+}
+
+export function forgeIssueToDetail(i: ForgejoIssue): IssueDetail {
+  return {
+    number: i.number,
+    title: i.title,
+    body: i.body,
+    state: i.state,
+    author_username: userLogin(i.user),
+    author: userRef(i.user),
+    assignees: (i.assignees ?? []).map((a) => a.login),
+    labels: i.labels.map(toLabel),
+    milestone: i.milestone ? { id: i.milestone.id, title: i.milestone.title } : null,
+    comment_count: i.comments,
+    created_at: toEpochMs(i.created_at),
+    updated_at: toEpochMs(i.updated_at),
+    closed_at: toEpochMsOrNull(i.closed_at),
   };
 }
 
@@ -63,6 +92,7 @@ export function forgeIssueCommentToDto(cm: ForgejoIssueComment): IssueComment {
     id: cm.id,
     body: cm.body,
     author_username: userLogin(cm.user),
+    author: userRef(cm.user),
     created_at: toEpochMs(cm.created_at),
     updated_at: toEpochMs(cm.updated_at),
   };
@@ -107,6 +137,7 @@ export function forgeTimelineEventToDto(e: ForgejoTimelineEvent): TimelineEvent 
     id: e.id,
     type: e.type,
     author_username: e.user?.login ?? null,
+    author: userRef(e.user) ?? null,
     body: e.body ?? null,
     created_at: toEpochMs(e.created_at),
     updated_at: toEpochMsOrNull(e.updated_at),

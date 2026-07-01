@@ -41,7 +41,7 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/issues/comments/55");
     expect(fake.calls[0]?.init?.method).toBe("PATCH");
     expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ body: "updated" });
-    expect(shape).toMatchObject({ id: 55, body: "updated", user: { login: "alice" } });
+    expect(shape).toMatchObject({ id: 55, body: "updated", author_username: "alice" });
   });
 
   it("deletes an issue comment by id without an issue number", async () => {

@@ -1,6 +1,6 @@
 import type { Context, Hono } from "hono";
+import type { IssueRow, Label, Milestone } from "../../shared/issues.js";
 import { onForgejo404 } from "../forgejo-errors.js";
-import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import { validateLabelSelection } from "./label-utils.js";
 import { isChatIssue, stripChatMetadata } from "./web-chat.js";
@@ -129,7 +129,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
     ctx.collab.listIssueBlocks(ctx.owner, ctx.repo, number).catch(() => []),
     ctx.collab.listPinnedIssues(ctx.owner, ctx.repo).catch(() => []),
   ]);
-  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  if (!issue) return notFoundPage(ctx.user, "Issue not found");
   const chatBackedIssue = isChatIssue(issue);
   const isPinned = pinnedIssues.some((pinned) => pinned.number === issue.number);
   const bodyText = chatBackedIssue ? stripChatMetadata(issue.body ?? "") : issue.body ?? "";
@@ -139,7 +139,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   // Repo labels back the rail's inline editor; only fetched when editing is
   // possible (read role and chat-backed issues show chips only).
   const allLabels = canEditIssue ? await ctx.collab.listLabels(ctx.owner, ctx.repo) : [];
-  const main = html`${threadParticipantsBar(issue.user, comments, ctx.local)}
+  const main = html`${threadParticipantsBar(issue.author ?? { login: issue.author_username }, comments, ctx.local)}
     ${await threadDescription(ctx, bodyText)}
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
@@ -179,7 +179,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
                   : ""
               }
             </div>
-            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.user?.login, ctx.local)} - ${timeEl(issue.created_at)}</p>
+            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.author?.login ?? issue.author_username, ctx.local)} - ${timeEl(issue.created_at)}</p>
           </header>
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI.</div>` : ""}
           ${threadLayout(main, railPanels)}
@@ -192,7 +192,7 @@ web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => 
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Issue not found");
   const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
-  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  if (!issue) return notFoundPage(ctx.user, "Issue not found");
   if (isChatIssue(issue)) return chatIssueReadOnlyPage(ctx.user);
   const [allLabels, collaborators, milestones] = await Promise.all([
     ctx.collab.listLabels(ctx.owner, ctx.repo).catch(() => []),
@@ -371,7 +371,7 @@ function parseIssueListFilters(c: Context<AppEnv>): IssueListFilters {
 
 function issueCreatePage(
   ctx: WebCtx,
-  labels: readonly ForgejoLabel[],
+  labels: readonly Label[],
   values: { title?: string; body?: string; labelIds?: number[]; error?: string } = {},
 ): Html {
   const selectedIds = new Set(values.labelIds ?? []);
@@ -395,7 +395,7 @@ function issueCreatePage(
   });
 }
 
-function labelCheckboxes(labels: readonly ForgejoLabel[], selectedIds: ReadonlySet<number>): Html {
+function labelCheckboxes(labels: readonly Label[], selectedIds: ReadonlySet<number>): Html {
   if (labels.length === 0) return emptyHtml;
   return html`<fieldset class="checkbox-list">
     <legend>Labels</legend>
@@ -413,8 +413,8 @@ function issueFilterForm(
   owner: string,
   repo: string,
   filters: IssueListFilters,
-  labels: readonly ForgejoLabel[],
-  milestones: readonly ForgejoMilestone[],
+  labels: readonly Label[],
+  milestones: readonly Milestone[],
 ): Html {
   const action = repoHref(owner, repo, "/issues");
   const suggestUrl = repoHref(owner, repo, "/user-suggestions");
@@ -444,7 +444,7 @@ function issueFilterForm(
   });
 }
 
-function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyText = "No issues.", local = false): Html {
+function issueList(owner: string, repo: string, issues: IssueRow[], emptyText = "No issues.", local = false): Html {
   return html`<div class="list">${
     issues.length === 0
       ? html`<div class="empty">${emptyText}</div>`
@@ -455,12 +455,12 @@ function issueList(owner: string, repo: string, issues: ForgejoIssue[], emptyTex
             state: issue.state,
             title: issue.title,
             number: issue.number,
-            metaPills: issue.milestone ? html`<span class="meta-pill">${issue.milestone.title}</span>` : emptyHtml,
-            hasMeta: Boolean(issue.milestone) || issue.labels.length > 0,
+            metaPills: emptyHtml,
+            hasMeta: issue.labels.length > 0,
             labels: issue.labels,
-            author: issue.user,
+            author: issue.author ?? { login: issue.author_username },
             createdAt: issue.created_at,
-            comments: issue.comments,
+            comments: issue.comment_count,
             local,
           }),
         )

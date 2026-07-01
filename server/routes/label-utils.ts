@@ -1,7 +1,10 @@
 import type { ForgejoLabel } from "../forgejo-types.js";
 export { toLabel } from "../core/forge-dto.js";
 
-function labelScope(label: ForgejoLabel): string | null {
+type LabelLike = Pick<ForgejoLabel, "id" | "name"> & Partial<Pick<ForgejoLabel, "exclusive" | "is_archived">> & { scope?: string | null };
+
+function labelScope(label: LabelLike): string | null {
+  if (label.scope !== undefined) return label.scope;
   if (!label.exclusive) return null;
   const slash = label.name.lastIndexOf("/");
   return slash > 0 ? label.name.slice(0, slash) : null;
@@ -22,8 +25,8 @@ export function parsePositiveLabelIds(value: unknown): number[] | null {
 
 export function validateLabelSelection(
   requestedIds: number[],
-  allLabels: ForgejoLabel[],
-  currentLabels: ForgejoLabel[],
+  allLabels: LabelLike[],
+  currentLabels: LabelLike[],
 ): { ok: true } | { ok: false; message: string } {
   const byId = new Map(allLabels.map((label) => [label.id, label]));
   const currentIds = new Set(currentLabels.map((label) => label.id));

@@ -1,16 +1,13 @@
 import { canWrite } from "../../shared/roles.js";
+import type { DependencyRow, IssueComment, IssueDetail, Label, TimelineEvent, UserRef } from "../../shared/issues.js";
 import type { ForgejoPull } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type {
   ForgejoCommit,
-  ForgejoIssue,
-  ForgejoIssueComment,
   ForgejoLabel,
-  ForgejoMilestone,
   ForgejoPullReviewComment,
   ForgejoReview,
   ForgejoTimelineEvent,
-  ForgejoUser,
 } from "../forgejo-types.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { type AvatarUser, avatarLinkForUser } from "./avatar.js";
@@ -35,14 +32,17 @@ import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { coflatCommentAssets } from "./web-shell.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
+type WebLabel = Pick<Label, "id" | "name" | "color"> & Partial<Pick<Label, "description" | "exclusive" | "is_archived" | "scope">>;
+type WebMilestone = { id: number; title: string };
+
 export function issueEditPage(
   ctx: WebCtx,
-  issue: ForgejoIssue,
-  allLabels: readonly ForgejoLabel[],
-  collaborators: readonly ForgejoUser[],
-  milestones: readonly ForgejoMilestone[],
+  issue: IssueDetail,
+  allLabels: readonly WebLabel[],
+  collaborators: readonly { login: string }[],
+  milestones: readonly WebMilestone[],
 ): Html {
-  const current = new Set((issue.assignees ?? []).map((a) => a.login));
+  const current = new Set(issue.assignees ?? []);
   // Candidate assignees: repo collaborators ∪ anyone currently assigned ∪ the
   // current user (so a write-access owner who isn't in /collaborators can still
   // self-assign). Forgejo's PATCH issue replaces the assignee set wholesale.
@@ -77,7 +77,7 @@ export function pullStateForm(ctx: WebCtx, pull: ForgejoPull): Html {
 
 export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<Response | null> {
   const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
-  if (!issue || issue.pull_request) return notFoundPage(ctx.user, "Issue not found");
+  if (!issue) return notFoundPage(ctx.user, "Issue not found");
   return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : null;
 }
 
@@ -98,9 +98,9 @@ export function chatIssueReadOnlyPage(user: string): Response {
 
 export function issueRelationsPanel(
   ctx: WebCtx,
-  issue: ForgejoIssue,
-  dependencies: readonly ForgejoIssue[],
-  blocks: readonly ForgejoIssue[],
+  issue: Pick<IssueDetail, "number">,
+  dependencies: readonly DependencyRow[],
+  blocks: readonly DependencyRow[],
 ): Html {
   return html`<section class="relation-panel" data-testid="issue-relations">
     <h2>Issue relations</h2>
@@ -113,19 +113,19 @@ export function issueRelationsPanel(
 
 export function dependenciesPanel(
   ctx: WebCtx,
-  issue: ForgejoIssue,
-  dependencies: readonly ForgejoIssue[],
-  blocks: readonly ForgejoIssue[],
+  issue: Pick<IssueDetail, "number">,
+  dependencies: readonly DependencyRow[],
+  blocks: readonly DependencyRow[],
 ): Html {
   return issueRelationsPanel(ctx, issue, dependencies, blocks);
 }
 
 function issueRelationList(
   ctx: WebCtx,
-  issue: ForgejoIssue,
+  issue: Pick<IssueDetail, "number">,
   relation: "depends_on" | "blocks",
   title: string,
-  issues: readonly ForgejoIssue[],
+  issues: readonly DependencyRow[],
 ): Html {
   const rows = issues.map(
     (item) => html`<div class="relation-row">
@@ -183,8 +183,8 @@ export async function threadDescription(ctx: WebCtx, rawBody: string): Promise<H
 // empty (read role / chat-backed) hides the editor.
 export function labelsRailPanel(opts: {
   ctx: WebCtx;
-  current: readonly ForgejoLabel[];
-  allLabels: readonly ForgejoLabel[];
+  current: readonly WebLabel[];
+  allLabels: readonly WebLabel[];
   action: string;
 }): Html {
   const currentIds = new Set(opts.current.map((label) => label.id));
@@ -216,8 +216,8 @@ export function labelsRailPanel(opts: {
 
 export function labelsPanel(opts: {
   ctx: WebCtx;
-  current: readonly ForgejoLabel[];
-  allLabels: readonly ForgejoLabel[];
+  current: readonly WebLabel[];
+  allLabels: readonly WebLabel[];
   action: string;
 }): Html {
   return labelsRailPanel(opts);
@@ -251,10 +251,10 @@ function threadEditPage(opts: {
   number: number;
   title: string;
   body: string;
-  allLabels: readonly ForgejoLabel[];
-  currentLabels: readonly ForgejoLabel[];
+  allLabels: readonly WebLabel[];
+  currentLabels: readonly WebLabel[];
   assignees?: { candidates: readonly string[]; current: ReadonlySet<string> };
-  milestones?: { all: readonly ForgejoMilestone[]; current: number | null };
+  milestones?: { all: readonly WebMilestone[]; current: number | null };
   backHref: string;
   action: string;
   testId: string;
@@ -319,7 +319,7 @@ function threadEditPage(opts: {
 export async function labelSelectionPatch(
   ctx: WebCtx,
   form: Record<string, unknown>,
-  current: readonly ForgejoLabel[],
+  current: readonly WebLabel[],
 ): Promise<{ ok: true; labels?: number[] } | { ok: false; message: string }> {
   if (!stringField(form.labels_present)) return { ok: true };
   const labelIds = positiveIntFields(form.labels);
@@ -344,7 +344,7 @@ export function pullEditPage(
   ctx: WebCtx,
   pull: ForgejoPull,
   allLabels: readonly ForgejoLabel[],
-  milestones: readonly ForgejoMilestone[],
+  milestones: readonly WebMilestone[],
 ): Html {
   return threadEditPage({
     ctx,
@@ -407,9 +407,9 @@ function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): 
 }
 
 type WebTimelineItem =
-  | { kind: "comment"; ts: number; number: number; comment: ForgejoIssueComment }
-  | { kind: "pull-comment"; ts: number; number: number; comment: ForgejoIssueComment }
-  | { kind: "event"; ts: number; event: ForgejoTimelineEvent }
+  | { kind: "comment"; ts: number; number: number; comment: IssueComment }
+  | { kind: "pull-comment"; ts: number; number: number; comment: IssueComment }
+  | { kind: "event"; ts: number; event: ForgejoTimelineEvent | TimelineEvent }
   | { kind: "review"; ts: number; review: ForgejoReview }
   | { kind: "line-comment"; ts: number; number: number; comment: ForgejoPullReviewComment }
   | { kind: "commit"; ts: number; commit: ForgejoCommit };
@@ -417,19 +417,19 @@ type WebTimelineItem =
 export async function renderIssueTimeline(
   ctx: WebCtx,
   number: number,
-  comments: readonly ForgejoIssueComment[],
-  timeline: readonly ForgejoTimelineEvent[],
+  comments: readonly IssueComment[],
+  timeline: readonly TimelineEvent[],
 ): Promise<Html> {
   const referenceEvents = timeline.filter((event) => event.type !== "comment" && isReferenceTimelineEvent(event.type));
   const visibleEvents = timeline.filter((event) => event.type !== "comment" && !isReferenceTimelineEvent(event.type));
   const items: WebTimelineItem[] = [
-    ...comments.map((comment) => ({ kind: "comment" as const, ts: toEpochMs(comment.created_at), number, comment })),
-    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event })),
+    ...comments.map((comment) => ({ kind: "comment" as const, ts: comment.created_at, number, comment })),
+    ...visibleEvents.map((event) => ({ kind: "event" as const, ts: event.created_at, event })),
   ].sort(compareTimelineItems);
   const visibleHtml = joinHtml(await Promise.all(items.map((item) => renderTimelineItem(ctx, item))));
   if (referenceEvents.length === 0) return visibleHtml;
   const referenceItems = referenceEvents
-    .map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event }))
+    .map((event) => ({ kind: "event" as const, ts: event.created_at, event }))
     .sort(compareTimelineItems);
   const referenceHtml = joinHtml(await Promise.all(referenceItems.map((item) => renderTimelineItem(ctx, item))));
   return html`${visibleHtml}<details class="timeline-collapsed"><summary>References (${referenceEvents.length})</summary>${referenceHtml}</details>`;
@@ -444,13 +444,27 @@ function isReferenceTimelineEvent(type: string): boolean {
 // identity block); re-exported here for the thread test + existing importers.
 export { initials, tint } from "./avatar.js";
 
+function userRef(login: string | null | undefined): AvatarUser | null {
+  return login ? { login } : null;
+}
+
+function commentUser(comment: { user?: AvatarUser | null; author?: UserRef | null; author_username?: string }): AvatarUser | null {
+  return comment.user ?? comment.author ?? userRef(comment.author_username);
+}
+
+function eventUser(event: ForgejoTimelineEvent | TimelineEvent): AvatarUser | null {
+  if ("user" in event) return event.user ?? null;
+  const dto = event as TimelineEvent;
+  return dto.author ?? userRef(dto.author_username);
+}
+
 // The right-hand metadata cluster for an issue/pull list row: author avatar +
 // name, short date, and bare comment count — all on one line. The avatar is a
 // server-rendered <img> for uploaders (same-origin /forge-avatars/*), else the
 // initials chip; the forge host never appears in a client URL (#177).
 export function listRowSide(
   author: AvatarUser | null | undefined,
-  createdAt: string | undefined,
+  createdAt: string | number | undefined,
   comments: number | undefined,
   local = false,
 ): Html {
@@ -476,7 +490,7 @@ export function threadListRow(opts: {
   hasMeta: boolean;
   labels: readonly ForgejoLabel[];
   author: AvatarUser | null | undefined;
-  createdAt: string | undefined;
+  createdAt: string | number | undefined;
   comments: number | undefined;
   local: boolean;
 }): Html {
@@ -524,12 +538,12 @@ export function composePage(opts: {
 // thread kinds reuse it; all computed from data already fetched.
 export function threadParticipantsBar(
   author: AvatarUser | null | undefined,
-  comments: readonly { user?: AvatarUser | null; created_at?: string }[],
+  comments: readonly { user?: AvatarUser | null; author?: UserRef | null; author_username?: string; created_at?: string | number }[],
   local = false,
 ): Html {
   const seen = new Set<string>();
   const participants: AvatarUser[] = [];
-  for (const user of [author, ...comments.map((c) => c.user)]) {
+  for (const user of [author, ...comments.map(commentUser)]) {
     if (user?.login && !seen.has(user.login)) {
       seen.add(user.login);
       participants.push(user);
@@ -539,7 +553,7 @@ export function threadParticipantsBar(
   return html`<div class="thread-bar" data-testid="thread-bar">
     <span class="thread-faces" aria-label="Participants">${participants.map((user) => avatarLinkForUser(user, local))}</span>
     <span class="thread-stats"><strong>${comments.length}</strong> ${comments.length === 1 ? "reply" : "replies"}${
-      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${userLink(last.user?.login, local)}` : emptyHtml
+      last?.created_at ? html` · last ${timeEl(last.created_at)} by ${userLink(commentUser(last)?.login, local)}` : emptyHtml
     }</span>
     ${comments.length ? html`<a class="thread-jump" href="#thread-bottom">Jump to latest ↓</a>` : emptyHtml}
   </div>`;
@@ -555,19 +569,19 @@ export function isVisibleReview(review: Pick<ForgejoReview, "state" | "body">): 
 export async function renderPullTimeline(
   ctx: WebCtx,
   number: number,
-  issueComments: readonly ForgejoIssueComment[],
+  issueComments: readonly IssueComment[],
   reviews: readonly ForgejoReview[],
   comments: readonly ForgejoPullReviewComment[],
-  timeline: readonly ForgejoTimelineEvent[],
+  timeline: readonly (ForgejoTimelineEvent | TimelineEvent)[],
   commits: readonly ForgejoCommit[],
 ): Promise<Html> {
   const items: WebTimelineItem[] = [
     ...timeline
       .filter((event) => event.type !== "comment" && event.type !== "pull_push" && event.type !== "review")
-      .map((event) => ({ kind: "event" as const, ts: toEpochMs(event.created_at), event })),
+      .map((event) => ({ kind: "event" as const, ts: new Date(event.created_at).getTime() || 0, event })),
     ...issueComments.map((comment) => ({
       kind: "pull-comment" as const,
-      ts: toEpochMs(comment.created_at),
+      ts: comment.created_at,
       number,
       comment,
     })),
@@ -622,8 +636,8 @@ function commentActions(opts: { ctx: WebCtx; testId: string; formId: string; edi
   </details>`;
 }
 
-function issueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
-  if (!canWrite(ctx.ws.role) && comment.user?.login !== ctx.user) return emptyHtml;
+function issueCommentActions(ctx: WebCtx, number: number, comment: IssueComment): Html {
+  if (!canWrite(ctx.ws.role) && commentUser(comment)?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "issue-comment-actions",
@@ -647,8 +661,8 @@ function pullCommentActions(ctx: WebCtx, number: number, comment: ForgejoPullRev
   });
 }
 
-function pullIssueCommentActions(ctx: WebCtx, number: number, comment: ForgejoIssueComment): Html {
-  if (!canWrite(ctx.ws.role) && comment.user?.login !== ctx.user) return emptyHtml;
+function pullIssueCommentActions(ctx: WebCtx, number: number, comment: IssueComment): Html {
+  if (!canWrite(ctx.ws.role) && commentUser(comment)?.login !== ctx.user) return emptyHtml;
   return commentActions({
     ctx,
     testId: "pull-issue-comment-actions",
@@ -696,7 +710,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   const local = ctx.local;
   if (item.kind === "comment") {
     return commentEntry({
-      author: item.comment.user,
+      author: commentUser(item.comment),
       anchorId: `comment-${item.comment.id}`,
       whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
@@ -706,7 +720,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   }
   if (item.kind === "pull-comment") {
     return commentEntry({
-      author: item.comment.user,
+      author: commentUser(item.comment),
       anchorId: `comment-${item.comment.id}`,
       whenHtml: timeEl(item.comment.created_at),
       body: await renderMarkdownSurface(ctx, item.comment.body, { surface: "thread" }),
@@ -744,7 +758,7 @@ async function renderTimelineItem(ctx: WebCtx, item: WebTimelineItem): Promise<H
   // collapsed by renderIssueTimeline.
   if (!webTimelineDescriptionText(item.event)) return emptyHtml;
   return html`<p class="timeline-note">${
-    item.event.user?.login ? html`${userLink(item.event.user.login, local)} ` : emptyHtml
+    eventUser(item.event)?.login ? html`${userLink(eventUser(item.event)?.login, local)} ` : emptyHtml
   }${webTimelineDescriptionHtml(item.event)} · ${timeEl(item.event.created_at)}</p>`;
 }
 
