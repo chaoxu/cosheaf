@@ -315,7 +315,10 @@ function placeReviewComments(root: HTMLElement, comments: readonly CoflatReviewC
       header.append(author, meta);
       const body = document.createElement("p");
       if (comment.bodyHtml) {
-        body.innerHTML = comment.bodyHtml;
+        // Sanitize on the island like every other rendered-HTML insertion here
+        // (document body, line ~83). Defense-in-depth per the CLAUDE.md rule, and
+        // it covers the coflat surface path where bodyHtml isn't forge-sanitized.
+        body.replaceChildren(sanitizeAndRewriteRefsFragment(comment.bodyHtml));
       } else {
         body.textContent = comment.body;
       }

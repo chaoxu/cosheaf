@@ -191,7 +191,7 @@ web.post("/:owner/:repo/chat/:number/send", webRouteForWrite(async (c, ctx) => {
   const number = positiveInt(c.req.param("number"));
   if (!number) return notFoundPage(ctx.user, "Chat not found");
   const issue = await ctx.fj.getIssue(ctx.owner, ctx.repo, number).catch(() => null);
-  if (!issue || !isChatIssue(issue)) {
+  if (!issue || issue.pull_request || !isChatIssue(issue)) {
     return notFoundPage(ctx.user, "Chat not found");
   }
   const message = stringField((await c.req.parseBody()).message);
