@@ -33,6 +33,25 @@ const NOTIFY_EVENTS = new Set([
   "pull_request_comment",
 ]);
 
+// Forgejo/Gitea push payloads can omit files from very large commits. Once a
+// per-commit file list is this large, treat it as an incomplete hint and
+// reconcile from the authoritative tree instead of trusting path filtering.
+const PUSH_COMMIT_FILE_LIST_CAP = 300;
+
+interface PushCommitFiles {
+  added?: string[];
+  modified?: string[];
+  removed?: string[];
+}
+
+function changedPathCount(commit: PushCommitFiles): number {
+  return (commit.added?.length ?? 0) + (commit.modified?.length ?? 0) + (commit.removed?.length ?? 0);
+}
+
+function pushFileListMayBeTruncated(commits: readonly PushCommitFiles[]): boolean {
+  return commits.some((commit) => changedPathCount(commit) >= PUSH_COMMIT_FILE_LIST_CAP);
+}
+
 webhooks.post("/forgejo", async (c) => {
   const config = c.get("config");
   const raw = await c.req.text();
@@ -150,7 +169,7 @@ webhooks.post("/forgejo", async (c) => {
       // next /tree fetch re-pulls from Forgejo. Cheaper than diffing refs.
       invalidateRepoTrees(owner, repoName);
       if (ref === "refs/heads/main") {
-        const commits = (payload.commits ?? []) as Array<{ added?: string[]; modified?: string[]; removed?: string[] }>;
+        const commits = (payload.commits ?? []) as PushCommitFiles[];
         const touched = new Set<string>();
         const removed = new Set<string>();
         for (const cm of commits) {
@@ -239,6 +258,7 @@ webhooks.post("/forgejo", async (c) => {
           failures.length > 0 ||
           commits.length === 0 ||
           totalCommits > commits.length ||
+          pushFileListMayBeTruncated(commits) ||
           (touched.size === 0 && removed.size === 0);
         try {
           if (!needsFullReindex) {
