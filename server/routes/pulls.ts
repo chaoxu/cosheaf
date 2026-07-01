@@ -844,8 +844,9 @@ async function requireOwnPendingReview(
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  if (pull.user?.login === c.get("user").username)
-    return c.json(...forbidden("cannot review your own pull request"));
+  // The author may build a pending review of plain COMMENTS on their own PR (the
+  // inline line-comment path routes through here); only an approve/request_changes
+  // verdict is gated, and that gate lives at submit time.
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
   const reviews = await collab.listReviews(owner, repo, n);
@@ -862,8 +863,8 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
-  if (pull.user?.login === c.get("user").username)
-    return c.json(...forbidden("cannot review your own pull request"));
+  // No author gate here: an author may open a pending review to leave inline
+  // COMMENTs on their own PR. The approve/request_changes gate is at submit.
   const review_id = await findOrCreatePendingReview(collab, owner, repo, n, c.get("user").username);
   return c.json({ review_id });
 });
@@ -936,6 +937,14 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const review = await requireOwnPendingReview(c, n, rid);
   if (review instanceof Response) return review;
+  // Author self-review gate lives here (not at pending-review creation) so an
+  // author can still submit a plain COMMENT review on their own PR; only an
+  // approve/request_changes verdict is forbidden.
+  if (event !== "comment") {
+    const pull = await collab.getPull(owner, repo, n);
+    if (pull?.user?.login === c.get("user").username)
+      return c.json(...forbidden("cannot approve or request changes on your own pull request"));
+  }
   await collab.submitPullReview(owner, repo, n, rid, {
     event: eventMap[event as keyof typeof eventMap],
     body: reviewBody.body,

@@ -816,54 +816,46 @@ describe("pulls + branches routes", () => {
       }
     });
 
-    it("rejects pending-review mutations when the pull cannot be reviewed by the caller", async () => {
-      const pullCases = [
-        { label: "self-authored", pull: pull() },
-        { label: "closed", pull: pull({ state: "closed", user: { login: "bob" } }) },
-      ];
-      const endpointCases = [
-        {
-          methodPath: "/api/v1/repos/owner/w/pulls/7/pending-review/9/submit",
-          body: { event: "approve" },
-          mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9",
-        },
-        {
-          methodPath: "/api/v1/repos/owner/w/pulls/7/pending-review/9/comments",
-          body: { path: "x.md", line: 1, side: "head", body: "hi" },
-          mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9/comments",
-        },
+    it("gates pending-review submit: closed and author-approve rejected, author-comment allowed (#274)", async () => {
+      const selfPull = pull(); // authored by alice
+      const closedPull = pull({ state: "closed", user: { login: "bob" } });
+      const submit = "/api/v1/repos/owner/w/pulls/7/pending-review/9/submit";
+      const addComment = "/api/v1/repos/owner/w/pulls/7/pending-review/9/comments";
+      const cases = [
+        // Closed pull: every pending-review mutation rejected.
+        { label: "closed submit", pull: closedPull, path: submit, body: { event: "approve" }, mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9", status: 403 },
+        { label: "closed add-comment", pull: closedPull, path: addComment, body: { path: "x.md", line: 1, side: "head", body: "hi" }, mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9/comments", status: 403 },
+        // Author of the PR: approve/request_changes rejected, but a plain COMMENT
+        // verdict on their own PR is allowed (the inline line-comment path).
+        { label: "self approve", pull: selfPull, path: submit, body: { event: "approve" }, mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9", status: 403 },
+        { label: "self comment", pull: selfPull, path: submit, body: { event: "comment" }, mutationPath: "/api/v1/repos/owner/w/pulls/7/reviews/9", status: 200 },
       ];
 
-      for (const pullCase of pullCases) {
-        for (const endpointCase of endpointCases) {
-          const db = freshDb();
-          seedWorkspace(db);
-          const token = seedUser(db, 1, "alice", "write");
-          let listedReviews = false;
-          let mutated = false;
-          fetchMock.mockReset();
-          fetchMock.mockImplementation(fakeForgejo((forge) => {
-            forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(pullCase.pull));
-            forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => {
-              listedReviews = true;
-              return Response.json([{ id: 9, state: "PENDING", body: "", user: { login: "alice" } }]);
-            });
-            forge.post(endpointCase.mutationPath, () => {
-              mutated = true;
-              return Response.json({ id: 9 });
-            });
-          }));
-
-          const res = await appFor(db).request(endpointCase.methodPath, {
-            method: "POST",
-            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-            body: JSON.stringify(endpointCase.body),
+      for (const tc of cases) {
+        const db = freshDb();
+        seedWorkspace(db);
+        const token = seedUser(db, 1, "alice", "write");
+        let mutated = false;
+        fetchMock.mockReset();
+        fetchMock.mockImplementation(fakeForgejo((forge) => {
+          forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(tc.pull));
+          forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () =>
+            Response.json([{ id: 9, state: "PENDING", body: "", user: { login: "alice" } }]),
+          );
+          forge.post(tc.mutationPath, () => {
+            mutated = true;
+            return Response.json({ id: 9 });
           });
+        }));
 
-          expect(res.status, `${pullCase.label} ${endpointCase.methodPath}`).toBe(403);
-          expect(listedReviews, `${pullCase.label} ${endpointCase.methodPath}`).toBe(false);
-          expect(mutated, `${pullCase.label} ${endpointCase.methodPath}`).toBe(false);
-        }
+        const res = await appFor(db).request(tc.path, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify(tc.body),
+        });
+
+        expect(res.status, tc.label).toBe(tc.status);
+        expect(mutated, tc.label).toBe(tc.status === 200);
       }
     });
 
