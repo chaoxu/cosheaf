@@ -1,6 +1,5 @@
 import type { Context, Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { fileLineToWritePosition } from "../diff-position.js";
 import { type ForgejoPull, mergePullWithRetry } from "../forgejo.js";
@@ -285,7 +284,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
               <span id="thread-bottom"></span>
-              ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}`,
+              ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}`,
             [
               labelsPanel({ ctx, current: pull.labels ?? [], allLabels, action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`) }),
               reviewersPanel(ctx, pull, availableReviewers),
@@ -293,7 +292,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
           )}
         </article>
       `,
-      { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID },
+      { readerAssets: ctx.coflat },
     ),
   );
 }));
@@ -459,7 +458,7 @@ web.post("/:owner/:repo/pulls/:number/comments", webRoute(async (c, ctx) => {
     comments: [{ path, body, ...pos }],
   });
   // Mirror the files-page gate: a non-markdown file's redirect stays in source.
-  const richOk = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID && fileKindForPath(path) === "markdown";
+  const richOk = ctx.coflat && fileKindForPath(path) === "markdown";
   const mode = parseDiffMode(stringField(form.mode) ?? undefined, richOk);
   const shape = parseDiffShape(stringField(form.shape) ?? undefined, mode);
   return redirect(
@@ -537,7 +536,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
   // — the same documented behavior as a passthrough workspace's rich diff.
   const richOk =
     !ctx.local &&
-    ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID &&
+    ctx.coflat &&
     file !== null &&
     fileKindForPath(file.path) === "markdown";
   const mode = ctx.local ? "source" : parseDiffMode(c.req.query("mode"), richOk);
@@ -591,13 +590,13 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
               ${reviewForms(ctx, pull, repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`))}
             </section>
           </section>
-          ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
+          ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}
         </div>
       `,
       // Load the reader island on coflat in BOTH modes: rich diffs need it, and
       // so do the now-markdown-rendered line comments (which are reader islands)
       // even in source mode.
-      { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID },
+      { readerAssets: ctx.coflat },
     ),
   );
 }));
@@ -730,7 +729,7 @@ function pullCreatePage(
           <button class="button primary" type="submit" data-testid="pull-create-submit">Create PR</button>
         </div>
       </form>
-      ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
+      ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}
     </div>
   `;
 }

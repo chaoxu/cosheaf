@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { Context } from "hono";
 import { setCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../../shared/conventions.js";
+import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { LocaleId, T } from "../../shared/i18n/index.js";
 import type { Role } from "../../shared/roles.js";
 import { repoHref, urlPath, userHref } from "../../shared/url.js";
@@ -54,6 +55,10 @@ export interface WebCtx {
   // "am I local" flag the page modules branch on, derived once here so call sites
   // read `ctx.local` instead of re-deriving `ctx.writeMode === "direct"`.
   local: boolean;
+  // Whether the workspace renders with Coflat (vs forgejo-passthrough), derived
+  // once here so call sites read `ctx.coflat` instead of re-deriving
+  // `ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID`.
+  coflat: boolean;
   // Add/update a collaborator's role. Hosted runs setWorkspaceMember against the
   // forge (collaborator + branch-protection whitelist); local proxies to the
   // connected core's members route. Kept off `collab` because the member-setter
@@ -215,6 +220,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       userAvatarSrc: null,
       writeMode: "direct",
       local: true,
+      coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID,
       canOpenPull: entry.identity.canOpenPull,
       setMember: localMemberSetter(entry, owner, repo),
       originId: entry.identity.originId,
@@ -242,7 +248,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
   const setMember = (username: string, role: Role) => setWorkspaceMember({ forgejo: fj, owner, repo, username, role });
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab: fj, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID, canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
 }
 
 async function resolveWorkspaceDisplayTitle(

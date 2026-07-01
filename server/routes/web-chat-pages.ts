@@ -1,5 +1,4 @@
 import type { Hono } from "hono";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { isCoverifyChatEnabled, runCoverifyChatReply } from "../coverify-cli.js";
 import type { Forgejo } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
@@ -182,7 +181,7 @@ web.get("/:owner/:repo/chat/:number", webRoute(async (c, ctx) => {
             }
           </section>
         </div>
-      `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
+      `, { readerAssets: ctx.coflat }),
   );
 }));
 

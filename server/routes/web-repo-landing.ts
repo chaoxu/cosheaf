@@ -1,4 +1,3 @@
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { type PageSearchResult, type SnippetPart, workspacePageExcerpts } from "../page-search.js";
@@ -41,7 +40,7 @@ export function repoHomeHeader(ctx: WebCtx, owner: string, repo: string, stats: 
     const inner = html`<span class="repo-stat-num">${value}</span><span class="repo-stat-label">${label}</span>`;
     return href ? html`<a class="repo-stat" href="${href}">${inner}</a>` : html`<div class="repo-stat">${inner}</div>`;
   };
-  const format = ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? "Coflat" : "Markdown";
+  const format = ctx.coflat ? "Coflat" : "Markdown";
   return html`<header class="repo-home" data-testid="repo-home-header">
     <div class="repo-home-id">
       <h1 class="repo-home-name">${repo}</h1>

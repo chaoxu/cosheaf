@@ -1,6 +1,5 @@
 import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
 import type { Context, Hono } from "hono";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { resolveBranchPath } from "../branch-path.js";
 import { onWorkspaceNotFound, type WorkspaceBackend } from "../workspace-backend.js";
@@ -18,7 +17,7 @@ const PDF_EXPORT_MAX_PROJECT_BYTES = 100 * 1024 * 1024;
 
 export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/export/pdf/options/branch/*", webRoute(async (c, ctx) => {
-    if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
+    if (!ctx.coflat) {
       return badRequestPage(ctx.user, "PDF export is only available for Coflat Markdown workspaces.");
     }
     const resolved = await resolveBranchPath(ctx.backend, ctx.owner, ctx.repo, routeRest(c, ctx.owner, ctx.repo, "/export/pdf/options/branch/"));
@@ -69,7 +68,7 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
   }));
 
   web.get("/:owner/:repo/export/pdf/branch/*", webRoute(async (c, ctx) => {
-    if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) {
+    if (!ctx.coflat) {
       return new Response("PDF export is only available for Coflat Markdown workspaces.", { status: 400 });
     }
     try {

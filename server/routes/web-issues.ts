@@ -1,5 +1,4 @@
 import type { Context, Hono } from "hono";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type { ForgejoIssue, ForgejoLabel, ForgejoMilestone } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
@@ -150,7 +149,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
            </form>`
     }
     <span id="thread-bottom"></span>
-    ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}`;
+    ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}`;
   const railPanels = [
     labelsPanel({ ctx, current: issue.labels, allLabels, action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`) }),
     ...(chatBackedIssue ? [] : [dependenciesPanel(ctx, issue, dependencies, blocks)]),
@@ -183,7 +182,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI.</div>` : ""}
           ${threadLayout(main, railPanels)}
         </article>
-      `, { readerAssets: ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID }),
+      `, { readerAssets: ctx.coflat }),
   );
 }));
 
@@ -409,7 +408,7 @@ function issueCreatePage(
           <button class="button primary" type="submit" data-testid="issue-create-submit">Create issue</button>
         </div>
       </form>
-      ${ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
+      ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}
     </div>
   `;
 }

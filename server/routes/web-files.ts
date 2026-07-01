@@ -2,7 +2,6 @@ import type { Hono } from "hono";
 import { join } from "node:path";
 import { buildPdfImagePreviewPaths, isPdfAssetPath } from "../../shared/asset-previews.js";
 import { rasterizePdfFirstPage } from "../pdf-raster.js";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
@@ -83,7 +82,7 @@ export function registerFileRoutes(web: Hono<AppEnv>): void {
         ${cloneUrl ? clonePanel(cloneUrl) : emptyHtml}
         ${repoLanding(ctx, defaultBranch, files, titles, readme)}
       `, {
-        readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+        readerAssets: Boolean(readme) && ctx.coflat,
         sidebarPanels: [fileTreePanel(owner, repo, defaultBranch, files, null, titles, branches, user, ws.role !== "read")],
       }),
     );
@@ -181,7 +180,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
           </div>
           ${repoLanding(ctx, resolved.branch, files, branchTitles ?? new Map<string, string>(), readme)}
         `, {
-          readerAssets: Boolean(readme) && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID,
+          readerAssets: Boolean(readme) && ctx.coflat,
           sidebarPanels: [fileTreePanel(owner, repo, resolved.branch, files, null, branchTitles, branches, user, ws.role !== "read")],
         }),
     );
@@ -193,7 +192,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const workbenchMode =
     requestedMode === "read" || requestedMode === "edit"
       ? requestedMode
-      : requestedMode === undefined && !sourceView && kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
+      : requestedMode === undefined && !sourceView && kind === "markdown" && ctx.coflat
         ? "auto"
         : null;
   if (workbenchMode && editableFileKind(kind) && ws.role !== "read") {
@@ -216,7 +215,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
   const content = kind === "markdown" || (kind === "text" && sourceView) ? await backend.getRawFile(owner, repo, resolved.branch, rel) : null;
   const previewKind = await previewKindForFile(backend, owner, repo, resolved.branch, rel, kind, meta.size);
-  const coflatMarkdownDocument = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const coflatMarkdownDocument = kind === "markdown" && ctx.coflat;
   const rendered =
     kind === "markdown" && content !== null && !sourceView
       ? await renderMarkdown(ctx, content, { branch: resolved.branch, documentPath: rel, renderTitle: true, assetPreviewPaths, sourcePositions: coflatMarkdownDocument })
@@ -358,7 +357,7 @@ async function editPageResponse(
   const baseSha = branchMeta?.sha ?? (!branchExists ? mainMeta?.sha : null) ?? null;
   const sourceSha = !branchMeta && branchExists ? (mainMeta?.sha ?? null) : null;
   const content = sourceRef ? await ctx.backend.getRawFile(ctx.owner, ctx.repo, sourceRef, rel) : "";
-  const repoConfig = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID
+  const repoConfig = kind === "markdown" && ctx.coflat
     ? await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, branchExists ? branch : "main")
     : null;
   // The edit branch is created lazily on first save, so for a brand-new edit
@@ -372,7 +371,7 @@ async function editPageResponse(
   const assetPreviewPaths = buildPdfImagePreviewPaths(readFiles.map((file) => file.path));
   const treeTitles = treeBranch === "main" ? workspacePageTitles(ctx.db, ctx.ws.slug) : undefined;
   const cancelHref = `${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(readBranch)}/${urlPath(rel)}`;
-  const coflatMarkdownEdit = kind === "markdown" && ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID;
+  const coflatMarkdownEdit = kind === "markdown" && ctx.coflat;
   // The titlebar is gone (#126): the file path + branch live in the status-bar
   // breadcrumb; rename + Cancel moved into the editor's bottom status bar. The
   // file tree mirrors the read page's sidebar so edit/read chrome match (#123).

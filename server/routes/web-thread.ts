@@ -1,4 +1,3 @@
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import type { ForgejoPull } from "../forgejo.js";
 import { onForgejo404 } from "../forgejo-errors.js";
 import type {
@@ -307,7 +306,7 @@ function threadEditPage(opts: {
         <button class="button primary" type="submit">Save ${opts.kind}</button>
       </div>
     </form>
-    ${opts.ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID ? webCommentEditorAssets() : emptyHtml}
+    ${opts.ctx.coflat ? webCommentEditorAssets() : emptyHtml}
   </section>`;
 }
 

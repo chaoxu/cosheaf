@@ -4,7 +4,6 @@ import {
   coflatReaderIslandClass,
   coflatReaderSurfaceClass,
 } from "../../shared/coflat-reader-surface.js";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
 import { loadRepoConfig } from "../repo-config.js";
 import type { WebCtx } from "./web-context.js";
@@ -81,7 +80,7 @@ type CoflatReaderPayload = {
 };
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
-  if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) {
+  if (ctx.coflat) {
     // Repo-wide math macros (#183) live in cosheaf.yaml (#182), cached per
     // branch; thread them into every coflat surface via the island payload so
     // they apply to documents, issue/PR/comment bodies, and diffs alike.
@@ -164,12 +163,12 @@ export function composeField(
     opts.required ? raw(" required") : emptyHtml
   }${opts.testId ? html` data-testid="${opts.testId}"` : emptyHtml}${opts.className ? html` class="${opts.className}"` : emptyHtml}`;
   const textarea = html`<textarea ${attrs}>${value}</textarea>`;
-  if (ctx.ws.defaultMdFormat !== COFLAT_FORMAT_ID) return textarea;
+  if (!ctx.coflat) return textarea;
   return html`<div class="coflat-compose" data-coflat-compose data-owner="${ctx.owner}" data-repo="${ctx.repo}" data-branch="${opts.branch ?? "main"}">${textarea}<div class="coflat-compose-mount"></div></div>`;
 }
 
 export function markdownSurface(ctx: WebCtx, rendered: Html, surface: MarkdownSurface = "document"): Html {
-  if (ctx.ws.defaultMdFormat === COFLAT_FORMAT_ID) return rendered;
+  if (ctx.coflat) return rendered;
   const className = ["markdown-body", coflatReaderSurfaceClass(surface)]
     .filter(Boolean)
     .join(" ");
