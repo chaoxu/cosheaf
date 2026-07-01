@@ -1104,7 +1104,17 @@ export class Forgejo {
 }
 
 function encodeFilePath(p: string): string {
-  return p.split("/").map(encodeURIComponent).join("/");
+  // encodeURIComponent does not encode ".", so a ".." segment would survive and
+  // be resolved by the WHATWG URL parser into a path traversal out of the repo
+  // scope. Callers validate paths (safeRel) upstream; reject here too since this
+  // client is the last boundary before the forge.
+  return p
+    .split("/")
+    .map((segment) => {
+      if (segment === "..") throw new Error("invalid file path: traversal segment");
+      return encodeURIComponent(segment);
+    })
+    .join("/");
 }
 
 
