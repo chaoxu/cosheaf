@@ -31,7 +31,7 @@ import type {
   NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
-import type { PrCommit, PrFile, PrMeta, ReviewState, ReviewSubmitEvent } from "../../shared/review.js";
+import type { PrCommit, PrFile, PrMeta, ReviewDto, ReviewState, ReviewSubmitEvent } from "../../shared/review.js";
 import type { Role } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import {
@@ -66,7 +66,6 @@ import {
   type PullFileShape,
   type PullShape,
   type RepoShape,
-  type ReviewDto,
   reviewDtoToShape,
   type ReviewerShape,
   type ReviewShape,

@@ -40,6 +40,18 @@ export type PrState = "open" | "closed";
 // Forgejo review states / submit events. One owner for the vocabulary the forge
 // client, forge types, and the Origin collaboration client all spell out. A
 // submitted review can never be PENDING (that's the unsubmitted draft state).
+// The GET /pulls/:n/reviews wire item: emitted by the typed route (pulls.ts) and
+// consumed by the local Workbench re-mapper (origin-shapes reviewDtoToShape).
+// Owned here so the producer and consumer can't drift.
+export type ReviewDecision = "approve" | "request_changes" | "comment" | "pending";
+export interface ReviewDto {
+  id: number;
+  username: string;
+  decision: ReviewDecision;
+  comment: string | null;
+  created_at: number;
+}
+
 export const REVIEW_STATES = ["APPROVED", "REQUEST_CHANGES", "COMMENT", "PENDING"] as const;
 export type ReviewState = (typeof REVIEW_STATES)[number];
 export type ReviewSubmitEvent = Exclude<ReviewState, "PENDING">;

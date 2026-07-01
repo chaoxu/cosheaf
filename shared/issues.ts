@@ -6,6 +6,7 @@
 // The issue lifecycle state (kept separate from review.ts's PrState, which
 // documents PR-specific merged-vs-closed semantics).
 export type IssueState = "open" | "closed";
+export type NotificationKind = "issue" | "pr";
 
 export interface Label {
   id: number;
@@ -134,7 +135,7 @@ export interface ActivityRow {
 
 export interface NotificationRow {
   id: number;
-  kind: "issue" | "pr";
+  kind: NotificationKind;
   number: number;
   title: string;
   repo: string;

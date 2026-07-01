@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { notificationChannel } from "../../shared/conventions.js";
-import type { NotificationRow } from "../../shared/issues.js";
+import type { NotificationKind, NotificationRow } from "../../shared/issues.js";
 import type { ForgejoNotificationThread } from "../forgejo.js";
 import { toEpochMs } from "../forgejo-types.js";
 import { repoCtxCollab, requireAuth, requireMembership } from "../middleware.js";
@@ -83,7 +83,7 @@ export function mapThreads(threads: readonly ForgejoNotificationThread[]): Notif
 
 function mapThread(t: ForgejoNotificationThread): NotificationRow | null {
   const subjectType = t.subject.type;
-  const kind: "issue" | "pr" | null =
+  const kind: NotificationKind | null =
     subjectType === "Issue" ? "issue" : subjectType === "Pull" ? "pr" : null;
   if (!kind) return null;
   const number = numberFromSubjectUrl(t.subject.url);

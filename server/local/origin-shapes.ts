@@ -13,13 +13,14 @@ import type {
   IssueComment,
   IssueDetail,
   IssueRow,
+  IssueState,
   Label,
   Milestone,
   NotificationRow,
   TimelineEvent,
 } from "../../shared/issues.js";
 import { parseWorkspaceSlug } from "../../shared/conventions.js";
-import type { PrCommit, PrFile, PrMeta } from "../../shared/review.js";
+import type { PrCommit, PrFile, PrMeta, ReviewDto } from "../../shared/review.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 
 // The forge-client object shapes, derived from the CollaborationClient surface so
@@ -112,7 +113,7 @@ export function issueDetailToShape(d: IssueDetail): IssueShape {
 // Build an issue shape from the compact create/edit response. The issue write
 // routes read only number/title/body/state off the returned object; the rest
 // default like the other compact mappers.
-export function writtenIssueToShape(d: { number: number; title: string; body?: string; state: "open" | "closed" }): IssueShape {
+export function writtenIssueToShape(d: { number: number; title: string; body?: string; state: IssueState }): IssueShape {
   return {
     id: d.number,
     number: d.number,
@@ -135,7 +136,7 @@ export function writtenIssueToShape(d: { number: number; title: string; body?: s
 export interface PinnedRow {
   number: number;
   title: string;
-  state: "open" | "closed";
+  state: IssueState;
   comment_count: number;
   updated_at: number;
   author_username: string;
@@ -272,13 +273,6 @@ export function prMetaToPullShape(p: PrMeta): PullShape {
 // can resolve the draft here (#262). Re-expand `decision` to the forge review
 // state the timeline + requireOwnPendingReview read; `comment` (nullable)
 // becomes the review body.
-export interface ReviewDto {
-  id: number;
-  username: string;
-  decision: "approve" | "request_changes" | "comment" | "pending";
-  comment: string | null;
-  created_at: number;
-}
 export function reviewDtoToShape(r: ReviewDto): ReviewShape {
   const state =
     r.decision === "approve"

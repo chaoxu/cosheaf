@@ -30,7 +30,7 @@ import { type Context, Hono, type MiddlewareHandler } from "hono";
 import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { RepoCollaborator } from "../../shared/repo.js";
-import type { MergeFailure, MergeFailureReason, PrCommit, PrFileStatus, PrMeta, PrState } from "../../shared/review.js";
+import type { MergeFailure, MergeFailureReason, PrCommit, PrFileStatus, PrMeta, PrState, ReviewDto } from "../../shared/review.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
 import { validBranchName } from "../branch-path.js";
 import type { CollaborationClient } from "../collaboration-client.js";
@@ -585,7 +585,7 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
         r.state === "COMMENT" ||
         (r.state === "PENDING" && userLogin(r.user) === me),
     )
-    .map((r) => ({
+    .map((r): ReviewDto => ({
       id: r.id,
       username: userLogin(r.user),
       decision:
