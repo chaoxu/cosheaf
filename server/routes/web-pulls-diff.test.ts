@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 import { raw } from "./web-html.js";
-import { parseDiffMode, parseDiffShape, renderPrFileView, richDiffGapAnchors, richDiffInlineRanges, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
+import { parseDiffMode, parseDiffShape, prFileVersions, renderPrFileView, richDiffGapAnchors, richDiffInlineRanges, richDiffSurfaceOpts, richReviewAnchors, type WebLineComment } from "./web-pulls-diff.js";
 
 describe("parseDiffMode", () => {
   it("defaults to rich when rich is available and no mode is given", () => {
@@ -166,6 +167,25 @@ describe("richDiffInlineRanges", () => {
     expect(richDiffInlineRanges(patch, { base, head })).toEqual({
       base: [{ from: base.indexOf("brown"), to: base.indexOf("brown") + "brown".length, kind: "del" }],
       head: [{ from: head.indexOf("red"), to: head.indexOf("red") + "red".length, kind: "add" }],
+    });
+  });
+});
+
+describe("prFileVersions", () => {
+  it("treats backend not-found reads as empty sides", async () => {
+    const ctx = {
+      owner: "chao",
+      repo: "milk",
+      backend: {
+        getRawFile: async () => {
+          throw new WorkspaceBackendError(404, "not_found", "missing");
+        },
+      },
+    } as never;
+
+    await expect(prFileVersions(ctx, { base_sha: "base-sha", head_sha: "head-sha" } as never, { path: "note.md" })).resolves.toEqual({
+      base: "",
+      head: "",
     });
   });
 });
