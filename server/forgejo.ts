@@ -494,7 +494,7 @@ export class Forgejo {
   }
 
   async listRepoHooks(owner: string, repo: string): Promise<ForgejoHook[]> {
-    return this.req<ForgejoHook[]>(this.repoPath(owner, repo, `hooks`));
+    return this.pagedList<ForgejoHook>(this.repoPath(owner, repo, `hooks`));
   }
 
   // ---------------- topics ----------------
@@ -671,7 +671,7 @@ export class Forgejo {
   }
 
   async listPullReviewers(owner: string, repo: string): Promise<ForgejoUser[]> {
-    return this.req<ForgejoUser[]>(this.repoPath(owner, repo, "reviewers"));
+    return this.pagedList<ForgejoUser>(this.repoPath(owner, repo, "reviewers"));
   }
 
   async createPullReviewRequests(
@@ -782,7 +782,7 @@ export class Forgejo {
   async listReviewComments(
     owner: string, repo: string, index: number, reviewId: number,
   ): Promise<ForgejoPullReviewComment[]> {
-    return this.req<ForgejoPullReviewComment[]>(
+    return this.pagedList<ForgejoPullReviewComment>(
       this.repoPath(owner, repo, `pulls/${index}/reviews/${reviewId}/comments`),
     );
   }
@@ -870,7 +870,7 @@ export class Forgejo {
   }
 
   async listPinnedIssues(owner: string, repo: string): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/pinned`));
+    return this.pagedList<ForgejoIssue>(this.repoPath(owner, repo, `issues/pinned`));
   }
 
   async pinIssue(owner: string, repo: string, number: number): Promise<void> {
@@ -1003,11 +1003,11 @@ export class Forgejo {
   }
 
   async listIssueDependencies(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/${number}/dependencies`));
+    return this.pagedList<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}/dependencies`));
   }
 
   async listIssueBlocks(owner: string, repo: string, number: number): Promise<ForgejoIssue[]> {
-    return this.req<ForgejoIssue[]>(this.repoPath(owner, repo, `issues/${number}/blocks`));
+    return this.pagedList<ForgejoIssue>(this.repoPath(owner, repo, `issues/${number}/blocks`));
   }
 
   async addIssueDependency(
@@ -1068,16 +1068,14 @@ export class Forgejo {
   // a single repository. Filters map directly to Forgejo's repo notification
   // query params.
   async listRepoNotifications(owner: string, repo: string, opts: NotificationListOpts = {}): Promise<ForgejoNotificationThread[]> {
-    return this.req<ForgejoNotificationThread[]>(this.repoPath(owner, repo, `notifications`), {
-      query: notificationQuery(opts),
-    });
+    return this.pagedList<ForgejoNotificationThread>(this.repoPath(owner, repo, `notifications`), notificationQuery(opts));
   }
 
   // Account-level notifications across every repo the user can see. Forgejo's
   // GET /notifications is already global, so this is the cross-repo inbox that
   // the per-repo listRepoNotifications can't give.
   async listNotifications(opts: NotificationListOpts = {}): Promise<ForgejoNotificationThread[]> {
-    return this.req<ForgejoNotificationThread[]>("/api/v1/notifications", { query: notificationQuery(opts) });
+    return this.pagedList<ForgejoNotificationThread>("/api/v1/notifications", notificationQuery(opts));
   }
 
   async markNotificationRead(id: number): Promise<void> {
