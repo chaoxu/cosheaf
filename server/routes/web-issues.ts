@@ -38,6 +38,7 @@ import {
   milestoneFormValue,
   rejectChatIssueMutation,
   renderIssueTimeline,
+  resolveMutableIssue,
   threadDescription,
   threadLayout,
   threadParticipantsBar,
@@ -203,10 +204,8 @@ web.get("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => 
 }));
 
 web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) => {
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const form = await c.req.parseBody({ all: true });
   const title = stringField(form.title);
   const body = textField(form.body);
@@ -235,10 +234,8 @@ web.post("/:owner/:repo/issues/:number/edit", webRouteForWrite(async (c, ctx) =>
 web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) => {
   // Inline label editing from the rail Labels panel (#110): set the selected
   // label ids via Forgejo and return to the issue thread.
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue) return notFoundPage(ctx.user, "Issue not found");
   const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), issue.labels);
@@ -249,10 +246,8 @@ web.post("/:owner/:repo/issues/:number/labels", webRouteForWrite(async (c, ctx) 
 }));
 
 web.post("/:owner/:repo/issues/:number/comments", webRoute(async (c, ctx) => {
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const body = stringField((await c.req.parseBody()).body);
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
   await ctx.collab.createIssueComment(ctx.owner, ctx.repo, number, body);
@@ -286,10 +281,8 @@ web.post("/:owner/:repo/issues/:number/comments/:id/delete", webRoute(async (c, 
 }));
 
 web.post("/:owner/:repo/issues/:number/pin", webRouteForWrite(async (c, ctx) => {
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const pinned = stringField((await c.req.parseBody()).pinned);
   if (pinned === "true") await ctx.collab.pinIssue(ctx.owner, ctx.repo, number);
   else if (pinned === "false") await ctx.collab.unpinIssue(ctx.owner, ctx.repo, number);
@@ -299,10 +292,8 @@ web.post("/:owner/:repo/issues/:number/pin", webRouteForWrite(async (c, ctx) => 
 }));
 
 web.post("/:owner/:repo/issues/:number/dependencies", webRouteForWrite(async (c, ctx) => {
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const form = await c.req.parseBody();
   const index = positiveInt(stringField(form.index) ?? undefined);
   const relation = stringField(form.relation);
@@ -315,10 +306,8 @@ web.post("/:owner/:repo/issues/:number/dependencies", webRouteForWrite(async (c,
 }));
 
 web.post("/:owner/:repo/issues/:number/dependencies/delete", webRouteForWrite(async (c, ctx) => {
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const form = await c.req.parseBody();
   const index = positiveInt(stringField(form.index) ?? undefined);
   const relation = stringField(form.relation);
@@ -331,10 +320,8 @@ web.post("/:owner/:repo/issues/:number/dependencies/delete", webRouteForWrite(as
 }));
 
 web.post("/:owner/:repo/issues/:number/state", webRouteForWrite(async (c, ctx) => {
-  const number = positiveInt(c.req.param("number"));
-  if (!number) return notFoundPage(ctx.user, "Issue not found");
-  const immutable = await rejectChatIssueMutation(ctx, number);
-  if (immutable) return immutable;
+  const number = await resolveMutableIssue(ctx, c.req.param("number"));
+  if (typeof number !== "number") return number;
   const state = stringField((await c.req.parseBody()).state);
   if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
   await ctx.collab.editIssue(ctx.owner, ctx.repo, number, { state });

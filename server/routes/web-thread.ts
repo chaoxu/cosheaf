@@ -81,6 +81,17 @@ export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Prom
   return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : null;
 }
 
+// The shared preamble for issue-mutation handlers: parse the :number param
+// (404 on bad), then apply the chat-issue read-only gate. Returns the issue
+// number, or a Response the handler should return as-is. Callers do:
+//   const number = await resolveMutableIssue(ctx, c.req.param("number"));
+//   if (typeof number !== "number") return number;
+export async function resolveMutableIssue(ctx: WebCtx, numberParam: string | undefined): Promise<number | Response> {
+  const number = positiveInt(numberParam);
+  if (!number) return notFoundPage(ctx.user, "Issue not found");
+  return (await rejectChatIssueMutation(ctx, number)) ?? number;
+}
+
 export function chatIssueReadOnlyPage(user: string): Response {
   return badRequestPage(user, "Chat-backed issues are read-only from the issue UI.");
 }
