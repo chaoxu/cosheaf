@@ -126,12 +126,16 @@ function basename(path: string): string {
   return path.split("/").at(-1) ?? path;
 }
 
+function encodeContentPath(path: string): string {
+  return path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+}
+
 function giteaContentShape(c: import("hono").Context<AppEnv>, path: string, meta: {
   sha: string | null;
   size: number;
   content: Buffer;
 }): Record<string, unknown> {
-  const apiPath = `/api/v1/repos/${c.req.param("owner")}/${c.req.param("repo")}/contents/${path}`;
+  const apiPath = `/api/v1/repos/${c.req.param("owner")}/${c.req.param("repo")}/contents/${encodeContentPath(path)}`;
   const url = new URL(apiPath, c.req.url).toString();
   return {
     name: basename(path),

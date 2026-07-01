@@ -110,6 +110,26 @@ describe("Gitea-shaped contents compatibility", () => {
     expect(Buffer.from(body.content, "base64").toString("utf8")).toBe("# Hello\n");
   });
 
+  it("GET /contents/:path encodes special filename bytes in returned links", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/raw/notes%23draft%3Fv%3D1.md", () => new Response("# Draft\n"));
+      forge.get("/api/v1/repos/owner/w/contents/notes%23draft%3Fv%3D1.md", () =>
+        Response.json({ name: "notes#draft?v=1.md", path: "notes#draft?v=1.md", sha: "blob-sha", size: 8, type: "file" }));
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/contents/notes%23draft%3Fv%3D1.md?ref=main", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { path: string; url: string; _links: { self: string } };
+    expect(body.path).toBe("notes#draft?v=1.md");
+    expect(new URL(body.url).pathname).toBe("/api/v1/repos/owner/w/contents/notes%23draft%3Fv%3D1.md");
+    expect(body.url).toBe(body._links.self);
+  });
+
   it("POST /contents/:path writes Markdown through Cosheaf frontmatter handling", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
