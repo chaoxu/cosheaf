@@ -27,7 +27,7 @@ import {
 import { emptyHtml, type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
 import { labelChip, labelChips, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
-import { webCommentEditorAssets } from "./web-shell.js";
+import { coflatCommentAssets } from "./web-shell.js";
 import {
   chatIssueReadOnlyPage,
   dependenciesPanel,
@@ -149,7 +149,7 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
            </form>`
     }
     <span id="thread-bottom"></span>
-    ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}`;
+    ${coflatCommentAssets(ctx.coflat)}`;
   const railPanels = [
     labelsPanel({ ctx, current: issue.labels, allLabels, action: repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/labels`) }),
     ...(chatBackedIssue ? [] : [dependenciesPanel(ctx, issue, dependencies, blocks)]),
@@ -408,7 +408,7 @@ function issueCreatePage(
           <button class="button primary" type="submit" data-testid="issue-create-submit">Create issue</button>
         </div>
       </form>
-      ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}
+      ${coflatCommentAssets(ctx.coflat)}
     </div>
   `;
 }

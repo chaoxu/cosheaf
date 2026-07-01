@@ -195,6 +195,13 @@ export function webCommentEditorAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-comment-editor.tsx");
 }
 
+// The comment-editor island assets when the workspace is Coflat, else nothing —
+// the repeated `ctx.coflat ? webCommentEditorAssets() : emptyHtml` on every
+// comment surface (issues, pulls, thread).
+export function coflatCommentAssets(coflat: boolean): Html {
+  return coflat ? webCommentEditorAssets() : emptyHtml;
+}
+
 type ViteManifestChunk = {
   file: string;
   css?: string[];

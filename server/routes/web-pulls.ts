@@ -35,7 +35,7 @@ import {
   webRouteForAdmin,
   webRouteForWrite,
 } from "./web-context.js";
-import { emptyHtml, type Html, html } from "./web-html.js";
+import { type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
 import { branchOptions, labelChips, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import {
@@ -50,7 +50,7 @@ import {
   renderPrFileView,
   splitDiffByFile,
 } from "./web-pulls-diff.js";
-import { webCommentEditorAssets } from "./web-shell.js";
+import { coflatCommentAssets } from "./web-shell.js";
 import {
   isVisibleReview,
   labelSelectionPatch,
@@ -284,7 +284,7 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
               ${timelineHtml}
               ${reviewForms(ctx, pull)}
               <span id="thread-bottom"></span>
-              ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}`,
+              ${coflatCommentAssets(ctx.coflat)}`,
             [
               labelsPanel({ ctx, current: pull.labels ?? [], allLabels, action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/labels`) }),
               reviewersPanel(ctx, pull, availableReviewers),
@@ -590,7 +590,7 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
               ${reviewForms(ctx, pull, repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`))}
             </section>
           </section>
-          ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}
+          ${coflatCommentAssets(ctx.coflat)}
         </div>
       `,
       // Load the reader island on coflat in BOTH modes: rich diffs need it, and
@@ -729,7 +729,7 @@ function pullCreatePage(
           <button class="button primary" type="submit" data-testid="pull-create-submit">Create PR</button>
         </div>
       </form>
-      ${ctx.coflat ? webCommentEditorAssets() : emptyHtml}
+      ${coflatCommentAssets(ctx.coflat)}
     </div>
   `;
 }

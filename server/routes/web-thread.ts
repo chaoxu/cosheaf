@@ -32,7 +32,7 @@ import { emptyHtml, type Html, html, joinHtml } from "./web-html.js";
 import { composeField, renderMarkdownSurface } from "./web-markdown.js";
 import { addDisclosure, labelChip, labelChips } from "./web-page.js";
 import { type Panel, panel, renderRegion } from "./web-panels.js";
-import { webCommentEditorAssets } from "./web-shell.js";
+import { coflatCommentAssets } from "./web-shell.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
 export function issueEditPage(
@@ -306,7 +306,7 @@ function threadEditPage(opts: {
         <button class="button primary" type="submit">Save ${opts.kind}</button>
       </div>
     </form>
-    ${opts.ctx.coflat ? webCommentEditorAssets() : emptyHtml}
+    ${coflatCommentAssets(opts.ctx.coflat)}
   </section>`;
 }
 
