@@ -131,7 +131,10 @@ function giteaContentShape(c: import("hono").Context<AppEnv>, path: string, meta
   size: number;
   content: Buffer;
 }): Record<string, unknown> {
-  const apiPath = `/api/v1/repos/${c.req.param("owner")}/${c.req.param("repo")}/contents/${path}`;
+  // Encode each path segment: safeRel permits `#` and `?` in filenames, which the
+  // URL parser would otherwise split off as fragment/query and truncate the path.
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const apiPath = `/api/v1/repos/${encodeURIComponent(c.req.param("owner") ?? "")}/${encodeURIComponent(c.req.param("repo") ?? "")}/contents/${encodedPath}`;
   const url = new URL(apiPath, c.req.url).toString();
   return {
     name: basename(path),

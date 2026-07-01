@@ -212,8 +212,16 @@ export class Forgejo {
   // Compose a repo-scoped Forgejo URL. All repo-bound methods share this so
   // a rename of Forgejo's path shape (or a future owner-encoding tweak)
   // changes one place.
+  // Encode owner/repo once here so every repo-bound URL is injection-safe even if
+  // a caller ever passes an unvalidated name (routes validate via FORGEJO_NAME_RE,
+  // but this client is the last boundary; encodeURIComponent is identity for the
+  // validated charset, so no behavior change for real names).
+  private repoRoot(owner: string, repo: string): string {
+    return `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  }
+
   private repoPath(owner: string, repo: string, suffix: string): string {
-    return `/api/v1/repos/${owner}/${repo}/${suffix}`;
+    return `${this.repoRoot(owner, repo)}/${suffix}`;
   }
 
   // ---------------- users ----------------
@@ -334,7 +342,7 @@ export class Forgejo {
   }
 
   async deleteRepo(owner: string, repo: string): Promise<void> {
-    await this.req(`/api/v1/repos/${owner}/${repo}`, { method: "DELETE", expectEmpty: true });
+    await this.req(`${this.repoRoot(owner, repo)}`, { method: "DELETE", expectEmpty: true });
   }
 
   // Patch repo metadata (description, visibility, default branch). Forgejo's
@@ -345,7 +353,7 @@ export class Forgejo {
     repo: string,
     patch: { description?: string; private?: boolean; default_branch?: string },
   ): Promise<ForgejoRepo> {
-    return this.req<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`, {
+    return this.req<ForgejoRepo>(`${this.repoRoot(owner, repo)}`, {
       method: "PATCH",
       body: patch,
     });
@@ -373,7 +381,7 @@ export class Forgejo {
   }
 
   async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {
-    return this.reqOpt<ForgejoRepo>(`/api/v1/repos/${owner}/${repo}`);
+    return this.reqOpt<ForgejoRepo>(`${this.repoRoot(owner, repo)}`);
   }
 
   async listUserRepos(owner: string, opts: { limit?: number; page?: number } = {}): Promise<ForgejoRepo[]> {
