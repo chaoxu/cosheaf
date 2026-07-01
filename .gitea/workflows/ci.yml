@@ -131,3 +131,20 @@ jobs:
       - run: pnpm --dir cosheaf install --frozen-lockfile
       - run: pnpm --dir cosheaf build
       - run: pnpm --dir cosheaf build:server
+
+  sync-github:
+    name: Sync to GitHub
+    runs-on: ubuntu-latest
+    needs: [static, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Check out Cosheaf
+        uses: actions/checkout@v4
+        with:
+          path: cosheaf
+          fetch-depth: 0
+      - name: Run GitHub Mirror Sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.COSHEAF_GITHUB_TOKEN }}
+          GITHUB_REPO: chaoxu/cosheaf
+        run: ./cosheaf/scripts/mirror-github.sh --yes

@@ -76,6 +76,18 @@ agent/API calls, all with `Authorization: Bearer <token>`:
 `GET /api/v1/repos/chao/flushing-coin/milestones?state=open`, and
 `GET /api/v1/repos/chao/flushing-coin/file?path=hello.md&branch=main`.
 
+## Cosheaf Workbench
+
+The Cosheaf Workbench is the local authoring surface for editing and reviewing Markdown folders offline. It runs as a local loopback server with a rich editor/reader UI, saving files directly to your disk and integrating with remote Git repositories for pull requests and reviews.
+
+To install or update the Workbench on your machine (e.g., `earth` or `saturn`), you only need Node.js >= 24 installed. Run this one-line command:
+
+```bash
+curl -sSf https://raw.githubusercontent.com/chaoxu/cosheaf/main/scripts/install-workbench.sh | bash
+```
+
+For more details on packaging, deployment, and custom configurations, see the [Workbench Bundle Guide](./docs/workbench-bundle.md).
+
 ## Quick start
 
 ```bash

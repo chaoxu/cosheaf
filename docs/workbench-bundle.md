@@ -69,8 +69,30 @@ tar -xzf cosheaf-workbench.tar.gz -C ~/cosheaf-workbench --strip-components=1
 ~/cosheaf-workbench/cosheaf-workbench ~/some/folder
 ```
 
+### Option C — One-line installer command (Recommended)
+
+Run this command directly on the consumer machine (e.g. `earth`) to automatically fetch, install, and configure the latest Workbench release from GitHub:
+
+```bash
+curl -sSf https://raw.githubusercontent.com/chaoxu/cosheaf/main/scripts/install-workbench.sh | bash
+```
+
+To configure custom directories, run with custom variables:
+
+```bash
+COSHEAF_WORKBENCH_DIR="~/custom-workbench" bash -c "$(curl -sSf https://raw.githubusercontent.com/chaoxu/cosheaf/main/scripts/install-workbench.sh)"
+```
+
+To use an internal Gitea instance instead of GitHub:
+
+```bash
+COSHEAF_GITEA_URL="http://gitea.lab" bash -c "$(curl -sSf http://gitea.lab/chaoxu/cosheaf/raw/branch/main/scripts/install-workbench.sh)"
+```
+
+The script automatically detects Node.js version/architecture compatibility and rebuilds the `better-sqlite3` native addon if necessary.
+
 `scripts/release-workbench.mjs` tags `workbench-<timestamp>` (or `--tag`) and
-attaches the tarball as a release asset.
+attaches the tarball as a release asset (defaults to GitHub, but supports Gitea with `--gitea`).
 
 ## Run
 

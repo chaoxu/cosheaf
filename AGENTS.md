@@ -359,6 +359,22 @@ Use the repo-local production commands by default:
 Override only when debugging infrastructure itself: `COSHEAF_PROD_HOST`,
 `COSHEAF_PROD_SSH_JUMP`, `COSHEAF_PROD_URL`, and `FLEET_INFRA_CHECKOUT`.
 
+## GitHub Synchronization
+
+To keep the public GitHub repository (`chaoxu/cosheaf`) in sync with your active development Gitea repository, there is an automated synchronization setup in Gitea's CI workflow:
+
+- Every successful push or merge to the `main` branch on your Gitea repository automatically triggers the `sync-github` job in `.gitea/workflows/ci.yml`.
+- This job executes `./scripts/mirror-github.sh --yes`, which archives the current commit tree and pushes a clean snapshot commit directly to GitHub's `main` branch. This process intentionally avoids leaking intermediate development commits or WIP branches.
+- To configure this pipeline on your Gitea instance:
+  1. Navigate to your repository **Settings -> Actions -> Secrets**.
+  2. Add a new secret named `COSHEAF_GITHUB_TOKEN` containing your GitHub Personal Access Token (PAT) with repository push scopes.
+
+For manual snapshots, you can run the script from your terminal:
+
+```bash
+GITHUB_TOKEN="your-token" GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh
+```
+
 ## DevX quick map
 
 Use `docs/DEVX.md` when you need the shortest path to a route owner,
