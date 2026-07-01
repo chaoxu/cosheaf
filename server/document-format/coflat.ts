@@ -6,6 +6,7 @@ import {
 } from "@chaoxu/coflat/parse";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
+import { compactFrontmatter, trimLeadingLineFeeds } from "../../shared/frontmatter-yaml.js";
 import type { DocumentFormat, DocumentLink, Frontmatter, ParsedDocument } from "./types.js";
 
 export type { DocumentFormat, DocumentLink, Frontmatter, ParsedDocument };
@@ -34,22 +35,13 @@ function parseDocument(content: string): ParsedDocument {
 }
 
 function serializeDocument(frontmatter: Frontmatter, body: string): string {
-  const compacted: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(frontmatter)) {
-    if (value !== undefined && value !== null && value !== "") compacted[key] = value;
-  }
+  const compacted = compactFrontmatter(frontmatter);
   if (Object.keys(compacted).length === 0) return trimLeadingLineFeeds(body);
   return serializeCoflatFrontmatter(compacted, trimLeadingLineFeeds(body));
 }
 
 function extractTitle(body: string): string | null {
   return extractFirstH1(body);
-}
-
-function trimLeadingLineFeeds(body: string): string {
-  let pos = 0;
-  while (body[pos] === "\n") pos++;
-  return pos === 0 ? body : body.slice(pos);
 }
 
 function extractLinks(source: string): DocumentLink[] {

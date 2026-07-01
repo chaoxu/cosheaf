@@ -46,11 +46,19 @@ export function parseFrontmatterYaml(content: string): ParsedDocument {
   }
 }
 
-export function serializeFrontmatterYaml(frontmatter: Frontmatter, body: string): string {
+// Drop undefined/null/empty-string frontmatter values (the shared "what counts
+// as empty" rule for serialization, used by both this YAML serializer and the
+// Coflat document serializer).
+export function compactFrontmatter(frontmatter: Frontmatter): Record<string, unknown> {
   const compacted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(frontmatter)) {
     if (value !== undefined && value !== null && value !== "") compacted[key] = value;
   }
+  return compacted;
+}
+
+export function serializeFrontmatterYaml(frontmatter: Frontmatter, body: string): string {
+  const compacted = compactFrontmatter(frontmatter);
   const cleanBody = trimLeadingLineFeeds(body);
   if (Object.keys(compacted).length === 0) return cleanBody;
   return `---\n${stringify(compacted).trimEnd()}\n---\n${cleanBody}`;
@@ -86,7 +94,7 @@ export function extractAtxHeadings(source: string): MarkdownHeading[] {
   return headings;
 }
 
-function trimLeadingLineFeeds(body: string): string {
+export function trimLeadingLineFeeds(body: string): string {
   let pos = 0;
   while (body[pos] === "\n") pos++;
   return pos === 0 ? body : body.slice(pos);
