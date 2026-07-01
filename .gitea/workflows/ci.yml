@@ -143,13 +143,8 @@ jobs:
         with:
           path: cosheaf
           fetch-depth: 0
-      - name: Setup SSH Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.COSHEAF_GITHUB_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
       - name: Run GitHub Mirror Sync
         env:
+          GITHUB_TOKEN: ${{ secrets.COSHEAF_GITHUB_TOKEN }}
           GITHUB_REPO: chaoxu/cosheaf
         run: ./cosheaf/scripts/mirror-github.sh --yes

@@ -367,16 +367,16 @@ To keep the public GitHub repository (`chaoxu/cosheaf`) in sync with your active
 - This job executes `./scripts/mirror-github.sh --yes`, which archives the current commit tree and pushes a clean snapshot commit directly to GitHub's `main` branch via SSH. This process intentionally avoids leaking intermediate development commits or WIP branches.
 - To configure this pipeline on your Gitea instance:
   1. Navigate to your repository **Settings -> Actions -> Secrets**.
-  2. Add a new secret named `COSHEAF_GITHUB_SSH_KEY` containing the private SSH key (whose corresponding public key has been configured as a Deploy Key on your GitHub repository with write access).
+  2. Add a new secret named `COSHEAF_GITHUB_TOKEN` containing your GitHub Personal Access Token (PAT). **Note**: The token must have the `workflow` scope enabled so GitHub allows updating/mirroring the workflow files.
 
 For manual snapshots, you can run the script from your terminal:
 
 ```bash
-# Uses local SSH credentials (git@github.com:chaoxu/cosheaf.git):
-GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh --yes
-
-# Alternatively, using a personal access token over HTTPS:
+# Using a personal access token over HTTPS:
 GITHUB_TOKEN="your-token" GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh --yes
+
+# Alternatively, using local SSH credentials (git@github.com:chaoxu/cosheaf.git):
+GITHUB_TOKEN="" GITHUB_REPO="chaoxu/cosheaf" ./scripts/mirror-github.sh --yes
 ```
 
 ## DevX quick map
