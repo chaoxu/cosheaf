@@ -2,7 +2,6 @@ import type { ForgejoBranch, ForgejoTreeEntry } from "../forgejo-types.js";
 import { branchIcon, chevronIcon } from "./icons.js";
 import { defaultFileLinkAttrs } from "./web-file-links.js";
 import { emptyHtml, html, type Html } from "./web-html.js";
-import { type Panel, panel } from "./web-panels.js";
 import { repoHref, urlPath } from "./web-context.js";
 
 // Nested, collapsible branch file tree for the left sidebar on /files pages
@@ -109,12 +108,10 @@ function fileTreeSidebar(
   </nav>`;
 }
 
-// Portable Panel unit (#120) for the branch file tree. The panel owns only its
-// own <nav class="file-tree">; the host page places it into a region (the left
-// sidebar today), so it could move to another region unchanged. `titles` is the
-// workspace page-title map (main branch only — the index tracks main); leaves
-// render titles where present (#168). `branches` feeds the header switcher
-// (empty = label only).
+// Branch file-tree fragment for the left sidebar. `titles` is the workspace
+// page-title map (main branch only — the index tracks main); leaves render
+// titles where present (#168). `branches` feeds the header switcher (empty =
+// label only).
 export function fileTreePanel(
   owner: string,
   repo: string,
@@ -126,6 +123,6 @@ export function fileTreePanel(
   user?: string,
   editByDefault = false,
   displayBranch = branch,
-): Panel {
-  return panel("file-tree", () => fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches, user, editByDefault, displayBranch));
+): Html {
+  return fileTreeSidebar(owner, repo, branch, files, activeRel, titles, branches, user, editByDefault, displayBranch);
 }

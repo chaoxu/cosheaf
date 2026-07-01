@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ForgejoPull } from "../forgejo.js";
 import type { WebCtx } from "./web-context.js";
-import { initials, reviewForms, tint } from "./web-thread.js";
+import { html } from "./web-html.js";
+import { initials, reviewForms, threadLayout, tint } from "./web-thread.js";
 
 describe("initials", () => {
   it("takes the first two alphanumerics, uppercased", () => {
@@ -70,5 +71,16 @@ describe("reviewForms merge controls (#180 admin bypass)", () => {
     expect(html).not.toContain("Approve");
     expect(html).not.toContain("Request changes");
     expect(render("admin", "someone-else", "closed")).toBe("");
+  });
+});
+
+describe("threadLayout", () => {
+  it("joins rail fragments in order inside the thread rail", () => {
+    const out = String(threadLayout(html`<p>main</p>`, [html`<p class="x">A</p>`, html`<p class="y">B</p>`]));
+
+    expect(out).toContain('class="thread-rail"');
+    expect(out).toContain('class="x"');
+    expect(out).toContain('class="y"');
+    expect(out.indexOf("A")).toBeLessThan(out.indexOf("B"));
   });
 });

@@ -32,7 +32,6 @@ import {
 import { emptyHtml, type Html, html, joinHtml } from "./web-html.js";
 import { composeField, renderMarkdownSurface } from "./web-markdown.js";
 import { addDisclosure, labelChip, labelChips } from "./web-page.js";
-import { type Panel, panel, renderRegion } from "./web-panels.js";
 import { coflatCommentAssets } from "./web-shell.js";
 import { compareWebTimelineItems, webTimelineDescriptionHtml, webTimelineDescriptionText } from "./web-timeline.js";
 
@@ -112,15 +111,13 @@ export function issueRelationsPanel(
   </section>`;
 }
 
-// Portable Panel units (#120) wrapping the rail panel bodies, so a host page
-// places them into a region (thread rail today) without coupling to it.
 export function dependenciesPanel(
   ctx: WebCtx,
   issue: ForgejoIssue,
   dependencies: readonly ForgejoIssue[],
   blocks: readonly ForgejoIssue[],
-): Panel {
-  return panel("dependencies", () => issueRelationsPanel(ctx, issue, dependencies, blocks));
+): Html {
+  return issueRelationsPanel(ctx, issue, dependencies, blocks);
 }
 
 function issueRelationList(
@@ -163,13 +160,10 @@ function issueRelationList(
 // Shared thread (issue + pull request) building blocks. Both thread kinds
 // must render through these so layout and editing stay uniform.
 
-// The thread rail is a region (#120): the host passes portable Panel units and
-// the region provides the .thread-rail wrapper. A panel never assumes this
-// container, so the same panel could be placed in another region unchanged.
-export function threadLayout(main: Html, railPanels: readonly Panel[]): Html {
+export function threadLayout(main: Html, railPanels: readonly Html[]): Html {
   return html`<div class="thread-layout">
     <div class="thread-main">${main}</div>
-    <aside class="thread-rail">${renderRegion(railPanels)}</aside>
+    <aside class="thread-rail">${joinHtml(railPanels)}</aside>
   </div>`;
 }
 
@@ -225,8 +219,8 @@ export function labelsPanel(opts: {
   current: readonly ForgejoLabel[];
   allLabels: readonly ForgejoLabel[];
   action: string;
-}): Panel {
-  return panel("labels", () => labelsRailPanel(opts));
+}): Html {
+  return labelsRailPanel(opts);
 }
 
 // Shared checkbox-list fieldset for the thread edit form (labels, assignees).
@@ -397,8 +391,8 @@ export function reviewRequestPanel(ctx: WebCtx, pull: ForgejoPull, availableRevi
   </section>`;
 }
 
-export function reviewersPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): Panel {
-  return panel("reviewers", () => reviewRequestPanel(ctx, pull, availableReviewers));
+export function reviewersPanel(ctx: WebCtx, pull: ForgejoPull, availableReviewers: readonly { login: string }[]): Html {
+  return reviewRequestPanel(ctx, pull, availableReviewers);
 }
 
 function reviewerRequestChip(ctx: WebCtx, pull: ForgejoPull, reviewer: string): Html {
