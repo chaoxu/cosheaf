@@ -302,7 +302,7 @@ function prMetaToPullShape(p: PrMeta): PullShape {
     head: { ref: p.head_ref, sha: p.head_sha, label: "" },
     base: { ref: p.base_ref, sha: p.base_sha },
     user: { id: 0, login: p.author_username },
-    comments: 0,
+    comments: p.comment_count,
     created_at: iso(p.created_at),
     updated_at: iso(p.created_at),
   };

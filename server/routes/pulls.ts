@@ -101,6 +101,7 @@ function prMeta(pull: ForgejoPull): PrMeta {
     additions_total: pull.additions ?? 0,
     deletions_total: pull.deletions ?? 0,
     files_changed: pull.changed_files ?? 0,
+    comment_count: pull.comments ?? 0,
     labels: (pull.labels ?? []).map(toLabel),
     milestone: pull.milestone ? { id: pull.milestone.id, title: pull.milestone.title } : null,
     requested_reviewers: (pull.requested_reviewers ?? []).map((u) => u.login),

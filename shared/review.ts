@@ -54,6 +54,7 @@ export interface PrMeta {
   additions_total: number;
   deletions_total: number;
   files_changed: number;
+  comment_count: number;
   labels: Label[];
   milestone: { id: number; title: string } | null;
   requested_reviewers: string[];
