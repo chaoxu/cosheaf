@@ -5,7 +5,7 @@
 import { resolveMarkdownReferencePathFromDocument } from "@chaoxu/coflat/parse";
 import type Database from "better-sqlite3";
 import { extractBibTeXCitationKeys } from "./citations.js";
-import type { DocumentLink } from "./document-format/types.js";
+import type { DocumentLink, ParsedDocument } from "./document-format/types.js";
 import { getDocumentFormat } from "./format-registry.js";
 import { generateDocId } from "./ids.js";
 
@@ -169,9 +169,12 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
 
   let rewritten: string | null = null;
   if (fmId !== cosheafId && !hasUnparsedDelimitedFrontmatter(p.bodyText, parsed.hadFrontmatter)) {
-    const newFm = { ...parsed.frontmatter, id: cosheafId };
-    if (title) newFm.title = title;
-    rewritten = format.serializeDocument(newFm, parsed.body);
+    rewritten = rewriteFrontmatterIdInPlace(p.bodyText, parsed, cosheafId);
+    if (rewritten === null) {
+      const newFm = { ...parsed.frontmatter, id: cosheafId };
+      if (title) newFm.title = title;
+      rewritten = format.serializeDocument(newFm, parsed.body);
+    }
   }
 
   return { cosheafId, title, rewrittenContent: rewritten, commit };
@@ -200,6 +203,56 @@ function hasUnparsedDelimitedFrontmatter(source: string, hadParsedFrontmatter: b
     lineStart = lineEnd === -1 ? source.length : lineEnd + 1;
   }
   return false;
+}
+
+function rewriteFrontmatterIdInPlace(source: string, parsed: ParsedDocument, cosheafId: string): string | null {
+  if (!parsed.hadFrontmatter) return null;
+  const openingEnd = frontmatterFenceLineEnd(source, 0);
+  if (openingEnd === null) return null;
+  const closing = frontmatterClosingFence(source, openingEnd);
+  if (!closing) return null;
+  const lineEnding = source.slice(Math.max(0, openingEnd - 2), openingEnd) === "\r\n" ? "\r\n" : "\n";
+  const idLine = findPlainTopLevelIdLine(source, openingEnd, closing.yamlEnd);
+  if (idLine) {
+    return `${source.slice(0, idLine.from)}id: ${cosheafId}${source.slice(idLine.to)}`;
+  }
+  return `${source.slice(0, openingEnd)}id: ${cosheafId}${lineEnding}${source.slice(openingEnd)}`;
+}
+
+function frontmatterClosingFence(source: string, bodyStart: number): { yamlEnd: number; bodyStart: number } | null {
+  let lineStart = bodyStart;
+  while (lineStart <= source.length) {
+    const lineEnd = source.indexOf("\n", lineStart);
+    const end = lineEnd === -1 ? source.length : lineEnd;
+    const rawLine = source.slice(lineStart, end);
+    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    if (line === "---") {
+      return {
+        yamlEnd: rawLine.endsWith("\r") ? end - 1 : end,
+        bodyStart: lineEnd === -1 ? source.length : lineEnd + 1,
+      };
+    }
+    if (lineEnd === -1) break;
+    lineStart = lineEnd + 1;
+  }
+  return null;
+}
+
+function findPlainTopLevelIdLine(source: string, start: number, end: number): { from: number; to: number } | null {
+  let lineStart = start;
+  while (lineStart <= end) {
+    const lineEnd = source.indexOf("\n", lineStart);
+    const rawEnd = lineEnd === -1 ? source.length : lineEnd;
+    const boundedRawEnd = Math.min(rawEnd, end);
+    const textEnd = source[boundedRawEnd - 1] === "\r" ? boundedRawEnd - 1 : boundedRawEnd;
+    const line = source.slice(lineStart, textEnd);
+    if (line.startsWith("id:") || line.startsWith("id :")) {
+      return { from: lineStart, to: textEnd };
+    }
+    if (lineEnd === -1 || lineEnd >= end) break;
+    lineStart = lineEnd + 1;
+  }
+  return null;
 }
 
 function frontmatterFenceLineEnd(source: string, offset: number): number | null {
