@@ -1,6 +1,8 @@
 import type { Label, DependencyRow, IssueComment, IssueRow, Milestone, NotificationKind, NotificationRow, TimelineEvent } from "../../shared/issues.js";
+import type { BranchRow } from "../../shared/branches.js";
 import type { PrCommit, PrFileStatus, PrMeta, ReviewDto } from "../../shared/review.js";
 import type {
+  ForgejoBranch,
   ForgejoCommit,
   ForgejoIssue,
   ForgejoIssueComment,
@@ -13,6 +15,17 @@ import type {
   ForgejoTimelineEvent,
 } from "../forgejo-types.js";
 import { toEpochMs, toEpochMsOrNull, userLogin } from "../forgejo-types.js";
+
+export function forgeBranchToRow(branch: ForgejoBranch): BranchRow {
+  return {
+    name: branch.name,
+    commit: {
+      id: branch.commit.id,
+      timestamp: branch.commit.timestamp,
+      author: branch.commit.author,
+    },
+  };
+}
 
 function labelScope(label: ForgejoLabel): string | null {
   if (!label.exclusive) return null;

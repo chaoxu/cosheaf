@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
+import type { BranchRow } from "../../shared/branches.js";
 import { isCommitSha, validBranchName } from "../branch-path.js";
 import { is404, isStatus } from "../forgejo-errors.js";
-import type { ForgejoBranch } from "../forgejo-types.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { branchIcon } from "./icons.js";
@@ -126,7 +126,7 @@ function branchDeleteRedirect(ctx: WebCtx, redirectTo: string | null): string {
   return redirectTo === repoRoot || redirectTo.startsWith(`${repoRoot}/`) ? redirectTo : fallback;
 }
 
-function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Html {
+function branchCreatePanel(ctx: WebCtx, branches: readonly BranchRow[]): Html {
   // Read-only members can't create branches; the local Workbench has no
   // seam to create a branch on the connected core (CollaborationClient has no
   // create-branch), so its branch list is read-only too.
@@ -146,7 +146,7 @@ function branchCreatePanel(ctx: WebCtx, branches: readonly ForgejoBranch[]): Htm
   </form>`;
 }
 
-function branchList(ctx: WebCtx, branches: readonly ForgejoBranch[], openHeads: ReadonlySet<string>): Html {
+function branchList(ctx: WebCtx, branches: readonly BranchRow[], openHeads: ReadonlySet<string>): Html {
   if (branches.length === 0) return html`<div class="list"><div class="empty">No branches.</div></div>`;
   return html`<div class="list">${branches.map((branch) => {
     const hasOpenPr = openHeads.has(branch.name);
