@@ -176,4 +176,81 @@ describe("web activity routes", () => {
     expect(body).not.toContain("/pulls/100");
     expect(body).not.toContain("/issues/7");
   });
+
+  it("renders collapsed edit activity repeat counts", async () => {
+    const db = freshTestDb("cosheaf-web-activity-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/activities/feeds", (c) =>
+          c.json([
+            {
+              id: 3,
+              op_type: "commit_repo",
+              act_user: { login: "alice" },
+              ref_name: "refs/heads/user/alice/wip",
+              content: JSON.stringify({ Commits: [{ Sha1: "cccc", Message: "update three.md" }] }),
+              created: "2026-06-01T00:00:02Z",
+            },
+            {
+              id: 2,
+              op_type: "commit_repo",
+              act_user: { login: "alice" },
+              ref_name: "refs/heads/user/alice/wip",
+              content: JSON.stringify({ Commits: [{ Sha1: "bbbb", Message: "update two.md" }] }),
+              created: "2026-06-01T00:00:01Z",
+            },
+            {
+              id: 1,
+              op_type: "commit_repo",
+              act_user: { login: "alice" },
+              ref_name: "refs/heads/user/alice/wip",
+              content: JSON.stringify({ Commits: [{ Sha1: "aaaa", Message: "update one.md" }] }),
+              created: "2026-06-01T00:00:00Z",
+            },
+          ]),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/activity", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("saved edits");
+    expect(body).toContain("3 commits");
+  });
+
+  it("keeps issue links from Forgejo comment URLs when activity content has no index", async () => {
+    const db = freshTestDb("cosheaf-web-activity-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/activities/feeds", (c) =>
+          c.json([
+            {
+              id: 1,
+              op_type: "comment_issue",
+              act_user: { login: "alice" },
+              comment: { id: 11, body: "noted", issue_url: "http://forgejo.test/api/v1/repos/owner/w/issues/7" },
+              created: "2026-06-01T00:00:00Z",
+            },
+          ]),
+        );
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/activity", {
+      headers: { cookie: `cosheaf_pat=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("commented on");
+    expect(body).toContain("/issues/7");
+  });
 });

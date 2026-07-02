@@ -136,7 +136,7 @@ export interface ActivityRow {
   author_username: string | null;
   ref_index: number | null;
   ref_name: string | null;
-  comment_body: string | null;
+  ref_text: string | null;
   commit_sha: string | null;
   commit_message: string | null;
   repeat_count: number;

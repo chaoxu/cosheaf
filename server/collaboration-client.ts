@@ -14,7 +14,7 @@
 // `WorkspaceBackend`, not here — that is the other trigger (local git vs forge).
 
 import type { BranchRow } from "../shared/branches.js";
-import type { DependencyRow, IssueComment, IssueDetail, IssueRow, Label, Milestone, NotificationRow, TimelineEvent } from "../shared/issues.js";
+import type { ActivityRow, DependencyRow, IssueComment, IssueDetail, IssueRow, Label, Milestone, NotificationRow, TimelineEvent } from "../shared/issues.js";
 import type { LineComment } from "../shared/comments.js";
 import type { PrCommit, PrFile, PrMeta, ReviewDto, ReviewState, ReviewSubmitEvent } from "../shared/review.js";
 import type { Forgejo, NotificationListOpts } from "./forgejo.js";
@@ -127,6 +127,7 @@ export type CollaborationClient = Omit<
   | "addCommentToReview"
   | "listRepoNotifications"
   | "getNotificationThread"
+  | "listRepoActivities"
   | "listBranches"
   | "searchUsers"
 > & {
@@ -185,6 +186,7 @@ export type CollaborationClient = Omit<
   ): Promise<LineComment>;
   listRepoNotifications(owner: string, repo: string, opts?: NotificationListOpts): Promise<NotificationRow[]>;
   getNotificationThread(id: number): Promise<NotificationRow | null>;
+  listRepoActivities(owner: string, repo: string, opts?: { limit?: number }): Promise<ActivityRow[]>;
   listBranches(owner: string, repo: string): Promise<BranchRow[]>;
   searchUsers(query: string, limit?: number): Promise<Array<{ login: string }>>;
 };

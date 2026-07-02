@@ -1,14 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
-import type {
-  ActivityRow,
-  IssueComment,
-  IssueDetail,
-  IssueRow,
-} from "../../shared/issues.js";
-import { activityCommitRef, collapseNoisyEditBranchCommits, parseActivityContent } from "../activity-feed.js";
+import type { IssueComment, IssueDetail, IssueRow } from "../../shared/issues.js";
 import { is404 } from "../forgejo-errors.js";
-import { toEpochMs } from "../forgejo-types.js";
 import {
   activeClaims,
   activeClaimsByIssue,
@@ -626,54 +619,10 @@ issues.delete("/:owner/:repo/issues/:number/blocks", async (c) => {
   return c.json({ ok: true });
 });
 
-// Typed because Forgejo activities encode references in JSON-ish strings;
-// clients get parsed issue refs and normalized timestamps.
 issues.get("/:owner/:repo/activities", async (c) => {
   const limit = parseBoundedPositiveInt(c.req.query("limit"), 50, 100);
   const { collab, owner, repo } = repoCtxCollab(c);
-  const raw = await collab.listRepoActivities(owner, repo, { limit });
-  const safe = collapseNoisyEditBranchCommits(raw ?? []);
-  return c.json({
-    activities: safe.map<ActivityRow>((item) => {
-      const a = item.activity;
-      // Forgejo encodes content as a JSON array string for many op_types.
-      // For comment_*: ["<issue_index>","<body>"]
-      // For close_issue, reopen_issue, etc: often just "<issue_index>" or
-      // similar — keep raw and let the client parse what it can.
-      let refIndex: number | null = null;
-      let body: string | null = null;
-      let commit = item.commit;
-      if (a.content) {
-        try {
-          const parsed = parseActivityContent(a.content);
-          commit ??= activityCommitRef(parsed);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const first = parsed[0];
-            const n = Number(first);
-            if (Number.isFinite(n)) refIndex = n;
-            if (parsed.length > 1 && typeof parsed[1] === "string") body = parsed[1];
-          } else if (typeof parsed === "string") {
-            const n = Number(parsed);
-            if (Number.isFinite(n)) refIndex = n;
-          }
-        } catch (_err) {
-          // content wasn't JSON; ignore.
-        }
-      }
-      return {
-        id: a.id,
-        op_type: a.op_type,
-        author_username: a.act_user?.login ?? null,
-        ref_index: refIndex,
-        ref_name: a.ref_name ?? null,
-        comment_body: body,
-        commit_sha: commit?.sha ?? null,
-        commit_message: commit?.message ?? null,
-        repeat_count: item.repeatCount,
-        created_at: toEpochMs(a.created),
-      };
-    }),
-  });
+  return c.json({ activities: await collab.listRepoActivities(owner, repo, { limit }) });
 });
 
 // Typed because public API clients use a narrowed event DTO with normalized

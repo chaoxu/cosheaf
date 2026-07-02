@@ -9,7 +9,7 @@
 // (connected) or that sentinel.
 //
 // Shape contract: CollaborationClient is the exact method surface the routes
-// call. Shared DTO surfaces pass through directly; narrow repo/settings/activity
+// call. Shared DTO surfaces pass through directly; narrow repo/settings
 // compatibility shapes stay isolated here until those contracts are tightened.
 
 import type { LineComment } from "../../shared/comments.js";
@@ -31,36 +31,14 @@ import type { CollaborationClient } from "../collaboration-client.js";
 import { parseOriginResponse, RemoteCosheafError } from "./remote-cosheaf-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
-type ActivityShape = Awaited<ReturnType<CollaborationClient["listRepoActivities"]>>[number];
 type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
 type CollaboratorShape = Awaited<ReturnType<CollaborationClient["listCollaborators"]>>[number];
 type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
 type ReviewerShape = Awaited<ReturnType<CollaborationClient["listPullReviewers"]>>[number];
 type BranchProtectionShape = NonNullable<Awaited<ReturnType<CollaborationClient["getBranchProtection"]>>>;
 
-function iso(ms: number): string {
-  return new Date(ms).toISOString();
-}
-
 function collaboratorToShape(member: { login: string; permission: string }): CollaboratorShape {
   return { id: 0, login: member.login };
-}
-
-function activityRowToShape(a: ActivityRow): ActivityShape {
-  let content: string | undefined;
-  if (a.commit_sha) {
-    content = JSON.stringify({ Commits: [{ Sha1: a.commit_sha, Message: a.commit_message ?? "" }] });
-  } else if (a.ref_index !== null) {
-    content = JSON.stringify([a.ref_index, a.comment_body ?? ""]);
-  }
-  return {
-    id: a.id,
-    op_type: a.op_type,
-    act_user: a.author_username ? { id: 0, login: a.author_username } : undefined,
-    ref_name: a.ref_name ?? undefined,
-    content,
-    created: iso(a.created_at),
-  };
 }
 
 // True when no core is connected for this workspace; the migrated collaboration
@@ -791,11 +769,11 @@ export class OriginCollaborationClient {
     return r.notifications ?? [];
   }
 
-  async listRepoActivities(owner: string, repo: string, opts: { limit?: number } = {}): Promise<ActivityShape[]> {
+  async listRepoActivities(owner: string, repo: string, opts: { limit?: number } = {}): Promise<ActivityRow[]> {
     const r = await this.get<{ activities: ActivityRow[] }>(this.repoPath(owner, repo, "/activities"), {
       limit: opts.limit,
     });
-    return (r.activities ?? []).map(activityRowToShape);
+    return r.activities ?? [];
   }
 
   // ---- notification writes ----

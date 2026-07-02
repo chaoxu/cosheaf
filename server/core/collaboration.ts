@@ -1,4 +1,5 @@
 import type { CollaborationClient } from "../collaboration-client.js";
+import { forgeActivitiesToRows } from "../activity-feed.js";
 import { resolveLineComment } from "../diff-position.js";
 import type { Forgejo } from "../forgejo.js";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -178,6 +179,10 @@ export function forgeCoreCollaborationClient(fj: Forgejo): CollaborationClient {
       if (prop === "listRepoNotifications") {
         return async (...args: Parameters<Forgejo["listRepoNotifications"]>) =>
           forgeNotificationThreadsToRows(await target.listRepoNotifications(...args));
+      }
+      if (prop === "listRepoActivities") {
+        return async (...args: Parameters<Forgejo["listRepoActivities"]>) =>
+          forgeActivitiesToRows(await target.listRepoActivities(...args));
       }
       if (prop === "getNotificationThread") {
         return async (...args: Parameters<Forgejo["getNotificationThread"]>) =>

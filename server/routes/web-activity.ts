@@ -1,15 +1,7 @@
 import type { Hono } from "hono";
-import {
-  type ActivityFeedItem,
-  activityCommitRef,
-  branchFromRef,
-  collapseNoisyEditBranchCommits,
-  parseActivityContent,
-} from "../activity-feed.js";
-import type { NotificationRow } from "../../shared/issues.js";
-import type { ForgejoActivity } from "../forgejo-types.js";
+import { branchFromRef } from "../activity-feed.js";
+import type { ActivityRow, NotificationRow } from "../../shared/issues.js";
 import type { AppEnv } from "../types.js";
-import { parsePositiveIntId } from "./query-params.js";
 import {
   htmlResponse,
   notFoundPage,
@@ -95,35 +87,32 @@ function notificationHref(ctx: WebCtx, thread: NotificationRow): string {
     : repoHref(ctx.owner, ctx.repo, `/issues/${thread.number}`);
 }
 
-function activityList(ctx: WebCtx, activities: ForgejoActivity[]): Html {
-  const items = collapseNoisyEditBranchCommits(activities);
-  return html`<div class="list">${items.length === 0 ? html`<div class="empty">No activity.</div>` : items.map((item) => activityRow(ctx, item))}</div>`;
+function activityList(ctx: WebCtx, activities: ActivityRow[]): Html {
+  return html`<div class="list">${activities.length === 0 ? html`<div class="empty">No activity.</div>` : activities.map((activity) => activityRow(ctx, activity))}</div>`;
 }
 
-function activityRow(ctx: WebCtx, item: ActivityFeedItem): Html {
-  const rendered = renderActivity(ctx, item);
-  const count = item.repeatCount > 1 ? html`<small class="activity-count">${item.repeatCount} commits</small>` : emptyHtml;
+function activityRow(ctx: WebCtx, activity: ActivityRow): Html {
+  const rendered = renderActivity(ctx, activity);
+  const count = activity.repeat_count > 1 ? html`<small class="activity-count">${activity.repeat_count} commits</small>` : emptyHtml;
   return html`<div class="list-row activity-row" data-testid="activity-row">
-    <strong>${userLink(item.activity.act_user?.login, ctx.local)}</strong>
+    <strong>${userLink(activity.author_username, ctx.local)}</strong>
     <span>${rendered.summary}${count}</span>
-    <small>${timeEl(item.activity.created)}</small>
+    <small>${timeEl(activity.created_at)}</small>
   </div>`;
 }
 
-function renderActivity(ctx: WebCtx, item: ActivityFeedItem): { summary: Html } {
-  const activity = item.activity;
-  const branch = branchFromRef(activity.ref_name);
-  const content = parseActivityContent(activity.content);
-  const pr = activityPullRef(content);
-  const issue = activityIssueRef(content, activity.comment?.issue_url);
-  const commit = item.commit ?? activityCommitRef(content);
+function renderActivity(ctx: WebCtx, activity: ActivityRow): { summary: Html } {
+  const branch = branchFromRef(activity.ref_name ?? undefined);
+  const pr = activity.ref_index !== null ? { number: activity.ref_index, label: activity.ref_text ?? "" } : null;
+  const issue = activity.ref_index;
+  const commit = activity.commit_sha ? { sha: activity.commit_sha, message: activity.commit_message ?? "" } : null;
   const branchHtml = branch ? activityBranchHtml(ctx, branch) : null;
   const commitHtml = commit ? activityCommitHtml(ctx, commit.sha) : null;
   switch (activity.op_type) {
     case "commit_repo": {
       const message = commit?.message ? html`: ${firstLine(commit.message)}` : emptyHtml;
       const target = commitHtml ?? branchHtml;
-      if (item.repeatCount > 1) {
+      if (activity.repeat_count > 1) {
         return { summary: html`saved edits${message}${target ? html` ${target}` : ""}${branchHtml && commitHtml ? html` on ${branchHtml}` : ""}` };
       }
       return { summary: html`committed${message}${target ? html` ${target}` : ""}${branchHtml && commitHtml ? html` on ${branchHtml}` : ""}` };
@@ -174,22 +163,4 @@ function activityBranchHtml(ctx: WebCtx, branch: string): Html {
 
 function firstLine(value: string): string {
   return value.split(/\r?\n/, 1)[0] ?? value;
-}
-
-function activityPullRef(value: unknown): { number: number; label: string } | null {
-  if (!Array.isArray(value) || value.length < 2 || typeof value[1] !== "string") return null;
-  const number = parsePositiveIntId(value[0]);
-  if (number === null) return null;
-  return { number, label: value[1] };
-}
-
-function activityIssueRef(value: unknown, issueUrl: string | undefined): number | null {
-  if (Array.isArray(value)) {
-    const number = parsePositiveIntId(value[0]);
-    if (number !== null) return number;
-  }
-  const match = issueUrl?.match(/\/issues\/(\d+)(?:$|[#?])/);
-  if (!match) return null;
-  const number = Number(match[1]);
-  return Number.isInteger(number) && number > 0 ? number : null;
 }

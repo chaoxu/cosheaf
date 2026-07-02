@@ -98,6 +98,31 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.init?.method).toBe("DELETE");
   });
 
+  it("preserves core activity repeat counts", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        activities: [
+          {
+            id: 8,
+            op_type: "commit_repo",
+            author_username: "vera",
+            ref_index: null,
+            ref_name: "refs/heads/user/vera/wip",
+            ref_text: null,
+            commit_sha: "abc123",
+            commit_message: "update notes",
+            repeat_count: 4,
+            created_at: 1_780_000_000_000,
+          },
+        ],
+      }),
+    );
+
+    await expect(clientWith(fake.fetch).listRepoActivities("me", "notes")).resolves.toMatchObject([
+      { id: 8, author_username: "vera", repeat_count: 4, commit_sha: "abc123" },
+    ]);
+  });
+
   it("does not apply main-branch review policy to non-main branches", async () => {
     const fake = recordingFetch(() => Response.json({ min_approvals: 2 }));
     await expect(clientWith(fake.fetch).getBranchProtection("me", "notes", "release")).resolves.toBeNull();
