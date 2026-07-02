@@ -152,6 +152,21 @@ test("workbench local annotation anchor inserts at selected source position @smo
     const firstArticle = page.locator(".local-annotation", { hasText: `[@local:${firstId}]` });
     const secondArticle = page.locator(".local-annotation", { hasText: `[@local:${id}]` });
     await expect(secondArticle.locator(".meta-pill")).toHaveText("task");
+    const agentReplyStatus = await page.evaluate(
+      async ({ id, owner, repo }) => {
+        const res = await fetch(`/api/v1/repos/${owner}/${repo}/local-annotations/${id}/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ body: "Agent checked this sentence." }),
+        });
+        return res.status;
+      },
+      { id, owner, repo },
+    );
+    expect(agentReplyStatus).toBe(200);
+    await expect(secondArticle).not.toContainText("Agent checked this sentence.");
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(secondArticle).toContainText("Agent checked this sentence.");
     await page.getByRole("button", { name: "Next open" }).click();
     await expect(page.locator(".local-annotation.is-focused")).toContainText(`[@local:${id}]`);
     await page.getByRole("button", { name: "Next open" }).click();
@@ -198,6 +213,20 @@ test("workbench local annotation anchor inserts at selected source position @smo
     const exportBody = await exportRes.text();
     expect(exportBody).toContain(`[@local:${id}] (open`);
     expect(exportBody).not.toContain(`[@local:${id}] (missing`);
+
+    const externalWriteStatus = await page.evaluate(
+      async ({ owner, repo, renamed }) => {
+        const res = await fetch(`/api/v1/repos/${owner}/${repo}/file?path=renamed.md&branch=main`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: `${renamed}\nExternal agent edit.\n` }),
+        });
+        return res.status;
+      },
+      { owner, repo, renamed },
+    );
+    expect(externalWriteStatus).toBe(200);
+    await expect(page.getByTestId("editor-external-change-banner")).toContainText("This file changed outside this editor.");
   } finally {
     if (child) await stopWorkbench(child);
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });

@@ -24,6 +24,7 @@ export interface LocalAnnotationsController {
   setOpen: (open: boolean | ((open: boolean) => boolean)) => void;
   openCount: number;
   ready: boolean;
+  refreshing: boolean;
   annotations: LocalAnnotation[];
   showOpenOnly: boolean;
   setShowOpenOnly: (showOpenOnly: boolean | ((showOpenOnly: boolean) => boolean)) => void;
@@ -35,6 +36,7 @@ export interface LocalAnnotationsController {
   error: string | null;
   focusedId: string | null;
   captureCursor: () => void;
+  refresh: () => Promise<void>;
   focusAnnotation: (id: string) => void;
   focusNextOpen: () => void;
   createAnnotation: () => Promise<void>;
@@ -57,11 +59,29 @@ export function useLocalAnnotationsController(options: LocalAnnotationsControlle
   const [annotations, setAnnotations] = useState<LocalAnnotation[]>([]);
   const [showOpenOnly, setShowOpenOnly] = useState(false);
   const [ready, setReady] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState<AnnotationDraft>({ kind: "comment", body: "" });
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!enabled) return;
+    setRefreshing(true);
+    setReady(false);
+    await api.listLocalAnnotations(owner, repo, { path }).then((result) => {
+      setAnnotations(result.annotations);
+      setReady(true);
+      setError(null);
+    }).catch((err) => {
+      setAnnotations([]);
+      setReady(false);
+      setError(err instanceof ApiError && err.status !== 404 ? err.message : null);
+    }).finally(() => {
+      setRefreshing(false);
+    });
+  }, [enabled, owner, path, repo]);
 
   useEffect(() => {
     if (!enabled) {
@@ -75,6 +95,7 @@ export function useLocalAnnotationsController(options: LocalAnnotationsControlle
       if (cancelled) return;
       setAnnotations(result.annotations);
       setReady(true);
+      setError(null);
     }).catch((err) => {
       if (cancelled) return;
       setAnnotations([]);
@@ -185,6 +206,7 @@ export function useLocalAnnotationsController(options: LocalAnnotationsControlle
     setOpen,
     openCount,
     ready,
+    refreshing,
     annotations,
     showOpenOnly,
     setShowOpenOnly,
@@ -196,6 +218,7 @@ export function useLocalAnnotationsController(options: LocalAnnotationsControlle
     error,
     focusedId,
     captureCursor,
+    refresh,
     focusAnnotation,
     focusNextOpen,
     createAnnotation,
@@ -224,6 +247,14 @@ export function LocalAnnotationsDrawer({ controller }: { controller: LocalAnnota
           />
           Open only
         </label>
+        <button
+          type="button"
+          className="button small subtle"
+          disabled={controller.refreshing}
+          onClick={() => void controller.refresh()}
+        >
+          Refresh
+        </button>
         <button
           type="button"
           className="button small subtle"

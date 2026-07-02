@@ -89,10 +89,24 @@ The basic local agent loop is:
 1. List unresolved annotations.
 2. Read each item's `path`, `anchor`, `kind`, messages, and `context` fields
    such as `context.excerpt` and `context.anchor_found`.
-3. Edit the Markdown file in the local workspace, keeping or removing the
-   `[@local:<id>]` marker according to the task.
+3. Edit the Markdown file through Cosheaf's typed file route when Workbench is
+   open, keeping or removing the `[@local:<id>]` marker according to the task.
 4. Append a message explaining what changed.
 5. Resolve the annotation when the document no longer needs that local note.
+
+Until live merge/compare exists, use a turn-taking protocol for AI writing
+sessions:
+
+- The human saves before handing a file to the agent.
+- The agent avoids direct filesystem writes while that file is open in the
+  Workbench editor; use typed Cosheaf file routes so Workbench receives change
+  events.
+- If the agent must edit files directly, the human reloads Workbench before
+  continuing.
+- When Workbench reports that the open file changed outside the editor, reload
+  before making more edits.
+- If the agent changes local annotation messages or status while the drawer is
+  open, use the drawer's Refresh action before reviewing the queue.
 
 Final PDF export fails while local markers remain in the source or while open
 sidecar annotations are detached from their anchors. Resolve/delete local
