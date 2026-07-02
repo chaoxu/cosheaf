@@ -7,8 +7,9 @@ import {
 } from "../../shared/document-format.js";
 import type { Role } from "../../shared/roles.js";
 import { ROLES } from "../../shared/roles.js";
+import type { CollaborationClient } from "../collaboration-client.js";
 import { ForgejoError, type ForgejoRepo } from "../forgejo.js";
-import { invalidateWorkspacePermissionCache, repoCtxForgejo, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
+import { invalidateWorkspacePermissionCache, repoCtxCollab, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
 import { setWorkspaceMember } from "../workspace-members.js";
@@ -143,7 +144,9 @@ workspaces.post("/", async (c) => {
 export const members = new Hono<AppEnv>();
 members.use("*", requireAuth);
 
-function publicRepoShape(c: import("hono").Context<AppEnv>, repoMeta: ForgejoRepo): Record<string, unknown> {
+type PublicRepoMeta = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>> | ForgejoRepo;
+
+function publicRepoShape(c: import("hono").Context<AppEnv>, repoMeta: PublicRepoMeta): Record<string, unknown> {
   const { owner, repo } = c.get("repoCtx");
   const origin = new URL(c.req.url).origin;
   const apiRepo = `${origin}/api/v1/repos/${owner}/${repo}`;
@@ -175,8 +178,8 @@ function publicRepoShape(c: import("hono").Context<AppEnv>, repoMeta: ForgejoRep
 }
 
 members.get("/:owner/:repo", requireMembership(), async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
-  const found = await fj.getRepo(owner, repo);
+  const { collab, owner, repo } = repoCtxCollab(c);
+  const found = await collab.getRepo(owner, repo);
   if (!found) return c.json(...notFound("workspace not found"));
   return c.json(publicRepoShape(c, found));
 });
@@ -187,7 +190,7 @@ members.get("/:owner/:repo", requireMembership(), async (c) => {
 // caller set are forwarded; the response is the same forge-repo-compatible shape
 // GET /:owner/:repo returns.
 members.patch("/:owner/:repo", requireMembership(), requireAdminFresh, async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   const body = (await c.req.json().catch(() => null)) as {
     description?: unknown;
     private?: unknown;
@@ -208,16 +211,16 @@ members.patch("/:owner/:repo", requireMembership(), requireAdminFresh, async (c)
       return c.json(...bad("default_branch must be a non-empty string"));
     patch.default_branch = body.default_branch;
   }
-  const updated = await fj.editRepo(owner, repo, patch);
+  const updated = await collab.editRepo(owner, repo, patch);
   return c.json(publicRepoShape(c, updated));
 });
 
 // Delete the repo. Admin-only and fresh-checked. Idempotent: a 404 means the
 // repo is already gone, matching the hosted settings-delete swallow.
 members.delete("/:owner/:repo", requireMembership(), requireAdminFresh, async (c) => {
-  const { fj, owner, repo } = repoCtxForgejo(c);
+  const { collab, owner, repo } = repoCtxCollab(c);
   try {
-    await fj.deleteRepo(owner, repo);
+    await collab.deleteRepo(owner, repo);
   } catch (err) {
     if (!(err instanceof ForgejoError && err.status === 404)) throw err;
   }
