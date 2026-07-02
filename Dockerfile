@@ -60,6 +60,7 @@ RUN --mount=type=cache,id=cosheaf-pnpm-store,target=/pnpm/store,sharing=locked \
 RUN pnpm --dir cosheaf rebuild esbuild
 
 COPY vite.config.ts tsconfig.json ./cosheaf/
+COPY scripts/check-coflat-install.mjs ./cosheaf/scripts/
 COPY src ./cosheaf/src
 COPY shared ./cosheaf/shared
 COPY public ./cosheaf/public
