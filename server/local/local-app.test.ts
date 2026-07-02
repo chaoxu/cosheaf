@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
@@ -24,11 +24,14 @@ const IDENTITY: LocalWorkspaceIdentity = {
 
 function localApp(seed: Record<string, string> = {}): { app: Hono<AppEnv>; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-app-"));
-  for (const [path, content] of Object.entries(seed)) writeFileSync(join(dir, path), content);
+  for (const [path, content] of Object.entries(seed)) {
+    mkdirSync(join(dir, path, ".."), { recursive: true });
+    writeFileSync(join(dir, path), content);
+  }
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   const db = freshTestDb("cosheaf-local-app-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
-  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY) });
+  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY, dir) });
   return { app, dir };
 }
 
@@ -206,6 +209,70 @@ describe("local Workbench app (Tier 0)", () => {
     await expect(res.json()).resolves.toMatchObject({
       code: "not_found",
       error: "no connected Cosheaf server",
+    });
+  });
+
+  it("serves an empty local annotation queue when the sidecar is absent", async () => {
+    const { app } = localApp({ "hello.md": "# Hello\n" });
+    const res = await app.request("/api/v1/repos/me/notes/local-annotations/unresolved");
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      annotations: [],
+      count: 0,
+      sidecar: ".cosheaf/local-annotations.json",
+    });
+  });
+
+  it("serves unresolved local annotations with source excerpts for agents", async () => {
+    const { app } = localApp({
+      "paper.md": [
+        "# Paper",
+        "",
+        "Before.",
+        "Needs work.[@local:a1]",
+        "After.",
+        "",
+      ].join("\n"),
+      ".cosheaf/local-annotations.json": JSON.stringify({
+        annotations: [
+          {
+            id: "a1",
+            path: "paper.md",
+            kind: "task",
+            status: "open",
+            messages: [{ author: "me", timestamp: "2026-07-02T00:00:00Z", text: "Clarify this step." }],
+          },
+          {
+            id: "done",
+            path: "paper.md",
+            kind: "comment",
+            status: "resolved",
+            messages: [{ text: "Already handled." }],
+          },
+        ],
+      }),
+    });
+
+    const res = await app.request("/api/v1/repos/me/notes/local-annotations/unresolved");
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      count: 1,
+      annotations: [
+        {
+          id: "a1",
+          anchor: "local:a1",
+          path: "paper.md",
+          kind: "task",
+          status: "open",
+          messages: [{ author: "me", timestamp: "2026-07-02T00:00:00Z", text: "Clarify this step." }],
+          source_excerpt: {
+            line: 4,
+            start_line: 2,
+            end_line: 6,
+            text: "\nBefore.\nNeeds work.[@local:a1]\nAfter.\n",
+          },
+        },
+      ],
     });
   });
 

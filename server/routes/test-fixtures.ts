@@ -202,11 +202,12 @@ export function testLocalRegistry(
   db: Database.Database,
   backend: LocalGitWorkspaceBackend,
   identity: LocalWorkspaceIdentity,
+  path = "",
 ): WorkspaceRegistry {
   const registry = new WorkspaceRegistry(db, { user: identity.user });
   registry.register({
     slug: workspaceSlug(identity.owner, identity.repo),
-    path: "",
+    path,
     identity,
     backend,
     remote: null,

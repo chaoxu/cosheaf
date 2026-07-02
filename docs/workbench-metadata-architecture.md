@@ -88,3 +88,38 @@ The Workbench UI displays local comments and AI conversations in a **toggleable 
 - **Coflat Editor**: Renders `[@c:commentId]` markers as inline yellow highlights. Clicking a highlight slides open the bottom drawer and focuses the active comment thread.
 - **Interactive Checkbox Lists**: Markdown checkboxes (`- [ ]`) written inside comment threads are parsed and rendered as interactive check-lists in the drawer. Clicking them edits the JSON/markdown files on disk.
 - **Live Sync**: The Workbench server runs an `fs.watch` file watcher on `comments.json` (or uses SQLite change triggers) and broadcasts updates to the browser via Server-Sent Events (SSE) for real-time rendering.
+
+## 6. Current Local-Only Queue Contract
+
+The first Workbench implementation uses local `[@local:<id>]` anchors and the
+gitignored sidecar `.cosheaf/local-annotations.json`. Agents can read unresolved
+local writing tasks through:
+
+```text
+GET /api/v1/repos/:owner/:repo/local-annotations/unresolved
+```
+
+The response is:
+
+```json
+{
+  "annotations": [
+    {
+      "id": "a1",
+      "anchor": "local:a1",
+      "path": "paper.md",
+      "kind": "task",
+      "status": "open",
+      "messages": [{ "author": "me", "timestamp": "2026-07-02T00:00:00Z", "text": "Clarify this step." }],
+      "source_excerpt": { "line": 4, "start_line": 2, "end_line": 6, "text": "..." }
+    }
+  ],
+  "count": 1,
+  "sidecar": ".cosheaf/local-annotations.json"
+}
+```
+
+The sidecar may use either `{ "annotations": [...] }` or an object map keyed by
+annotation id. Each record should include `id`, `path`, `kind` (`comment` or
+`task`), `status` (`open` or `resolved`), and `messages` (or legacy `thread`).
+Resolved records are omitted from the unresolved queue.
