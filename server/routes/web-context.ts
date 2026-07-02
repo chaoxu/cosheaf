@@ -56,8 +56,9 @@ export interface WebCtx {
   // "am I local" flag the page modules branch on, derived once here so call sites
   // read `ctx.local` instead of re-deriving `ctx.writeMode === "direct"`.
   local: boolean;
-  // Whether the workspace renders with Coflat. This is currently always true
-  // for Cosheaf Markdown, but the flag remains during route migration.
+  // Whether the workspace renders with Coflat. Cosheaf is Coflat-only today;
+  // the flag keeps older page/render helper signatures narrow until they are
+  // simplified.
   coflat: boolean;
   // Add/update a collaborator's role. Hosted runs setWorkspaceMember against the
   // forge (collaborator + branch-protection whitelist); local proxies to the

@@ -236,9 +236,9 @@ export function repoCtxForgejo(c: Context<AppEnv>): { fj: Forgejo; owner: string
   return { fj, owner, repo };
 }
 
-// The collaboration seam accessor (#262): the forge (hosted) or the bound core
-// (local), plus owner/repo. Collaboration routes call this instead of
-// repoCtxForgejo as they migrate, so the same route serves both modes.
+// The collaboration seam accessor (#262): the in-process Core adapter (hosted)
+// or the bound remote Core client (local), plus owner/repo. Shared
+// collaboration routes use this so the same route serves both modes.
 export function repoCtxCollab(c: Context<AppEnv>): { collab: CollaborationClient; owner: string; repo: string } {
   const { collab, owner, repo } = c.get("repoCtx");
   if (!collab) throw new Error("collaboration client unavailable: no forge and no connected core for this workspace");

@@ -1,6 +1,6 @@
-// Branch surface. Branches live entirely on Forgejo; this route translates
-// cosheaf paths to Forgejo REST and shapes "branches/mine" so the sidebar
-// can list a user's in-progress work without their open PRs duplicating in.
+// Branch surface. Branch reads/writes go through WorkspaceBackend so hosted
+// forge branches and local git branches share one route. "branches/mine" uses
+// the collaboration client only to hide branches that already have open PRs.
 //
 // Endpoints under /:owner/:repo/* :
 //   GET    /branches              — list branches

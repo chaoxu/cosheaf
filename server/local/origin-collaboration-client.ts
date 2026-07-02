@@ -3,13 +3,14 @@
 // typed Cosheaf API (the Origin API) instead of a co-located forge. This is the
 // "local" half of the seam — hosted uses the forge client directly.
 //
-// A workspace with no connected core has no collaboration source; the migrated
-// routes render a Connect prompt rather than throwing. `localCollaborationClient`
-// returns either an OriginCollaborationClient (connected) or that sentinel.
+// A workspace with no connected core has no collaboration source; web routes
+// render a Connect prompt and typed API routes receive a stable not-connected
+// error. `localCollaborationClient` returns either an OriginCollaborationClient
+// (connected) or that sentinel.
 //
 // Shape contract: CollaborationClient is the exact method surface the routes
-// call. Migrated surfaces return the core DTOs directly; narrow repo/settings
-// compatibility shapes live here until those routes have shared DTOs too.
+// call. Shared DTO surfaces pass through directly; narrow repo/settings/activity
+// compatibility shapes stay isolated here until those contracts are tightened.
 
 import type { LineComment } from "../../shared/comments.js";
 import type { BranchRow } from "../../shared/branches.js";

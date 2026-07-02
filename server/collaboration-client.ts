@@ -6,8 +6,9 @@
 //
 // `CollaborationClient` is the exact method surface the collaboration routes
 // call. Hosted injects an in-process Core adapter over Forgejo; local injects an
-// Origin HTTP client. Surfaces migrate from forge shapes to DTOs one at a time
-// here, so both transports expose the same route-owned contract.
+// Origin HTTP client. The contract is route-owned: shared DTO surfaces stay
+// shared across transports, while the few remaining forge-shaped compatibility
+// methods are explicit in this type.
 //
 // Content (getRawFile/getTree/listBranches/file writes) stays on
 // `WorkspaceBackend`, not here — that is the other trigger (local git vs forge).
@@ -18,11 +19,9 @@ import type { LineComment } from "../shared/comments.js";
 import type { PrCommit, PrFile, PrMeta, ReviewDto, ReviewState, ReviewSubmitEvent } from "../shared/review.js";
 import type { Forgejo, NotificationListOpts } from "./forgejo.js";
 
-// The exact methods the collaboration routes/pages need from the forge/core.
-// Keep this list in sync with the routes as the seam migration (#262) proceeds;
-// `scripts/check-...` could later assert no `ctx.fj` survives in collaboration
-// routes. Grouped to mirror the surfaces (issues / pulls+reviews / notifications
-// + activity / repo + settings).
+// The exact methods the collaboration routes/pages need from the forge/core,
+// grouped to mirror the surfaces (issues / pulls+reviews / notifications +
+// activity / repo + settings).
 type ForgejoCollaborationClient = Pick<
   Forgejo,
   // issues

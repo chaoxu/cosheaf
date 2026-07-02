@@ -1,6 +1,6 @@
-// Pull-request surface. All workflow state lives on Forgejo; this route
-// only translates cosheaf paths to Forgejo REST calls and shapes responses
-// for the client.
+// Pull-request surface. Collaboration state lives in the Core collaboration
+// client (hosted in-process over Forgejo, local over the Origin API); file
+// content and branch cleanup go through WorkspaceBackend.
 //
 // Endpoints under /:owner/:repo/* :
 //   POST   /pulls                           — open a PR
