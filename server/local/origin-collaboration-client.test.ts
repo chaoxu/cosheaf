@@ -158,6 +158,26 @@ describe("OriginCollaborationClient write methods", () => {
     expect(detail.assignees).toEqual(["vera"]);
   });
 
+  it("creates issues from the typed route's compact create result", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        number: 6,
+        title: "Bug",
+        state: "open",
+      }),
+    );
+    const detail = await clientWith(fake.fetch).createIssue("me", "notes", {
+      title: "Bug",
+      body: "body",
+      labels: [4],
+    });
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/issues");
+    expect(fake.calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ title: "Bug", body: "body", labels: [4] });
+    expect(detail).toEqual({ number: 6, title: "Bug", state: "open" });
+  });
+
   it("forwards PR milestones through the typed pull patch route", async () => {
     const fake = recordingFetch(() =>
       Response.json({
@@ -204,7 +224,7 @@ describe("OriginCollaborationClient write methods", () => {
 
   it("adds an inline comment to a pending review via the position-form route", async () => {
     const fake = recordingFetch(() => Response.json({ ok: true }));
-    const shape = await clientWith(fake.fetch).addCommentToReview("me", "notes", 4, 9, {
+    await clientWith(fake.fetch).addCommentToReview("me", "notes", 4, 9, {
       path: "doc.md",
       body: "nit",
       new_position: 12,
@@ -213,7 +233,6 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/pulls/4/pending-review/9/review-comments");
     expect(fake.calls[0]?.init?.method).toBe("POST");
     expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ path: "doc.md", body: "nit", new_position: 12 });
-    expect(shape).toMatchObject({ path: "doc.md", body: "nit", line: 12, side: "head", review_id: 9 });
   });
 
   it("removes an issue block edge with the blocking number in the body", async () => {
@@ -262,10 +281,35 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.init?.method).toBe("POST");
   });
 
-  it("creates a single-comment review via pending-review → comment → submit", async () => {
-    const fake = recordingFetch((call) =>
-      call.input.endsWith("/pending-review") ? Response.json({ review_id: 9 }) : Response.json({ ok: true }),
+  it("returns login-only collaborator and reviewer rows", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({
+        collaborators: [
+          { login: "vera", permission: "write" },
+          { login: "ada", permission: "read" },
+        ],
+      }),
     );
+    const client = clientWith(fake.fetch);
+
+    await expect(client.listCollaborators("me", "notes")).resolves.toEqual([{ login: "vera" }, { login: "ada" }]);
+    await expect(client.listPullReviewers("me", "notes")).resolves.toEqual([{ login: "vera" }, { login: "ada" }]);
+    expect(fake.calls.map((call) => call.input)).toEqual([
+      "https://core.example/api/v1/repos/me/notes/collaborators",
+      "https://core.example/api/v1/repos/me/notes/collaborators",
+    ]);
+  });
+
+  it("creates a single-comment review via pending-review → comment → submit", async () => {
+    const fake = recordingFetch((call) => {
+      if (call.input.endsWith("/pending-review")) {
+        return Response.json({ review_id: 9, review: { id: 9, username: "me", decision: "pending", comment: null, created_at: 10 } });
+      }
+      if (call.input.endsWith("/submit")) {
+        return Response.json({ review: { id: 9, username: "me", decision: "comment", comment: null, created_at: 20 } });
+      }
+      return Response.json({ ok: true });
+    });
     const review = await clientWith(fake.fetch).createReview("me", "notes", 4, {
       event: "COMMENT",
       body: "",
@@ -279,7 +323,52 @@ describe("OriginCollaborationClient write methods", () => {
     ]);
     expect(JSON.parse(String(fake.calls[1]?.init?.body))).toEqual({ path: "doc.md", body: "nit", new_position: 12 });
     expect(JSON.parse(String(fake.calls[2]?.init?.body))).toEqual({ event: "comment", body: "" });
-    expect(review).toMatchObject({ id: 9, decision: "comment" });
+    expect(review).toMatchObject({ id: 9, username: "me", decision: "comment", created_at: 20 });
+  });
+
+  it("falls back to reading reviews when legacy review writes omit the DTO", async () => {
+    const fake = recordingFetch((call) => {
+      if (call.input.endsWith("/pending-review")) return Response.json({ review_id: 9 });
+      if (call.input.endsWith("/submit")) return Response.json({ ok: true });
+      if (call.input.endsWith("/reviews")) {
+        return Response.json({
+          reviews: [{ id: 9, username: "me", decision: "approve", comment: "ok", created_at: 30 }],
+          approvals: 1,
+          rejections: 0,
+        });
+      }
+      return Response.json({ ok: true });
+    });
+
+    const review = await clientWith(fake.fetch).createReview("me", "notes", 4, {
+      event: "APPROVED",
+      body: "ok",
+      comments: [{ path: "doc.md", body: "nit", new_position: 12 }],
+    });
+
+    expect(fake.calls.map((c) => c.input)).toEqual([
+      "https://core.example/api/v1/repos/me/notes/pulls/4/pending-review",
+      "https://core.example/api/v1/repos/me/notes/pulls/4/pending-review/9/review-comments",
+      "https://core.example/api/v1/repos/me/notes/pulls/4/pending-review/9/submit",
+      "https://core.example/api/v1/repos/me/notes/pulls/4/reviews",
+    ]);
+    expect(review).toEqual({ id: 9, username: "me", decision: "approve", comment: "ok", created_at: 30 });
+  });
+
+  it("returns direct review DTOs from typed review routes", async () => {
+    const fake = recordingFetch(() =>
+      Response.json({ review: { id: 12, username: "vera", decision: "approve", comment: "ok", created_at: 30 } }),
+    );
+
+    const review = await clientWith(fake.fetch).createReview("me", "notes", 4, {
+      event: "APPROVED",
+      body: "ok",
+    });
+
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/repos/me/notes/pulls/4/reviews");
+    expect(fake.calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(fake.calls[0]?.init?.body))).toEqual({ event: "APPROVE", body: "ok" });
+    expect(review).toEqual({ id: 12, username: "vera", decision: "approve", comment: "ok", created_at: 30 });
   });
 
   // BUG E round-trip: the core's GET /reviews surfaces the caller's own draft as

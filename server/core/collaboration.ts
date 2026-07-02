@@ -40,8 +40,10 @@ export function forgeCoreCollaborationClient(fj: Forgejo): CollaborationClient {
         };
       }
       if (prop === "createIssue") {
-        return async (...args: Parameters<Forgejo["createIssue"]>) =>
-          forgeIssueToDetail(await target.createIssue(...args));
+        return async (...args: Parameters<Forgejo["createIssue"]>) => {
+          const issue = await target.createIssue(...args);
+          return { number: issue.number, title: issue.title, state: issue.state };
+        };
       }
       if (prop === "editIssue") {
         return async (...args: Parameters<Forgejo["editIssue"]>) =>
@@ -169,12 +171,17 @@ export function forgeCoreCollaborationClient(fj: Forgejo): CollaborationClient {
           forgeReviewToDto(await target.submitPullReview(...args));
       }
       if (prop === "addCommentToReview") {
-        return async (...args: Parameters<Forgejo["addCommentToReview"]>) =>
-          forgePullCommentToDto(await target.addCommentToReview(...args), {
-            line: args[4].new_position ?? args[4].old_position ?? null,
-            side: args[4].new_position !== undefined ? "head" : "base",
-            outdated: false,
-          });
+        return async (...args: Parameters<Forgejo["addCommentToReview"]>) => {
+          await target.addCommentToReview(...args);
+        };
+      }
+      if (prop === "listPullReviewers") {
+        return async (...args: Parameters<Forgejo["listPullReviewers"]>) =>
+          (await target.listPullReviewers(...args)).map((reviewer) => ({ login: reviewer.login }));
+      }
+      if (prop === "listCollaborators") {
+        return async (...args: Parameters<Forgejo["listCollaborators"]>) =>
+          (await target.listCollaborators(...args)).map((collaborator) => ({ login: collaborator.login }));
       }
       if (prop === "listRepoNotifications") {
         return async (...args: Parameters<Forgejo["listRepoNotifications"]>) =>

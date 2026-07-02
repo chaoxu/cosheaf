@@ -569,14 +569,14 @@ pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
     return c.json(...forbidden("cannot review your own pull request"));
   if (pull.state === "closed") return c.json(...forbidden("cannot review a closed pull request"));
 
-  await collab.createReview(owner, repo, n, {
+  const review = await collab.createReview(owner, repo, n, {
     event: EVENT_MAP[reviewEvent],
     body: reviewBody.body,
   });
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reviewed" });
 
   const counts = await approvalCounts(collab, owner, repo, n);
-  return c.json({ ok: true, approvals: counts.approvals, rejections: counts.rejections });
+  return c.json({ ok: true, review, approvals: counts.approvals, rejections: counts.rejections });
 });
 
 function parseReviewers(raw: unknown): string[] | null {
@@ -752,15 +752,15 @@ async function findOrCreatePendingReview(
   repo: string,
   n: number,
   forgejoUsername: string,
-): Promise<number> {
+): Promise<ReviewDto> {
   const reviews = await collab.listReviews(owner, repo, n);
   const existing = reviews.find((r) => r.decision === "pending" && r.username === forgejoUsername);
-  if (existing) return existing.id;
+  if (existing) return existing;
   const created = await collab.createReview(owner, repo, n, {
     event: "PENDING",
     body: "(pending)",
   });
-  return created.id;
+  return created;
 }
 
 async function requireOwnPendingReview(
@@ -792,8 +792,8 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
   if (!pull) return c.json(...notFound());
   // No author gate here: an author may open a pending review to leave inline
   // COMMENTs on their own PR. The approve/request_changes gate is at submit.
-  const review_id = await findOrCreatePendingReview(collab, owner, repo, n, c.get("user").username);
-  return c.json({ review_id });
+  const review = await findOrCreatePendingReview(collab, owner, repo, n, c.get("user").username);
+  return c.json({ review_id: review.id, review });
 });
 
 pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
@@ -872,12 +872,12 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
     if (pull?.author_username === c.get("user").username)
       return c.json(...forbidden("cannot approve or request changes on your own pull request"));
   }
-  await collab.submitPullReview(owner, repo, n, rid, {
+  const submitted = await collab.submitPullReview(owner, repo, n, rid, {
     event: eventMap[event as keyof typeof eventMap],
     body: reviewBody.body,
   });
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "reviewed" });
-  return c.json({ ok: true });
+  return c.json({ ok: true, review: submitted });
 });
 
 // ---------- repo access + topics (settings surface reads) ----------

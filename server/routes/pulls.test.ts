@@ -67,6 +67,17 @@ function pull(overrides: Record<string, unknown> = {}): Record<string, unknown> 
   };
 }
 
+function review(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 99,
+    state: "COMMENT",
+    body: "question",
+    user: { login: "test-bob" },
+    submitted_at: "2026-05-16T00:00:00Z",
+    ...overrides,
+  };
+}
+
 describe("pulls + branches routes", () => {
   it("GET /pulls returns stable Cosheaf PR metadata", async () => {
     const db = freshDb();
@@ -405,7 +416,7 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "test-bob", "read");
       fetchMock
         .mockResolvedValueOnce(ok(pull({ user: { login: "alice" } })))
-        .mockResolvedValueOnce(ok({ id: 99 }))
+        .mockResolvedValueOnce(ok(review()))
         .mockResolvedValueOnce(ok([]));
       const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/reviews", {
         method: "POST",
@@ -417,6 +428,10 @@ describe("pulls + branches routes", () => {
       expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
         event: "COMMENT",
         body: "question",
+      });
+      await expect(res.json()).resolves.toMatchObject({
+        ok: true,
+        review: { id: 99, username: "test-bob", decision: "comment", comment: "question" },
       });
     });
 
@@ -755,6 +770,30 @@ describe("pulls + branches routes", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it("POST /pending-review returns the pending review DTO", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "write");
+      fetchMock.mockImplementation(fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(pull({ user: { login: "bob" } })));
+        forge.get("/api/v1/repos/owner/w/pulls/7/reviews", () => Response.json([]));
+        forge.post("/api/v1/repos/owner/w/pulls/7/reviews", () =>
+          Response.json(review({ id: 9, state: "PENDING", body: "(pending)", user: { login: "alice" } })),
+        );
+      }));
+
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/pending-review", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        review_id: 9,
+        review: { id: 9, username: "alice", decision: "pending", comment: "(pending)" },
+      });
+    });
+
     it("rejects pending-review mutations for foreign or non-pending review ids", async () => {
       const reviewCases = [
         { label: "missing", reviews: [] },
@@ -830,7 +869,7 @@ describe("pulls + branches routes", () => {
           );
           forge.post(tc.mutationPath, () => {
             mutated = true;
-            return Response.json({ id: 9 });
+            return Response.json(review({ id: 9, state: "COMMENT", body: "", user: { login: "alice" } }));
           });
         }));
 
@@ -840,9 +879,15 @@ describe("pulls + branches routes", () => {
           body: JSON.stringify(tc.body),
         });
 
-        expect(res.status, tc.label).toBe(tc.status);
-        expect(mutated, tc.label).toBe(tc.status === 200);
-      }
+	        expect(res.status, tc.label).toBe(tc.status);
+	        expect(mutated, tc.label).toBe(tc.status === 200);
+	        if (tc.status === 200) {
+	          await expect(res.json()).resolves.toMatchObject({
+	            ok: true,
+	            review: { id: 9, username: "alice", decision: "comment" },
+	          });
+	        }
+	      }
     });
 
     // The position-form review-comments route is the Origin-proxy entry point:

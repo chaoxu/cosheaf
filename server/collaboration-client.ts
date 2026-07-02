@@ -125,15 +125,17 @@ export type CollaborationClient = Omit<
   | "createReview"
   | "submitPullReview"
   | "addCommentToReview"
+  | "listPullReviewers"
   | "listRepoNotifications"
   | "getNotificationThread"
   | "listRepoActivities"
+  | "listCollaborators"
   | "listBranches"
   | "searchUsers"
 > & {
   listIssues(owner: string, repo: string, opts?: Parameters<Forgejo["listIssues"]>[2]): Promise<IssueRow[]>;
   getIssue(owner: string, repo: string, number: number): Promise<IssueDetail>;
-  createIssue(owner: string, repo: string, opts: Parameters<Forgejo["createIssue"]>[2]): Promise<IssueDetail>;
+  createIssue(owner: string, repo: string, opts: Parameters<Forgejo["createIssue"]>[2]): Promise<Pick<IssueDetail, "number" | "title" | "state">>;
   editIssue(owner: string, repo: string, number: number, patch: Parameters<Forgejo["editIssue"]>[3]): Promise<IssueDetail>;
   listIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]>;
   createIssueComment(owner: string, repo: string, number: number, body: string): Promise<IssueComment>;
@@ -183,10 +185,12 @@ export type CollaborationClient = Omit<
     number: number,
     reviewId: number,
     opts: { path: string; body: string; new_position?: number; old_position?: number },
-  ): Promise<LineComment>;
+  ): Promise<void>;
+  listPullReviewers(owner: string, repo: string): Promise<Array<{ login: string }>>;
   listRepoNotifications(owner: string, repo: string, opts?: NotificationListOpts): Promise<NotificationRow[]>;
   getNotificationThread(id: number): Promise<NotificationRow | null>;
   listRepoActivities(owner: string, repo: string, opts?: { limit?: number }): Promise<ActivityRow[]>;
+  listCollaborators(owner: string, repo: string): Promise<Array<{ login: string }>>;
   listBranches(owner: string, repo: string): Promise<BranchRow[]>;
   searchUsers(query: string, limit?: number): Promise<Array<{ login: string }>>;
 };

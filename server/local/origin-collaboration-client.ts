@@ -32,14 +32,8 @@ import { parseOriginResponse, RemoteCosheafError } from "./remote-cosheaf-client
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
-type CollaboratorShape = Awaited<ReturnType<CollaborationClient["listCollaborators"]>>[number];
 type RepoShape = NonNullable<Awaited<ReturnType<CollaborationClient["getRepo"]>>>;
-type ReviewerShape = Awaited<ReturnType<CollaborationClient["listPullReviewers"]>>[number];
 type BranchProtectionShape = NonNullable<Awaited<ReturnType<CollaborationClient["getBranchProtection"]>>>;
-
-function collaboratorToShape(member: { login: string; permission: string }): CollaboratorShape {
-  return { id: 0, login: member.login };
-}
 
 // True when no core is connected for this workspace; the migrated collaboration
 // routes branch on this to show the Connect form instead of data.
@@ -80,13 +74,6 @@ type IssueListOpts = {
   sort?: string;
   q?: string;
 };
-
-function reviewStateToDecision(state: ReviewState): ReviewDto["decision"] {
-  if (state === "APPROVED") return "approve";
-  if (state === "REQUEST_CHANGES") return "request_changes";
-  if (state === "PENDING") return "pending";
-  return "comment";
-}
 
 // The connected-core collaboration source. Bound to {baseUrl, token}; every read
 // hits the core's typed Cosheaf API with `Authorization: Bearer <token>` and
@@ -174,6 +161,14 @@ export class OriginCollaborationClient {
     return this.send<T>("DELETE", path, opts);
   }
 
+  private async getReviewById(owner: string, repo: string, index: number, reviewId: number): Promise<ReviewDto> {
+    // Compatibility fallback for older Core Servers that returned only ids/ok
+    // from review write routes.
+    const review = (await this.listReviews(owner, repo, index)).find((item) => item.id === reviewId);
+    if (!review) throw new RemoteCosheafError(502, `remote cosheaf did not return review ${reviewId}`);
+    return review;
+  }
+
   async listIssues(owner: string, repo: string, opts: IssueListOpts = {}): Promise<IssueRow[]> {
     const r = await this.get<{ issues: IssueRow[] }>(this.repoPath(owner, repo, "/issues"), {
       state: opts.state,
@@ -238,25 +233,11 @@ export class OriginCollaborationClient {
     owner: string,
     repo: string,
     opts: { title: string; body: string; assignees?: string[]; labels?: number[] },
-  ): Promise<IssueDetail> {
-    const r = await this.post<{ number: number; title: string; state: "open" | "closed" }>(
+  ): Promise<Pick<IssueDetail, "number" | "title" | "state">> {
+    return this.post<Pick<IssueDetail, "number" | "title" | "state">>(
       this.repoPath(owner, repo, "/issues"),
       { title: opts.title, body: opts.body, ...(opts.labels?.length ? { labels: opts.labels } : {}) },
     );
-    return {
-      number: r.number,
-      title: r.title,
-      body: opts.body,
-      state: r.state,
-      author_username: "",
-      assignees: [],
-      labels: [],
-      milestone: null,
-      comment_count: 0,
-      created_at: 0,
-      updated_at: 0,
-      closed_at: null,
-    };
   }
 
   // The forge editIssue is one method; the typed API splits milestone/state into
@@ -502,14 +483,10 @@ export class OriginCollaborationClient {
     await this.post(this.repoPath(owner, repo, `/pulls/${index}/merge`), { Do: opts.Do, force: opts.force ?? false });
   }
 
-  // The typed verdict route accepts only a simple {event,body} and returns
-  // counts, not the review object; PENDING maps to the find-or-create route
-  // (which returns the new review id, the one field findOrCreatePendingReview
-  // reads). The standalone single-comment path arrives with already-resolved
-  // diff positions, which the verdict route has no form for — so it maps onto
-  // the same pending-review → add-comment(s) → submit sequence the
-  // addCommentToReview path uses. The synthesized review carries the fields
-  // callers read.
+  // Review write routes return the Core ReviewDto. A standalone single-comment
+  // review arrives with already-resolved diff positions, which the direct
+  // verdict route has no form for, so it maps onto the same pending-review →
+  // add-comment(s) → submit sequence the addCommentToReview path uses.
   async createReview(
     owner: string,
     repo: string,
@@ -526,7 +503,7 @@ export class OriginCollaborationClient {
       // comment, then submit it as the verdict. The standalone comment path
       // always sends event=COMMENT, but approve/request_changes-with-comments
       // map the same way.
-      const created = await this.post<{ review_id: number }>(
+      const created = await this.post<{ review_id: number; review?: ReviewDto }>(
         this.repoPath(owner, repo, `/pulls/${index}/pending-review`),
         {},
       );
@@ -541,23 +518,24 @@ export class OriginCollaborationClient {
       }
       const verdict =
         opts.event === "APPROVED" ? "approve" : opts.event === "REQUEST_CHANGES" ? "request_changes" : "comment";
-      await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
+      const submitted = await this.post<{ review?: ReviewDto }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
         event: verdict,
         body: opts.body,
       });
-      return { id: reviewId, username: "", decision: reviewStateToDecision(opts.event), comment: opts.body || null, created_at: 0 };
+      return submitted.review ?? await this.getReviewById(owner, repo, index, reviewId);
     }
     if (opts.event === "PENDING") {
-      const r = await this.post<{ review_id: number }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review`), {});
-      return { id: r.review_id, username: "", decision: "pending", comment: opts.body || null, created_at: 0 };
+      const r = await this.post<{ review_id: number; review?: ReviewDto }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review`), {});
+      return r.review ?? await this.getReviewById(owner, repo, index, r.review_id);
     }
     const event = opts.event === "APPROVED" ? "APPROVE" : opts.event;
-    await this.post(this.repoPath(owner, repo, `/pulls/${index}/reviews`), { event, body: opts.body });
-    return { id: 0, username: "", decision: reviewStateToDecision(opts.event), comment: opts.body || null, created_at: 0 };
+    const r = await this.post<{ review: ReviewDto }>(this.repoPath(owner, repo, `/pulls/${index}/reviews`), { event, body: opts.body });
+    return r.review;
   }
 
-  // Submit a previously-created pending review; the typed route takes a
-  // lowercase verdict and returns {ok}. Callers ignore the return.
+  // Submit a previously-created pending review. The typed route takes a
+  // lowercase verdict and returns {ok, review}; older remotes may omit `review`,
+  // so getReviewById preserves compatibility without fabricating a DTO.
   async submitPullReview(
     owner: string,
     repo: string,
@@ -566,44 +544,30 @@ export class OriginCollaborationClient {
     opts: { event: ReviewSubmitEvent; body: string },
   ): Promise<ReviewDto> {
     const event = opts.event === "APPROVED" ? "approve" : opts.event === "REQUEST_CHANGES" ? "request_changes" : "comment";
-    await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
+    const r = await this.post<{ review?: ReviewDto }>(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/submit`), {
       event,
       body: opts.body,
     });
-    return { id: reviewId, username: "", decision: reviewStateToDecision(opts.event), comment: opts.body || null, created_at: 0 };
+    return r.review ?? await this.getReviewById(owner, repo, index, reviewId);
   }
 
   // Add an inline comment to an existing pending review. The shared route already
   // resolved the diff anchor to forge positions (new_position/old_position), so
   // this forwards those to the typed pending-review review-comments route, which
-  // maps them straight onto the core's addCommentToReview. The forge returns the
-  // created comment, but every caller ignores it, so a minimal DTO is synthesized
-  // from the inputs.
+  // maps them straight onto the core's addCommentToReview.
   async addCommentToReview(
     owner: string,
     repo: string,
     index: number,
     reviewId: number,
     opts: { path: string; body: string; new_position?: number; old_position?: number },
-  ): Promise<LineComment> {
+  ): Promise<void> {
     await this.post(this.repoPath(owner, repo, `/pulls/${index}/pending-review/${reviewId}/review-comments`), {
       path: opts.path,
       body: opts.body,
       ...(opts.new_position !== undefined ? { new_position: opts.new_position } : {}),
       ...(opts.old_position !== undefined ? { old_position: opts.old_position } : {}),
     });
-    return {
-      id: 0,
-      review_id: reviewId,
-      path: opts.path,
-      body: opts.body,
-      line: opts.new_position ?? opts.old_position ?? null,
-      side: opts.new_position !== undefined ? "head" : "base",
-      author_username: "",
-      created_at: 0,
-      updated_at: 0,
-      outdated: false,
-    };
   }
 
   async deleteReviewComment(owner: string, repo: string, index: number, reviewId: number, commentId: number): Promise<void> {
@@ -624,22 +588,22 @@ export class OriginCollaborationClient {
     return this.get<BranchRow[]>(this.repoPath(owner, repo, "/branches"));
   }
 
-  async listCollaborators(owner: string, repo: string): Promise<CollaboratorShape[]> {
+  async listCollaborators(owner: string, repo: string): Promise<Array<{ login: string }>> {
     const r = await this.get<{ collaborators: Array<{ login: string; permission: string }> }>(
       this.repoPath(owner, repo, "/collaborators"),
     );
-    return (r.collaborators ?? []).map(collaboratorToShape);
+    return (r.collaborators ?? []).map((m) => ({ login: m.login }));
   }
 
   // Available reviewers for a PR = the repo's collaborators (the forge's
   // repo-scoped reviewer list). The core has no separate reviewer-candidates
   // endpoint, so source it from /collaborators and map to the user shape the
   // PR page's reviewer picker reads (login only).
-  async listPullReviewers(owner: string, repo: string): Promise<ReviewerShape[]> {
+  async listPullReviewers(owner: string, repo: string): Promise<Array<{ login: string }>> {
     const r = await this.get<{ collaborators: Array<{ login: string; permission: string }> }>(
       this.repoPath(owner, repo, "/collaborators"),
     );
-    return (r.collaborators ?? []).map((m) => ({ id: 0, login: m.login }) as ReviewerShape);
+    return (r.collaborators ?? []).map((m) => ({ login: m.login }));
   }
 
   async searchUsers(query: string, limit = 10): Promise<Array<{ login: string }>> {

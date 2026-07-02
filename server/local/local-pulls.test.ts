@@ -466,23 +466,25 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
     expect(calls.some((c) => c.path.endsWith("/topics"))).toBe(false);
   });
 
-  it("BUG E: submits a staged pending review, resolving the caller's own draft via the core", async () => {
-    const { work } = repoWithOrigin();
-    const calls = stubCore((method, path) => {
-      if (method === "GET" && path.endsWith("/pulls/7")) return { pull: prMeta({ author_username: "other" }) };
-      if (method === "GET" && path.endsWith("/pulls/7/reviews")) {
-        return { reviews: [{ id: 9, username: "me", decision: "pending", comment: null, created_at: 0 }], approvals: 0, rejections: 0 };
-      }
-      return { ok: true };
-    });
+	it("BUG E: submits a staged pending review, resolving the caller's own draft via the core", async () => {
+		const { work } = repoWithOrigin();
+		const submitted = { id: 9, username: "me", decision: "approve", comment: null, created_at: 10 };
+		const calls = stubCore((method, path) => {
+			if (method === "GET" && path.endsWith("/pulls/7")) return { pull: prMeta({ author_username: "other" }) };
+			if (method === "GET" && path.endsWith("/pulls/7/reviews")) {
+				return { reviews: [{ id: 9, username: "me", decision: "pending", comment: null, created_at: 0 }], approvals: 0, rejections: 0 };
+			}
+			if (method === "POST" && path.endsWith("/pending-review/9/submit")) return { ok: true, review: submitted };
+			return { ok: true };
+		});
     const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/pulls/7/pending-review/9/submit", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ event: "approve" }),
-    });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
-    const submit = calls.find((c) => c.method === "POST" && c.path.endsWith("/pending-review/9/submit"));
-    expect(submit?.body).toMatchObject({ event: "approve" });
-  });
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true, review: submitted });
+		const submit = calls.find((c) => c.method === "POST" && c.path.endsWith("/pending-review/9/submit"));
+		expect(submit?.body).toMatchObject({ event: "approve" });
+	});
 });

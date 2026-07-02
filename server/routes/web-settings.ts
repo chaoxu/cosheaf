@@ -5,7 +5,7 @@ import { isFormatTopic } from "../../shared/document-format.js";
 import type { Label, Milestone } from "../../shared/issues.js";
 import { ROLES, type Role } from "../../shared/roles.js";
 import { is404, is4xx } from "../forgejo-errors.js";
-import type { ForgejoRepo, ForgejoUser } from "../forgejo-types.js";
+import type { ForgejoRepo } from "../forgejo-types.js";
 import { invalidateWorkspaceCaches, invalidateWorkspacePermissionCache, invalidateWorkspaceTitleCache } from "../middleware.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
@@ -433,7 +433,7 @@ function repoMetaSection(ctx: WebCtx, repo: ForgejoRepo | null, branches: readon
   </section>`;
 }
 
-function accessSection(ctx: WebCtx, collaborators: readonly ForgejoUser[], accessUpdated: string | undefined): Html {
+function accessSection(ctx: WebCtx, collaborators: readonly { login: string }[], accessUpdated: string | undefined): Html {
   const inner = ctx.ws.role !== "admin"
     ? html`<p class="muted">Only repository admins can manage access.</p>`
     : html`<div class="settings-form" data-testid="settings-collaborators">
