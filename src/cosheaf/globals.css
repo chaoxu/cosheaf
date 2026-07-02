@@ -12,6 +12,11 @@
   margin: 0.25rem 0 0.5rem;
 }
 
+.cf-theme-scope .cf-math-display-content {
+  width: auto;
+  max-width: 100%;
+}
+
 html,
 body {
   height: 100%;
