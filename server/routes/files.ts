@@ -28,7 +28,7 @@ import { streamHubChannel } from "./sse-helpers.js";
 import { parseBoundedPositiveInt } from "./query-params.js";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
 import { assertLocalAnnotationsReadable, localAnnotationSidecarConflict, moveLocalAnnotationsPath } from "../local/local-annotations.js";
-import { publishLocalAnnotationEvent, publishLocalFileEvent, publishLocalGitEvent } from "../local/local-events.js";
+import { publishLocalAnnotationEvent, publishLocalFileMutationEvents } from "../local/local-events.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 
 export const files = new Hono<AppEnv>();
@@ -398,11 +398,8 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
   }
   indexLocalWrite(isLocalMode(c), c.get("db"), ws.slug, plan);
   invalidateBranchReadCaches(owner, repo, branch);
-  if (isLocalMode(c)) {
-    publishLocalFileEvent(c, ws.slug, { action: "changed", path: rel });
-    publishLocalGitEvent(c, ws.slug, { action: "status_changed", paths: [rel] });
-  }
-  c.get("sse").publish(ws.slug, { type: "change", path: rel });
+  if (isLocalMode(c)) publishLocalFileMutationEvents(c, ws.slug, { action: "changed", path: rel });
+  else c.get("sse").publish(ws.slug, { type: "change", path: rel });
   const writtenSha = written.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
   return c.json({
     content: giteaContentShape(c, rel, {
@@ -442,11 +439,8 @@ files.delete("/:owner/:repo/contents/:path{.+}", async (c) => {
   });
   indexLocalDelete(isLocalMode(c), c.get("db"), c.get("workspace").slug, rel);
   invalidateBranchReadCaches(owner, repo, branch);
-  if (isLocalMode(c)) {
-    publishLocalFileEvent(c, c.get("workspace").slug, { action: "removed", path: rel });
-    publishLocalGitEvent(c, c.get("workspace").slug, { action: "status_changed", paths: [rel] });
-  }
-  c.get("sse").publish(c.get("workspace").slug, { type: "change", path: rel });
+  if (isLocalMode(c)) publishLocalFileMutationEvents(c, c.get("workspace").slug, { action: "removed", path: rel });
+  else c.get("sse").publish(c.get("workspace").slug, { type: "change", path: rel });
   return c.json({ content: null, commit: null });
 });
 
@@ -668,16 +662,13 @@ files.put("/:owner/:repo/file", async (c) => {
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
   invalidateBranchReadCaches(owner, repo, branch);
   if (isLocalMode(c)) {
-    publishLocalFileEvent(c, ws.slug, isRename
+    publishLocalFileMutationEvents(c, ws.slug, isRename
       ? { action: "moved", path: rel, previous_path: previousRel as string }
       : { action: "changed", path: rel });
-    publishLocalGitEvent(c, ws.slug, {
-      action: "status_changed",
-      paths: isRename && previousRel ? [previousRel, rel] : [rel],
-    });
+  } else {
+    if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
+    hub.publish(ws.slug, { type: "change", path: rel });
   }
-  if (isRename) hub.publish(ws.slug, { type: "change", path: previousRel as string });
-  hub.publish(ws.slug, { type: "change", path: rel });
   const writtenSha = r.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
   return c.json({
     ok: true,
@@ -719,11 +710,8 @@ files.post("/:owner/:repo/assets", async (c) => {
     message: `upload ${safeName.stem}${safeName.ext}`,
   });
   invalidateBranchReadCaches(owner, repo, branch);
-  if (isLocalMode(c)) {
-    publishLocalFileEvent(c, c.get("workspace").slug, { action: "changed", path: assetPath });
-    publishLocalGitEvent(c, c.get("workspace").slug, { action: "status_changed", paths: [assetPath] });
-  }
-  c.get("sse").publish(c.get("workspace").slug, { type: "change", path: assetPath });
+  if (isLocalMode(c)) publishLocalFileMutationEvents(c, c.get("workspace").slug, { action: "changed", path: assetPath });
+  else c.get("sse").publish(c.get("workspace").slug, { type: "change", path: assetPath });
   return c.json({ path: assetPath });
 });
 
@@ -1099,11 +1087,8 @@ files.delete("/:owner/:repo/file", async (c) => {
   indexLocalDelete(isLocalMode(c), db, ws.slug, rel);
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
   invalidateBranchReadCaches(owner, repo, branch);
-  if (isLocalMode(c)) {
-    publishLocalFileEvent(c, ws.slug, { action: "removed", path: rel });
-    publishLocalGitEvent(c, ws.slug, { action: "status_changed", paths: [rel] });
-  }
-  c.get("sse").publish(ws.slug, { type: "change", path: rel });
+  if (isLocalMode(c)) publishLocalFileMutationEvents(c, ws.slug, { action: "removed", path: rel });
+  else c.get("sse").publish(ws.slug, { type: "change", path: rel });
   return c.json({ ok: true, branch });
 });
 

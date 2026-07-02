@@ -433,7 +433,8 @@ function WebEditor({
         ? payload.path
         : previousPath && ignoredChangePathsRef.current.has(previousPath) ? previousPath : null;
       if (ignoredPath) {
-        ignoredChangePathsRef.current.delete(ignoredPath);
+        ignoredChangePathsRef.current.delete(payload.path);
+        if (previousPath) ignoredChangePathsRef.current.delete(previousPath);
         return;
       }
       setExternalFileChange({

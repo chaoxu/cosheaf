@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
@@ -186,6 +186,26 @@ describe("local Workbench annotations", () => {
     const res = await app.request("/api/v1/repos/me/paper/local-annotations?path=../paper.md");
     expect(res.status).toBe(400);
     expect(await json(res)).toEqual({ error: "invalid path" });
+  });
+
+  it("does not read annotation queue context through symlinks outside the workspace", async () => {
+    const { dir, app } = workspace();
+    const outside = mkdtempSync(join(tmpdir(), "cosheaf-local-annotations-outside-"));
+    writeFileSync(join(outside, "secret.md"), "PRIVATE SECRET\n[@local:la_aaaaaaaaaaaa]\n");
+    symlinkSync(join(outside, "secret.md"), join(dir, "leak.md"));
+    const createdRes = await app.request("/api/v1/repos/me/paper/local-annotations", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ id: "la_aaaaaaaaaaaa", path: "leak.md", body: "Do not leak symlink context." }),
+    });
+    expect(createdRes.status).toBe(201);
+
+    const queueRes = await app.request("/api/v1/repos/me/paper/local-annotations/unresolved");
+    expect(queueRes.status).toBe(200);
+    const queue = (await json(queueRes)).annotations as Array<{ context: { excerpt: string; anchor_found: boolean } }>;
+    expect(queue).toHaveLength(1);
+    expect(queue[0]?.context.anchor_found).toBe(false);
+    expect(queue[0]?.context.excerpt).not.toContain("PRIVATE SECRET");
   });
 
   it("keeps local annotation sidecar out of git status", async () => {
