@@ -14,7 +14,7 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { splitUnifiedDiff } from "../diff-splitter.js";
@@ -79,6 +79,7 @@ export interface LocalFileDiff {
   previous_path?: string;
   patch: string;
   changed: boolean;
+  review_hash: string;
 }
 
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
@@ -430,7 +431,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     const base = baseSha && isCommitSha(baseSha) ? baseSha : "HEAD";
     const out = await this.git(["diff", "--no-ext-diff", "--find-renames", base, "--", ...safePaths]);
     const patches = splitUnifiedDiff(out);
-    const byPath = new Map(patches.map((patch) => [patch.path, { ...patch, changed: true }]));
+    const byPath = new Map(patches.map((patch) => [patch.path, this.withReviewHash({ ...patch, changed: true })]));
     const status = await this.git(["status", "--porcelain=v1", "--", ...safePaths]);
     const untracked = new Set(
       status
@@ -445,18 +446,31 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
           path,
           patch: await this.untrackedPatch(path),
           changed: true,
+          review_hash: "",
         });
+        const diff = byPath.get(path);
+        if (diff) byPath.set(path, this.withReviewHash(diff));
       } else {
-        byPath.set(path, { path, patch: "", changed: false });
+        byPath.set(path, this.withReviewHash({ path, patch: "", changed: false }));
       }
     }
-    return safePaths.map((path) => byPath.get(path) ?? { path, patch: "", changed: false });
+    return safePaths.map((path) => byPath.get(path) ?? this.withReviewHash({ path, patch: "", changed: false }));
+  }
+
+  private withReviewHash(diff: Omit<LocalFileDiff, "review_hash"> | LocalFileDiff): LocalFileDiff {
+    return {
+      ...diff,
+      review_hash: createHash("sha256").update(`${diff.path}\0${diff.patch}`).digest("hex"),
+    };
   }
 
   private async untrackedPatch(path: string): Promise<string> {
     let text: string;
     try {
-      const bytes = await readFile(join(this.root, path));
+      const full = this.abs(path);
+      const info = await lstat(full);
+      if (!info.isFile()) return "";
+      const bytes = await readFile(await this.realInside(full));
       text = bytes.toString("utf8");
     } catch (_err) {
       return "";

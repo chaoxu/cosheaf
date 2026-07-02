@@ -25,6 +25,7 @@ import { repoPageShell } from "../routes/web-page.js";
 import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
 import { localAnnotationSidecarConflict, readLocalAnnotations, setLocalAnnotationStatus } from "./local-annotations.js";
+import { publishLocalAnnotationEvent } from "./local-events.js";
 import type { LocalFileDiff, LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -44,6 +45,7 @@ const LOCAL_AGENT_SESSIONS_FILE = join(".cosheaf", "agent-sessions.json");
 const SESSION_ID_RE = /^as_[a-z0-9]{12}$/;
 const MESSAGE_ID_RE = /^msg_[a-z0-9]{12}$/;
 const LOCAL_ANNOTATION_ID_RE = /^la_[a-z0-9]{12}$/;
+const mutationQueues = new Map<string, Promise<void>>();
 
 function newId(prefix: "as" | "msg"): string {
   return `${prefix}_${randomBytes(8).toString("base64url").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12).padEnd(12, "0")}`;
@@ -166,6 +168,23 @@ export function writeLocalAgentSessions(entry: WorkspaceEntry, data: LocalAgentS
   renameSync(tmp, file);
 }
 
+async function withLocalAgentSessionMutation<T>(entry: WorkspaceEntry, fn: () => Promise<T> | T): Promise<T> {
+  const previous = mutationQueues.get(entry.slug) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const next = previous.catch(() => {}).then(() => gate);
+  mutationQueues.set(entry.slug, next);
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (mutationQueues.get(entry.slug) === next) mutationQueues.delete(entry.slug);
+  }
+}
+
 export function localAgentSessionSidecarConflict(err: unknown): { error: string; details: string } | null {
   if (!(err instanceof LocalAgentSessionSidecarError)) return null;
   return {
@@ -273,34 +292,36 @@ localAgentSessions.post("/:owner/:repo/agent-sessions", async (c) => {
   if (!linkedAnnotations) return c.json({ error: "invalid linked_annotations" }, 400);
   const summary = typeof body.summary === "string" ? body.summary.trim() : "";
   const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
-  let data: LocalAgentSessionFile;
-  try {
-    data = readLocalAgentSessions(entry);
-  } catch (err) {
-    const conflict = localAgentSessionSidecarConflict(err);
-    if (conflict) return c.json(conflict, 409);
-    throw err;
-  }
-  const id = typeof body.id === "string" && SESSION_ID_RE.test(body.id) ? body.id : newId("as");
-  if (data.sessions[id]) return c.json({ error: "session already exists" }, 409);
-  const created = nowIso();
-  const session: LocalAgentSession = {
-    id,
-    status: "active",
-    title,
-    started_at: created,
-    updated_at: created,
-    baseline_head_sha: await entry.backend.currentHeadSha(),
-    touched_files: touchedFiles,
-    linked_annotations: linkedAnnotations,
-    summary,
-    messages: [],
-  };
-  const messageError = appendMessage(session, body, author, created);
-  if (messageError) return c.json({ error: messageError }, 400);
-  data.sessions[id] = session;
-  writeLocalAgentSessions(entry, data);
-  return c.json({ session }, 201);
+  return await withLocalAgentSessionMutation(entry, async () => {
+    let data: LocalAgentSessionFile;
+    try {
+      data = readLocalAgentSessions(entry);
+    } catch (err) {
+      const conflict = localAgentSessionSidecarConflict(err);
+      if (conflict) return c.json(conflict, 409);
+      throw err;
+    }
+    const id = typeof body.id === "string" && SESSION_ID_RE.test(body.id) ? body.id : newId("as");
+    if (data.sessions[id]) return c.json({ error: "session already exists" }, 409);
+    const created = nowIso();
+    const session: LocalAgentSession = {
+      id,
+      status: "active",
+      title,
+      started_at: created,
+      updated_at: created,
+      baseline_head_sha: await entry.backend.currentHeadSha(),
+      touched_files: touchedFiles,
+      linked_annotations: linkedAnnotations,
+      summary,
+      messages: [],
+    };
+    const messageError = appendMessage(session, body, author, created);
+    if (messageError) return c.json({ error: messageError }, 400);
+    data.sessions[id] = session;
+    writeLocalAgentSessions(entry, data);
+    return c.json({ session }, 201);
+  });
 });
 
 localAgentSessions.patch("/:owner/:repo/agent-sessions/:id", async (c) => {
@@ -309,24 +330,26 @@ localAgentSessions.patch("/:owner/:repo/agent-sessions/:id", async (c) => {
   const id = c.req.param("id");
   if (!SESSION_ID_RE.test(id)) return c.json({ error: "invalid session id" }, 400);
   const body = await readJsonObject(c.req);
-  let data: LocalAgentSessionFile;
-  try {
-    data = readLocalAgentSessions(entry);
-  } catch (err) {
-    const conflict = localAgentSessionSidecarConflict(err);
-    if (conflict) return c.json(conflict, 409);
-    throw err;
-  }
-  const session = data.sessions[id];
-  if (!session) return c.json({ error: "session not found" }, 404);
-  const updated = nowIso();
-  const patchError = applySessionPatch(session, body, updated);
-  if (patchError) return c.json({ error: patchError }, 400);
-  const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
-  const messageError = appendMessage(session, body, author, updated);
-  if (messageError) return c.json({ error: messageError }, 400);
-  writeLocalAgentSessions(entry, data);
-  return c.json({ session });
+  return await withLocalAgentSessionMutation(entry, () => {
+    let data: LocalAgentSessionFile;
+    try {
+      data = readLocalAgentSessions(entry);
+    } catch (err) {
+      const conflict = localAgentSessionSidecarConflict(err);
+      if (conflict) return c.json(conflict, 409);
+      throw err;
+    }
+    const session = data.sessions[id];
+    if (!session) return c.json({ error: "session not found" }, 404);
+    const updated = nowIso();
+    const patchError = applySessionPatch(session, body, updated);
+    if (patchError) return c.json({ error: patchError }, 400);
+    const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
+    const messageError = appendMessage(session, body, author, updated);
+    if (messageError) return c.json({ error: messageError }, 400);
+    writeLocalAgentSessions(entry, data);
+    return c.json({ session });
+  });
 });
 
 localAgentSessions.post("/:owner/:repo/agent-sessions/:id/complete", async (c) => {
@@ -335,28 +358,30 @@ localAgentSessions.post("/:owner/:repo/agent-sessions/:id/complete", async (c) =
   const id = c.req.param("id");
   if (!SESSION_ID_RE.test(id)) return c.json({ error: "invalid session id" }, 400);
   const body = await readJsonObject(c.req);
-  let data: LocalAgentSessionFile;
-  try {
-    data = readLocalAgentSessions(entry);
-  } catch (err) {
-    const conflict = localAgentSessionSidecarConflict(err);
-    if (conflict) return c.json(conflict, 409);
-    throw err;
-  }
-  const session = data.sessions[id];
-  if (!session) return c.json({ error: "session not found" }, 404);
-  const updated = nowIso();
-  if (body.summary !== undefined) {
-    if (typeof body.summary !== "string") return c.json({ error: "invalid summary" }, 400);
-    session.summary = body.summary.trim();
-  }
-  const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
-  const messageError = appendMessage(session, body, author, updated);
-  if (messageError) return c.json({ error: messageError }, 400);
-  session.status = "done";
-  session.updated_at = updated;
-  writeLocalAgentSessions(entry, data);
-  return c.json({ session });
+  return await withLocalAgentSessionMutation(entry, () => {
+    let data: LocalAgentSessionFile;
+    try {
+      data = readLocalAgentSessions(entry);
+    } catch (err) {
+      const conflict = localAgentSessionSidecarConflict(err);
+      if (conflict) return c.json(conflict, 409);
+      throw err;
+    }
+    const session = data.sessions[id];
+    if (!session) return c.json({ error: "session not found" }, 404);
+    const updated = nowIso();
+    if (body.summary !== undefined) {
+      if (typeof body.summary !== "string") return c.json({ error: "invalid summary" }, 400);
+      session.summary = body.summary.trim();
+    }
+    const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
+    const messageError = appendMessage(session, body, author, updated);
+    if (messageError) return c.json({ error: messageError }, 400);
+    session.status = "done";
+    session.updated_at = updated;
+    writeLocalAgentSessions(entry, data);
+    return c.json({ session });
+  });
 });
 
 function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
@@ -435,6 +460,7 @@ function fileDiffBlock(diff: LocalFileDiff): Html {
     <summary>
       <label>
         <input type="checkbox" name="accepted_file" value="${diff.path}" ${diff.changed ? "checked" : ""} ${diff.changed ? "" : "disabled"}>
+        <input type="hidden" name="review_token" value="${diff.path}	${diff.review_hash}">
         <code>${diff.path}</code>
       </label>
       ${diff.changed ? html`<span class="badge">changed</span>` : html`<span class="badge">clean</span>`}
@@ -503,6 +529,21 @@ function selectedFiles(value: unknown): string[] {
   return out;
 }
 
+function reviewTokens(value: unknown): Map<string, string> {
+  const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  const out = new Map<string, string>();
+  for (const item of values) {
+    if (typeof item !== "string") continue;
+    const sep = item.indexOf("\t");
+    if (sep < 0) continue;
+    const path = safeRel(item.slice(0, sep));
+    const hash = item.slice(sep + 1);
+    if (!path || !/^[0-9a-f]{64}$/.test(hash)) continue;
+    out.set(path, hash);
+  }
+  return out;
+}
+
 function getSessionForWeb(entry: WorkspaceEntry, id: string): LocalAgentSession | null {
   if (!SESSION_ID_RE.test(id)) return null;
   return readLocalAgentSessions(entry).sessions[id] ?? null;
@@ -545,7 +586,11 @@ export function registerLocalAgentSessionRoutes(web: Hono<AppEnv>): void {
     if (status !== "open" && status !== "resolved") return badRequestPage(ctx.user, "Invalid annotation status.");
     try {
       if (!getSessionForWeb(entry, sessionId)) return badRequestPage(ctx.user, "Agent session not found.");
+      const annotations = readLocalAnnotations(entry).annotations;
+      const annotation = annotations[annotationId];
+      if (!annotation) return badRequestPage(ctx.user, "Annotation not found.");
       if (!setLocalAnnotationStatus(entry, annotationId, status)) return badRequestPage(ctx.user, "Annotation not found.");
+      publishLocalAnnotationEvent(c, entry, { action: "updated", id: annotationId, path: annotation.path });
     } catch (err) {
       const conflict = localAnnotationSidecarConflict(err);
       if (conflict) return badRequestPage(ctx.user, conflict.details);
@@ -562,42 +607,51 @@ export function registerLocalAgentSessionRoutes(web: Hono<AppEnv>): void {
     const message = stringField(form.message);
     if (!message) return badRequestPage(ctx.user, "A commit message is required.");
     const acceptedFiles = selectedFiles(form.accepted_file);
+    const tokens = reviewTokens(form.review_token);
     if (acceptedFiles.length === 0) return badRequestPage(ctx.user, "Select at least one changed file.");
-    let data: LocalAgentSessionFile;
-    try {
-      data = readLocalAgentSessions(entry);
-    } catch (err) {
-      const conflict = localAgentSessionSidecarConflict(err);
-      if (conflict) return badRequestPage(ctx.user, conflict.details);
-      throw err;
-    }
-    const session = data.sessions[sessionId];
-    if (!session) return badRequestPage(ctx.user, "Agent session not found.");
-    const allowed = new Set(session.touched_files);
-    const commitFiles = acceptedFiles.filter((path) => allowed.has(path));
-    if (commitFiles.length === 0) return badRequestPage(ctx.user, "Selected files are not part of this session.");
-    let sha: string | null;
-    try {
-      sha = await localBackend(ctx).commitPaths(message, commitFiles);
-    } catch (err) {
-      return badRequestPage(ctx.user, friendlyLine(err));
-    }
-    if (!sha) return redirect(`${repoHref(ctx.owner, ctx.repo, `/agent-sessions/${sessionId}`)}?toast=${encodeURIComponent("Nothing to commit.")}`);
-    const remainingDiffs = await localBackend(ctx).diffForPaths(sha, session.touched_files);
-    const remaining = remainingDiffs.filter((diff) => diff.changed).map((diff) => diff.path);
-    const updated = nowIso();
-    session.baseline_head_sha = sha;
-    session.touched_files = remaining;
-    session.status = remaining.length === 0 ? "done" : "waiting_for_review";
-    session.updated_at = updated;
-    session.messages.push({
-      id: newId("msg"),
-      author: ctx.user,
-      created_at: updated,
-      body: `Committed ${sha.slice(0, 8)} from review.`,
+    return await withLocalAgentSessionMutation(entry, async () => {
+      let data: LocalAgentSessionFile;
+      try {
+        data = readLocalAgentSessions(entry);
+      } catch (err) {
+        const conflict = localAgentSessionSidecarConflict(err);
+        if (conflict) return badRequestPage(ctx.user, conflict.details);
+        throw err;
+      }
+      const session = data.sessions[sessionId];
+      if (!session) return badRequestPage(ctx.user, "Agent session not found.");
+      const allowed = new Set(session.touched_files);
+      const commitFiles = acceptedFiles.filter((path) => allowed.has(path));
+      if (commitFiles.length === 0) return badRequestPage(ctx.user, "Selected files are not part of this session.");
+      const currentDiffs = await localBackend(ctx).diffForPaths(session.baseline_head_sha, commitFiles);
+      for (const diff of currentDiffs) {
+        if (tokens.get(diff.path) !== diff.review_hash) {
+          return badRequestPage(ctx.user, "A selected file changed after this review page loaded. Reload the agent session and review the latest diff before committing.");
+        }
+      }
+      let sha: string | null;
+      try {
+        sha = await localBackend(ctx).commitPaths(message, commitFiles);
+      } catch (err) {
+        return badRequestPage(ctx.user, friendlyLine(err));
+      }
+      if (!sha) return redirect(`${repoHref(ctx.owner, ctx.repo, `/agent-sessions/${sessionId}`)}?toast=${encodeURIComponent("Nothing to commit.")}`);
+      const remainingDiffs = await localBackend(ctx).diffForPaths(sha, session.touched_files);
+      const remaining = remainingDiffs.filter((diff) => diff.changed).map((diff) => diff.path);
+      const updated = nowIso();
+      session.baseline_head_sha = sha;
+      session.touched_files = remaining;
+      session.status = remaining.length === 0 ? "done" : "waiting_for_review";
+      session.updated_at = updated;
+      session.messages.push({
+        id: newId("msg"),
+        author: ctx.user,
+        created_at: updated,
+        body: `Committed ${sha.slice(0, 8)} from review.`,
+      });
+      data.sessions[session.id] = session;
+      writeLocalAgentSessions(entry, data);
+      return redirect(`${repoHref(ctx.owner, ctx.repo, `/agent-sessions/${sessionId}`)}?toast=${encodeURIComponent(`Committed ${sha.slice(0, 8)}`)}`);
     });
-    data.sessions[session.id] = session;
-    writeLocalAgentSessions(entry, data);
-    return redirect(`${repoHref(ctx.owner, ctx.repo, `/agent-sessions/${sessionId}`)}?toast=${encodeURIComponent(`Committed ${sha.slice(0, 8)}`)}`);
   }));
 }

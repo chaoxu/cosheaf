@@ -9,6 +9,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
 import { freshTestDb } from "../routes/test-fixtures.js";
+import { type SSEEvent, SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -18,7 +19,7 @@ function git(dir: string, args: string[]): string {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 }
 
-function workspace(): { dir: string; app: Hono<AppEnv>; entry: WorkspaceEntry } {
+function workspace(options: { sse?: SSEHub } = {}): { dir: string; app: Hono<AppEnv>; entry: WorkspaceEntry } {
   const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-agent-sessions-"));
   git(dir, ["init", "-q", "-b", "main"]);
   git(dir, ["config", "user.email", "t@t.test"]);
@@ -53,6 +54,7 @@ function workspace(): { dir: string; app: Hono<AppEnv>; entry: WorkspaceEntry } 
       config: buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 }),
       db,
       localRegistry: registry,
+      sse: options.sse,
     }),
     entry,
   };
@@ -60,6 +62,13 @@ function workspace(): { dir: string; app: Hono<AppEnv>; entry: WorkspaceEntry } 
 
 async function json(res: Response): Promise<Record<string, unknown>> {
   return await res.json() as Record<string, unknown>;
+}
+
+function reviewToken(page: string, path: string): string {
+  const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = page.match(new RegExp(`name="review_token" value="${escapedPath}\\t([0-9a-f]{64})"`));
+  if (!match) throw new Error(`missing review token for ${path}`);
+  return `${path}\t${match[1]}`;
 }
 
 describe("local Workbench agent sessions", () => {
@@ -127,6 +136,23 @@ describe("local Workbench agent sessions", () => {
     expect(git(dir, ["status", "--porcelain"]).trim()).toBe("");
   });
 
+  it("serializes concurrent agent session sidecar mutations", async () => {
+    const { dir, app } = workspace();
+    const ids = ["as_aaaaaaaaaaaa", "as_bbbbbbbbbbbb", "as_cccccccccccc", "as_dddddddddddd"];
+    const responses = await Promise.all(ids.map((id) =>
+      app.request("/api/v1/repos/me/paper/agent-sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://localhost" },
+        body: JSON.stringify({ id, title: `Session ${id}`, touched_files: ["paper.md"] }),
+      }),
+    ));
+    expect(responses.map((res) => res.status)).toEqual([201, 201, 201, 201]);
+    const sidecar = JSON.parse(readFileSync(join(dir, ".cosheaf", "agent-sessions.json"), "utf8")) as {
+      sessions: Record<string, unknown>;
+    };
+    expect(Object.keys(sidecar.sessions).sort()).toEqual(ids.sort());
+  });
+
   it("refuses to overwrite a corrupt agent sessions sidecar", async () => {
     const { dir, app } = workspace();
     const storedPath = join(dir, ".cosheaf", "agent-sessions.json");
@@ -161,7 +187,10 @@ describe("local Workbench agent sessions", () => {
   });
 
   it("renders a waiting review diff and commits only accepted session files", async () => {
-    const { dir, app } = workspace();
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/paper", (event) => events.push(event));
+    const { dir, app } = workspace({ sse });
     const annotationRes = await app.request("/api/v1/repos/me/paper/local-annotations", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
@@ -195,17 +224,38 @@ describe("local Workbench agent sessions", () => {
     expect(page).toContain("appendix.md");
     expect(page).toContain("data-testid=\"agent-session-commit-form\"");
     expect(page).toContain("la_aaaaaaaaaaaa");
+    const stalePaperToken = reviewToken(page, "paper.md");
 
-    const resolveRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/annotations/la_aaaaaaaaaaaa", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
-      body: new URLSearchParams({ status: "resolved" }),
-    });
-    expect(resolveRes.status).toBe(303);
+    try {
+      const resolveRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/annotations/la_aaaaaaaaaaaa", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+        body: new URLSearchParams({ status: "resolved" }),
+      });
+      expect(resolveRes.status).toBe(303);
+    } finally {
+      unsubscribe();
+    }
     const annotations = JSON.parse(readFileSync(join(dir, ".cosheaf", "local-annotations.json"), "utf8")) as {
       annotations: Record<string, { status: string }>;
     };
     expect(annotations.annotations.la_aaaaaaaaaaaa.status).toBe("resolved");
+    expect(events).toContainEqual({ type: "local_annotation", action: "updated", id: "la_aaaaaaaaaaaa", path: "paper.md" });
+
+    writeFileSync(join(dir, "paper.md"), "# Paper\n\nChanged after review.\n");
+    const staleCommitRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/commit", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: new URLSearchParams({
+        message: "Accept stale paper edit",
+        accepted_file: "paper.md",
+        review_token: stalePaperToken,
+      }).toString(),
+    });
+    expect(staleCommitRes.status).toBe(400);
+    expect(await staleCommitRes.text()).toContain("changed after this review page loaded");
+
+    const refreshedPage = await (await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb")).text();
 
     const commitRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/commit", {
       method: "POST",
@@ -213,6 +263,7 @@ describe("local Workbench agent sessions", () => {
       body: new URLSearchParams({
         message: "Accept paper edit",
         accepted_file: "paper.md",
+        review_token: reviewToken(refreshedPage, "paper.md"),
       }),
     });
     expect(commitRes.status).toBe(303);
