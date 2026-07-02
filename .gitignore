@@ -31,3 +31,4 @@ test-results/
 playwright-report/
 ai-math-kb-manifesto.zh.md
 vendor/
+/scripts/start-workbench-daemon.sh
