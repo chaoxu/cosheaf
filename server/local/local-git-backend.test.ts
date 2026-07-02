@@ -168,6 +168,61 @@ describe("LocalGitWorkspaceBackend", () => {
     expect(diff?.patch).not.toContain("private-secret");
   });
 
+  it("rejects git pathspec magic before diffing or committing paths", async () => {
+    const dir = gitRepo({ identity: true });
+    writeFileSync(join(dir, "root.md"), "# Root\n");
+    mkdirSync(join(dir, "paper"));
+    writeFileSync(join(dir, "paper", "paper.md"), "# Paper\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-qm", "init"]);
+    writeFileSync(join(dir, "root.md"), "# Root\n\nEscaped edit.\n");
+
+    const backend = new LocalGitWorkspaceBackend(join(dir, "paper"));
+    await expect(backend.diffForPaths(null, [":(top)root.md"])).rejects.toMatchObject({ code: "invalid_path" });
+    await expect(backend.commitPaths("escape", [":(top)root.md"])).rejects.toMatchObject({ code: "invalid_path" });
+    expect(git(dir, ["status", "--porcelain"]).trim()).toBe("M root.md");
+  });
+
+  it("treats glob-like touched files as literal paths", async () => {
+    const dir = gitRepo({ identity: true });
+    writeFileSync(join(dir, "*.md"), "# Literal star\n");
+    writeFileSync(join(dir, "other.md"), "# Other\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-qm", "init"]);
+    writeFileSync(join(dir, "*.md"), "# Literal star\n\nAccepted.\n");
+    writeFileSync(join(dir, "other.md"), "# Other\n\nMust stay uncommitted.\n");
+
+    const backend = new LocalGitWorkspaceBackend(dir);
+    const diffs = await backend.diffForPaths(null, ["*.md"]);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]).toMatchObject({ path: "*.md", changed: true });
+    expect(diffs[0]?.patch).toContain("Accepted.");
+    expect(diffs[0]?.patch).not.toContain("Must stay uncommitted.");
+
+    const sha = await backend.commitPaths("literal star only", ["*.md"]);
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(dir, ["show", "--name-only", "--format=", "HEAD"]).trim()).toBe("*.md");
+    expect(git(dir, ["status", "--porcelain"]).trim()).toBe("M other.md");
+  });
+
+  it("scopes status and commitAll to the opened Workbench subdirectory", async () => {
+    const dir = gitRepo({ identity: true });
+    mkdirSync(join(dir, "paper"));
+    writeFileSync(join(dir, "root.md"), "# Root\n");
+    writeFileSync(join(dir, "paper", "paper.md"), "# Paper\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-qm", "init"]);
+    writeFileSync(join(dir, "root.md"), "# Root\n\nOutside edit.\n");
+    writeFileSync(join(dir, "paper", "paper.md"), "# Paper\n\nInside edit.\n");
+
+    const backend = new LocalGitWorkspaceBackend(join(dir, "paper"));
+    expect(await backend.gitStatus()).toMatchObject({ entries: [{ code: " M", path: "paper.md" }] });
+    const sha = await backend.commitAll("commit workbench root only");
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(dir, ["show", "--name-only", "--format=", "HEAD"]).trim()).toBe("paper/paper.md");
+    expect(git(dir, ["status", "--porcelain"]).trim()).toBe("M root.md");
+  });
+
   it("does not write or delete through a symlinked directory that escapes the workspace", async () => {
     const dir = tmpRepo();
     const outside = mkdtempSync(join(tmpdir(), "cosheaf-wb-outside-"));

@@ -415,20 +415,32 @@ function WebEditor({
         return;
       }
       if (!data || typeof data !== "object") return;
-      const payload = data as { type?: unknown; path?: unknown };
-      if ((payload.type !== "change" && payload.type !== "remove") || typeof payload.path !== "string") return;
+      const payload = data as { type?: unknown; action?: unknown; path?: unknown; previous_path?: unknown };
+      if (typeof payload.path !== "string") return;
+      let type: ExternalFileChange["type"] | null = null;
+      if (payload.type === "change") type = "change";
+      if (payload.type === "remove") type = "remove";
+      if (payload.type === "file_changed") {
+        if (payload.action === "changed" || payload.action === "moved") type = "change";
+        if (payload.action === "removed") type = "remove";
+      }
+      if (!type) return;
       const current = currentPathRef.current.trim() || config.path;
       const saved = savedPathRef.current;
-      if (payload.path !== current && payload.path !== saved) return;
-      if (ignoredChangePathsRef.current.has(payload.path)) {
-        ignoredChangePathsRef.current.delete(payload.path);
+      const previousPath = typeof payload.previous_path === "string" ? payload.previous_path : null;
+      if (payload.path !== current && payload.path !== saved && previousPath !== current && previousPath !== saved) return;
+      const ignoredPath = ignoredChangePathsRef.current.has(payload.path)
+        ? payload.path
+        : previousPath && ignoredChangePathsRef.current.has(previousPath) ? previousPath : null;
+      if (ignoredPath) {
+        ignoredChangePathsRef.current.delete(ignoredPath);
         return;
       }
       setExternalFileChange({
         path: payload.path,
-        type: payload.type,
+        type,
         compareOpen: false,
-        loading: payload.type === "change",
+        loading: type === "change",
       });
     };
     return () => stream.close();

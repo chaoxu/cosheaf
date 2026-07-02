@@ -8,6 +8,7 @@ import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
 import { freshTestDb, testLocalRegistry } from "../routes/test-fixtures.js";
+import { type SSEEvent, SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
@@ -22,7 +23,7 @@ const IDENTITY: LocalWorkspaceIdentity = {
   originId: "local-test-origin",
 };
 
-function localApp(seed: Record<string, string> = {}): { app: Hono<AppEnv>; dir: string } {
+function localApp(seed: Record<string, string> = {}, options: { sse?: SSEHub } = {}): { app: Hono<AppEnv>; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-app-"));
   for (const [path, content] of Object.entries(seed)) {
     mkdirSync(join(dir, path, ".."), { recursive: true });
@@ -31,7 +32,7 @@ function localApp(seed: Record<string, string> = {}): { app: Hono<AppEnv>; dir: 
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   const db = freshTestDb("cosheaf-local-app-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
-  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY, dir) });
+  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY, dir), sse: options.sse });
   return { app, dir };
 }
 
@@ -54,7 +55,10 @@ describe("local Workbench app (Tier 0)", () => {
   });
 
   it("writes a file to disk through PUT /file on main (direct mode)", async () => {
-    const { app, dir } = localApp({ "hello.md": "# Hello\n" });
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/notes", (event) => events.push(event));
+    const { app, dir } = localApp({ "hello.md": "# Hello\n" }, { sse });
     const read = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };
     const res = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
       method: "PUT",
@@ -66,6 +70,34 @@ describe("local Workbench app (Tier 0)", () => {
     expect(onDisk).toContain("# Changed");
     // Coflat markdown gets a frontmatter id stamped on write.
     expect(onDisk).toMatch(/id:/);
+    unsubscribe();
+    expect(events).toContainEqual({ type: "file_changed", action: "changed", path: "hello.md" });
+    expect(events).toContainEqual({ type: "git_changed", action: "status_changed", paths: ["hello.md"] });
+    expect(events).toContainEqual({ type: "change", path: "hello.md" });
+  });
+
+  it("publishes typed file and git events for local asset uploads", async () => {
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/notes", (event) => events.push(event));
+    const { app, dir } = localApp({}, { sse });
+    const form = new FormData();
+    form.set("file", new File(["image-bytes"], "diagram.png", { type: "image/png" }));
+
+    const res = await app.request("/api/v1/repos/me/notes/assets?branch=main", {
+      method: "POST",
+      headers: { origin: "http://localhost" },
+      body: form,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { path: string };
+    expect(body.path).toMatch(/^assets\/diagram-[a-z0-9]+\.png$/);
+    expect(readFileSync(join(dir, body.path), "utf8")).toBe("image-bytes");
+
+    unsubscribe();
+    expect(events).toContainEqual({ type: "file_changed", action: "changed", path: body.path });
+    expect(events).toContainEqual({ type: "git_changed", action: "status_changed", paths: [body.path] });
+    expect(events).toContainEqual({ type: "change", path: body.path });
   });
 
   it("rejects a stale-sha write with a conflict", async () => {

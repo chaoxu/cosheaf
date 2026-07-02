@@ -18,6 +18,7 @@ import {
 import { emptyHtml, html } from "../routes/web-html.js";
 import { repoPageShell } from "../routes/web-page.js";
 import { friendlyLine } from "./git-errors.js";
+import { publishLocalGitEvent } from "./local-events.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 
 // The web ctx's backend is always the resolved workspace's LocalGitWorkspaceBackend
@@ -81,6 +82,7 @@ export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
     } catch (err) {
       return badRequestPage(ctx.user, friendlyLine(err));
     }
+    if (sha) publishLocalGitEvent(c, ctx.ws.slug, { action: "committed", sha });
     const toast = sha ? `Committed ${sha.slice(0, 8)}` : "Nothing to commit";
     return redirect(`${repoHref(ctx.owner, ctx.repo, "/commit")}?toast=${encodeURIComponent(toast)}`);
   }));

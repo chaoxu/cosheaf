@@ -25,7 +25,7 @@ import { repoPageShell } from "../routes/web-page.js";
 import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
 import { localAnnotationSidecarConflict, readLocalAnnotations, setLocalAnnotationStatus } from "./local-annotations.js";
-import { publishLocalAnnotationEvent } from "./local-events.js";
+import { publishLocalAgentActivityEvent, publishLocalAnnotationEvent, publishLocalGitEvent } from "./local-events.js";
 import type { LocalFileDiff, LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
@@ -79,7 +79,9 @@ function normalizeStringArray(value: unknown, normalize: (value: string) => stri
 }
 
 function normalizeTouchedFile(value: string): string | null {
-  return safeRel(value);
+  const rel = safeRel(value);
+  if (!rel || rel.startsWith("-") || rel.startsWith(":")) return null;
+  return rel;
 }
 
 function normalizeAnnotationId(value: string): string | null {
@@ -320,6 +322,12 @@ localAgentSessions.post("/:owner/:repo/agent-sessions", async (c) => {
     if (messageError) return c.json({ error: messageError }, 400);
     data.sessions[id] = session;
     writeLocalAgentSessions(entry, data);
+    publishLocalAgentActivityEvent(c, entry, {
+      action: "created",
+      id: session.id,
+      status: session.status,
+      touched_files: session.touched_files,
+    });
     return c.json({ session }, 201);
   });
 });
@@ -348,6 +356,12 @@ localAgentSessions.patch("/:owner/:repo/agent-sessions/:id", async (c) => {
     const messageError = appendMessage(session, body, author, updated);
     if (messageError) return c.json({ error: messageError }, 400);
     writeLocalAgentSessions(entry, data);
+    publishLocalAgentActivityEvent(c, entry, {
+      action: "updated",
+      id: session.id,
+      status: session.status,
+      touched_files: session.touched_files,
+    });
     return c.json({ session });
   });
 });
@@ -380,6 +394,12 @@ localAgentSessions.post("/:owner/:repo/agent-sessions/:id/complete", async (c) =
     session.status = "done";
     session.updated_at = updated;
     writeLocalAgentSessions(entry, data);
+    publishLocalAgentActivityEvent(c, entry, {
+      action: "completed",
+      id: session.id,
+      status: session.status,
+      touched_files: session.touched_files,
+    });
     return c.json({ session });
   });
 });
@@ -585,7 +605,10 @@ export function registerLocalAgentSessionRoutes(web: Hono<AppEnv>): void {
     const status = stringField(form.status);
     if (status !== "open" && status !== "resolved") return badRequestPage(ctx.user, "Invalid annotation status.");
     try {
-      if (!getSessionForWeb(entry, sessionId)) return badRequestPage(ctx.user, "Agent session not found.");
+      const session = getSessionForWeb(entry, sessionId);
+      if (!session) return badRequestPage(ctx.user, "Agent session not found.");
+      if (!session.linked_annotations.includes(annotationId))
+        return badRequestPage(ctx.user, "Annotation is not linked to this agent session.");
       const annotations = readLocalAnnotations(entry).annotations;
       const annotation = annotations[annotationId];
       if (!annotation) return badRequestPage(ctx.user, "Annotation not found.");
@@ -651,6 +674,13 @@ export function registerLocalAgentSessionRoutes(web: Hono<AppEnv>): void {
       });
       data.sessions[session.id] = session;
       writeLocalAgentSessions(entry, data);
+      publishLocalGitEvent(c, entry, { action: "committed", sha, paths: commitFiles });
+      publishLocalAgentActivityEvent(c, entry, {
+        action: "committed",
+        id: session.id,
+        status: session.status,
+        touched_files: session.touched_files,
+      });
       return redirect(`${repoHref(ctx.owner, ctx.repo, `/agent-sessions/${sessionId}`)}?toast=${encodeURIComponent(`Committed ${sha.slice(0, 8)}`)}`);
     });
   }));

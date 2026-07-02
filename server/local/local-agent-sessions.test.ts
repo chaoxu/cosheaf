@@ -73,7 +73,10 @@ function reviewToken(page: string, path: string): string {
 
 describe("local Workbench agent sessions", () => {
   it("creates, lists, updates, and completes local agent sessions", async () => {
-    const { dir, app } = workspace();
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/paper", (event) => events.push(event));
+    const { dir, app } = workspace({ sse });
     const createdRes = await app.request("/api/v1/repos/me/paper/agent-sessions", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
@@ -116,13 +119,40 @@ describe("local Workbench agent sessions", () => {
     expect(patched.touched_files).toEqual(["paper.md", "appendix.md"]);
     expect(patched.messages).toHaveLength(2);
 
-    const completeRes = await app.request("/api/v1/repos/me/paper/agent-sessions/as_aaaaaaaaaaaa/complete", {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: "http://localhost" },
-      body: JSON.stringify({ summary: "Accepted.", message: "Done." }),
-    });
-    expect(completeRes.status).toBe(200);
-    expect(((await json(completeRes)).session as Record<string, unknown>).status).toBe("done");
+    try {
+      const completeRes = await app.request("/api/v1/repos/me/paper/agent-sessions/as_aaaaaaaaaaaa/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://localhost" },
+        body: JSON.stringify({ summary: "Accepted.", message: "Done." }),
+      });
+      expect(completeRes.status).toBe(200);
+      expect(((await json(completeRes)).session as Record<string, unknown>).status).toBe("done");
+    } finally {
+      unsubscribe();
+    }
+    expect(events).toEqual([
+      {
+        type: "agent_activity_changed",
+        action: "created",
+        id: "as_aaaaaaaaaaaa",
+        status: "active",
+        touched_files: ["paper.md"],
+      },
+      {
+        type: "agent_activity_changed",
+        action: "updated",
+        id: "as_aaaaaaaaaaaa",
+        status: "waiting_for_review",
+        touched_files: ["paper.md", "appendix.md"],
+      },
+      {
+        type: "agent_activity_changed",
+        action: "completed",
+        id: "as_aaaaaaaaaaaa",
+        status: "done",
+        touched_files: ["paper.md", "appendix.md"],
+      },
+    ]);
   });
 
   it("keeps the agent sessions sidecar out of git status", async () => {
@@ -184,6 +214,14 @@ describe("local Workbench agent sessions", () => {
     });
     expect(res.status).toBe(400);
     expect(await json(res)).toEqual({ error: "invalid touched_files" });
+
+    const magic = await app.request("/api/v1/repos/me/paper/agent-sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ title: "Bad pathspec", touched_files: [":(top)paper.md"] }),
+    });
+    expect(magic.status).toBe(400);
+    expect(await json(magic)).toEqual({ error: "invalid touched_files" });
   });
 
   it("renders a waiting review diff and commits only accepted session files", async () => {
@@ -226,21 +264,31 @@ describe("local Workbench agent sessions", () => {
     expect(page).toContain("la_aaaaaaaaaaaa");
     const stalePaperToken = reviewToken(page, "paper.md");
 
-    try {
-      const resolveRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/annotations/la_aaaaaaaaaaaa", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
-        body: new URLSearchParams({ status: "resolved" }),
-      });
-      expect(resolveRes.status).toBe(303);
-    } finally {
-      unsubscribe();
-    }
+    const resolveRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/annotations/la_aaaaaaaaaaaa", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: new URLSearchParams({ status: "resolved" }),
+    });
+    expect(resolveRes.status).toBe(303);
     const annotations = JSON.parse(readFileSync(join(dir, ".cosheaf", "local-annotations.json"), "utf8")) as {
       annotations: Record<string, { status: string }>;
     };
     expect(annotations.annotations.la_aaaaaaaaaaaa.status).toBe("resolved");
-    expect(events).toContainEqual({ type: "local_annotation", action: "updated", id: "la_aaaaaaaaaaaa", path: "paper.md" });
+    expect(events).toContainEqual({ type: "annotations_changed", action: "updated", id: "la_aaaaaaaaaaaa", path: "paper.md" });
+
+    const unrelatedRes = await app.request("/api/v1/repos/me/paper/local-annotations", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ id: "la_cccccccccccc", path: "appendix.md", body: "Not part of this session." }),
+    });
+    expect(unrelatedRes.status).toBe(201);
+    const unrelatedToggle = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/annotations/la_cccccccccccc", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: new URLSearchParams({ status: "resolved" }),
+    });
+    expect(unrelatedToggle.status).toBe(400);
+    expect(await unrelatedToggle.text()).toContain("Annotation is not linked to this agent session.");
 
     writeFileSync(join(dir, "paper.md"), "# Paper\n\nChanged after review.\n");
     const staleCommitRes = await app.request("/me/paper/agent-sessions/as_bbbbbbbbbbbb/commit", {
@@ -275,5 +323,14 @@ describe("local Workbench agent sessions", () => {
     };
     expect(sidecar.sessions.as_bbbbbbbbbbbb.status).toBe("waiting_for_review");
     expect(sidecar.sessions.as_bbbbbbbbbbbb.touched_files).toEqual(["appendix.md"]);
+    expect(events).toContainEqual({ type: "git_changed", action: "committed", sha: expect.any(String), paths: ["paper.md"] });
+    expect(events).toContainEqual({
+      type: "agent_activity_changed",
+      action: "committed",
+      id: "as_bbbbbbbbbbbb",
+      status: "waiting_for_review",
+      touched_files: ["appendix.md"],
+    });
+    unsubscribe();
   });
 });
