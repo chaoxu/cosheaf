@@ -44,6 +44,18 @@
     return document.querySelector(".app-content");
   }
 
+  function visibleDocumentScroller() {
+    var candidates = Array.prototype.slice.call(document.querySelectorAll(".doc-main"));
+    for (var i = 0; i < candidates.length; i += 1) {
+      var candidate = candidates[i];
+      if (!(candidate instanceof HTMLElement)) continue;
+      var rect = candidate.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (candidate.scrollHeight > candidate.clientHeight + 1) return candidate;
+    }
+    return appContent();
+  }
+
   function documentScrollKey(urlValue) {
     try {
       var url = new URL(urlValue, window.location.href);
@@ -58,7 +70,7 @@
   function rememberDocumentScroll() {
     if (!document.querySelector(".doc-with-toc")) return;
     var key = documentScrollKey(window.location.href);
-    var container = appContent();
+    var container = visibleDocumentScroller();
     if (!key || !container) return;
     try { sessionStorage.setItem(key, String(container.scrollTop)); } catch (_err) {}
   }
@@ -66,7 +78,7 @@
   function restoreDocumentScroll() {
     if (!document.querySelector(".doc-with-toc")) return;
     var key = documentScrollKey(window.location.href);
-    var container = appContent();
+    var container = visibleDocumentScroller();
     if (!key || !container) return;
     var value = null;
     try { value = sessionStorage.getItem(key); } catch (_err) {}
@@ -75,6 +87,48 @@
     if (!Number.isFinite(top) || top <= 0) return;
     requestAnimationFrame(function () {
       container.scrollTo({ top: top, left: 0, behavior: "auto" });
+    });
+  }
+
+  function scrollByKey(container, key) {
+    var line = 48;
+    var page = Math.max(line, container.clientHeight * 0.86);
+    switch (key) {
+      case "ArrowDown":
+        container.scrollBy({ top: line, behavior: "auto" });
+        return true;
+      case "ArrowUp":
+        container.scrollBy({ top: -line, behavior: "auto" });
+        return true;
+      case "PageDown":
+      case " ":
+        container.scrollBy({ top: page, behavior: "auto" });
+        return true;
+      case "PageUp":
+        container.scrollBy({ top: -page, behavior: "auto" });
+        return true;
+      case "Home":
+        container.scrollTo({ top: 0, behavior: "auto" });
+        return true;
+      case "End":
+        container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function installDocumentKeyScroll() {
+    document.addEventListener("keydown", function (event) {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      var target = event.target;
+      if (target instanceof HTMLElement) {
+        if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+      }
+      var container = visibleDocumentScroller();
+      if (!container || container.scrollHeight <= container.clientHeight + 1) return;
+      if (!scrollByKey(container, event.key)) return;
+      event.preventDefault();
     });
   }
 
@@ -88,6 +142,7 @@
       rememberDocumentScroll();
     }, { capture: true });
     restoreDocumentScroll();
+    installDocumentKeyScroll();
   }
 
   function boot() {
