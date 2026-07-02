@@ -9,6 +9,7 @@ import type { Role } from "../../shared/roles.js";
 import { ROLES } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
 import { ForgejoError, type ForgejoRepo } from "../forgejo.js";
+import { is4xx } from "../forgejo-errors.js";
 import { invalidateWorkspacePermissionCache, repoCtxCollab, requireAdminFresh, requireAuth, requireMembership } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { listVisibleWorkspaceRepos, roleFromPermissions } from "../workspace-discovery.js";
@@ -222,7 +223,7 @@ members.delete("/:owner/:repo", requireMembership(), requireAdminFresh, async (c
   try {
     await collab.deleteRepo(owner, repo);
   } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) throw err;
+    if (!is4xx(err, 404)) throw err;
   }
   return c.json({ ok: true });
 });
@@ -267,14 +268,13 @@ members.delete("/:owner/:repo/members/:username", requireMembership(), requireAd
   if (!FORGEJO_NAME_RE.test(username)) return c.json(...bad("invalid username"));
 
   const ws = c.get("workspace");
-  // The caller passed requireAdminFresh — their own PAT carries the
-  // collaborator-management rights. Removing is idempotent: a 404/422 means the
-  // user is already gone, mirroring the hosted web-settings remove path.
-  const fj = c.get("fjUser");
+  // The caller passed requireAdminFresh. Removing is idempotent: a 404/422 means
+  // the user is already gone, mirroring the hosted web-settings remove path.
+  const { collab } = repoCtxCollab(c);
   try {
-    await fj.removeCollaborator(ws.owner, ws.repo, username);
+    await collab.removeCollaborator(ws.owner, ws.repo, username);
   } catch (err) {
-    if (!(err instanceof ForgejoError && (err.status === 404 || err.status === 422))) throw err;
+    if (!is4xx(err, 404, 422)) throw err;
   }
 
   invalidateWorkspacePermissionCache(ws.owner, ws.repo, username);
