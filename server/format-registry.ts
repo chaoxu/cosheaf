@@ -5,6 +5,9 @@ import {
   type DocumentFormatId,
 } from "../shared/document-format.js";
 
+// Coflat is the only runtime document format. This registry remains as a small
+// compatibility wrapper for older indexing/validation call sites that still pass
+// a historical `default_md_format` value.
 const formats: Record<DocumentFormatId, DocumentFormat> = {
   [COFLAT_FORMAT_ID]: coflatMarkdownFormat,
 };

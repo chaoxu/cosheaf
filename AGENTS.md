@@ -22,7 +22,7 @@ semantic math layers unless explicitly requested.
 
 Cosheaf markdown is Coflat-only. Keep rendering, indexing, editor behavior,
 and validation on the Coflat contract; do not add Forgejo Markdown passthrough
-or another document format unless one is explicitly requested.
+or another document format.
 
 Agent/prover internals (Coverify and friends) are out of scope here. They live
 in a separate layer and participate as ordinary Forgejo write-access
@@ -63,10 +63,10 @@ workflow changes.
   Cosheaf-owned backend credentials — keyed by the Forgejo `owner/repo` full
   name or username. There is no users, sessions, or workspaces table; identity,
   workspace registry, memberships, branches, pull requests, issues, labels,
-  milestones, and notifications all live on Forgejo and are read on demand
-  (the workspace format lives in a `cosheaf-format-*` repo topic). Passthrough
-  calls are not audited locally — Forgejo's access log is the trail. The page
-  index is rebuildable from Forgejo via
+  milestones, and notifications all live on Forgejo and are read on demand.
+  `cosheaf-format-coflat` may exist as a marker/back-compat repo topic, but
+  workspace Markdown is Coflat-only. Passthrough calls are not audited locally —
+  Forgejo's access log is the trail. The page index is rebuildable from Forgejo via
   `pnpm cli workspace reindex <owner>/<repo>`.
 - **Stable identity via frontmatter.** Every page has an `id` in its YAML
   frontmatter. The indexer records missing ids in SQLite; canonical writes can
@@ -598,10 +598,11 @@ include `[@id]` backlinks, bare-ref rewriting for issue/page references, and
 source-line-attributed rich diffs.
 
 Generic YAML frontmatter parsing lives in `shared/frontmatter-yaml.ts`; do not
-hide generic frontmatter behavior behind one format implementation. Server
-format implementations are registered in `server/format-registry.ts`.
+hide generic frontmatter behavior behind one renderer. The server/client format
+registries are Coflat-only compatibility wrappers while older route and API
+shapes still carry `default_md_format`.
 
-Every server-rendered markdown render surface should be checked when changing formats:
+Every server-rendered markdown render surface should be checked when changing Coflat rendering:
 issue bodies, issue comments, PR descriptions, PR review comments, label and
 milestone descriptions, notification previews, page editor/viewer content, and
 PR file diffs. Rendered HTML inserted into the DOM must pass through DOMPurify.

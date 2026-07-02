@@ -201,8 +201,8 @@ web.post("/:owner/:repo/settings/meta", webRouteForAdmin(async (c, ctx) => {
       default_branch: defaultBranch,
     });
     invalidateWorkspaceTitleCache(ctx.owner, ctx.repo);
-    // Topics: the user edits only the free topics; the cosheaf-format-* topic is
-    // managed by the document format and must survive a topics edit.
+    // Topics: the user edits only the free topics; the cosheaf-format-* marker
+    // is back-compat metadata and must survive a topics edit.
     if (form.topics !== undefined) {
       const existing = await ctx.collab.listRepoTopics(ctx.owner, ctx.repo).catch(() => []);
       await ctx.collab.replaceRepoTopics(ctx.owner, ctx.repo, mergeRepoTopics(existing, stringField(form.topics) ?? ""));
@@ -377,8 +377,8 @@ function milestoneSettingsSection(ctx: WebCtx, milestones: readonly Milestone[])
   </section>`;
 }
 
-// The cosheaf-format-* topic is managed via the document format, not the free
-// topics field, so we hide it from the editable list and preserve it on save.
+// The cosheaf-format-* marker is back-compat metadata, not a free topic, so we
+// hide it from the editable list and preserve it on save.
 function editableTopics(topics: readonly string[] | undefined): string {
   return (topics ?? []).filter((t) => !isFormatTopic(t)).join(" ");
 }

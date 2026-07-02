@@ -32,9 +32,10 @@ const WEBHOOK_EVENTS = [
 
 // A workspace is identified by (owner, repo) — any Forgejo user or org can
 // own workspaces. The slug is the `owner/repo` full name; the display name
-// lives in the Forgejo repo description; the markdown format lives in a
-// Forgejo repo topic. There is no SQLite `workspaces` row — sidecar tables
-// key off the slug directly.
+// lives in the Forgejo repo description. Markdown handling is Coflat-only; a
+// legacy `cosheaf-format-*` repo topic may exist only as marker/back-compat
+// metadata. There is no SQLite `workspaces` row — sidecar tables key off the
+// slug directly.
 export interface Workspace {
   owner: string;
   repo: string;
@@ -170,8 +171,9 @@ export async function provisionWorkspace(
   return { workspace, repoExisted, createdRepo };
 }
 
-// Replace any existing cosheaf-format-* topics on the repo with exactly the
-// one that selects `formatId`. Other repo topics (user-set) are preserved.
+// Replace any existing cosheaf-format-* topics on the repo with the current
+// marker topic. Markdown is Coflat-only; the topic is back-compat metadata, not
+// a runtime mode selector. Other repo topics (user-set) are preserved.
 export async function setWorkspaceFormatTopic(
   forgejo: Forgejo,
   owner: string,

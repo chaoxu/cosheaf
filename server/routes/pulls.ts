@@ -904,8 +904,9 @@ pulls.get("/:owner/:repo/topics", async (c) => {
   return c.json({ topics });
 });
 
-// Replace the full topic set. Admin-only (topics carry the cosheaf-format-*
-// convention); callers send the complete list — Forgejo replaces, not merges.
+// Replace the full topic set. Admin-only (topics include the cosheaf-format-*
+// marker convention); callers send the complete list — Forgejo replaces, not
+// merges.
 pulls.put("/:owner/:repo/topics", requireAdminFresh, async (c) => {
   const body = await readJsonObject(c.req);
   const topics = body.topics;
@@ -932,8 +933,8 @@ pulls.get("/:owner/:repo/settings", async (c) => {
 });
 
 // PUT /settings is NOT atomic across Forgejo and the SQLite sidecar — by
-// design. Forgejo is authoritative for branch protection and workspace format
-// topics; SQLite is local derived index state. Order within the handler:
+// design. Forgejo is authoritative for branch protection and marker topics;
+// SQLite is local derived index state. Order within the handler:
 //
 //   1. validate payload (cheap, no side effects)
 //   2. update Forgejo branch protection if min_approvals changed
@@ -941,8 +942,8 @@ pulls.get("/:owner/:repo/settings", async (c) => {
 //
 // If any step throws, the response is a 5xx with the step that failed in
 // the body. The repair path is always: PUT /settings again with the same
-// payload (idempotent), then optionally `pnpm cli workspace reindex <slug>`
-// if the format topic advanced but the indexer crashed mid-walk.
+// payload (idempotent); run `pnpm cli workspace reindex <slug>` only after
+// out-of-band repository content changes or sidecar drift.
 pulls.put("/:owner/:repo/settings", requireAdminFresh, async (c) => {
   const body = await readJsonBody(c.req);
   if (!isSettingsPayload(body))

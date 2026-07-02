@@ -40,6 +40,8 @@ interface ClientDocumentFormat {
   editor(): Promise<{ default: ComponentType<EditorProps> }>;
 }
 
+// Coflat is the only runtime editor format. This registry remains as a small
+// compatibility wrapper while mount data still carries `data-format-id`.
 const formats = new Map<DocumentFormatId, ClientDocumentFormat>();
 
 function register(format: ClientDocumentFormat): void {
@@ -58,6 +60,6 @@ register({
 
 export function getClientDocumentFormat(formatId: DocumentFormatId): ClientDocumentFormat {
   const format = formats.get(formatId) ?? formats.get(COFLAT_FORMAT_ID);
-  if (!format) throw new Error("no document formats registered");
+  if (!format) throw new Error("Coflat editor format is not registered");
   return format;
 }
