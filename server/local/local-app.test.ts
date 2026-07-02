@@ -199,6 +199,16 @@ describe("local Workbench app (Tier 0)", () => {
     expect(body).toContain('data-testid="connect-form"');
   });
 
+  it("maps disconnected typed collaboration API requests to a stable not-found envelope", async () => {
+    const { app } = localApp({ "hello.md": "# Hello\n" });
+    const res = await app.request("/api/v1/repos/me/notes/issues");
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({
+      code: "not_found",
+      error: "no connected Cosheaf server",
+    });
+  });
+
   it("renders the edit page in direct write-mode with PR affordances off", async () => {
     const { app } = localApp({ "hello.md": "# Hello\n" });
     const res = await app.request("/me/notes/src/branch/main/hello.md?mode=edit");

@@ -10,6 +10,7 @@
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { ForgejoError } from "../forgejo.js";
+import { NoCoreConnectedError } from "../local/origin-collaboration-client.js";
 import { RemoteCosheafError } from "../local/remote-cosheaf-client.js";
 import { AUTH_COOKIE, invalidateBearerCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
@@ -19,6 +20,11 @@ import { errorPage, forbiddenPage, notFoundPage, redirect } from "./web-context.
 
 export async function handleAppError(err: Error, c: Context<AppEnv>): Promise<Response> {
   const isApi = c.req.path.startsWith("/api/");
+  if (err instanceof NoCoreConnectedError) {
+    if (isApi) return c.json(...notFound("no connected Cosheaf server"));
+    const user = c.get("user")?.username ?? "";
+    return notFoundPage(user, "No connected Cosheaf server");
+  }
   if (
     !(err instanceof ForgejoError) &&
     !(err instanceof WorkspaceBackendError) &&
