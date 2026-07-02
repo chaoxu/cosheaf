@@ -164,9 +164,8 @@ test("workbench local annotation anchor inserts at selected source position @smo
       { id, owner, repo },
     );
     expect(agentReplyStatus).toBe(200);
-    await expect(secondArticle).not.toContainText("Agent checked this sentence.");
-    await page.getByRole("button", { name: "Refresh" }).click();
     await expect(secondArticle).toContainText("Agent checked this sentence.");
+    await expect(page.getByRole("button", { name: "Refresh" })).toBeEnabled();
     await page.getByRole("button", { name: "Next open" }).click();
     await expect(page.locator(".local-annotation.is-focused")).toContainText(`[@local:${id}]`);
     await page.getByRole("button", { name: "Next open" }).click();

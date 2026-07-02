@@ -14,6 +14,7 @@ import { readJsonObject } from "../routes/query-params.js";
 import { safeRel } from "../routes/files.js";
 import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
 import type { AppEnv } from "../types.js";
+import { publishLocalAnnotationEvent } from "./local-events.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
@@ -329,6 +330,7 @@ localAnnotations.post("/:owner/:repo/local-annotations", async (c) => {
   };
   data.annotations[id] = annotation;
   writeLocalAnnotations(entry, data);
+  publishLocalAnnotationEvent(c, entry, { action: "created", id: annotation.id, path: annotation.path });
   return c.json({ annotation }, 201);
 });
 
@@ -348,6 +350,7 @@ localAnnotations.patch("/:owner/:repo/local-annotations/:id", async (c) => {
   }
   const annotation = data.annotations[id];
   if (!annotation) return c.json({ error: "annotation not found" }, 404);
+  const previousPath = annotation.path;
   const status = body.status === undefined ? null : normalizeStatus(body.status);
   if (body.status !== undefined && !status) return c.json({ error: "invalid status" }, 400);
   if (status) annotation.status = status;
@@ -358,6 +361,12 @@ localAnnotations.patch("/:owner/:repo/local-annotations/:id", async (c) => {
   }
   annotation.updated_at = nowIso();
   writeLocalAnnotations(entry, data);
+  publishLocalAnnotationEvent(c, entry, {
+    action: "updated",
+    id: annotation.id,
+    path: annotation.path,
+    ...(previousPath !== annotation.path ? { previous_path: previousPath } : {}),
+  });
   return c.json({ annotation });
 });
 
@@ -389,6 +398,7 @@ localAnnotations.post("/:owner/:repo/local-annotations/:id/messages", async (c) 
   });
   annotation.updated_at = created;
   writeLocalAnnotations(entry, data);
+  publishLocalAnnotationEvent(c, entry, { action: "message", id: annotation.id, path: annotation.path });
   return c.json({ annotation });
 });
 
@@ -406,7 +416,9 @@ localAnnotations.delete("/:owner/:repo/local-annotations/:id", (c) => {
     throw err;
   }
   if (!data.annotations[id]) return c.json({ error: "annotation not found" }, 404);
+  const annotation = data.annotations[id];
   delete data.annotations[id];
   writeLocalAnnotations(entry, data);
+  publishLocalAnnotationEvent(c, entry, { action: "deleted", id: annotation.id, path: annotation.path });
   return c.json({ ok: true });
 });

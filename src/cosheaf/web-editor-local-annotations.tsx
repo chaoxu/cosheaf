@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isLocalAnnotationWorkbenchEvent } from "../../shared/local-events";
+import { workspaceApiPath } from "../../shared/url";
 import type { LocalAnnotation, LocalAnnotationKind } from "../../shared/local-annotations";
 import { ApiError, api } from "./api";
 import { toast } from "./web-editor-helpers";
@@ -106,6 +108,21 @@ export function useLocalAnnotationsController(options: LocalAnnotationsControlle
       cancelled = true;
     };
   }, [enabled, owner, path, repo]);
+
+  useEffect(() => {
+    if (!enabled || typeof EventSource === "undefined") return;
+    const stream = new EventSource(`${workspaceApiPath(owner, repo)}/events`);
+    stream.onmessage = (event) => {
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data) as unknown;
+      } catch (_err) {
+        return;
+      }
+      if (isLocalAnnotationWorkbenchEvent(data, path)) void refresh();
+    };
+    return () => stream.close();
+  }, [enabled, owner, path, refresh, repo]);
 
   const createAnnotation = useCallback(async () => {
     if (!enabled || !draft.body.trim()) return;
