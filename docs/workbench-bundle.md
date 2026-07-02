@@ -59,14 +59,21 @@ ssh earth 'mkdir -p ~/cosheaf-workbench && tar -xzf ~/cosheaf-workbench.tar.gz -
 ssh earth '~/cosheaf-workbench/cosheaf-workbench ~/some/folder'
 ```
 
-### Option B — Gitea release asset (no saturn online)
+### Option B — GitHub release asset (no saturn online)
 
 ```bash
-pnpm workbench:release         # packs + uploads the tarball to chaoxu/cosheaf
+GITHUB_TOKEN=... pnpm workbench:release  # packs + uploads the tarball to chaoxu/cosheaf
 # on earth:
-tea releases download workbench-<tag> --repo chaoxu/cosheaf -l coflat
+gh release download workbench-<tag> --repo chaoxu/cosheaf --pattern cosheaf-workbench.tar.gz
 tar -xzf cosheaf-workbench.tar.gz -C ~/cosheaf-workbench --strip-components=1
 ~/cosheaf-workbench/cosheaf-workbench ~/some/folder
+```
+
+For the internal Gitea release path, run `pnpm workbench:release --gitea`.
+Consumers can install the latest internal release with the repo helper:
+
+```bash
+COSHEAF_GITEA_URL="http://gitea.lab" node scripts/update-workbench.mjs
 ```
 
 ### Option C — One-line installer command (Recommended)

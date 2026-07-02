@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded, smokeDefaults } from "./browser-utils.mjs";
 import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
@@ -11,10 +11,7 @@ const chromium = await loadChromium();
 
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-staging-reference-smoke.png";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const { username: USERNAME, password: PASSWORD, owner: OWNER, workspaceSlug: WORKSPACE_SLUG } = smokeDefaults();
 const PAGE_PATH = process.env.COSHEAF_REFERENCE_SMOKE_PATH ?? "coflat-feature-showcase.md";
 const BRANCH = process.env.COSHEAF_REFERENCE_SMOKE_BRANCH ?? `user/${USERNAME}/staging-reference-smoke`;
 

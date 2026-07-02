@@ -5,9 +5,9 @@ See also `docs/client-server-design.md` for the newer product vocabulary:
 authority-boundary contract for local content, server-owned collaboration, and
 Origin API storage/protocol details.
 
-This document names the workbench/server split before behavior changes land.
-It is a migration contract for keeping local authoring useful without turning
-Cosheaf Workbench into a second server or a local Forgejo clone.
+This document names the current workbench/server authority split. It is the
+contract for keeping local authoring useful without turning Cosheaf Workbench
+into a second server or a local Forgejo clone.
 
 ## Terms
 
@@ -68,7 +68,7 @@ token in `remote.json`).
   folder, working tree state, local branches, commits, rendering, indexing, and
   local git authorship fallback.
 - Typed `/api/v1/repos/:owner/:repo/*` routes are the public contract for
-  clients, page islands, and future Origin API calls. They are not raw Forgejo
+  clients, page islands, and Origin API calls. They are not raw Forgejo
   passthrough routes.
 - `server/local/**` and `LocalGitWorkspaceBackend` are the local git provider
   path. They must stay forge-free and must not import hosted forge clients.

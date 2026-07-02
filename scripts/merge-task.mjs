@@ -280,7 +280,7 @@ export function runMergeTaskSteps(steps, options = {}) {
 export function printMergeTaskHelp(stream = process.stdout) {
   stream.write(`Usage:
   pnpm merge-task -- --branch <worker-branch> [--base-branch main] [--base-ref origin/main] [--old-base <ref>]
-  pnpm merge-task -- --branch <worker-branch> --issue 1234 --check "rtk pnpm test:focused -- file.test.ts"
+  pnpm merge-task -- --branch <worker-branch> --issue 1234 --check "rtk pnpm exec vitest run file.test.ts"
   pnpm merge-task -- --handoff /tmp/cosheaf-agent-handoff.json
   pnpm merge-task -- --branch <worker-branch> --run
 

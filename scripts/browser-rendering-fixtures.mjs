@@ -1,6 +1,6 @@
 // Browser smoke for seeded long-form Markdown issue and PR rendering.
 
-import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, smokeDefaults } from "./browser-utils.mjs";
 import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
@@ -10,10 +10,7 @@ const chromium = await loadChromium();
 
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-rendering-fixtures.png";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const { username: USERNAME, password: PASSWORD, owner: OWNER, workspaceSlug: WORKSPACE_SLUG } = smokeDefaults();
 const ISSUE_TITLE = "Rendering fixture: long Markdown issue";
 const COFLAT_SHOWCASE_ISSUE_TITLE = "Rendering fixture: Coflat feature showcase";
 const PR_TITLE = "Rendering fixture: long Markdown PR";

@@ -1,6 +1,6 @@
 // Browser smoke for the issue sidebar and browser history behavior.
 
-import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, smokeDefaults } from "./browser-utils.mjs";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -9,10 +9,7 @@ const chromium = await loadChromium();
 
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-issues-nav.png";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const { username: USERNAME, password: PASSWORD, owner: OWNER, workspaceSlug: WORKSPACE_SLUG } = smokeDefaults();
 const VIEWPORT = { width: 1280, height: 800 };
 
 const browser = await chromium.launch({ headless: true });

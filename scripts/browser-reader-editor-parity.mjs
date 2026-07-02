@@ -1,7 +1,7 @@
 // Browser regression for the server-rendered Coflat full reader surface.
 
 import { writeFileSync } from "node:fs";
-import { attachPageListeners, browserWebUrl, loadChromium } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, smokeDefaults } from "./browser-utils.mjs";
 import {
   assertCoflatCodeBlockParity,
   assertCoflatFootnoteSectionParity,
@@ -19,10 +19,7 @@ const chromium = await loadChromium();
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-reader-editor-parity.png";
 const REPORT = process.env.REPORT ?? "/tmp/cosheaf-reader-editor-parity.json";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const { username: USERNAME, password: PASSWORD, owner: OWNER, workspaceSlug: WORKSPACE_SLUG } = smokeDefaults();
 const SHOWCASE_PATH = "coflat-feature-showcase.md";
 const SHOWCASE_BIB_PATH = "reference.bib";
 const SHOWCASE_IMAGE_PATH = "showcase/hover-preview-figure.svg";

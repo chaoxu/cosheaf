@@ -1,6 +1,6 @@
 // Browser smoke for the server-rendered edit page's Coflat editor island.
 
-import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded, smokeDefaults } from "./browser-utils.mjs";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -9,10 +9,7 @@ const chromium = await loadChromium();
 
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-edit.png";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const { username: USERNAME, password: PASSWORD, owner: OWNER, workspaceSlug: WORKSPACE_SLUG } = smokeDefaults();
 const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "coflat-feature-showcase.md";
 const BRANCH = process.env.COSHEAF_SMOKE_EDIT_BRANCH ?? `user/${USERNAME}/smoke-edit-check`;
 const SELECTION_PATH = process.env.COSHEAF_FLOW_PATH ?? `smoke-edit-selection-${Date.now()}.md`;

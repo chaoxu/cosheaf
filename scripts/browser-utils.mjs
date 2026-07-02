@@ -59,6 +59,18 @@ export function browserWebUrl(env = process.env) {
   return serverRenderedOrigin(browserAppUrl(env), env);
 }
 
+export function smokeDefaults(env = process.env) {
+  return {
+    username: env.COSHEAF_SMOKE_USER ?? "chao",
+    password: env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!",
+    owner: env.COSHEAF_SMOKE_OWNER ?? "chao",
+    workspace: env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin",
+    workspaceSlug: env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin",
+    page: env.COSHEAF_SMOKE_PAGE ?? "Hello",
+    pagePath: env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md",
+  };
+}
+
 export function serverRenderedOrigin(value, env = process.env) {
   const url = new URL(value);
   const viteDevPort = vitePort(env);

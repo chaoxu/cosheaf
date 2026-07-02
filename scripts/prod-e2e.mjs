@@ -7,8 +7,7 @@ import { run } from "./lib/run.mjs";
 import { smokeChecks } from "./smoke-manifest.mjs";
 
 const explicitProdHost = process.env.COSHEAF_PROD_HOST;
-const legacyProdHost = process.env.COSHEAF_JUPITER_HOST;
-const prodHost = explicitProdHost ?? legacyProdHost ?? "root@cosheaf.chaoxu.prof";
+const prodHost = explicitProdHost ?? "root@cosheaf.chaoxu.prof";
 const prodJump = process.env.COSHEAF_PROD_SSH_JUMP ?? "";
 const prodUrl = process.env.COSHEAF_PROD_URL ?? "https://cosheaf.chaoxu.prof/";
 

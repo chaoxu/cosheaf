@@ -4,7 +4,7 @@
 // as "undefined control sequence". Deliberately uses NON-builtin macro names —
 // \R (a KaTeX builtin) masked this bug in the original verification.
 
-import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded, smokeDefaults } from "./browser-utils.mjs";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -12,10 +12,7 @@ loadDotenvDev();
 const chromium = await loadChromium();
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser-math-macros.png";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
+const { username: USERNAME, password: PASSWORD, owner: OWNER, workspaceSlug: WORKSPACE_SLUG } = smokeDefaults();
 
 const TS = `${Date.now().toString(36)}-${process.pid.toString(36)}`;
 const BRANCH = `smoke-math-${TS}`;

@@ -4,7 +4,7 @@
 // Logs in, opens a workspace/page, captures the rendered document state +
 // screenshot, and prints page errors. Defaults match `pnpm setup:dev`.
 
-import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded } from "./browser-utils.mjs";
+import { attachPageListeners, browserWebUrl, loadChromium, signInIfNeeded, smokeDefaults } from "./browser-utils.mjs";
 import { loadDotenvDev } from "./lib/env-dev.mjs";
 
 loadDotenvDev();
@@ -13,13 +13,15 @@ const chromium = await loadChromium();
 
 const WEB_URL = browserWebUrl();
 const SCREENSHOT = process.env.SCREENSHOT ?? "/tmp/cosheaf-browser.png";
-const USERNAME = process.env.COSHEAF_SMOKE_USER ?? "chao";
-const PASSWORD = process.env.COSHEAF_SMOKE_PASSWORD ?? "Cosheaf123!";
-const WORKSPACE = process.env.COSHEAF_SMOKE_WORKSPACE ?? "Flushing Coin";
-const WORKSPACE_SLUG = process.env.COSHEAF_SMOKE_WORKSPACE_SLUG ?? "flushing-coin";
-const OWNER = process.env.COSHEAF_SMOKE_OWNER ?? "chao";
-const PAGE = process.env.COSHEAF_SMOKE_PAGE ?? "Hello";
-const PAGE_PATH = process.env.COSHEAF_SMOKE_PAGE_PATH ?? "hello.md";
+const {
+  username: USERNAME,
+  password: PASSWORD,
+  workspace: WORKSPACE,
+  workspaceSlug: WORKSPACE_SLUG,
+  owner: OWNER,
+  page: PAGE,
+  pagePath: PAGE_PATH,
+} = smokeDefaults();
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });

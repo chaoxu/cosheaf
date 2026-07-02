@@ -154,7 +154,7 @@ describe("issue CLI wrapper", () => {
       "--verify",
       "pnpm typecheck",
       "--verify",
-      "pnpm test,pnpm test:browser",
+      "pnpm test,pnpm check:web",
     ]);
 
     expect(plan.repo).toBe(DEFAULT_REPO);
@@ -162,14 +162,14 @@ describe("issue CLI wrapper", () => {
     expect(plan.verifyItems).toEqual([
       "pnpm typecheck",
       "pnpm test",
-      "pnpm test:browser",
+      "pnpm check:web",
     ]);
     expect(plan.commands.map((entry) => entry.argv.slice(0, 4))).toEqual([
       ["git", "rev-parse", "--verify", "abc123^{commit}"],
       ["git", "status", "--short"],
       ["sh", "-lc", "pnpm typecheck"],
       ["sh", "-lc", "pnpm test"],
-      ["sh", "-lc", "pnpm test:browser"],
+      ["sh", "-lc", "pnpm check:web"],
       ["tea", "issues", "--repo", DEFAULT_REPO],
       ["tea", "issues", "--repo", DEFAULT_REPO],
       ["tea", "comment", "--repo", DEFAULT_REPO],

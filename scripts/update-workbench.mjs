@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Standard consumer-side Workbench deploy. Run on a target machine (e.g. earth)
-// to follow the latest bundle saturn published with `pnpm workbench:release`:
+// to follow the latest bundle saturn published with `pnpm workbench:release --gitea`:
 //
 //   1. resolve the newest `workbench-*` release on the Gitea repo,
 //   2. download its `cosheaf-workbench.tar.gz` asset,

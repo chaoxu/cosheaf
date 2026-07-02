@@ -613,9 +613,8 @@ becomes a real bottleneck.
 
 - It is not the coflat editor. The editor is a sibling package
   (`@chaoxu/coflat`); see its own repo for editor-internal debug
-  helpers, browser harness, perf scripts, etc. None of `__cmView`,
-  `__cmDebug`, `pnpm test:browser`, `pnpm chrome`, `scripts/perf-*` apply
-  here.
+  helpers, browser harness, perf scripts, etc. Coflat-specific debug globals,
+  browser commands, and performance scripts do not apply here.
 - It is not a math-native semantic engine or an agent system. No theorem graph,
   proof dependency model, proving, exploration, gatherer/oracle logic, or
   verifier-bot implementation belongs in this repo. The optional chat launcher

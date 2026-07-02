@@ -7,7 +7,7 @@ directly for normal workspace workflows.
 Use this guide when an agent needs to read or update pages, open pull requests,
 triage issues, or merge reviewed work in a Cosheaf workspace.
 
-For local Workbench and future Origin API boundary work, also read
+For local Workbench and Origin API boundary work, also read
 `docs/workbench-origin-split.md`. That document defines which operations belong
 to the local git workbench versus the remote Cosheaf server authority.
 

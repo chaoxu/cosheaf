@@ -19,13 +19,13 @@ describe("merge-task helper", () => {
         "--branch",
         "worker-1",
         "--check",
-        "pnpm test:focused -- scripts/a.test.mjs",
+        "pnpm exec vitest run scripts/a.test.mjs",
         "--check=pnpm check:types",
       ], "--check"),
     ).toEqual({
       rest: ["--branch", "worker-1"],
       values: [
-        "pnpm test:focused -- scripts/a.test.mjs",
+        "pnpm exec vitest run scripts/a.test.mjs",
         "pnpm check:types",
       ],
     });
@@ -187,7 +187,7 @@ describe("merge-task helper", () => {
         baseBranch: "main",
         baseRef: "origin/main",
         branch: "agent/feature",
-        checks: ["rtk pnpm test:focused -- scripts/merge-task.test.mjs"],
+        checks: ["rtk pnpm exec vitest run scripts/merge-task.test.mjs"],
         issue: "1402",
       }),
     ).toEqual([
@@ -213,7 +213,7 @@ describe("merge-task helper", () => {
       },
       {
         label: "Run verification",
-        shell: "rtk pnpm test:focused -- scripts/merge-task.test.mjs",
+        shell: "rtk pnpm exec vitest run scripts/merge-task.test.mjs",
       },
       {
         command: ["rtk", "git", "switch", "main"],
