@@ -276,6 +276,41 @@ describe("local Workbench app (Tier 0)", () => {
     });
   });
 
+  it("serves all local annotations and toggles their status", async () => {
+    const { app, dir } = localApp({
+      "paper.md": "Needs work.[@local:a1]\nDone.[@local:done]\n",
+      ".cosheaf/local-annotations.json": JSON.stringify({
+        annotations: [
+          { id: "a1", path: "paper.md", kind: "task", status: "open", messages: [{ text: "Clarify this step." }] },
+          { id: "done", path: "paper.md", kind: "comment", status: "resolved", messages: [{ text: "Already handled." }] },
+        ],
+      }),
+    });
+
+    const list = await app.request("/api/v1/repos/me/notes/local-annotations");
+    expect(list.status).toBe(200);
+    await expect(list.json()).resolves.toMatchObject({
+      count: 2,
+      annotations: [
+        { id: "a1", status: "open", source_excerpt: { line: 1 } },
+        { id: "done", status: "resolved", source_excerpt: { line: 2 } },
+      ],
+    });
+
+    const updated = await app.request("/api/v1/repos/me/notes/local-annotations/a1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ status: "resolved" }),
+    });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({ annotation: { id: "a1", status: "resolved" } });
+
+    const sidecar = JSON.parse(readFileSync(join(dir, ".cosheaf", "local-annotations.json"), "utf8")) as {
+      annotations: Array<{ id: string; status: string }>;
+    };
+    expect(sidecar.annotations.find((entry) => entry.id === "a1")?.status).toBe("resolved");
+  });
+
   it("renders the edit page in direct write-mode with PR affordances off", async () => {
     const { app } = localApp({ "hello.md": "# Hello\n" });
     const res = await app.request("/me/notes/src/branch/main/hello.md?mode=edit");

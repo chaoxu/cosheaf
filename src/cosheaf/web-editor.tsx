@@ -43,6 +43,7 @@ import {
 import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
+import { installLocalAnnotations } from "./local-annotations-ui";
 import type { MountedEditor } from "./editor";
 import {
   IncrementalSourceCache,
@@ -857,6 +858,17 @@ function WebEditor({
       },
     );
   }, [outlineMathMacros, railModel]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || config.writeMode !== "direct") return;
+    return installLocalAnnotations(shell, {
+      owner: config.owner,
+      repo: config.repo,
+      path: currentPath,
+      drawerParent: shell,
+    });
+  }, [config.owner, config.repo, config.writeMode, currentPath]);
 
   return (
     <div className={readerClass} ref={shellRef}>
