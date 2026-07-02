@@ -14,9 +14,10 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { splitUnifiedDiff } from "../diff-splitter.js";
 import { isCommitSha } from "../branch-path.js";
 import {
   type WorkspaceBackend,
@@ -71,6 +72,14 @@ export interface GitStatusEntry {
 export interface GitStatus {
   branch: string | null;
   entries: GitStatusEntry[];
+}
+
+export interface LocalFileDiff {
+  path: string;
+  previous_path?: string;
+  patch: string;
+  changed: boolean;
+  review_hash: string;
 }
 
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
@@ -415,6 +424,70 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return { branch, entries };
   }
 
+  async diffForPaths(baseSha: string | null, paths: string[]): Promise<LocalFileDiff[]> {
+    if (!(await this.isGitRepo())) return [];
+    const safePaths = paths.filter((path) => path && !path.startsWith("-"));
+    if (safePaths.length === 0) return [];
+    const base = baseSha && isCommitSha(baseSha) ? baseSha : "HEAD";
+    const out = await this.git(["diff", "--no-ext-diff", "--find-renames", base, "--", ...safePaths]);
+    const patches = splitUnifiedDiff(out);
+    const byPath = new Map(patches.map((patch) => [patch.path, this.withReviewHash({ ...patch, changed: true })]));
+    const status = await this.git(["status", "--porcelain=v1", "--", ...safePaths]);
+    const untracked = new Set(
+      status
+        .split("\n")
+        .filter((line) => line.startsWith("?? "))
+        .map((line) => line.slice(3).trim()),
+    );
+    for (const path of safePaths) {
+      if (byPath.has(path)) continue;
+      if (untracked.has(path)) {
+        byPath.set(path, {
+          path,
+          patch: await this.untrackedPatch(path),
+          changed: true,
+          review_hash: "",
+        });
+        const diff = byPath.get(path);
+        if (diff) byPath.set(path, this.withReviewHash(diff));
+      } else {
+        byPath.set(path, this.withReviewHash({ path, patch: "", changed: false }));
+      }
+    }
+    return safePaths.map((path) => byPath.get(path) ?? this.withReviewHash({ path, patch: "", changed: false }));
+  }
+
+  private withReviewHash(diff: Omit<LocalFileDiff, "review_hash"> | LocalFileDiff): LocalFileDiff {
+    return {
+      ...diff,
+      review_hash: createHash("sha256").update(`${diff.path}\0${diff.patch}`).digest("hex"),
+    };
+  }
+
+  private async untrackedPatch(path: string): Promise<string> {
+    let text: string;
+    try {
+      const full = this.abs(path);
+      const info = await lstat(full);
+      if (!info.isFile()) return "";
+      const bytes = await readFile(await this.realInside(full));
+      text = bytes.toString("utf8");
+    } catch (_err) {
+      return "";
+    }
+    const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
+    const body = lines.map((line) => `+${line}`).join("\n");
+    return [
+      `diff --git a/${path} b/${path}`,
+      "new file mode 100644",
+      "index 0000000..0000000",
+      "--- /dev/null",
+      `+++ b/${path}`,
+      `@@ -0,0 +1,${lines.length} @@`,
+      body,
+    ].join("\n");
+  }
+
   // Stage everything and commit. Returns the new commit sha, or null when there
   // was nothing to commit.
   async commitAll(message: string): Promise<string | null> {
@@ -423,6 +496,17 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     const status = await this.git(["status", "--porcelain=v1"]);
     if (status.trim() === "") return null;
     await this.git([...(await this.commitIdentityArgs()), "commit", "-m", message]);
+    return (await this.git(["rev-parse", "HEAD"])).trim();
+  }
+
+  async commitPaths(message: string, paths: string[]): Promise<string | null> {
+    if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
+    const safePaths = paths.filter((path) => path && !path.startsWith("-"));
+    if (safePaths.length === 0) return null;
+    await this.git(["add", "--", ...safePaths]);
+    const status = await this.git(["status", "--porcelain=v1", "--", ...safePaths]);
+    if (status.trim() === "") return null;
+    await this.git([...(await this.commitIdentityArgs()), "commit", "-m", message, "--only", "--", ...safePaths]);
     return (await this.git(["rev-parse", "HEAD"])).trim();
   }
 

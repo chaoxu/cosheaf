@@ -4,6 +4,10 @@ import type {
   LocalAnnotationQueueItem,
   LocalAnnotationStatus,
 } from "../../shared/local-annotations";
+import type {
+  LocalAgentSession,
+  LocalAgentSessionStatus,
+} from "../../shared/local-agent-sessions";
 import type { WorkspaceValidation } from "../../shared/validation";
 import { queryString, workspaceApiPath } from "../../shared/url";
 
@@ -14,11 +18,18 @@ interface PutFileResult {
   content?: string;
 }
 
+interface GetFileResult {
+  content: string;
+  sha: string | null;
+  source_ref?: string;
+  source_sha?: string | null;
+}
+
 interface OpenPullResult {
   number: number;
 }
 
-export type { LocalAnnotation, LocalAnnotationKind, LocalAnnotationQueueItem, LocalAnnotationStatus };
+export type { LocalAgentSession, LocalAgentSessionStatus, LocalAnnotation, LocalAnnotationKind, LocalAnnotationQueueItem, LocalAnnotationStatus };
 
 interface ErrorBody {
   error?: string;
@@ -83,6 +94,14 @@ async function apiErrorFromResponse(res: Response, fallback: string): Promise<Ap
 }
 
 export const api = {
+  getFile: (
+    owner: string,
+    repo: string,
+    path: string,
+    branch: string,
+  ) =>
+    jsonFetch<GetFileResult>(`${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`),
+
   putFile: (
     owner: string,
     repo: string,
@@ -182,6 +201,47 @@ export const api = {
   deleteLocalAnnotation: (owner: string, repo: string, id: string) =>
     jsonFetch<{ ok: true }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`, {
       method: "DELETE",
+    }),
+
+  listLocalAgentSessions: (
+    owner: string,
+    repo: string,
+    params: { status?: LocalAgentSessionStatus } = {},
+  ) =>
+    jsonFetch<{ sessions: LocalAgentSession[] }>(
+      `${workspaceApiPath(owner, repo)}/agent-sessions${queryString(params)}`,
+    ),
+
+  createLocalAgentSession: (
+    owner: string,
+    repo: string,
+    payload: { title?: string; touched_files?: string[]; linked_annotations?: string[]; summary?: string; message?: string },
+  ) =>
+    jsonFetch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateLocalAgentSession: (
+    owner: string,
+    repo: string,
+    id: string,
+    payload: { status?: LocalAgentSessionStatus; title?: string; touched_files?: string[]; linked_annotations?: string[]; summary?: string; message?: string },
+  ) =>
+    jsonFetch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  completeLocalAgentSession: (
+    owner: string,
+    repo: string,
+    id: string,
+    payload: { summary?: string; message?: string } = {},
+  ) =>
+    jsonFetch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions/${id}/complete`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   openPull: (owner: string, repo: string, payload: { head: string; base?: string; title?: string; body?: string }) =>

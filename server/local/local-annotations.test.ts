@@ -10,6 +10,7 @@ import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
 import { _resetPdfExportLimiterForTest } from "../pdf-export.js";
 import { freshTestDb } from "../routes/test-fixtures.js";
+import { type SSEEvent, SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { localAnchorPreflightIssues } from "./local-annotations.js";
@@ -20,7 +21,7 @@ function git(dir: string, args: string[]): string {
   return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 }
 
-function workspace(): { dir: string; app: Hono<AppEnv> } {
+function workspace(options: { sse?: SSEHub } = {}): { dir: string; app: Hono<AppEnv> } {
   const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-annotations-"));
   git(dir, ["init", "-q", "-b", "main"]);
   git(dir, ["config", "user.email", "t@t.test"]);
@@ -53,6 +54,7 @@ function workspace(): { dir: string; app: Hono<AppEnv> } {
       config: buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 }),
       db,
       localRegistry: registry,
+      sse: options.sse,
     }),
   };
 }
@@ -114,6 +116,58 @@ describe("local Workbench annotations", () => {
 
     const afterDelete = JSON.parse(readFileSync(storedPath, "utf8")) as { annotations: Record<string, unknown> };
     expect(afterDelete.annotations[created.id as string]).toBeUndefined();
+  });
+
+  it("publishes local annotation events after successful API mutations", async () => {
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/paper", (event) => events.push(event));
+    const { app } = workspace({ sse });
+
+    try {
+      const createdRes = await app.request("/api/v1/repos/me/paper/local-annotations", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://localhost" },
+        body: JSON.stringify({ kind: "task", path: "paper.md", body: "Clarify the reduction.", author: "chao" }),
+      });
+      expect(createdRes.status).toBe(201);
+      const created = (await json(createdRes)).annotation as Record<string, string>;
+
+      const messageRes = await app.request(`/api/v1/repos/me/paper/local-annotations/${created.id}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://localhost" },
+        body: JSON.stringify({ body: "Agent checked this.", author: "codex" }),
+      });
+      expect(messageRes.status).toBe(200);
+
+      const patchRes = await app.request(`/api/v1/repos/me/paper/local-annotations/${created.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", origin: "http://localhost" },
+        body: JSON.stringify({ status: "resolved", path: "renamed.md" }),
+      });
+      expect(patchRes.status).toBe(200);
+
+      const deleteRes = await app.request(`/api/v1/repos/me/paper/local-annotations/${created.id}`, {
+        method: "DELETE",
+        headers: { origin: "http://localhost" },
+      });
+      expect(deleteRes.status).toBe(200);
+
+      expect(events).toEqual([
+        { type: "local_annotation", action: "created", id: created.id, path: "paper.md" },
+        { type: "local_annotation", action: "message", id: created.id, path: "paper.md" },
+        {
+          type: "local_annotation",
+          action: "updated",
+          id: created.id,
+          path: "renamed.md",
+          previous_path: "paper.md",
+        },
+        { type: "local_annotation", action: "deleted", id: created.id, path: "renamed.md" },
+      ]);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("rejects unsafe document paths", async () => {
@@ -257,7 +311,10 @@ describe("local Workbench annotations", () => {
   });
 
   it("moves annotation sidecar paths when a local file is renamed through the typed file route", async () => {
-    const { dir, app } = workspace();
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/paper", (event) => events.push(event));
+    const { dir, app } = workspace({ sse });
     const createdRes = await app.request("/api/v1/repos/me/paper/local-annotations", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
@@ -274,6 +331,7 @@ describe("local Workbench annotations", () => {
       }),
     });
     expect(renameRes.status).toBe(200);
+    unsubscribe();
 
     const oldListRes = await app.request("/api/v1/repos/me/paper/local-annotations?path=paper.md");
     expect(oldListRes.status).toBe(200);
@@ -295,6 +353,13 @@ describe("local Workbench annotations", () => {
         line: 7,
         excerpt: `Moved paragraph. ${created.anchor}`,
       }]);
+    expect(events).toContainEqual({
+      type: "local_annotation",
+      action: "moved",
+      path: "renamed.md",
+      previous_path: "paper.md",
+      count: 1,
+    });
   });
 
   it("reports local markers and open annotations in export preflight", async () => {

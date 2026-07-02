@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
+import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { expect, test } from "@playwright/test";
 
 function git(dir: string, args: string[]): void {
@@ -164,9 +165,8 @@ test("workbench local annotation anchor inserts at selected source position @smo
       { id, owner, repo },
     );
     expect(agentReplyStatus).toBe(200);
-    await expect(secondArticle).not.toContainText("Agent checked this sentence.");
-    await page.getByRole("button", { name: "Refresh" }).click();
     await expect(secondArticle).toContainText("Agent checked this sentence.");
+    await expect(page.getByRole("button", { name: "Refresh" })).toBeEnabled();
     await page.getByRole("button", { name: "Next open" }).click();
     await expect(page.locator(".local-annotation.is-focused")).toContainText(`[@local:${id}]`);
     await page.getByRole("button", { name: "Next open" }).click();
@@ -227,6 +227,24 @@ test("workbench local annotation anchor inserts at selected source position @smo
     );
     expect(externalWriteStatus).toBe(200);
     await expect(page.getByTestId("editor-external-change-banner")).toContainText("This file changed outside this editor.");
+    await page.getByTestId("editor-external-change-compare").click();
+    await expect(page.getByTestId("editor-external-compare")).toContainText("Current editor buffer");
+    await expect(page.getByTestId("editor-external-compare")).toContainText("Latest workspace file");
+    await expect(page.getByTestId("editor-external-compare")).toContainText("External agent edit.");
+
+    await page.locator(CF.editorContent).fill(`${renamed}\nHuman stale edit.\n`);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByTestId("editor-external-change-banner")).toContainText("Save blocked because this editor buffer is stale.");
+    await expect(page.getByTestId("editor-save-state")).toHaveAttribute(
+      "title",
+      "Stale buffer: this file changed outside the editor. Compare or reload before saving.",
+    );
+    expect(readFileSync(join(dir, "renamed.md"), "utf8")).toContain("External agent edit.");
+    expect(readFileSync(join(dir, "renamed.md"), "utf8")).not.toContain("Human stale edit.");
+
+    await page.getByTestId("editor-external-change-reload").click();
+    await expect(page.locator(CF.editorContent)).toContainText("External agent edit.");
+    await expect(page.locator(CF.editorContent)).not.toContainText("Human stale edit.");
   } finally {
     if (child) await stopWorkbench(child);
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });

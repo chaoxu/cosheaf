@@ -1,3 +1,4 @@
+import { isLocalAnnotationWorkbenchEvent } from "../../shared/local-events";
 import { workspaceApiPath } from "../../shared/url";
 
 interface LocalAnnotationMessage {
@@ -59,6 +60,7 @@ export function installLocalAnnotations(root: HTMLElement, opts: InstallOptions)
       const res = await fetch(`${workspaceApiPath(opts.owner, opts.repo)}/local-annotations`, { credentials: "same-origin" });
       if (!res.ok) return;
       const body = await res.json() as LocalAnnotationResponse;
+      if (destroyed) return;
       annotations = body.annotations ?? [];
       applyHighlights(root, annotations);
       if (!drawer.hidden) render();
@@ -173,14 +175,31 @@ export function installLocalAnnotations(root: HTMLElement, opts: InstallOptions)
 
   const observer = new MutationObserver(() => applyHighlights(root, annotations));
   observer.observe(root, { childList: true, subtree: true });
+  const closeEvents = subscribeToLocalEvents();
   void load();
 
   return () => {
     destroyed = true;
     root.removeEventListener("click", onClick);
     observer.disconnect();
+    closeEvents();
     drawer.remove();
   };
+
+  function subscribeToLocalEvents(): () => void {
+    if (typeof EventSource === "undefined") return () => {};
+    const stream = new EventSource(`${workspaceApiPath(opts.owner, opts.repo)}/events`);
+    stream.onmessage = (event) => {
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data) as unknown;
+      } catch (_err) {
+        return;
+      }
+      if (isLocalAnnotationWorkbenchEvent(data, opts.path)) void load();
+    };
+    return () => stream.close();
+  }
 
   function applyHighlights(target: HTMLElement, records: readonly LocalAnnotation[]): void {
     if (destroyed) return;

@@ -15,6 +15,7 @@ import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { healthPayload, healthStatus } from "./health.js";
 import { localAuthGate } from "./local/local-auth.js";
+import { localAgentSessions } from "./local/local-agent-sessions.js";
 import { localAnnotations } from "./local/local-annotations.js";
 import { localNotifications } from "./local/local-notifications.js";
 import { localPulls } from "./local/local-pulls.js";
@@ -152,6 +153,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     // so its POST /pulls (local commit + push + open PR on the connected core)
     // wins over the typed create-PR handler; the typed router serves the GET
     // reads. localNotifications keeps the chrome's global poller + SSE silent.
+    app.route("/api/v1/repos", localAgentSessions);
     app.route("/api/v1/repos", localAnnotations);
     app.route("/api/v1/repos", files);
     app.route("/api/v1/repos", branches);

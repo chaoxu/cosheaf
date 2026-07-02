@@ -110,9 +110,31 @@ export interface WebEditorPreviewEvent {
 }
 
 type WebEditorSourcePosition = EditorSourcePosition | EditorScrollToSourcePositionOptions;
-type ExternalFileChange = { path: string; type: "change" | "remove" };
+type ExternalFileChange = {
+  path: string;
+  type: "change" | "remove";
+  compareOpen: boolean;
+  loading: boolean;
+  latestContent?: string;
+  latestSha?: string | null;
+  error?: string;
+  staleSave?: boolean;
+};
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 const ActiveMarkdownEditor = lazy(() => import("./editor").then((m) => ({ default: m.MarkdownEditor })));
+
+function compareLines(buffer: string, latest: string): Array<{ index: number; buffer: string; latest: string; changed: boolean }> {
+  const bufferLines = buffer.split("\n");
+  const latestLines = latest.split("\n");
+  const count = Math.max(bufferLines.length, latestLines.length);
+  const rows: Array<{ index: number; buffer: string; latest: string; changed: boolean }> = [];
+  for (let i = 0; i < count; i++) {
+    const bufferLine = bufferLines[i] ?? "";
+    const latestLine = latestLines[i] ?? "";
+    rows.push({ index: i + 1, buffer: bufferLine, latest: latestLine, changed: bufferLine !== latestLine });
+  }
+  return rows;
+}
 
 function insertAnchorIntoSource(source: string, anchor: string): string {
   if (!source) return `${anchor}\n`;
@@ -402,10 +424,45 @@ function WebEditor({
         ignoredChangePathsRef.current.delete(payload.path);
         return;
       }
-      setExternalFileChange({ path: payload.path, type: payload.type });
+      setExternalFileChange({
+        path: payload.path,
+        type: payload.type,
+        compareOpen: false,
+        loading: payload.type === "change",
+      });
     };
     return () => stream.close();
   }, [config.owner, config.path, config.repo]);
+
+  useEffect(() => {
+    if (!externalFileChange || externalFileChange.type !== "change" || !externalFileChange.loading) return;
+    let cancelled = false;
+    const readBranch = branchRef.current || savedReadBranchRef.current || config.branch;
+    void api.getFile(config.owner, config.repo, externalFileChange.path, readBranch).then((latest) => {
+      if (cancelled) return;
+      setExternalFileChange((current) => current && current.path === externalFileChange.path
+        ? {
+            ...current,
+            loading: false,
+            latestContent: latest.content,
+            latestSha: latest.sha,
+            error: undefined,
+          }
+        : current);
+    }).catch((err) => {
+      if (cancelled) return;
+      setExternalFileChange((current) => current && current.path === externalFileChange.path
+        ? {
+            ...current,
+            loading: false,
+            error: err instanceof Error ? err.message : "Unable to read latest file",
+          }
+        : current);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.branch, config.owner, config.repo, externalFileChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -599,6 +656,16 @@ function WebEditor({
         clearDraft(config.owner, config.repo, result.branch, nextPath, draftScope);
         return { ok: true, branch: result.branch, path: nextPath };
       } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          setExternalFileChange({
+            path: nextPath,
+            type: "change",
+            compareOpen: true,
+            loading: true,
+            staleSave: true,
+          });
+          return { ok: false, error: "Stale buffer: this file changed outside the editor. Compare or reload before saving." };
+        }
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
@@ -964,6 +1031,21 @@ function WebEditor({
     documentTheme === "blueprint-book"
       ? "web-editor-shell cf-theme-scope cf-theme-blueprint-book"
       : "web-editor-shell cf-theme-scope";
+  const copyCurrentBuffer = useCallback(() => {
+    const buffer = liveEditorSource(editorRef.current, content);
+    if (!navigator.clipboard) {
+      toast("Copy unavailable; select the editor buffer manually", "error");
+      return;
+    }
+    void navigator.clipboard.writeText(buffer).then(() => {
+      toast("Copied current editor buffer");
+    }).catch(() => {
+      toast("Copy failed; select the editor buffer manually", "error");
+    });
+  }, [content]);
+  const reloadLatestFile = useCallback(() => {
+    window.location.href = `${repoBranchFileHref(config.owner, config.repo, savedReadBranchRef.current, savedPathRef.current)}?mode=edit`;
+  }, [config.owner, config.repo]);
 
   // Reader/Cancel return to the last saved file as it is actually viewable. For
   // a lazy edit branch, that may still be main until the first successful save.
@@ -1004,6 +1086,10 @@ function WebEditor({
     );
   }, [outlineMathMacros, railModel]);
 
+  const externalCompareRows = externalFileChange?.latestContent !== undefined
+    ? compareLines(liveEditorSource(editorRef.current, content), externalFileChange.latestContent)
+    : [];
+
   return (
     <div className={readerClass} ref={shellRef}>
       {pendingDraft ? (
@@ -1020,16 +1106,62 @@ function WebEditor({
       {externalFileChange ? (
         <div className="editor-draft-banner editor-external-change-banner" data-testid="editor-external-change-banner" role="alert">
           <span>
-            {externalFileChange.type === "remove" ? "This file was removed outside this editor." : "This file changed outside this editor."}
-            {" "}Reload before continuing the AI writing session.
+            {externalFileChange.staleSave
+              ? "Save blocked because this editor buffer is stale."
+              : externalFileChange.type === "remove" ? "This file was removed outside this editor." : "This file changed outside this editor."}
+            {" "}Compare or reload before continuing.
           </span>
-          <button type="button" className="button small" data-testid="editor-external-change-reload" onClick={() => window.location.reload()}>
+          {externalFileChange.type === "change" ? (
+            <button
+              type="button"
+              className="button small"
+              data-testid="editor-external-change-compare"
+              onClick={() => setExternalFileChange((current) => current ? { ...current, compareOpen: !current.compareOpen } : current)}
+            >
+              {externalFileChange.compareOpen ? "Hide compare" : "Compare"}
+            </button>
+          ) : null}
+          <button type="button" className="button small" data-testid="editor-external-change-reload" onClick={reloadLatestFile}>
             Reload
           </button>
-          <button type="button" className="button small subtle" onClick={() => setExternalFileChange(null)}>
-            Dismiss
+          <button type="button" className="button small subtle" data-testid="editor-external-change-copy" onClick={copyCurrentBuffer}>
+            Copy buffer
+          </button>
+          <button
+            type="button"
+            className="button small subtle"
+            data-testid="editor-external-change-keep-editing"
+            onClick={() => setExternalFileChange((current) => current ? { ...current, compareOpen: false } : current)}
+          >
+            Keep editing stale buffer
           </button>
         </div>
+      ) : null}
+      {externalFileChange?.compareOpen ? (
+        <section className="editor-external-compare" data-testid="editor-external-compare" aria-label="External change compare">
+          <header>
+            <strong>Editor buffer vs latest workspace file</strong>
+            <span>{externalFileChange.path}</span>
+          </header>
+          {externalFileChange.loading ? (
+            <p>Loading latest file...</p>
+          ) : externalFileChange.error ? (
+            <p>{externalFileChange.error}</p>
+          ) : externalFileChange.type === "remove" ? (
+            <p>The workspace file no longer exists. Copy the buffer or reload to resolve.</p>
+          ) : (
+            <div className="editor-external-compare-grid">
+              <div className="editor-external-compare-heading">Current editor buffer</div>
+              <div className="editor-external-compare-heading">Latest workspace file</div>
+              {externalCompareRows.map((row) => (
+                <div className={`editor-external-compare-row ${row.changed ? "changed" : ""}`} key={row.index}>
+                  <pre><span>{row.index}</span>{row.buffer || " "}</pre>
+                  <pre><span>{row.index}</span>{row.latest || " "}</pre>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       ) : null}
       <div className="doc-with-toc">
         <div className="doc-main">

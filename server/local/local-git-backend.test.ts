@@ -153,6 +153,21 @@ describe("LocalGitWorkspaceBackend", () => {
     expect((await backend.getTree(O, R, "main")).map((e) => e.path)).not.toContain("link.md");
   });
 
+  it("does not render untracked symlink targets in local diffs", async () => {
+    const dir = gitRepo({ identity: true });
+    writeFileSync(join(dir, "tracked.md"), "# Tracked\n");
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-qm", "init"]);
+    const outside = mkdtempSync(join(tmpdir(), "cosheaf-wb-outside-"));
+    writeFileSync(join(outside, "secret.md"), "private-secret\n");
+    symlinkSync(join(outside, "secret.md"), join(dir, "leak.md"));
+
+    const backend = new LocalGitWorkspaceBackend(dir);
+    const [diff] = await backend.diffForPaths(null, ["leak.md"]);
+    expect(diff).toMatchObject({ path: "leak.md", changed: true, patch: "" });
+    expect(diff?.patch).not.toContain("private-secret");
+  });
+
   it("does not write or delete through a symlinked directory that escapes the workspace", async () => {
     const dir = tmpRepo();
     const outside = mkdtempSync(join(tmpdir(), "cosheaf-wb-outside-"));

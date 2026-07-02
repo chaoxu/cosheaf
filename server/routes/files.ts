@@ -28,6 +28,7 @@ import { streamHubChannel } from "./sse-helpers.js";
 import { parseBoundedPositiveInt } from "./query-params.js";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
 import { assertLocalAnnotationsReadable, localAnnotationSidecarConflict, moveLocalAnnotationsPath } from "../local/local-annotations.js";
+import { publishLocalAnnotationEvent } from "../local/local-events.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 
 export const files = new Hono<AppEnv>();
@@ -645,7 +646,13 @@ files.put("/:owner/:repo/file", async (c) => {
   // indexLocalWrite — committing now and cleaning up a renamed-away page.
   indexLocalWrite(isLocalMode(c), db, ws.slug, plan, isRename && previousRel && previousRel !== rel ? previousRel : undefined);
   if (localAnnotationEntry && previousRel) {
-    moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
+    const moved = moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
+    if (moved > 0) publishLocalAnnotationEvent(c, localAnnotationEntry, {
+      action: "moved",
+      path: rel,
+      previous_path: previousRel,
+      count: moved,
+    });
   }
   // #182: a cosheaf.yaml write through the typed route busts its cached config
   // for this branch so the change is read-after-write consistent (the webhook
