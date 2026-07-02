@@ -10,6 +10,7 @@ import { requireAuth, requireMembership, requireWriteOnMutation } from "../middl
 import { bad, conflict } from "../routes/responses.js";
 import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
+import { publishLocalGitEvent } from "./local-events.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { parseGitRemote } from "./local-workspace.js";
 import { OriginCollaborationClient } from "./origin-collaboration-client.js";
@@ -51,7 +52,7 @@ async function validatePublishBinding(entry: WorkspaceEntry, owner: string, repo
 // so each caller maps it to its own surface (JSON envelope vs. a re-rendered
 // form); the friendly messages stay identical between them.
 export type OpenLocalPullResult =
-  | { ok: true; number: number }
+  | { ok: true; number: number; commit_sha: string | null }
   | { ok: false; status: 400 | 409; message: string };
 
 export async function openLocalPull(
@@ -103,8 +104,9 @@ export async function openLocalPull(
 
   // Commit local edits, push the branch over the user's git transport, then ask
   // the remote Cosheaf API to create the durable pull request.
+  let committedSha: string | null = null;
   try {
-    await backend.commitAll(title);
+    committedSha = await backend.commitAll(title);
   } catch (err) {
     return { ok: false, status: 400, message: `Commit step failed: ${friendlyLine(err)}` };
   }
@@ -126,7 +128,7 @@ export async function openLocalPull(
 
   try {
     const pr = await collab.createPull(owner, repo, { head, base, title, body: prBody });
-    return { ok: true, number: pr.number };
+    return { ok: true, number: pr.number, commit_sha: committedSha };
   } catch (err) {
     return { ok: false, status: 400, message: `Pushed "${head}", but couldn't open the remote pull request: ${friendlyLine(err)}` };
   }
@@ -149,6 +151,9 @@ localPulls.post("/:owner/:repo/pulls", async (c) => {
     title: body?.title,
     body: body?.body,
   });
-  if (result.ok) return c.json({ number: result.number });
+  if (result.ok) {
+    if (result.commit_sha) publishLocalGitEvent(c, entry, { action: "committed", sha: result.commit_sha });
+    return c.json({ number: result.number });
+  }
   return result.status === 409 ? c.json(...conflict(result.message)) : c.json(...bad(result.message));
 });

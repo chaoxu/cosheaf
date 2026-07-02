@@ -112,6 +112,32 @@ Final PDF export fails while local markers remain in the source or while open
 sidecar annotations are detached from their anchors. Resolve/delete local
 annotations before treating the document as publishable.
 
+## Local Workbench Agent Sessions
+
+For larger local writing passes, use a local agent session to group the files
+and annotations that need human review. Sessions are Workbench-only sidecar
+state, stored in:
+
+```text
+<workspace>/.cosheaf/agent-sessions.json
+```
+
+Use these routes only against the local Workbench URL:
+
+| Workflow | Local Workbench route |
+| --- | --- |
+| List sessions | `GET /api/v1/repos/$OWNER/$REPO/agent-sessions` |
+| List sessions by status | `GET /api/v1/repos/$OWNER/$REPO/agent-sessions?status=waiting_for_review` |
+| Create session | `POST /api/v1/repos/$OWNER/$REPO/agent-sessions` |
+| Update status/files/summary | `PATCH /api/v1/repos/$OWNER/$REPO/agent-sessions/$ID` |
+| Mark complete | `POST /api/v1/repos/$OWNER/$REPO/agent-sessions/$ID/complete` |
+
+Create a session before or during the edit with `touched_files` and optional
+`linked_annotations`. When the edit is ready for the human, set
+`status: "waiting_for_review"` and include a summary/message. The human reviews
+the browser page at `/$OWNER/$REPO/agent-sessions/$ID`, resolves linked local
+annotations, and commits selected files from that page.
+
 ## Instruction Block
 
 Put this in the agent's workspace instructions, system prompt, or project

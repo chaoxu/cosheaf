@@ -11,6 +11,7 @@ import { mergePullWithRetry } from "../forgejo.js";
 import { errorStatus } from "../forgejo-errors.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { openLocalPull } from "../local/local-pulls.js";
+import { publishLocalGitEvent } from "../local/local-events.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { safeRel } from "./files.js";
@@ -168,6 +169,7 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
     if (!entry) return notFoundPage(ctx.user, "Repository not found");
     const result = await openLocalPull(entry, ctx.owner, ctx.repo, { head: head ?? undefined, base, title: title ?? undefined, body });
     if (result.ok) {
+      if (result.commit_sha) publishLocalGitEvent(c, ctx.ws.slug, { action: "committed", sha: result.commit_sha });
       c.get("sse").publish(ctx.ws.slug, { type: "pull", number: result.number, action: "opened" });
       return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${result.number}`));
     }

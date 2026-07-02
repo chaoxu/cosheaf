@@ -154,16 +154,16 @@ describe("local Workbench annotations", () => {
       expect(deleteRes.status).toBe(200);
 
       expect(events).toEqual([
-        { type: "local_annotation", action: "created", id: created.id, path: "paper.md" },
-        { type: "local_annotation", action: "message", id: created.id, path: "paper.md" },
+        { type: "annotations_changed", action: "created", id: created.id, path: "paper.md" },
+        { type: "annotations_changed", action: "message", id: created.id, path: "paper.md" },
         {
-          type: "local_annotation",
+          type: "annotations_changed",
           action: "updated",
           id: created.id,
           path: "renamed.md",
           previous_path: "paper.md",
         },
-        { type: "local_annotation", action: "deleted", id: created.id, path: "renamed.md" },
+        { type: "annotations_changed", action: "deleted", id: created.id, path: "renamed.md" },
       ]);
     } finally {
       unsubscribe();
@@ -354,7 +354,7 @@ describe("local Workbench annotations", () => {
         excerpt: `Moved paragraph. ${created.anchor}`,
       }]);
     expect(events).toContainEqual({
-      type: "local_annotation",
+      type: "annotations_changed",
       action: "moved",
       path: "renamed.md",
       previous_path: "paper.md",

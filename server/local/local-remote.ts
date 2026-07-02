@@ -21,6 +21,7 @@ import {
 import { emptyHtml, type Html, html } from "../routes/web-html.js";
 import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
+import { publishLocalGitEvent } from "./local-events.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { writeRemote } from "./local-workspace.js";
@@ -101,10 +102,11 @@ export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
   // outcome (or a friendly failure) back on the commit page, where the button is.
   web.post(
     "/:owner/:repo/sync",
-    webRouteForWrite(async (_c, ctx) => {
+    webRouteForWrite(async (c, ctx) => {
       const dest = `${repoHref(ctx.owner, ctx.repo, "/commit")}?toast=`;
       try {
         const result = await localBackend(ctx).sync();
+        if (result.fastForwarded) publishLocalGitEvent(c, ctx.ws.slug, { action: "synced" });
         return redirect(dest + encodeURIComponent(result.message));
       } catch (err) {
         return redirect(dest + encodeURIComponent(friendlyLine(err)));

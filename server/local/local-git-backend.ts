@@ -387,6 +387,36 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return stdout;
   }
 
+  private async gitWithLiteralPathspecs(args: string[]): Promise<string> {
+    const { stdout } = await execFileP("git", ["-C", this.root, "--literal-pathspecs", ...args], {
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return stdout;
+  }
+
+  private async gitPrefix(): Promise<string> {
+    return (await this.git(["rev-parse", "--show-prefix"]).catch(() => "")).trim();
+  }
+
+  private stripGitPrefix(path: string, prefix: string): string {
+    return prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  }
+
+  private gitLiteralPaths(paths: string[]): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const path of paths) {
+      if (!path || path.startsWith("-") || path.startsWith(":") || path.includes("\0")) {
+        throw new WorkspaceBackendError(400, "invalid_path", `invalid git path: ${path}`);
+      }
+      this.abs(path);
+      if (seen.has(path)) continue;
+      seen.add(path);
+      out.push(path);
+    }
+    return out;
+  }
+
   async isGitRepo(): Promise<boolean> {
     if (this.gitRepo !== undefined) return this.gitRepo;
     try {
@@ -410,7 +440,8 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   async gitStatus(): Promise<GitStatus> {
     if (!(await this.isGitRepo())) return { branch: null, entries: [] };
     const branch = await this.currentBranch();
-    const out = await this.git(["status", "--porcelain=v1"]);
+    const prefix = await this.gitPrefix();
+    const out = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", "."]);
     const entries = out
       .split("\n")
       .filter((line) => line.length > 3)
@@ -419,25 +450,31 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
         const rest = line.slice(3).trim();
         // Renamed/copied entries are "old -> new"; show the new path.
         const arrow = rest.indexOf(" -> ");
-        return { code, path: arrow === -1 ? rest : rest.slice(arrow + 4) };
+        const path = arrow === -1 ? rest : rest.slice(arrow + 4);
+        return { code, path: this.stripGitPrefix(path, prefix) };
       });
     return { branch, entries };
   }
 
   async diffForPaths(baseSha: string | null, paths: string[]): Promise<LocalFileDiff[]> {
     if (!(await this.isGitRepo())) return [];
-    const safePaths = paths.filter((path) => path && !path.startsWith("-"));
+    const safePaths = this.gitLiteralPaths(paths);
     if (safePaths.length === 0) return [];
     const base = baseSha && isCommitSha(baseSha) ? baseSha : "HEAD";
-    const out = await this.git(["diff", "--no-ext-diff", "--find-renames", base, "--", ...safePaths]);
-    const patches = splitUnifiedDiff(out);
+    const prefix = await this.gitPrefix();
+    const out = await this.gitWithLiteralPathspecs(["diff", "--no-ext-diff", "--find-renames", base, "--", ...safePaths]);
+    const patches = splitUnifiedDiff(out).map((patch) => ({
+      ...patch,
+      path: this.stripGitPrefix(patch.path, prefix),
+      ...(patch.previous_path ? { previous_path: this.stripGitPrefix(patch.previous_path, prefix) } : {}),
+    }));
     const byPath = new Map(patches.map((patch) => [patch.path, this.withReviewHash({ ...patch, changed: true })]));
-    const status = await this.git(["status", "--porcelain=v1", "--", ...safePaths]);
+    const status = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", ...safePaths]);
     const untracked = new Set(
       status
         .split("\n")
         .filter((line) => line.startsWith("?? "))
-        .map((line) => line.slice(3).trim()),
+        .map((line) => this.stripGitPrefix(line.slice(3).trim(), prefix)),
     );
     for (const path of safePaths) {
       if (byPath.has(path)) continue;
@@ -492,21 +529,21 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // was nothing to commit.
   async commitAll(message: string): Promise<string | null> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
-    await this.git(["add", "-A"]);
-    const status = await this.git(["status", "--porcelain=v1"]);
+    await this.gitWithLiteralPathspecs(["add", "-A", "--", "."]);
+    const status = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", "."]);
     if (status.trim() === "") return null;
-    await this.git([...(await this.commitIdentityArgs()), "commit", "-m", message]);
+    await this.gitWithLiteralPathspecs([...(await this.commitIdentityArgs()), "commit", "-m", message, "--", "."]);
     return (await this.git(["rev-parse", "HEAD"])).trim();
   }
 
   async commitPaths(message: string, paths: string[]): Promise<string | null> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
-    const safePaths = paths.filter((path) => path && !path.startsWith("-"));
+    const safePaths = this.gitLiteralPaths(paths);
     if (safePaths.length === 0) return null;
-    await this.git(["add", "--", ...safePaths]);
-    const status = await this.git(["status", "--porcelain=v1", "--", ...safePaths]);
+    await this.gitWithLiteralPathspecs(["add", "--", ...safePaths]);
+    const status = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", ...safePaths]);
     if (status.trim() === "") return null;
-    await this.git([...(await this.commitIdentityArgs()), "commit", "-m", message, "--only", "--", ...safePaths]);
+    await this.gitWithLiteralPathspecs([...(await this.commitIdentityArgs()), "commit", "-m", message, "--only", "--", ...safePaths]);
     return (await this.git(["rev-parse", "HEAD"])).trim();
   }
 

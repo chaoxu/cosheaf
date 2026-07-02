@@ -250,3 +250,80 @@ test("workbench local annotation anchor inserts at selected source position @smo
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("workbench agent session review commits selected local edits @smoke-workbench-annotations", async ({ page }) => {
+  const dir = mkdtempSync(join(tmpdir(), "cosheaf-workbench-agent-session-"));
+  const port = await freePort();
+  const owner = "local";
+  const repo = dir.split("/").pop() ?? "cosheaf-workbench-agent-session";
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const logs: string[] = [];
+  let child: ChildProcess | null = null;
+
+  try {
+    writeFileSync(join(dir, "paper.md"), "# Paper\n\nFirst draft.\n");
+    git(dir, ["init", "-q", "-b", "main"]);
+    git(dir, ["config", "user.email", "smoke@example.test"]);
+    git(dir, ["config", "user.name", "Smoke"]);
+    git(dir, ["add", "paper.md"]);
+    git(dir, ["commit", "-qm", "init"]);
+
+    child = spawn("pnpm", ["workbench", dir, "--port", String(port)], {
+      cwd: process.cwd(),
+      env: { ...process.env, COSHEAF_NO_OPEN: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.on("data", (chunk) => logs.push(String(chunk)));
+    child.stderr?.on("data", (chunk) => logs.push(String(chunk)));
+
+    await waitForWorkbench(`${baseUrl}/${owner}/${repo}`, child, logs);
+
+    const annotation = await page.request.post(`${baseUrl}/api/v1/repos/${owner}/${repo}/local-annotations`, {
+      headers: { origin: baseUrl },
+      data: { id: "la_aaaaaaaaaaaa", path: "paper.md", body: "Clarify the opening.", author: "chao" },
+    });
+    expect(annotation.status()).toBe(201);
+    const session = await page.request.post(`${baseUrl}/api/v1/repos/${owner}/${repo}/agent-sessions`, {
+      headers: { origin: baseUrl },
+      data: {
+        id: "as_aaaaaaaaaaaa",
+        title: "Review agent edits",
+        touched_files: ["paper.md"],
+        linked_annotations: ["la_aaaaaaaaaaaa"],
+      },
+    });
+    expect(session.status()).toBe(201);
+
+    writeFileSync(join(dir, "paper.md"), "# Paper\n\nImproved draft from agent.\n");
+    const waiting = await page.request.patch(`${baseUrl}/api/v1/repos/${owner}/${repo}/agent-sessions/as_aaaaaaaaaaaa`, {
+      headers: { origin: baseUrl },
+      data: { status: "waiting_for_review", summary: "Ready for human review." },
+    });
+    expect(waiting.status()).toBe(200);
+
+    await page.goto(`${baseUrl}/${owner}/${repo}/agent-sessions/as_aaaaaaaaaaaa`);
+    await expect(page.getByRole("heading", { name: "Review agent edits" })).toBeVisible();
+    await expect(page.getByTestId("agent-session-annotations")).toContainText("la_aaaaaaaaaaaa");
+    await expect(page.getByTestId("agent-session-diff")).toContainText("Improved draft from agent.");
+
+    await page.getByRole("button", { name: "Resolve" }).click();
+    await expect(page.getByTestId("agent-session-notice")).toContainText("Annotation updated.");
+    await expect(page.getByTestId("agent-session-annotations")).toContainText("resolved");
+
+    await page.getByRole("button", { name: "Commit selected files" }).click();
+    await expect(page.getByTestId("agent-session-notice")).toContainText(/Committed [0-9a-f]{8}/);
+    await expect(page.getByText("This session has no touched files.")).toBeVisible();
+
+    const committedFiles = execFileSync("git", ["-C", dir, "show", "--name-only", "--format=", "HEAD"], { encoding: "utf8" }).trim();
+    expect(committedFiles).toBe("paper.md");
+    expect(execFileSync("git", ["-C", dir, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
+    const sidecar = JSON.parse(readFileSync(join(dir, ".cosheaf", "agent-sessions.json"), "utf8")) as {
+      sessions: Record<string, { status: string; touched_files: string[] }>;
+    };
+    expect(sidecar.sessions.as_aaaaaaaaaaaa.status).toBe("done");
+    expect(sidecar.sessions.as_aaaaaaaaaaaa.touched_files).toEqual([]);
+  } finally {
+    if (child) await stopWorkbench(child);
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  }
+});
