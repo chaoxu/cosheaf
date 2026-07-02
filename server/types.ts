@@ -24,17 +24,16 @@ export interface WorkspaceContext {
 // data-access seam every route should use (file/tree/branch reads+writes); it is
 // a ForgejoWorkspaceBackend in the hosted app and a LocalGitWorkspaceBackend in
 // the local Workbench. `fj` is the raw Forgejo client bound to the authenticated
-// user's server-side credential — kept for the hosted-only review/issue/
-// notification routes that are not mounted locally; it is undefined in local mode.
+// user's server-side credential — kept only for hosted-only paths that cannot
+// use the collaboration seam; it is undefined in local mode.
 export interface RepoCtx {
   backend: WorkspaceBackend;
   fj?: Forgejo;
   // The collaboration seam (#262): issues/pulls/reviews/notifications/settings
   // read this instead of `fj` directly. Hosted injects an in-process Core
   // adapter over Forgejo; the local Workbench injects an OriginCollaborationClient
-  // bound to the connected core. Optional during the migration; once every
-  // collaboration route reads `collab`, `fj` retires.
-  collab?: CollaborationClient;
+  // bound to the connected core.
+  collab: CollaborationClient;
   owner: string;
   repo: string;
 }
