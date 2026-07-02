@@ -140,3 +140,21 @@ describe("removeCollaborator", () => {
     await expect(client().removeCollaborator("owner", "repo", "ghost")).rejects.toBeInstanceOf(ForgejoError);
   });
 });
+
+describe("deleteBranch", () => {
+  it("encodes slash-containing branch names in the Forgejo API path", async () => {
+    let seenPath = "";
+    fetchMock.mockImplementation(
+      fakeForgejo((forge: Hono) => {
+        forge.delete("/api/v1/repos/owner/repo/branches/:branch", (c) => {
+          seenPath = c.req.path;
+          return c.body(null, 204);
+        });
+      }),
+    );
+
+    await client().deleteBranch("owner", "repo", "user/alice/wip-2");
+
+    expect(seenPath).toBe("/api/v1/repos/owner/repo/branches/user%2Falice%2Fwip-2");
+  });
+});

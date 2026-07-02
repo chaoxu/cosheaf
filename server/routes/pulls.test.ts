@@ -13,7 +13,18 @@ import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
 import { branches } from "./branches.js";
 import { classifyMergeFailure, pulls } from "./pulls.js";
-import { responseEmpty as empty, fakeForgejo, freshTestDb, responseOk as ok, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import {
+  fakeForgejo,
+  fakeWorkspaceBackend,
+  freshTestDb,
+  responseEmpty as empty,
+  responseOk as ok,
+  seedTestWorkspace,
+  testApp,
+  testConfig,
+  testLocalRouteApp,
+} from "./test-fixtures.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 
 const config = testConfig("pulls");
 
@@ -34,6 +45,10 @@ function appFor(db: Database.Database): Hono<AppEnv> {
     app.route("/api/v1/repos", pulls);
     app.route("/api/v1/repos", branches);
   });
+}
+
+function localBranchAppFor(db: Database.Database, backend = fakeWorkspaceBackend()): Hono<AppEnv> {
+  return testLocalRouteApp(db, config, backend, (app) => app.route("/api/v1/repos", branches));
 }
 
 const fetchMock = vi.fn();
@@ -1174,38 +1189,56 @@ describe("pulls + branches routes", () => {
   });
 
   describe("branches", () => {
-    it("GET /branches returns the forge-shaped branch list", async () => {
+    it("GET /branches has a hosted smoke over the normal auth/backend wiring", async () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "read");
-      const mainSha = "1111111111111111111111111111111111111111";
-      const wipSha = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
-      fetchMock.mockResolvedValueOnce(
-        ok([
-          { name: "main", commit: { id: mainSha, url: `http://forgejo.test/owner/w/commit/${mainSha}` } },
-          { name: "agent/wip", commit: { id: wipSha, url: `http://forgejo.test/owner/w/commit/${wipSha}` } },
-        ]),
-      );
+      fetchMock.mockResolvedValueOnce(ok([{ name: "main", commit: { id: "1111111111111111111111111111111111111111" } }]));
+
       const res = await appFor(db).request("/api/v1/repos/owner/w/branches", {
         headers: { authorization: `Bearer ${token}` },
       });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual([
+        {
+          name: "main",
+          commit: {
+            id: "1111111111111111111111111111111111111111",
+            url: "http://localhost/owner/w/commit/1111111111111111111111111111111111111111",
+          },
+        },
+      ]);
+    });
+
+    it("GET /branches returns backend branches with public commit links", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const mainSha = "1111111111111111111111111111111111111111";
+      const wipSha = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+      const backend = fakeWorkspaceBackend({
+        listBranches: async () => [
+          { name: "main", commit: { id: mainSha, url: `http://backend.invalid/owner/w/commit/${mainSha}` } },
+          { name: "agent/wip", commit: { id: wipSha, url: `http://backend.invalid/owner/w/commit/${wipSha}` } },
+        ],
+      });
+      const res = await localBranchAppFor(db, backend).request("/api/v1/repos/owner/w/branches");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toEqual([
         { name: "main", commit: { id: mainSha, url: `http://localhost/owner/w/commit/${mainSha}` } },
         { name: "agent/wip", commit: { id: wipSha, url: `http://localhost/owner/w/commit/${wipSha}` } },
       ]);
-      expect(JSON.stringify(body)).not.toContain("forgejo.test");
+      expect(JSON.stringify(body)).not.toContain("backend.invalid");
     });
 
     it("GET /branches omits commit.url for a synthetic working-tree (WORKTREE) ref", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "alice", "read");
-      fetchMock.mockResolvedValueOnce(ok([{ name: "main", commit: { id: "WORKTREE" } }]));
-      const res = await appFor(db).request("/api/v1/repos/owner/w/branches", {
-        headers: { authorization: `Bearer ${token}` },
+      const backend = fakeWorkspaceBackend({
+        listBranches: async () => [{ name: "main", commit: { id: "WORKTREE" } }],
       });
+      const res = await localBranchAppFor(db, backend).request("/api/v1/repos/owner/w/branches");
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toEqual([{ name: "main", commit: { id: "WORKTREE", url: "" } }]);
@@ -1227,29 +1260,24 @@ describe("pulls + branches routes", () => {
     it("GET /branches/mine filters by head-commit author and excludes branches with open PRs", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "alice", "write");
-      fetchMock
-        // listBranches: mix of authors. Includes a branch without the legacy
-        // user/<name>/ prefix to confirm we now match on author, not name.
-        .mockResolvedValueOnce(
-          ok([
-            { name: "main", commit: { id: "m", author: { username: "alice" } } },
-            {
-              name: "user/alice/wip-1",
-              commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z", author: { username: "alice" } },
-            },
-            {
-              name: "feature/docs",
-              commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z", author: { username: "alice" } },
-            },
-            { name: "user/test-bob/wip-9", commit: { id: "b9", author: { username: "test-bob" } } },
-          ]),
-        )
-        // listPulls "open"
-        .mockResolvedValueOnce(ok([pull({ head: { ref: "user/alice/wip-1", sha: "h" } })]));
-      const res = await appFor(db).request("/api/v1/repos/owner/w/branches/mine", {
-        headers: { authorization: `Bearer ${token}` },
+      const backend = fakeWorkspaceBackend({
+        // Mix of authors. Includes a branch without the legacy user/<name>/
+        // prefix to confirm we match on author, not name.
+        listBranches: async () => [
+          { name: "main", commit: { id: "m", author: { username: "alice" } } },
+          {
+            name: "user/alice/wip-1",
+            commit: { id: "a1", timestamp: "2026-05-16T00:00:00Z", author: { username: "alice" } },
+          },
+          {
+            name: "feature/docs",
+            commit: { id: "a2", timestamp: "2026-05-16T00:01:00Z", author: { username: "alice" } },
+          },
+          { name: "user/test-bob/wip-9", commit: { id: "b9", author: { username: "test-bob" } } },
+        ],
+        listPulls: async () => [{ head: { ref: "user/alice/wip-1" }, base: { ref: "main" }, merged: false, state: "open" }],
       });
+      const res = await localBranchAppFor(db, backend).request("/api/v1/repos/owner/w/branches/mine");
       expect(res.status).toBe(200);
       const body = (await res.json()) as { branches: Array<{ name: string }> };
       // wip-1 excluded (open PR by alice), feature/docs kept (alice
@@ -1273,30 +1301,27 @@ describe("pulls + branches routes", () => {
     it("DELETE /branches/:name handles slash-containing names", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "alice", "write");
-      fetchMock.mockResolvedValueOnce(empty(204));
-      const res = await appFor(db).request("/api/v1/repos/owner/w/branches/user/alice/wip-2", {
-        method: "DELETE",
-        headers: { authorization: `Bearer ${token}` },
+      let deletedBranch: string | null = null;
+      const backend = fakeWorkspaceBackend({
+        deleteBranch: async (_owner, _repo, branch) => {
+          deletedBranch = branch;
+        },
       });
+      const res = await localBranchAppFor(db, backend).request("/api/v1/repos/owner/w/branches/user/alice/wip-2", { method: "DELETE" });
       expect(res.status).toBe(200);
-      // Upstream Forgejo URL contains the full multi-segment name (URL-encoded
-      // per Forgejo's API path-param convention).
-      expect(String(fetchMock.mock.calls[0][0])).toContain(
-        "/branches/user%2Falice%2Fwip-2",
-      );
+      expect(deletedBranch).toBe("user/alice/wip-2");
     });
 
-    it("DELETE /branches/:name propagates Forgejo delete failures", async () => {
+    it("DELETE /branches/:name propagates backend delete failures", async () => {
       const db = freshDb();
       seedWorkspace(db);
-      const token = seedUser(db, 1, "alice", "write");
-      fetchMock.mockResolvedValueOnce(new Response("forgejo down", { status: 500 }));
-
-      const res = await appFor(db).request("/api/v1/repos/owner/w/branches/user/alice/wip-2", {
-        method: "DELETE",
-        headers: { authorization: `Bearer ${token}` },
+      const backend = fakeWorkspaceBackend({
+        deleteBranch: async () => {
+          throw new WorkspaceBackendError(500, "error", "backend down");
+        },
       });
+
+      const res = await localBranchAppFor(db, backend).request("/api/v1/repos/owner/w/branches/user/alice/wip-2", { method: "DELETE" });
 
       expect(res.status).toBe(500);
       expect(await res.text()).not.toContain("\"ok\":true");

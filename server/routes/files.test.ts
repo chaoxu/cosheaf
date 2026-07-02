@@ -8,8 +8,17 @@ import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
 import { _clearBranchRefCacheForTests, files, safeRel } from "./files.js";
-import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import {
+  fakeForgejo,
+  fakeWorkspaceBackend,
+  freshTestDb,
+  seedTestWorkspace,
+  testApp,
+  testConfig,
+  testLocalRouteApp,
+} from "./test-fixtures.js";
 
 const config = testConfig("files");
 
@@ -21,6 +30,10 @@ function freshDb(defaultMdFormat = COFLAT_FORMAT_ID): Database.Database {
 
 function appFor(db: Database.Database): Hono<AppEnv> {
   return testApp(db, config, (app) => app.route("/api/v1/repos", files));
+}
+
+function localFilesAppFor(db: Database.Database, backend = fakeWorkspaceBackend()): Hono<AppEnv> {
+  return testLocalRouteApp(db, config, backend, (app) => app.route("/api/v1/repos", files));
 }
 
 const fetchMock = vi.fn();
@@ -1469,17 +1482,21 @@ describe("files concurrent-write conflicts (#92)", () => {
     expect(calls).toEqual(["create-branch", "write-file"]);
   });
 
-  it("maps a stale-sha 422 from Forgejo to a typed 409 with recovery details", async () => {
+  it("maps a backend stale-sha error to a typed 409 with recovery details", async () => {
     const db = freshDb();
-    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
-    fetchMock.mockImplementation(fakeForgejo((forge) => {
-      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
-      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ sha: "sha-now" }));
-      // The write loses the head race: Forgejo rejects the stale blob sha.
-      forge.put("/api/v1/repos/owner/w/contents/notes.md", (c) => c.text("sha does not match [given: A, expected: B]", 422));
-    }));
+    const backend = fakeWorkspaceBackend({
+      getBranch: async () => ({ name: "user/alice/wip", commit: { id: "head-now" } }),
+      getFileMeta: async () => ({ sha: "sha-now", size: 8 }),
+      putFile: async () => {
+        throw new WorkspaceBackendError(409, "stale_sha", "branch head moved");
+      },
+    });
 
-    const res = await writeReq(db, token, { content: "# Notes\n" });
+    const res = await localFilesAppFor(db, backend).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "# Notes\n" }),
+    });
     expect(res.status).toBe(409);
     const body = (await res.json()) as { code: string; details: Record<string, unknown> };
     expect(body.code).toBe("conflict");

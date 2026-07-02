@@ -597,9 +597,8 @@ files.put("/:owner/:repo/file", async (c) => {
     });
   } catch (err) {
     // A concurrent writer landed a commit between our getFileMeta read and the
-    // putFile: Forgejo rejects the stale blob sha as 422 "sha does not match"
-    // (a push-level reject is 409). Either way, surface a typed, recoverable
-    // conflict instead of a bare 502 (#92).
+    // putFile. The backend reports that as `stale_sha`; surface a typed,
+    // recoverable conflict instead of a bare 502 (#92).
     if (isStaleShaConflict(err)) {
       return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, expectedSha)));
     }

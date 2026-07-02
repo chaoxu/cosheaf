@@ -200,7 +200,7 @@ describe("web file editor route", () => {
     expect(await res.text()).toContain("NewKey");
   });
 
-  it("reuses the cached Forgejo tree across server-rendered file pages", async () => {
+  it("reuses the cached backend tree across server-rendered file pages", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
     const token = seedAuthUser(db, config, { username: "alice", role: "read" });

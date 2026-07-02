@@ -15,10 +15,13 @@ import { DEFAULT_DOCUMENT_FORMAT_ID } from "../../shared/document-format.js";
 import type { Config } from "../db.js";
 import { Forgejo } from "../forgejo.js";
 import { makeT } from "../../shared/i18n/index.js";
+import type { LocalGitWorkspaceBackend } from "../local/local-git-backend.js";
+import { WorkspaceRegistry } from "../local/workspace-registry.js";
 import { resolveLocale } from "../locale.js";
 import { _seedFormatCacheForTests } from "../middleware.js";
 import { SSEHub } from "../sse.js";
-import type { AppEnv } from "../types.js";
+import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
+import type { WorkspaceBackend } from "../workspace-backend.js";
 
 // Tracks every Database returned by freshTestDb() so a single afterEach
 // closes them and cleans up the tmpdir behind them. Without this each
@@ -115,6 +118,76 @@ export function testApp(
     c.set("db", db);
     c.set("config", config);
     c.set("fjAdmin", fjAdmin ?? new Forgejo({ baseUrl: config.forgejoUrl, token: config.forgejoAdminToken }));
+    c.set("sse", sse);
+    const locale = resolveLocale(c);
+    c.set("locale", locale);
+    c.set("t", makeT(locale));
+    await next();
+  });
+  mount(app);
+  return app;
+}
+
+export function fakeWorkspaceBackend(overrides: Partial<WorkspaceBackend> = {}): WorkspaceBackend {
+  function missing<K extends keyof WorkspaceBackend>(name: K): WorkspaceBackend[K] {
+    return (async () => {
+      throw new Error(`fake WorkspaceBackend method not implemented: ${String(name)}`);
+    }) as WorkspaceBackend[K];
+  }
+  return {
+    getTree: missing("getTree"),
+    getRawFile: missing("getRawFile"),
+    getRawFileBytes: missing("getRawFileBytes"),
+    getFileMeta: missing("getFileMeta"),
+    putFile: missing("putFile"),
+    putFileBytes: missing("putFileBytes"),
+    deleteFile: missing("deleteFile"),
+    getBranch: missing("getBranch"),
+    listBranches: missing("listBranches"),
+    createBranch: missing("createBranch"),
+    deleteBranch: missing("deleteBranch"),
+    getRepo: missing("getRepo"),
+    listPulls: missing("listPulls"),
+    getCommit: missing("getCommit"),
+    ...overrides,
+  };
+}
+
+export function testLocalRouteApp(
+  db: Database.Database,
+  config: Config,
+  backend: WorkspaceBackend,
+  mount: (app: Hono<AppEnv>) => void,
+  identity: Partial<LocalWorkspaceIdentity> = {},
+): Hono<AppEnv> {
+  const localConfig = { ...config, mode: "local" as const };
+  const ws: LocalWorkspaceIdentity = {
+    owner: identity.owner ?? "owner",
+    repo: identity.repo ?? "w",
+    defaultMdFormat: identity.defaultMdFormat ?? DEFAULT_DOCUMENT_FORMAT_ID,
+    user: identity.user ?? "alice",
+    title: identity.title ?? "w",
+    canOpenPull: identity.canOpenPull ?? false,
+    originId: identity.originId,
+  };
+  const registry = new WorkspaceRegistry(db, { user: ws.user });
+  registry.register({
+    slug: workspaceSlug(ws.owner, ws.repo),
+    path: "",
+    identity: ws,
+    // Test-only seam injection: route tests only call WorkspaceBackend methods.
+    // Real local Workbench entries still use LocalGitWorkspaceBackend because
+    // local-only routes such as open-PR need git-specific methods.
+    backend: backend as LocalGitWorkspaceBackend,
+    remote: null,
+    gitRemote: null,
+  });
+  const app = new Hono<AppEnv>();
+  const sse = new SSEHub();
+  app.use("*", async (c, next) => {
+    c.set("db", db);
+    c.set("config", localConfig);
+    c.set("localRegistry", registry);
     c.set("sse", sse);
     const locale = resolveLocale(c);
     c.set("locale", locale);
