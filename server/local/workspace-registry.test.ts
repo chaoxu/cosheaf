@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -53,6 +53,28 @@ describe("WorkspaceRegistry sidecar protection", () => {
     const entry = await reg.addFolder(dir);
     expect(entry.remote).toBeNull();
     expect(entry.identity.canOpenPull).toBe(false);
+  });
+
+  it("drops stale markdown and citation rows when a folder is re-indexed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-reg-index-"));
+    writeFileSync(join(dir, "gone.md"), "# Gone\n");
+    writeFileSync(join(dir, "refs.bib"), "@article{Gone2026, title={Gone}}\n");
+    const db = freshTestDb("cosheaf-reg-index-db-");
+    const reg = new WorkspaceRegistry(db);
+    const entry = await reg.addFolder(dir);
+    expect(db.prepare("SELECT path FROM notes_fts WHERE workspace_slug = ?").all(entry.slug)).toEqual([
+      { path: "gone.md" },
+    ]);
+    expect(db.prepare("SELECT target_id, source_path FROM citation_targets WHERE workspace_slug = ?").all(entry.slug)).toEqual([
+      { target_id: "Gone2026", source_path: "refs.bib" },
+    ]);
+
+    rmSync(join(dir, "gone.md"));
+    rmSync(join(dir, "refs.bib"));
+    await reg.index(entry);
+
+    expect(db.prepare("SELECT count(*) AS c FROM doc_map WHERE workspace_slug = ?").get(entry.slug)).toEqual({ c: 0 });
+    expect(db.prepare("SELECT count(*) AS c FROM citation_targets WHERE workspace_slug = ?").get(entry.slug)).toEqual({ c: 0 });
   });
 });
 

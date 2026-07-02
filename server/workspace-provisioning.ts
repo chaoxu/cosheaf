@@ -12,7 +12,7 @@ import { isCoverifyChatEnabled } from "./coverify-cli.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
-import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./indexer.js";
+import { indexCitationFile, indexPage, pruneWorkspaceIndex } from "./indexer.js";
 import { clearRepoConfig } from "./repo-config.js";
 import type { User } from "./users.js";
 import { withWorkspaceSidecarLock } from "./workspace-lock.js";
@@ -391,18 +391,7 @@ export async function reindexWorkspaceFromForgejo(
     }
   }
 
-  const indexed = db
-    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = ?")
-    .all(workspace.slug) as Array<{ forgejo_id: string }>;
-  for (const row of indexed) {
-    if (!seenMarkdown.has(row.forgejo_id)) deletePage(db, workspace.slug, row.forgejo_id);
-  }
-  const indexedCitations = db
-    .prepare("SELECT source_path FROM citation_targets WHERE workspace_slug = ? GROUP BY source_path")
-    .all(workspace.slug) as Array<{ source_path: string }>;
-  for (const row of indexedCitations) {
-    if (!seenCitations.has(row.source_path)) deleteCitationFile(db, workspace.slug, row.source_path);
-  }
+  pruneWorkspaceIndex(db, workspace.slug, seenMarkdown, seenCitations);
   return seenMarkdown.size;
 }
 

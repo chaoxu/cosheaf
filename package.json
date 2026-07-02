@@ -100,7 +100,6 @@
     "pluto:verify": "node scripts/prod-release.mjs verify",
     "pluto:repo-check": "node scripts/prod-release.mjs repo-check",
     "pluto:e2e": "node scripts/prod-e2e.mjs",
-    "jupiter:e2e": "node scripts/jupiter-e2e.mjs",
     "test:e2e": "node scripts/playwright-devx.mjs",
     "check:e2e": "node scripts/playwright-devx.mjs",
     "check:web": "node scripts/playwright-devx.mjs tests/e2e/web-pages.spec.ts",

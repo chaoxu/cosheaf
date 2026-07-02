@@ -13,6 +13,12 @@ function tmpRepo(): string {
 const O = "owner";
 const R = "repo";
 
+async function existingSha(backend: LocalGitWorkspaceBackend, path: string): Promise<string> {
+  const meta = await backend.getFileMeta(O, R, "main", path);
+  if (!meta) throw new Error(`missing fixture file: ${path}`);
+  return meta.sha;
+}
+
 describe("gitBlobHash", () => {
   it("matches `git hash-object` for the same bytes", () => {
     // `printf 'hello\n' | git hash-object --stdin`
@@ -67,8 +73,58 @@ describe("LocalGitWorkspaceBackend", () => {
     const dir = tmpRepo();
     writeFileSync(join(dir, "gone.md"), "x");
     const backend = new LocalGitWorkspaceBackend(dir);
-    await backend.deleteFile(O, R, { branch: "main", path: "gone.md", sha: "x", message: "m" });
+    await backend.deleteFile(O, R, { branch: "main", path: "gone.md", sha: await existingSha(backend, "gone.md"), message: "m" });
     expect(await backend.getFileMeta(O, R, "main", "gone.md")).toBeNull();
+  });
+
+  it("rejects stale writes and leaves the current file untouched", async () => {
+    const dir = tmpRepo();
+    writeFileSync(join(dir, "a.md"), "first\n");
+    const backend = new LocalGitWorkspaceBackend(dir);
+    const stale = await existingSha(backend, "a.md");
+    writeFileSync(join(dir, "a.md"), "second\n");
+
+    await expect(
+      backend.putFile(O, R, { branch: "main", path: "a.md", content: "third\n", message: "m", sha: stale }),
+    ).rejects.toMatchObject({ code: "stale_sha" });
+    expect(readFileSync(join(dir, "a.md"), "utf8")).toBe("second\n");
+  });
+
+  it("rejects blind overwrites of existing files", async () => {
+    const dir = tmpRepo();
+    writeFileSync(join(dir, "a.md"), "first\n");
+    const backend = new LocalGitWorkspaceBackend(dir);
+
+    await expect(
+      backend.putFile(O, R, { branch: "main", path: "a.md", content: "second\n", message: "m" }),
+    ).rejects.toMatchObject({ code: "stale_sha" });
+    expect(readFileSync(join(dir, "a.md"), "utf8")).toBe("first\n");
+  });
+
+  it("rejects stale binary writes", async () => {
+    const dir = tmpRepo();
+    writeFileSync(join(dir, "image.bin"), Buffer.from([1, 2, 3]));
+    const backend = new LocalGitWorkspaceBackend(dir);
+    const stale = await existingSha(backend, "image.bin");
+    writeFileSync(join(dir, "image.bin"), Buffer.from([4, 5, 6]));
+
+    await expect(
+      backend.putFileBytes(O, R, { branch: "main", path: "image.bin", content: Buffer.from([7]), message: "m", sha: stale }),
+    ).rejects.toMatchObject({ code: "stale_sha" });
+    expect(readFileSync(join(dir, "image.bin"))).toEqual(Buffer.from([4, 5, 6]));
+  });
+
+  it("rejects stale deletes and leaves the file in place", async () => {
+    const dir = tmpRepo();
+    writeFileSync(join(dir, "gone.md"), "first\n");
+    const backend = new LocalGitWorkspaceBackend(dir);
+    const stale = await existingSha(backend, "gone.md");
+    writeFileSync(join(dir, "gone.md"), "second\n");
+
+    await expect(
+      backend.deleteFile(O, R, { branch: "main", path: "gone.md", sha: stale, message: "m" }),
+    ).rejects.toMatchObject({ code: "stale_sha" });
+    expect(readFileSync(join(dir, "gone.md"), "utf8")).toBe("second\n");
   });
 
   it("treats any branch name as existing (no branch forking) and lists main", async () => {
@@ -129,7 +185,13 @@ describe("LocalGitWorkspaceBackend", () => {
     // The working tree is the single source: a write with any branch label lands
     // on the checked-out tree — the work is always on the current branch.
     await expect(
-      backend.putFile(O, R, { branch: "main", path: "a.md", content: "y", message: "m" }),
+      backend.putFile(O, R, {
+        branch: "main",
+        path: "a.md",
+        content: "y",
+        message: "m",
+        sha: await existingSha(backend, "a.md"),
+      }),
     ).resolves.toMatchObject({ content: { sha: expect.any(String) } });
     expect(readFileSync(join(dir, "a.md"), "utf8")).toBe("y");
     // getRepo reports the checked-out branch as the default, so the UI routes there.

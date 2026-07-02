@@ -187,8 +187,8 @@ it after the user explicitly asks for production deploy:
 COSHEAF_CONFIRM_PROD_RELEASE=1 pnpm prod:release
 ```
 
-`pnpm pluto:*` aliases are equivalent. `pnpm jupiter:e2e` remains only as a
-deprecated compatibility shim; do not use it for new production work.
+`pnpm pluto:release`, `pnpm pluto:verify`, `pnpm pluto:repo-check`, and
+`pnpm pluto:e2e` are equivalent aliases.
 
 Useful overrides for `pnpm dev:login-state`:
 

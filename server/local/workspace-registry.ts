@@ -14,7 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import { workspaceSlug } from "../../shared/conventions.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
-import { indexCitationFile, indexPage } from "../indexer.js";
+import { indexCitationFile, indexPage, pruneWorkspaceIndex } from "../indexer.js";
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { type LocalGitRemote, type LocalRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
@@ -146,6 +146,8 @@ export class WorkspaceRegistry {
   async index(entry: WorkspaceEntry): Promise<{ pages: number; bibs: number }> {
     const { owner, repo, defaultMdFormat } = entry.identity;
     const tree = await entry.backend.getTree(owner, repo, "main", true);
+    const seenMarkdown = new Set<string>();
+    const seenCitations = new Set<string>();
     let pages = 0;
     let bibs = 0;
     for (const node of tree) {
@@ -153,13 +155,16 @@ export class WorkspaceRegistry {
       if (fileKindForPath(node.path) === "markdown") {
         const content = await entry.backend.getRawFile(owner, repo, "main", node.path);
         indexPage(this.db, { workspaceSlug: entry.slug, filePath: node.path, bodyText: content, formatId: defaultMdFormat });
+        seenMarkdown.add(node.path);
         pages++;
       } else if (node.path.toLowerCase().endsWith(".bib")) {
         const content = await entry.backend.getRawFile(owner, repo, "main", node.path);
         indexCitationFile(this.db, { workspaceSlug: entry.slug, filePath: node.path, bodyText: content });
+        seenCitations.add(node.path);
         bibs++;
       }
     }
+    pruneWorkspaceIndex(this.db, entry.slug, seenMarkdown, seenCitations);
     return { pages, bibs };
   }
 

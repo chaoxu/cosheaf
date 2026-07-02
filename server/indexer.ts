@@ -333,6 +333,26 @@ export function deleteCitationFile(db: Database.Database, workspaceSlug: string,
     .run(workspaceSlug, filePath);
 }
 
+export function pruneWorkspaceIndex(
+  db: Database.Database,
+  workspaceSlug: string,
+  seenMarkdown: Set<string>,
+  seenCitations: Set<string>,
+): void {
+  const indexedPages = db
+    .prepare("SELECT forgejo_id FROM doc_map WHERE workspace_slug = ?")
+    .all(workspaceSlug) as Array<{ forgejo_id: string }>;
+  for (const row of indexedPages) {
+    if (!seenMarkdown.has(row.forgejo_id)) deletePage(db, workspaceSlug, row.forgejo_id);
+  }
+  const indexedCitations = db
+    .prepare("SELECT source_path FROM citation_targets WHERE workspace_slug = ? GROUP BY source_path")
+    .all(workspaceSlug) as Array<{ source_path: string }>;
+  for (const row of indexedCitations) {
+    if (!seenCitations.has(row.source_path)) deleteCitationFile(db, workspaceSlug, row.source_path);
+  }
+}
+
 function resolveLinkTarget(
   db: Database.Database,
   workspaceSlug: string,

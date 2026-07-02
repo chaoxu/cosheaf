@@ -86,6 +86,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // Lazy getter for the Workbench profile (git authorship fallback). Read at
   // commit time so a profile set after the backend was built still applies.
   private readonly author: (() => WorkbenchProfile | null) | undefined;
+  private readonly mutationQueues = new Map<string, Promise<void>>();
 
   constructor(rootDir: string, opts: { pushRemote?: string; author?: () => WorkbenchProfile | null } = {}) {
     this.root = resolve(rootDir);
@@ -158,6 +159,44 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     }
   }
 
+  private async withPathMutation<T>(fullPath: string, fn: () => Promise<T>): Promise<T> {
+    const key = fullPath;
+    const previous = this.mutationQueues.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate;
+    });
+    const next = previous.catch(() => {}).then(() => gate);
+    this.mutationQueues.set(key, next);
+    await previous.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.mutationQueues.get(key) === next) this.mutationQueues.delete(key);
+    }
+  }
+
+  private async requireCurrentSha(
+    filepath: string,
+    sha: string | undefined,
+    opts: { mustExist?: boolean } = {},
+  ): Promise<void> {
+    const current = await this.getFileMeta("", "", "WORKTREE", filepath);
+    if (!current) {
+      if (opts.mustExist) {
+        throw new WorkspaceBackendError(404, "not_found", `not found: ${filepath}`);
+      }
+      if (sha) {
+        throw new WorkspaceBackendError(409, "stale_sha", `stale sha for ${filepath}`);
+      }
+      return;
+    }
+    if (!sha || current.sha !== sha) {
+      throw new WorkspaceBackendError(409, "stale_sha", `stale sha for ${filepath}`);
+    }
+  }
+
   async getTree(_owner: string, _repo: string, _ref: string, _recursive = true): Promise<WsTreeEntry[]> {
     const entries: WsTreeEntry[] = [];
     const walk = async (dir: string): Promise<void> => {
@@ -224,28 +263,34 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // the UI routes there in the first place (no hardcoded "main" mismatch).
   async putFileBytes(_owner: string, _repo: string, opts: WsPutFileBytes): Promise<WsFileWrite> {
     const full = this.abs(opts.path);
-    await this.assertRealParentInside(full);
-    await mkdir(resolve(full, ".."), { recursive: true });
-    // Write to a temp sibling then rename so a reader never sees a half-written
-    // file. The temp name is derived from the content hash (no Math.random,
-    // which is unavailable in some sandboxes and irrelevant here).
-    const tmp = `${full}.tmp-${gitBlobHash(opts.content).slice(0, 12)}-${this.writeSeq++}`;
-    await writeFile(tmp, opts.content);
-    await rename(tmp, full);
-    return { content: { sha: gitBlobHash(opts.content) }, commit: { sha: WORKTREE_REF } };
+    return this.withPathMutation(full, async () => {
+      await this.assertRealParentInside(full);
+      await this.requireCurrentSha(opts.path, opts.sha);
+      await mkdir(resolve(full, ".."), { recursive: true });
+      // Write to a temp sibling then rename so a reader never sees a half-written
+      // file. The temp name is derived from the content hash (no Math.random,
+      // which is unavailable in some sandboxes and irrelevant here).
+      const tmp = `${full}.tmp-${gitBlobHash(opts.content).slice(0, 12)}-${this.writeSeq++}`;
+      await writeFile(tmp, opts.content);
+      await rename(tmp, full);
+      return { content: { sha: gitBlobHash(opts.content) }, commit: { sha: WORKTREE_REF } };
+    });
   }
 
   async deleteFile(_owner: string, _repo: string, opts: WsDeleteFile): Promise<void> {
     const full = this.abs(opts.path);
-    await this.assertRealParentInside(full);
-    try {
-      await rm(full);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new WorkspaceBackendError(404, "not_found", `not found: ${opts.path}`);
+    return this.withPathMutation(full, async () => {
+      await this.assertRealParentInside(full);
+      await this.requireCurrentSha(opts.path, opts.sha, { mustExist: true });
+      try {
+        await rm(full);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new WorkspaceBackendError(404, "not_found", `not found: ${opts.path}`);
+        }
+        throw err;
       }
-      throw err;
-    }
+    });
   }
 
   // Any branch name "exists" (it aliases the working tree), so the route's
