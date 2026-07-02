@@ -98,6 +98,12 @@ describe("OriginCollaborationClient write methods", () => {
     expect(fake.calls[0]?.init?.method).toBe("DELETE");
   });
 
+  it("does not apply main-branch review policy to non-main branches", async () => {
+    const fake = recordingFetch(() => Response.json({ min_approvals: 2 }));
+    await expect(clientWith(fake.fetch).getBranchProtection("me", "notes", "release")).resolves.toBeNull();
+    expect(fake.calls).toEqual([]);
+  });
+
   it("forwards issue assignees through the typed issue patch route", async () => {
     const fake = recordingFetch(() =>
       Response.json({

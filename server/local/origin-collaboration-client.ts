@@ -738,10 +738,10 @@ export class OriginCollaborationClient {
     }
   }
 
-  // The typed surface exposes only the main-branch review policy via /settings;
-  // every caller reads this for "main", and `min_approvals` is that branch's
-  // required-approvals count.
+  // The typed surface exposes only the main-branch review policy via /settings.
+  // Do not label that policy as applying to another base branch.
   async getBranchProtection(owner: string, repo: string, branch: string): Promise<BranchProtectionShape | null> {
+    if (branch !== "main") return null;
     const r = await this.get<{ min_approvals: number }>(this.repoPath(owner, repo, "/settings"));
     return { branch_name: branch, required_approvals: r.min_approvals };
   }
