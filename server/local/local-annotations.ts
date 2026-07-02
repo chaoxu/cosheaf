@@ -54,9 +54,9 @@ function annotationFilePath(entry: WorkspaceEntry): string {
   return join(entry.path, LOCAL_ANNOTATIONS_FILE);
 }
 
-function readWorkspaceText(entry: WorkspaceEntry, rel: string): string | null {
+async function readWorkspaceText(entry: WorkspaceEntry, rel: string): Promise<string | null> {
   try {
-    return readFileSync(join(entry.path, rel), "utf8");
+    return await entry.backend.getRawFile(entry.identity.owner, entry.identity.repo, "WORKTREE", rel);
   } catch (_err) {
     return null;
   }
@@ -199,20 +199,21 @@ function sourceContext(source: string | null, anchor: string): LocalAnnotationCo
   };
 }
 
-export function localAnnotationQueue(entry: WorkspaceEntry, opts: { path?: string | null } = {}): LocalAnnotationQueueItem[] {
+export async function localAnnotationQueue(entry: WorkspaceEntry, opts: { path?: string | null } = {}): Promise<LocalAnnotationQueueItem[]> {
   const path = opts.path ? safeRel(opts.path) : null;
   const data = readLocalAnnotations(entry);
   const sourceByPath = new Map<string, string | null>();
-  return sortedAnnotations(data)
+  const queue: LocalAnnotationQueueItem[] = [];
+  for (const annotation of sortedAnnotations(data)
     .filter((annotation) => annotation.status === "open")
-    .filter((annotation) => !path || annotation.path === path)
-    .map((annotation) => {
-      if (!sourceByPath.has(annotation.path)) sourceByPath.set(annotation.path, readWorkspaceText(entry, annotation.path));
-      return {
-        ...annotation,
-        context: sourceContext(sourceByPath.get(annotation.path) ?? null, annotation.anchor),
-      };
+    .filter((annotation) => !path || annotation.path === path)) {
+    if (!sourceByPath.has(annotation.path)) sourceByPath.set(annotation.path, await readWorkspaceText(entry, annotation.path));
+    queue.push({
+      ...annotation,
+      context: sourceContext(sourceByPath.get(annotation.path) ?? null, annotation.anchor),
     });
+  }
+  return queue;
 }
 
 export function localAnchorPreflightIssues(entry: WorkspaceEntry, path: string, source: string): LocalAnchorPreflightIssue[] {
@@ -265,14 +266,14 @@ localAnnotations.use("*", requireAuth);
 localAnnotations.use("/:owner/:repo/*", requireMembership());
 localAnnotations.use("/:owner/:repo/*", requireWriteOnMutation);
 
-localAnnotations.get("/:owner/:repo/local-annotations/unresolved", (c) => {
+localAnnotations.get("/:owner/:repo/local-annotations/unresolved", async (c) => {
   const entry = localAnnotationEntry(c);
   if (!entry) return c.json({ error: "workspace not found" }, 404);
   const path = c.req.query("path");
   const rel = path ? safeRel(path) : null;
   if (path && !rel) return c.json({ error: "invalid path" }, 400);
   try {
-    return c.json({ annotations: localAnnotationQueue(entry, { path: rel }) });
+    return c.json({ annotations: await localAnnotationQueue(entry, { path: rel }) });
   } catch (err) {
     const conflict = localAnnotationSidecarConflict(err);
     if (conflict) return c.json(conflict, 409);

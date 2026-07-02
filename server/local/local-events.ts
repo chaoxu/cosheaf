@@ -57,6 +57,21 @@ export function publishLocalFileEvent(
   publishLocalWorkbenchEvent(c, target, { ...event, type: LOCAL_FILE_EVENT_TYPE });
 }
 
+export function publishLocalFileMutationEvents(
+  c: Context<AppEnv>,
+  target: WorkspaceEntry | string,
+  event: LocalFileEventInput,
+): void {
+  const slug = typeof target === "string" ? target : target.slug;
+  const paths = event.action === "moved" && event.previous_path ? [event.previous_path, event.path] : [event.path];
+  publishLocalFileEvent(c, slug, event);
+  publishLocalGitEvent(c, slug, { action: "status_changed", paths });
+  if (event.action === "moved" && event.previous_path) {
+    c.get("sse").publish(slug, { type: "change", path: event.previous_path });
+  }
+  c.get("sse").publish(slug, { type: "change", path: event.path });
+}
+
 export function publishLocalAnnotationEvent(
   c: Context<AppEnv>,
   entry: WorkspaceEntry,

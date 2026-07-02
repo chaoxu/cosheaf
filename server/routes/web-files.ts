@@ -14,7 +14,7 @@ import {
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { assertLocalAnnotationsReadable, localAnnotationSidecarConflict, moveLocalAnnotationsPath } from "../local/local-annotations.js";
-import { publishLocalFileEvent, publishLocalGitEvent } from "../local/local-events.js";
+import { publishLocalFileMutationEvents } from "../local/local-events.js";
 import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -313,11 +313,8 @@ web.post("/:owner/:repo/src/branch/*", webRouteForWrite(async (c, ctx) => {
   indexLocalDelete(ctx.writeMode === "direct", ctx.db, ctx.ws.slug, rel);
   if (rel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, resolved.branch);
   invalidateBranchTree(ctx.owner, ctx.repo, resolved.branch);
-  if (ctx.writeMode === "direct") {
-    publishLocalFileEvent(c, ctx.ws.slug, { action: "removed", path: rel });
-    publishLocalGitEvent(c, ctx.ws.slug, { action: "status_changed", paths: [rel] });
-  }
-  c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
+  if (ctx.writeMode === "direct") publishLocalFileMutationEvents(c, ctx.ws.slug, { action: "removed", path: rel });
+  else c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
   return redirect(`${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(resolved.branch)}`);
 }));
 
@@ -493,13 +490,13 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
     throw err;
   }
   if (ctx.writeMode === "direct") {
-    publishLocalFileEvent(c, ctx.ws.slug, oldRel && oldRel !== rel
+    publishLocalFileMutationEvents(c, ctx.ws.slug, oldRel && oldRel !== rel
       ? { action: "moved", path: rel, previous_path: oldRel }
       : { action: "changed", path: rel });
-    publishLocalGitEvent(c, ctx.ws.slug, { action: "status_changed", paths: oldRel && oldRel !== rel ? [oldRel, rel] : [rel] });
+  } else {
+    if (oldRel && oldRel !== rel) c.get("sse").publish(ctx.ws.slug, { type: "change", path: oldRel });
+    c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
   }
-  if (oldRel && oldRel !== rel) c.get("sse").publish(ctx.ws.slug, { type: "change", path: oldRel });
-  c.get("sse").publish(ctx.ws.slug, { type: "change", path: rel });
   return redirect(
     kind === "markdown"
       ? `${readHref(ctx.owner, ctx.repo, branch, rel)}?mode=edit`
