@@ -9,7 +9,16 @@ import { _resetPdfExportLimiterForTest, _setPdfExportCommandRunnerForTest, _setP
 import { authHeaders, formHeaders, seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
-import { fakeForgejo, freshTestDb, seedTestWorkspace, testApp, testConfig } from "./test-fixtures.js";
+import { WorkspaceBackendError } from "../workspace-backend.js";
+import {
+  fakeForgejo,
+  fakeWorkspaceBackend,
+  freshTestDb,
+  seedTestWorkspace,
+  testApp,
+  testConfig,
+  testLocalRouteApp,
+} from "./test-fixtures.js";
 import { registerBranchRoutes } from "./web-branches.js";
 import { registerFileRoutes } from "./web-files.js";
 
@@ -17,6 +26,13 @@ const config = testConfig("web-files");
 
 function appFor(db: Database.Database): Hono<AppEnv> {
   return testApp(db, config, (app) => {
+    registerFileRoutes(app);
+    registerBranchRoutes(app);
+  });
+}
+
+function localWebAppFor(db: Database.Database, backend = fakeWorkspaceBackend()): Hono<AppEnv> {
+  return testLocalRouteApp(db, config, backend, (app) => {
     registerFileRoutes(app);
     registerBranchRoutes(app);
   });
@@ -203,28 +219,23 @@ describe("web file editor route", () => {
   it("reuses the cached backend tree across server-rendered file pages", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
-    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
     let treeCalls = 0;
-    fetchMock.mockImplementation(
-      fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
-        forge.get("/api/v1/repos/owner/w/git/trees/main", () => {
-          treeCalls += 1;
-          return Response.json({
-            tree: [
-              { path: "a.md", type: "blob" },
-              { path: "b.md", type: "blob" },
-            ],
-            truncated: false,
-          });
-        });
-        forge.get("/api/v1/repos/owner/w/contents/:path", () => Response.json({ sha: "current-sha" }));
-        forge.get("/api/v1/repos/owner/w/raw/:path", (c) => new Response(`# ${c.req.param("path")}\n`));
-      }),
-    );
+    const backend = fakeWorkspaceBackend({
+      getBranch: async (_owner, _repo, branch) => ({ name: branch, commit: { id: branch } }),
+      listBranches: async () => [{ name: "main", commit: { id: "main" } }],
+      getTree: async () => {
+        treeCalls += 1;
+        return [
+          { path: "a.md", type: "blob", sha: "a-sha" },
+          { path: "b.md", type: "blob", sha: "b-sha" },
+        ];
+      },
+      getFileMeta: async () => ({ sha: "current-sha", size: 8 }),
+      getRawFile: async (_owner, _repo, _ref, path) => `# ${path}\n`,
+    });
 
-    const first = await appFor(db).request("/owner/w/src/branch/main/a.md", { headers: authHeaders(token) });
-    const second = await appFor(db).request("/owner/w/src/branch/main/b.md", { headers: authHeaders(token) });
+    const first = await localWebAppFor(db, backend).request("/owner/w/src/branch/main/a.md", { headers: authHeaders("local-token") });
+    const second = await localWebAppFor(db, backend).request("/owner/w/src/branch/main/b.md", { headers: authHeaders("local-token") });
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
@@ -1437,33 +1448,29 @@ describe("web file editor route", () => {
   it("rolls back a plain form rename destination when source deletion loses a sha race", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db);
-    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     const calls: string[] = [];
     let newCreated = false;
-    fetchMock.mockImplementation(
-      fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/branches/*", (c) => c.json({ name: c.req.param("*") }));
-        forge.get("/api/v1/repos/owner/w/contents/new.md", () =>
-          newCreated ? Response.json({ sha: "concurrent-newer" }) : new Response("not found", { status: 404 }),
-        );
-        forge.get("/api/v1/repos/owner/w/contents/old.md", () => Response.json({ sha: "old-sha" }));
-        forge.post("/api/v1/repos/owner/w/contents/new.md", () => {
-          calls.push("create-new");
-          newCreated = true;
-          return Response.json({ commit: { sha: "created-commit" }, content: { sha: "new-created" } });
-        });
-        forge.delete("/api/v1/repos/owner/w/contents/old.md", () => {
+    const backend = fakeWorkspaceBackend({
+      getBranch: async (_owner, _repo, branch) => ({ name: branch, commit: { id: "head-now" } }),
+      getFileMeta: async (_owner, _repo, _branch, path) => {
+        if (path === "old.md") return { sha: "old-sha", size: 5 };
+        if (path === "new.md" && newCreated) return { sha: "concurrent-newer", size: 5 };
+        return null;
+      },
+      putFile: async () => {
+        calls.push("create-new");
+        newCreated = true;
+        return { commit: { sha: "created-commit" }, content: { sha: "new-created" } };
+      },
+      deleteFile: async (_owner, _repo, opts) => {
+        if (opts.path === "old.md") {
           calls.push("delete-old");
-          return new Response("sha does not match [given: old, expected: newer]", { status: 422 });
-        });
-        forge.delete("/api/v1/repos/owner/w/contents/new.md", async (c) => {
-          calls.push("rollback-new");
-          const body = (await c.req.json()) as { sha: string; message: string };
-          expect(body).toMatchObject({ sha: "new-created", message: "rollback incomplete rename to new.md" });
-          return c.body(null, 200);
-        });
-      }),
-    );
+          throw new WorkspaceBackendError(409, "stale_sha", "source changed");
+        }
+        calls.push("rollback-new");
+        expect(opts).toMatchObject({ path: "new.md", sha: "new-created", message: "rollback incomplete rename to new.md" });
+      },
+    });
 
     const form = new URLSearchParams({
       branch: "user/alice/wip",
@@ -1472,9 +1479,9 @@ describe("web file editor route", () => {
       expected_sha: "old-sha",
       content: "# Renamed\n",
     });
-    const res = await appFor(db).request("/owner/w/_edit", {
+    const res = await localWebAppFor(db, backend).request("/owner/w/_edit", {
       method: "POST",
-      headers: formHeaders(token),
+      headers: formHeaders("local-token"),
       body: form.toString(),
     });
 
@@ -1483,30 +1490,25 @@ describe("web file editor route", () => {
     expect(await res.text()).toContain("This file changed on the branch while you were editing");
   });
 
-  it("does not rollback-delete a plain form rename destination when Forgejo omitted the created blob sha", async () => {
+  it("does not rollback-delete a plain form rename destination when the backend omitted the created blob sha", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db);
-    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     const calls: string[] = [];
-    fetchMock.mockImplementation(
-      fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/branches/*", (c) => c.json({ name: c.req.param("*") }));
-        forge.get("/api/v1/repos/owner/w/contents/new.md", () => new Response("not found", { status: 404 }));
-        forge.get("/api/v1/repos/owner/w/contents/old.md", () => Response.json({ sha: "old-sha" }));
-        forge.post("/api/v1/repos/owner/w/contents/new.md", () => {
-          calls.push("create-new");
-          return Response.json({ commit: { sha: "created-commit" }, content: null });
-        });
-        forge.delete("/api/v1/repos/owner/w/contents/old.md", () => {
+    const backend = fakeWorkspaceBackend({
+      getBranch: async (_owner, _repo, branch) => ({ name: branch, commit: { id: "head-now" } }),
+      getFileMeta: async (_owner, _repo, _branch, path) => path === "old.md" ? { sha: "old-sha", size: 5 } : null,
+      putFile: async () => {
+        calls.push("create-new");
+        return { commit: { sha: "created-commit" }, content: null };
+      },
+      deleteFile: async (_owner, _repo, opts) => {
+        if (opts.path === "old.md") {
           calls.push("delete-old");
-          return new Response("sha does not match [given: old, expected: newer]", { status: 422 });
-        });
-        forge.delete("/api/v1/repos/owner/w/contents/new.md", () => {
-          calls.push("rollback-new");
-          return new Response(null);
-        });
-      }),
-    );
+          throw new WorkspaceBackendError(409, "stale_sha", "source changed");
+        }
+        calls.push("rollback-new");
+      },
+    });
 
     const form = new URLSearchParams({
       branch: "user/alice/wip",
@@ -1514,9 +1516,9 @@ describe("web file editor route", () => {
       path: "new.md",
       content: "# Renamed\n",
     });
-    const res = await appFor(db).request("/owner/w/_edit", {
+    const res = await localWebAppFor(db, backend).request("/owner/w/_edit", {
       method: "POST",
-      headers: formHeaders(token),
+      headers: formHeaders("local-token"),
       body: form.toString(),
     });
 

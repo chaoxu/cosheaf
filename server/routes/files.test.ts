@@ -1765,7 +1765,6 @@ describe("files concurrent-write conflicts (#92)", () => {
 
   it("rolls back a rename destination when deleting the source loses a sha race", async () => {
     const db = freshDb();
-    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "old.md",
@@ -1773,29 +1772,26 @@ describe("files concurrent-write conflicts (#92)", () => {
       formatId: COFLAT_FORMAT_ID,
     });
     const calls: string[] = [];
-    fetchMock.mockImplementation(fakeForgejo((forge) => {
-      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
-      forge.get("/api/v1/repos/owner/w/contents/new.md", (c) => c.text("not found", 404));
-      forge.get("/api/v1/repos/owner/w/contents/old.md", (c) => c.json({ sha: "old-now" }));
-      forge.post("/api/v1/repos/owner/w/contents/new.md", () => {
+    const backend = fakeWorkspaceBackend({
+      getBranch: async (_owner, _repo, branch) => ({ name: branch, commit: { id: "head-now" } }),
+      getFileMeta: async (_owner, _repo, _branch, path) => path === "old.md" ? { sha: "old-now", size: 5 } : null,
+      putFile: async () => {
         calls.push("create-new");
-        return Response.json({ commit: { sha: "created-commit" }, content: { sha: "new-created" } });
-      });
-      forge.delete("/api/v1/repos/owner/w/contents/old.md", () => {
-        calls.push("delete-old");
-        return new Response("sha does not match [given: old, expected: newer]", { status: 422 });
-      });
-      forge.delete("/api/v1/repos/owner/w/contents/new.md", async (c) => {
+        return { commit: { sha: "created-commit" }, content: { sha: "new-created" } };
+      },
+      deleteFile: async (_owner, _repo, opts) => {
+        if (opts.path === "old.md") {
+          calls.push("delete-old");
+          throw new WorkspaceBackendError(409, "stale_sha", "source changed");
+        }
         calls.push("rollback-new");
-        const body = (await c.req.json()) as { sha: string; message: string };
-        expect(body).toMatchObject({ sha: "new-created", message: "rollback incomplete rename to new.md" });
-        return c.body(null, 200);
-      });
-    }));
+        expect(opts).toMatchObject({ path: "new.md", sha: "new-created", message: "rollback incomplete rename to new.md" });
+      },
+    });
 
-    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
+    const res = await localFilesAppFor(db, backend).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
       method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ previous_path: "old.md", content: "---\nid: new\n---\n# New\n" }),
     });
 
@@ -1811,9 +1807,8 @@ describe("files concurrent-write conflicts (#92)", () => {
     expect(rows).toEqual([{ cosheaf_id: "old", forgejo_id: "old.md" }]);
   });
 
-  it("does not rollback-delete a destination when Forgejo omitted the created blob sha", async () => {
+  it("does not rollback-delete a destination when the backend omitted the created blob sha", async () => {
     const db = freshDb();
-    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "old.md",
@@ -1821,27 +1816,25 @@ describe("files concurrent-write conflicts (#92)", () => {
       formatId: COFLAT_FORMAT_ID,
     });
     const calls: string[] = [];
-    fetchMock.mockImplementation(fakeForgejo((forge) => {
-      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
-      forge.get("/api/v1/repos/owner/w/contents/new.md", () => new Response("not found", { status: 404 }));
-      forge.get("/api/v1/repos/owner/w/contents/old.md", () => Response.json({ sha: "old-now" }));
-      forge.post("/api/v1/repos/owner/w/contents/new.md", () => {
+    const backend = fakeWorkspaceBackend({
+      getBranch: async (_owner, _repo, branch) => ({ name: branch, commit: { id: "head-now" } }),
+      getFileMeta: async (_owner, _repo, _branch, path) => path === "old.md" ? { sha: "old-now", size: 5 } : null,
+      putFile: async () => {
         calls.push("create-new");
-        return Response.json({ commit: { sha: "created-commit" }, content: null });
-      });
-      forge.delete("/api/v1/repos/owner/w/contents/old.md", () => {
-        calls.push("delete-old");
-        return new Response("sha does not match [given: old, expected: newer]", { status: 422 });
-      });
-      forge.delete("/api/v1/repos/owner/w/contents/new.md", () => {
+        return { commit: { sha: "created-commit" }, content: null };
+      },
+      deleteFile: async (_owner, _repo, opts) => {
+        if (opts.path === "old.md") {
+          calls.push("delete-old");
+          throw new WorkspaceBackendError(409, "stale_sha", "source changed");
+        }
         calls.push("rollback-new");
-        return new Response(null);
-      });
-    }));
+      },
+    });
 
-    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
+    const res = await localFilesAppFor(db, backend).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
       method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ previous_path: "old.md", content: "---\nid: new\n---\n# New\n" }),
     });
 
@@ -1855,7 +1848,6 @@ describe("files concurrent-write conflicts (#92)", () => {
 
   it("fails loudly when an incomplete rename rollback cannot delete the new destination", async () => {
     const db = freshDb();
-    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "old.md",
@@ -1863,27 +1855,26 @@ describe("files concurrent-write conflicts (#92)", () => {
       formatId: COFLAT_FORMAT_ID,
     });
     const calls: string[] = [];
-    fetchMock.mockImplementation(fakeForgejo((forge) => {
-      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
-      forge.get("/api/v1/repos/owner/w/contents/new.md", (c) => c.text("not found", 404));
-      forge.get("/api/v1/repos/owner/w/contents/old.md", (c) => c.json({ sha: "old-now" }));
-      forge.post("/api/v1/repos/owner/w/contents/new.md", () => {
+    const backend = fakeWorkspaceBackend({
+      getBranch: async (_owner, _repo, branch) => ({ name: branch, commit: { id: "head-now" } }),
+      getFileMeta: async (_owner, _repo, _branch, path) => path === "old.md" ? { sha: "old-now", size: 5 } : null,
+      putFile: async () => {
         calls.push("create-new");
-        return Response.json({ commit: { sha: "created-commit" }, content: { sha: "new-created" } });
-      });
-      forge.delete("/api/v1/repos/owner/w/contents/old.md", () => {
-        calls.push("delete-old");
-        return new Response("sha does not match [given: old, expected: newer]", { status: 422 });
-      });
-      forge.delete("/api/v1/repos/owner/w/contents/new.md", () => {
+        return { commit: { sha: "created-commit" }, content: { sha: "new-created" } };
+      },
+      deleteFile: async (_owner, _repo, opts) => {
+        if (opts.path === "old.md") {
+          calls.push("delete-old");
+          throw new WorkspaceBackendError(409, "stale_sha", "source changed");
+        }
         calls.push("rollback-new");
-        return new Response("temporary Forgejo failure", { status: 500 });
-      });
-    }));
+        throw new WorkspaceBackendError(500, "error", "temporary backend failure");
+      },
+    });
 
-    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
+    const res = await localFilesAppFor(db, backend).request("/api/v1/repos/owner/w/file?path=new.md&branch=user/alice/wip", {
       method: "PUT",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ previous_path: "old.md", content: "---\nid: new\n---\n# New\n" }),
     });
 
