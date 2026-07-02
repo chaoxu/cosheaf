@@ -27,7 +27,7 @@ try {
   await page.goto(WEB_URL, { waitUntil: "domcontentloaded" });
   await signInIfNeeded(page, USERNAME, PASSWORD);
 
-  const readerUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}`, WEB_URL).toString();
+  const readerUrl = new URL(`/${OWNER}/${WORKSPACE_SLUG}/src/branch/main/${PAGE_PATH}?mode=read`, WEB_URL).toString();
   await page.goto(readerUrl, { waitUntil: "domcontentloaded" });
   await page.locator(CF.reader).waitFor({ state: "visible", timeout: 15000 });
   const readerPreview = await hoverPreviewText(
