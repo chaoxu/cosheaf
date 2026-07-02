@@ -78,6 +78,32 @@ describe("local Workbench app (Tier 0)", () => {
     expect(res.status).toBe(409);
   });
 
+  it("blocks an editor save based on a stale revision after an external typed write", async () => {
+    const { app, dir } = localApp({ "hello.md": "# Hello\n" });
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };
+    const external = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ content: "# External\n" }),
+    });
+    expect(external.status).toBe(200);
+
+    const staleSave = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ content: "# Human stale buffer\n", expected_sha: loaded.sha }),
+    });
+    expect(staleSave.status).toBe(409);
+    await expect(staleSave.json()).resolves.toMatchObject({
+      code: "conflict",
+      details: {
+        branch_moved: true,
+        expected_sha: loaded.sha,
+      },
+    });
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toContain("# External");
+  });
+
   it("reindexes the sidecar on save so search finds the new content", async () => {
     const { app } = localApp({ "hello.md": "---\nid: hello\n---\n# Hello\n" });
     const read = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };

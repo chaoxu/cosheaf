@@ -44,6 +44,17 @@ describe("putFileBody", () => {
 });
 
 describe("api errors", () => {
+  it("reads a file through the typed file route", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ content: "# Notes\n", sha: "sha" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.getFile("owner", "repo", "notes.md", "main")).resolves.toEqual({
+      content: "# Notes\n",
+      sha: "sha",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/repos/owner/repo/file?path=notes.md&branch=main", expect.any(Object));
+  });
+
   it("preserves typed error code and details from JSON API failures", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       Response.json(

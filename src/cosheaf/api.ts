@@ -14,6 +14,13 @@ interface PutFileResult {
   content?: string;
 }
 
+interface GetFileResult {
+  content: string;
+  sha: string | null;
+  source_ref?: string;
+  source_sha?: string | null;
+}
+
 interface OpenPullResult {
   number: number;
 }
@@ -83,6 +90,14 @@ async function apiErrorFromResponse(res: Response, fallback: string): Promise<Ap
 }
 
 export const api = {
+  getFile: (
+    owner: string,
+    repo: string,
+    path: string,
+    branch: string,
+  ) =>
+    jsonFetch<GetFileResult>(`${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`),
+
   putFile: (
     owner: string,
     repo: string,
