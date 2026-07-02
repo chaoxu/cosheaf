@@ -1407,10 +1407,10 @@ describe("pulls + branches routes", () => {
       expect(body.rejections).toBe(0);
     });
 
-    // BUG E: the typed reviews list must surface the CALLER'S OWN pending draft
-    // (as decision "pending") so the staged pending-review flow round-trips
-    // through the Origin client in the local Workbench — while still hiding other
-    // users' drafts. The caller here is "alice".
+    // The typed reviews list must surface the CALLER'S OWN pending draft (as
+    // decision "pending") so the staged pending-review flow round-trips through
+    // the Origin client in the local Workbench — while still hiding other users'
+    // drafts. The caller here is "alice".
     it("GET /pulls/:n/reviews includes the caller's own pending review but hides others'", async () => {
       const db = freshDb();
       seedWorkspace(db);

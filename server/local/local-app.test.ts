@@ -7,7 +7,7 @@ import { workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
-import { freshTestDb } from "../routes/test-fixtures.js";
+import { freshTestDb, testLocalRegistry } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
@@ -28,7 +28,7 @@ function localApp(seed: Record<string, string> = {}): { app: Hono<AppEnv>; dir: 
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   const db = freshTestDb("cosheaf-local-app-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
-  const app = createApp({ config, db, workspaceBackend: backend, localWorkspace: IDENTITY });
+  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY) });
   return { app, dir };
 }
 

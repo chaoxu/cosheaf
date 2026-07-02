@@ -14,9 +14,8 @@ conventions. Cosheaf does not model mathematical objects as a separate graph:
 the durable unit is still the markdown page, and the document index stores
 page metadata, links, tags, and search text.
 
-Workspaces choose one markdown format. New workspaces default to Forgejo
-Markdown passthrough for plain `.md` files; Coflat workspaces opt into
-math-friendly parsing, `[@id]` backlinks, and rich rendered diffs.
+Cosheaf markdown is Coflat markdown. Pages use Coflat's math-friendly parsing,
+`[@id]` backlinks, and rich rendered diffs.
 
 Cosheaf is meant to be useful with only human users. Autonomous agents can
 participate through the same HTTP API as ordinary Forgejo collaborators, and
@@ -27,9 +26,9 @@ agent layer.
 
 - **Forgejo is the source of truth.** Workspace content lives in a Forgejo repo.
   SQLite is a sidecar for fast reads, search, backlinks, tags, webhook dedupe,
-  and cached Cosheaf-issued PATs used by browser login. Identity, workspace
-  registry, and audit logs live on Forgejo — there is no `users`, `sessions`,
-  or `workspaces` table.
+  and server-side cached backend Forgejo credentials. Identity, workspace
+  registry, and audit logs live on Forgejo — there is no `users`, `sessions`, or
+  `workspaces` table.
 - **Use Forgejo terms directly.** Cosheaf should mirror Forgejo's branch, pull
   request, review, issue, merge, and close model instead of inventing parallel
   workflow concepts. A user should be able to perform the same durable
@@ -45,7 +44,7 @@ agent layer.
 
 ## Document Model
 
-Pages use YAML frontmatter plus the workspace's markdown format:
+Pages use YAML frontmatter plus Coflat markdown:
 
 ```yaml
 ---
@@ -61,7 +60,7 @@ Cosheaf indexes:
 
 - title and body in FTS5 using the trigram tokenizer
 - tags from frontmatter
-- backlinks from the active format's link extractor
+- backlinks from the Coflat link extractor
 - path-to-id mappings in `doc_map`
 
 ## Branch And Pull Request Model
@@ -117,7 +116,7 @@ the page index from Forgejo `main` and removes stale page index rows.
 The [Coverify](https://github.com/chaoxu/coverify) layer is intentionally out
 of this repo. It:
 
-- authenticate with ordinary Forgejo PATs through Cosheaf bearer auth
+- authenticate with opaque Cosheaf tokens
 - read pages, search, and walk backlinks
 - push branches, open pull requests, and participate in reviews
 - answer issue-backed chats through Cosheaf's typed API when the optional chat
@@ -132,9 +131,10 @@ humans too.
 ## Stack
 
 - **Server**: Node, TypeScript, Hono, `better-sqlite3`, Forgejo REST API.
-  No password hashing — the Forgejo PAT is the credential, exchanged at
-  login for an HttpOnly browser cookie or sent directly by API clients as
-  `Authorization: Bearer <pat>`.
+  No Cosheaf-side password hashing — opaque Cosheaf tokens are the client
+  credentials, sent as an HttpOnly browser cookie or as
+  `Authorization: Bearer <token>`. Cosheaf maps those tokens to backend forge
+  credentials internally.
 - **Web**: server-rendered Hono pages, `public/cosheaf-web.css`, and narrow
   React 19 + Vite islands for the rich editor/reader surfaces.
 - **Editor**: [`@chaoxu/coflat`](https://github.com/chaoxu/coflat).

@@ -121,9 +121,9 @@ the backing Forgejo URL or accept backend tokens by default.
 
 Routes that remain Cosheaf-owned:
 
-- Merge. Forgejo-shaped clients can merge directly against the forge. Cosheaf's
-  canonical merge path is `/pulls/:number/merge` because it runs the admin
-  freshness gate before delegating to the backend.
+- Merge. Forgejo-shaped clients must still call Cosheaf's
+  `/pulls/:number/merge` route because it runs the admin freshness gate before
+  delegating to the backend.
 - Search, backlinks, suggestions, validation, and events. These are Cosheaf
   sidecar/document features and do not have a direct Forgejo/Gitea equivalent.
 

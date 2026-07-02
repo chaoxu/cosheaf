@@ -33,9 +33,8 @@ format `coflat`.
 ## 4. Search, backlinks, validation
 - [ ] Use the typed search/backlinks/validation API from `API.md` for this
       sidecar behavior until those utility panels have server-rendered pages.
-- [ ] For Coflat workspaces, `GET /api/v1/repos/chao/flushing-coin/backlinks?id=hello`
-      returns derived references; passthrough workspaces return no Coflat
-      backlinks.
+- [ ] `GET /api/v1/repos/chao/flushing-coin/backlinks?id=hello` returns derived
+      Coflat references for pages that link to `hello`.
 
 ## 5. Branches
 - [ ] **Files** → **New file** or save a new edit → creates a `user/<me>/wip-…`

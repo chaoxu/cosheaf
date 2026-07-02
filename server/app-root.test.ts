@@ -7,7 +7,7 @@ import { resolveAppRoot, resolveCoflatDistDir } from "./app-root.js";
 import { createApp } from "./app.js";
 import { buildLocalConfig } from "./db.js";
 import { LocalGitWorkspaceBackend } from "./local/local-git-backend.js";
-import { freshTestDb } from "./routes/test-fixtures.js";
+import { freshTestDb, testLocalRegistry } from "./routes/test-fixtures.js";
 import type { LocalWorkspaceIdentity } from "./types.js";
 
 const IDENTITY: LocalWorkspaceIdentity = {
@@ -63,11 +63,12 @@ describe("bundled-root asset serving (COSHEAF_APP_ROOT)", () => {
 
     const work = mkdtempSync(join(tmpdir(), "cosheaf-bundle-work-"));
     const config = buildLocalConfig({ dataDir: join(work, ".cosheaf"), port: 0 });
+    const db = freshTestDb("cosheaf-approot-db-");
+    const backend = new LocalGitWorkspaceBackend(work);
     const app = createApp({
       config,
-      db: freshTestDb("cosheaf-approot-db-"),
-      workspaceBackend: new LocalGitWorkspaceBackend(work),
-      localWorkspace: IDENTITY,
+      db,
+      localRegistry: testLocalRegistry(db, backend, IDENTITY),
     });
 
     const res = await app.request("/relocated.css");

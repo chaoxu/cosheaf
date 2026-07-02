@@ -80,7 +80,7 @@ export class WorkspaceRegistry {
     private readonly opts: { configPath?: string; user?: string } = {},
   ) {}
 
-  // The fixed local user (see LOCAL_USER); overridable for tests/back-compat.
+  // The fixed local user (see LOCAL_USER); overridable for tests.
   get user(): string {
     return this.opts.user ?? LOCAL_USER;
   }
@@ -108,8 +108,8 @@ export class WorkspaceRegistry {
     return [...this.entries.values()].sort((a, b) => a.slug.localeCompare(b.slug));
   }
 
-  // Register a fully-built entry without touching disk or the index. Used by the
-  // app's back-compat single-workspace assembly (and internally after building).
+  // Register a fully-built entry without touching disk or the index. Used by
+  // tests and internally after building.
   register(entry: WorkspaceEntry): void {
     this.entries.set(entry.slug, entry);
   }

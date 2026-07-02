@@ -235,7 +235,7 @@ pnpm dev:login-state
 - Forgejo client: `server/forgejo.ts`
   - Verify with the affected route unit tests plus `pnpm smoke:api`.
 - Shared issue/activity DTOs: `shared/issues.ts`
-  - Verify with `pnpm test -- server/routes/issues.test.ts` and `pnpm check:web`.
+  - Verify with `pnpm exec vitest run server/routes/issues.test.ts` and `pnpm check:web`.
 - E2E web flow: `tests/e2e/web-pages.spec.ts`
   - Verify with `pnpm check:web`.
 - Focused settings E2E: `tests/e2e/web-settings.spec.ts`

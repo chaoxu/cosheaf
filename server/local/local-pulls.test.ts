@@ -8,7 +8,7 @@ import { workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
-import { freshTestDb } from "../routes/test-fixtures.js";
+import { freshTestDb, testLocalRegistry } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
@@ -75,11 +75,12 @@ function prMeta(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 function app(dir: string): Hono<AppEnv> {
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
+  const db = freshTestDb("wb-pulls-");
+  const backend = new LocalGitWorkspaceBackend(dir);
   return createApp({
     config,
-    db: freshTestDb("wb-pulls-"),
-    workspaceBackend: new LocalGitWorkspaceBackend(dir),
-    localWorkspace: IDENTITY,
+    db,
+    localRegistry: testLocalRegistry(db, backend, IDENTITY),
   });
 }
 
@@ -370,18 +371,16 @@ describe("local Workbench Tier 2 (push + PR)", () => {
   });
 });
 
-// Typed PR API in the local Workbench (#262). These hit the SAME typed routes
+// Typed PR API in the local Workbench. These hit the SAME typed routes
 // the agent-facing API and editor island use, served by the local app whose
-// ctx.collab is an OriginCollaborationClient against a connected core. Before the
-// fix these 500'd by eagerly reaching for a co-located forge client the local
-// Workbench does not have. Global fetch is stubbed so the Origin API calls
-// resolve without a live core.
-describe("local Workbench typed PR API (#262 BUG B/E)", () => {
+// ctx.collab is an OriginCollaborationClient against a connected core. Global
+// fetch is stubbed so the Origin API calls resolve without a live core.
+describe("local Workbench typed PR API", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("BUG B: merges a PR through the core and skips the local-absent forge branch cleanup", async () => {
+  it("merges a PR through the core and skips local branch cleanup when there is no forge", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore((method, path) => {
       if (method === "POST" && path.endsWith("/pulls/7/merge")) return { ok: true };
@@ -400,7 +399,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
     expect(calls.some((c) => c.method === "DELETE" && /\/branches\//.test(c.path))).toBe(false);
   });
 
-  it("BUG B: replaces repo topics through the core's typed route", async () => {
+  it("replaces repo topics through the core's typed route", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore(() => ({ ok: true }));
     const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/topics", {
@@ -413,7 +412,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
     expect(put?.body).toEqual({ topics: ["cosheaf-format-coflat", "math"] });
   });
 
-  it("BUG B: updates min_approvals through the core's typed settings route", async () => {
+  it("updates min_approvals through the core's typed settings route", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore((method) => (method === "GET" ? { min_approvals: 1 } : { min_approvals: 2 }));
     const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/settings", {
@@ -440,7 +439,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
     expect(calls.some((c) => c.path.endsWith("/topics"))).toBe(false);
   });
 
-	it("BUG E: submits a staged pending review, resolving the caller's own draft via the core", async () => {
+	it("submits a staged pending review, resolving the caller's own draft via the core", async () => {
 		const { work } = repoWithOrigin();
 		const submitted = { id: 9, username: "me", decision: "approve", comment: null, created_at: 10 };
 		const calls = stubCore((method, path) => {

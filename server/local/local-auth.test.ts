@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig, isLoopbackHost, refuseRemoteWithoutToken } from "../db.js";
-import { freshTestDb } from "../routes/test-fixtures.js";
+import { freshTestDb, testLocalRegistry } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { hostHeaderName } from "./local-auth.js";
@@ -31,7 +31,7 @@ function localApp(accessToken: string | null, publicOrigin: string | null = null
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0, accessToken, publicOrigin });
   const db = freshTestDb("cosheaf-local-auth-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
-  return createApp({ config, db, workspaceBackend: backend, localWorkspace: IDENTITY });
+  return createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY) });
 }
 
 describe("local Workbench access gate", () => {

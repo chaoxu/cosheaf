@@ -380,9 +380,9 @@ describe("OriginCollaborationClient write methods", () => {
     expect(review).toEqual({ id: 12, username: "vera", decision: "approve", comment: "ok", created_at: 30 });
   });
 
-  // BUG E round-trip: the core's GET /reviews surfaces the caller's own draft as
-  // decision "pending"; listReviews must preserve it so findOrCreatePendingReview
-  // / requireOwnPendingReview can resolve the draft.
+  // The core's GET /reviews surfaces the caller's own draft as decision
+  // "pending"; listReviews must preserve it so findOrCreatePendingReview /
+  // requireOwnPendingReview can resolve the draft.
   it("preserves the caller's own pending draft review DTO", async () => {
     const fake = recordingFetch(() =>
       Response.json({

@@ -7,7 +7,6 @@ import { Hono } from "hono";
 import { compress } from "hono/compress";
 import { logger } from "hono/logger";
 import { requestId } from "hono/request-id";
-import { workspaceSlug } from "../shared/conventions.js";
 import { makeT } from "../shared/i18n/index.js";
 import { rejectCrossOriginCookieApiMutation } from "./api-csrf.js";
 import { resolveAppRoot, resolveCoflatDistDir } from "./app-root.js";
@@ -16,7 +15,6 @@ import type { Config } from "./db.js";
 import { Forgejo } from "./forgejo.js";
 import { healthPayload, healthStatus } from "./health.js";
 import { localAuthGate } from "./local/local-auth.js";
-import type { LocalGitWorkspaceBackend } from "./local/local-git-backend.js";
 import { localNotifications } from "./local/local-notifications.js";
 import { localPulls } from "./local/local-pulls.js";
 import { createLocalWebRouter } from "./local/local-web.js";
@@ -35,9 +33,8 @@ import { webhooks } from "./routes/webhooks.js";
 import { members, workspaces } from "./routes/workspaces.js";
 import { SSEHub } from "./sse.js";
 import { listPublicAssetPaths } from "./static-assets.js";
-import type { AppEnv, LocalWorkspaceIdentity } from "./types.js";
+import type { AppEnv } from "./types.js";
 import { viteDevOrigin } from "./vite-dev-origin.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
 
 export interface CreateAppOptions {
   config: Config;
@@ -45,13 +42,7 @@ export interface CreateAppOptions {
   fjAdmin?: Forgejo;
   sse?: SSEHub;
   // Local Workbench (config.mode === "local"): the registry of opened folders.
-  // The launcher passes a populated registry; tests use the single-workspace
-  // back-compat fields below, which are wrapped into a one-entry registry.
   localRegistry?: WorkspaceRegistry;
-  // Back-compat single-workspace assembly (tests): one backend + identity.
-  // Ignored when localRegistry is provided.
-  workspaceBackend?: WorkspaceBackend;
-  localWorkspace?: LocalWorkspaceIdentity;
 }
 
 export type AppContentProvider = "forgejo" | "local-git";
@@ -95,23 +86,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     : undefined;
   const sse = options.sse ?? new SSEHub();
 
-  // Resolve the local registry: an explicit one from the launcher, or (tests) a
-  // one-entry registry wrapping the back-compat single-workspace fields.
-  let registry = options.localRegistry;
-  if (local && !registry) {
-    registry = new WorkspaceRegistry(db, { user: options.localWorkspace?.user });
-    if (options.workspaceBackend && options.localWorkspace) {
-      const id = options.localWorkspace;
-      registry.register({
-        slug: workspaceSlug(id.owner, id.repo),
-        path: "",
-        identity: id,
-        backend: options.workspaceBackend as LocalGitWorkspaceBackend,
-        remote: null,
-        gitRemote: null,
-      });
-    }
-  }
+  const registry = options.localRegistry ?? (local ? new WorkspaceRegistry(db) : undefined);
 
   const app = new Hono<AppEnv>();
 

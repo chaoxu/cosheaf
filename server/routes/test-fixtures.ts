@@ -198,6 +198,23 @@ export function testLocalRouteApp(
   return app;
 }
 
+export function testLocalRegistry(
+  db: Database.Database,
+  backend: LocalGitWorkspaceBackend,
+  identity: LocalWorkspaceIdentity,
+): WorkspaceRegistry {
+  const registry = new WorkspaceRegistry(db, { user: identity.user });
+  registry.register({
+    slug: workspaceSlug(identity.owner, identity.repo),
+    path: "",
+    identity,
+    backend,
+    remote: null,
+    gitRemote: null,
+  });
+  return registry;
+}
+
 // Declarative fake Forgejo backend for fetch stubbing. Register Hono routes
 // matching Forgejo REST paths, then hand the returned function to
 // `fetchMock.mockImplementation(...)`. Path params, methods, and bodies come

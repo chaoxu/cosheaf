@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
-import { freshTestDb } from "../routes/test-fixtures.js";
+import { freshTestDb, testLocalRegistry } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 
@@ -37,7 +37,9 @@ const IDENTITY: LocalWorkspaceIdentity = {
 
 function app(dir: string): Hono<AppEnv> {
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
-  return createApp({ config, db: freshTestDb("wb-git-"), workspaceBackend: new LocalGitWorkspaceBackend(dir), localWorkspace: IDENTITY });
+  const db = freshTestDb("wb-git-");
+  const backend = new LocalGitWorkspaceBackend(dir);
+  return createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY) });
 }
 
 describe("local Workbench Tier 1 (git)", () => {
