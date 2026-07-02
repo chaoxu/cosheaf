@@ -44,6 +44,40 @@ describe("devx check suggestions", () => {
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:reader-parity");
   });
 
+  it("maps local annotation changes to Workbench annotation smoke", () => {
+    const result = suggestChecks(["server/local/local-annotations.ts", "shared/local-annotations.ts"]);
+    expect(result.matchedRules).toContain("workbench-annotations");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:workbench-writing");
+    expect(result.suggestions.map((item) => item.run)).toContain(
+      "pnpm exec vitest run server/local/local-annotations.test.ts src/cosheaf/api.test.ts",
+    );
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:workbench-annotations");
+  });
+
+  it("maps Workbench annotation browser smoke changes to its own smoke", () => {
+    const result = suggestChecks(["tests/e2e/workbench-annotations.spec.ts", "playwright.workbench.config.ts"]);
+    expect(result.matchedRules).toContain("workbench-annotations");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:workbench-writing");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:workbench-annotations");
+  });
+
+  it("maps Workbench marker context and route changes to the writing gate", () => {
+    const result = suggestChecks([
+      "src/cosheaf/coflat-document-context.ts",
+      "server/routes/web-files.ts",
+      "server/routes/web-pdf-export.ts",
+    ]);
+    expect(result.matchedRules).toContain("workbench-annotations");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:workbench-writing");
+  });
+
+  it("maps the extracted Workbench annotation drawer to its smoke", () => {
+    const result = suggestChecks(["src/cosheaf/web-editor-local-annotations.tsx", "src/cosheaf/local-annotations-ui.ts"]);
+    expect(result.matchedRules).toContain("workbench-annotations");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:workbench-writing");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:workbench-annotations");
+  });
+
   it("maps parity docs and Coflat tooling to parity-specific checks", () => {
     const result = suggestChecks(["docs/reader-editor-parity.md", "scripts/coflat-status.mjs"]);
     expect(result.matchedRules).toContain("coflat-parity");

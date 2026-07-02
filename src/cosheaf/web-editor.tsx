@@ -4,10 +4,10 @@ import type {
   SaveHandler as EditorSaveHandler,
   EditorSourcePosition,
   StatusEvents as EditorStatusEvents,
-  EditorDocumentChange as MountedDocumentChange,
+  EditorDocumentChange,
   OutlineEntry,
   RequestHandler,
-  EditorScrollToSourcePositionOptions as ScrollToSourcePositionOptions,
+  EditorScrollToSourcePositionOptions,
 } from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,
@@ -35,15 +35,16 @@ import {
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { repoBranchFileHref, repoHref } from "../../shared/url";
-import { ApiError, api } from "./api";
+import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
 import {
+  LOCAL_ANNOTATION_CLICK_EVENT,
   loadCoflatDocumentContext,
+  localAnnotationIdFromRef,
 } from "./coflat-document-context";
 import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
-import { installLocalAnnotations } from "./local-annotations-ui";
 import type { MountedEditor } from "./editor";
 import {
   IncrementalSourceCache,
@@ -52,6 +53,7 @@ import {
 } from "./editor-change-routing";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { currentDocumentSuggestions, fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
+import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -107,9 +109,17 @@ export interface WebEditorPreviewEvent {
   sourcePosition: EditorSourcePosition | null;
 }
 
-type WebEditorSourcePosition = EditorSourcePosition | ScrollToSourcePositionOptions;
+type WebEditorSourcePosition = EditorSourcePosition | EditorScrollToSourcePositionOptions;
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 const ActiveMarkdownEditor = lazy(() => import("./editor").then((m) => ({ default: m.MarkdownEditor })));
+
+function insertAnchorIntoSource(source: string, anchor: string): string {
+  if (!source) return `${anchor}\n`;
+  if (source.includes(anchor)) return source;
+  if (source.endsWith("\n\n")) return `${source}${anchor}\n`;
+  if (source.endsWith("\n")) return `${source}\n${anchor}\n`;
+  return `${source} ${anchor}`;
+}
 
 export interface WebEditorCallbacks {
   onDirtyChange?: (dirty: boolean) => void;
@@ -224,6 +234,8 @@ function WebEditor({
   const sourceCacheRef = useRef(new IncrementalSourceCache(initialContent));
   const contextSourceTimerRef = useRef<number | null>(null);
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
+  const cursorUnsubscribeRef = useRef<(() => void) | null>(null);
+  const lastCursorFromRef = useRef<number | null>(null);
   const branchRef = useRef(branch);
   const branchExistsRef = useRef(branchExists);
   const savedReadBranchRef = useRef(savedReadBranch);
@@ -234,6 +246,7 @@ function WebEditor({
   const resetEditBranchRef = useRef(config.resetEditBranch);
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
   const contextLoadedRef = useRef(false);
+  const localAnnotationsEnabled = config.writeMode === "direct";
   branchRef.current = branch;
   branchExistsRef.current = branchExists;
   savedReadBranchRef.current = savedReadBranch;
@@ -304,7 +317,7 @@ function WebEditor({
     setSaveError(null);
   }, [setEditorContent]);
 
-  const handleCoflatDocumentChange = useCallback((change: MountedDocumentChange) => {
+  const handleCoflatDocumentChange = useCallback((change: EditorDocumentChange) => {
     // Keep Coflat's hot edit path metadata-only. Operations that require source
     // text (save/upload/autocomplete/PR) read from the mounted editor handle.
     // The document-context source is refreshed from an incremental Text cache
@@ -345,6 +358,8 @@ function WebEditor({
     () => () => {
       outlineUnsubscribeRef.current?.();
       outlineUnsubscribeRef.current = null;
+      cursorUnsubscribeRef.current?.();
+      cursorUnsubscribeRef.current = null;
     },
     [],
   );
@@ -721,6 +736,91 @@ function WebEditor({
     });
   }, [busy, content, uncommitted, pathDirty, commitSource]);
 
+  const captureEditorCursor = useCallback(() => {
+    const context = editorRef.current?.cursorContext.get();
+    if (context) lastCursorFromRef.current = context.from;
+  }, []);
+
+  const insertLocalAnnotationAnchor = useCallback((annotation: LocalAnnotation) => {
+    captureEditorCursor();
+    const source = liveEditorSource(editorRef.current, content);
+    if (source.includes(annotation.anchor)) return;
+    if (editorRef.current?.insertText) {
+      editorRef.current.insertText(annotation.anchor, {
+        ...(lastCursorFromRef.current === null ? {} : { position: lastCursorFromRef.current }),
+        replaceSelection: false,
+      });
+      setSaveError(null);
+      return;
+    }
+    const next = insertAnchorIntoSource(source, annotation.anchor);
+    setEditorContent(next);
+    setUncommitted(true);
+    setSaveError(null);
+  }, [captureEditorCursor, content, setEditorContent]);
+
+  const removeLocalAnnotationAnchor = useCallback((annotation: LocalAnnotation) => {
+    const cached = sourceCacheRef.current.source();
+    const source = cached.includes(annotation.anchor) ? cached : liveEditorSource(editorRef.current, content);
+    if (!source.includes(annotation.anchor)) return;
+    const next = source.split(annotation.anchor).join("");
+    sourceCacheRef.current.reset(next);
+    editorRef.current?.setDoc(next);
+    setEditorContent(next);
+    setUncommitted(true);
+    setSaveError(null);
+  }, [content, setEditorContent]);
+
+  const localAnnotations = useLocalAnnotationsController({
+    enabled: localAnnotationsEnabled,
+    owner: config.owner,
+    repo: config.repo,
+    path: currentPath.trim() || config.path,
+    captureCursor: captureEditorCursor,
+    insertAnchor: insertLocalAnnotationAnchor,
+    removeAnchor: removeLocalAnnotationAnchor,
+  });
+  const focusLocalAnnotation = localAnnotations.focusAnnotation;
+
+  useEffect(() => {
+    if (!localAnnotationsEnabled) return;
+    const onLocalAnnotationClick = (event: Event) => {
+      const id = (event as CustomEvent<{ id?: unknown }>).detail?.id;
+      if (typeof id === "string") focusLocalAnnotation(id);
+    };
+    const onLocalAnnotationMarkerPointer = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const marker = event.target.closest<HTMLElement>("[data-ref-key]");
+      const id = marker ? localAnnotationIdFromRef(marker.dataset.refKey ?? "") : null;
+      if (!id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      focusLocalAnnotation(id);
+    };
+    const onLocalAnnotationMarkerKeydown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (!(event.target instanceof Element)) return;
+      const marker = event.target.closest<HTMLElement>("[data-ref-key]");
+      const id = marker ? localAnnotationIdFromRef(marker.dataset.refKey ?? "") : null;
+      if (!id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      focusLocalAnnotation(id);
+    };
+    window.addEventListener(LOCAL_ANNOTATION_CLICK_EVENT, onLocalAnnotationClick);
+    window.addEventListener("mousedown", onLocalAnnotationMarkerPointer, true);
+    window.addEventListener("click", onLocalAnnotationMarkerPointer, true);
+    window.addEventListener("keydown", onLocalAnnotationMarkerKeydown, true);
+    return () => {
+      window.removeEventListener(LOCAL_ANNOTATION_CLICK_EVENT, onLocalAnnotationClick);
+      window.removeEventListener("mousedown", onLocalAnnotationMarkerPointer, true);
+      window.removeEventListener("click", onLocalAnnotationMarkerPointer, true);
+      window.removeEventListener("keydown", onLocalAnnotationMarkerKeydown, true);
+    };
+  }, [focusLocalAnnotation, localAnnotationsEnabled]);
+
   const restoreDraft = useCallback(() => {
     if (!pendingDraft) return;
     const freshness = restoredDraftFreshness(
@@ -859,17 +959,6 @@ function WebEditor({
     );
   }, [outlineMathMacros, railModel]);
 
-  useEffect(() => {
-    const shell = shellRef.current;
-    if (!shell || config.writeMode !== "direct") return;
-    return installLocalAnnotations(shell, {
-      owner: config.owner,
-      repo: config.repo,
-      path: currentPath,
-      drawerParent: shell,
-    });
-  }, [config.owner, config.repo, config.writeMode, currentPath]);
-
   return (
     <div className={readerClass} ref={shellRef}>
       {pendingDraft ? (
@@ -898,9 +987,14 @@ function WebEditor({
                 testId="editor"
                 onReady={(editor) => {
                   outlineUnsubscribeRef.current?.();
+                  cursorUnsubscribeRef.current?.();
                   editorRef.current = editor;
                   setOutline(editor.outline.get());
                   outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
+                  lastCursorFromRef.current = editor.cursorContext.get().from;
+                  cursorUnsubscribeRef.current = editor.cursorContext.subscribe((context) => {
+                    lastCursorFromRef.current = context.from;
+                  }, { emitCurrent: true });
                   onEditorReady?.();
                 }}
                 {...routeEditorChangeHandlers({
@@ -921,6 +1015,7 @@ function WebEditor({
         </div>
         <aside ref={railRef} className="web-editor-outline doc-rail" aria-label="Document tools" data-document-rail />
       </div>
+      <LocalAnnotationsDrawer controller={localAnnotations} />
       {renderEditorChrome(
         <>
           <span className="status-sep">/</span>
@@ -934,14 +1029,17 @@ function WebEditor({
             value={currentPath}
             disabled={readOnly || busy}
             onChange={(e) => {
-              setCurrentPath(e.target.value);
-              setPathDirty(e.target.value.trim() !== savedPath);
+              const nextPath = e.target.value;
+              currentPathRef.current = nextPath;
+              setCurrentPath(nextPath);
+              setPathDirty(nextPath.trim() !== savedPath);
               setSaveError(null);
             }}
             onKeyDown={(e) => {
               // Esc abandons an in-progress rename, restoring the saved path;
               // Enter commits by blurring (the underlying save picks up pathDirty).
               if (e.key === "Escape") {
+                currentPathRef.current = savedPath;
                 setCurrentPath(savedPath);
                 setPathDirty(false);
                 e.currentTarget.blur();
@@ -1006,6 +1104,17 @@ function WebEditor({
               </a>
             );
           })()}
+          {localAnnotations.enabled ? (
+            <button
+              type="button"
+              className="web-editor-annotations-toggle"
+              aria-pressed={localAnnotations.open}
+              onPointerDown={captureEditorCursor}
+              onClick={() => localAnnotations.setOpen((open) => !open)}
+            >
+              Annotations {localAnnotations.openCount}
+            </button>
+          ) : null}
           {(() => {
             // Glance-able, paired with the dirty-dot. title surfaces the full error.
             const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty, lastSavedAt });

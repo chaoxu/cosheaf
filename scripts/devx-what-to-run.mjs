@@ -53,6 +53,28 @@ const rules = [
     ],
   },
   {
+    id: "workbench-annotations",
+    matches: [
+      /^server\/local\/local-annotations\.ts$/,
+      /^server\/routes\/files\.ts$/,
+      /^server\/routes\/web-files\.ts$/,
+      /^server\/routes\/web-pdf-export\.ts$/,
+      /^shared\/local-annotations\.ts$/,
+      /^src\/cosheaf\/coflat-document-context\.ts$/,
+      /^src\/cosheaf\/local-annotations-ui\.ts$/,
+      /^src\/cosheaf\/web-editor\.tsx$/,
+      /^src\/cosheaf\/web-editor-local-annotations\.tsx$/,
+      /^tests\/e2e\/workbench-annotations\.spec\.ts$/,
+      /^playwright\.workbench\.config\.ts$/,
+      /^package\.json$/,
+    ],
+    commands: [
+      command("pnpm check:workbench-writing", "focused local Workbench writing gate: annotation API/client/context, types, forge-free boundary, and browser smoke"),
+      command("pnpm exec vitest run server/local/local-annotations.test.ts src/cosheaf/api.test.ts", "local annotation API and client route coverage"),
+      command("pnpm smoke:workbench-annotations", "local Workbench annotation drawer and selected-position anchor insertion"),
+    ],
+  },
+  {
     id: "coflat-parity",
     matches: [
       /^scripts\/(?:browser-reader-editor-parity|refresh-coflat|coflat-status)\.mjs$/,
@@ -106,6 +128,7 @@ const rules = [
       /^server\/vite-dev-origin\.ts$/,
       /^vite\.config\.ts$/,
       /^playwright\.smoke\.config\.ts$/,
+      /^playwright\.workbench\.config\.ts$/,
       /^docs\/DEVX\.md$/,
     ],
     commands: [

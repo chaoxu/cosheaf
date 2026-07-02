@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   coflatDocumentContext,
+  LOCAL_ANNOTATION_CLICK_EVENT,
   type CoflatDocumentPayload,
   loadCoflatRefs,
+  localAnnotationIdFromRef,
   resolveMathMacros,
   resolveRawRepoDisplayAssetLink,
   resolveRawRepoLink,
@@ -134,6 +136,55 @@ describe("resolveRepoLink", () => {
 });
 
 describe("loadCoflatRefs", () => {
+  it("does not fetch workspace refs for local annotation markers", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refs = await loadCoflatRefs({
+      ...payload,
+      source: "Needs work [@local:la_aaaaaaaaaaaa].",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(refs.workspaceCrossrefs.size).toBe(0);
+    expect(refs.citations).toBeNull();
+  });
+
+  it("parses only valid local annotation reference ids", () => {
+    expect(localAnnotationIdFromRef("local:la_aaaaaaaaaaaa")).toBe("la_aaaaaaaaaaaa");
+    expect(localAnnotationIdFromRef("local:la_bad")).toBeNull();
+    expect(localAnnotationIdFromRef("page:la_aaaaaaaaaaaa")).toBeNull();
+  });
+
+  it("renders local annotation refs through the host ref resolver", () => {
+    const context = coflatDocumentContext(payload, { workspaceCrossrefs: new Map(), citations: null });
+    const eventTarget = new EventTarget();
+    vi.stubGlobal("window", eventTarget);
+    vi.stubGlobal("CustomEvent", class TestCustomEvent<T = unknown> extends Event {
+      readonly detail: T;
+      constructor(type: string, init?: CustomEventInit<T>) {
+        super(type, init);
+        this.detail = init?.detail as T;
+      }
+    });
+    const events: string[] = [];
+    const listener = (event: Event) => {
+      if (event instanceof CustomEvent && typeof event.detail?.id === "string") events.push(event.detail.id);
+    };
+    window.addEventListener(LOCAL_ANNOTATION_CLICK_EVENT, listener);
+    try {
+      const resolved = context.refResolver?.resolve("local:la_aaaaaaaaaaaa", "bracketed");
+      expect(resolved?.content).toBe("local note");
+      expect(resolved?.className).toBe("cf-local-annotation");
+      const click = new Event("click", { cancelable: true }) as MouseEvent;
+      resolved?.onClick?.(click);
+      expect(click.defaultPrevented).toBe(true);
+      expect(events).toEqual(["la_aaaaaaaaaaaa"]);
+    } finally {
+      window.removeEventListener(LOCAL_ANNOTATION_CLICK_EVENT, listener);
+    }
+  });
+
   it("leaves local crossrefs to Coflat and loads only workspace refs", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       expect(url).toContain("ids=page%3Aremote");

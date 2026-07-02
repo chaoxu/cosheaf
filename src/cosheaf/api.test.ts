@@ -93,3 +93,46 @@ describe("api errors", () => {
       });
   });
 });
+
+describe("local annotation API", () => {
+  it("uses typed local annotation routes", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/local-annotations?path=notes.md&status=open")) {
+        return Response.json({ annotations: [] });
+      }
+      if (url.endsWith("/local-annotations/unresolved?path=notes.md")) {
+        return Response.json({ annotations: [] });
+      }
+      if (url.endsWith("/local-annotations") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({
+          path: "notes.md",
+          kind: "task",
+          body: "tighten intro",
+        });
+        return Response.json({ annotation: { id: "la_abc", messages: [] } });
+      }
+      if (url.endsWith("/local-annotations/la_abc") && init?.method === "PATCH") {
+        expect(JSON.parse(String(init.body))).toEqual({ status: "resolved" });
+        return Response.json({ annotation: { id: "la_abc", messages: [] } });
+      }
+      if (url.endsWith("/local-annotations/la_abc/messages") && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ body: "done" });
+        return Response.json({ annotation: { id: "la_abc", messages: [] } });
+      }
+      if (url.endsWith("/local-annotations/la_abc") && init?.method === "DELETE") {
+        return Response.json({ ok: true });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.listLocalAnnotations("owner", "repo", { path: "notes.md", status: "open" });
+    await api.listUnresolvedLocalAnnotations("owner", "repo", { path: "notes.md" });
+    await api.createLocalAnnotation("owner", "repo", { path: "notes.md", kind: "task", body: "tighten intro" });
+    await api.updateLocalAnnotation("owner", "repo", "la_abc", { status: "resolved" });
+    await api.addLocalAnnotationMessage("owner", "repo", "la_abc", { body: "done" });
+    await api.deleteLocalAnnotation("owner", "repo", "la_abc");
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+});

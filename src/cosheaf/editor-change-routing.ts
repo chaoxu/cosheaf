@@ -1,17 +1,17 @@
 import type {
-  EditorDocumentChange as MountedDocumentChange,
+  EditorDocumentChange,
   MountedEditor,
 } from "@chaoxu/coflat";
 import { Text } from "@codemirror/state";
 
 interface EditorChangeHandlers {
   onStringChange: (value: string) => void;
-  onDocumentChange: (change: MountedDocumentChange) => void;
+  onDocumentChange: (change: EditorDocumentChange) => void;
 }
 
 export type RoutedEditorChangeProps =
   | { onChange: (value: string) => void; onDocumentChange?: never }
-  | { onChange?: never; onDocumentChange: (change: MountedDocumentChange) => void };
+  | { onChange?: never; onDocumentChange: (change: EditorDocumentChange) => void };
 
 export function routeEditorChangeHandlers(
   handlers: EditorChangeHandlers,
@@ -27,7 +27,7 @@ export function textFromSource(source: string): Text {
   return Text.of(source.split("\n"));
 }
 
-export function applyDocumentChangeText(source: Text, change: Pick<MountedDocumentChange, "changes">): Text {
+export function applyDocumentChangeText(source: Text, change: Pick<EditorDocumentChange, "changes">): Text {
   return change.changes.apply(source);
 }
 
@@ -52,7 +52,7 @@ export class IncrementalSourceCache {
     this.sourceText = textFromSource(source);
   }
 
-  apply(change: Pick<MountedDocumentChange, "changes">): void {
+  apply(change: Pick<EditorDocumentChange, "changes">): void {
     this.sourceVersion += 1;
     this.sourceText = applyDocumentChangeText(this.sourceText, change);
   }

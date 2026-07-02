@@ -62,6 +62,42 @@ pnpm cosheaf:tea-check -- --api "https://cosheaf-test.lab/api/v1" --workspace "c
 Add `--write-check` when it is acceptable to create and clean up a temporary
 branch and Markdown file through the Gitea-shaped `/contents` route.
 
+## Local Workbench Writing Queue
+
+When Cosheaf is running as a local Workbench over a folder, local annotations
+are a private writing task queue for the user and local agents. They are not
+Core issues, pull-request review comments, or shared collaboration records.
+The durable source is the gitignored sidecar:
+
+```text
+<workspace>/.cosheaf/local-annotations.json
+```
+
+Use these routes only against the local Workbench URL for the opened folder:
+
+| Workflow | Local Workbench route |
+| --- | --- |
+| List annotations | `GET /api/v1/repos/$OWNER/$REPO/local-annotations?path=paper.md` |
+| List unresolved queue | `GET /api/v1/repos/$OWNER/$REPO/local-annotations/unresolved` |
+| Create local note/task | `POST /api/v1/repos/$OWNER/$REPO/local-annotations` |
+| Append progress message | `POST /api/v1/repos/$OWNER/$REPO/local-annotations/$ID/messages` |
+| Resolve or reopen | `PATCH /api/v1/repos/$OWNER/$REPO/local-annotations/$ID` |
+| Delete local annotation | `DELETE /api/v1/repos/$OWNER/$REPO/local-annotations/$ID` |
+
+The basic local agent loop is:
+
+1. List unresolved annotations.
+2. Read each item's `path`, `anchor`, `kind`, messages, and `context` fields
+   such as `context.excerpt` and `context.anchor_found`.
+3. Edit the Markdown file in the local workspace, keeping or removing the
+   `[@local:<id>]` marker according to the task.
+4. Append a message explaining what changed.
+5. Resolve the annotation when the document no longer needs that local note.
+
+Final PDF export fails while local markers remain in the source or while open
+sidecar annotations are detached from their anchors. Resolve/delete local
+annotations before treating the document as publishable.
+
 ## Instruction Block
 
 Put this in the agent's workspace instructions, system prompt, or project

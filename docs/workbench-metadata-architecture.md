@@ -1,125 +1,166 @@
-# Workbench Metadata & Commenting Architecture
+# Workbench Local Writing Annotations
 
-This document defines the implementation specification for handling transient/working metadata (such as inline comments, todo lists, and AI session states) in the local Cosheaf Workbench. 
+This document defines the near-term architecture for local Workbench writing
+metadata: comments, TODOs, and AI-facing notes used while drafting a paper or
+technical note. The first target workflow is a single user plus AI working in a
+local paper folder such as `~/playground/ESA` on `earth`.
 
----
+The goal is not global collaborative review yet. Workbench should first become a
+good local writing cockpit: read the document, mark issues in context, ask AI to
+work from those marks, review edits, and resolve the marks.
 
-## 1. The Core Philosophy: "How do we transport non-document metadata?"
+## Product Boundary
 
-In an AI-collaborative writing environment, there is a distinct boundary between:
-* **Source Content** (final text, figures, bibliography) -> committed to the main document files (`main.md`).
-* **Collaboration Metadata** (comments, task statuses, AI session logs) -> stored out-of-file so they do not pollute the raw markdown or final PDF.
+Local annotations are drafting affordances, not collaboration records.
 
-To transport this metadata without bloating the Git repository or relying on complex real-time database sync engines, we divide metadata into two transport pathways:
+- Document content lives in the user's files and git working tree.
+- Local annotations live in a gitignored Workbench sidecar.
+- Formal shared issues, pull requests, and review comments still belong to the
+  remote Core API when a workspace is connected.
+- Moving local annotations into shared collaboration is a future explicit
+  promotion/sync feature, not the default transport.
 
-1. **Git-Native Transport (The Committed Sidecar)**: Local working comments and AI tasks are stored in a structured JSON file committed to Git (`.cosheaf/comments.json`). They are branched, merged, and shared via standard `git push`/`pull` operations.
-2. **Forge-Native Transport (The API Registry)**: Formal team-wide PR review comments and issues are stored on the Gitea server and fetched by the Workbench via APIs, cached locally in a gitignored SQLite sidecar.
+This keeps the first version useful for the common case: one person is editing a
+paper locally and using AI as a writing assistant.
 
----
+## Storage
 
-## 2. In-Text Comment Anchoring & Syntax
+Workbench stores local annotations under the opened folder's `.cosheaf/`
+sidecar, which is already protected by `.cosheaf/.gitignore`.
 
-To ensure comments never drift or become outdated when text paragraphs are shifted or refactored, comments are anchored directly in the markdown text using Coflat's citation-aligned syntax:
+Initial file:
 
-```markdown
-We can reduce the problem to reduction-to-grid[@c:c_a8f921] in polynomial time.
+```text
+<workspace>/.cosheaf/local-annotations.json
 ```
 
-### 2.1 Sigil Reservation & Autocomplete
-* The prefix **`@c:`** and **`[@c:`** are reserved exclusively for comment references.
-* Typing `[@` in the CodeMirror editor triggers autocomplete for citations (`refs.bib`) and page backlinks.
-* Typing `[@c:` immediately switches the editor's autocomplete filter to display active comment threads from the sidecar database.
-* **Auto-insertion**: The user can highlight a text span and press `Cmd+Alt+M` (or click "Comment" in the UI). The editor automatically generates a unique ID, inserts `[@c:c_xxxxxx]` at the cursor, and focuses the comment drawer.
+This file is private local Workbench state. It must not be committed by the
+Workbench commit flow, and it must not be interpreted as shared review state.
 
----
-
-## 3. The Committed Sidecar Schema (`.cosheaf/comments.json`)
-
-The rich metadata, author attributions, and discussion threads are stored in `.cosheaf/comments.json`:
+Suggested shape:
 
 ```json
 {
-  "c_a8f921": {
-    "status": "open",
-    "assignee": "ai",
-    "thread": [
-      {
-        "author": "chaoxu",
-        "timestamp": "2026-07-01T19:10:00Z",
-        "text": "Please clarify this step."
-      },
-      {
-        "author": "ai",
-        "timestamp": "2026-07-01T19:11:15Z",
-        "text": "I will rewrite it to highlight the grid coordinate mapping."
-      }
-    ]
+  "annotations": {
+    "la_k7f3m2q9x1p0": {
+      "id": "la_k7f3m2q9x1p0",
+      "kind": "comment",
+      "status": "open",
+      "path": "paper.md",
+      "anchor": "[@local:la_k7f3m2q9x1p0]",
+      "created_at": "2026-07-01T19:10:00.000Z",
+      "updated_at": "2026-07-01T19:10:00.000Z",
+      "messages": [
+        {
+          "id": "msg_k7f3m2q9x1p0",
+          "author": "chao",
+          "created_at": "2026-07-01T19:10:00.000Z",
+          "body": "Please clarify this step."
+        }
+      ]
+    }
   }
 }
 ```
 
-### 3.1 Resolving Git Conflicts
-Because comments are added as distinct keys in the JSON object mapping, standard Git merges will cleanly integrate additions from different collaborators without conflicts.
+The file shape is deliberately simple so Codex or another local agent can read
+and update it without a database client. Workbench may later mirror it into
+SQLite for search or SSE fanout, but JSON remains the durable local source.
 
----
+## Anchors
 
-## 4. Compiler Integration (LaTeX/PDF Safety)
+Document text may contain a local annotation marker:
 
-During document compilation (e.g. `make pdf` or running Pandoc), the Pandoc Lua filter ([`latex/filter.lua`](file:///Users/chaoxu/playground/cosheaf/latex/filter.lua)) must strip comment references:
-
-```lua
--- In latex/filter.lua
-function Cite(el)
-  -- Strip comment citations completely from the LaTeX output
-  if el.citations[1].id:match("^c:") then
-    return {}
-  end
-  return el
-end
+```markdown
+We reduce the instance to a grid gadget[@local:la_k7f3m2q9x1p0].
 ```
 
-This guarantees that comments never appear in the compiled LaTeX source or final PDF paper.
+The marker is intentionally explicit:
 
----
+- `@local:` means local Workbench drafting metadata.
+- The id after the prefix points to the sidecar annotation.
+- The marker can move with the surrounding sentence, which is better than a
+  line-number-only anchor for active writing.
 
-## 5. UI Layout: The Bottom Drawer
+The marker namespace is not global review syntax. If a future sync feature is
+added, promotion to Core comments should create remote records explicitly.
 
-The Workbench UI displays local comments and AI conversations in a **toggleable bottom drawer** (collapsible like a terminal console):
-- **Coflat Editor**: Renders `[@c:commentId]` markers as inline yellow highlights. Clicking a highlight slides open the bottom drawer and focuses the active comment thread.
-- **Interactive Checkbox Lists**: Markdown checkboxes (`- [ ]`) written inside comment threads are parsed and rendered as interactive check-lists in the drawer. Clicking them edits the JSON/markdown files on disk.
-- **Live Sync**: The Workbench server runs an `fs.watch` file watcher on `comments.json` (or uses SQLite change triggers) and broadcasts updates to the browser via Server-Sent Events (SSE) for real-time rendering.
+## AI Workflow
 
-## 6. Current Local-Only Queue Contract
+Codex remains the main conversational AI interface. Workbench provides a
+document-grounded task surface that Codex can inspect.
 
-The first Workbench implementation uses local `[@local:<id>]` anchors and the
-gitignored sidecar `.cosheaf/local-annotations.json`. Agents can read unresolved
-local writing tasks through:
+Minimum useful loop:
 
-```text
-GET /api/v1/repos/:owner/:repo/local-annotations/unresolved
-```
+1. User highlights a paragraph or places the cursor and adds a local comment or
+   task.
+2. Workbench inserts an `[@local:<id>]` marker and creates the sidecar record.
+3. Codex reads unresolved annotations through a local API or the sidecar file.
+4. Codex edits the document, optionally appends a message to the annotation,
+   and resolves it when done.
+5. User reviews the document in Workbench and reopens or resolves as needed.
 
-The response is:
+Implemented local API shape:
 
-```json
-{
-  "annotations": [
-    {
-      "id": "a1",
-      "anchor": "local:a1",
-      "path": "paper.md",
-      "kind": "task",
-      "status": "open",
-      "messages": [{ "author": "me", "timestamp": "2026-07-02T00:00:00Z", "text": "Clarify this step." }],
-      "source_excerpt": { "line": 4, "start_line": 2, "end_line": 6, "text": "..." }
-    }
-  ],
-  "count": 1,
-  "sidecar": ".cosheaf/local-annotations.json"
-}
-```
+- `GET /api/v1/repos/:owner/:repo/local-annotations`
+- `GET /api/v1/repos/:owner/:repo/local-annotations/unresolved`
+- `POST /api/v1/repos/:owner/:repo/local-annotations`
+- `PATCH /api/v1/repos/:owner/:repo/local-annotations/:id`
+- `POST /api/v1/repos/:owner/:repo/local-annotations/:id/messages`
+- `DELETE /api/v1/repos/:owner/:repo/local-annotations/:id`
 
-The sidecar may use either `{ "annotations": [...] }` or an object map keyed by
-annotation id. Each record should include `id`, `path`, `kind` (`comment` or
-`task`), `status` (`open` or `resolved`), and `messages` (or legacy `thread`).
-Resolved records are omitted from the unresolved queue.
+The unresolved queue includes path, anchor id, status, messages, and source
+context (`line`, `excerpt`, `anchor_found`) so Codex can pick up document-local
+writing tasks without scraping the UI.
+
+## UI Direction
+
+The Workbench UI should use a bottom drawer for local annotations.
+
+Expected first controls:
+
+- Add comment / add task
+- Show unresolved
+- Jump to next unresolved
+- Resolve / reopen
+- Thread messages for the selected annotation
+
+Coflat should render local markers as subtle document highlights. Clicking a
+highlight should open the drawer focused on that annotation. This rendering
+belongs in Coflat or a documented Coflat host extension, not as ad hoc HTML
+rewrites in Cosheaf.
+
+## Export and PDF Safety
+
+Local drafting markers must not leak into final output.
+
+Implemented near-term rule:
+
+- Workbench final export/PDF fails while any `[@local:...]` marker remains in
+  the source, including resolved annotations. Resolved means the drafting task is
+  done; it does not mean the authoring marker is safe to publish.
+
+The current Workbench PDF export fails before invoking Pandoc if the source
+contains any `[@local:...]` marker, whether the matching sidecar annotation is
+open, resolved, missing, or unreadable. It also fails when an open sidecar
+annotation exists for the file but its anchor is absent from source, so authors
+do not accidentally export while local comments are detached from the text.
+
+Later rule, if useful:
+
+- A draft export mode may strip local anchors.
+- A final export mode should fail on unresolved local anchors by default.
+
+Draft-mode stripping remains a future policy question.
+
+## Future Work
+
+Out of scope for the first local writing workflow:
+
+- Syncing local annotations across machines.
+- Promoting local annotations to Core comments.
+- Multi-user concurrent editing.
+- Shared bottom-drawer presence or real-time collaboration.
+- Treating local annotations as PR review comments.
+
+Those should be designed after the local writing loop is useful.

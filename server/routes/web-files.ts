@@ -13,6 +13,7 @@ import {
 } from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
+import { assertLocalAnnotationsReadable, localAnnotationSidecarConflict, moveLocalAnnotationsPath } from "../local/local-annotations.js";
 import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
@@ -481,6 +482,9 @@ web.post("/:owner/:repo/_edit", webRouteForWrite(async (c, ctx) => {
     if (err instanceof Error && /^destination already exists: /.test(err.message)) {
       return badRequestPage(ctx.user, "A file already exists at the new path.");
     }
+    if (localAnnotationSidecarConflict(err)) {
+      return badRequestPage(ctx.user, "Local annotations could not be read. Fix .cosheaf/local-annotations.json, then retry.");
+    }
     throw err;
   }
   if (oldRel && oldRel !== rel) c.get("sse").publish(ctx.ws.slug, { type: "change", path: oldRel });
@@ -590,6 +594,10 @@ async function writeFile(
       })
     : null;
   const finalContent = plan?.rewrittenContent ?? content;
+  const localAnnotationEntry = ctx.writeMode === "direct" && ctx.localEntry && previousRel && previousRel !== rel
+    ? ctx.localEntry
+    : null;
+  if (localAnnotationEntry) assertLocalAnnotationsReadable(localAnnotationEntry);
   if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
     throw new WorkspaceBackendError(409, "stale_sha", `stale sha for ${casPath}`);
   }
@@ -633,6 +641,9 @@ async function writeFile(
   // main). Local Workbench (direct write-mode) is the exception — see
   // indexLocalWrite — indexing now to keep search/backlinks live.
   indexLocalWrite(ctx.writeMode === "direct", ctx.db, ctx.ws.slug, plan, previousRel && previousRel !== rel ? previousRel : undefined);
+  if (localAnnotationEntry && previousRel) {
+    moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
+  }
   // #182: a cosheaf.yaml edit through the editor busts its cached config for
   // this branch (read-after-write for config, independent of sidecar indexing).
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, branch);
