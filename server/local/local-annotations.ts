@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { fileKindForPath } from "../../shared/file-kind.js";
@@ -56,6 +56,47 @@ localAnnotations.get("/:owner/:repo/local-annotations/unresolved", async (c) => 
   });
 });
 
+localAnnotations.get("/:owner/:repo/local-annotations", async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
+  if (!resolved) return c.json(...notFound("workspace not found"));
+
+  const sidecar = readAnnotationSidecar(resolved.entry.path);
+  if (!sidecar.ok) return c.json(...bad(sidecar.error));
+
+  const queue = await annotationQueue(resolved.entry, sidecar.records);
+  return c.json({
+    annotations: queue,
+    count: queue.length,
+    sidecar: SIDECAR_PATH,
+  });
+});
+
+localAnnotations.patch("/:owner/:repo/local-annotations/:id", async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const id = stripLocalPrefix(c.req.param("id"));
+  const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
+  if (!resolved) return c.json(...notFound("workspace not found"));
+
+  const body = await c.req.json().catch(() => null) as { status?: unknown } | null;
+  const requestedStatus = body?.status;
+  if (requestedStatus !== "open" && requestedStatus !== "resolved") return c.json(...bad("status must be open or resolved"));
+  const status: LocalAnnotationRecord["status"] = requestedStatus;
+
+  const sidecar = readAnnotationSidecar(resolved.entry.path);
+  if (!sidecar.ok) return c.json(...bad(sidecar.error));
+
+  const records = sidecar.records.map((record) => record.id === id ? { ...record, status } : record);
+  const updated = records.find((record) => record.id === id);
+  if (!updated) return c.json(...notFound("local annotation not found"));
+  writeAnnotationSidecar(resolved.entry.path, records);
+
+  const [annotation] = await annotationQueue(resolved.entry, [updated]);
+  return c.json({ annotation: annotation ?? { ...updated, anchor: `local:${updated.id}`, source_excerpt: null } });
+});
+
 type SidecarRead = { ok: true; records: LocalAnnotationRecord[] } | { ok: false; error: string };
 
 function readAnnotationSidecar(root: string): SidecarRead {
@@ -68,6 +109,12 @@ function readAnnotationSidecar(root: string): SidecarRead {
     return { ok: false, error: "invalid local annotations sidecar JSON" };
   }
   return { ok: true, records: normalizeSidecar(raw) };
+}
+
+function writeAnnotationSidecar(root: string, records: readonly LocalAnnotationRecord[]): void {
+  const path = join(root, SIDECAR_PATH);
+  mkdirSync(join(root, ".cosheaf"), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ annotations: records }, null, 2)}\n`);
 }
 
 function normalizeSidecar(raw: unknown): LocalAnnotationRecord[] {
@@ -115,13 +162,16 @@ function stripLocalPrefix(id: string): string {
 }
 
 async function unresolvedQueue(entry: import("./workspace-registry.js").WorkspaceEntry, records: readonly LocalAnnotationRecord[]): Promise<LocalAnnotationQueueItem[]> {
-  const open = records.filter((record) => record.status !== "resolved");
-  if (open.length === 0) return [];
+  return annotationQueue(entry, records.filter((record) => record.status !== "resolved"));
+}
+
+async function annotationQueue(entry: import("./workspace-registry.js").WorkspaceEntry, records: readonly LocalAnnotationRecord[]): Promise<LocalAnnotationQueueItem[]> {
+  if (records.length === 0) return [];
 
   const tree = await entry.backend.getTree(entry.identity.owner, entry.identity.repo, "main", true);
   const markdownPaths = new Set(tree.filter((node) => node.type === "blob" && fileKindForPath(node.path) === "markdown").map((node) => node.path));
   const byPath = new Map<string, LocalAnnotationRecord[]>();
-  for (const record of open) {
+  for (const record of records) {
     if (!markdownPaths.has(record.path)) continue;
     const list = byPath.get(record.path) ?? [];
     list.push(record);

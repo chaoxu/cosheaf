@@ -26,6 +26,7 @@ import {
 import { markChangedBlocks, markChangeStops, markRichGapContentAnchors, markRichInlineRanges } from "./reader-diff-marking";
 import { rewritePdfPreviewObjects } from "./pdf-preview-rewrite";
 import { placeReviewComments, placeReviewCommentComposers } from "./reader-review-comments";
+import { installLocalAnnotations } from "./local-annotations-ui";
 
 const READER_SCROLL_STATE_KEY = "cosheafReaderScrollTop";
 const observedScrollTop = new WeakMap<HTMLElement, number>();
@@ -135,6 +136,14 @@ async function renderIsland(root: HTMLElement): Promise<void> {
   }
   if (payload.reviewComments?.length) {
     placeReviewComments(root, payload.reviewComments);
+  }
+  if (root.querySelector("[data-ref-key^='local:']")) {
+    installLocalAnnotations(root, {
+      owner: payload.owner,
+      repo: payload.repo,
+      path: payload.path,
+      drawerParent: root.closest<HTMLElement>(".doc-main") ?? undefined,
+    });
   }
   buildReaderToc(result.outline ?? [], ctx.mathMacros);
   root.dataset.readerHydrated = "1";
