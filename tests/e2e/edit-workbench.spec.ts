@@ -126,6 +126,38 @@ test("edit workbench read mode paints the fast rich-readonly surface before edit
   await expect(page.getByTestId("editor-path-pencil")).toBeDisabled();
 });
 
+test("edit workbench fast read mode scrolls with wheel and document keys", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await signIn(page);
+
+  await page.goto(`${repoBase}/src/branch/main/coflat-feature-showcase.md?mode=read&edit_branch=user%2Fchao%2Fweb-edit`);
+  await expectFastWorkbenchRead(page, "Coflat Feature Showcase");
+  const scroller = page.locator("[data-edit-shell] .doc-main");
+  await expect(scroller).toBeVisible();
+  await expect.poll(async () =>
+    scroller.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollable: element.scrollHeight > element.clientHeight,
+    })),
+  ).toEqual({ overflowY: "auto", scrollable: true });
+
+  const box = await scroller.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move((box?.x ?? 0) + Math.min(60, (box?.width ?? 1) / 2), (box?.y ?? 0) + Math.min(60, (box?.height ?? 1) / 2));
+  await page.mouse.wheel(0, 360);
+  await expect.poll(async () => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+  await scroller.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await page.keyboard.press("End");
+  await expect.poll(async () => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.keyboard.press("Home");
+  await expect.poll(async () => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+  await page.keyboard.press("Space");
+  await expect.poll(async () => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+});
+
 test("rich editor keeps fenced div opener editable while adding a label", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await signIn(page);
