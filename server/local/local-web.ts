@@ -24,6 +24,7 @@ import { registerPullRoutes } from "../routes/web-pulls.js";
 import { registerSettingsRoutes } from "../routes/web-settings.js";
 import { globalSidebar, pageShell } from "../routes/web-shell.js";
 import type { AppEnv } from "../types.js";
+import { registerLocalAgentSessionRoutes } from "./local-agent-sessions.js";
 import { hasWorkbenchAccess, localAuthGate, tokenMatches, WORKBENCH_COOKIE } from "./local-auth.js";
 import { registerLocalCommitRoutes } from "./local-commit.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
@@ -392,6 +393,7 @@ export function createLocalWebRouter(): Hono<AppEnv> {
   // Diagnostics reads the local SQLite sidecar, so it needs no connected core.
   registerFileRoutes(localWeb);
   registerLocalCommitRoutes(localWeb);
+  registerLocalAgentSessionRoutes(localWeb);
   registerDiagnosticsRoutes(localWeb);
 
   // Collaboration surfaces (#268): gate on a connected core first — no core →

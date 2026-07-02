@@ -290,6 +290,20 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 .commit-branchline{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .commit-branchline p{margin:0}
 .commit-sync{display:flex;align-items:center;gap:6px}
+.agent-session-list{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}
+.agent-session-card{border-top:1px solid var(--cf-border);padding:8px 0}
+.agent-session-card p{margin:4px 0 0}
+.agent-session-section{border-top:1px solid var(--cf-border);padding:10px 0}
+.agent-session-section h2{font-size:15px;margin:0 0 8px}
+.agent-session-annotations{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.agent-session-annotations li{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.agent-session-annotations form{display:inline}
+.agent-session-diffs{display:grid;gap:8px;margin-bottom:10px}
+.agent-session-diff{border-top:1px solid var(--cf-border);padding:6px 0}
+.agent-session-diff summary{cursor:pointer;display:flex;align-items:center;gap:8px;list-style:none}
+.agent-session-diff summary::-webkit-details-marker{display:none}
+.agent-session-diff label{display:flex;align-items:center;gap:7px;margin:0}
+.agent-session-diff pre{margin:8px 0 0;overflow:auto;max-height:420px;padding:8px;background:var(--cf-code-bg);font:12px/1.45 var(--cf-font-mono);white-space:pre}
 
 /* mobile */
 @media(max-width:900px){#web-editor-root{margin:0}.web-editor-shell .cm-scroller{padding-right:0}.web-editor-outline{display:none}}

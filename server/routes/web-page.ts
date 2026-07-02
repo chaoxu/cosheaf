@@ -7,7 +7,7 @@ import { repoHref, type WebCtx, type WebListState } from "./web-context.js";
 import { emptyHtml, type Html, html, joinHtml, raw } from "./web-html.js";
 import { pageShell, type StatusCrumb, sidebarIdentity } from "./web-shell.js";
 
-export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings" | "commit";
+export type RepoTab = "files" | "issues" | "pulls" | "chat" | "notifications" | "activity" | "diagnostics" | "settings" | "commit" | "agents";
 
 // A small "+ <label>" disclosure that keeps a durable add/create form closed by
 // default behind a native <details>, so a panel/section reads cleanly when
@@ -107,6 +107,7 @@ export function repoPage(opts: {
         // (or a Connect prompt when none is connected).
         tab(opts, "files", t("tab.files"), ""),
         tab(opts, "commit", "Commit", "/commit"),
+        tab(opts, "agents", "Agent sessions", "/agent-sessions"),
         tab(opts, "issues", t("tab.issues"), "/issues"),
         tab(opts, "pulls", t("tab.pulls"), "/pulls"),
         tab(opts, "notifications", t("nav.notifications"), "/notifications"),

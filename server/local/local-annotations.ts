@@ -249,6 +249,17 @@ export function localAnchorPreflightIssues(entry: WorkspaceEntry, path: string, 
   return issues;
 }
 
+export function setLocalAnnotationStatus(entry: WorkspaceEntry, id: string, status: LocalAnnotationStatus): LocalAnnotation | null {
+  if (!ANNOTATION_ID_RE.test(id)) return null;
+  const data = readLocalAnnotations(entry);
+  const annotation = data.annotations[id];
+  if (!annotation) return null;
+  annotation.status = status;
+  annotation.updated_at = nowIso();
+  writeLocalAnnotations(entry, data);
+  return annotation;
+}
+
 export const localAnnotations = new Hono<AppEnv>();
 localAnnotations.use("*", requireAuth);
 localAnnotations.use("/:owner/:repo/*", requireMembership());
