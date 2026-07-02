@@ -11,7 +11,7 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { ForgejoError } from "../forgejo.js";
 import { NoCoreConnectedError } from "../local/origin-collaboration-client.js";
-import { RemoteCosheafError } from "../local/remote-cosheaf-client.js";
+import { RemoteCosheafError } from "../local/origin-response.js";
 import { AUTH_COOKIE, invalidateBearerCache } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";

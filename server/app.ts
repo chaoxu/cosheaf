@@ -20,7 +20,6 @@ import type { LocalGitWorkspaceBackend } from "./local/local-git-backend.js";
 import { localNotifications } from "./local/local-notifications.js";
 import { localPulls } from "./local/local-pulls.js";
 import { createLocalWebRouter } from "./local/local-web.js";
-import type { RemotePullClient } from "./local/remote-cosheaf-client.js";
 import { WorkspaceRegistry } from "./local/workspace-registry.js";
 import { resolveLocale } from "./locale.js";
 import { auth } from "./routes/auth.js";
@@ -49,11 +48,10 @@ export interface CreateAppOptions {
   // The launcher passes a populated registry; tests use the single-workspace
   // back-compat fields below, which are wrapped into a one-entry registry.
   localRegistry?: WorkspaceRegistry;
-  // Back-compat single-workspace assembly (tests): one backend + identity, and
-  // an optional Tier-2 remote client. Ignored when localRegistry is provided.
+  // Back-compat single-workspace assembly (tests): one backend + identity.
+  // Ignored when localRegistry is provided.
   workspaceBackend?: WorkspaceBackend;
   localWorkspace?: LocalWorkspaceIdentity;
-  remoteClient?: RemotePullClient;
 }
 
 export type AppContentProvider = "forgejo" | "local-git";
@@ -111,7 +109,6 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
         backend: options.workspaceBackend as LocalGitWorkspaceBackend,
         remote: null,
         gitRemote: null,
-        remoteClient: options.remoteClient,
       });
     }
   }

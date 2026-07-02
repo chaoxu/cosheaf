@@ -18,7 +18,6 @@ import { indexCitationFile, indexPage } from "../indexer.js";
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { type LocalGitRemote, type LocalRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
-import { CosheafOriginClient, type RemotePullClient } from "./remote-cosheaf-client.js";
 
 // The fixed single user every local workspace is served as. The Workbench is
 // single-person; this handle only colours the sidebar identity and any branch
@@ -26,7 +25,7 @@ import { CosheafOriginClient, type RemotePullClient } from "./remote-cosheaf-cli
 export const LOCAL_USER = "local";
 
 // One opened folder. `identity` is the existing per-workspace contract the routes
-// already consume; `gitRemote` + `remoteClient` add the Tier-2 / display bits.
+// already consume; `gitRemote` + `remote` add the Tier-2 / display bits.
 export interface WorkspaceEntry {
   slug: string;
   // Absolute path to the folder on disk.
@@ -37,8 +36,6 @@ export interface WorkspaceEntry {
   remote: LocalRemote | null;
   // Working-tree git upstream (display + push target), or null for local-only.
   gitRemote: LocalGitRemote | null;
-  // Tier 2 open-PR client (present iff .cosheaf/remote.json configured a token).
-  remoteClient?: RemotePullClient;
 }
 
 // Ensure `<dir>/.cosheaf/.gitignore` exists and ignores everything, so a
@@ -118,7 +115,7 @@ export class WorkspaceRegistry {
   }
 
   // Build an entry for a folder from its on-disk identity (git upstream → slug,
-  // sidecar remote.json → Tier 2 client). Does not index or persist.
+  // sidecar remote.json → connected Core config). Does not index or persist.
   buildEntry(dir: string): WorkspaceEntry {
     const path = resolve(dir);
     // Guard the per-workspace sidecar before anything can commit: `.cosheaf/`
@@ -141,8 +138,7 @@ export class WorkspaceRegistry {
       originId: originIdForPath(path),
     };
     const backend = new LocalGitWorkspaceBackend(path, { pushRemote: cfg.gitRemote?.name, author: () => this.getProfile() });
-    const remoteClient = cfg.remote ? new CosheafOriginClient(cfg.remote.url, cfg.remote.token) : undefined;
-    return { slug, path, identity, backend, remote: cfg.remote, gitRemote: cfg.gitRemote, remoteClient };
+    return { slug, path, identity, backend, remote: cfg.remote, gitRemote: cfg.gitRemote };
   }
 
   // Index a workspace's markdown + bib files into the shared sidecar, scoped by
@@ -187,7 +183,7 @@ export class WorkspaceRegistry {
 
   // Re-derive a registered entry from disk (without re-indexing) so a sidecar
   // change — connecting a remote via .cosheaf/remote.json — takes effect:
-  // remoteClient / canOpenPull / gitRemote are recomputed. Null if not registered.
+  // remote / canOpenPull / gitRemote are recomputed. Null if not registered.
   rebuild(slug: string): WorkspaceEntry | null {
     const existing = this.entries.get(slug);
     if (!existing) return null;

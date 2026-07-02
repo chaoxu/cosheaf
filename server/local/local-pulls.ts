@@ -12,6 +12,7 @@ import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { parseGitRemote } from "./local-workspace.js";
+import { OriginCollaborationClient } from "./origin-collaboration-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 export const localPulls = new Hono<AppEnv>();
@@ -59,8 +60,7 @@ export async function openLocalPull(
   repo: string,
   input: { head?: string; base?: string; title?: string; body?: string },
 ): Promise<OpenLocalPullResult> {
-  const remote = entry.remoteClient;
-  if (!remote) {
+  if (!entry.remote) {
     return {
       ok: false,
       status: 409,
@@ -68,6 +68,7 @@ export async function openLocalPull(
         "No Cosheaf server connected. Add { url, token } to .cosheaf/remote.json (gitignored) to push local git branches and open remote pull requests.",
     };
   }
+  const collab = new OriginCollaborationClient(entry.remote.url, entry.remote.token);
   const backend = entry.backend;
   const head = input.head?.trim();
   const base = input.base?.trim() || "main";
@@ -94,7 +95,7 @@ export async function openLocalPull(
   const bindingError = await validatePublishBinding(entry, owner, repo);
   if (bindingError) return { ok: false, status: 400, message: bindingError };
   try {
-    const who = await remote.whoami();
+    const who = await collab.whoami();
     if (!who) return { ok: false, status: 400, message: "Remote Cosheaf server check failed before committing: the configured token was rejected." };
   } catch (err) {
     return { ok: false, status: 400, message: `Remote Cosheaf server check failed before committing: ${friendlyLine(err)}` };
@@ -114,7 +115,7 @@ export async function openLocalPull(
     return { ok: false, status: 400, message: `Committed local changes, but push to "${backend.getPushRemoteName()}" failed: ${friendlyLine(err)}` };
   }
   try {
-    const remoteHead = await remote.branchHead(owner, repo, head);
+    const remoteHead = (await collab.listBranches(owner, repo)).find((branch) => branch.name === head)?.commit.id ?? null;
     if (!remoteHead) return { ok: false, status: 400, message: `Pushed "${head}", but the Cosheaf server does not see that branch yet.` };
     if (localHead && remoteHead !== localHead) {
       return { ok: false, status: 400, message: `Pushed "${head}", but the Cosheaf server sees ${remoteHead.slice(0, 12)} instead of ${localHead.slice(0, 12)}.` };
@@ -124,7 +125,7 @@ export async function openLocalPull(
   }
 
   try {
-    const pr = await remote.openPull(owner, repo, { head, base, title, body: prBody });
+    const pr = await collab.createPull(owner, repo, { head, base, title, body: prBody });
     return { ok: true, number: pr.number };
   } catch (err) {
     return { ok: false, status: 400, message: `Pushed "${head}", but couldn't open the remote pull request: ${friendlyLine(err)}` };

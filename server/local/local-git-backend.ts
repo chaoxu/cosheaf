@@ -287,8 +287,8 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     return { default_branch: branch, description: "", ssh_url: "", open_issues_count: 0 };
   }
 
-  // No pull requests locally: the review/merge surface is the remote Cosheaf
-  // (Tier 2), reached through CosheafOriginClient, not this backend.
+  // No pull requests locally: the review/merge surface is the connected Core
+  // Server (Tier 2), reached through OriginCollaborationClient, not this backend.
   async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all"): Promise<WsPull[]> {
     return [];
   }

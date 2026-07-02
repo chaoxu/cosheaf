@@ -52,7 +52,6 @@ describe("WorkspaceRegistry sidecar protection", () => {
     const reg = new WorkspaceRegistry(freshTestDb("cosheaf-reg-db3-"));
     const entry = await reg.addFolder(dir);
     expect(entry.remote).toBeNull();
-    expect(entry.remoteClient).toBeUndefined();
     expect(entry.identity.canOpenPull).toBe(false);
   });
 });

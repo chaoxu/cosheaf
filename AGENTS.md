@@ -138,9 +138,9 @@ hosted server.
   the Workbench. Folders with no remote remain useful as local-only editors.
 - Keep the current boundary: content operations go through
   `WorkspaceBackend`/`LocalGitWorkspaceBackend`; remote collaboration operations
-  go through `RemoteCosheafClient` and typed `/api/v1/repos/:owner/:repo/*`
-  routes. Do not import forge clients or construct backend forge paths in
-  `server/local/**`.
+  go through the typed Core collaboration client and
+  `/api/v1/repos/:owner/:repo/*` routes. Do not import forge clients or
+  construct backend forge paths in `server/local/**`.
 - The planning contract for this split is `docs/workbench-origin-split.md`.
   Read it before changing local/server authority boundaries, Origin API naming,
   multi-server workbench state, or Workbench security rules.

@@ -24,7 +24,7 @@ import { friendlyLine } from "./git-errors.js";
 import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { writeRemote } from "./local-workspace.js";
-import { CosheafOriginClient } from "./remote-cosheaf-client.js";
+import { OriginCollaborationClient } from "./origin-collaboration-client.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
@@ -65,7 +65,7 @@ export function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined,
 export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
   // Connect (or reconnect) a workspace to a remote Cosheaf: validate the token
   // with a whoami probe, then write the gitignored remote.json and rebuild the
-  // entry so its remoteClient / open-PR capability light up.
+  // entry so its Core connection / open-PR capability light up.
   web.post(
     "/:owner/:repo/connect",
     webRouteForWrite(async (c, ctx) => {
@@ -84,7 +84,7 @@ export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
       }
       let who: { username: string } | null;
       try {
-        who = await new CosheafOriginClient(url, token).whoami();
+        who = await new OriginCollaborationClient(url, token).whoami();
       } catch (err) {
         return badRequestPage(ctx.user, `Couldn't reach that Cosheaf: ${friendlyLine(err)}`);
       }

@@ -98,13 +98,13 @@ publish-flow change:
 
 - `pnpm check:no-forgejo-workbench` must stay mandatory in `pnpm check:lint`.
   It blocks `server/local/**` from naming the backing forge directly.
-- Use typed Cosheaf routes or `CosheafOriginClient` for remote workspace-server
+- Use typed Cosheaf routes or `OriginCollaborationClient` for remote workspace-server
   operations. Do not add raw backing-forge calls or hidden local issue/PR
   storage to the Workbench.
 - For local PR/open-flow changes, run
-  `pnpm exec vitest run server/local/local-pulls.test.ts server/local/local-app.test.ts server/local/remote-cosheaf-client.test.ts`.
+  `pnpm exec vitest run server/local/local-pulls.test.ts server/local/local-app.test.ts server/local/origin-collaboration-client.test.ts server/local/origin-response.test.ts`.
   This covers local edit/commit/push/open-remote-PR behavior, connected and
-  disconnected UI labels, and the remote client contract.
+  disconnected UI labels, and the Origin response parser contract.
 - Hosted regressions still belong in the normal gates: `pnpm check:local` for
   static/unit/build coverage, plus `pnpm check:web` when login, files, issues,
   PR review/merge, notifications, or assets are affected.

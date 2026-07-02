@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ForgejoError } from "../forgejo.js";
-import { RemoteCosheafError } from "../local/remote-cosheaf-client.js";
+import { RemoteCosheafError } from "../local/origin-response.js";
 import { _resetBearerAuthCacheForTests, _seedBearerAuthCacheForTests, resolveAuth } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";

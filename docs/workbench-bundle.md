@@ -112,7 +112,7 @@ The Workbench is a local editor, not a local copy of hosted Cosheaf.
 - A remote Cosheaf server owns collaboration: pull requests, issues, reviews,
   merge gates, notifications, collaborator permissions, labels, and milestones.
 - When a folder is connected to a remote, Workbench collaboration surfaces are
-  live proxy views through the typed Cosheaf API (`RemoteCosheafClient`). The
+  live proxy views through the typed Cosheaf API (`OriginCollaborationClient`). The
   Workbench stores no local issues, PRs, reviews, merge state, notifications,
   labels, milestones, or permissions.
 - The only per-folder remote state is the gitignored `.cosheaf/remote.json`

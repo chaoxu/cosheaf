@@ -32,6 +32,15 @@ function clientWith(fetch: (input: string, init?: RequestInit) => Promise<Respon
 }
 
 describe("OriginCollaborationClient write methods", () => {
+  it("reads the authenticated Core user through /api/v1/me", async () => {
+    const fake = recordingFetch(() => Response.json({ user: { username: "alice" } }));
+
+    await expect(clientWith(fake.fetch).whoami()).resolves.toEqual({ username: "alice" });
+    expect(fake.calls[0]?.input).toBe("https://core.example/api/v1/me");
+    expect(fake.calls[0]?.init?.method ?? "GET").toBe("GET");
+    expect(fake.calls[0]?.init?.headers).toMatchObject({ authorization: "Bearer tok" });
+  });
+
   it("edits an issue comment by id without an issue number", async () => {
     const fake = recordingFetch(() =>
       Response.json({ id: 55, body: "updated", author_username: "alice", created_at: 0, updated_at: 0 }),

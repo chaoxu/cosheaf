@@ -28,7 +28,7 @@ import type {
 import type { PrCommit, PrFile, PrMeta, ReviewDto, ReviewState, ReviewSubmitEvent } from "../../shared/review.js";
 import type { Role } from "../../shared/roles.js";
 import type { CollaborationClient } from "../collaboration-client.js";
-import { parseOriginResponse, RemoteCosheafError } from "./remote-cosheaf-client.js";
+import { parseOriginResponse, RemoteCosheafError } from "./origin-response.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 type BranchShape = Awaited<ReturnType<CollaborationClient["listBranches"]>>[number];
@@ -159,6 +159,11 @@ export class OriginCollaborationClient {
   }
   private del<T>(path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {}): Promise<T> {
     return this.send<T>("DELETE", path, opts);
+  }
+
+  async whoami(): Promise<{ username: string } | null> {
+    const r = await this.get<{ user: { username: string } | null }>("/api/v1/me");
+    return r.user;
   }
 
   private async getReviewById(owner: string, repo: string, index: number, reviewId: number): Promise<ReviewDto> {

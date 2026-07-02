@@ -11,7 +11,6 @@ import { buildLocalConfig } from "../db.js";
 import { freshTestDb } from "../routes/test-fixtures.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
-import type { RemotePullClient } from "./remote-cosheaf-client.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 
 function git(dir: string, args: string[]): string {
@@ -46,32 +45,46 @@ const IDENTITY: LocalWorkspaceIdentity = {
   canOpenPull: true,
 };
 
-// A fake remote with sensible defaults; override only what a test asserts on.
-function fakeRemote(over: Partial<RemotePullClient> = {}): RemotePullClient {
+// Minimal PrMeta the core's typed routes return; consumers read the arrays, so
+// they must be present even in tests that only assert the PR number.
+function prMeta(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    whoami: async () => ({ username: "me" }),
-    openPull: async () => ({ number: 1 }),
-    listPulls: async () => [],
-    branchHead: async () => null,
-    pullUrl: (owner, repo, n) => `https://remote.example/${owner}/${repo}/pulls/${n}`,
+    number: 7,
+    title: "t",
+    body: "",
+    state: "open",
+    merged: false,
+    merged_at: null,
+    mergeable: true,
+    additions_total: 0,
+    deletions_total: 0,
+    files_changed: 0,
+    labels: [],
+    milestone: null,
+    requested_reviewers: [],
+    requested_reviewer_teams: [],
+    head_ref: "feature",
+    head_sha: "h",
+    base_ref: "main",
+    base_sha: "b",
+    author_username: "other",
+    created_at: 0,
     ...over,
   };
 }
 
-function app(dir: string, remoteClient?: RemotePullClient): Hono<AppEnv> {
+function app(dir: string): Hono<AppEnv> {
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   return createApp({
     config,
     db: freshTestDb("wb-pulls-"),
     workspaceBackend: new LocalGitWorkspaceBackend(dir),
     localWorkspace: IDENTITY,
-    remoteClient,
   });
 }
 
 function appWithBinding(
   dir: string,
-  remoteClient: RemotePullClient,
   gitRemote: { name: string; host: string; owner: string; repo: string; url: string },
 ): Hono<AppEnv> {
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
@@ -84,7 +97,6 @@ function appWithBinding(
     backend: new LocalGitWorkspaceBackend(dir, { pushRemote: gitRemote.name }),
     remote: { url: `https://${gitRemote.host}`, token: "token" },
     gitRemote,
-    remoteClient,
   });
   return createApp({ config, db, localRegistry: registry });
 }
@@ -93,7 +105,7 @@ function appWithBinding(
 // binding (so validatePublishBinding short-circuits past the unparseable local
 // bare-repo path), exercising the full local commit→push→openPull happy path
 // through the server-rendered POST.
-function appConnectedNoBinding(dir: string, remoteClient: RemotePullClient): Hono<AppEnv> {
+function appConnectedNoBinding(dir: string): Hono<AppEnv> {
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   const db = freshTestDb("wb-pulls-conn-");
   const registry = new WorkspaceRegistry(db, { user: IDENTITY.user });
@@ -104,19 +116,34 @@ function appConnectedNoBinding(dir: string, remoteClient: RemotePullClient): Hon
     backend: new LocalGitWorkspaceBackend(dir),
     remote: { url: "https://remote.example", token: "token" },
     gitRemote: null,
-    remoteClient,
   });
   return createApp({ config, db, localRegistry: registry });
 }
 
-function appWithConnectedRegistry(dir: string, remoteClient: RemotePullClient): Hono<AppEnv> {
-  return appWithBinding(dir, remoteClient, {
+function appWithConnectedRegistry(dir: string): Hono<AppEnv> {
+  return appWithBinding(dir, {
     name: "origin",
     host: "remote.example",
     owner: IDENTITY.owner,
     repo: IDENTITY.repo,
     url: git(dir, ["remote", "get-url", "origin"]).trim(),
   });
+}
+
+function stubCore(route: (method: string, path: string) => unknown): Array<{ method: string; path: string; body: unknown }> {
+  const calls: Array<{ method: string; path: string; body: unknown }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      const path = url.pathname;
+      calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const payload = route(method, path);
+      return payload === undefined ? Response.json({}) : Response.json(payload);
+    }),
+  );
+  return calls;
 }
 
 function commitCount(dir: string): number {
@@ -137,16 +164,16 @@ describe("local Workbench Tier 2 (push + PR)", () => {
 
   it("commits, pushes the branch to origin, and opens a PR on the remote", async () => {
     const { work, bare } = repoWithOrigin();
-    const calls: Array<Record<string, unknown>> = [];
-    const remote = fakeRemote({
-      branchHead: async () => git(work, ["rev-parse", "HEAD"]).trim(),
-      openPull: async (owner, repo, body) => {
-        calls.push({ owner, repo, ...body });
-        return { number: 7 };
-      },
+    const calls = stubCore((method, path) => {
+      if (method === "GET" && path === "/api/v1/me") return { user: { username: "me" } };
+      if (method === "GET" && path.endsWith("/branches")) {
+        return [{ name: "feature", commit: { id: git(work, ["rev-parse", "HEAD"]).trim() } }];
+      }
+      if (method === "POST" && path.endsWith("/pulls")) return prMeta({ number: 7 });
+      return {};
     });
 
-    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+    const res = await appConnectedNoBinding(work).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "feature", base: "main", title: "edit hello", body: "b" }),
@@ -157,29 +184,25 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     // The feature branch was committed and pushed to the bare origin.
     expect(git(bare, ["rev-parse", "--verify", "feature"]).trim()).toMatch(/^[0-9a-f]{40}$/);
     // The PR was opened on the remote with the right head/base.
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ owner: "me", repo: "notes", head: "feature", base: "main", title: "edit hello" });
+    const opened = calls.find((call) => call.method === "POST" && call.path.endsWith("/pulls"));
+    expect(opened?.body).toMatchObject({ head: "feature", base: "main", title: "edit hello", body: "b" });
   });
 
   it("checks the configured remote before committing", async () => {
     const { work } = repoWithOrigin();
-    let opened = false;
-    const remote = fakeRemote({
-      whoami: async () => null,
-      openPull: async () => {
-        opened = true;
-        return { number: 1 };
-      },
+    const calls = stubCore((method, path) => {
+      if (method === "GET" && path === "/api/v1/me") return { user: null };
+      return {};
     });
 
-    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+    const res = await appConnectedNoBinding(work).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "feature", base: "main", title: "edit hello" }),
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: expect.stringContaining("before committing") });
-    expect(opened).toBe(false);
+    expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toBe(false);
     expect(commitCount(work)).toBe(1);
   });
 
@@ -188,7 +211,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     const url = "ssh://git@remote.example/other/notes.git";
     git(work, ["remote", "set-url", "origin", url]);
 
-    const res = await appWithBinding(work, fakeRemote(), {
+    const res = await appWithBinding(work, {
       name: "origin",
       host: "remote.example",
       owner: "me",
@@ -206,30 +229,29 @@ describe("local Workbench Tier 2 (push + PR)", () => {
 
   it("stops after push when the Cosheaf server does not observe the pushed head", async () => {
     const { work } = repoWithOrigin();
-    let opened = false;
-    const remote = fakeRemote({
-      branchHead: async () => "0000000000000000000000000000000000000000",
-      openPull: async () => {
-        opened = true;
-        return { number: 1 };
-      },
+    const calls = stubCore((method, path) => {
+      if (method === "GET" && path === "/api/v1/me") return { user: { username: "me" } };
+      if (method === "GET" && path.endsWith("/branches")) {
+        return [{ name: "feature", commit: { id: "0000000000000000000000000000000000000000" } }];
+      }
+      if (method === "POST" && path.endsWith("/pulls")) return { number: 1 };
+      return {};
     });
 
-    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+    const res = await appConnectedNoBinding(work).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "feature", base: "main", title: "edit hello" }),
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: expect.stringContaining("server sees 000000000000") });
-    expect(opened).toBe(false);
+    expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/pulls"))).toBe(false);
   });
 
   it("409s opening a PR from a detached HEAD (no silent orphan commit)", async () => {
     const { work } = repoWithOrigin();
     git(work, ["checkout", "-q", "--detach"]);
-    const remote = fakeRemote();
-    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+    const res = await appConnectedNoBinding(work).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "feature", base: "main", title: "t" }),
@@ -239,8 +261,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
 
   it("rejects a PR whose head equals its base", async () => {
     const { work } = repoWithOrigin();
-    const remote = fakeRemote();
-    const res = await app(work, remote).request("/api/v1/repos/me/notes/pulls", {
+    const res = await appConnectedNoBinding(work).request("/api/v1/repos/me/notes/pulls", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ head: "main", base: "main" }),
@@ -253,13 +274,11 @@ describe("local Workbench Tier 2 (push + PR)", () => {
   });
 
   // The pre-#268 external bounce on /pulls/:n is gone. A workspace with no
-  // connected core (the back-compat remoteClient path leaves entry.remote null)
-  // now renders the Connect prompt for every collaboration surface, including a
-  // PR detail path, rather than redirecting to an external forge URL.
+  // connected core now renders the Connect prompt for every collaboration
+  // surface, including a PR detail path, rather than redirecting externally.
   it("shows the Connect prompt on /pulls/:n when no core is connected", async () => {
     const { work } = repoWithOrigin();
-    const remote = fakeRemote({ openPull: async () => ({ number: 7 }) });
-    const res = await app(work, remote).request("/me/notes/pulls/7");
+    const res = await app(work).request("/me/notes/pulls/7");
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("no connected Cosheaf server");
@@ -281,7 +300,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
         return Response.json({});
       }),
     );
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/me/notes/pulls");
+    const res = await appWithConnectedRegistry(work).request("/me/notes/pulls");
     expect(res.status).toBe(200);
     const body = await res.text();
     // The shared PRs page (heading + empty state), not the old remote-PR-list page.
@@ -306,7 +325,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
   it("/pulls/new preselects the working-tree branch as head, not main", async () => {
     const { work } = repoWithOrigin(); // checked out on `feature`
     stubBranches();
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/me/notes/pulls/new");
+    const res = await appWithConnectedRegistry(work).request("/me/notes/pulls/new");
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-testid="pull-create-form"');
@@ -318,7 +337,7 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     const { work } = repoWithOrigin();
     git(work, ["checkout", "-q", "main"]);
     stubBranches();
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/me/notes/pulls/new");
+    const res = await appWithConnectedRegistry(work).request("/me/notes/pulls/new");
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain('data-testid="pull-create-no-branch"');
@@ -328,15 +347,15 @@ describe("local Workbench Tier 2 (push + PR)", () => {
 
   it("POST /pulls/new routes through the local commit→push→openPull flow", async () => {
     const { work, bare } = repoWithOrigin(); // on `feature` with a pending edit
-    const calls: Array<Record<string, unknown>> = [];
-    const remote = fakeRemote({
-      branchHead: async () => git(work, ["rev-parse", "HEAD"]).trim(),
-      openPull: async (owner, repo, body) => {
-        calls.push({ owner, repo, ...body });
-        return { number: 9 };
-      },
+    const calls = stubCore((method, path) => {
+      if (method === "GET" && path === "/api/v1/me") return { user: { username: "me" } };
+      if (method === "GET" && path.endsWith("/branches")) {
+        return [{ name: "feature", commit: { id: git(work, ["rev-parse", "HEAD"]).trim() } }];
+      }
+      if (method === "POST" && path.endsWith("/pulls")) return prMeta({ number: 9 });
+      return {};
     });
-    const res = await appConnectedNoBinding(work, remote).request("/me/notes/pulls/new", {
+    const res = await appConnectedNoBinding(work).request("/me/notes/pulls/new", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
       body: new URLSearchParams({ head: "feature", base: "main", title: "edit hello", body: "b" }).toString(),
@@ -346,8 +365,8 @@ describe("local Workbench Tier 2 (push + PR)", () => {
     expect(res.headers.get("location")).toBe("/me/notes/pulls/9");
     // The branch was actually committed and pushed to origin, then opened on the core.
     expect(git(bare, ["rev-parse", "--verify", "feature"]).trim()).toMatch(/^[0-9a-f]{40}$/);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ owner: "me", repo: "notes", head: "feature", base: "main", title: "edit hello" });
+    const opened = calls.find((call) => call.method === "POST" && call.path.endsWith("/pulls"));
+    expect(opened?.body).toMatchObject({ head: "feature", base: "main", title: "edit hello", body: "b" });
   });
 });
 
@@ -362,51 +381,6 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
     vi.unstubAllGlobals();
   });
 
-  // Minimal PrMeta the core's typed routes return; prMetaToPullShape reads the
-  // arrays, so they must be present.
-  function prMeta(over: Record<string, unknown> = {}): Record<string, unknown> {
-    return {
-      number: 7,
-      title: "t",
-      body: "",
-      state: "open",
-      merged: false,
-      merged_at: null,
-      mergeable: true,
-      additions_total: 0,
-      deletions_total: 0,
-      files_changed: 0,
-      labels: [],
-      milestone: null,
-      requested_reviewers: [],
-      requested_reviewer_teams: [],
-      head_ref: "feature",
-      head_sha: "h",
-      base_ref: "main",
-      base_sha: "b",
-      author_username: "other",
-      created_at: 0,
-      ...over,
-    };
-  }
-
-  // Record every Origin API call and route the response by method + path suffix.
-  function stubCore(route: (method: string, path: string) => unknown): Array<{ method: string; path: string; body: unknown }> {
-    const calls: Array<{ method: string; path: string; body: unknown }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = new URL(String(input));
-        const method = (init?.method ?? "GET").toUpperCase();
-        const path = url.pathname;
-        calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        const payload = route(method, path);
-        return payload === undefined ? Response.json({}) : Response.json(payload);
-      }),
-    );
-    return calls;
-  }
-
   it("BUG B: merges a PR through the core and skips the local-absent forge branch cleanup", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore((method, path) => {
@@ -414,7 +388,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
       if (method === "GET" && path.endsWith("/pulls/7")) return { pull: prMeta() };
       return {};
     });
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/pulls/7/merge", {
+    const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/pulls/7/merge", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ Do: "squash" }),
@@ -429,7 +403,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
   it("BUG B: replaces repo topics through the core's typed route", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore(() => ({ ok: true }));
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/topics", {
+    const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/topics", {
       method: "PUT",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ topics: ["cosheaf-format-coflat", "math"] }),
@@ -442,7 +416,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
   it("BUG B: updates min_approvals through the core's typed settings route", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore((method) => (method === "GET" ? { min_approvals: 1 } : { min_approvals: 2 }));
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/settings", {
+    const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/settings", {
       method: "PUT",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ min_approvals: 2 }),
@@ -456,7 +430,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
   it("accepts legacy coflat format payload without a core format write", async () => {
     const { work } = repoWithOrigin();
     const calls = stubCore(() => ({}));
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/settings", {
+    const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/settings", {
       method: "PUT",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ default_md_format: COFLAT_FORMAT_ID }),
@@ -477,7 +451,7 @@ describe("local Workbench typed PR API (#262 BUG B/E)", () => {
 			if (method === "POST" && path.endsWith("/pending-review/9/submit")) return { ok: true, review: submitted };
 			return { ok: true };
 		});
-    const res = await appWithConnectedRegistry(work, fakeRemote()).request("/api/v1/repos/me/notes/pulls/7/pending-review/9/submit", {
+    const res = await appWithConnectedRegistry(work).request("/api/v1/repos/me/notes/pulls/7/pending-review/9/submit", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ event: "approve" }),
