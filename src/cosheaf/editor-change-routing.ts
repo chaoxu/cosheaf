@@ -1,9 +1,8 @@
-import { Text } from "@codemirror/state";
 import type {
   MountedDocumentChange,
   MountedEditor,
 } from "@chaoxu/coflat";
-import type { DocumentFormatId } from "../../shared/document-format";
+import { Text } from "@codemirror/state";
 
 interface EditorChangeHandlers {
   onStringChange: (value: string) => void;
@@ -15,10 +14,8 @@ export type RoutedEditorChangeProps =
   | { onChange?: never; onDocumentChange: (change: MountedDocumentChange) => void };
 
 export function routeEditorChangeHandlers(
-  formatId: DocumentFormatId,
   handlers: EditorChangeHandlers,
 ): RoutedEditorChangeProps {
-  void formatId;
   return { onDocumentChange: handlers.onDocumentChange };
 }
 

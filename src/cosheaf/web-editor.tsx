@@ -2,20 +2,21 @@ import type {
   AssetUploader as EditorAssetUploader,
   AutocompleteSource as EditorAutocompleteSource,
   SaveHandler as EditorSaveHandler,
-  StatusEvents as EditorStatusEvents,
   EditorSourcePosition,
-  ScrollToSourcePositionOptions,
+  StatusEvents as EditorStatusEvents,
   MountedDocumentChange,
   OutlineEntry,
+  RequestHandler,
+  ScrollToSourcePositionOptions,
 } from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,
 } from "@chaoxu/coflat";
 import {
+  createReaderCitationClusterPreviewBody,
   type DocumentContext,
   type FileEntry,
   type FileSystem,
-  createReaderCitationClusterPreviewBody,
   hydrateReaderHoverPreviews,
   hydrateReferences,
 } from "@chaoxu/coflat/reader";
@@ -23,35 +24,33 @@ import type { ReactNode, Ref } from "react";
 import { createRef, lazy, StrictMode, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { pdfDisplaySuffix, previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
+import { type AssetPreviewPaths, pdfDisplaySuffix, previewAssetPath } from "../../shared/asset-previews";
 import {
   userBranchPrefix,
 } from "../../shared/conventions";
+import { DEFAULT_DOCUMENT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import {
   documentRailModel,
 } from "../../shared/document-rail";
-import { DEFAULT_DOCUMENT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 import { repoBranchFileHref, repoHref } from "../../shared/url";
 import { ApiError, api } from "./api";
+import { createBibliographyPicker } from "./bibliography-picker";
 import {
   loadCoflatDocumentContext,
 } from "./coflat-document-context";
 import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
+import type { MountedEditor } from "./editor";
 import {
   IncrementalSourceCache,
   liveEditorSource,
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
-import type { RequestHandler } from "@chaoxu/coflat";
-import { createBibliographyPicker } from "./bibliography-picker";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { currentDocumentSuggestions, fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
-import { getClientDocumentFormat } from "./format-registry";
-import type { MountedEditor } from "./document-format/coflat";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -109,6 +108,7 @@ export interface WebEditorPreviewEvent {
 
 type WebEditorSourcePosition = EditorSourcePosition | ScrollToSourcePositionOptions;
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
+const ActiveMarkdownEditor = lazy(() => import("./editor").then((m) => ({ default: m.MarkdownEditor })));
 
 export interface WebEditorCallbacks {
   onDirtyChange?: (dirty: boolean) => void;
@@ -181,10 +181,6 @@ function WebEditor({
   onEditorReady?: () => void;
   initialReadOnly?: boolean;
 }) {
-  const ActiveMarkdownEditor = useMemo(
-    () => lazy(getClientDocumentFormat(config.formatId).editor),
-    [config.formatId],
-  );
   const [content, setContent] = useState(initialContent);
   const [contextSource, setContextSource] = useState(initialContent);
   const [currentPath, setCurrentPath] = useState(config.path);
@@ -895,7 +891,7 @@ function WebEditor({
                   outlineUnsubscribeRef.current = editor.outline.subscribe(setOutline);
                   onEditorReady?.();
                 }}
-                {...routeEditorChangeHandlers(config.formatId, {
+                {...routeEditorChangeHandlers({
                   onStringChange: handleEditorStringChange,
                   onDocumentChange: handleCoflatDocumentChange,
                 })}

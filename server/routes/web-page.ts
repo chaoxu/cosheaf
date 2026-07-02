@@ -1,5 +1,5 @@
-import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import type { BranchRow } from "../../shared/branches.js";
+import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import type { ForgejoLabel, ForgejoUser } from "../forgejo-types.js";
 import type { WorkspaceContext } from "../types.js";
 import { backIcon } from "./icons.js";
@@ -63,9 +63,8 @@ export function repoPageShell(
     statusExtra: opts.statusExtra,
     statusOmitTab: opts.statusOmitTab,
     userAvatarSrc: ctx.userAvatarSrc,
-    // Local Workbench (direct write-mode): trim the repo nav to the surfaces the
-    // local app actually mounts (files + commit); the hosted issue/pull/settings
-    // tabs would 404.
+    // Local Workbench (direct write-mode): render the local repo nav. Shared
+    // collaboration tabs are mounted behind the connected-server gate.
     local: ctx.local,
     locale: ctx.locale,
     t: ctx.t,
@@ -94,8 +93,8 @@ export function repoPage(opts: {
   statusOmitTab?: boolean;
   // The signed-in user's same-origin avatar src for the sidebar identity (#177).
   userAvatarSrc?: string | null;
-  // Local Workbench: render the trimmed local nav (files + commit) and avoid
-  // linking to hosted-only owner/profile pages.
+  // Local Workbench: render the local nav and avoid linking to hosted-only
+  // owner/profile pages.
   local?: boolean;
   locale: LocaleId;
   t: T;
@@ -104,8 +103,8 @@ export function repoPage(opts: {
   const nav = opts.local
     ? [
         // Local Workbench: files + the local-only Commit surface, then the shared
-        // collaboration tabs (#268) the local app now mounts against the
-        // connected core (or a Connect prompt when none is connected).
+        // collaboration tabs the local app mounts against the connected server
+        // (or a Connect prompt when none is connected).
         tab(opts, "files", t("tab.files"), ""),
         tab(opts, "commit", "Commit", "/commit"),
         tab(opts, "issues", t("tab.issues"), "/issues"),

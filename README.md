@@ -78,7 +78,7 @@ agent/API calls, all with `Authorization: Bearer <token>`:
 
 ## Cosheaf Workbench
 
-The Cosheaf Workbench is the local authoring surface for editing and reviewing Markdown folders offline. It runs as a local loopback server with a rich editor/reader UI, saving files directly to your disk and integrating with remote Git repositories for pull requests and reviews.
+The Cosheaf Workbench is the local authoring surface for editing and reviewing Markdown folders offline. It runs as a local loopback server with a rich editor/reader UI, saves files directly to your disk, and integrates with a connected Cosheaf server for pull requests and reviews.
 
 To install or update the Workbench on your machine (e.g., `earth` or `saturn`), you only need Node.js >= 24 installed. Run this one-line command:
 

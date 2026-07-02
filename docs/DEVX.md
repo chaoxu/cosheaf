@@ -33,11 +33,12 @@
 - `pnpm staging:check-page -- <url|route|fixture>` runs the same rich-page
   checker against `https://cosheaf-test.lab/`.
 - `pnpm prod:release` deploys Cosheaf production to Pluto
-- `pnpm prod:build-check` builds the production image on `jupiter` without deploying
   (`https://cosheaf.chaoxu.prof`) through the fleet-infra Pluto release helper.
   Do not run it during normal work; production has real users and should only
   be deployed after the user explicitly asks. Normal live verification uses
   `cosheaf-test.lab`.
+- `pnpm prod:build-check` builds the production image on `jupiter` without
+  deploying.
 - `pnpm staging:deploy` deploys the current pushed commit to the isolated
   `cosheaf-test.lab` staging instance on `jupiter`.
 - `pnpm staging:verify` checks staging health and verifies that staging is

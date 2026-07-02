@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { allDocumentFormats } from "../format-registry.js";
+import { coflatMarkdownFormat } from "../document-format/coflat.js";
 import { WORKBENCH_COOKIE } from "../local/local-auth.js";
 import { AUTH_COOKIE } from "../middleware.js";
 import type { AppEnv } from "../types.js";
@@ -7,7 +7,7 @@ import type { AppEnv } from "../types.js";
 export const origin = new Hono<AppEnv>();
 
 const documentFormats = () =>
-  allDocumentFormats().map((format) => ({
+  [coflatMarkdownFormat].map((format) => ({
     id: format.id,
     display_name: format.displayName,
     extensions: format.extensions,
@@ -16,8 +16,8 @@ const documentFormats = () =>
 // What a local Workbench actually serves. It owns local content (files, tree,
 // branches, search over the working tree) but NOT collaboration: pull requests,
 // issues, reviews, labels, milestones, and notifications live on a connected
-// Cosheaf core (see `provider.collaboration: "federated"`). Opening a PR is a
-// publish action federated to that core, not a capability the Workbench owns.
+// Cosheaf server (see `provider.collaboration: "federated"`). Opening a PR is
+// a publish action federated to that server, not a capability the Workbench owns.
 const localCapabilities = [
   { id: "repo_metadata", route_prefix: "/api/v1/repos/{owner}/{repo}" },
   { id: "files", route_prefix: "/api/v1/repos/{owner}/{repo}/contents" },
@@ -50,10 +50,10 @@ origin.get("/origin", (c) => {
   const serverUrl = config.publicOrigin ?? new URL(c.req.url).origin;
 
   // Local Workbench: a forge-free content provider. It owns local git content
-  // and federates collaboration to a connected core, so its manifest advertises
-  // the local capability set, its own auth model (the optional workbench access
-  // token, or none on loopback), and a local-git source of truth — never the
-  // hosted "Forgejo is authoritative" claim.
+  // and federates collaboration to a connected Cosheaf server, so its manifest
+  // advertises the local capability set, its own auth model (the optional
+  // workbench access token, or none on loopback), and a local-git source of
+  // truth — never the hosted "Forgejo is authoritative" claim.
   if (config.mode === "local") {
     return c.json({
       origin_id: serverUrl,
@@ -83,10 +83,10 @@ origin.get("/origin", (c) => {
       document_formats: documentFormats(),
       consistency: {
         source_of_truth:
-          "The local git working tree is authoritative for content; collaboration (pull requests, issues, reviews) is federated to a connected Cosheaf core, not owned here.",
+          "The local git working tree is authoritative for content; collaboration (pull requests, issues, reviews) is federated to a connected Cosheaf server, not owned here.",
         branch_reads: "File, tree, and branch routes read the local working tree and git directly.",
         main_index: "Search, backlinks, and xref metadata are derived from the local index and rebuilt on write.",
-        events: "No notification stream in local mode; collaboration events live on the connected core.",
+        events: "No notification stream in local mode; collaboration events live on the connected Cosheaf server.",
       },
     });
   }

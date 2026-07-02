@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import { ChangeSet } from "@codemirror/state";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyDocumentChangeText,
   IncrementalSourceCache,
@@ -13,7 +12,7 @@ describe("routeEditorChangeHandlers", () => {
   it("uses metadata-only document changes for Coflat", () => {
     const onStringChange = vi.fn();
     const onDocumentChange = vi.fn();
-    const routed = routeEditorChangeHandlers(COFLAT_FORMAT_ID, { onStringChange, onDocumentChange });
+    const routed = routeEditorChangeHandlers({ onStringChange, onDocumentChange });
 
     expect(routed.onChange).toBeUndefined();
     expect(routed.onDocumentChange).toBe(onDocumentChange);
