@@ -34,7 +34,7 @@ import {
 } from "../../shared/document-rail";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
-import { repoBranchFileHref, repoHref } from "../../shared/url";
+import { repoBranchFileHref, repoHref, workspaceApiPath } from "../../shared/url";
 import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
 import {
@@ -110,6 +110,7 @@ export interface WebEditorPreviewEvent {
 }
 
 type WebEditorSourcePosition = EditorSourcePosition | EditorScrollToSourcePositionOptions;
+type ExternalFileChange = { path: string; type: "change" | "remove" };
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 const ActiveMarkdownEditor = lazy(() => import("./editor").then((m) => ({ default: m.MarkdownEditor })));
 
@@ -225,6 +226,7 @@ function WebEditor({
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(false);
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+  const [externalFileChange, setExternalFileChange] = useState<ExternalFileChange | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -244,6 +246,8 @@ function WebEditor({
   const savedShaRef = useRef<string | null | undefined>(config.baseSha);
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
   const resetEditBranchRef = useRef(config.resetEditBranch);
+  const ignoredChangePathsRef = useRef(new Set<string>());
+  const ignoredChangeTimersRef = useRef<number[]>([]);
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
   const contextLoadedRef = useRef(false);
   const localAnnotationsEnabled = config.writeMode === "direct";
@@ -360,9 +364,48 @@ function WebEditor({
       outlineUnsubscribeRef.current = null;
       cursorUnsubscribeRef.current?.();
       cursorUnsubscribeRef.current = null;
+      for (const timer of ignoredChangeTimersRef.current) window.clearTimeout(timer);
+      ignoredChangeTimersRef.current = [];
     },
     [],
   );
+
+  const ignoreOwnChangeEvents = useCallback((paths: string[]) => {
+    for (const path of paths) {
+      if (!path) continue;
+      ignoredChangePathsRef.current.add(path);
+    }
+    const timer = window.setTimeout(() => {
+      for (const path of paths) ignoredChangePathsRef.current.delete(path);
+      ignoredChangeTimersRef.current = ignoredChangeTimersRef.current.filter((item) => item !== timer);
+    }, 5_000);
+    ignoredChangeTimersRef.current.push(timer);
+  }, []);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    const stream = new EventSource(`${workspaceApiPath(config.owner, config.repo)}/events`);
+    stream.onmessage = (event) => {
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data) as unknown;
+      } catch (_err) {
+        return;
+      }
+      if (!data || typeof data !== "object") return;
+      const payload = data as { type?: unknown; path?: unknown };
+      if ((payload.type !== "change" && payload.type !== "remove") || typeof payload.path !== "string") return;
+      const current = currentPathRef.current.trim() || config.path;
+      const saved = savedPathRef.current;
+      if (payload.path !== current && payload.path !== saved) return;
+      if (ignoredChangePathsRef.current.has(payload.path)) {
+        ignoredChangePathsRef.current.delete(payload.path);
+        return;
+      }
+      setExternalFileChange({ path: payload.path, type: payload.type });
+    };
+    return () => stream.close();
+  }, [config.owner, config.path, config.repo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -523,6 +566,7 @@ function WebEditor({
       // rejected client-side when the backend would accept it.
       if (!isEditableTextFile(nextPath)) return { ok: false, error: "path must be a Markdown or text file (e.g. .md, .bib, .txt)" };
       try {
+        ignoreOwnChangeEvents(previousPath === nextPath ? [nextPath] : [previousPath, nextPath]);
         const result = await api.putFile(
           config.owner,
           config.repo,
@@ -549,6 +593,7 @@ function WebEditor({
         setCurrentPath(nextPath);
         setPathDirty(false);
         setUncommitted(false);
+        setExternalFileChange(null);
         clearDraft(config.owner, config.repo, config.branch, config.path, draftScope);
         if (previousPath !== nextPath) clearDraft(config.owner, config.repo, result.branch, previousPath, draftScope);
         clearDraft(config.owner, config.repo, result.branch, nextPath, draftScope);
@@ -557,7 +602,7 @@ function WebEditor({
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, setEditorContent],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, setEditorContent],
   );
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
@@ -969,6 +1014,20 @@ function WebEditor({
           </button>
           <button type="button" className="button small subtle" data-testid="editor-draft-discard" onClick={discardDraft}>
             Discard
+          </button>
+        </div>
+      ) : null}
+      {externalFileChange ? (
+        <div className="editor-draft-banner editor-external-change-banner" data-testid="editor-external-change-banner" role="alert">
+          <span>
+            {externalFileChange.type === "remove" ? "This file was removed outside this editor." : "This file changed outside this editor."}
+            {" "}Reload before continuing the AI writing session.
+          </span>
+          <button type="button" className="button small" data-testid="editor-external-change-reload" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+          <button type="button" className="button small subtle" onClick={() => setExternalFileChange(null)}>
+            Dismiss
           </button>
         </div>
       ) : null}
