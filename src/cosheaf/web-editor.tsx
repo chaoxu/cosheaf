@@ -4,10 +4,10 @@ import type {
   SaveHandler as EditorSaveHandler,
   EditorSourcePosition,
   StatusEvents as EditorStatusEvents,
-  MountedDocumentChange,
+  EditorDocumentChange as MountedDocumentChange,
   OutlineEntry,
   RequestHandler,
-  ScrollToSourcePositionOptions,
+  EditorScrollToSourcePositionOptions as ScrollToSourcePositionOptions,
 } from "@chaoxu/coflat";
 import {
   formatUploadedAssetMarkdown,

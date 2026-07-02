@@ -1,5 +1,5 @@
 import type {
-  MountedDocumentChange,
+  EditorDocumentChange as MountedDocumentChange,
   MountedEditor,
 } from "@chaoxu/coflat";
 import { Text } from "@codemirror/state";

@@ -120,5 +120,10 @@ describe("createApp API route assembly", () => {
     const themeRes = await app.request("/vendor/coflat/themes/blueprint-book.css?v=test");
     expect(themeRes.status).toBe(200);
     expect(await themeRes.text()).toContain(".cf-theme-blueprint-book");
+
+    const chromeRes = await app.request("/cosheaf-web.css");
+    expect(chromeRes.status).toBe(200);
+    const chromeCss = await chromeRes.text();
+    expect(chromeCss).toContain(".cf-theme-scope .cf-math-display-content{width:auto;max-width:100%}");
   });
 });

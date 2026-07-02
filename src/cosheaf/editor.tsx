@@ -8,9 +8,9 @@ import { type Diagnostic, linter } from "@codemirror/lint";
 import {
   frontmatterField,
   type MountedEditor,
-  type MountedDocumentChange,
+  type EditorDocumentChange as MountedDocumentChange,
   type SaveHandler,
-  type StandaloneEditorMode,
+  type EditorMode as StandaloneEditorMode,
   type StatusEvents,
   type AssetUploader,
   type AutocompleteSource,
