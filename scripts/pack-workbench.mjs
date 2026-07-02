@@ -70,6 +70,8 @@ if (opts.skipBuild) {
   }
   step("Reusing existing dist/ and dist-server/ (--skip-build)");
 } else {
+  step("Refresh installed Coflat package");
+  run("pnpm", ["refresh:coflat"]);
   step("Build islands (vite) and server (tsc)");
   run("pnpm", ["build"]);
   run("pnpm", ["build:server"]);

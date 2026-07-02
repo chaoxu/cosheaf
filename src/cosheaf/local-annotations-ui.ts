@@ -1,9 +1,11 @@
 import { workspaceApiPath } from "../../shared/url";
 
 interface LocalAnnotationMessage {
+  body?: string;
   author?: string;
+  created_at?: string;
   timestamp?: string;
-  text: string;
+  text?: string;
 }
 
 interface LocalAnnotation {
@@ -13,7 +15,8 @@ interface LocalAnnotation {
   kind: "comment" | "task";
   status: "open" | "resolved";
   messages: LocalAnnotationMessage[];
-  source_excerpt: { line: number; start_line: number; end_line: number; text: string } | null;
+  context?: { line: number | null; excerpt: string; anchor_found: boolean };
+  source_excerpt?: { line: number; start_line: number; end_line: number; text: string } | null;
 }
 
 interface LocalAnnotationResponse {
@@ -128,13 +131,15 @@ export function installLocalAnnotations(root: HTMLElement, opts: InstallOptions)
       for (const message of active.messages) {
         const p = document.createElement("p");
         p.className = "local-annotation-message";
-        p.textContent = message.author ? `${message.author}: ${message.text}` : message.text;
+        const text = messageText(message);
+        p.textContent = message.author ? `${message.author}: ${text}` : text;
         detail.append(p);
       }
-      if (active.source_excerpt) {
+      const sourceExcerpt = active.context?.excerpt || active.source_excerpt?.text || "";
+      if (sourceExcerpt) {
         const excerpt = document.createElement("pre");
         excerpt.className = "local-annotation-excerpt";
-        excerpt.textContent = active.source_excerpt.text;
+        excerpt.textContent = sourceExcerpt;
         detail.append(excerpt);
       }
       const action = document.createElement("button");
@@ -179,7 +184,11 @@ export function installLocalAnnotations(root: HTMLElement, opts: InstallOptions)
 
   function applyHighlights(target: HTMLElement, records: readonly LocalAnnotation[]): void {
     if (destroyed) return;
-    const byAnchor = new Map(records.map((annotation) => [annotation.anchor, annotation]));
+    const byAnchor = new Map<string, LocalAnnotation>();
+    for (const annotation of records) {
+      byAnchor.set(annotation.anchor, annotation);
+      byAnchor.set(`local:${annotation.id}`, annotation);
+    }
     for (const element of target.querySelectorAll<HTMLElement>("[data-ref-key^='local:']")) {
       const key = element.dataset.refKey;
       if (!key) continue;
@@ -192,6 +201,10 @@ export function installLocalAnnotations(root: HTMLElement, opts: InstallOptions)
       element.setAttribute("role", "button");
     }
   }
+}
+
+function messageText(message: LocalAnnotationMessage): string {
+  return message.body ?? message.text ?? "";
 }
 
 function stripLocalPrefix(id: string): string {

@@ -76,6 +76,10 @@
 - `pnpm check:web:fast` runs the smaller server-rendered UI gate for low-risk
   markup/CSS changes: types, focused web route tests, Vite build, and server
   build.
+- `pnpm check:workbench-writing` runs the focused local writing gate for
+  Workbench annotation changes: local annotation unit tests, editor/API context
+  tests, TypeScript checks, the forge-free Workbench boundary lint, and the
+  browser Workbench annotation smoke.
 - `pnpm check:web` runs the full server-rendered web page flow and prints
   DevX failure artifact paths. Start `pnpm dev:all` first.
 - `pnpm smoke:repo-home` runs a focused browser check for the repository
@@ -83,6 +87,10 @@
 - `pnpm smoke:reader-parity` runs the broad seeded Coflat showcase
   reader/editor parity browser check, including outline labels, hover target
   selection, footnote sections, typography, and geometry.
+- `pnpm smoke:workbench-annotations` builds the Workbench bundle, launches a
+  temporary local Workbench over a throwaway git folder, creates a local
+  annotation, and verifies the anchor saves at the selected source position
+  rather than EOF.
 - `pnpm check:pr-rich -- --list-fixtures` prints named rich-render fixtures.
   Built-ins are intentionally small aliases for known live regressions; add
   site-specific aliases with
@@ -106,6 +114,8 @@ publish-flow change:
   `pnpm exec vitest run server/local/local-pulls.test.ts server/local/local-app.test.ts server/local/origin-collaboration-client.test.ts server/local/origin-response.test.ts`.
   This covers local edit/commit/push/open-remote-PR behavior, connected and
   disconnected UI labels, and the Origin response parser contract.
+- For local annotation or Workbench writing-flow changes, run
+  `pnpm check:workbench-writing`.
 - Hosted regressions still belong in the normal gates: `pnpm check:local` for
   static/unit/build coverage, plus `pnpm check:web` when login, files, issues,
   PR review/merge, notifications, or assets are affected.

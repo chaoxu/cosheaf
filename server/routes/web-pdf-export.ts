@@ -2,6 +2,9 @@ import { LATEX_CSL_NAMES, LATEX_TEMPLATE_NAMES } from "@chaoxu/coflat/latex";
 import type { Context, Hono } from "hono";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import { resolveBranchPath } from "../branch-path.js";
+import { localAnchorPreflightIssues, localAnnotationSidecarConflict } from "../local/local-annotations.js";
+import { resolveLocalWorkspace } from "../local/local-mode.js";
+import { isLocalMode } from "../middleware.js";
 import { onWorkspaceNotFound, type WorkspaceBackend } from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { exportCoflatMarkdownPdf, PdfExportError, type PdfProjectFile, withPdfExportLimit } from "../pdf-export.js";
@@ -87,6 +90,30 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
           ctx.backend.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
           repoFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch),
         ]);
+        if (isLocalMode(c)) {
+          const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
+          if (entry) {
+            let localIssues;
+            try {
+              localIssues = localAnchorPreflightIssues(entry, rel, source);
+            } catch (err) {
+              const sidecar = localAnnotationSidecarConflict(err);
+              if (sidecar) {
+                throw new PdfExportError(422, "PDF export blocked by local annotations.", sidecar.details);
+              }
+              throw err;
+            }
+            if (localIssues.length > 0) {
+              throw new PdfExportError(
+                422,
+                "PDF export blocked by local annotations.",
+                localIssues.map((issue) =>
+                  `${issue.anchor} (${issue.status}${issue.line ? `, line ${issue.line}` : ""})`,
+                ).join("\n"),
+              );
+            }
+          }
+        }
         const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
         const projectFiles = await collectPdfProjectFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
         return exportCoflatMarkdownPdf({

@@ -1,3 +1,9 @@
+import type {
+  LocalAnnotation,
+  LocalAnnotationKind,
+  LocalAnnotationQueueItem,
+  LocalAnnotationStatus,
+} from "../../shared/local-annotations";
 import type { WorkspaceValidation } from "../../shared/validation";
 import { queryString, workspaceApiPath } from "../../shared/url";
 
@@ -11,6 +17,8 @@ interface PutFileResult {
 interface OpenPullResult {
   number: number;
 }
+
+export type { LocalAnnotation, LocalAnnotationKind, LocalAnnotationQueueItem, LocalAnnotationStatus };
 
 interface ErrorBody {
   error?: string;
@@ -117,6 +125,64 @@ export const api = {
 
   validation: (owner: string, repo: string) =>
     jsonFetch<WorkspaceValidation>(`${workspaceApiPath(owner, repo)}/validation`),
+
+  listLocalAnnotations: (
+    owner: string,
+    repo: string,
+    params: { path?: string; status?: LocalAnnotationStatus } = {},
+  ) =>
+    jsonFetch<{ annotations: LocalAnnotation[] }>(
+      `${workspaceApiPath(owner, repo)}/local-annotations${queryString(params)}`,
+    ),
+
+  listUnresolvedLocalAnnotations: (
+    owner: string,
+    repo: string,
+    params: { path?: string } = {},
+  ) =>
+    jsonFetch<{ annotations: LocalAnnotationQueueItem[] }>(
+      `${workspaceApiPath(owner, repo)}/local-annotations/unresolved${queryString(params)}`,
+    ),
+
+  createLocalAnnotation: (
+    owner: string,
+    repo: string,
+    payload: { path: string; kind: LocalAnnotationKind; body: string },
+  ) =>
+    jsonFetch<{ annotation: LocalAnnotation }>(`${workspaceApiPath(owner, repo)}/local-annotations`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateLocalAnnotation: (
+    owner: string,
+    repo: string,
+    id: string,
+    payload: { status?: LocalAnnotationStatus; path?: string },
+  ) =>
+    jsonFetch<{ annotation: LocalAnnotation }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  addLocalAnnotationMessage: (
+    owner: string,
+    repo: string,
+    id: string,
+    payload: { body: string },
+  ) =>
+    jsonFetch<{ annotation: LocalAnnotation }>(
+      `${workspaceApiPath(owner, repo)}/local-annotations/${id}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  deleteLocalAnnotation: (owner: string, repo: string, id: string) =>
+    jsonFetch<{ ok: true }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`, {
+      method: "DELETE",
+    }),
 
   openPull: (owner: string, repo: string, payload: { head: string; base?: string; title?: string; body?: string }) =>
     jsonFetch<OpenPullResult>(`${workspaceApiPath(owner, repo)}/pulls`, {

@@ -27,6 +27,8 @@ import { bad, conflict, notFound } from "./responses.js";
 import { streamHubChannel } from "./sse-helpers.js";
 import { parseBoundedPositiveInt } from "./query-params.js";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
+import { assertLocalAnnotationsReadable, localAnnotationSidecarConflict, moveLocalAnnotationsPath } from "../local/local-annotations.js";
+import { resolveLocalWorkspace } from "../local/local-mode.js";
 
 export const files = new Hono<AppEnv>();
 files.use("*", requireAuth);
@@ -564,6 +566,18 @@ files.put("/:owner/:repo/file", async (c) => {
       })
     : null;
   const finalContent = plan?.rewrittenContent ?? body.content;
+  const localAnnotationEntry = isLocalMode(c) && isRename && previousRel && previousRel !== rel
+    ? resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry ?? null
+    : null;
+  if (localAnnotationEntry) {
+    try {
+      assertLocalAnnotationsReadable(localAnnotationEntry);
+    } catch (err) {
+      const sidecar = localAnnotationSidecarConflict(err);
+      if (sidecar) return c.json(...conflict(sidecar.error, sidecar));
+      throw err;
+    }
+  }
   // Compare-and-set: if the caller declared the blob sha its edit was based on and
   // the branch has since moved, reject before writing so a concurrent edit isn't
   // silently clobbered (#92). On a rename the edit was based on the SOURCE blob,
@@ -630,6 +644,9 @@ files.put("/:owner/:repo/file", async (c) => {
   // (webhooks/reindex reconcile main). Local Workbench is the exception — see
   // indexLocalWrite — committing now and cleaning up a renamed-away page.
   indexLocalWrite(isLocalMode(c), db, ws.slug, plan, isRename && previousRel && previousRel !== rel ? previousRel : undefined);
+  if (localAnnotationEntry && previousRel) {
+    moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
+  }
   // #182: a cosheaf.yaml write through the typed route busts its cached config
   // for this branch so the change is read-after-write consistent (the webhook
   // only reconciles main; external non-main pushes reconcile on reindex).

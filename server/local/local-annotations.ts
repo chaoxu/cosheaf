@@ -1,226 +1,412 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { fileKindForPath } from "../../shared/file-kind.js";
-import type { AppEnv } from "../types.js";
-import { requireAuth, requireMembership } from "../middleware.js";
+import type {
+  LocalAnnotation,
+  LocalAnnotationContext,
+  LocalAnnotationKind,
+  LocalAnnotationMessage,
+  LocalAnnotationQueueItem,
+  LocalAnnotationStatus,
+} from "../../shared/local-annotations.js";
+import { readJsonObject } from "../routes/query-params.js";
 import { safeRel } from "../routes/files.js";
-import { bad, notFound } from "../routes/responses.js";
+import { requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import type { AppEnv } from "../types.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
+import type { WorkspaceEntry } from "./workspace-registry.js";
 
-const SIDECAR_PATH = join(".cosheaf", "local-annotations.json");
-const LOCAL_ANCHOR_RE = /\[@local:([A-Za-z0-9_.:-]+)\]/g;
-
-export interface LocalAnnotationMessage {
-  author?: string;
-  timestamp?: string;
-  text: string;
-}
-
-export interface LocalAnnotationRecord {
+export interface LocalAnchorPreflightIssue {
   id: string;
-  path: string;
-  kind: "comment" | "task";
-  status: "open" | "resolved";
-  messages: LocalAnnotationMessage[];
+  anchor: string;
+  status: "open" | "resolved" | "missing";
+  line: number | null;
+  excerpt: string;
 }
 
-interface LocalAnnotationQueueItem extends LocalAnnotationRecord {
-  anchor: string;
-  source_excerpt: {
-    line: number;
-    start_line: number;
-    end_line: number;
-    text: string;
-  } | null;
+interface LocalAnnotationFile {
+  annotations: Record<string, LocalAnnotation>;
+}
+
+export class LocalAnnotationSidecarError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalAnnotationSidecarError";
+  }
+}
+
+const LOCAL_ANNOTATIONS_FILE = join(".cosheaf", "local-annotations.json");
+const ANNOTATION_ID_RE = /^la_[a-z0-9]{12}$/;
+const MESSAGE_ID_RE = /^msg_[a-z0-9]{12}$/;
+const LOCAL_ANCHOR_RE = /\[@local:(la_[a-z0-9]{12})\]/g;
+
+function newId(prefix: "la" | "msg"): string {
+  return `${prefix}_${randomBytes(8).toString("base64url").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12).padEnd(12, "0")}`;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function annotationFilePath(entry: WorkspaceEntry): string {
+  return join(entry.path, LOCAL_ANNOTATIONS_FILE);
+}
+
+function readWorkspaceText(entry: WorkspaceEntry, rel: string): string | null {
+  try {
+    return readFileSync(join(entry.path, rel), "utf8");
+  } catch (_err) {
+    return null;
+  }
+}
+
+function normalizeKind(value: unknown): LocalAnnotationKind | null {
+  return value === "comment" || value === "task" ? value : null;
+}
+
+function normalizeStatus(value: unknown): LocalAnnotationStatus | null {
+  return value === "open" || value === "resolved" ? value : null;
+}
+
+function normalizeMessage(raw: unknown): LocalAnnotationMessage | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const msg = raw as Record<string, unknown>;
+  if (typeof msg.id !== "string" || !MESSAGE_ID_RE.test(msg.id)) return null;
+  if (typeof msg.author !== "string" || !msg.author.trim()) return null;
+  if (typeof msg.created_at !== "string" || !msg.created_at.trim()) return null;
+  if (typeof msg.body !== "string" || !msg.body.trim()) return null;
+  return {
+    id: msg.id,
+    author: msg.author.trim(),
+    created_at: msg.created_at,
+    body: msg.body,
+  };
+}
+
+function normalizeAnnotation(raw: unknown): LocalAnnotation | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const item = raw as Record<string, unknown>;
+  if (typeof item.id !== "string" || !ANNOTATION_ID_RE.test(item.id)) return null;
+  const kind = normalizeKind(item.kind);
+  const status = normalizeStatus(item.status);
+  const path = typeof item.path === "string" ? safeRel(item.path) : null;
+  const anchor = typeof item.anchor === "string" && item.anchor === `[@local:${item.id}]` ? item.anchor : null;
+  if (!kind || !status || !path || !anchor) return null;
+  if (typeof item.created_at !== "string" || typeof item.updated_at !== "string") return null;
+  if (!Array.isArray(item.messages)) return null;
+  const messages: LocalAnnotationMessage[] = [];
+  for (const message of item.messages) {
+    const normalized = normalizeMessage(message);
+    if (!normalized) return null;
+    messages.push(normalized);
+  }
+  return {
+    id: item.id,
+    kind,
+    status,
+    path,
+    anchor,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    messages,
+  };
+}
+
+export function readLocalAnnotations(entry: WorkspaceEntry): LocalAnnotationFile {
+  const file = annotationFilePath(entry);
+  if (!existsSync(file)) return { annotations: {} };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8")) as unknown;
+  } catch (_err) {
+    throw new LocalAnnotationSidecarError("local annotations sidecar is not valid JSON");
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    throw new LocalAnnotationSidecarError("local annotations sidecar must be an object");
+  const annotations = (raw as { annotations?: unknown }).annotations;
+  if (!annotations || typeof annotations !== "object" || Array.isArray(annotations))
+    throw new LocalAnnotationSidecarError("local annotations sidecar must contain an annotations object");
+  const normalized: Record<string, LocalAnnotation> = {};
+  for (const [key, value] of Object.entries(annotations)) {
+    const item = normalizeAnnotation(value);
+    if (!item || item.id !== key)
+      throw new LocalAnnotationSidecarError(`local annotations sidecar contains an invalid annotation: ${key}`);
+    normalized[item.id] = item;
+  }
+  return { annotations: normalized };
+}
+
+export function writeLocalAnnotations(entry: WorkspaceEntry, data: LocalAnnotationFile): void {
+  const file = annotationFilePath(entry);
+  mkdirSync(join(entry.path, ".cosheaf"), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
+  renameSync(tmp, file);
+}
+
+export function moveLocalAnnotationsPath(entry: WorkspaceEntry, fromPath: string, toPath: string): number {
+  const from = safeRel(fromPath);
+  const to = safeRel(toPath);
+  if (!from || !to || from === to) return 0;
+  const data = readLocalAnnotations(entry);
+  const updatedAt = nowIso();
+  let moved = 0;
+  for (const annotation of Object.values(data.annotations)) {
+    if (annotation.path !== from) continue;
+    data.annotations[annotation.id] = { ...annotation, path: to, updated_at: updatedAt };
+    moved += 1;
+  }
+  if (moved > 0) writeLocalAnnotations(entry, data);
+  return moved;
+}
+
+export function assertLocalAnnotationsReadable(entry: WorkspaceEntry): void {
+  readLocalAnnotations(entry);
+}
+
+export function localAnnotationSidecarConflict(err: unknown): { error: string; details: string } | null {
+  if (!(err instanceof LocalAnnotationSidecarError)) return null;
+  return {
+    error: "local annotations sidecar is invalid",
+    details: err.message,
+  };
+}
+
+function localAnnotationEntry(c: import("hono").Context<AppEnv>): WorkspaceEntry | null {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  if (!owner || !repo) return null;
+  return resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry ?? null;
+}
+
+function sortedAnnotations(data: LocalAnnotationFile): LocalAnnotation[] {
+  return Object.values(data.annotations).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+}
+
+function sourceContext(source: string | null, anchor: string): LocalAnnotationContext {
+  if (source === null) return { line: null, excerpt: "", anchor_found: false };
+  const lines = source.split(/\r?\n/);
+  const index = lines.findIndex((line) => line.includes(anchor));
+  if (index < 0) return { line: null, excerpt: "", anchor_found: false };
+  const start = Math.max(0, index - 1);
+  const end = Math.min(lines.length, index + 2);
+  return {
+    line: index + 1,
+    excerpt: lines.slice(start, end).join("\n").trim(),
+    anchor_found: true,
+  };
+}
+
+export function localAnnotationQueue(entry: WorkspaceEntry, opts: { path?: string | null } = {}): LocalAnnotationQueueItem[] {
+  const path = opts.path ? safeRel(opts.path) : null;
+  const data = readLocalAnnotations(entry);
+  const sourceByPath = new Map<string, string | null>();
+  return sortedAnnotations(data)
+    .filter((annotation) => annotation.status === "open")
+    .filter((annotation) => !path || annotation.path === path)
+    .map((annotation) => {
+      if (!sourceByPath.has(annotation.path)) sourceByPath.set(annotation.path, readWorkspaceText(entry, annotation.path));
+      return {
+        ...annotation,
+        context: sourceContext(sourceByPath.get(annotation.path) ?? null, annotation.anchor),
+      };
+    });
+}
+
+export function localAnchorPreflightIssues(entry: WorkspaceEntry, path: string, source: string): LocalAnchorPreflightIssue[] {
+  const rel = safeRel(path);
+  if (!rel) return [];
+  const data = readLocalAnnotations(entry);
+  const issues: LocalAnchorPreflightIssue[] = [];
+  const seen = new Set<string>();
+  for (const match of source.matchAll(LOCAL_ANCHOR_RE)) {
+    const id = match[1];
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const anchor = `[@local:${id}]`;
+    const annotation = data.annotations[id];
+    const context = sourceContext(source, anchor);
+    issues.push({
+      id,
+      anchor,
+      status: annotation?.path === rel ? annotation.status : "missing",
+      line: context.line,
+      excerpt: context.excerpt,
+    });
+  }
+  for (const annotation of sortedAnnotations(data)) {
+    if (annotation.path !== rel || annotation.status !== "open" || seen.has(annotation.id)) continue;
+    issues.push({
+      id: annotation.id,
+      anchor: annotation.anchor,
+      status: "open",
+      line: null,
+      excerpt: "",
+    });
+  }
+  return issues;
 }
 
 export const localAnnotations = new Hono<AppEnv>();
 localAnnotations.use("*", requireAuth);
 localAnnotations.use("/:owner/:repo/*", requireMembership());
+localAnnotations.use("/:owner/:repo/*", requireWriteOnMutation);
 
-localAnnotations.get("/:owner/:repo/local-annotations/unresolved", async (c) => {
-  const owner = c.req.param("owner");
-  const repo = c.req.param("repo");
-  const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
-  if (!resolved) return c.json(...notFound("workspace not found"));
-
-  const sidecar = readAnnotationSidecar(resolved.entry.path);
-  if (!sidecar.ok) return c.json(...bad(sidecar.error));
-
-  const queue = await unresolvedQueue(resolved.entry, sidecar.records);
-  return c.json({
-    annotations: queue,
-    count: queue.length,
-    sidecar: SIDECAR_PATH,
-  });
+localAnnotations.get("/:owner/:repo/local-annotations/unresolved", (c) => {
+  const entry = localAnnotationEntry(c);
+  if (!entry) return c.json({ error: "workspace not found" }, 404);
+  const path = c.req.query("path");
+  const rel = path ? safeRel(path) : null;
+  if (path && !rel) return c.json({ error: "invalid path" }, 400);
+  try {
+    return c.json({ annotations: localAnnotationQueue(entry, { path: rel }) });
+  } catch (err) {
+    const conflict = localAnnotationSidecarConflict(err);
+    if (conflict) return c.json(conflict, 409);
+    throw err;
+  }
 });
 
-localAnnotations.get("/:owner/:repo/local-annotations", async (c) => {
-  const owner = c.req.param("owner");
-  const repo = c.req.param("repo");
-  const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
-  if (!resolved) return c.json(...notFound("workspace not found"));
+localAnnotations.get("/:owner/:repo/local-annotations", (c) => {
+  const entry = localAnnotationEntry(c);
+  if (!entry) return c.json({ error: "workspace not found" }, 404);
+  const status = c.req.query("status");
+  const rawPath = c.req.query("path");
+  const path = rawPath ? safeRel(rawPath) : null;
+  if (rawPath && !path) return c.json({ error: "invalid path" }, 400);
+  let all: LocalAnnotation[];
+  try {
+    all = sortedAnnotations(readLocalAnnotations(entry));
+  } catch (err) {
+    const conflict = localAnnotationSidecarConflict(err);
+    if (conflict) return c.json(conflict, 409);
+    throw err;
+  }
+  const filtered = all.filter((item) =>
+    (status === "open" || status === "resolved" ? item.status === status : true) &&
+    (path ? item.path === path : true),
+  );
+  return c.json({ annotations: filtered });
+});
 
-  const sidecar = readAnnotationSidecar(resolved.entry.path);
-  if (!sidecar.ok) return c.json(...bad(sidecar.error));
+localAnnotations.post("/:owner/:repo/local-annotations", async (c) => {
+  const entry = localAnnotationEntry(c);
+  if (!entry) return c.json({ error: "workspace not found" }, 404);
+  const body = await readJsonObject(c.req);
+  const kind = normalizeKind(body.kind) ?? "comment";
+  const path = typeof body.path === "string" ? safeRel(body.path) : null;
+  const message = typeof body.body === "string" ? body.body.trim() : "";
+  const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
+  if (!path) return c.json({ error: "path required" }, 400);
+  if (!message) return c.json({ error: "body required" }, 400);
 
-  const queue = await annotationQueue(resolved.entry, sidecar.records);
-  return c.json({
-    annotations: queue,
-    count: queue.length,
-    sidecar: SIDECAR_PATH,
-  });
+  let data: LocalAnnotationFile;
+  try {
+    data = readLocalAnnotations(entry);
+  } catch (err) {
+    const conflict = localAnnotationSidecarConflict(err);
+    if (conflict) return c.json(conflict, 409);
+    throw err;
+  }
+  const id = typeof body.id === "string" && ANNOTATION_ID_RE.test(body.id) ? body.id : newId("la");
+  if (data.annotations[id]) return c.json({ error: "annotation already exists" }, 409);
+  const created = nowIso();
+  const annotation: LocalAnnotation = {
+    id,
+    kind,
+    status: "open",
+    path,
+    anchor: `[@local:${id}]`,
+    created_at: created,
+    updated_at: created,
+    messages: [{
+      id: newId("msg"),
+      author,
+      created_at: created,
+      body: message,
+    }],
+  };
+  data.annotations[id] = annotation;
+  writeLocalAnnotations(entry, data);
+  return c.json({ annotation }, 201);
 });
 
 localAnnotations.patch("/:owner/:repo/local-annotations/:id", async (c) => {
-  const owner = c.req.param("owner");
-  const repo = c.req.param("repo");
-  const id = stripLocalPrefix(c.req.param("id"));
-  const resolved = resolveLocalWorkspace(c.get("localRegistry"), owner, repo);
-  if (!resolved) return c.json(...notFound("workspace not found"));
-
-  const body = await c.req.json().catch(() => null) as { status?: unknown } | null;
-  const requestedStatus = body?.status;
-  if (requestedStatus !== "open" && requestedStatus !== "resolved") return c.json(...bad("status must be open or resolved"));
-  const status: LocalAnnotationRecord["status"] = requestedStatus;
-
-  const sidecar = readAnnotationSidecar(resolved.entry.path);
-  if (!sidecar.ok) return c.json(...bad(sidecar.error));
-
-  const records = sidecar.records.map((record) => record.id === id ? { ...record, status } : record);
-  const updated = records.find((record) => record.id === id);
-  if (!updated) return c.json(...notFound("local annotation not found"));
-  writeAnnotationSidecar(resolved.entry.path, records);
-
-  const [annotation] = await annotationQueue(resolved.entry, [updated]);
-  return c.json({ annotation: annotation ?? { ...updated, anchor: `local:${updated.id}`, source_excerpt: null } });
+  const entry = localAnnotationEntry(c);
+  if (!entry) return c.json({ error: "workspace not found" }, 404);
+  const id = c.req.param("id");
+  if (!ANNOTATION_ID_RE.test(id)) return c.json({ error: "invalid annotation id" }, 400);
+  const body = await readJsonObject(c.req);
+  let data: LocalAnnotationFile;
+  try {
+    data = readLocalAnnotations(entry);
+  } catch (err) {
+    const conflict = localAnnotationSidecarConflict(err);
+    if (conflict) return c.json(conflict, 409);
+    throw err;
+  }
+  const annotation = data.annotations[id];
+  if (!annotation) return c.json({ error: "annotation not found" }, 404);
+  const status = body.status === undefined ? null : normalizeStatus(body.status);
+  if (body.status !== undefined && !status) return c.json({ error: "invalid status" }, 400);
+  if (status) annotation.status = status;
+  if (typeof body.path === "string") {
+    const path = safeRel(body.path);
+    if (!path) return c.json({ error: "invalid path" }, 400);
+    annotation.path = path;
+  }
+  annotation.updated_at = nowIso();
+  writeLocalAnnotations(entry, data);
+  return c.json({ annotation });
 });
 
-type SidecarRead = { ok: true; records: LocalAnnotationRecord[] } | { ok: false; error: string };
-
-function readAnnotationSidecar(root: string): SidecarRead {
-  const path = join(root, SIDECAR_PATH);
-  if (!existsSync(path)) return { ok: true, records: [] };
-  let raw: unknown;
+localAnnotations.post("/:owner/:repo/local-annotations/:id/messages", async (c) => {
+  const entry = localAnnotationEntry(c);
+  if (!entry) return c.json({ error: "workspace not found" }, 404);
+  const id = c.req.param("id");
+  if (!ANNOTATION_ID_RE.test(id)) return c.json({ error: "invalid annotation id" }, 400);
+  const body = await readJsonObject(c.req);
+  const message = typeof body.body === "string" ? body.body.trim() : "";
+  const author = typeof body.author === "string" && body.author.trim() ? body.author.trim() : c.get("user").username;
+  if (!message) return c.json({ error: "body required" }, 400);
+  let data: LocalAnnotationFile;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (_err) {
-    return { ok: false, error: "invalid local annotations sidecar JSON" };
+    data = readLocalAnnotations(entry);
+  } catch (err) {
+    const conflict = localAnnotationSidecarConflict(err);
+    if (conflict) return c.json(conflict, 409);
+    throw err;
   }
-  return { ok: true, records: normalizeSidecar(raw) };
-}
+  const annotation = data.annotations[id];
+  if (!annotation) return c.json({ error: "annotation not found" }, 404);
+  const created = nowIso();
+  annotation.messages.push({
+    id: newId("msg"),
+    author,
+    created_at: created,
+    body: message,
+  });
+  annotation.updated_at = created;
+  writeLocalAnnotations(entry, data);
+  return c.json({ annotation });
+});
 
-function writeAnnotationSidecar(root: string, records: readonly LocalAnnotationRecord[]): void {
-  const path = join(root, SIDECAR_PATH);
-  mkdirSync(join(root, ".cosheaf"), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ annotations: records }, null, 2)}\n`);
-}
-
-function normalizeSidecar(raw: unknown): LocalAnnotationRecord[] {
-  if (Array.isArray(raw)) return raw.flatMap((entry) => normalizeRecord(entry));
-  if (!raw || typeof raw !== "object") return [];
-  const object = raw as Record<string, unknown>;
-  if (Array.isArray(object.annotations)) return object.annotations.flatMap((entry) => normalizeRecord(entry));
-  return Object.entries(object).flatMap(([id, entry]) => normalizeRecord(entry, id));
-}
-
-function normalizeRecord(raw: unknown, fallbackId = ""): LocalAnnotationRecord[] {
-  if (!raw || typeof raw !== "object") return [];
-  const object = raw as Record<string, unknown>;
-  const id = stringField(object.id) ?? fallbackId;
-  const path = safeRel(stringField(object.path) ?? undefined);
-  if (!id || !path) return [];
-  const kind = object.kind === "task" ? "task" : "comment";
-  const status = object.status === "resolved" ? "resolved" : "open";
-  const messages = Array.isArray(object.messages)
-    ? object.messages.flatMap((message) => normalizeMessage(message))
-    : Array.isArray(object.thread)
-      ? object.thread.flatMap((message) => normalizeMessage(message))
-      : [];
-  return [{ id: stripLocalPrefix(id), path, kind, status, messages }];
-}
-
-function normalizeMessage(raw: unknown): LocalAnnotationMessage[] {
-  if (!raw || typeof raw !== "object") return [];
-  const object = raw as Record<string, unknown>;
-  const text = stringField(object.text);
-  if (!text) return [];
-  return [{
-    ...(typeof object.author === "string" ? { author: object.author } : {}),
-    ...(typeof object.timestamp === "string" ? { timestamp: object.timestamp } : {}),
-    text,
-  }];
-}
-
-function stringField(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function stripLocalPrefix(id: string): string {
-  return id.startsWith("local:") ? id.slice("local:".length) : id;
-}
-
-async function unresolvedQueue(entry: import("./workspace-registry.js").WorkspaceEntry, records: readonly LocalAnnotationRecord[]): Promise<LocalAnnotationQueueItem[]> {
-  return annotationQueue(entry, records.filter((record) => record.status !== "resolved"));
-}
-
-async function annotationQueue(entry: import("./workspace-registry.js").WorkspaceEntry, records: readonly LocalAnnotationRecord[]): Promise<LocalAnnotationQueueItem[]> {
-  if (records.length === 0) return [];
-
-  const tree = await entry.backend.getTree(entry.identity.owner, entry.identity.repo, "main", true);
-  const markdownPaths = new Set(tree.filter((node) => node.type === "blob" && fileKindForPath(node.path) === "markdown").map((node) => node.path));
-  const byPath = new Map<string, LocalAnnotationRecord[]>();
-  for (const record of records) {
-    if (!markdownPaths.has(record.path)) continue;
-    const list = byPath.get(record.path) ?? [];
-    list.push(record);
-    byPath.set(record.path, list);
+localAnnotations.delete("/:owner/:repo/local-annotations/:id", (c) => {
+  const entry = localAnnotationEntry(c);
+  if (!entry) return c.json({ error: "workspace not found" }, 404);
+  const id = c.req.param("id");
+  if (!ANNOTATION_ID_RE.test(id)) return c.json({ error: "invalid annotation id" }, 400);
+  let data: LocalAnnotationFile;
+  try {
+    data = readLocalAnnotations(entry);
+  } catch (err) {
+    const conflict = localAnnotationSidecarConflict(err);
+    if (conflict) return c.json(conflict, 409);
+    throw err;
   }
-
-  const queue: LocalAnnotationQueueItem[] = [];
-  for (const [path, pathRecords] of byPath) {
-    const source = await entry.backend.getRawFile(entry.identity.owner, entry.identity.repo, "main", path);
-    const anchors = anchorsInSource(source);
-    for (const record of pathRecords) {
-      const anchor = anchors.get(record.id);
-      queue.push({
-        ...record,
-        anchor: `local:${record.id}`,
-        source_excerpt: anchor ? excerptForLine(source, anchor.line) : null,
-      });
-    }
-  }
-  return queue.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));
-}
-
-function anchorsInSource(source: string): Map<string, { line: number }> {
-  const anchors = new Map<string, { line: number }>();
-  const lineStarts = [0];
-  for (let i = 0; i < source.length; i += 1) {
-    if (source[i] === "\n") lineStarts.push(i + 1);
-  }
-  for (const match of source.matchAll(LOCAL_ANCHOR_RE)) {
-    const id = match[1];
-    const offset = match.index ?? 0;
-    let line = 1;
-    for (let i = 0; i < lineStarts.length; i += 1) {
-      if (lineStarts[i] > offset) break;
-      line = i + 1;
-    }
-    anchors.set(id, { line });
-  }
-  return anchors;
-}
-
-function excerptForLine(source: string, line: number): LocalAnnotationQueueItem["source_excerpt"] {
-  const lines = source.split(/\r?\n/);
-  const start = Math.max(1, line - 2);
-  const end = Math.min(lines.length, line + 2);
-  return {
-    line,
-    start_line: start,
-    end_line: end,
-    text: lines.slice(start - 1, end).join("\n"),
-  };
-}
+  if (!data.annotations[id]) return c.json({ error: "annotation not found" }, 404);
+  delete data.annotations[id];
+  writeLocalAnnotations(entry, data);
+  return c.json({ ok: true });
+});

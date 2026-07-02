@@ -8,9 +8,9 @@ import { type Diagnostic, linter } from "@codemirror/lint";
 import {
   frontmatterField,
   type MountedEditor,
-  type EditorDocumentChange as MountedDocumentChange,
+  type EditorDocumentChange,
   type SaveHandler,
-  type EditorMode as StandaloneEditorMode,
+  type EditorMode,
   type StatusEvents,
   type AssetUploader,
   type AutocompleteSource,
@@ -18,13 +18,13 @@ import {
   mountEditor,
 } from "@chaoxu/coflat";
 import type { DocumentContext, FileSystem } from "@chaoxu/coflat/reader";
-export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource, MountedDocumentChange, MountedEditor };
+export type { SaveHandler, StatusEvents, AssetUploader, AutocompleteSource, EditorDocumentChange, MountedEditor };
 
 interface Props {
   value: string;
-  mode: StandaloneEditorMode;
+  mode: EditorMode;
   onChange?: (value: string) => void;
-  onDocumentChange?: (change: MountedDocumentChange) => void;
+  onDocumentChange?: (change: EditorDocumentChange) => void;
   onReady?: (editor: MountedEditor) => void;
   testId?: string;
   // Mount-time only — changes after mount are ignored. The component must
@@ -50,7 +50,7 @@ interface Props {
   sidenotesCollapsed?: boolean;
 }
 
-export function coflatEditorMode(mode: StandaloneEditorMode, readOnly?: boolean): StandaloneEditorMode {
+export function coflatEditorMode(mode: EditorMode, readOnly?: boolean): EditorMode {
   return readOnly && mode === "rich" ? "rich-readonly" : mode;
 }
 
@@ -212,7 +212,7 @@ export function MarkdownEditor({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (lastValueRef.current === value) return;
+    if (lastValueRef.current === value && editor.getDoc() === value) return;
     lastValueRef.current = value;
     editor.setDoc(value);
   }, [value]);

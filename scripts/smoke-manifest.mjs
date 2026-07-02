@@ -69,4 +69,14 @@ export const smokeChecks = [
     prod: false,
     covers: "repo-wide cosheaf.yaml + doc frontmatter KaTeX macros render (non-builtin) without undefined-control-sequence",
   },
+  {
+    name: "workbench-annotations",
+    command: "pnpm smoke:workbench-annotations",
+    grep: "@smoke-workbench-annotations",
+    script: "tests/e2e/workbench-annotations.spec.ts",
+    seed: "local-workbench",
+    destructive: false,
+    prod: false,
+    covers: "local Workbench annotation creation and selected-position anchor insertion",
+  },
 ];

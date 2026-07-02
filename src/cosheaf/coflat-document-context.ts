@@ -126,6 +126,29 @@ interface WorkspaceRef {
 const BUILTIN_CSL_XML = new Map<string, string>([
   ["ieee", ieeeCslXml],
 ]);
+const LOCAL_ANNOTATION_ID_RE = /^la_[a-z0-9]{12}$/;
+const LOCAL_ANNOTATION_REF_PREFIX = "local:";
+export const LOCAL_ANNOTATION_CLICK_EVENT = "cosheaf:local-annotation-click";
+
+export function localAnnotationIdFromRef(key: string): string | null {
+  if (!key.startsWith(LOCAL_ANNOTATION_REF_PREFIX)) return null;
+  const id = key.slice(LOCAL_ANNOTATION_REF_PREFIX.length);
+  return LOCAL_ANNOTATION_ID_RE.test(id) ? id : null;
+}
+
+function localAnnotationReference(key: string): { content: string; className: string; onClick: (event: MouseEvent) => void } | null {
+  const id = localAnnotationIdFromRef(key);
+  if (!id) return null;
+  return {
+    content: "local note",
+    className: "cf-local-annotation",
+    onClick(event) {
+      event.preventDefault();
+      if (typeof window === "undefined") return;
+      window.dispatchEvent(new CustomEvent(LOCAL_ANNOTATION_CLICK_EVENT, { detail: { id } }));
+    },
+  };
+}
 
 export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
   const clean = href.trim();
@@ -261,6 +284,14 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
     },
     refResolver: {
       resolve: (key, _mode, env) => {
+        const localAnnotation = localAnnotationReference(key);
+        if (localAnnotation) {
+          return {
+            content: escapeHtml(localAnnotation.content),
+            className: localAnnotation.className,
+            onClick: localAnnotation.onClick,
+          };
+        }
         const crossref = refs.workspaceCrossrefs.get(key);
         if (crossref) {
           return {
@@ -294,7 +325,11 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
   const parsed = parseFrontmatter(payload.source);
   const localKeys = new Set(extractCoflatXrefTargets(payload.source).map((target) => target.id));
   const workspaceRefs = await workspaceCrossrefs(payload, payload.source, localKeys);
-  const citationLocalTargets = new Set([...localKeys, ...workspaceRefs.keys()]);
+  const citationLocalTargets = new Set([
+    ...localKeys,
+    ...workspaceRefs.keys(),
+    ...referencedKeys(payload.source).filter((key) => localAnnotationIdFromRef(key)),
+  ]);
   return {
     workspaceCrossrefs: workspaceRefs,
     citations: await loadCitations(
@@ -306,7 +341,7 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
 }
 
 async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string, localKeys: ReadonlySet<string>): Promise<Map<string, RenderedCrossref>> {
-  const keys = referencedKeys(source).filter((key) => !localKeys.has(key));
+  const keys = referencedKeys(source).filter((key) => !localKeys.has(key) && !localAnnotationIdFromRef(key));
   if (keys.length === 0) return new Map();
   try {
     const params = new URLSearchParams({ ids: keys.join(",") });

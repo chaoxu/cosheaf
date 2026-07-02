@@ -12,6 +12,7 @@ import { Forgejo } from "../forgejo.js";
 import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
 import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
+import type { WorkspaceEntry } from "../local/workspace-registry.js";
 import { localCollaborationClient, localMemberSetter } from "../local/origin-collaboration-client.js";
 import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
 import { workspaceReadmeTitle } from "../page-search.js";
@@ -67,6 +68,8 @@ export interface WebCtx {
   setMember: (username: string, role: Role) => Promise<void>;
   // Optional local Workbench browser-state scope. Hosted pages leave this empty.
   originId?: string;
+  // Local Workbench workspace entry. Hosted pages leave this empty.
+  localEntry?: WorkspaceEntry;
   // Per-request UI locale and a locale-bound translate, threaded into repo-page
   // chrome/renderers (no AsyncLocalStorage).
   locale: LocaleId;
@@ -225,6 +228,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       canOpenPull: entry.identity.canOpenPull,
       setMember: localMemberSetter(entry, owner, repo),
       originId: entry.identity.originId,
+      localEntry: entry,
       locale: c.get("locale"),
       t: c.get("t"),
     };

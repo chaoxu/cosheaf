@@ -218,8 +218,6 @@ describe("local Workbench app (Tier 0)", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
       annotations: [],
-      count: 0,
-      sidecar: ".cosheaf/local-annotations.json",
     });
   });
 
@@ -229,47 +227,61 @@ describe("local Workbench app (Tier 0)", () => {
         "# Paper",
         "",
         "Before.",
-        "Needs work.[@local:a1]",
+        "Needs work.[@local:la_aaaaaaaaaaaa]",
         "After.",
         "",
       ].join("\n"),
       ".cosheaf/local-annotations.json": JSON.stringify({
-        annotations: [
-          {
-            id: "a1",
+        annotations: {
+          la_aaaaaaaaaaaa: {
+            id: "la_aaaaaaaaaaaa",
             path: "paper.md",
+            anchor: "[@local:la_aaaaaaaaaaaa]",
             kind: "task",
             status: "open",
-            messages: [{ author: "me", timestamp: "2026-07-02T00:00:00Z", text: "Clarify this step." }],
+            created_at: "2026-07-02T00:00:00Z",
+            updated_at: "2026-07-02T00:00:00Z",
+            messages: [{
+              id: "msg_aaaaaaaaaaaa",
+              author: "me",
+              created_at: "2026-07-02T00:00:00Z",
+              body: "Clarify this step.",
+            }],
           },
-          {
-            id: "done",
+          la_bbbbbbbbbbbb: {
+            id: "la_bbbbbbbbbbbb",
             path: "paper.md",
+            anchor: "[@local:la_bbbbbbbbbbbb]",
             kind: "comment",
             status: "resolved",
-            messages: [{ text: "Already handled." }],
+            created_at: "2026-07-02T00:00:00Z",
+            updated_at: "2026-07-02T00:00:00Z",
+            messages: [{
+              id: "msg_bbbbbbbbbbbb",
+              author: "me",
+              created_at: "2026-07-02T00:00:00Z",
+              body: "Already handled.",
+            }],
           },
-        ],
+        },
       }),
     });
 
     const res = await app.request("/api/v1/repos/me/notes/local-annotations/unresolved");
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
-      count: 1,
       annotations: [
         {
-          id: "a1",
-          anchor: "local:a1",
+          id: "la_aaaaaaaaaaaa",
+          anchor: "[@local:la_aaaaaaaaaaaa]",
           path: "paper.md",
           kind: "task",
           status: "open",
-          messages: [{ author: "me", timestamp: "2026-07-02T00:00:00Z", text: "Clarify this step." }],
-          source_excerpt: {
+          messages: [{ author: "me", created_at: "2026-07-02T00:00:00Z", body: "Clarify this step." }],
+          context: {
             line: 4,
-            start_line: 2,
-            end_line: 6,
-            text: "\nBefore.\nNeeds work.[@local:a1]\nAfter.\n",
+            excerpt: "Before.\nNeeds work.[@local:la_aaaaaaaaaaaa]\nAfter.",
+            anchor_found: true,
           },
         },
       ],
@@ -278,37 +290,64 @@ describe("local Workbench app (Tier 0)", () => {
 
   it("serves all local annotations and toggles their status", async () => {
     const { app, dir } = localApp({
-      "paper.md": "Needs work.[@local:a1]\nDone.[@local:done]\n",
+      "paper.md": "Needs work.[@local:la_aaaaaaaaaaaa]\nDone.[@local:la_bbbbbbbbbbbb]\n",
       ".cosheaf/local-annotations.json": JSON.stringify({
-        annotations: [
-          { id: "a1", path: "paper.md", kind: "task", status: "open", messages: [{ text: "Clarify this step." }] },
-          { id: "done", path: "paper.md", kind: "comment", status: "resolved", messages: [{ text: "Already handled." }] },
-        ],
+        annotations: {
+          la_aaaaaaaaaaaa: {
+            id: "la_aaaaaaaaaaaa",
+            path: "paper.md",
+            anchor: "[@local:la_aaaaaaaaaaaa]",
+            kind: "task",
+            status: "open",
+            created_at: "2026-07-02T00:00:00Z",
+            updated_at: "2026-07-02T00:00:00Z",
+            messages: [{
+              id: "msg_aaaaaaaaaaaa",
+              author: "me",
+              created_at: "2026-07-02T00:00:00Z",
+              body: "Clarify this step.",
+            }],
+          },
+          la_bbbbbbbbbbbb: {
+            id: "la_bbbbbbbbbbbb",
+            path: "paper.md",
+            anchor: "[@local:la_bbbbbbbbbbbb]",
+            kind: "comment",
+            status: "resolved",
+            created_at: "2026-07-02T00:00:00Z",
+            updated_at: "2026-07-02T00:00:00Z",
+            messages: [{
+              id: "msg_bbbbbbbbbbbb",
+              author: "me",
+              created_at: "2026-07-02T00:00:00Z",
+              body: "Already handled.",
+            }],
+          },
+        },
       }),
     });
 
     const list = await app.request("/api/v1/repos/me/notes/local-annotations");
     expect(list.status).toBe(200);
     await expect(list.json()).resolves.toMatchObject({
-      count: 2,
       annotations: [
-        { id: "a1", status: "open", source_excerpt: { line: 1 } },
-        { id: "done", status: "resolved", source_excerpt: { line: 2 } },
+        { id: "la_aaaaaaaaaaaa", status: "open" },
+        { id: "la_bbbbbbbbbbbb", status: "resolved" },
       ],
     });
 
-    const updated = await app.request("/api/v1/repos/me/notes/local-annotations/a1", {
+    const updated = await app.request("/api/v1/repos/me/notes/local-annotations/la_aaaaaaaaaaaa", {
       method: "PATCH",
       headers: { "content-type": "application/json", origin: "http://localhost" },
       body: JSON.stringify({ status: "resolved" }),
     });
     expect(updated.status).toBe(200);
-    await expect(updated.json()).resolves.toMatchObject({ annotation: { id: "a1", status: "resolved" } });
+    await expect(updated.json()).resolves.toMatchObject({ annotation: { id: "la_aaaaaaaaaaaa", status: "resolved" } });
 
     const sidecar = JSON.parse(readFileSync(join(dir, ".cosheaf", "local-annotations.json"), "utf8")) as {
-      annotations: Array<{ id: string; status: string }>;
+      annotations: Record<string, { status: string }>;
     };
-    expect(sidecar.annotations.find((entry) => entry.id === "a1")?.status).toBe("resolved");
+    expect(sidecar.annotations.la_aaaaaaaaaaaa?.status).toBe("resolved");
   });
 
   it("renders the edit page in direct write-mode with PR affordances off", async () => {
