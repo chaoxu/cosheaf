@@ -109,6 +109,9 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     const revert = page.getByRole("button", { name: "Revert hunk" });
     await expect(accept).toBeVisible();
     await expect(revert).toBeVisible();
+    await expect.poll(() =>
+      page.locator(".cm-gutters").evaluate((el) => getComputedStyle(el).backgroundColor)
+    ).toBe("rgba(0, 0, 0, 0)");
     await expect(accept).toBeInViewport();
     await expect(revert).toBeInViewport();
     await accept.click();

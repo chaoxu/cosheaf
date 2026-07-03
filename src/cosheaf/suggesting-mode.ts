@@ -184,11 +184,17 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
     }])),
     Prec.highest(EditorView.theme({
       "&.cm-cosheaf-suggesting-has-hunks .cm-gutters": {
+        backgroundColor: "transparent",
+        borderRight: "none",
         display: "flex",
+      },
+      "&.cm-cosheaf-suggesting-has-hunks .cm-gutter": {
+        backgroundColor: "transparent",
       },
     })),
     EditorView.baseTheme({
       ".cm-cosheaf-suggesting-gutter": {
+        backgroundColor: "transparent",
         minWidth: "42px",
       },
       ".cm-cosheaf-suggesting-actions": {
