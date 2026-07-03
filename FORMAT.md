@@ -10,6 +10,9 @@ Cosheaf is the Forgejo-backed host around that format. It adds repository,
 branch, issue, pull-request, review, rendering, and indexing behavior, but it
 should not duplicate Coflat's parser or syntax contract.
 
+Do not add Coflat syntax rules to this file. Update Coflat's `FORMAT.md`
+instead, then consume the updated Coflat package or checkout from Cosheaf.
+
 ## Cosheaf-Specific Behavior
 
 - Markdown pages live as `.md` files in Forgejo branches.
