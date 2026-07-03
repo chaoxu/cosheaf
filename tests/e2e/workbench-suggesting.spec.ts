@@ -67,6 +67,7 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
   const repo = basename(dir);
   const baseUrl = `http://127.0.0.1:${port}`;
   const logs: string[] = [];
+  const browserErrors: string[] = [];
   let child: ChildProcess | null = null;
 
   try {
@@ -85,6 +86,17 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     child.stdout?.on("data", (chunk) => logs.push(String(chunk)));
     child.stderr?.on("data", (chunk) => logs.push(String(chunk)));
     await waitForWorkbench(`${baseUrl}/${owner}/${repo}`, child, logs);
+    await page.setViewportSize({ width: 390, height: 800 });
+    page.on("response", (response) => {
+      const url = response.url();
+      if ((url.includes("/assets/") || url.includes("/vendor/coflat/")) && response.status() >= 400) {
+        browserErrors.push(`${response.status()} ${url}`);
+      }
+    });
+    page.on("pageerror", (err) => browserErrors.push(err.message));
+    page.on("console", (msg) => {
+      if (msg.type() === "error") browserErrors.push(msg.text());
+    });
 
     await page.goto(`${baseUrl}/${owner}/${repo}/src/branch/main/paper.md?mode=edit`);
     await page.getByRole("button", { name: "Source" }).click();
@@ -92,11 +104,15 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     await page.keyboard.press("End");
     await page.keyboard.type(" Browser accepted edit.");
 
-    const accept = page.locator('.cm-cosheaf-suggesting-actions button[aria-label="Accept hunk"]').first();
-    const revert = page.locator('.cm-cosheaf-suggesting-actions button[aria-label="Revert hunk"]').first();
+    const accept = page.getByRole("button", { name: "Accept hunk" });
+    const revert = page.getByRole("button", { name: "Revert hunk" });
     await expect(accept).toBeVisible();
     await expect(revert).toBeVisible();
+    await expect(accept).toBeInViewport();
+    await expect(revert).toBeInViewport();
     await accept.click();
+    await expect(accept).toHaveCount(0);
+    await expect(page.getByTestId("editor-suggesting-state")).toContainText("Changes 0");
 
     await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
     await expect.poll(() => git(dir, ["rev-list", "--count", "HEAD"]).trim()).toBe("2");
@@ -112,10 +128,11 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     await revert.click();
 
     await expect(page.locator(".cm-content")).not.toContainText("Browser reverted edit.");
-    await expect(page.locator(".cm-cosheaf-suggesting-actions")).toHaveCount(0);
+    await expect(revert).toHaveCount(0);
     expect(readFileSync(join(dir, "paper.md"), "utf8")).not.toContain("Browser reverted edit.");
     expect(git(dir, ["rev-parse", "--short", "HEAD"]).trim()).toBe(checkpointHead);
     expect(git(dir, ["status", "--porcelain"])).toBe("");
+    expect(browserErrors).toEqual([]);
   } finally {
     if (child) await stopWorkbench(child);
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });

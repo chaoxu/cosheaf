@@ -34,6 +34,17 @@ function jsonPath(value: unknown): string | null {
   return typeof value === "string" ? safeRel(value) : null;
 }
 
+function requiredShaString(value: unknown, name: string): { ok: true; value: string } | { ok: false; error: string } {
+  if (typeof value === "string" && /^[0-9a-f]{40}$/.test(value)) return { ok: true, value };
+  return { ok: false, error: `${name} must be a git SHA` };
+}
+
+function requiredSha(value: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === null) return { ok: true, value };
+  if (typeof value === "string" && /^[0-9a-f]{40}$/.test(value)) return { ok: true, value };
+  return { ok: false, error: "expected_sha must be a git blob SHA or null" };
+}
+
 function nonNegativeInt(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) return null;
   return value;
@@ -81,8 +92,11 @@ localSuggesting.get("/:owner/:repo/local-suggesting/base", async (c) => {
   const path = safeRel(c.req.query("path"));
   if (!path || !isEditableTextFile(path)) return c.json(...bad("valid editable path required"));
   try {
-    const head = await entry.backend.getHeadFile(path);
-    return c.json({ path, base_text: head.content, head_sha: head.head_sha });
+    const [head, meta] = await Promise.all([
+      entry.backend.getHeadFile(path),
+      entry.backend.getFileMeta(entry.identity.owner, entry.identity.repo, "WORKTREE", path),
+    ]);
+    return c.json({ path, base_text: head.content, head_sha: head.head_sha, current_sha: meta?.sha ?? null });
   } catch (err) {
     const mapped = gitError(err);
     if (mapped) return c.json(...mapped);
@@ -96,42 +110,43 @@ localSuggesting.post("/:owner/:repo/local-suggesting/revert", async (c) => {
   const body = await readJsonObject(c.req);
   const path = jsonPath(body.path);
   const hunk = jsonHunk(body.hunk);
+  const expectedHeadSha = requiredShaString(body.expected_head_sha, "expected_head_sha");
+  const expectedSha = requiredSha(body.expected_sha);
   if (!path || !isEditableTextFile(path)) return c.json(...bad("valid editable path required"));
   if (!hunk) return c.json(...bad("valid hunk required"));
+  if (!expectedHeadSha.ok) return c.json(...bad(expectedHeadSha.error));
+  if (!expectedSha.ok) return c.json(...bad(expectedSha.error));
   try {
-    const head = await entry.backend.getHeadFile(path);
-    const current = await entry.backend.getRawFile(entry.identity.owner, entry.identity.repo, "WORKTREE", path);
-    const next = revertSuggestingHunk(head.content, current, hunk);
-    if (next === null) return c.json(...conflict("suggesting hunk is stale; reload the file and retry"));
-    const meta = await entry.backend.getFileMeta(entry.identity.owner, entry.identity.repo, "WORKTREE", path);
-    if (!meta) return c.json(...notFound("file not found"));
-    const content = next;
-    const plan = fileKindForPath(path) === "markdown"
-      ? planIndexPage(c.get("db"), {
-          workspaceSlug: entry.slug,
-          filePath: path,
-          bodyText: content,
-          formatId: entry.identity.defaultMdFormat,
-        })
-      : null;
-    const branch = await currentBranch(entry);
-    const written = await entry.backend.putFile(entry.identity.owner, entry.identity.repo, {
-      branch,
-      path,
-      content,
-      sha: meta.sha,
-      message: `revert hunk in ${path}`,
+    let plan: ReturnType<typeof planIndexPage> | null = null;
+    const written = await entry.backend.mutateTextFileAgainstHead(path, {
+      headSha: expectedHeadSha.value,
+      sha: expectedSha.value,
+    }, ({ head, current }) => {
+      const next = revertSuggestingHunk(head.content, current, hunk);
+      if (next === null) return null;
+      plan = fileKindForPath(path) === "markdown"
+        ? planIndexPage(c.get("db"), {
+            workspaceSlug: entry.slug,
+            filePath: path,
+            bodyText: next,
+            formatId: entry.identity.defaultMdFormat,
+          })
+        : null;
+      return plan?.rewrittenContent ?? next;
     });
+    if (!written) return c.json(...conflict("suggesting hunk is stale; reload the file and retry"));
     indexLocalWrite(true, c.get("db"), entry.slug, plan);
+    const branch = await currentBranch(entry);
     invalidateBranchTree(entry.identity.owner, entry.identity.repo, branch);
     publishLocalFileMutationEvents(c, entry, { action: "changed", path });
     return c.json({
       path,
-      content,
-      sha: written.content?.sha ?? null,
-      hunks: suggestingHunks(head.content, content),
-      base_text: head.content,
-      head_sha: head.head_sha,
+      content: written.content,
+      sha: written.sha,
+      current_sha: written.sha,
+      hunks: suggestingHunks(written.head.content, written.content),
+      base_text: written.head.content,
+      head_sha: written.head.head_sha,
     });
   } catch (err) {
     const mapped = gitError(err);
@@ -146,14 +161,24 @@ localSuggesting.post("/:owner/:repo/local-suggesting/checkpoint", async (c) => {
   const body = await readJsonObject(c.req);
   const path = jsonPath(body.path);
   if (!path || !isEditableTextFile(path)) return c.json(...bad("valid editable path required"));
+  const expectedHeadSha = requiredShaString(body.expected_head_sha, "expected_head_sha");
+  const expectedSha = requiredSha(body.expected_sha);
+  if (!expectedHeadSha.ok) return c.json(...bad(expectedHeadSha.error));
+  if (!expectedSha.ok) return c.json(...bad(expectedSha.error));
   const rawMessage = typeof body.message === "string" ? body.message.trim() : "";
   const message = `Checkpoint: ${rawMessage || path}`;
   try {
-    const sha = await entry.backend.commitPaths(message, [path]);
+    const sha = await entry.backend.commitPathIfUnchanged(message, path, {
+      headSha: expectedHeadSha.value,
+      sha: expectedSha.value,
+    });
     if (sha) publishLocalGitEvent(c, entry, { action: "committed", sha, paths: [path] });
     else publishLocalGitEvent(c, entry, { action: "status_changed", paths: [path] });
-    const head = await entry.backend.getHeadFile(path);
-    return c.json({ path, commit_sha: sha, base_text: head.content, head_sha: head.head_sha });
+    const [head, meta] = await Promise.all([
+      entry.backend.getHeadFile(path),
+      entry.backend.getFileMeta(entry.identity.owner, entry.identity.repo, "WORKTREE", path),
+    ]);
+    return c.json({ path, commit_sha: sha, base_text: head.content, head_sha: head.head_sha, current_sha: meta?.sha ?? null });
   } catch (err) {
     const mapped = gitError(err);
     if (mapped) return c.json(...mapped);

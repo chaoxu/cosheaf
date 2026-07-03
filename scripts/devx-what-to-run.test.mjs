@@ -49,7 +49,23 @@ describe("devx check suggestions", () => {
     expect(result.matchedRules).toContain("workbench-annotations");
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:workbench-writing");
     expect(result.suggestions.map((item) => item.run)).toContain(
-      "pnpm exec vitest run server/local/local-annotations.test.ts src/cosheaf/api.test.ts",
+      "pnpm exec vitest run server/local/local-annotations.test.ts server/local/local-app.test.ts src/cosheaf/api.test.ts",
+    );
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:workbench-annotations");
+  });
+
+  it("maps local suggesting changes to the Workbench writing gate", () => {
+    const result = suggestChecks([
+      "server/local/local-suggesting.ts",
+      "server/local/local-git-backend.ts",
+      "shared/suggesting-diff.ts",
+      "src/cosheaf/suggesting-mode.ts",
+      "tests/e2e/workbench-suggesting.spec.ts",
+    ]);
+    expect(result.matchedRules).toContain("workbench-annotations");
+    expect(result.suggestions.map((item) => item.run)).toContain("pnpm check:workbench-writing");
+    expect(result.suggestions.map((item) => item.run)).toContain(
+      "pnpm exec vitest run server/local/local-annotations.test.ts server/local/local-app.test.ts src/cosheaf/api.test.ts",
     );
     expect(result.suggestions.map((item) => item.run)).toContain("pnpm smoke:workbench-annotations");
   });

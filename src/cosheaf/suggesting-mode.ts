@@ -1,6 +1,7 @@
-import { Prec, StateField, RangeSetBuilder, type Extension } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, GutterMarker, gutter, keymap } from "@codemirror/view";
+import { Prec, StateEffect, StateField, RangeSetBuilder, type Extension } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, GutterMarker, gutter, keymap, ViewPlugin } from "@codemirror/view";
 import {
+  suggestingHunkFingerprint,
   suggestingHunks,
   type SuggestingHunk,
 } from "../../shared/suggesting-diff";
@@ -55,6 +56,12 @@ function buildDecorations(state: EditorView["state"], hunks: readonly Suggesting
   return builder.finish();
 }
 
+const acceptHunkEffect = StateEffect.define<string>();
+
+function acceptedHunkKey(baseText: string, currentText: string, hunk: SuggestingHunk): string {
+  return `${hunk.id}\0${suggestingHunkFingerprint(baseText, currentText, hunk)}`;
+}
+
 class SuggestingSpacerMarker extends GutterMarker {
   toDOM(): Node {
     const span = document.createElement("span");
@@ -67,6 +74,7 @@ class SuggestingSpacerMarker extends GutterMarker {
 class SuggestingHunkMarker extends GutterMarker {
   constructor(
     private readonly hunk: SuggestingHunk,
+    private readonly view: EditorView,
     private readonly opts: SuggestingModeOptions,
   ) {
     super();
@@ -90,7 +98,7 @@ class SuggestingHunkMarker extends GutterMarker {
     const button = document.createElement("button");
     button.type = "button";
     button.title = label;
-    button.ariaLabel = label;
+    button.setAttribute("aria-label", label);
     button.innerHTML = markup;
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
@@ -99,6 +107,11 @@ class SuggestingHunkMarker extends GutterMarker {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (label === "Accept hunk") {
+        this.view.dispatch({
+          effects: acceptHunkEffect.of(acceptedHunkKey(this.opts.baseText, this.view.state.doc.toString(), this.hunk)),
+        });
+      }
       action();
     });
     return button;
@@ -106,32 +119,65 @@ class SuggestingHunkMarker extends GutterMarker {
 }
 
 export function suggestingModeExtension(opts: SuggestingModeOptions): Extension {
+  const acceptedField = StateField.define<ReadonlySet<string>>({
+    create: () => new Set<string>(),
+    update: (value, transaction) => {
+      const next = new Set(value);
+      for (const effect of transaction.effects) {
+        if (effect.is(acceptHunkEffect)) next.add(effect.value);
+      }
+      return next;
+    },
+  });
   const hunkField = StateField.define<readonly SuggestingHunk[]>({
     create: (state) => suggestingHunks(opts.baseText, state.doc.toString()),
     update: (value, transaction) =>
       transaction.docChanged ? suggestingHunks(opts.baseText, transaction.newDoc.toString()) : value,
   });
   const decorations = StateField.define<DecorationSet>({
-    create: (state) => buildDecorations(state, state.field(hunkField)),
+    create: (state) => buildDecorations(
+      state,
+      state.field(hunkField).filter((hunk) =>
+        !state.field(acceptedField).has(acceptedHunkKey(opts.baseText, state.doc.toString(), hunk))
+      ),
+    ),
     update: (value, transaction) =>
-      transaction.docChanged ? buildDecorations(transaction.state, transaction.state.field(hunkField)) : value,
+      transaction.docChanged || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
+        ? buildDecorations(
+          transaction.state,
+          transaction.state.field(hunkField).filter((hunk) =>
+            !transaction.state.field(acceptedField).has(acceptedHunkKey(opts.baseText, transaction.state.doc.toString(), hunk))
+          ),
+        )
+        : value,
     provide: (field) => EditorView.decorations.from(field),
   });
+  const accessibleGutter = ViewPlugin.define((view) => {
+    const expose = () => {
+      view.dom.querySelector(".cm-gutters")?.setAttribute("aria-hidden", "false");
+    };
+    expose();
+    return { update: expose };
+  });
   return [
+    acceptedField,
     hunkField,
     decorations,
+    accessibleGutter,
     gutter({
       class: "cm-cosheaf-suggesting-gutter",
       renderEmptyElements: true,
       initialSpacer: () => new SuggestingSpacerMarker(),
       lineMarker: (view, line) => {
         const lineNumber = view.state.doc.lineAt(line.from).number;
+        const accepted = view.state.field(acceptedField);
         const hunk = view.state.field(hunkField).find((item) =>
+          !accepted.has(acceptedHunkKey(opts.baseText, view.state.doc.toString(), item)) &&
           hunkAnchorLine(item, view.state.doc.lines) === lineNumber
         );
-        return hunk ? new SuggestingHunkMarker(hunk, opts) : null;
+        return hunk ? new SuggestingHunkMarker(hunk, view, opts) : null;
       },
-      lineMarkerChange: (update) => update.docChanged,
+      lineMarkerChange: (update) => update.docChanged || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(acceptHunkEffect))),
     }),
     Prec.highest(keymap.of([{
       key: "Mod-s",

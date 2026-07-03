@@ -89,6 +89,16 @@ export function sameSuggestingHunk(a: SuggestingHunk, b: SuggestingHunk): boolea
     a.new_lines === b.new_lines;
 }
 
+export function suggestingHunkFingerprint(baseText: string, currentText: string, hunk: SuggestingHunk): string {
+  const baseLines = splitLinesPreserveEndings(baseText);
+  const currentLines = splitLinesPreserveEndings(currentText);
+  const oldStart = Math.max(0, hunk.old_start - 1);
+  const newStart = Math.max(0, hunk.new_start - 1);
+  const oldText = baseLines.slice(oldStart, oldStart + hunk.old_lines).join("");
+  const newText = currentLines.slice(newStart, newStart + hunk.new_lines).join("");
+  return `${hunk.kind}\0${oldText}\0${newText}`;
+}
+
 export function revertSuggestingHunk(baseText: string, currentText: string, hunk: SuggestingHunk): string | null {
   const fresh = suggestingHunks(baseText, currentText).find((candidate) => sameSuggestingHunk(candidate, hunk));
   if (!fresh) return null;

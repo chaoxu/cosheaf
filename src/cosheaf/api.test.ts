@@ -105,6 +105,77 @@ describe("api errors", () => {
   });
 });
 
+describe("local suggesting API", () => {
+  it("sends concrete current SHA for suggesting revert CAS", async () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ path: "notes.md", content: "", base_text: "", head_sha: "head", current_sha: sha, hunks: [] })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.revertSuggestingHunk("owner", "repo", "notes.md", {
+      id: "1:1:1:1",
+      kind: "change",
+      old_start: 1,
+      old_lines: 1,
+      new_start: 1,
+      new_lines: 1,
+    }, { headSha: "head", currentSha: sha });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      path: "notes.md",
+      hunk: {
+        id: "1:1:1:1",
+        kind: "change",
+        old_start: 1,
+        old_lines: 1,
+        new_start: 1,
+        new_lines: 1,
+      },
+      expected_head_sha: "head",
+      expected_sha: sha,
+    });
+  });
+
+  it("sends null current SHA for a known-absent suggesting file", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ path: "notes.md", commit_sha: null, base_text: "", head_sha: "head", current_sha: null })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.checkpointSuggestingFile("owner", "repo", "notes.md", {
+      headSha: "head",
+      currentSha: null,
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      path: "notes.md",
+      expected_head_sha: "head",
+      expected_sha: null,
+    });
+  });
+
+  it("sends concrete current SHA for suggesting checkpoint CAS", async () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ path: "notes.md", commit_sha: "commit", base_text: "", head_sha: "head", current_sha: sha })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.checkpointSuggestingFile("owner", "repo", "notes.md", {
+      headSha: "head",
+      currentSha: sha,
+    }, "save hunk");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      path: "notes.md",
+      message: "save hunk",
+      expected_head_sha: "head",
+      expected_sha: sha,
+    });
+  });
+});
+
 describe("local annotation API", () => {
   it("uses typed local annotation routes", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

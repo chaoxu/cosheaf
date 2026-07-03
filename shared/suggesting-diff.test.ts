@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { revertSuggestingHunk, suggestingHunks } from "./suggesting-diff.js";
+import { revertSuggestingHunk, suggestingHunkFingerprint, suggestingHunks } from "./suggesting-diff.js";
 
 describe("suggesting diff hunks", () => {
   it("identifies inserted, deleted, and changed line hunks", () => {
@@ -30,5 +30,18 @@ describe("suggesting diff hunks", () => {
     expect(hunk).toBeDefined();
     if (!hunk) throw new Error("expected a suggesting hunk");
     expect(revertSuggestingHunk(base, "a\nB\nextra\n", hunk)).toBeNull();
+  });
+
+  it("keeps identical hunk text distinguishable by range id", () => {
+    const base = "old\nsame\nold\n";
+    const current = "new\nsame\nnew\n";
+    const hunks = suggestingHunks(base, current);
+    expect(hunks).toHaveLength(2);
+    const [first, second] = hunks;
+    if (!first || !second) throw new Error("expected two suggesting hunks");
+    expect(suggestingHunkFingerprint(base, current, first)).toBe(suggestingHunkFingerprint(base, current, second));
+    expect(`${first.id}\0${suggestingHunkFingerprint(base, current, first)}`).not.toBe(
+      `${second.id}\0${suggestingHunkFingerprint(base, current, second)}`,
+    );
   });
 });

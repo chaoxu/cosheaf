@@ -37,7 +37,7 @@ import {
 } from "../../shared/document-rail";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
-import { suggestingHunks, type SuggestingHunk } from "../../shared/suggesting-diff";
+import { suggestingHunkFingerprint, suggestingHunks, type SuggestingHunk } from "../../shared/suggesting-diff";
 import { repoBranchFileHref, repoHref, workspaceApiPath } from "../../shared/url";
 import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
@@ -62,6 +62,10 @@ import { suggestingModeExtension } from "./suggesting-mode";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
+
+function acceptedSuggestingHunkKey(baseText: string, currentText: string, hunk: SuggestingHunk): string {
+  return `${hunk.id}\0${suggestingHunkFingerprint(baseText, currentText, hunk)}`;
+}
 
 interface EditorConfig {
   owner: string;
@@ -109,6 +113,7 @@ interface SuggestingBase {
   path: string;
   baseText: string;
   headSha: string;
+  currentSha: string | null;
 }
 
 export interface WebEditorPreviewEvent {
@@ -228,6 +233,7 @@ function WebEditor({
 }) {
   const [content, setContent] = useState(initialContent);
   const [contextSource, setContextSource] = useState(initialContent);
+  const [suggestingSource, setSuggestingSource] = useState(initialContent);
   const [currentPath, setCurrentPath] = useState(config.path);
   const [savedPath, setSavedPath] = useState(config.path);
   const [branch, setBranch] = useState(config.branch);
@@ -260,6 +266,7 @@ function WebEditor({
   const [documentContextReady, setDocumentContextReady] = useState(false);
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [suggestingBase, setSuggestingBase] = useState<SuggestingBase | null>(null);
+  const [acceptedSuggestingHunks, setAcceptedSuggestingHunks] = useState<ReadonlySet<string>>(() => new Set());
   const [suggestingError, setSuggestingError] = useState<string | null>(null);
   const [externalFileChange, setExternalFileChange] = useState<ExternalFileChange | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
@@ -341,6 +348,7 @@ function WebEditor({
     sourceCacheRef.current.reset(next);
     setContent(next);
     setContextSource(next);
+    setSuggestingSource(next);
   }, []);
 
   const scheduleContextSourceSync = useCallback(() => {
@@ -363,6 +371,7 @@ function WebEditor({
     // The document-context source is refreshed from an incremental Text cache
     // after typing pauses, without calling editor.getDoc().
     sourceCacheRef.current.apply(change);
+    setSuggestingSource(sourceCacheRef.current.source());
     scheduleContextSourceSync();
     setUncommitted(true);
     setSaveError(null);
@@ -422,12 +431,19 @@ function WebEditor({
     if (!suggestingEnabled) return null;
     try {
       const base = await api.suggestingBase(config.owner, config.repo, path);
-      const next = { path: base.path, baseText: base.base_text, headSha: base.head_sha };
+      const next = {
+        path: base.path,
+        baseText: base.base_text,
+        headSha: base.head_sha,
+        currentSha: base.current_sha,
+      };
       setSuggestingBase(next);
+      setAcceptedSuggestingHunks(new Set());
       setSuggestingError(null);
       return next;
     } catch (err) {
       setSuggestingBase(null);
+      setAcceptedSuggestingHunks(new Set());
       setSuggestingError(err instanceof ApiError ? err.message : "Suggesting mode unavailable");
       return null;
     }
@@ -722,20 +738,38 @@ function WebEditor({
   const checkpointSuggestingFile = useCallback(async (path: string): Promise<{ ok: true; commitSha: string | null } | { ok: false; error: string }> => {
     if (!suggestingEnabled) return { ok: true, commitSha: null };
     try {
-      const checkpoint = await api.checkpointSuggestingFile(config.owner, config.repo, path);
+      if (!suggestingBase || suggestingBase.path !== path) {
+        return { ok: false, error: "suggesting base unavailable; reload and retry" };
+      }
+      const checkpoint = await api.checkpointSuggestingFile(config.owner, config.repo, path, {
+        headSha: suggestingBase.headSha,
+        currentSha: savedShaRef.current ?? suggestingBase.currentSha,
+      });
       setSuggestingBase({
         path: checkpoint.path,
         baseText: checkpoint.base_text,
         headSha: checkpoint.head_sha,
+        currentSha: checkpoint.current_sha,
       });
+      savedShaRef.current = checkpoint.current_sha;
+      setAcceptedSuggestingHunks(new Set());
       setSuggestingError(null);
       return { ok: true, commitSha: checkpoint.commit_sha };
     } catch (err) {
       const error = err instanceof ApiError ? err.message : "checkpoint failed";
+      if (err instanceof ApiError && err.status === 409) {
+        setExternalFileChange({
+          path,
+          type: "change",
+          compareOpen: true,
+          loading: true,
+          staleSave: true,
+        });
+      }
       setSuggestingError(error);
       return { ok: false, error };
     }
-  }, [config.owner, config.repo, suggestingEnabled]);
+  }, [config.owner, config.repo, suggestingBase, suggestingEnabled]);
 
   const commitManualSource = useCallback(
     async (source: string): Promise<{ ok: true; branch: string; path: string } | { ok: false; error: string }> => {
@@ -749,11 +783,19 @@ function WebEditor({
     [commitSource, checkpointSuggestingFile, suggestingBase, suggestingEnabled],
   );
 
-  const suggestingHunkCount = useMemo(
-    () => suggestingBase ? suggestingHunks(suggestingBase.baseText, content).length : 0,
-    [content, suggestingBase],
+  const suggestingHunksForSource = useMemo(
+    () => suggestingBase ? suggestingHunks(suggestingBase.baseText, suggestingSource) : [],
+    [suggestingBase, suggestingSource],
   );
-  const hasCheckpointChanges = suggestingEnabled && suggestingHunkCount > 0;
+  const unresolvedSuggestingHunkCount = useMemo(
+    () => suggestingBase
+      ? suggestingHunksForSource.filter((hunk) =>
+          !acceptedSuggestingHunks.has(acceptedSuggestingHunkKey(suggestingBase.baseText, suggestingSource, hunk))
+        ).length
+      : 0,
+    [acceptedSuggestingHunks, suggestingBase, suggestingHunksForSource, suggestingSource],
+  );
+  const hasCheckpointChanges = suggestingEnabled && suggestingHunksForSource.length > 0;
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
   // disabled, #158); manual/command (Save button, Cmd-S) → real commit.
@@ -945,22 +987,44 @@ function WebEditor({
     });
   }, [busy, content, uncommitted, pathDirty, hasCheckpointChanges, checkpointSuggestingFile, commitManualSource]);
 
-  const acceptSuggestingHunk = useCallback((_hunk: SuggestingHunk) => {
+  const acceptSuggestingHunk = useCallback((hunk: SuggestingHunk) => {
+    const base = suggestingBase;
+    if (!base) return;
+    const source = liveEditorSource(editorRef.current, suggestingSource);
+    const key = acceptedSuggestingHunkKey(base.baseText, source, hunk);
+    setSuggestingSource(source);
+    setAcceptedSuggestingHunks((previous) => {
+      const next = new Set(previous);
+      next.add(key);
+      return next;
+    });
     toast("Hunk kept for the next checkpoint");
-  }, []);
+  }, [suggestingBase, suggestingSource]);
 
   const revertSuggestingHunk = useCallback(async (hunk: SuggestingHunk) => {
     if (busy) return;
+    if (pathDirty) {
+      const error = "Rename pending: save or cancel the path change before reverting a hunk.";
+      setSaveError(error);
+      toast(error, "error");
+      return;
+    }
     setBusy(true);
     setSaveError(null);
     try {
-      if (uncommitted || pathDirty) {
+      if (uncommitted) {
         const committed = await commitSource(liveEditorSource(editorRef.current, content));
         if (!committed.ok) throw new Error(committed.error);
       }
       const targetPath = savedPathRef.current;
       ignoreOwnChangeEvents([targetPath]);
-      const result = await api.revertSuggestingHunk(config.owner, config.repo, targetPath, hunk);
+      if (!suggestingBase || suggestingBase.path !== targetPath) {
+        throw new Error("suggesting base unavailable; reload and retry");
+      }
+      const result = await api.revertSuggestingHunk(config.owner, config.repo, targetPath, hunk, {
+        headSha: suggestingBase.headSha,
+        currentSha: savedShaRef.current ?? suggestingBase.currentSha,
+      });
       setEditorContent(result.content);
       setSavedPath(result.path);
       setCurrentPath(result.path);
@@ -975,17 +1039,28 @@ function WebEditor({
         path: result.path,
         baseText: result.base_text,
         headSha: result.head_sha,
+        currentSha: result.current_sha,
       });
+      setAcceptedSuggestingHunks(new Set());
       setSuggestingError(null);
       toast("Reverted hunk");
     } catch (err) {
       const error = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "revert failed";
+      if (err instanceof ApiError && err.status === 409) {
+        setExternalFileChange({
+          path: savedPathRef.current,
+          type: "change",
+          compareOpen: true,
+          loading: true,
+          staleSave: true,
+        });
+      }
       setSaveError(error);
       toast(`Revert failed: ${error}`, "error");
     } finally {
       setBusy(false);
     }
-  }, [busy, uncommitted, pathDirty, commitSource, content, config.owner, config.repo, ignoreOwnChangeEvents, setEditorContent]);
+  }, [busy, uncommitted, pathDirty, commitSource, content, config.owner, config.repo, ignoreOwnChangeEvents, setEditorContent, suggestingBase]);
 
   const acceptSuggestingHunkRef = useRef(acceptSuggestingHunk);
   const revertSuggestingHunkRef = useRef(revertSuggestingHunk);
@@ -1474,7 +1549,7 @@ function WebEditor({
               data-testid="editor-suggesting-state"
               title={suggestingError ?? (suggestingBase ? "Diff against the current HEAD checkpoint" : "Suggesting mode unavailable")}
             >
-              Changes {suggestingBase ? suggestingHunkCount : "-"}
+              Changes {suggestingBase ? unresolvedSuggestingHunkCount : "-"}
             </span>
           ) : null}
           {(() => {

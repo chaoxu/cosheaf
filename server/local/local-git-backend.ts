@@ -88,6 +88,17 @@ export interface LocalHeadFile {
   head_sha: string;
 }
 
+export interface LocalExpectedFileState {
+  headSha?: string;
+  sha?: string | null;
+}
+
+export interface LocalTextFileState {
+  head: LocalHeadFile;
+  current: string;
+  currentSha: string;
+}
+
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   private readonly root: string;
   private realRoot: string | undefined;
@@ -192,6 +203,61 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     }
   }
 
+  private withGitMutation<T>(fn: () => Promise<T>): Promise<T> {
+    return this.withPathMutation(`${this.root}\0git`, fn);
+  }
+
+  private assertExpectedHead(head: LocalHeadFile, expected: LocalExpectedFileState): void {
+    if (expected.headSha && head.head_sha !== expected.headSha) {
+      throw new WorkspaceBackendError(409, "stale_sha", "suggesting base changed; reload the file and retry");
+    }
+  }
+
+  private assertExpectedBlob(path: string, currentSha: string | null, expected: LocalExpectedFileState): void {
+    if (expected.sha !== undefined && currentSha !== expected.sha) {
+      throw new WorkspaceBackendError(409, "stale_sha", `suggesting file changed; reload the file and retry: ${path}`);
+    }
+  }
+
+  private async writeBytesUnlocked(full: string, content: Buffer): Promise<WsFileWrite> {
+    await this.assertRealParentInside(full);
+    await mkdir(resolve(full, ".."), { recursive: true });
+    const tmp = `${full}.tmp-${gitBlobHash(content).slice(0, 12)}-${this.writeSeq++}`;
+    await writeFile(tmp, content);
+    await rename(tmp, full);
+    return { content: { sha: gitBlobHash(content) }, commit: { sha: WORKTREE_REF } };
+  }
+
+  async mutateTextFileAgainstHead(
+    path: string,
+    expected: LocalExpectedFileState,
+    mutate: (state: LocalTextFileState) => Promise<string | null> | string | null,
+  ): Promise<{ path: string; content: string; sha: string; head: LocalHeadFile } | null> {
+    const full = this.abs(path);
+    return this.withGitMutation(() => this.withPathMutation(full, async () => {
+      const head = await this.getHeadFile(path);
+      this.assertExpectedHead(head, expected);
+      const currentBytes = await this.readBytes(path);
+      const currentSha = gitBlobHash(currentBytes);
+      this.assertExpectedBlob(path, currentSha, expected);
+      const content = await mutate({ head, current: currentBytes.toString("utf8"), currentSha });
+      if (content === null) return null;
+      const written = await this.writeBytesUnlocked(full, Buffer.from(content, "utf8"));
+      return { path, content, sha: written.content?.sha ?? gitBlobHash(Buffer.from(content, "utf8")), head };
+    }));
+  }
+
+  async commitPathIfUnchanged(message: string, path: string, expected: LocalExpectedFileState): Promise<string | null> {
+    const full = this.abs(path);
+    return this.withGitMutation(() => this.withPathMutation(full, async () => {
+      const head = await this.getHeadFile(path);
+      this.assertExpectedHead(head, expected);
+      const meta = await this.getFileMeta("", "", "WORKTREE", path);
+      this.assertExpectedBlob(path, meta?.sha ?? null, expected);
+      return await this.commitPathsUnlocked(message, [path]);
+    }));
+  }
+
   private async requireCurrentSha(
     filepath: string,
     sha: string | undefined,
@@ -279,16 +345,11 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   async putFileBytes(_owner: string, _repo: string, opts: WsPutFileBytes): Promise<WsFileWrite> {
     const full = this.abs(opts.path);
     return this.withPathMutation(full, async () => {
-      await this.assertRealParentInside(full);
       await this.requireCurrentSha(opts.path, opts.sha);
-      await mkdir(resolve(full, ".."), { recursive: true });
       // Write to a temp sibling then rename so a reader never sees a half-written
       // file. The temp name is derived from the content hash (no Math.random,
       // which is unavailable in some sandboxes and irrelevant here).
-      const tmp = `${full}.tmp-${gitBlobHash(opts.content).slice(0, 12)}-${this.writeSeq++}`;
-      await writeFile(tmp, opts.content);
-      await rename(tmp, full);
-      return { content: { sha: gitBlobHash(opts.content) }, commit: { sha: WORKTREE_REF } };
+      return await this.writeBytesUnlocked(full, opts.content);
     });
   }
 
@@ -549,6 +610,10 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // Stage everything and commit. Returns the new commit sha, or null when there
   // was nothing to commit.
   async commitAll(message: string): Promise<string | null> {
+    return this.withGitMutation(() => this.commitAllUnlocked(message));
+  }
+
+  private async commitAllUnlocked(message: string): Promise<string | null> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
     await this.gitWithLiteralPathspecs(["add", "-A", "--", "."]);
     const status = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", "."]);
@@ -558,6 +623,10 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   async commitPaths(message: string, paths: string[]): Promise<string | null> {
+    return this.withGitMutation(() => this.commitPathsUnlocked(message, paths));
+  }
+
+  private async commitPathsUnlocked(message: string, paths: string[]): Promise<string | null> {
     if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
     const safePaths = this.gitLiteralPaths(paths);
     if (safePaths.length === 0) return null;

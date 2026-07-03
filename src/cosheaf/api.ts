@@ -34,6 +34,7 @@ interface SuggestingBaseResult {
   path: string;
   base_text: string;
   head_sha: string;
+  current_sha: string | null;
 }
 
 interface SuggestingRevertResult extends SuggestingBaseResult {
@@ -167,16 +168,38 @@ export const api = {
       `${workspaceApiPath(owner, repo)}/local-suggesting/base${queryString({ path })}`,
     ),
 
-  revertSuggestingHunk: (owner: string, repo: string, path: string, hunk: SuggestingHunk) =>
+  revertSuggestingHunk: (
+    owner: string,
+    repo: string,
+    path: string,
+    hunk: SuggestingHunk,
+    expected: { headSha: string; currentSha: string | null },
+  ) =>
     jsonFetch<SuggestingRevertResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/revert`, {
       method: "POST",
-      body: JSON.stringify({ path, hunk }),
+      body: JSON.stringify({
+        path,
+        hunk,
+        expected_head_sha: expected.headSha,
+        expected_sha: expected.currentSha,
+      }),
     }),
 
-  checkpointSuggestingFile: (owner: string, repo: string, path: string, message?: string) =>
+  checkpointSuggestingFile: (
+    owner: string,
+    repo: string,
+    path: string,
+    expected: { headSha: string; currentSha: string | null },
+    message?: string,
+  ) =>
     jsonFetch<SuggestingCheckpointResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/checkpoint`, {
       method: "POST",
-      body: JSON.stringify({ path, ...(message ? { message } : {}) }),
+      body: JSON.stringify({
+        path,
+        ...(message ? { message } : {}),
+        expected_head_sha: expected.headSha,
+        expected_sha: expected.currentSha,
+      }),
     }),
 
   listLocalAnnotations: (

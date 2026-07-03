@@ -11,7 +11,7 @@ import { buildLocalConfig } from "../db.js";
 import { freshTestDb, testLocalRegistry } from "../routes/test-fixtures.js";
 import { type SSEEvent, SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
-import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
+import { gitBlobHash, LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 import { suggestingHunks } from "../../shared/suggesting-diff.js";
 
@@ -182,27 +182,158 @@ describe("local Workbench app (Tier 0)", () => {
 
     const res = await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { base_text: string; head_sha: string };
+    const body = (await res.json()) as { base_text: string; head_sha: string; current_sha: string };
     expect(body.base_text).toBe("# Hello\n");
     expect(body.head_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(body.current_sha).toBe(gitBlobHash(Buffer.from("# Changed\n")));
   });
 
   it("reverts a suggesting hunk after verifying it against live HEAD", async () => {
-    const { app, dir } = localGitApp({ "hello.md": "# Hello\n\nOld\n" });
-    writeFileSync(join(dir, "hello.md"), "# Hello\n\nNew\n");
-    const [hunk] = suggestingHunks("# Hello\n\nOld\n", "# Hello\n\nNew\n");
+    const base = "---\nid: hello\ntitle: Hello\n---\n# Hello\n\nOld\n";
+    const current = "---\nid: hello\ntitle: Hello\n---\n# Hello\n\nNew\n";
+    const { app, dir } = localGitApp({ "hello.md": base });
+    writeFileSync(join(dir, "hello.md"), current);
+    const [hunk] = suggestingHunks(base, current);
     expect(hunk).toBeDefined();
+    const load = await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md");
+    const loaded = (await load.json()) as { head_sha: string; current_sha: string };
 
     const res = await app.request("/api/v1/repos/me/notes/local-suggesting/revert", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
-      body: JSON.stringify({ path: "hello.md", hunk }),
+      body: JSON.stringify({
+        path: "hello.md",
+        hunk,
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { content: string; hunks: unknown[]; current_sha: string };
+    expect(body.content).toBe(base);
+    expect(body.hunks).toEqual([]);
+    expect(body.current_sha).toBe(gitBlobHash(Buffer.from(base)));
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe(base);
+  });
+
+  it("returns the rewritten frontmatter content when reverting a non-normalized markdown file", async () => {
+    const base = "# Hello\n\nOld\n";
+    const current = "# Hello\n\nNew\n";
+    const { app, dir } = localGitApp({ "hello.md": base });
+    writeFileSync(join(dir, "hello.md"), current);
+    const [hunk] = suggestingHunks(base, current);
+    expect(hunk).toBeDefined();
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md")).json()) as {
+      head_sha: string;
+      current_sha: string;
+    };
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/revert", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "hello.md",
+        hunk,
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { content: string; hunks: unknown[] };
-    expect(body.content).toBe("# Hello\n\nOld\n");
+    expect(body.content).toContain("id:");
+    expect(body.content).toContain("# Hello\n\nOld\n");
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe(body.content);
+  });
+
+  it("reverts a deletion-only suggesting hunk", async () => {
+    const base = "---\nid: hello\ntitle: Hello\n---\n# Hello\n\nKeep\nRestore me\nAfter\n";
+    const current = "---\nid: hello\ntitle: Hello\n---\n# Hello\n\nKeep\nAfter\n";
+    const { app, dir } = localGitApp({ "hello.md": base });
+    writeFileSync(join(dir, "hello.md"), current);
+    const [hunk] = suggestingHunks(base, current);
+    expect(hunk).toMatchObject({ kind: "delete" });
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md")).json()) as {
+      head_sha: string;
+      current_sha: string;
+    };
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/revert", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "hello.md",
+        hunk,
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { content: string; hunks: unknown[] };
+    expect(body.content).toBe(base);
     expect(body.hunks).toEqual([]);
-    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe("# Hello\n\nOld\n");
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe(base);
+  });
+
+  it("rejects stale suggesting revert and checkpoint writes", async () => {
+    const base = "---\nid: hello\n---\n# Hello\n\nOld\n";
+    const current = "---\nid: hello\n---\n# Hello\n\nNew\n";
+    const { app, dir } = localGitApp({ "hello.md": base });
+    writeFileSync(join(dir, "hello.md"), current);
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md")).json()) as {
+      head_sha: string;
+      current_sha: string;
+    };
+    writeFileSync(join(dir, "hello.md"), "---\nid: hello\n---\n# Hello\n\nExternal\n");
+    const [hunk] = suggestingHunks(base, current);
+
+    const revert = await app.request("/api/v1/repos/me/notes/local-suggesting/revert", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "hello.md",
+        hunk,
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(revert.status).toBe(409);
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toContain("External");
+
+    const checkpoint = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "hello.md",
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(checkpoint.status).toBe(409);
+    expect(git(dir, ["rev-list", "--count", "HEAD"]).trim()).toBe("1");
+  });
+
+  it("requires suggesting mutation callers to send the reviewed HEAD and file SHA", async () => {
+    const base = "---\nid: hello\n---\n# Hello\n\nOld\n";
+    const current = "---\nid: hello\n---\n# Hello\n\nNew\n";
+    const { app, dir } = localGitApp({ "hello.md": base });
+    writeFileSync(join(dir, "hello.md"), current);
+    const [hunk] = suggestingHunks(base, current);
+
+    const revert = await app.request("/api/v1/repos/me/notes/local-suggesting/revert", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ path: "hello.md", hunk }),
+    });
+    expect(revert.status).toBe(400);
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe(current);
+
+    const checkpoint = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ path: "hello.md" }),
+    });
+    expect(checkpoint.status).toBe(400);
+    expect(git(dir, ["rev-list", "--count", "HEAD"]).trim()).toBe("1");
   });
 
   it("commits the active file as a checkpoint and advances the suggesting base", async () => {
@@ -211,11 +342,19 @@ describe("local Workbench app (Tier 0)", () => {
     const unsubscribe = sse.subscribe("me/notes", (event) => events.push(event));
     const { app, dir } = localGitApp({ "hello.md": "# Hello\n" }, { sse });
     writeFileSync(join(dir, "hello.md"), "# Checkpoint\n");
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md")).json()) as {
+      head_sha: string;
+      current_sha: string;
+    };
 
     const res = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://localhost" },
-      body: JSON.stringify({ path: "hello.md" }),
+      body: JSON.stringify({
+        path: "hello.md",
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { commit_sha: string; base_text: string; head_sha: string };
@@ -226,6 +365,38 @@ describe("local Workbench app (Tier 0)", () => {
     expect(git(dir, ["status", "--porcelain"]).trim()).toBe("");
     unsubscribe();
     expect(events).toContainEqual({ type: "git_changed", action: "committed", sha: body.commit_sha, paths: ["hello.md"] });
+  });
+
+  it("rejects a suggesting checkpoint after another checkpoint advanced HEAD", async () => {
+    const { app, dir } = localGitApp({ "hello.md": "---\nid: hello\n---\n# Hello\n" });
+    writeFileSync(join(dir, "hello.md"), "---\nid: hello\n---\n# Changed\n");
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md")).json()) as {
+      head_sha: string;
+      current_sha: string;
+    };
+
+    const first = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "hello.md",
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(first.status).toBe(200);
+
+    const stale = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "hello.md",
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(stale.status).toBe(409);
+    expect(git(dir, ["rev-list", "--count", "HEAD"]).trim()).toBe("2");
   });
 
   it("rejects an origin-less (cross-origin) mutation with 403", async () => {
