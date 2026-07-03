@@ -98,7 +98,7 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     await expect(revert).toBeVisible();
     await accept.click();
 
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
     await expect.poll(() => git(dir, ["rev-list", "--count", "HEAD"]).trim()).toBe("2");
     await expect(page.locator(".cm-cosheaf-suggesting-actions")).toHaveCount(0);
 

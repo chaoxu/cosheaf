@@ -141,11 +141,11 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
         return true;
       },
     }])),
-    EditorView.theme({
-      ".cm-gutters": {
-        display: "flex !important",
+    Prec.highest(EditorView.theme({
+      "& .cm-gutters": {
+        display: "flex",
       },
-    }),
+    })),
     EditorView.baseTheme({
       ".cm-cosheaf-suggesting-gutter": {
         minWidth: "42px",
