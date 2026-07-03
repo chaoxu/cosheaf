@@ -82,6 +82,12 @@ export interface LocalFileDiff {
   review_hash: string;
 }
 
+export interface LocalHeadFile {
+  path: string;
+  content: string;
+  head_sha: string;
+}
+
 export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   private readonly root: string;
   private realRoot: string | undefined;
@@ -492,6 +498,21 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
       }
     }
     return safePaths.map((path) => byPath.get(path) ?? this.withReviewHash({ path, patch: "", changed: false }));
+  }
+
+  async getHeadFile(path: string): Promise<LocalHeadFile> {
+    if (!(await this.isGitRepo())) throw new WorkspaceBackendError(400, "not_git", "folder is not a git repository");
+    const [safePath] = this.gitLiteralPaths([path]);
+    if (!safePath) throw new WorkspaceBackendError(400, "invalid_path", `invalid git path: ${path}`);
+    const prefix = await this.gitPrefix();
+    const headSha = (await this.git(["rev-parse", "HEAD"]).catch(() => "")).trim();
+    if (!headSha) throw new WorkspaceBackendError(404, "not_found", "HEAD not found");
+    try {
+      const content = await this.git(["show", `HEAD:${prefix}${safePath}`]);
+      return { path: safePath, content, head_sha: headSha };
+    } catch (_err) {
+      throw new WorkspaceBackendError(404, "not_found", `not found at HEAD: ${safePath}`);
+    }
   }
 
   private withReviewHash(diff: Omit<LocalFileDiff, "review_hash"> | LocalFileDiff): LocalFileDiff {

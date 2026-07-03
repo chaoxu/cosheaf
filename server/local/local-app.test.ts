@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import { type SSEEvent, SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
+import { suggestingHunks } from "../../shared/suggesting-diff.js";
 
 const IDENTITY: LocalWorkspaceIdentity = {
   owner: "me",
@@ -31,6 +33,30 @@ function localApp(seed: Record<string, string> = {}, options: { sse?: SSEHub } =
   }
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   const db = freshTestDb("cosheaf-local-app-db-");
+  const backend = new LocalGitWorkspaceBackend(dir);
+  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY, dir), sse: options.sse });
+  return { app, dir };
+}
+
+function git(dir: string, args: string[]): string {
+  return execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+}
+
+function localGitApp(seed: Record<string, string> = {}, options: { sse?: SSEHub } = {}): { app: Hono<AppEnv>; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-git-app-"));
+  for (const [path, content] of Object.entries(seed)) {
+    mkdirSync(join(dir, path, ".."), { recursive: true });
+    writeFileSync(join(dir, path), content);
+  }
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "t@t.test"]);
+  git(dir, ["config", "user.name", "Tester"]);
+  if (Object.keys(seed).length > 0) {
+    git(dir, ["add", "-A", "--", ...Object.keys(seed)]);
+    git(dir, ["commit", "-qm", "init"]);
+  }
+  const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
+  const db = freshTestDb("cosheaf-local-git-app-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
   const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY, dir), sse: options.sse });
   return { app, dir };
@@ -148,6 +174,58 @@ describe("local Workbench app (Tier 0)", () => {
     const res = await app.request("/api/v1/repos/me/notes/search?q=zzuniquewordzz");
     const body = (await res.json()) as { results: unknown[] };
     expect(body.results.length).toBeGreaterThan(0);
+  });
+
+  it("serves HEAD content as the suggesting base for a git-backed file", async () => {
+    const { app, dir } = localGitApp({ "hello.md": "# Hello\n" });
+    writeFileSync(join(dir, "hello.md"), "# Changed\n");
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=hello.md");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { base_text: string; head_sha: string };
+    expect(body.base_text).toBe("# Hello\n");
+    expect(body.head_sha).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("reverts a suggesting hunk after verifying it against live HEAD", async () => {
+    const { app, dir } = localGitApp({ "hello.md": "# Hello\n\nOld\n" });
+    writeFileSync(join(dir, "hello.md"), "# Hello\n\nNew\n");
+    const [hunk] = suggestingHunks("# Hello\n\nOld\n", "# Hello\n\nNew\n");
+    expect(hunk).toBeDefined();
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/revert", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ path: "hello.md", hunk }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { content: string; hunks: unknown[] };
+    expect(body.content).toBe("# Hello\n\nOld\n");
+    expect(body.hunks).toEqual([]);
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe("# Hello\n\nOld\n");
+  });
+
+  it("commits the active file as a checkpoint and advances the suggesting base", async () => {
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/notes", (event) => events.push(event));
+    const { app, dir } = localGitApp({ "hello.md": "# Hello\n" }, { sse });
+    writeFileSync(join(dir, "hello.md"), "# Checkpoint\n");
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ path: "hello.md" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { commit_sha: string; base_text: string; head_sha: string };
+    expect(body.commit_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(body.base_text).toBe("# Checkpoint\n");
+    expect(body.head_sha).toBe(body.commit_sha);
+    expect(git(dir, ["log", "-1", "--pretty=%s"]).trim()).toBe("Checkpoint: hello.md");
+    expect(git(dir, ["status", "--porcelain"]).trim()).toBe("");
+    unsubscribe();
+    expect(events).toContainEqual({ type: "git_changed", action: "committed", sha: body.commit_sha, paths: ["hello.md"] });
   });
 
   it("rejects an origin-less (cross-origin) mutation with 403", async () => {

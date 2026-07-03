@@ -5,7 +5,7 @@
 // to `dangerouslySetInnerHTML`, so neither hand-draws SVG paths and both stay in
 // lockstep with the same lucide geometry.
 
-import { Bell, ChevronLeft, ChevronRight, CircleHelp, Eye, GitBranch, Home, Pencil, Settings } from "lucide";
+import { Bell, Check, ChevronLeft, ChevronRight, CircleHelp, Eye, GitBranch, Home, Pencil, Settings, X } from "lucide";
 
 export type IconNode = ReadonlyArray<readonly [string, Record<string, string | number>, IconNode?]>;
 
@@ -48,6 +48,8 @@ export const lucideIcons = {
   back: asNode(ChevronLeft),
   bell: asNode(Bell),
   help: asNode(CircleHelp),
+  check: asNode(Check),
+  x: asNode(X),
   pencil: asNode(Pencil),
   eye: asNode(Eye),
   settings: asNode(Settings),
