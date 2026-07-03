@@ -219,6 +219,19 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     }
   }
 
+  async getSuggestingHeadFile(path: string): Promise<LocalHeadFile> {
+    try {
+      return await this.getHeadFile(path);
+    } catch (err) {
+      if (!(err instanceof WorkspaceBackendError) || err.status !== 404) throw err;
+      const meta = await this.getFileMeta("", "", "WORKTREE", path);
+      if (!meta) throw err;
+      const headSha = await this.currentHeadSha();
+      if (!headSha) throw err;
+      return { path, content: "", head_sha: headSha };
+    }
+  }
+
   private async writeBytesUnlocked(full: string, content: Buffer): Promise<WsFileWrite> {
     await this.assertRealParentInside(full);
     await mkdir(resolve(full, ".."), { recursive: true });
@@ -235,7 +248,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   ): Promise<{ path: string; content: string; sha: string; head: LocalHeadFile } | null> {
     const full = this.abs(path);
     return this.withGitMutation(() => this.withPathMutation(full, async () => {
-      const head = await this.getHeadFile(path);
+      const head = await this.getSuggestingHeadFile(path);
       this.assertExpectedHead(head, expected);
       const currentBytes = await this.readBytes(path);
       const currentSha = gitBlobHash(currentBytes);
@@ -250,7 +263,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   async commitPathIfUnchanged(message: string, path: string, expected: LocalExpectedFileState): Promise<string | null> {
     const full = this.abs(path);
     return this.withGitMutation(() => this.withPathMutation(full, async () => {
-      const head = await this.getHeadFile(path);
+      const head = await this.getSuggestingHeadFile(path);
       this.assertExpectedHead(head, expected);
       const meta = await this.getFileMeta("", "", "WORKTREE", path);
       this.assertExpectedBlob(path, meta?.sha ?? null, expected);
@@ -566,7 +579,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     const [safePath] = this.gitLiteralPaths([path]);
     if (!safePath) throw new WorkspaceBackendError(400, "invalid_path", `invalid git path: ${path}`);
     const prefix = await this.gitPrefix();
-    const headSha = (await this.git(["rev-parse", "HEAD"]).catch(() => "")).trim();
+    const headSha = await this.currentHeadSha();
     if (!headSha) throw new WorkspaceBackendError(404, "not_found", "HEAD not found");
     try {
       const content = await this.git(["show", `HEAD:${prefix}${safePath}`]);

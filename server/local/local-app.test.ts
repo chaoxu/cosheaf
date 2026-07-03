@@ -188,6 +188,19 @@ describe("local Workbench app (Tier 0)", () => {
     expect(body.current_sha).toBe(gitBlobHash(Buffer.from("# Changed\n")));
   });
 
+  it("serves an empty suggesting base for an untracked git-backed file", async () => {
+    const { app, dir } = localGitApp({ "README.md": "# Seed\n" });
+    writeFileSync(join(dir, "new.md"), "# New\n\nDraft\n");
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=new.md");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { base_text: string; head_sha: string; current_sha: string };
+    expect(body.base_text).toBe("");
+    expect(body.head_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(body.current_sha).toBe(gitBlobHash(Buffer.from("# New\n\nDraft\n")));
+    expect(suggestingHunks(body.base_text, "# New\n\nDraft\n")).toMatchObject([{ kind: "insert" }]);
+  });
+
   it("reverts a suggesting hunk after verifying it against live HEAD", async () => {
     const base = "---\nid: hello\ntitle: Hello\n---\n# Hello\n\nOld\n";
     const current = "---\nid: hello\ntitle: Hello\n---\n# Hello\n\nNew\n";
@@ -365,6 +378,32 @@ describe("local Workbench app (Tier 0)", () => {
     expect(git(dir, ["status", "--porcelain"]).trim()).toBe("");
     unsubscribe();
     expect(events).toContainEqual({ type: "git_changed", action: "committed", sha: body.commit_sha, paths: ["hello.md"] });
+  });
+
+  it("commits an untracked active file as a suggesting checkpoint", async () => {
+    const { app, dir } = localGitApp({ "README.md": "# Seed\n" });
+    writeFileSync(join(dir, "new.md"), "# New\n");
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/local-suggesting/base?path=new.md")).json()) as {
+      head_sha: string;
+      current_sha: string;
+    };
+
+    const res = await app.request("/api/v1/repos/me/notes/local-suggesting/checkpoint", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({
+        path: "new.md",
+        expected_head_sha: loaded.head_sha,
+        expected_sha: loaded.current_sha,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { commit_sha: string; base_text: string; head_sha: string };
+    expect(body.commit_sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(body.base_text).toBe("# New\n");
+    expect(body.head_sha).toBe(body.commit_sha);
+    expect(git(dir, ["status", "--porcelain", "--", "new.md"]).trim()).toBe("");
+    expect(git(dir, ["log", "-1", "--pretty=%s"]).trim()).toBe("Checkpoint: new.md");
   });
 
   it("rejects a suggesting checkpoint after another checkpoint advanced HEAD", async () => {

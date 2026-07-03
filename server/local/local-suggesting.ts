@@ -93,7 +93,7 @@ localSuggesting.get("/:owner/:repo/local-suggesting/base", async (c) => {
   if (!path || !isEditableTextFile(path)) return c.json(...bad("valid editable path required"));
   try {
     const [head, meta] = await Promise.all([
-      entry.backend.getHeadFile(path),
+      entry.backend.getSuggestingHeadFile(path),
       entry.backend.getFileMeta(entry.identity.owner, entry.identity.repo, "WORKTREE", path),
     ]);
     return c.json({ path, base_text: head.content, head_sha: head.head_sha, current_sha: meta?.sha ?? null });
