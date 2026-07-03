@@ -44,7 +44,7 @@ describe("createApp API route assembly", () => {
     });
 
     expect(res.status).toBe(403);
-    expect(await res.text()).toBe("forbidden");
+    expect(await res.text()).toContain("CSRF block: origin mismatch");
   });
 
   it("keeps same-origin API logout working through the assembled guard chain", async () => {

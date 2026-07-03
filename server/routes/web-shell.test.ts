@@ -103,13 +103,13 @@ describe("sidebar identity chrome", () => {
     expect(body).toContain('class="notif-bell"');
   });
 
-  it("local mode points identity at /_profile and hides bell/help/settings", () => {
+  it("local mode points identity at /_profile, hides bell/help but shows settings gear", () => {
     const body = String(sidebarIdentity("alice", false, null, undefined, false, false, { local: true }));
     expect(body).toContain('class="sidebar-identity-link" href="/_profile"');
     expect(body).not.toContain("/users/alice");
     expect(body).not.toContain("notif-bell");
     expect(body).not.toContain("help-circle");
-    expect(body).not.toContain("settings-gear");
+    expect(body).toContain('class="settings-gear" href="/settings"');
   });
 
   it("local globalSidebar emits no hosted-only account hrefs", () => {

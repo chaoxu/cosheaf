@@ -226,7 +226,7 @@ describe("web mutating routes reject cross-origin form posts", () => {
     });
 
     expect(res.status).toBe(403);
-    expect(await res.text()).toBe("forbidden");
+    expect(await res.text()).toContain("CSRF block: origin mismatch");
   });
 
   it("allows same-origin web POSTs and rejects originless mutations", async () => {
@@ -250,7 +250,7 @@ describe("web mutating routes reject cross-origin form posts", () => {
 
     expect(sameOrigin.status).toBe(200);
     expect(originless.status).toBe(403);
-    expect(await originless.text()).toBe("forbidden");
+    expect(await originless.text()).toContain("CSRF block: no origin or referer header provided");
   });
 
   it("falls back to Referer when Origin is absent", async () => {

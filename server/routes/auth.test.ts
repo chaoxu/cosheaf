@@ -464,7 +464,7 @@ describe("POST /api/v1/logout", () => {
     const res = await appFor(db).request("/api/v1/logout", { method: "POST" });
 
     expect(res.status).toBe(403);
-    expect(await res.text()).toBe("forbidden");
+    expect(await res.text()).toContain("CSRF block: no origin or referer header provided");
   });
 
   it("evicts the bearer cache so the revoked token stops authenticating", async () => {

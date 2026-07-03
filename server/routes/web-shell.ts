@@ -120,11 +120,14 @@ export function globalSidebar(
 export function sidebarIdentity(user: string | undefined, notificationsActive = false, avatarSrc: string | null = null, t: T = enT, settingsActive = false, helpActive = false, opts: { local?: boolean } = {}): Html {
   if (!user) return html`<div class="sidebar-identity"><a class="sidebar-identity-link" href="/login">${t("auth.sign_in")}</a></div>`;
   const profileTarget = opts.local ? "/_profile" : profileHref(user);
+  const settingsTarget = opts.local ? "/settings" : "/account/settings";
   return html`<div class="sidebar-identity">
     <a class="sidebar-identity-link" href="${profileTarget}" title="${t("nav.profile")}">${avatar(user, avatarSrc)}<span class="sidebar-identity-name">${user}</span></a>
     ${opts.local ? emptyHtml : notificationsBell(notificationsActive, t)}
     ${opts.local ? emptyHtml : helpCircle(helpActive, t)}
-    ${opts.local ? emptyHtml : settingsGear(settingsActive, t)}
+    <a class="settings-gear${settingsActive ? " active" : ""}" href="${settingsTarget}" aria-label="${t("settings.title")}" title="${t("settings.title")}">
+      ${settingsIcon({ size: 15 })}
+    </a>
   </div>`;
 }
 
