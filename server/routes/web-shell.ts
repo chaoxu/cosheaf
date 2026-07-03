@@ -70,22 +70,23 @@ function cosheafWebCssVersion(): string {
   return version ? `?v=${encodeURIComponent(version)}` : "";
 }
 
-const coflatVendorCssVersions = new Map<string, string>();
+const coflatVendorCssVersions = new Map<string, { mtime: number; version: string }>();
 
 function coflatVendorCssVersion(exportPath: "document-surface.css" | "themes/blueprint-book.css"): string {
   const appRoot = resolveAppRoot();
   const cacheKey = `${appRoot}:${exportPath}`;
-  const cached = coflatVendorCssVersions.get(cacheKey);
-  if (cached !== undefined) return cached;
   try {
     const vendoredPath = path.resolve(appRoot, "vendor/coflat", exportPath);
     const filePath = existsSync(vendoredPath) ? vendoredPath : requireResolve(`@chaoxu/coflat/${exportPath}`);
+    const mtime = statSync(filePath).mtimeMs;
+    const cached = coflatVendorCssVersions.get(cacheKey);
+    if (cached !== undefined && cached.mtime === mtime) return cached.version;
     const hash = createHash("sha256").update(readFileSync(filePath)).digest("hex").slice(0, 12);
     const version = `?v=${encodeURIComponent(hash)}`;
-    coflatVendorCssVersions.set(cacheKey, version);
+    coflatVendorCssVersions.set(cacheKey, { mtime, version });
     return version;
   } catch (_error) {
-    coflatVendorCssVersions.set(cacheKey, "");
+    coflatVendorCssVersions.set(cacheKey, { mtime: 0, version: "" });
     return "";
   }
 }
