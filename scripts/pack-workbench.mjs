@@ -134,6 +134,7 @@ const shim = `#!/bin/sh
 # Cosheaf Workbench — open a local folder in the rich Coflat editor/reader.
 # Usage: ./cosheaf-workbench /path/to/folder
 set -e
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export COSHEAF_APP_ROOT="$HERE"
 # Tier-2 push/PR against an internal-CA host (e.g. https://cosheaf-test.lab):
