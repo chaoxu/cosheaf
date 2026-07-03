@@ -141,6 +141,11 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
         return true;
       },
     }])),
+    EditorView.theme({
+      ".cm-gutters": {
+        display: "flex !important",
+      },
+    }),
     EditorView.baseTheme({
       ".cm-cosheaf-suggesting-gutter": {
         minWidth: "42px",
