@@ -3,10 +3,9 @@ import type { DocumentContext } from "@chaoxu/coflat/reader";
 import type { ReactElement } from "react";
 import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api } from "./api";
 import { coflatLinkResolver, loadCoflatDocumentContext } from "./coflat-document-context";
 import { readEditorMode } from "./document-theme";
-import { type AutocompleteSource, MarkdownEditor } from "./editor";
+import { MarkdownEditor } from "./editor";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -67,29 +66,12 @@ function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; co
       window.clearTimeout(timer);
     };
   }, [config, mode, refSignature]);
-  const autocompleteSources = useMemo<readonly AutocompleteSource[]>(
-    () => [
-      {
-        trigger: "[@",
-        suggest: async (prefix, env) => {
-          if (env.signal.aborted) return [];
-          try {
-            return (await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch: config.branch, limit: 10 })).suggestions;
-          } catch (_err) {
-            return [];
-          }
-        },
-      },
-    ],
-    [config],
-  );
   return (
     <div className="coflat-compose-editor cf-theme-scope">
       <MarkdownEditor
         value={value}
         mode={mode}
         documentContext={documentContext}
-        autocompleteSources={autocompleteSources}
         testId="comment-editor"
         onChange={(next) => {
           setValue(next);

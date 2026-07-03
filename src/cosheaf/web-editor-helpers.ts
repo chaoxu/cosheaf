@@ -1,17 +1,8 @@
 import {
-  extractFirstH1 as extractCoflatFirstH1,
-  parseFrontmatter as parseCoflatFrontmatter,
   relativeMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
-import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
 import { MAX_ASSET_BYTES, MAX_ASSET_DISPLAY } from "../../shared/conventions";
 import { rawRepoBranchFileHref } from "../../shared/url";
-
-export interface Suggestion {
-  id: string;
-  insert: string;
-  display: string;
-}
 
 export function shortId(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -60,38 +51,4 @@ export function saveState(args: {
   if (args.dirty) return { text: "Unsaved changes", cls: "dirty" };
   if (args.lastSavedAt) return { text: `Saved · ${args.lastSavedAt}`, cls: "saved" };
   return { text: "", cls: "idle" };
-}
-
-export function currentDocumentSuggestions(source: string, prefix: string): Suggestion[] {
-  const parsed = parseCoflatFrontmatter(source);
-  const frontmatter = (parsed.frontmatter ?? {}) as Record<string, unknown>;
-  const suggestions: Suggestion[] = [];
-  const add = (id: string, title: string | null, detail: string) => {
-    if (!id || !matchesSuggestion(id, title, prefix)) return;
-    suggestions.push({
-      id,
-      insert: `[@${id}]`,
-      display: title ? `${id} — ${title} (${detail})` : `${id} (${detail})`,
-    });
-  };
-  if (typeof frontmatter.id === "string") {
-    add(
-      frontmatter.id,
-      typeof frontmatter.title === "string" ? frontmatter.title : extractCoflatFirstH1(parsed.body),
-      "current page",
-    );
-  }
-  for (const target of extractCoflatXrefTargets(source)) add(target.id, target.label, "current page");
-  const seen = new Set<string>();
-  return suggestions.filter((suggestion) => {
-    if (seen.has(suggestion.id)) return false;
-    seen.add(suggestion.id);
-    return true;
-  });
-}
-
-export function matchesSuggestion(id: string, title: string | null, prefix: string): boolean {
-  const needle = prefix.trim().toLowerCase();
-  if (!needle) return true;
-  return id.toLowerCase().startsWith(needle) || Boolean(title?.toLowerCase().includes(needle));
 }
