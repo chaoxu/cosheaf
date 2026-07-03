@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DEFAULT_LOCALE, type LocaleId, localeDir, makeT, type T } from "../../shared/i18n/index.js";
@@ -208,7 +208,7 @@ type ViteManifestChunk = {
   imports?: string[];
 };
 
-let manifestCache: { appRoot: string; manifest: Record<string, ViteManifestChunk> | null } | undefined;
+let manifestCache: { appRoot: string; mtime: number; manifest: Record<string, ViteManifestChunk> | null } | undefined;
 
 function webReaderAssets(): Html {
   return viteEntryAssets("src/cosheaf/web-reader.ts");
@@ -230,14 +230,28 @@ function viteEntryAssets(entryId: string): Html {
 
 function readViteManifest(): Record<string, ViteManifestChunk> | null {
   const appRoot = resolveAppRoot();
-  if (manifestCache?.appRoot === appRoot) return manifestCache.manifest;
   const manifestPath = path.resolve(appRoot, "dist/.vite/manifest.json");
-  if (!existsSync(manifestPath)) {
-    manifestCache = { appRoot, manifest: null };
+  let mtime = 0;
+  try {
+    mtime = statSync(manifestPath).mtimeMs;
+  } catch (_err) {
+    manifestCache = undefined;
+    return null;
+  }
+  if (manifestCache?.appRoot === appRoot && manifestCache.mtime === mtime) {
     return manifestCache.manifest;
   }
-  manifestCache = { appRoot, manifest: JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, ViteManifestChunk> };
-  return manifestCache.manifest;
+  try {
+    manifestCache = {
+      appRoot,
+      mtime,
+      manifest: JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, ViteManifestChunk>,
+    };
+    return manifestCache.manifest;
+  } catch (_err) {
+    manifestCache = undefined;
+    return null;
+  }
 }
 
 function collectCss(
