@@ -300,18 +300,45 @@ type WebHandler = (c: Context<AppEnv>, ctx: WebCtx) => Response | Promise<Respon
 export function rejectCrossOriginMutation(c: Context<AppEnv>, opts: { allowOriginless?: boolean } = {}): Response | null {
   if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") return null;
   const expected = normalizedOrigin(requestOrigin(c));
-  if (!expected) return new Response("forbidden", { status: 403 });
+  if (!expected) {
+    return new Response(
+      "CSRF block: expected origin could not be parsed. Check your COSHEAF_PUBLIC_ORIGIN environment variable.",
+      { status: 403 }
+    );
+  }
   const origin = c.req.header("origin");
   if (origin) {
     const actual = normalizedOrigin(origin);
-    if (!actual || actual !== expected) return new Response("forbidden", { status: 403 });
+    if (!actual || actual !== expected) {
+      return new Response(
+        `CSRF block: origin mismatch. Actual Origin: ${actual ?? "none"}, Expected: ${expected}. ` +
+        `Set COSHEAF_PUBLIC_ORIGIN correctly if fronted by a reverse proxy.`,
+        { status: 403 }
+      );
+    }
     return null;
   }
   const referer = c.req.header("referer");
-  if (!referer) return opts.allowOriginless ? null : new Response("forbidden", { status: 403 });
+  if (!referer) {
+    return opts.allowOriginless ? null : new Response(
+      "CSRF block: no origin or referer header provided.",
+      { status: 403 }
+    );
+  }
   const actual = normalizedOrigin(referer);
-  if (!actual) return new Response("forbidden", { status: 403 });
-  if (actual && actual !== expected) return new Response("forbidden", { status: 403 });
+  if (!actual) {
+    return new Response(
+      "CSRF block: referer header could not be parsed.",
+      { status: 403 }
+    );
+  }
+  if (actual && actual !== expected) {
+    return new Response(
+      `CSRF block: referer mismatch. Actual Referer: ${actual}, Expected: ${expected}. ` +
+      `Set COSHEAF_PUBLIC_ORIGIN correctly if fronted by a reverse proxy.`,
+      { status: 403 }
+    );
+  }
   return null;
 }
 
