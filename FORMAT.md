@@ -19,13 +19,12 @@ instead, then consume the updated Coflat package or checkout from Cosheaf.
 - Cosheaf markdown is Coflat-only. Workspaces may carry the
   `cosheaf-format-coflat` Forgejo repo topic as a marker; obsolete format
   topics are ignored by runtime format resolution.
-- Cosheaf renders files through `@chaoxu/coflat` and indexes Coflat references
-  for backlinks and rich review diffs.
+- Cosheaf renders files through `@chaoxu/coflat` and indexes Coflat-defined
+  references for backlinks and rich review diffs.
 - YAML frontmatter is parsed by Cosheaf for stable page identity. The `id`
   field is the durable Cosheaf page id.
-- Cosheaf indexes these page links:
-  - `[@id]` Coflat/Pandoc-style references.
-  - `[text](relative/path.md[#fragment])` Markdown links to pages.
+- Cosheaf indexes page links using Coflat's reference/link extraction contract;
+  the exact authoring syntax belongs in Coflat `FORMAT.md`.
 - Markdown writes made through Cosheaf's typed file route update the sidecar
   index synchronously. External Forgejo edits are reconciled by webhooks or
   `pnpm cli workspace reindex <owner>/<repo>`.

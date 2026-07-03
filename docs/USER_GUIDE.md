@@ -43,7 +43,7 @@ review, or comment.
 ## Workspace Formats
 
 Cosheaf Markdown is Coflat Markdown. Pages use `.md` files with math-friendly
-rendering, backlinks from `[@id]` references, richer review diffs, and stable
+rendering, Coflat-defined reference backlinks, richer review diffs, and stable
 page ids in YAML frontmatter.
 
 The `cosheaf-format-coflat` repository topic may mark a repository as a

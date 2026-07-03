@@ -99,8 +99,8 @@ format `coflat`.
 
 | Path | Expectation |
 |---|---|
-| File rendering | Coflat reader: math, `[@id]` citations, footnotes |
-| Backlinks panel | Populated from `[@id]` and `[text](path.md)` links |
+| File rendering | Coflat reader output matches Coflat `FORMAT.md` |
+| Backlinks panel | Populated from Coflat-defined references and page links |
 | Linter tab | Broken-ref rows if any |
 | PR rich-diff view | Source-line-attributed side-by-side |
 | Editor | `@chaoxu/coflat` MarkdownEditor |

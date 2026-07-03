@@ -7,11 +7,9 @@ work happens on branches, review happens in pull requests, and merged markdown
 on `main` is canonical. SQLite is a sidecar for rebuildable indexes plus the
 small Cosheaf-owned credential cache used by browser login.
 
-Cosheaf was originally motivated by mathematical knowledge-base work, and
-Coflat markdown is intentionally close to mathematical writing: theorem-style
-fenced divs, KaTeX math, `[@id]` cross-references, citations, and LaTeX export
-conventions. Cosheaf itself stays page-oriented; it does not maintain a
-math-native theorem graph or proof dependency model.
+Cosheaf was originally motivated by mathematical knowledge-base work and uses
+Coflat's mathematical-writing format. Cosheaf itself stays page-oriented; it
+does not maintain a math-native theorem graph or proof dependency model.
 
 Cosheaf markdown is Coflat. Workspaces store ordinary `.md` files in Forgejo,
 but rendering, indexing, backlinks, and rich review diffs all use the Coflat
@@ -28,17 +26,16 @@ itself stays outside this repo.
 - **A teachable repository model** — users work with accounts, workspaces,
   pages, branches, pull requests, issues, reviews, and agents. The in-app Help
   page and [user guide](./docs/USER_GUIDE.md) explain what each object means.
-- **Pages** as Coflat-flavored markdown (theorem-style fenced divs, KaTeX
-  math, `[@id]` cross-references and citations - see
+- **Pages** as Coflat-flavored markdown; see
   [Coflat `FORMAT.md`](https://github.com/chaoxu/coflat/blob/main/FORMAT.md)
-  and Cosheaf's [format notes](./FORMAT.md)).
+  for syntax and Cosheaf's [format notes](./FORMAT.md) for host behavior.
 - **Branch workflow** — edits live on ordinary Forgejo branches. Opening a pull
   request submits the branch for review; merging the pull request makes it
   canonical.
 - **Pull request review** — admins and write collaborators review pull requests through
   the Cosheaf UI/API while Forgejo remains the durable record.
-- **Backlinks + FTS5 search** — Coflat's `[@id]` references are indexed; the
-  body is full-text searchable.
+- **Backlinks + FTS5 search** — Coflat-defined references are indexed; the body
+  is full-text searchable.
 - **External-edit safe** — Forgejo webhooks reindex changed markdown files and
   stream updates over SSE to open browsers.
 - **Cosheaf PAT auth** — API clients and agents send a PAT as

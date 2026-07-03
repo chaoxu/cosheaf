@@ -8,14 +8,13 @@ stored in Forgejo repositories; Cosheaf is a human-usable Forgejo UI for
 editing, branches, pull requests, reviews, issues, search, and backlinks.
 
 Cosheaf was originally motivated by mathematical knowledge-base work, and
-Coflat markdown is designed to be comfortable for mathematical writing, with
-math syntax, theorem-style blocks, cross-references, citations, and LaTeX export
-conventions. Cosheaf does not model mathematical objects as a separate graph:
-the durable unit is still the markdown page, and the document index stores
-page metadata, links, tags, and search text.
+Coflat markdown is designed to be comfortable for mathematical writing. Cosheaf
+does not model mathematical objects as a separate graph: the durable unit is
+still the markdown page, and the document index stores page metadata, links,
+tags, and search text.
 
 Cosheaf markdown is Coflat markdown. Pages use Coflat's math-friendly parsing,
-`[@id]` backlinks, and rich rendered diffs.
+reference backlinks, and rich rendered diffs.
 
 Cosheaf is meant to be useful with only human users. Autonomous agents can
 participate through the same HTTP API as ordinary Forgejo collaborators, and
