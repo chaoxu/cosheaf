@@ -3,7 +3,6 @@ import type {
 } from "@codemirror/state";
 import type {
   AssetUploader as EditorAssetUploader,
-  AutocompleteSource as EditorAutocompleteSource,
   SaveHandler as EditorSaveHandler,
   EditorSourcePosition,
   StatusEvents as EditorStatusEvents,
@@ -56,7 +55,7 @@ import {
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
-import { currentDocumentSuggestions, fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
+import { fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
 import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
 import { suggestingModeExtension } from "./suggesting-mode";
 import "@chaoxu/coflat/style.css";
@@ -921,34 +920,6 @@ function WebEditor({
     [config.owner, config.repo, config.path, branch, currentPath],
   );
 
-  const autocompleteSources = useMemo<readonly EditorAutocompleteSource[]>(
-    () =>
-      [
-        {
-          trigger: "[@",
-          suggest: async (prefix, env) => {
-            if (env.signal.aborted) return [];
-            const local = currentDocumentSuggestions(liveEditorSource(editorRef.current, content), prefix);
-            try {
-              const result = await api.suggest(config.owner, config.repo, { trigger: "[@", prefix, branch, limit: 10 });
-              const seen = new Set(local.map((suggestion) => suggestion.id));
-              return [
-                ...local,
-                ...result.suggestions.filter((suggestion) => {
-                  if (seen.has(suggestion.id)) return false;
-                  seen.add(suggestion.id);
-                  return true;
-                }),
-              ].slice(0, 10);
-            } catch (_err) {
-              return local.slice(0, 10);
-            }
-          },
-        },
-      ],
-    [branch, config.owner, config.repo, config.formatId, content],
-  );
-
   const save = useCallback(() => {
     if (busy) return;
     // Content changed: route through Coflat so it flushes pending edits, fires
@@ -1432,7 +1403,6 @@ function WebEditor({
                 saveHandler={saveHandler}
                 statusEvents={statusEvents}
                 assetUploader={assetUploader}
-                autocompleteSources={autocompleteSources}
                 requestHandler={requestHandler}
                 sidenotesCollapsed={true}
               />
