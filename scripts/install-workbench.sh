@@ -188,6 +188,15 @@ else
   echo "better-sqlite3 is compatible."
 fi
 
+# 9. Bootstrap root CA certificate for internal .lab domains if in the fleet
+if [[ "${GITEA_URL:-}" == *".lab"* ]] || [ -f /etc/lab-host ] || [ -d "$HOME/playground/fleet-infra" ]; then
+  mkdir -p "$HOME/.cosheaf"
+  if [ ! -f "$HOME/.cosheaf/caddy-lab-root.crt" ]; then
+    echo "Downloading lab root CA certificate for HTTPS trust..."
+    curl -sSf -o "$HOME/.cosheaf/caddy-lab-root.crt" http://100.93.22.80/caddy-lab-root.crt || true
+  fi
+fi
+
 echo ""
 echo "=== Installation Successful ==="
 echo "Cosheaf Workbench $TAG has been installed to:"
@@ -196,6 +205,13 @@ echo ""
 echo "To run it, execute:"
 echo "  $TARGET_DIR/cosheaf-workbench /path/to/your/markdown/folder"
 echo ""
+if [ -f "$HOME/.cosheaf/caddy-lab-root.crt" ]; then
+  echo "Lab Environment Detected:"
+  echo "  To allow Node.js to trust internal HTTPS .lab servers (e.g. gitea.lab, cosheaf.lab):"
+  echo "  export NODE_EXTRA_CA_CERTS=\"\$HOME/.cosheaf/caddy-lab-root.crt\""
+  echo "  (or set COSHEAF_CA_FILE=\"\$HOME/.cosheaf/caddy-lab-root.crt\" when running the bundle)"
+  echo ""
+fi
 if [ -d "$BACKUP_DIR" ]; then
   echo "A backup of your previous installation was saved to:"
   echo "  $BACKUP_DIR"
