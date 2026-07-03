@@ -100,6 +100,7 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
 
     await page.goto(`${baseUrl}/${owner}/${repo}/src/branch/main/paper.md?mode=edit`);
     await page.getByRole("button", { name: "Source" }).click();
+    await expect(page.locator(".cm-gutters")).toBeHidden();
     await page.getByText("Beta line.").click();
     await page.keyboard.press("End");
     await page.keyboard.type(" Browser accepted edit.");
@@ -112,6 +113,7 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     await expect(revert).toBeInViewport();
     await accept.click();
     await expect(accept).toHaveCount(0);
+    await expect(page.locator(".cm-gutters")).toBeHidden();
     await expect(page.getByTestId("editor-suggesting-state")).toContainText("Changes 0");
 
     await page.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
