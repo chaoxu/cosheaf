@@ -1,5 +1,5 @@
 import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 
 const webBase = defaultWebUrl();
@@ -84,6 +84,43 @@ async function expectFastWorkbenchRead(page: Page, text?: string): Promise<void>
   await expect(fast).toBeVisible();
   if (text) await expect(fast).toContainText(text);
   await expect(page.getByTestId("editor")).toHaveCount(0);
+}
+
+async function textRect(locator: Locator, text: string): Promise<{ left: number; top: number; width: number; height: number }> {
+  return locator.evaluate((element, targetText) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const value = node.nodeValue ?? "";
+      const index = value.indexOf(targetText);
+      if (index >= 0) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + targetText.length);
+        const rect = range.getClientRects()[0];
+        if (!rect) throw new Error(`missing text rect for ${targetText}`);
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+      node = walker.nextNode();
+    }
+    throw new Error(`missing text node for ${targetText}`);
+  }, text);
+}
+
+async function editorSelectionLineText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode;
+    const element = anchor instanceof Element ? anchor : anchor?.parentElement;
+    const line = element?.closest<HTMLElement>(".cm-line");
+    if (!line) throw new Error("missing native selection line");
+    return line.textContent ?? "";
+  });
 }
 
 async function centerIsNearSource(page: Page, pos: number, tolerance = 8): Promise<boolean> {
@@ -196,6 +233,56 @@ test("rich editor keeps fenced div opener editable while adding a label", async 
 
   await expect(page.locator(CF.editorContent)).toContainText("::: {.lemma #l}");
   await expect(page.locator(CF.editorContent).locator(CF.blockHeaderRendered, { hasText: "Lemma" })).toHaveCount(0);
+});
+
+test("edit workbench resolves rendered paragraph clicks before mouseup", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page);
+
+  const branch = `user/chao/click-caret-${Date.now()}`;
+  const path = "click-caret.md";
+  const pat = await apiPat(page);
+  const put = await page.request.put(
+    `${webBase}/api/v1/repos/chao/flushing-coin/file?path=${path}&branch=${encodeURIComponent(branch)}`,
+    {
+      headers: { authorization: `Bearer ${pat}` },
+      data: {
+        content: [
+          "# Click Caret Regression",
+          "",
+          "Before.",
+          "",
+          "- rainbow spanning tree is also NP-hard since bipartite matching can reduce to it.",
+          "",
+          "[2] showed another result.",
+          "",
+        ].join("\n"),
+      },
+    },
+  );
+  expect(put.ok()).toBe(true);
+
+  await page.goto(`${repoBase}/src/branch/${branch}/${path}?mode=edit&edit_branch=${encodeURIComponent(branch)}`);
+  await expect(page.getByTestId("editor")).toBeVisible();
+  const paragraph = page.locator(`${CF.editorContent} .cm-line`, { hasText: "rainbow spanning tree" }).first();
+  await expect(paragraph).toBeVisible();
+  const rect = await textRect(paragraph, "spanning");
+  const point = {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  };
+
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  const duringDown = await editorSelectionLineText(page);
+
+  await page.mouse.up();
+  await page.waitForTimeout(50);
+  const afterClickWindow = await editorSelectionLineText(page);
+
+  expect(duringDown).toContain("rainbow spanning tree");
+  expect(afterClickWindow).toBe(duringDown);
 });
 
 test("edit workbench treats held Enter repeat as repeated rich editor splitting", async ({ page }) => {
