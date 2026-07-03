@@ -94,7 +94,7 @@ console.log(`installed ${release.tag_name} → ${dir} (previous kept at ${backup
 // Check if better-sqlite3 loads, and rebuild if needed
 console.log("Verifying better-sqlite3 compatibility...");
 try {
-  execSync(`node --input-type=module -e "import('better-sqlite3').catch(() => process.exit(1))"`, {
+  execSync(`node --input-type=module -e "import Database from 'better-sqlite3'; new Database(':memory:')"`, {
     cwd: dir,
     stdio: "ignore",
   });

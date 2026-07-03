@@ -175,7 +175,7 @@ mv "$EXTRACTED_DIR" "$TARGET_DIR"
 echo "Verifying better-sqlite3 compatibility..."
 # We run a quick check import inside the target directory.
 # Note: --input-type=module ensures we can use dynamic import() in ES context.
-if ! (cd "$TARGET_DIR" && node --input-type=module -e "import('better-sqlite3').catch(() => process.exit(1))" >/dev/null 2>&1); then
+if ! (cd "$TARGET_DIR" && node --input-type=module -e "import Database from 'better-sqlite3'; new Database(':memory:')" >/dev/null 2>&1); then
   echo "Note: Node version or architecture mismatch detected for better-sqlite3."
   echo "Rebuilding better-sqlite3 native addon..."
   if command -v npm >/dev/null 2>&1; then
