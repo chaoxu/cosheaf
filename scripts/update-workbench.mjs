@@ -91,6 +91,24 @@ renameSync(bundleRoot, dir);
 rmSync(work, { recursive: true, force: true });
 console.log(`installed ${release.tag_name} → ${dir} (previous kept at ${backup})`);
 
+// Check if better-sqlite3 loads, and rebuild if needed
+console.log("Verifying better-sqlite3 compatibility...");
+try {
+  execSync(`node --input-type=module -e "import('better-sqlite3').catch(() => process.exit(1))"`, {
+    cwd: dir,
+    stdio: "ignore",
+  });
+  console.log("better-sqlite3 is compatible.");
+} catch (_err) {
+  console.log("Note: Node version or architecture mismatch detected for better-sqlite3.");
+  console.log("Rebuilding better-sqlite3 native addon...");
+  try {
+    execSync("npm rebuild better-sqlite3", { cwd: dir, stdio: "inherit" });
+  } catch (_rebuildErr) {
+    console.warn("Warning: Failed to rebuild better-sqlite3. If the daemon fails to start, run 'npm rebuild better-sqlite3' inside the install directory manually.");
+  }
+}
+
 const restart = opts.restart ?? process.env.COSHEAF_WORKBENCH_RESTART;
 if (restart) {
   console.log(`$ ${restart}`);
