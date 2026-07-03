@@ -19,6 +19,7 @@ import { localAgentSessions } from "./local/local-agent-sessions.js";
 import { localAnnotations } from "./local/local-annotations.js";
 import { localNotifications } from "./local/local-notifications.js";
 import { localPulls } from "./local/local-pulls.js";
+import { localSuggesting } from "./local/local-suggesting.js";
 import { createLocalWebRouter } from "./local/local-web.js";
 import { WorkspaceRegistry } from "./local/workspace-registry.js";
 import { resolveLocale } from "./locale.js";
@@ -155,6 +156,7 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     // reads. localNotifications keeps the chrome's global poller + SSE silent.
     app.route("/api/v1/repos", localAgentSessions);
     app.route("/api/v1/repos", localAnnotations);
+    app.route("/api/v1/repos", localSuggesting);
     app.route("/api/v1/repos", files);
     app.route("/api/v1/repos", branches);
     app.route("/api/v1/repos", localPulls);

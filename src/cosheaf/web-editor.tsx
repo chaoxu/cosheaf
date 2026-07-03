@@ -1,4 +1,7 @@
 import type {
+  Extension,
+} from "@codemirror/state";
+import type {
   AssetUploader as EditorAssetUploader,
   AutocompleteSource as EditorAutocompleteSource,
   SaveHandler as EditorSaveHandler,
@@ -34,6 +37,7 @@ import {
 } from "../../shared/document-rail";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
+import { suggestingHunks, type SuggestingHunk } from "../../shared/suggesting-diff";
 import { repoBranchFileHref, repoHref, workspaceApiPath } from "../../shared/url";
 import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
@@ -54,6 +58,7 @@ import {
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
 import { currentDocumentSuggestions, fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
 import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
+import { suggestingModeExtension } from "./suggesting-mode";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -98,6 +103,12 @@ interface ValidationSummary {
   brokenRefs: number;
   duplicateLabels: number;
   orphanLabels: number;
+}
+
+interface SuggestingBase {
+  path: string;
+  baseText: string;
+  headSha: string;
 }
 
 export interface WebEditorPreviewEvent {
@@ -248,6 +259,8 @@ function WebEditor({
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
   const [documentContextReady, setDocumentContextReady] = useState(false);
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
+  const [suggestingBase, setSuggestingBase] = useState<SuggestingBase | null>(null);
+  const [suggestingError, setSuggestingError] = useState<string | null>(null);
   const [externalFileChange, setExternalFileChange] = useState<ExternalFileChange | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
@@ -273,6 +286,7 @@ function WebEditor({
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
   const contextLoadedRef = useRef(false);
   const localAnnotationsEnabled = config.writeMode === "direct";
+  const suggestingEnabled = config.writeMode === "direct";
   branchRef.current = branch;
   branchExistsRef.current = branchExists;
   savedReadBranchRef.current = savedReadBranch;
@@ -403,6 +417,26 @@ function WebEditor({
     }, 5_000);
     ignoredChangeTimersRef.current.push(timer);
   }, []);
+
+  const loadSuggestingBase = useCallback(async (path: string) => {
+    if (!suggestingEnabled) return null;
+    try {
+      const base = await api.suggestingBase(config.owner, config.repo, path);
+      const next = { path: base.path, baseText: base.base_text, headSha: base.head_sha };
+      setSuggestingBase(next);
+      setSuggestingError(null);
+      return next;
+    } catch (err) {
+      setSuggestingBase(null);
+      setSuggestingError(err instanceof ApiError ? err.message : "Suggesting mode unavailable");
+      return null;
+    }
+  }, [config.owner, config.repo, suggestingEnabled]);
+
+  useEffect(() => {
+    if (!suggestingEnabled) return;
+    void loadSuggestingBase(savedPathRef.current);
+  }, [loadSuggestingBase, savedPath, suggestingEnabled]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
@@ -685,6 +719,42 @@ function WebEditor({
     [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, setEditorContent],
   );
 
+  const checkpointSuggestingFile = useCallback(async (path: string): Promise<{ ok: true; commitSha: string | null } | { ok: false; error: string }> => {
+    if (!suggestingEnabled) return { ok: true, commitSha: null };
+    try {
+      const checkpoint = await api.checkpointSuggestingFile(config.owner, config.repo, path);
+      setSuggestingBase({
+        path: checkpoint.path,
+        baseText: checkpoint.base_text,
+        headSha: checkpoint.head_sha,
+      });
+      setSuggestingError(null);
+      return { ok: true, commitSha: checkpoint.commit_sha };
+    } catch (err) {
+      const error = err instanceof ApiError ? err.message : "checkpoint failed";
+      setSuggestingError(error);
+      return { ok: false, error };
+    }
+  }, [config.owner, config.repo, suggestingEnabled]);
+
+  const commitManualSource = useCallback(
+    async (source: string): Promise<{ ok: true; branch: string; path: string } | { ok: false; error: string }> => {
+      const committed = await commitSource(source);
+      if (!committed.ok) return committed;
+      if (!suggestingEnabled || !suggestingBase || suggestingBase.path !== committed.path) return committed;
+      const checkpoint = await checkpointSuggestingFile(committed.path);
+      if (!checkpoint.ok) return { ok: false, error: checkpoint.error };
+      return committed;
+    },
+    [commitSource, checkpointSuggestingFile, suggestingBase, suggestingEnabled],
+  );
+
+  const suggestingHunkCount = useMemo(
+    () => suggestingBase ? suggestingHunks(suggestingBase.baseText, content).length : 0,
+    [content, suggestingBase],
+  );
+  const hasCheckpointChanges = suggestingEnabled && suggestingHunkCount > 0;
+
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
   // disabled, #158); manual/command (Save button, Cmd-S) → real commit.
   const saveHandler = useMemo<EditorSaveHandler>(
@@ -693,12 +763,12 @@ function WebEditor({
       isBusy: () => busy,
       save: (payload) => {
         lastReasonRef.current = payload.reason;
-        if (payload.reason !== "autosave") return commitSource(payload.source);
+        if (payload.reason !== "autosave") return commitManualSource(payload.source);
         if (!autosave.enabled) return Promise.resolve({ ok: true as const });
         return Promise.resolve(saveDraft(payload.source));
       },
     }),
-    [autosave.intervalMs, autosave.enabled, busy, saveDraft, commitSource],
+    [autosave.intervalMs, autosave.enabled, busy, saveDraft, commitManualSource],
   );
 
   const statusEvents = useMemo<EditorStatusEvents>(
@@ -847,11 +917,25 @@ function WebEditor({
     }
     // Path-only rename: content is unchanged so Coflat won't fire a save — commit
     // the current content directly to carry the rename through.
-    if (!pathDirty) return;
+    if (!pathDirty) {
+      if (!hasCheckpointChanges) return;
+      setBusy(true);
+      setSaveError(null);
+      lastReasonRef.current = "manual";
+      void checkpointSuggestingFile(savedPathRef.current).then((result) => {
+        setBusy(false);
+        if (result.ok) setLastSavedAt(nowTime());
+        else {
+          setSaveError(result.error);
+          toast(`Save failed: ${result.error}`, "error");
+        }
+      });
+      return;
+    }
     setBusy(true);
     setSaveError(null);
     lastReasonRef.current = "manual";
-    void commitSource(liveEditorSource(editorRef.current, content)).then((result) => {
+    void commitManualSource(liveEditorSource(editorRef.current, content)).then((result) => {
       setBusy(false);
       if (result.ok) setLastSavedAt(nowTime());
       else {
@@ -859,7 +943,71 @@ function WebEditor({
         toast(`Save failed: ${result.error}`, "error");
       }
     });
-  }, [busy, content, uncommitted, pathDirty, commitSource]);
+  }, [busy, content, uncommitted, pathDirty, hasCheckpointChanges, checkpointSuggestingFile, commitManualSource]);
+
+  const acceptSuggestingHunk = useCallback((_hunk: SuggestingHunk) => {
+    toast("Hunk kept for the next checkpoint");
+  }, []);
+
+  const revertSuggestingHunk = useCallback(async (hunk: SuggestingHunk) => {
+    if (busy) return;
+    setBusy(true);
+    setSaveError(null);
+    try {
+      if (uncommitted || pathDirty) {
+        const committed = await commitSource(liveEditorSource(editorRef.current, content));
+        if (!committed.ok) throw new Error(committed.error);
+      }
+      const targetPath = savedPathRef.current;
+      ignoreOwnChangeEvents([targetPath]);
+      const result = await api.revertSuggestingHunk(config.owner, config.repo, targetPath, hunk);
+      setEditorContent(result.content);
+      setSavedPath(result.path);
+      setCurrentPath(result.path);
+      savedPathRef.current = result.path;
+      currentPathRef.current = result.path;
+      savedShaRef.current = result.sha;
+      sourceShaRef.current = undefined;
+      setPathDirty(false);
+      setUncommitted(false);
+      setExternalFileChange(null);
+      setSuggestingBase({
+        path: result.path,
+        baseText: result.base_text,
+        headSha: result.head_sha,
+      });
+      setSuggestingError(null);
+      toast("Reverted hunk");
+    } catch (err) {
+      const error = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "revert failed";
+      setSaveError(error);
+      toast(`Revert failed: ${error}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, uncommitted, pathDirty, commitSource, content, config.owner, config.repo, ignoreOwnChangeEvents, setEditorContent]);
+
+  const acceptSuggestingHunkRef = useRef(acceptSuggestingHunk);
+  const revertSuggestingHunkRef = useRef(revertSuggestingHunk);
+  const saveCheckpointRef = useRef(save);
+  acceptSuggestingHunkRef.current = acceptSuggestingHunk;
+  revertSuggestingHunkRef.current = revertSuggestingHunk;
+  saveCheckpointRef.current = save;
+
+  const suggestingExtensions = useMemo<readonly Extension[]>(
+    () =>
+      suggestingEnabled && suggestingBase
+        ? [
+            suggestingModeExtension({
+              baseText: suggestingBase.baseText,
+              onAccept: (hunk) => acceptSuggestingHunkRef.current(hunk),
+              onRevert: (hunk) => revertSuggestingHunkRef.current(hunk),
+              onCheckpoint: () => saveCheckpointRef.current(),
+            }),
+          ]
+        : [],
+    [suggestingBase, suggestingEnabled],
+  );
 
   const captureEditorCursor = useCallback(() => {
     const context = editorRef.current?.cursorContext.get();
@@ -1181,13 +1329,14 @@ function WebEditor({
           <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
             {documentContextReady ? (
               <ActiveMarkdownEditor
-                key={savedPath}
+                key={`${savedPath}:${suggestingBase?.headSha ?? "no-suggesting-base"}`}
                 value={content}
                 mode={readOnly ? "rich" : mode}
                 readOnly={readOnly}
                 from={currentPath}
                 documentContext={documentContext ?? undefined}
                 fileSystem={fileSystem}
+                extensions={suggestingExtensions}
                 testId="editor"
                 onReady={(editor) => {
                   outlineUnsubscribeRef.current?.();
@@ -1269,7 +1418,7 @@ function WebEditor({
                 markup is hardcoded/trusted (no user input), so inserting it is safe. */}
             <span className="web-editor-path-pencil-icon" dangerouslySetInnerHTML={{ __html: iconMarkup(lucideIcons.pencil, { size: 13 }) }} />
           </button>
-          <span className="dirty-dot" hidden={!uncommitted && !pathDirty}>
+          <span className="dirty-dot" hidden={!uncommitted && !pathDirty && !hasCheckpointChanges}>
             *
           </span>
         </>,
@@ -1319,9 +1468,18 @@ function WebEditor({
               Annotations {localAnnotations.openCount}
             </button>
           ) : null}
+          {suggestingEnabled ? (
+            <span
+              className="web-editor-suggesting-state"
+              data-testid="editor-suggesting-state"
+              title={suggestingError ?? (suggestingBase ? "Diff against the current HEAD checkpoint" : "Suggesting mode unavailable")}
+            >
+              Changes {suggestingBase ? suggestingHunkCount : "-"}
+            </span>
+          ) : null}
           {(() => {
             // Glance-able, paired with the dirty-dot. title surfaces the full error.
-            const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty, lastSavedAt });
+            const s = saveState({ busy, saveError, dirty: uncommitted || pathDirty || hasCheckpointChanges, lastSavedAt });
             return (
               <span
                 className={`web-editor-status web-editor-status--${s.cls}`}
@@ -1332,8 +1490,8 @@ function WebEditor({
               </span>
             );
           })()}
-          <button type="button" onClick={save} disabled={(!uncommitted && !pathDirty) || busy}>
-            Save
+          <button type="button" onClick={save} disabled={(!uncommitted && !pathDirty && !hasCheckpointChanges) || busy}>
+            {suggestingBase ? "Save checkpoint" : "Save"}
           </button>
           <input
             ref={assetInputRef}

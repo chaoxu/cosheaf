@@ -9,6 +9,7 @@ import type {
   LocalAgentSessionStatus,
 } from "../../shared/local-agent-sessions";
 import type { WorkspaceValidation } from "../../shared/validation";
+import type { SuggestingHunk } from "../../shared/suggesting-diff";
 import { queryString, workspaceApiPath } from "../../shared/url";
 
 interface PutFileResult {
@@ -27,6 +28,22 @@ interface GetFileResult {
 
 interface OpenPullResult {
   number: number;
+}
+
+interface SuggestingBaseResult {
+  path: string;
+  base_text: string;
+  head_sha: string;
+}
+
+interface SuggestingRevertResult extends SuggestingBaseResult {
+  content: string;
+  sha: string | null;
+  hunks: SuggestingHunk[];
+}
+
+interface SuggestingCheckpointResult extends SuggestingBaseResult {
+  commit_sha: string | null;
 }
 
 export type { LocalAgentSession, LocalAgentSessionStatus, LocalAnnotation, LocalAnnotationKind, LocalAnnotationQueueItem, LocalAnnotationStatus };
@@ -144,6 +161,23 @@ export const api = {
 
   validation: (owner: string, repo: string) =>
     jsonFetch<WorkspaceValidation>(`${workspaceApiPath(owner, repo)}/validation`),
+
+  suggestingBase: (owner: string, repo: string, path: string) =>
+    jsonFetch<SuggestingBaseResult>(
+      `${workspaceApiPath(owner, repo)}/local-suggesting/base${queryString({ path })}`,
+    ),
+
+  revertSuggestingHunk: (owner: string, repo: string, path: string, hunk: SuggestingHunk) =>
+    jsonFetch<SuggestingRevertResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/revert`, {
+      method: "POST",
+      body: JSON.stringify({ path, hunk }),
+    }),
+
+  checkpointSuggestingFile: (owner: string, repo: string, path: string, message?: string) =>
+    jsonFetch<SuggestingCheckpointResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/checkpoint`, {
+      method: "POST",
+      body: JSON.stringify({ path, ...(message ? { message } : {}) }),
+    }),
 
   listLocalAnnotations: (
     owner: string,
