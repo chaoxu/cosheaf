@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { copyWorkingTree, gitVisibleFiles } from "./lib/pinned-coflat-gate.mjs";
+import { copyWorkingTree, gitVisibleFiles, hasGitStatusEntries } from "./lib/pinned-coflat-gate.mjs";
 
 describe("pinned Coflat gate helpers", () => {
   it("parses Git-visible file lists", () => {
@@ -11,6 +11,12 @@ describe("pinned Coflat gate helpers", () => {
       return "package.json\0scripts/new.mjs\0";
     });
     expect(files).toEqual(["package.json", "scripts/new.mjs"]);
+  });
+
+  it("detects dirty git status output", () => {
+    expect(hasGitStatusEntries("")).toBe(false);
+    expect(hasGitStatusEntries("  \n")).toBe(false);
+    expect(hasGitStatusEntries(" M src/reader.ts\n")).toBe(true);
   });
 
   it("copies only requested working-tree files", () => {

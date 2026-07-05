@@ -37,6 +37,14 @@ export function ensureCoflatCommit(ref = DEFAULT_COFLAT_REF) {
   }
 }
 
+export function hasGitStatusEntries(status) {
+  return status.trim().length > 0;
+}
+
+function coflatWorkingTreeDirty() {
+  return hasGitStatusEntries(output("git", ["-C", COFLAT_DIR, "status", "--porcelain"], { allowFailure: true }));
+}
+
 export async function runIsolatedPinnedGate({
   source = "head",
   gate = runFastGate,
@@ -70,11 +78,12 @@ export async function runWithPinnedFallback({
   fallbackMessage = "Running checks in an isolated pinned Coflat worktree.",
 } = {}) {
   const coflat = checkCoflatRef();
-  if (coflat.ok) {
+  const dirty = coflat.ok && coflatWorkingTreeDirty();
+  if (coflat.ok && !dirty) {
     await gate(REPO_ROOT);
     return;
   }
-  console.error(coflat.message);
+  console.error(dirty ? `${COFLAT_DIR} has local changes.` : coflat.message);
   console.error(fallbackMessage);
   await runIsolatedPinnedGate({ source, gate: isolatedGate, coflatRef: coflat.expectedRef ?? DEFAULT_COFLAT_REF });
 }
