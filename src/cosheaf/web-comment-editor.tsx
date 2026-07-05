@@ -1,144 +1,45 @@
-import { extractReferences } from "@chaoxu/coflat/parse";
-import type { DocumentContext } from "@chaoxu/coflat/reader";
-import type { ReactElement } from "react";
-import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { coflatLinkResolver, loadCoflatDocumentContext } from "./coflat-document-context";
-import { readEditorMode } from "./document-theme";
-import { MarkdownEditor } from "./editor";
-import "@chaoxu/coflat/style.css";
-import "@chaoxu/coflat/themes/blueprint-book.css";
-import "./globals.css";
+type Runtime = typeof import("./web-comment-editor-runtime");
 
-// Progressive-enhancement compose island for coflat workspaces. Each
-// `[data-coflat-compose]` container holds exactly one real `<textarea>` form
-// field; we mount a coflat editor over it and mirror its value back into the
-// textarea, which stays the source of truth for native form submission. The
-// island is gated server-side on COFLAT_FORMAT_ID, so it only ships markup it
-// should enhance.
+let runtimePromise: Promise<Runtime> | null = null;
 
-interface ComposeConfig {
-  owner: string;
-  repo: string;
-  branch: string;
-}
-
-function composeContext(config: ComposeConfig): DocumentContext {
-  const payload = { source: "", owner: config.owner, repo: config.repo, branch: config.branch, path: "" };
-  return { linkResolver: coflatLinkResolver(payload) };
-}
-
-function referencedKeySignature(source: string): string {
-  return [
-    ...new Set(
-      extractReferences(source)
-        .filter((ref) => ref.kind === "crossref" && ref.key)
-        .map((ref) => ref.key as string),
-    ),
-  ].join("\n");
-}
-
-function CommentEditor({ textarea, config }: { textarea: HTMLTextAreaElement; config: ComposeConfig }): ReactElement {
-  const [value, setValue] = useState(textarea.value);
-  const [mode] = useState<"rich" | "source">(() => readEditorMode(document.body.dataset.cosheafUser));
-  const [documentContext, setDocumentContext] = useState<DocumentContext>(() => composeContext(config));
-  const latestValueRef = useRef(value);
-  const refSignature = useMemo(() => referencedKeySignature(value), [value]);
-  useEffect(() => {
-    latestValueRef.current = value;
-  }, [value]);
-  useEffect(() => {
-    if (mode !== "rich" || !refSignature) {
-      setDocumentContext(composeContext(config));
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      const payload = { source: latestValueRef.current, owner: config.owner, repo: config.repo, branch: config.branch, path: "" };
-      void loadCoflatDocumentContext(payload).then((ctx) => {
-        if (!cancelled) setDocumentContext(ctx);
-      }).catch(() => {
-        if (!cancelled) setDocumentContext(composeContext(config));
-      });
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [config, mode, refSignature]);
-  return (
-    <div className="coflat-compose-editor cf-theme-scope">
-      <MarkdownEditor
-        value={value}
-        mode={mode}
-        documentContext={documentContext}
-        testId="comment-editor"
-        onChange={(next) => {
-          setValue(next);
-          // The native textarea is the submitted form field; keep it in sync on
-          // every keystroke so a plain form POST carries the edited body.
-          textarea.value = next;
-        }}
-      />
-    </div>
-  );
+function loadRuntime(): Promise<Runtime> {
+  runtimePromise ??= import("./web-comment-editor-runtime");
+  return runtimePromise;
 }
 
 function enhance(container: HTMLElement): void {
-  if (container.dataset.mounted) return;
+  if (container.dataset.mounted || container.dataset.loading) return;
+  container.dataset.loading = "1";
+  void loadRuntime().then((runtime) => {
+    delete container.dataset.loading;
+    runtime.enhance(container);
+  }).catch(() => {
+    delete container.dataset.loading;
+  });
+}
+
+function prepare(container: HTMLElement): void {
+  if (container.dataset.lazyReady || container.dataset.mounted) return;
+  container.dataset.lazyReady = "1";
+  const trigger = (): void => enhance(container);
+  container.addEventListener("focusin", trigger, { once: true });
+  container.addEventListener("pointerdown", trigger, { once: true });
   const textarea = container.querySelector("textarea");
-  if (!textarea) return;
-  container.dataset.mounted = "1";
-
-  const config: ComposeConfig = {
-    owner: container.dataset.owner ?? "",
-    repo: container.dataset.repo ?? "",
-    branch: container.dataset.branch ?? "main",
-  };
-  const wasRequired = textarea.required;
-
-  // Hide the textarea but keep it in the form as the submitted field. A hidden
-  // `required` input would block native submit with no visible control to focus,
-  // so drop `required` and re-enforce non-empty ourselves on submit.
-  textarea.hidden = true;
-  textarea.required = false;
-
-  const mount = container.querySelector<HTMLElement>(".coflat-compose-mount") ?? container;
-  const root = createRoot(mount);
-  root.render(
-    <StrictMode>
-      <CommentEditor textarea={textarea} config={config} />
-    </StrictMode>,
-  );
-
-  const form = textarea.form;
-  if (form) {
-    form.addEventListener("submit", (event) => {
-      // The editor already syncs on change, but sync once more in case a submit
-      // races a pending change. If the field was required, block empty submits
-      // and surface the editor instead of a hidden invalid control.
-      if (wasRequired && textarea.value.trim() === "") {
-        event.preventDefault();
-        mount.querySelector<HTMLElement>(".cm-editor")?.focus();
-      }
-    });
-  }
+  if (textarea?.autofocus || document.activeElement === textarea) trigger();
 }
 
-function enhanceIn(scope: ParentNode): void {
-  for (const container of scope.querySelectorAll<HTMLElement>("[data-coflat-compose]")) enhance(container);
+function prepareIn(scope: ParentNode): void {
+  for (const container of scope.querySelectorAll<HTMLElement>("[data-coflat-compose]")) prepare(container);
 }
 
-enhanceIn(document);
+prepareIn(document);
 
-// Some compose forms appear after initial load (e.g. a disclosure revealing an
-// inline edit form), so watch for new containers and enhance them too.
 new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       if (!(node instanceof HTMLElement)) continue;
-      if (node.matches("[data-coflat-compose]")) enhance(node);
-      enhanceIn(node);
+      if (node.matches("[data-coflat-compose]")) prepare(node);
+      prepareIn(node);
     }
   }
 }).observe(document.body, { childList: true, subtree: true });

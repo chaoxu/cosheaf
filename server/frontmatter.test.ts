@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { extractTitle, generateDocId, parseDocument, serializeDocument } from "./frontmatter.js";
+import { extractFirstH1 as extractTitle, parseFrontmatterYaml as parseDocument, serializeFrontmatterYaml as serializeDocument } from "../shared/frontmatter-yaml.js";
+import { generateDocId } from "./ids.js";
 
 describe("frontmatter", () => {
   it("parseDocument handles content without frontmatter", () => {

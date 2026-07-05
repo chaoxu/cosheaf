@@ -72,21 +72,21 @@ export function pullStateForm(ctx: WebCtx, pull: PrMeta): Html {
   </form>`;
 }
 
-export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<Response | null> {
+export async function rejectChatIssueMutation(ctx: WebCtx, number: number): Promise<IssueDetail | Response> {
   const issue = await ctx.collab.getIssue(ctx.owner, ctx.repo, number).catch(onForgejo404(null));
   if (!issue) return notFoundPage(ctx.user, "Issue not found");
-  return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : null;
+  return isChatIssue(issue) ? chatIssueReadOnlyPage(ctx.user) : issue;
 }
 
 // The shared preamble for issue-mutation handlers: parse the :number param
 // (404 on bad), then apply the chat-issue read-only gate. Returns the issue
-// number, or a Response the handler should return as-is. Callers do:
-//   const number = await resolveMutableIssue(ctx, c.req.param("number"));
-//   if (typeof number !== "number") return number;
-export async function resolveMutableIssue(ctx: WebCtx, numberParam: string | undefined): Promise<number | Response> {
+// issue detail, or a Response the handler should return as-is. Callers do:
+//   const issue = await resolveMutableIssue(ctx, c.req.param("number"));
+//   if (issue instanceof Response) return issue;
+export async function resolveMutableIssue(ctx: WebCtx, numberParam: string | undefined): Promise<IssueDetail | Response> {
   const number = positiveInt(numberParam);
   if (!number) return notFoundPage(ctx.user, "Issue not found");
-  return (await rejectChatIssueMutation(ctx, number)) ?? number;
+  return rejectChatIssueMutation(ctx, number);
 }
 
 export function chatIssueReadOnlyPage(user: string): Response {

@@ -3,17 +3,15 @@ import { workspaceSlug } from "../shared/conventions.js";
 import {
   DEFAULT_CREATE_FORMAT_ID,
   type DocumentFormatId,
-  documentFormatFromTopics,
-  isFormatTopic,
   normalizeDocumentFormatId,
-  topicForDocumentFormat,
 } from "../shared/document-format.js";
 import { isCoverifyChatEnabled } from "./coverify-cli.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
-import { indexCitationFile, indexPage, pruneWorkspaceIndex } from "./indexer.js";
+import { indexCitationFile, planIndexPage, pruneWorkspaceIndex } from "./indexer.js";
 import { clearRepoConfig } from "./repo-config.js";
+import { getCachedTree, setCachedTree } from "./tree-cache.js";
 import type { User } from "./users.js";
 import { withWorkspaceSidecarLock } from "./workspace-lock.js";
 
@@ -29,6 +27,8 @@ const WEBHOOK_EVENTS = [
   "issue_comment",
   "repository",
 ];
+
+const REINDEX_FETCH_CONCURRENCY = 8;
 
 // A workspace is identified by (owner, repo) — any Forgejo user or org can
 // own workspaces. The slug is the `owner/repo` full name; the display name
@@ -123,7 +123,6 @@ export async function provisionWorkspace(
     const formatId = normalizeDocumentFormatId(
       options.defaultMdFormat ?? DEFAULT_CREATE_FORMAT_ID,
     );
-    await setWorkspaceFormatTopic(forgejo, owner, repoName, formatId);
     workspace = { owner, repo: repoName, slug: workspaceSlug(owner, repoName), defaultMdFormat: formatId };
   } catch (err) {
     return rollback(err);
@@ -171,28 +170,42 @@ export async function provisionWorkspace(
   return { workspace, repoExisted, createdRepo };
 }
 
-// Replace any existing cosheaf-format-* topics on the repo with the current
-// marker topic. Markdown is Coflat-only; the topic is back-compat metadata, not
-// a runtime mode selector. Other repo topics (user-set) are preserved.
-export async function setWorkspaceFormatTopic(
-  forgejo: Forgejo,
-  owner: string,
-  repoName: string,
-  formatId: DocumentFormatId,
-): Promise<void> {
-  const existing = await forgejo.listRepoTopics(owner, repoName);
-  const preserved = existing.filter((t) => !isFormatTopic(t));
-  const target = [...preserved, topicForDocumentFormat(formatId)];
-  await forgejo.replaceRepoTopics(owner, repoName, target);
-}
-
 export async function readWorkspaceFormatFromTopics(
   forgejo: Forgejo,
   owner: string,
   repoName: string,
 ): Promise<DocumentFormatId> {
-  const topics = await forgejo.listRepoTopics(owner, repoName);
-  return documentFormatFromTopics(topics);
+  void forgejo;
+  void owner;
+  void repoName;
+  return DEFAULT_CREATE_FORMAT_ID;
+}
+
+async function cachedMainTree(forgejo: Forgejo, owner: string, repoName: string, opts: { refresh?: boolean } = {}) {
+  const cached = opts.refresh ? undefined : getCachedTree(owner, repoName, "main");
+  if (cached) return cached;
+  const tree = await forgejo.getTree(owner, repoName, "main", true);
+  setCachedTree(owner, repoName, "main", tree);
+  return tree;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 export async function getWorkspaceMarkdownDrift(
@@ -207,7 +220,7 @@ export async function getWorkspaceMarkdownDrift(
   )
     .map((r) => r.path)
     .sort();
-  const tree = await forgejo.getTree(workspace.owner, workspace.repo, "main", true);
+  const tree = await cachedMainTree(forgejo, workspace.owner, workspace.repo);
   const forgejoPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
     .map((e) => e.path)
@@ -338,28 +351,26 @@ export async function reindexWorkspaceFromForgejo(
   // #182: drop cached cosheaf.yaml config so it rebuilds from Forgejo on next
   // render (the file is authoritative; the sidecar only caches it).
   clearRepoConfig(db, workspace.slug);
-  const tree = await forgejo.getTree(workspace.owner, workspace.repo, "main", true);
+  const tree = await cachedMainTree(forgejo, workspace.owner, workspace.repo, { refresh: true });
   const mdPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".md"))
     .map((e) => e.path);
   const bibPaths = tree
     .filter((e) => e.type === "blob" && e.path.endsWith(".bib"))
     .map((e) => e.path);
-  // Fetch all markdown bodies in parallel — each getRawFile is independent
-  // and the indexPage write that follows is local.
-  const bodies = await Promise.all(
-    mdPaths.map((path) =>
-      forgejo
-        .getRawFile(workspace.owner, workspace.repo, "main", path)
-        .then((body) => ({ path, body })),
-    ),
+  const bodies = await mapWithConcurrency(
+    mdPaths,
+    REINDEX_FETCH_CONCURRENCY,
+    (path) => forgejo
+      .getRawFile(workspace.owner, workspace.repo, "main", path)
+      .then((body) => ({ path, body })),
   );
-  const bibBodies = await Promise.all(
-    bibPaths.map((path) =>
-      forgejo
-        .getRawFile(workspace.owner, workspace.repo, "main", path)
-        .then((body) => ({ path, body })),
-    ),
+  const bibBodies = await mapWithConcurrency(
+    bibPaths,
+    REINDEX_FETCH_CONCURRENCY,
+    (path) => forgejo
+      .getRawFile(workspace.owner, workspace.repo, "main", path)
+      .then((body) => ({ path, body })),
   );
   for (const { path, body } of bibBodies) {
     indexCitationFile(db, {
@@ -369,26 +380,23 @@ export async function reindexWorkspaceFromForgejo(
     });
     seenCitations.add(path);
   }
-  for (const { path, body } of bodies) {
-    indexPage(db, {
+  const plans = bodies.map(({ path, body }) => ({
+    path,
+    plan: planIndexPage(db, {
       workspaceSlug: workspace.slug,
       filePath: path,
       bodyText: body,
       formatId: workspace.defaultMdFormat,
-    });
+    }),
+  }));
+  for (const { path, plan } of plans) {
+    plan.commit();
     seenMarkdown.add(path);
   }
-  if (bodies.length > 1) {
+  if (plans.length > 1) {
     // First pass makes every page id/xref target visible; the second pass
-    // resolves cross-file links independently of Forgejo tree order.
-    for (const { path, body } of bodies) {
-      indexPage(db, {
-        workspaceSlug: workspace.slug,
-        filePath: path,
-        bodyText: body,
-        formatId: workspace.defaultMdFormat,
-      });
-    }
+    // resolves cross-file links without reparsing or rewriting FTS/doc rows.
+    for (const { plan } of plans) plan.commitBacklinksOnly();
   }
 
   pruneWorkspaceIndex(db, workspace.slug, seenMarkdown, seenCitations);

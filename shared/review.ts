@@ -13,10 +13,6 @@ export interface PrFile {
   patch: string;
 }
 
-export interface PrFiles {
-  files: PrFile[];
-}
-
 // A single commit on a pull request's head branch. `author_username` is the
 // Forgejo login when the commit author is a known forge user (null otherwise);
 // `author_name` is the git author name from the commit metadata.
@@ -26,10 +22,6 @@ export interface PrCommit {
   author_username: string | null;
   author_name: string | null;
   date: number | null;
-}
-
-export interface PrCommits {
-  commits: PrCommit[];
 }
 
 // Forgejo PR state vocabulary. Cosheaf no longer stores its own workflow

@@ -153,12 +153,6 @@ export function helpCircle(active = false, t: T = enT): Html {
   </a>`;
 }
 
-export function settingsGear(active = false, t: T = enT): Html {
-  return html`<a class="settings-gear${active ? " active" : ""}" href="/account/settings" aria-label="${t("settings.title")}" title="${t("settings.title")}">
-    ${settingsIcon({ size: 15 })}
-  </a>`;
-}
-
 function appStatusbar(path: StatusCrumb[] | undefined, t: T = enT): Html {
   const sep = html`<span class="status-sep">/</span>`;
   const crumbs = [
@@ -226,10 +220,13 @@ function viteEntryAssets(entryId: string): Html {
   if (!manifest) return emptyHtml;
   const entry = manifest[entryId];
   if (!entry) return emptyHtml;
+  const preloads = collectImports(manifest, entry, new Set<string>()).map(
+    (href) => html`<link rel="modulepreload" href="/${href}">`,
+  );
   const cssLinks = collectCss(manifest, entry, new Set<string>()).map(
     (href) => html`<link rel="stylesheet" href="/${href}">`,
   );
-  return html`${cssLinks}<script type="module" src="/${entry.file}"></script>`;
+  return html`${preloads}${cssLinks}<script type="module" src="/${entry.file}"></script>`;
 }
 
 function readViteManifest(): Record<string, ViteManifestChunk> | null {
@@ -274,4 +271,22 @@ function collectCss(
     css.push(href);
   }
   return css;
+}
+
+function collectImports(
+  manifest: Record<string, ViteManifestChunk>,
+  chunk: ViteManifestChunk,
+  seen: Set<string>,
+): string[] {
+  const files: string[] = [];
+  for (const imported of chunk.imports ?? []) {
+    const importedChunk = manifest[imported];
+    if (!importedChunk) continue;
+    if (!seen.has(importedChunk.file)) {
+      seen.add(importedChunk.file);
+      files.push(importedChunk.file);
+    }
+    files.push(...collectImports(manifest, importedChunk, seen));
+  }
+  return files;
 }

@@ -4,6 +4,7 @@ import {
   COFLAT_BROWSER_SELECTORS as CF,
 } from "@chaoxu/coflat/browser-test-utils";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
+import { ensureSignedIn } from "./auth";
 
 const webBase = defaultWebUrl();
 const owner = "chao";
@@ -37,11 +38,7 @@ async function expectRichComposerRevealsOnHover(page: Page): Promise<void> {
 }
 
 test("rich PR diffs expose comment composers on generated bibliography entries", async ({ page }) => {
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
   const token = (await page.context().cookies(webBase)).find((cookie) => cookie.name === "cosheaf_pat")?.value;
   expect(token).toBeTruthy();
 
@@ -92,11 +89,7 @@ test("rich PR diffs expose comment composers on generated bibliography entries",
 });
 
 test("rich PR diff comment composers preserve Coflat section disclosure adjacency", async ({ page }) => {
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
 
   await page.goto(`${repoBase}/pulls/3/files?mode=rich&shape=after`);
   await expect(page.locator(".cf-doc-section-heading-collapsible").first()).toBeVisible();
@@ -120,11 +113,7 @@ test("rich PR diff comment composers preserve Coflat section disclosure adjacenc
 
 test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
   await expect(page.locator(".sidebar-identity-link")).toContainText("chao");
   await expect(page.locator(".app-sidebar")).toContainText("Workspaces");
 

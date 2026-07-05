@@ -1,7 +1,6 @@
 import type { Context, Hono } from "hono";
 import { buildPdfImagePreviewPaths } from "../../shared/asset-previews.js";
 import type { BranchRow } from "../../shared/branches.js";
-import type { LineComment } from "../../shared/comments.js";
 import type { IssueComment, Label, Milestone } from "../../shared/issues.js";
 import type { PrMeta } from "../../shared/review.js";
 import { reviewRequiresNonAuthor } from "../../shared/review.js";
@@ -12,7 +11,7 @@ import { errorStatus } from "../forgejo-errors.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { openLocalPull } from "../local/local-pulls.js";
 import { publishLocalGitEvent } from "../local/local-events.js";
-import { invalidateRepoTrees } from "../tree-cache.js";
+import { getCachedTree, invalidateRepoTrees, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { safeRel } from "./files.js";
 import { branchIcon } from "./icons.js";
@@ -72,22 +71,14 @@ import {
   threadParticipantsBar,
 } from "./web-thread.js";
 
-async function pullCommentFor(
-  ctx: WebCtx,
-  pullNumber: number,
-  commentId: number,
-): Promise<LineComment | null> {
-  const comments = await ctx.collab.listPullComments(ctx.owner, ctx.repo, pullNumber);
-  return comments.find((comment) => comment.id === commentId) ?? null;
-}
-
 async function pullIssueCommentFor(
   ctx: WebCtx,
   pullNumber: number,
   commentId: number,
 ): Promise<IssueComment | null> {
-  const comments = await ctx.collab.listIssueComments(ctx.owner, ctx.repo, pullNumber);
-  return comments.find((comment) => comment.id === commentId) ?? null;
+  const comment = await ctx.collab.getIssueComment(ctx.owner, ctx.repo, commentId).catch(() => null);
+  if (comment?.issue_number !== undefined && comment.issue_number !== pullNumber) return null;
+  return comment;
 }
 
 export function registerPullRoutes(web: Hono<AppEnv>): void {
@@ -355,7 +346,7 @@ web.post("/:owner/:repo/pulls/:number/state", webRouteForWrite(async (c, ctx) =>
   if (pull.merged) return forbiddenPage(ctx.user);
   const state = stringField((await c.req.parseBody()).state);
   if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
-  await ctx.collab.editPull(ctx.owner, ctx.repo, pull.number, { state });
+  await ctx.collab.setPullState(ctx.owner, ctx.repo, pull.number, state);
   c.get("sse").publish(ctx.ws.slug, { type: "pull", number: pull.number, action: state === "closed" ? "closed" : "reopened" });
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
@@ -402,9 +393,14 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/edit", webRoute(async (c, ctx
   const body = stringField((await c.req.parseBody()).body);
   if (!pull || !id) return notFoundPage(ctx.user, "Comment not found");
   if (!body) return badRequestPage(ctx.user, "Comment body is required.");
-  const comment = await pullCommentFor(ctx, pull.number, id);
+  const comment = await pullIssueCommentFor(ctx, pull.number, id);
   if (!comment) return notFoundPage(ctx.user, "Comment not found");
-  await ctx.collab.editIssueComment(ctx.owner, ctx.repo, id, body);
+  try {
+    await ctx.collab.editIssueComment(ctx.owner, ctx.repo, id, body);
+  } catch (err) {
+    if (errorStatus(err) === 404) return notFoundPage(ctx.user, "Comment not found");
+    throw err;
+  }
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -413,10 +409,14 @@ web.post("/:owner/:repo/pulls/:number/comments/:id/delete", webRoute(async (c, c
   const id = positiveInt(c.req.param("id"));
   const reviewId = positiveInt(stringField((await c.req.parseBody()).review_id) ?? undefined);
   if (!pull || !id || !reviewId) return notFoundPage(ctx.user, "Comment not found");
-  const comment = await pullCommentFor(ctx, pull.number, id);
-  if (!comment) return notFoundPage(ctx.user, "Comment not found");
-  if (comment.review_id !== reviewId) return badRequestPage(ctx.user, "Review id does not match comment.");
-  await ctx.collab.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
+  try {
+    const comment = await pullIssueCommentFor(ctx, pull.number, id);
+    if (!comment) return notFoundPage(ctx.user, "Comment not found");
+    await ctx.collab.deleteReviewComment(ctx.owner, ctx.repo, pull.number, reviewId, id);
+  } catch (err) {
+    if (errorStatus(err) === 404) return notFoundPage(ctx.user, "Comment not found");
+    throw err;
+  }
   return redirect(repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`));
 }));
 
@@ -547,9 +547,11 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
     fileKindForPath(file.path) === "markdown";
   const mode = ctx.local ? "source" : parseDiffMode(c.req.query("mode"), richOk);
   const shape = ctx.local ? "unified" : parseDiffShape(c.req.query("shape"), mode);
-  const versions = file && shape !== "unified" ? await prFileVersions(ctx, pull, file) : null;
-  const fileComments = file ? await mapLineComments(ctx, file, allComments) : [];
-  const assetPreviewPaths = file && mode === "rich" ? await prAssetPreviewPaths(ctx, pull) : {};
+  const [versions, fileComments, assetPreviewPaths] = await Promise.all([
+    file && shape !== "unified" ? prFileVersions(ctx, pull, file) : Promise.resolve(null),
+    file ? mapLineComments(ctx, file, allComments) : Promise.resolve([]),
+    file && mode === "rich" ? prAssetPreviewPaths(ctx, pull) : Promise.resolve({}),
+  ]);
   return htmlResponse(
     repoPageShell(
       ctx,
@@ -624,10 +626,14 @@ async function prAssetPreviewPaths(ctx: WebCtx, pull: PrMeta): Promise<PrFileAss
   // PR's core-side commits, so the tree lookup can't resolve those SHAs —
   // degrade to no previews (the diff itself still renders from the core).
   if (ctx.local) return { base: {}, head: {} };
-  const [baseTree, headTree] = await Promise.all([
-    ctx.backend.getTree(ctx.owner, ctx.repo, pull.base_sha, true),
-    ctx.backend.getTree(ctx.owner, ctx.repo, pull.head_sha, true),
-  ]);
+  const readTree = async (sha: string) => {
+    const cached = getCachedTree(ctx.owner, ctx.repo, sha);
+    if (cached) return cached;
+    const tree = await ctx.backend.getTree(ctx.owner, ctx.repo, sha, true);
+    setCachedTree(ctx.owner, ctx.repo, sha, tree);
+    return tree;
+  };
+  const [baseTree, headTree] = await Promise.all([readTree(pull.base_sha), readTree(pull.head_sha)]);
   return {
     base: buildPdfImagePreviewPaths(baseTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),
     head: buildPdfImagePreviewPaths(headTree.filter((entry) => entry.type === "blob").map((entry) => entry.path)),

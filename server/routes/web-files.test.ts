@@ -883,7 +883,8 @@ describe("web file editor route", () => {
         forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
         forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
         forge.get("/api/v1/repos/owner/w/pulls", (c) => {
-          expect(c.req.query("state")).toBe("all");
+          expect(c.req.query("state")).toBe("closed");
+          expect(c.req.query("limit")).toBe("50");
           return c.json([
             { number: 7, state: "closed", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
           ]);

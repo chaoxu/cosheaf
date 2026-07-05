@@ -1,6 +1,4 @@
 import type Database from "better-sqlite3";
-import type { Forgejo } from "./forgejo.js";
-import { ForgejoError } from "./forgejo.js";
 import { clearRepoConfig } from "./repo-config.js";
 
 // Delete every sidecar row for a workspace. Shared by the workspace-rm
@@ -16,21 +14,4 @@ export function deleteSidecarForWorkspace(db: Database.Database, workspaceSlug: 
   db.prepare("DELETE FROM page_tags WHERE workspace_slug = ?").run(workspaceSlug);
   db.prepare("DELETE FROM issue_claims WHERE workspace_slug = ?").run(workspaceSlug);
   clearRepoConfig(db, workspaceSlug);
-}
-
-// Forgejo.deleteBranch with 404-tolerance for cleanup-only call sites. Typed
-// API routes should call Forgejo directly so real delete failures propagate.
-export async function deleteBranchQuietly(
-  fj: Forgejo,
-  owner: string,
-  repo: string,
-  branch: string,
-): Promise<void> {
-  try {
-    await fj.deleteBranch(owner, repo, branch);
-  } catch (err) {
-    if (!(err instanceof ForgejoError && err.status === 404)) {
-      console.warn(`deleteBranch ${branch}: ${(err as Error).message}`);
-    }
-  }
 }

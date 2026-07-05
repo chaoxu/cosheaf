@@ -95,7 +95,7 @@ async function run(dirArg: string | undefined, opts: { port?: string; host?: str
       console.error(`not a directory: ${dir}`);
       process.exit(1);
     }
-    const entry = await registry.addFolder(dir);
+    const entry = registry.list().find((item) => item.path === dir) ?? await registry.addFolder(dir);
     opened = { owner: entry.identity.owner, repo: entry.identity.repo };
   }
 

@@ -134,22 +134,29 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
     update: (value, transaction) =>
       transaction.docChanged ? suggestingHunks(opts.baseText, transaction.newDoc.toString()) : value,
   });
-  const visibleHunks = (state: EditorView["state"]): readonly SuggestingHunk[] => {
+  const visibleHunksForState = (state: EditorView["state"]): readonly SuggestingHunk[] => {
     const source = state.doc.toString();
     const accepted = state.field(acceptedField);
     return state.field(hunkField).filter((hunk) => !accepted.has(acceptedHunkKey(opts.baseText, source, hunk)));
   };
-  const decorations = StateField.define<DecorationSet>({
-    create: (state) => buildDecorations(state, visibleHunks(state)),
+  const visibleHunkField = StateField.define<readonly SuggestingHunk[]>({
+    create: visibleHunksForState,
     update: (value, transaction) =>
       transaction.docChanged || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
-        ? buildDecorations(transaction.state, visibleHunks(transaction.state))
+        ? visibleHunksForState(transaction.state)
+        : value,
+  });
+  const decorations = StateField.define<DecorationSet>({
+    create: (state) => buildDecorations(state, state.field(visibleHunkField)),
+    update: (value, transaction) =>
+      transaction.docChanged || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
+        ? buildDecorations(transaction.state, transaction.state.field(visibleHunkField))
         : value,
     provide: (field) => EditorView.decorations.from(field),
   });
   const accessibleGutter = ViewPlugin.define((view) => {
     const expose = () => {
-      const hasHunks = visibleHunks(view.state).length > 0;
+      const hasHunks = view.state.field(visibleHunkField).length > 0;
       view.dom.classList.toggle("cm-cosheaf-suggesting-has-hunks", hasHunks);
       view.dom.querySelector(".cm-gutters")?.setAttribute("aria-hidden", hasHunks ? "false" : "true");
     };
@@ -159,6 +166,7 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
   return [
     acceptedField,
     hunkField,
+    visibleHunkField,
     decorations,
     accessibleGutter,
     gutter({
@@ -167,7 +175,7 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
       initialSpacer: () => new SuggestingSpacerMarker(),
       lineMarker: (view, line) => {
         const lineNumber = view.state.doc.lineAt(line.from).number;
-        const hunk = visibleHunks(view.state).find((item) =>
+        const hunk = view.state.field(visibleHunkField).find((item) =>
           hunkAnchorLine(item, view.state.doc.lines) === lineNumber
         );
         return hunk ? new SuggestingHunkMarker(hunk, view, opts) : null;

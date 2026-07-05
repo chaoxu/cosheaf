@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
-import { parseDocument } from "./frontmatter.js";
+import { parseFrontmatterYaml as parseDocument } from "../shared/frontmatter-yaml.js";
 import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./indexer.js";
 import { freshTestDb } from "./routes/test-fixtures.js";
 

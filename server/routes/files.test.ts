@@ -1602,7 +1602,8 @@ describe("files concurrent-write conflicts (#92)", () => {
     const calls: string[] = [];
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/pulls", (c) => {
-        expect(c.req.query("state")).toBe("all");
+        expect(c.req.query("state")).toBe("closed");
+        expect(c.req.query("limit")).toBe("50");
         calls.push("list-pulls");
         return c.json([
           { number: 7, state: "closed", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },

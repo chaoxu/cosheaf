@@ -2,7 +2,7 @@
 
 import { runLocalGate, runWithPinnedFallback } from "./lib/pinned-coflat-gate.mjs";
 
-runWithPinnedFallback({
+await runWithPinnedFallback({
   gate: runLocalGate,
   isolatedGate: runLocalGate,
   source: "working-tree",

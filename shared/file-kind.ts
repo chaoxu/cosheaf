@@ -67,14 +67,6 @@ export function isEditableTextFile(filePath: string): boolean {
   return kind === "markdown" || kind === "text";
 }
 
-export function fileKindLabel(kind: FileKind): string {
-  if (kind === "markdown") return "Markdown";
-  if (kind === "text") return "Text";
-  if (kind === "pdf") return "PDF";
-  if (kind === "image") return "Image";
-  return "File";
-}
-
 export function fileKindInfoForPath(filePath: string): FileKindInfo {
   return fileKindsByExtension[fileExtension(filePath)] ?? fallbackFileKind;
 }

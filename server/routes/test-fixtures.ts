@@ -134,11 +134,12 @@ export function fakeWorkspaceBackend(overrides: Partial<WorkspaceBackend> = {}):
       throw new Error(`fake WorkspaceBackend method not implemented: ${String(name)}`);
     }) as WorkspaceBackend[K];
   }
-  return {
+  const backend: WorkspaceBackend = {
     getTree: missing("getTree"),
     getRawFile: missing("getRawFile"),
     getRawFileBytes: missing("getRawFileBytes"),
     getFileMeta: missing("getFileMeta"),
+    readFile: missing("readFile"),
     putFile: missing("putFile"),
     putFileBytes: missing("putFileBytes"),
     deleteFile: missing("deleteFile"),
@@ -151,6 +152,15 @@ export function fakeWorkspaceBackend(overrides: Partial<WorkspaceBackend> = {}):
     getCommit: missing("getCommit"),
     ...overrides,
   };
+  if (!overrides.readFile) {
+    backend.readFile = async (owner, repo, ref, path) => {
+      const meta = await backend.getFileMeta(owner, repo, ref, path);
+      if (!meta) return null;
+      const content = await backend.getRawFile(owner, repo, ref, path);
+      return { sha: meta.sha, size: meta.size ?? Buffer.byteLength(content, "utf8"), content };
+    };
+  }
+  return backend;
 }
 
 export function testLocalRouteApp(

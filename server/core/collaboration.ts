@@ -49,9 +49,17 @@ export function forgeCoreCollaborationClient(fj: Forgejo): CollaborationClient {
         return async (...args: Parameters<Forgejo["editIssue"]>) =>
           forgeIssueToDetail(await target.editIssue(...args));
       }
+      if (prop === "setIssueState") {
+        return async (owner: string, repo: string, number: number, state: "open" | "closed") =>
+          (await target.editIssue(owner, repo, number, { state })).state;
+      }
       if (prop === "listIssueComments") {
         return async (...args: Parameters<Forgejo["listIssueComments"]>) =>
           (await target.listIssueComments(...args)).map(forgeIssueCommentToDto);
+      }
+      if (prop === "getIssueComment") {
+        return async (...args: Parameters<Forgejo["getIssueComment"]>) =>
+          forgeIssueCommentToDto(await target.getIssueComment(...args));
       }
       if (prop === "createIssueComment") {
         return async (...args: Parameters<Forgejo["createIssueComment"]>) =>
@@ -130,6 +138,11 @@ export function forgeCoreCollaborationClient(fj: Forgejo): CollaborationClient {
       if (prop === "editPull") {
         return async (...args: Parameters<Forgejo["editPull"]>) =>
           forgePullToMeta(await target.editPull(...args));
+      }
+      if (prop === "setPullState") {
+        return async (owner: string, repo: string, number: number, state: "open" | "closed") => {
+          await target.editPull(owner, repo, number, { state });
+        };
       }
       if (prop === "listPullFiles") {
         return async (...args: Parameters<Forgejo["listPullFiles"]>) => {

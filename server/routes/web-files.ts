@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { buildPdfImagePreviewPaths, isPdfAssetPath } from "../../shared/asset-previews.js";
 import { rasterizePdfFirstPage } from "../pdf-raster.js";
 import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
-import { resolveBranchPath, validBranchName } from "../branch-path.js";
+import { resolveBranchPath, resolveBranchPathFromNames, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
 import {
   WorkspaceBackendError,
@@ -47,6 +47,10 @@ import { pdfExportOptionsHref, registerPdfExportRoutes } from "./web-pdf-export.
 import { clonePanel, sshCloneUrl } from "./web-repo-clone.js";
 import { pageSearchForm, repoHomeHeader, repoLanding, searchResultRow } from "./web-repo-landing.js";
 import { webEditShellAssets, webEditorAssets } from "./web-shell.js";
+
+function hasFileContent(file: unknown): file is { content: string } {
+  return Boolean(file && typeof file === "object" && "content" in file && typeof (file as { content?: unknown }).content === "string");
+}
 
 export function registerFileRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo", webRoute(async (c, ctx) => {
@@ -147,7 +151,8 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       return badRequestPage(ctx.user, "Valid file path is required.");
     }
   }
-  const resolved = await resolveBranchPath(backend, owner, repo, routeRest(c, owner, repo, "/src/branch/"));
+  const branches = await backend.listBranches(owner, repo).catch(() => []);
+  const resolved = resolveBranchPathFromNames(branches.map((branch) => branch.name), routeRest(c, owner, repo, "/src/branch/"));
   if (!resolved) return notFoundPage(user, "Branch not found");
   if (!resolved.path) {
     if ((requestedMode === "read" || requestedMode === "edit") && ws.role !== "read") {
@@ -160,10 +165,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       if (!directWrite && !validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
       return editPageResponse(ctx, { branch: editBranch, rel, kind, initialMode: requestedMode });
     }
-    const [files, branches] = await Promise.all([
-      repoFiles(backend, owner, repo, resolved.branch),
-      backend.listBranches(owner, repo).catch(() => []),
-    ]);
+    const files = await repoFiles(backend, owner, repo, resolved.branch);
     const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
     const branchTitles = resolved.branch === "main" ? workspacePageTitles(ctx.db, ws.slug) : undefined;
     // The sidebar tree is the file navigator; the main panel shows the branch's
@@ -209,14 +211,17 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       initialMode: workbenchMode,
     });
   }
-  const meta = await backend.getFileMeta(owner, repo, resolved.branch, rel).catch(onWorkspaceNotFound(null));
-  if (!meta) return notFoundPage(user, "File not found");
-  const [files, branches] = await Promise.all([
-    repoFiles(backend, owner, repo, resolved.branch),
-    backend.listBranches(owner, repo).catch(() => []),
+  const readText = kind === "markdown" || (kind === "text" && sourceView);
+  const [fileRead, files] = await Promise.all([
+    readText
+      ? backend.readFile(owner, repo, resolved.branch, rel).catch(onWorkspaceNotFound(null))
+      : backend.getFileMeta(owner, repo, resolved.branch, rel).catch(onWorkspaceNotFound(null)),
+    repoFiles(backend, owner, repo, resolved.branch).catch(() => []),
   ]);
+  if (!fileRead) return notFoundPage(user, "File not found");
+  const meta = { sha: fileRead.sha, size: fileRead.size };
   const assetPreviewPaths = buildPdfImagePreviewPaths(files.map((file) => file.path));
-  const content = kind === "markdown" || (kind === "text" && sourceView) ? await backend.getRawFile(owner, repo, resolved.branch, rel) : null;
+  const content = readText && hasFileContent(fileRead) ? fileRead.content : null;
   const previewKind = await previewKindForFile(backend, owner, repo, resolved.branch, rel, kind, meta.size);
   const coflatMarkdownDocument = kind === "markdown" && ctx.coflat;
   const rendered =
@@ -349,25 +354,28 @@ async function editPageResponse(
   opts: { branch: string; rel: string; kind: FileKind; initialMode: "read" | "edit" | "auto" },
 ): Promise<Response> {
   const { branch, rel, kind, initialMode } = opts;
-  const branchInfo = branch === "main" ? await ctx.backend.getBranch(ctx.owner, ctx.repo, "main") : await ctx.backend.getBranch(ctx.owner, ctx.repo, branch);
+  const [branchInfo, mainInfo] = await Promise.all([
+    ctx.backend.getBranch(ctx.owner, ctx.repo, branch),
+    branch === "main" ? Promise.resolve(null) : ctx.backend.getBranch(ctx.owner, ctx.repo, "main"),
+  ]);
   const resetEditBranch = Boolean(branchInfo) && await retiredDefaultEditBranch(ctx, branch);
   const branchExists = !resetEditBranch && (branch === "main" || Boolean(branchInfo));
   const branchRef = branchInfo?.commit?.id ?? branch;
-  const branchMeta = resetEditBranch ? null : await ctx.backend.getFileMeta(ctx.owner, ctx.repo, branchRef, rel);
-  const mainInfo = branchMeta ? null : await ctx.backend.getBranch(ctx.owner, ctx.repo, "main");
+  const branchRead = resetEditBranch
+    ? null
+    : await ctx.backend.readFile(ctx.owner, ctx.repo, branchRef, rel).catch(onWorkspaceNotFound(null));
   const mainRef = mainInfo?.commit?.id ?? "main";
-  const mainMeta = branchMeta ? null : await ctx.backend.getFileMeta(ctx.owner, ctx.repo, mainRef, rel);
-  const sourceRef = branchMeta ? branchRef : mainMeta ? mainRef : null;
-  const baseSha = branchMeta?.sha ?? (!branchExists ? mainMeta?.sha : null) ?? null;
-  const sourceSha = !branchMeta && branchExists ? (mainMeta?.sha ?? null) : null;
-  const content = sourceRef ? await ctx.backend.getRawFile(ctx.owner, ctx.repo, sourceRef, rel) : "";
+  const mainRead = branchRead ? null : await ctx.backend.readFile(ctx.owner, ctx.repo, mainRef, rel).catch(onWorkspaceNotFound(null));
+  const baseSha = branchRead?.sha ?? (!branchExists ? mainRead?.sha : null) ?? null;
+  const sourceSha = !branchRead && branchExists ? (mainRead?.sha ?? null) : null;
+  const content = branchRead?.content ?? mainRead?.content ?? "";
   const repoConfig = kind === "markdown" && ctx.coflat
     ? await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, branchExists ? branch : "main")
     : null;
   // The edit branch is created lazily on first save, so for a brand-new edit
   // branch the tree (file list) and Cancel target come from main instead.
   const treeBranch = branchExists ? branch : "main";
-  const readBranch = branchMeta ? branch : mainMeta ? "main" : treeBranch;
+  const readBranch = branchRead ? branch : mainRead ? "main" : treeBranch;
   const files = await repoFiles(ctx.backend, ctx.owner, ctx.repo, treeBranch).catch(() => []);
   const readFiles = readBranch === treeBranch
     ? files
@@ -393,7 +401,6 @@ async function editPageResponse(
             data-read-branch="${readBranch}"
             data-username="${ctx.user}"
             data-role="${ctx.ws.role}"
-            data-format-id="${ctx.ws.defaultMdFormat}"
             data-base-sha="${baseSha ?? ""}"
             data-source-sha="${sourceSha ?? ""}"
             data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
@@ -419,7 +426,6 @@ async function editPageResponse(
             data-read-branch="${readBranch}"
             data-username="${ctx.user}"
             data-role="${ctx.ws.role}"
-            data-format-id="${ctx.ws.defaultMdFormat}"
             data-base-sha="${baseSha ?? ""}"
             data-source-sha="${sourceSha ?? ""}"
             data-reset-edit-branch="${resetEditBranch ? "1" : "0"}"
@@ -672,7 +678,7 @@ async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTr
 
 async function retiredDefaultEditBranch(ctx: WebCtx, branch: string): Promise<boolean> {
   if (branch !== userDefaultEditBranch(ctx.user)) return false;
-  const pulls = await ctx.backend.listPulls(ctx.owner, ctx.repo, "all").catch(() => []);
+  const pulls = await ctx.backend.listPulls(ctx.owner, ctx.repo, "closed", { limit: 50 }).catch(() => []);
   const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
   return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
 }

@@ -1,6 +1,5 @@
 export const COFLAT_READER_ARTICLE_CLASS = "document cosheaf-document-reader cf-theme-scope";
 export const COFLAT_READER_SURFACE_CLASS = "cf-reader cf-doc-surface cf-doc-flow";
-export const COFLAT_READER_ISLAND_CLASS = `${COFLAT_READER_SURFACE_CLASS} coflat-reader-island`;
 export const COFLAT_FILE_PREVIEW_TEST_ID = "file-preview-markdown";
 
 export type CoflatReaderSurface = "document" | "thread" | "diff";

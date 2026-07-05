@@ -31,9 +31,16 @@ async function requireIssueComment(c: Context<AppEnv>, number: number, id: numbe
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
-  const comments = await collab.listIssueComments(owner, repo, number);
-  const comment = comments.find((item) => item.id === id);
-  return comment ?? c.json(...notFound("comment not found"));
+  try {
+    const comment = await collab.getIssueComment(owner, repo, id);
+    if (comment.issue_number !== undefined && comment.issue_number !== number) {
+      return c.json(...notFound("comment not found"));
+    }
+    return comment;
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("comment not found"));
+    throw err;
+  }
 }
 
 function trimmedQuery(value: string | undefined): string | undefined {
@@ -267,9 +274,9 @@ issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
-  const issue = await collab.editIssue(owner, repo, number, { state: body.state });
+  const state = await collab.setIssueState(owner, repo, number, body.state);
   c.get("sse").publish(ws.slug, { type: "issue", number, action: body.state === "closed" ? "closed" : "reopened" });
-  return c.json({ ok: true, state: issue.state });
+  return c.json({ ok: true, state });
 });
 
 issues.patch("/:owner/:repo/issues/:number", async (c) => {
@@ -308,6 +315,18 @@ issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
   const comments = await collab.listIssueComments(owner, repo, number);
   return c.json({ comments });
+});
+
+issues.get("/:owner/:repo/issues/comments/:id", async (c) => {
+  const id = parsePositiveIntId(c.req.param("id"));
+  if (id === null) return c.json(...bad("bad comment id"));
+  const { collab, owner, repo } = repoCtxCollab(c);
+  try {
+    return c.json(await collab.getIssueComment(owner, repo, id));
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("comment not found"));
+    throw err;
+  }
 });
 
 issues.post("/:owner/:repo/issues/:number/comments", async (c) => {

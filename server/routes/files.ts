@@ -252,7 +252,7 @@ async function ensureBranch(
 async function retiredDefaultEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
   if (branch !== `${userBranchPrefix(c.get("user").username)}web-edit`) return false;
   const { backend, owner, repo } = c.get("repoCtx");
-  const pulls = await backend.listPulls(owner, repo, "all").catch(() => []);
+  const pulls = await backend.listPulls(owner, repo, "closed", { limit: 50 }).catch(() => []);
   const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
   return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
 }
@@ -454,11 +454,9 @@ files.get("/:owner/:repo/file", async (c) => {
   try {
     branchInfo = await backend.getBranch(owner, repo, ref);
     const snapshotRef = branchInfo?.commit?.id ?? ref;
-    const [content, meta] = await Promise.all([
-      backend.getRawFile(owner, repo, snapshotRef, rel),
-      backend.getFileMeta(owner, repo, snapshotRef, rel),
-    ]);
-    return c.json({ content, sha: meta?.sha ?? null });
+    const read = await backend.readFile(owner, repo, snapshotRef, rel);
+    if (!read) throw new WorkspaceBackendError(404, "not_found", `not found: ${rel}`);
+    return c.json({ content: read.content, sha: read.sha });
   } catch (err) {
     if (err instanceof WorkspaceBackendError && err.status === 404 && ref !== "main") {
       // File not on the branch — fall back to main so the editor can still
@@ -466,15 +464,13 @@ files.get("/:owner/:repo/file", async (c) => {
       try {
         const mainInfo = await backend.getBranch(owner, repo, "main");
         const mainRef = mainInfo?.commit?.id ?? "main";
-        const [content, meta] = await Promise.all([
-          backend.getRawFile(owner, repo, mainRef, rel),
-          backend.getFileMeta(owner, repo, mainRef, rel),
-        ]);
+        const read = await backend.readFile(owner, repo, mainRef, rel);
+        if (!read) return c.json(...notFound());
         return c.json({
-          content,
-          sha: branchInfo ? null : (meta?.sha ?? null),
+          content: read.content,
+          sha: branchInfo ? null : read.sha,
           source_ref: "main",
-          source_sha: meta?.sha ?? null,
+          source_sha: read.sha,
         });
       } catch (err2) {
         if (err2 instanceof WorkspaceBackendError && err2.status === 404)
@@ -838,25 +834,32 @@ async function parseBranchRefs(
 ): Promise<readonly BranchRefEntry[]> {
   const { backend, owner, repo } = c.get("repoCtx");
   const entries: BranchRefEntry[] = [];
-  for (const entry of markdownFiles) {
-    const rel = safeRel(entry.path);
-    if (!rel) continue;
-    const source = await backend.getRawFile(owner, repo, branch, rel).catch(() => null);
-    if (source === null) continue;
-    const parsed = parseCoflatFrontmatter(source);
-    const frontmatter = (parsed.frontmatter ?? {}) as Record<string, unknown>;
-    if (typeof frontmatter.id === "string") {
-      entries.push({
-        id: frontmatter.id,
-        title: typeof frontmatter.title === "string" ? frontmatter.title : extractCoflatFirstH1(parsed.body),
-        path: rel,
-        kind: "page",
-        line: null,
-      });
-    }
-    for (const target of extractCoflatXrefTargets(source)) {
-      entries.push({ id: target.id, title: target.label, path: rel, kind: target.kind, line: target.line });
-    }
+  const chunkSize = 8;
+  for (let i = 0; i < markdownFiles.length; i += chunkSize) {
+    const chunk = markdownFiles.slice(i, i + chunkSize);
+    const parsed = await Promise.all(chunk.map(async (entry): Promise<BranchRefEntry[]> => {
+      const rel = safeRel(entry.path);
+      if (!rel) return [];
+      const source = await backend.getRawFile(owner, repo, branch, rel).catch(() => null);
+      if (source === null) return [];
+      const parsedDoc = parseCoflatFrontmatter(source);
+      const frontmatter = (parsedDoc.frontmatter ?? {}) as Record<string, unknown>;
+      const out: BranchRefEntry[] = [];
+      if (typeof frontmatter.id === "string") {
+        out.push({
+          id: frontmatter.id,
+          title: typeof frontmatter.title === "string" ? frontmatter.title : extractCoflatFirstH1(parsedDoc.body),
+          path: rel,
+          kind: "page",
+          line: null,
+        });
+      }
+      for (const target of extractCoflatXrefTargets(source)) {
+        out.push({ id: target.id, title: target.label, path: rel, kind: target.kind, line: target.line });
+      }
+      return out;
+    }));
+    entries.push(...parsed.flat());
   }
   return entries.sort((a, b) => a.id.length - b.id.length || a.id.localeCompare(b.id));
 }

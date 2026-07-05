@@ -2,7 +2,7 @@
 
 import { runFastGate, runWithPinnedFallback } from "./lib/pinned-coflat-gate.mjs";
 
-runWithPinnedFallback({
+await runWithPinnedFallback({
   gate: runFastGate,
   isolatedGate: runFastGate,
   source: "head",

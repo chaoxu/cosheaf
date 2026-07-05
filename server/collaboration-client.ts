@@ -30,6 +30,7 @@ type ForgejoCollaborationClient = Pick<
   | "createIssue"
   | "editIssue"
   | "listIssueComments"
+  | "getIssueComment"
   | "createIssueComment"
   | "editIssueComment"
   | "deleteIssueComment"
@@ -99,6 +100,7 @@ export type CollaborationClient = Omit<
   | "createIssue"
   | "editIssue"
   | "listIssueComments"
+  | "getIssueComment"
   | "createIssueComment"
   | "editIssueComment"
   | "listIssueTimeline"
@@ -137,7 +139,9 @@ export type CollaborationClient = Omit<
   getIssue(owner: string, repo: string, number: number): Promise<IssueDetail>;
   createIssue(owner: string, repo: string, opts: Parameters<Forgejo["createIssue"]>[2]): Promise<Pick<IssueDetail, "number" | "title" | "state">>;
   editIssue(owner: string, repo: string, number: number, patch: Parameters<Forgejo["editIssue"]>[3]): Promise<IssueDetail>;
+  setIssueState(owner: string, repo: string, number: number, state: "open" | "closed"): Promise<"open" | "closed">;
   listIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]>;
+  getIssueComment(owner: string, repo: string, id: number): Promise<IssueComment>;
   createIssueComment(owner: string, repo: string, number: number, body: string): Promise<IssueComment>;
   editIssueComment(owner: string, repo: string, id: number, body: string): Promise<IssueComment>;
   listIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineEvent[]>;
@@ -157,6 +161,7 @@ export type CollaborationClient = Omit<
   getPull(owner: string, repo: string, number: number): Promise<PrMeta | null>;
   createPull(owner: string, repo: string, opts: Parameters<Forgejo["createPull"]>[2]): Promise<PrMeta>;
   editPull(owner: string, repo: string, number: number, patch: Parameters<Forgejo["editPull"]>[3]): Promise<PrMeta>;
+  setPullState(owner: string, repo: string, number: number, state: "open" | "closed"): Promise<void>;
   listPullFiles(owner: string, repo: string, number: number): Promise<PrFile[]>;
   listPullCommits(owner: string, repo: string, number: number): Promise<PrCommit[]>;
   listPullComments(owner: string, repo: string, number: number): Promise<LineComment[]>;

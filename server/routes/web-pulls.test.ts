@@ -48,24 +48,6 @@ describe("web pull request routes", () => {
     };
   }
 
-  function reviewComment(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return {
-      id: 123,
-      pull_request_review_id: 9,
-      path: "notes.md",
-      body: "note",
-      position: 1,
-      original_position: 1,
-      commit_id: "c",
-      original_commit_id: "c",
-      diff_hunk: "",
-      user: { login: "alice" },
-      created_at: "2026-05-20T00:00:00Z",
-      updated_at: "2026-05-20T00:00:00Z",
-      ...overrides,
-    };
-  }
-
   function issueComment(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       id: 234,
@@ -528,7 +510,7 @@ describe("web pull request routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
-        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ id: 456 })]));
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/8", body: "note", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.patch("/api/v1/repos/owner/w/issues/comments/123", () => {
           edited = true;
           return Response.json({ id: 123, body: "updated" });
@@ -551,15 +533,12 @@ describe("web pull request routes", () => {
     const db = freshTestDb("cosheaf-web-pulls-");
     seedTestWorkspace(db);
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
-    let deleted = false;
+    const deleted = false;
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
-        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ pull_request_review_id: 9 })]));
-        forge.delete("/api/v1/repos/owner/w/pulls/7/reviews/11/comments/123", () => {
-          deleted = true;
-          return new Response(null, { status: 204 });
-        });
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/7", body: "note", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
+        forge.delete("/api/v1/repos/owner/w/pulls/7/reviews/11/comments/123", () => new Response(null, { status: 404 }));
       }),
     );
 
@@ -570,8 +549,7 @@ describe("web pull request routes", () => {
       body: form.toString(),
     });
 
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain("Review id does not match comment");
+    expect(res.status).toBe(404);
     expect(deleted).toBe(false);
   });
 
@@ -583,7 +561,7 @@ describe("web pull request routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
-        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment({ id: 456 })]));
+        forge.get("/api/v1/repos/owner/w/issues/comments/234", () => Response.json(issueComment({ id: 234, issue_url: "http://forgejo.test/owner/w/issues/8" })));
         forge.patch("/api/v1/repos/owner/w/issues/comments/234", () => {
           edited = true;
           return Response.json(issueComment({ id: 234, body: "updated" }));
@@ -610,7 +588,7 @@ describe("web pull request routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json(forgejoPull()));
-        forge.get("/api/v1/repos/owner/w/issues/7/comments", () => Response.json([issueComment({ id: 234 })]));
+        forge.get("/api/v1/repos/owner/w/issues/comments/234", () => Response.json(issueComment({ id: 234, issue_url: "http://forgejo.test/owner/w/issues/7" })));
         forge.delete("/api/v1/repos/owner/w/issues/comments/234", () => {
           deleted = true;
           return new Response(null, { status: 204 });

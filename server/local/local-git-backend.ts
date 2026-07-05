@@ -27,6 +27,7 @@ import {
   type WsCreateBranch,
   type WsDeleteFile,
   type WsFileMeta,
+  type WsFileRead,
   type WsFileWrite,
   type WsPull,
   type WsPutFile,
@@ -35,6 +36,7 @@ import {
   type WsTreeEntry,
 } from "../workspace-backend.js";
 import type { WorkbenchProfile } from "./local-workspace.js";
+import { KeyedQueue } from "./keyed-queue.js";
 
 // Outcome of a Tier-2 sync (fetch + fast-forward), reported back to the UI.
 export interface SyncResult {
@@ -112,7 +114,8 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   // Lazy getter for the Workbench profile (git authorship fallback). Read at
   // commit time so a profile set after the backend was built still applies.
   private readonly author: (() => WorkbenchProfile | null) | undefined;
-  private readonly mutationQueues = new Map<string, Promise<void>>();
+  private readonly mutationQueue = new KeyedQueue();
+  private gitPrefixValue: string | undefined;
 
   constructor(rootDir: string, opts: { pushRemote?: string; author?: () => WorkbenchProfile | null } = {}) {
     this.root = resolve(rootDir);
@@ -186,21 +189,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   private async withPathMutation<T>(fullPath: string, fn: () => Promise<T>): Promise<T> {
-    const key = fullPath;
-    const previous = this.mutationQueues.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolveGate) => {
-      release = resolveGate;
-    });
-    const next = previous.catch(() => {}).then(() => gate);
-    this.mutationQueues.set(key, next);
-    await previous.catch(() => {});
-    try {
-      return await fn();
-    } finally {
-      release();
-      if (this.mutationQueues.get(key) === next) this.mutationQueues.delete(key);
-    }
+    return this.mutationQueue.run(fullPath, fn);
   }
 
   private withGitMutation<T>(fn: () => Promise<T>): Promise<T> {
@@ -346,6 +335,16 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
     }
   }
 
+  async readFile(_owner: string, _repo: string, _ref: string, filepath: string): Promise<WsFileRead | null> {
+    try {
+      const bytes = await this.readBytes(filepath);
+      return { sha: gitBlobHash(bytes), size: bytes.length, content: bytes.toString("utf8") };
+    } catch (err) {
+      if (err instanceof WorkspaceBackendError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
   putFile(owner: string, repo: string, opts: WsPutFile): Promise<WsFileWrite> {
     return this.putFileBytes(owner, repo, { ...opts, content: Buffer.from(opts.content, "utf8") });
   }
@@ -423,7 +422,7 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
 
   // No pull requests locally: the review/merge surface is the connected Core
   // Server (Tier 2), reached through OriginCollaborationClient, not this backend.
-  async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all"): Promise<WsPull[]> {
+  async listPulls(_owner: string, _repo: string, _state: "open" | "closed" | "all", _opts: { limit?: number } = {}): Promise<WsPull[]> {
     return [];
   }
 
@@ -475,7 +474,8 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
   }
 
   private async gitPrefix(): Promise<string> {
-    return (await this.git(["rev-parse", "--show-prefix"]).catch(() => "")).trim();
+    this.gitPrefixValue ??= (await this.git(["rev-parse", "--show-prefix"]).catch(() => "")).trim();
+    return this.gitPrefixValue;
   }
 
   private stripGitPrefix(path: string, prefix: string): string {
@@ -549,14 +549,16 @@ export class LocalGitWorkspaceBackend implements WorkspaceBackend {
       ...(patch.previous_path ? { previous_path: this.stripGitPrefix(patch.previous_path, prefix) } : {}),
     }));
     const byPath = new Map(patches.map((patch) => [patch.path, this.withReviewHash({ ...patch, changed: true })]));
-    const status = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", ...safePaths]);
+    const unresolvedPaths = safePaths.filter((path) => !byPath.has(path));
+    if (unresolvedPaths.length === 0) return safePaths.map((path) => byPath.get(path) ?? this.withReviewHash({ path, patch: "", changed: false }));
+    const status = await this.gitWithLiteralPathspecs(["status", "--porcelain=v1", "--", ...unresolvedPaths]);
     const untracked = new Set(
       status
         .split("\n")
         .filter((line) => line.startsWith("?? "))
         .map((line) => this.stripGitPrefix(line.slice(3).trim(), prefix)),
     );
-    for (const path of safePaths) {
+    for (const path of unresolvedPaths) {
       if (byPath.has(path)) continue;
       if (untracked.has(path)) {
         byPath.set(path, {

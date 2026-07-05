@@ -267,7 +267,7 @@ describe("POST /api/v1/workspaces", () => {
     expect(body).toMatchObject({ visibility: "private", required_approvals: 1 });
     expect(createBody).toMatchObject({ name: "new-ws", private: true });
     expect(protectionBody).toMatchObject({ branch_name: "main", required_approvals: 1 });
-    expect(topicPutBody).toEqual({ topics: ["cosheaf-format-coflat"] });
+    expect(topicPutBody).toBeNull();
   });
 
   it("creates under an explicit owner via the org endpoint", async () => {
@@ -351,7 +351,7 @@ describe("POST /api/v1/workspaces", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { default_md_format: string };
     expect(body.default_md_format).toBe("coflat");
-    expect(topicPutBody).toEqual({ topics: ["cosheaf-format-coflat"] });
+    expect(topicPutBody).toBeNull();
   });
 
   it("rejects an invalid slug", async () => {

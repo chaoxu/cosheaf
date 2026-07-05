@@ -248,6 +248,35 @@ export function resolveMathMacros(payload: CoflatDocumentPayload): Record<string
   return { ...(payload.mathMacros ?? {}), ...doc };
 }
 
+export function coflatDocumentContextSignature(payload: CoflatDocumentPayload): string {
+  const frontmatter = parseFrontmatter(payload.source).frontmatter ?? {};
+  const localTargets = extractCoflatXrefTargets(payload.source)
+    .map((target) => [target.id, target.kind, target.label, target.line ?? null])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])) || String(a[1]).localeCompare(String(b[1])));
+  const referenceKeys = referencedKeys(payload.source).sort();
+  const citationReferences = analyzeReferences(payload.source).references.map((ref) =>
+    ref.ids.map((id, index) => [id, ref.locators[index] ?? ""]),
+  );
+  return JSON.stringify({
+    owner: payload.owner,
+    repo: payload.repo,
+    branch: payload.branch,
+    branchExists: payload.branchExists !== false,
+    path: payload.path,
+    bibliography: optionalFrontmatterString(frontmatter.bibliography) ?? payload.bibliography ?? "",
+    csl: optionalFrontmatterString(frontmatter.csl) ?? payload.csl ?? "",
+    mathMacros: Object.entries(resolveMathMacros(payload)).sort(([a], [b]) => a.localeCompare(b)),
+    assetPreviewPaths: Object.entries(payload.assetPreviewPaths ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    localTargets,
+    referenceKeys,
+    citationReferences,
+  });
+}
+
+function optionalFrontmatterString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: CoflatDocumentRefs): DocumentContext {
   const citations = refs.citations;
   const mathMacros = resolveMathMacros(payload);

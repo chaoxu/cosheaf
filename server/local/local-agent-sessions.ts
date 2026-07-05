@@ -24,6 +24,7 @@ import { emptyHtml, type Html, html } from "../routes/web-html.js";
 import { repoPageShell } from "../routes/web-page.js";
 import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
+import { KeyedQueue } from "./keyed-queue.js";
 import { localAnnotationSidecarConflict, readLocalAnnotations, setLocalAnnotationStatus } from "./local-annotations.js";
 import { publishLocalAgentActivityEvent, publishLocalAnnotationEvent, publishLocalGitEvent } from "./local-events.js";
 import type { LocalFileDiff, LocalGitWorkspaceBackend } from "./local-git-backend.js";
@@ -45,7 +46,7 @@ const LOCAL_AGENT_SESSIONS_FILE = join(".cosheaf", "agent-sessions.json");
 const SESSION_ID_RE = /^as_[a-z0-9]{12}$/;
 const MESSAGE_ID_RE = /^msg_[a-z0-9]{12}$/;
 const LOCAL_ANNOTATION_ID_RE = /^la_[a-z0-9]{12}$/;
-const mutationQueues = new Map<string, Promise<void>>();
+const mutationQueue = new KeyedQueue();
 
 function newId(prefix: "as" | "msg"): string {
   return `${prefix}_${randomBytes(8).toString("base64url").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12).padEnd(12, "0")}`;
@@ -171,20 +172,7 @@ export function writeLocalAgentSessions(entry: WorkspaceEntry, data: LocalAgentS
 }
 
 async function withLocalAgentSessionMutation<T>(entry: WorkspaceEntry, fn: () => Promise<T> | T): Promise<T> {
-  const previous = mutationQueues.get(entry.slug) ?? Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const next = previous.catch(() => {}).then(() => gate);
-  mutationQueues.set(entry.slug, next);
-  await previous.catch(() => {});
-  try {
-    return await fn();
-  } finally {
-    release();
-    if (mutationQueues.get(entry.slug) === next) mutationQueues.delete(entry.slug);
-  }
+  return mutationQueue.run(entry.slug, fn);
 }
 
 export function localAgentSessionSidecarConflict(err: unknown): { error: string; details: string } | null {
@@ -609,10 +597,8 @@ export function registerLocalAgentSessionRoutes(web: Hono<AppEnv>): void {
       if (!session) return badRequestPage(ctx.user, "Agent session not found.");
       if (!session.linked_annotations.includes(annotationId))
         return badRequestPage(ctx.user, "Annotation is not linked to this agent session.");
-      const annotations = readLocalAnnotations(entry).annotations;
-      const annotation = annotations[annotationId];
+      const annotation = setLocalAnnotationStatus(entry, annotationId, status);
       if (!annotation) return badRequestPage(ctx.user, "Annotation not found.");
-      if (!setLocalAnnotationStatus(entry, annotationId, status)) return badRequestPage(ctx.user, "Annotation not found.");
       publishLocalAnnotationEvent(c, entry, { action: "updated", id: annotationId, path: annotation.path });
     } catch (err) {
       const conflict = localAnnotationSidecarConflict(err);

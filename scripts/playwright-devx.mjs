@@ -8,9 +8,13 @@ import { loadDotenvDev } from "./lib/env-dev.mjs";
 loadDotenvDev();
 
 const args = process.argv.slice(2);
+const env = { ...process.env };
+if (!("COSHEAF_E2E_RESET" in env) && args.length > 0 && args.every(isReadOnlySpec)) {
+  env.COSHEAF_E2E_RESET = "0";
+}
 const result = spawnSync("pnpm", ["exec", "playwright", "test", ...args], {
   stdio: "inherit",
-  env: process.env,
+  env,
 });
 
 if ((result.status ?? 1) !== 0) summarizeFailures();
@@ -50,4 +54,11 @@ function likelyOwner(text) {
   if (text.includes("web-pages")) return "server/routes/web.ts, public/cosheaf-web.css, tests/e2e/web-pages.spec.ts";
   if (text.includes("smoke")) return "scripts/smoke-manifest.mjs, tests/e2e/smoke.spec.ts";
   return "";
+}
+
+function isReadOnlySpec(arg) {
+  return [
+    "tests/e2e/doc-rail.spec.ts",
+    "tests/e2e/web-settings.spec.ts",
+  ].includes(arg);
 }

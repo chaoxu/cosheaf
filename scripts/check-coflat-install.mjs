@@ -58,6 +58,7 @@ function newestMtime(paths) {
       return;
     }
     if (!stat.isFile()) return;
+    if (isCoflatTestFile(path)) return;
     if (stat.mtimeMs > newest) {
       newest = stat.mtimeMs;
       newestPath = path;
@@ -65,6 +66,10 @@ function newestMtime(paths) {
   };
   for (const path of paths) visit(path);
   return { mtimeMs: newest, path: newestPath };
+}
+
+function isCoflatTestFile(path) {
+  return /\b(?:test|spec)\.[cm]?[jt]sx?$/.test(path);
 }
 
 function digest(dir, rels) {

@@ -187,7 +187,7 @@ describe("issues routes", () => {
 
     fetchMock
       .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
-      .mockResolvedValueOnce(ok([{ id: 456, body: "other", user: { login: "alice" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }]));
+      .mockResolvedValueOnce(ok({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/8", body: "other", user: { login: "alice" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
     const edit = await appFor(db).request("/api/v1/repos/owner/w/issues/7/comments/123", {
       method: "PATCH",
       headers,
@@ -196,12 +196,12 @@ describe("issues routes", () => {
 
     expect(edit.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/comments?page=1&limit=50");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/comments/123");
 
     fetchMock.mockClear();
     fetchMock
       .mockResolvedValueOnce(ok(forgejoIssue(7, "Theorem")))
-      .mockResolvedValueOnce(ok([{ id: 456, body: "other", user: { login: "alice" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }]));
+      .mockResolvedValueOnce(ok({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/8", body: "other", user: { login: "alice" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
     const del = await appFor(db).request("/api/v1/repos/owner/w/issues/7/comments/123", {
       method: "DELETE",
       headers: { authorization: `Bearer ${token}` },
@@ -209,7 +209,7 @@ describe("issues routes", () => {
 
     expect(del.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/7/comments?page=1&limit=50");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/issues/comments/123");
   });
 
   it("edits an issue comment by id through the number-less route", async () => {

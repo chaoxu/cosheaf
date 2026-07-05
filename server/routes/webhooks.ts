@@ -4,9 +4,9 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { notificationChannel, parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
-import { type DocumentFormatId, documentFormatFromTopics } from "../../shared/document-format.js";
+import type { DocumentFormatId } from "../../shared/document-format.js";
 import type { ForgejoIssue } from "../forgejo.js";
-import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "../indexer.js";
+import { deleteCitationFile, deletePage, indexCitationFile, planIndexPage } from "../indexer.js";
 import { invalidateWorkspaceCaches } from "../middleware.js";
 import { bustRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
@@ -140,9 +140,6 @@ webhooks.post("/forgejo", async (c) => {
     );
     return c.json({ ok: true, ignored: "unknown_repo" });
   }
-  const formatId = event === "push" ? await fj.listRepoTopics(owner, repoName).then(documentFormatFromTopics) : undefined;
-  ws.defaultMdFormat = formatId;
-
   let deduped = false;
   await serializeWorkspace(ws.slug, () => withWorkspaceSidecarLock(db, ws.slug, async () => {
     // Claim the delivery id first. Any later failure leaves the dedupe row in
@@ -218,30 +215,26 @@ webhooks.post("/forgejo", async (c) => {
             bodyText: r.body,
           });
         }
-        const indexed: Array<{ path: string; body: string }> = [];
+        const indexed: Array<{ path: string; plan: ReturnType<typeof planIndexPage> }> = [];
         for (const r of results) {
           if (r.error) {
             failures.push(`${r.path}: ${r.error}`);
             continue;
           }
-          indexed.push({ path: r.path, body: r.body });
-          indexPage(db, {
+          const plan = planIndexPage(db, {
             workspaceSlug: ws.slug,
             filePath: r.path,
             bodyText: r.body,
             formatId: ws.defaultMdFormat,
           });
+          indexed.push({ path: r.path, plan });
+          plan.commit();
         }
         if (indexed.length > 1) {
           // First pass makes all page ids/xref targets visible; the second pass
-          // resolves same-push links without depending on Forgejo's path order.
+          // resolves same-push links without reparsing or rewriting FTS/doc rows.
           for (const r of indexed) {
-            indexPage(db, {
-              workspaceSlug: ws.slug,
-              filePath: r.path,
-              bodyText: r.body,
-              formatId: ws.defaultMdFormat,
-            });
+            r.plan.commitBacklinksOnly();
           }
         }
         for (const path of removed) {

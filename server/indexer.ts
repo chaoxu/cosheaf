@@ -25,6 +25,7 @@ export interface IngestPlan {
   title: string | null;
   rewrittenContent: string | null; // non-null if frontmatter needed an injected id
   commit: () => void; // commits sidecar transaction; call only after the canonical write succeeds
+  commitBacklinksOnly: () => void; // second-pass link resolution after all ids/xrefs are visible
 }
 
 // Prepared-statement cache. `better-sqlite3` does not cache by SQL string, so
@@ -45,9 +46,51 @@ function prep(db: Database.Database, sql: string): Database.Statement {
   return s;
 }
 
+function pageExcerpt(body: string, maxLength = 220): string | null {
+  const text = body.replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > maxLength ? `${text.slice(0, maxLength).trimEnd()}…` : text;
+}
+
+function deleteFtsRow(db: Database.Database, workspaceSlug: string, cosheafId: string, ftsRowid?: number | null): void {
+  if (typeof ftsRowid === "number") {
+    prep(db, "DELETE FROM notes_fts WHERE rowid = ?").run(ftsRowid);
+    return;
+  }
+  prep(db, "DELETE FROM notes_fts WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
+}
+
+function replaceBacklinks(
+  db: Database.Database,
+  workspaceSlug: string,
+  cosheafId: string,
+  filePath: string,
+  bodyText: string,
+  links: readonly DocumentLink[],
+): void {
+  prep(db, "DELETE FROM backlinks WHERE workspace_slug = ? AND src_id = ?")
+    .run(workspaceSlug, cosheafId);
+  const insertBacklink = prep(
+    db,
+    "INSERT OR IGNORE INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
+  );
+  for (const link of links) {
+    const targetId = resolveLinkTarget(db, workspaceSlug, filePath, link);
+    insertBacklink.run(
+      workspaceSlug,
+      cosheafId,
+      filePath,
+      targetId,
+      link.raw,
+      link.line ?? lineFromOffset(bodyText, link.from),
+    );
+  }
+}
+
 export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan {
   const format = getDocumentFormat(p.formatId);
   const parsed = format.parseDocument(p.bodyText);
+  const links = format.extractLinks(p.bodyText);
   const fmId = typeof parsed.frontmatter.id === "string" && parsed.frontmatter.id.length > 0
     ? parsed.frontmatter.id
     : null;
@@ -81,6 +124,11 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
       ? parsed.frontmatter.title
       : null;
   const title = explicitTitle ?? format.extractTitle(parsed.body);
+  const excerpt = pageExcerpt(parsed.body);
+
+  const commitBacklinksOnly = db.transaction(() => {
+    replaceBacklinks(db, p.workspaceSlug, cosheafId, p.filePath, p.bodyText, links);
+  });
 
   const commit = db.transaction(() => {
     const stalePath = prep(
@@ -93,23 +141,24 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
 
     const exists = prep(db, "SELECT 1 FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?")
       .get(p.workspaceSlug, cosheafId);
+    const existingDoc = prep(db, "SELECT fts_rowid FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?")
+      .get(p.workspaceSlug, cosheafId) as { fts_rowid: number | null } | undefined;
+    deleteFtsRow(db, p.workspaceSlug, cosheafId, existingDoc?.fts_rowid ?? null);
     if (exists) {
-      prep(db, "UPDATE doc_map SET forgejo_id = ?, title = ? WHERE workspace_slug = ? AND cosheaf_id = ?")
-        .run(p.filePath, title, p.workspaceSlug, cosheafId);
+      prep(db, "UPDATE doc_map SET forgejo_id = ?, title = ?, excerpt = ? WHERE workspace_slug = ? AND cosheaf_id = ?")
+        .run(p.filePath, title, excerpt, p.workspaceSlug, cosheafId);
     } else {
       prep(
         db,
-        "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, created_at) VALUES (?, ?, ?, ?, ?)",
-      ).run(cosheafId, p.workspaceSlug, p.filePath, title, Date.now());
+        "INSERT INTO doc_map (cosheaf_id, workspace_slug, forgejo_id, title, excerpt, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(cosheafId, p.workspaceSlug, p.filePath, title, excerpt, Date.now());
     }
-    prep(db, "DELETE FROM notes_fts WHERE workspace_slug = ? AND cosheaf_id = ?")
-      .run(p.workspaceSlug, cosheafId);
-    prep(
+    const ftsInsert = prep(
       db,
       "INSERT INTO notes_fts (workspace_slug, cosheaf_id, path, title, body) VALUES (?, ?, ?, ?, ?)",
     ).run(p.workspaceSlug, cosheafId, p.filePath, title ?? "", parsed.body);
-    prep(db, "DELETE FROM backlinks WHERE workspace_slug = ? AND src_id = ?")
-      .run(p.workspaceSlug, cosheafId);
+    prep(db, "UPDATE doc_map SET fts_rowid = ? WHERE workspace_slug = ? AND cosheaf_id = ?")
+      .run(ftsInsert.lastInsertRowid, p.workspaceSlug, cosheafId);
     prep(db, "DELETE FROM xref_targets WHERE workspace_slug = ? AND source_path = ?")
       .run(p.workspaceSlug, p.filePath);
     prep(db, "DELETE FROM xref_target_duplicates WHERE workspace_slug = ? AND source_path = ?")
@@ -138,21 +187,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
         target.line,
       );
     }
-    const insertBacklink = prep(
-      db,
-      "INSERT OR IGNORE INTO backlinks (workspace_slug, src_id, src_path, target_id, target_label, line) VALUES (?, ?, ?, ?, ?, ?)",
-    );
-    for (const link of format.extractLinks(p.bodyText)) {
-      const targetId = resolveLinkTarget(db, p.workspaceSlug, p.filePath, link);
-      insertBacklink.run(
-        p.workspaceSlug,
-        cosheafId,
-        p.filePath,
-        targetId,
-        link.raw,
-        link.line ?? lineFromOffset(p.bodyText, link.from),
-      );
-    }
+    replaceBacklinks(db, p.workspaceSlug, cosheafId, p.filePath, p.bodyText, links);
     prep(db, "DELETE FROM page_tags WHERE workspace_slug = ? AND cosheaf_id = ?")
       .run(p.workspaceSlug, cosheafId);
     const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags : [];
@@ -177,7 +212,7 @@ export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan 
     }
   }
 
-  return { cosheafId, title, rewrittenContent: rewritten, commit };
+  return { cosheafId, title, rewrittenContent: rewritten, commit, commitBacklinksOnly };
 }
 
 function lineFromOffset(source: string, offset: number): number {
@@ -272,7 +307,9 @@ export function indexPage(db: Database.Database, p: PageIngest): IngestPlan {
 }
 
 function deletePageRows(db: Database.Database, workspaceSlug: string, cosheafId: string): void {
-  prep(db, "DELETE FROM notes_fts WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
+  const doc = prep(db, "SELECT fts_rowid FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?")
+    .get(workspaceSlug, cosheafId) as { fts_rowid: number | null } | undefined;
+  deleteFtsRow(db, workspaceSlug, cosheafId, doc?.fts_rowid ?? null);
   prep(db, "DELETE FROM backlinks WHERE workspace_slug = ? AND src_id = ?").run(workspaceSlug, cosheafId);
   prep(db, "DELETE FROM page_tags WHERE workspace_slug = ? AND cosheaf_id = ?").run(workspaceSlug, cosheafId);
   prep(db, "DELETE FROM xref_targets WHERE workspace_slug = ? AND source_path IN (SELECT forgejo_id FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?)")

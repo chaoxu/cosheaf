@@ -1,16 +1,13 @@
 import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
+import { ensureSignedIn } from "./auth";
 
 const webBase = defaultWebUrl();
 const repoBase = `${webBase}/chao/flushing-coin`;
 
 async function signIn(page: Page): Promise<void> {
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
   await page.evaluate(() => {
     localStorage.removeItem("cosheaf:left-rail");
     localStorage.removeItem("cosheaf:right-rail");

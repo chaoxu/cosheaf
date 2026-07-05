@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
-import { type DocumentFormatId, documentFormatFromTopics } from "../shared/document-format.js";
+import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../shared/document-format.js";
 import type { Role } from "../shared/roles.js";
 import { type ResolvedApiToken, resolveApiToken } from "./api-tokens.js";
 import type { CollaborationClient } from "./collaboration-client.js";
@@ -148,18 +148,6 @@ export const requireAdminFresh: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
-// Require the caller is workspace `admin` (i.e. Forgejo collaborator with the
-// "owner" / admin role). Uses the cached role from requireMembership — for a
-// fresh re-check on truly destructive ops (merge, delete repo), see
-// `requireAdminFresh`.
-export const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const ws = c.get("workspace");
-  if (ws.role !== "admin") {
-    return c.json({ error: "owner required", code: "forbidden" }, 403);
-  }
-  await next();
-};
-
 // Require the caller has at least `write` (i.e. `write` or `admin`) on the
 // workspace. Read-only members can still hit GET/HEAD routes, but any
 // mutation method is gated here. Uses the cached role from requireMembership.
@@ -232,31 +220,25 @@ export function repoCtxCollab(c: Context<AppEnv>): { collab: CollaborationClient
   return { collab, owner, repo };
 }
 
-// Same TTL discipline as the role cache — format changes propagate quickly
-// enough, and a topic flip is a rare admin action.
-const FORMAT_TTL_MS = AUTH_CACHE_TTL_MS;
-
-// Cached per-workspace markdown format. Cosheaf markdown is Coflat; the cache
-// remains while workspace DTOs still expose the historical format field.
-const FORMAT_CACHE = new TTLCache<string, DocumentFormatId>(FORMAT_TTL_MS);
-
 export function _resetFormatCacheForTests(): void {
-  FORMAT_CACHE.clear();
+  // Historical no-op: Cosheaf markdown is Coflat-only.
 }
 
 export function _seedFormatCacheForTests(owner: string, repo: string, formatId: string): void {
-  FORMAT_CACHE.set(`${owner}/${repo}`, formatId as DocumentFormatId, 60_000);
+  void owner;
+  void repo;
+  void formatId;
 }
 
-// Cached topics lookup shared with the web path.
 export async function resolveWorkspaceFormat(
   fj: Forgejo,
   owner: string,
   repo: string,
 ): Promise<DocumentFormatId> {
-  return FORMAT_CACHE.getOrFetch(`${owner}/${repo}`, async () =>
-    documentFormatFromTopics(await fj.listRepoTopics(owner, repo)),
-  );
+  void fj;
+  void owner;
+  void repo;
+  return COFLAT_FORMAT_ID;
 }
 
 // Cached workspace title (the Forgejo repo description) for the web chrome's
@@ -264,7 +246,7 @@ export async function resolveWorkspaceFormat(
 // description, so the chrome falls back to the owner/repo slug. Web-only — the
 // typed API never needs it — and same 30s TTL as role/format. `getRepo` returns
 // null on a 404, which caches as "" (→ slug fallback).
-const TITLE_CACHE = new TTLCache<string, string>(FORMAT_TTL_MS);
+const TITLE_CACHE = new TTLCache<string, string>(AUTH_CACHE_TTL_MS);
 
 export function _resetTitleCacheForTests(): void {
   TITLE_CACHE.clear();
@@ -290,7 +272,6 @@ export function invalidateWorkspaceCaches(owner: string, repo: string): void {
   for (const key of [...PERM_CACHE.keys()]) {
     if (key.startsWith(rolePrefix)) PERM_CACHE.delete(key);
   }
-  FORMAT_CACHE.delete(`${owner}/${repo}`);
   invalidateWorkspaceTitleCache(owner, repo);
 }
 

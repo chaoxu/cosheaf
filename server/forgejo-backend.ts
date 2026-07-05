@@ -16,6 +16,7 @@ import {
   type WsCreateBranch,
   type WsDeleteFile,
   type WsFileMeta,
+  type WsFileRead,
   type WsFileWrite,
   type WsPull,
   type WsPutFile,
@@ -47,6 +48,12 @@ async function tx<T>(thunk: () => Promise<T>): Promise<T> {
   }
 }
 
+function decodeForgejoContent(content: string | undefined, encoding: string | undefined): string | null {
+  if (!content) return null;
+  if (encoding && encoding !== "base64") return null;
+  return Buffer.from(content.replace(/\s+/g, ""), "base64").toString("utf8");
+}
+
 export class ForgejoWorkspaceBackend implements WorkspaceBackend {
   constructor(private fj: Forgejo) {}
 
@@ -64,6 +71,19 @@ export class ForgejoWorkspaceBackend implements WorkspaceBackend {
 
   getFileMeta(owner: string, repo: string, ref: string, filepath: string): Promise<WsFileMeta | null> {
     return tx(() => this.fj.getFileMeta(owner, repo, ref, filepath));
+  }
+
+  async readFile(owner: string, repo: string, ref: string, filepath: string): Promise<WsFileRead | null> {
+    return tx(async () => {
+      const meta = await this.fj.getFileMeta(owner, repo, ref, filepath);
+      if (!meta) return null;
+      const content = decodeForgejoContent(meta.content, meta.encoding);
+      if (content === null) {
+        const raw = await this.fj.getRawFile(owner, repo, ref, filepath);
+        return { sha: meta.sha, size: meta.size ?? Buffer.byteLength(raw, "utf8"), content: raw };
+      }
+      return { sha: meta.sha, size: meta.size ?? Buffer.byteLength(content, "utf8"), content };
+    });
   }
 
   putFile(owner: string, repo: string, opts: WsPutFile): Promise<WsFileWrite> {
@@ -98,8 +118,8 @@ export class ForgejoWorkspaceBackend implements WorkspaceBackend {
     return tx(() => this.fj.getRepo(owner, repo));
   }
 
-  listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<WsPull[]> {
-    return tx(() => this.fj.listPulls(owner, repo, state));
+  listPulls(owner: string, repo: string, state: "open" | "closed" | "all", opts: { limit?: number } = {}): Promise<WsPull[]> {
+    return tx(() => this.fj.listPulls(owner, repo, { state, limit: opts.limit }));
   }
 
   async getCommit(owner: string, repo: string, sha: string): Promise<WsCommit | null> {

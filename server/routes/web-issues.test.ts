@@ -161,9 +161,7 @@ describe("web issue routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/issues/7", () => Response.json(forgejoIssue()));
-        forge.get("/api/v1/repos/owner/w/issues/7/comments", () =>
-          Response.json([{ id: 456, body: "other", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }]),
-        );
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/8", body: "other", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.patch("/api/v1/repos/owner/w/issues/comments/123", () => {
           edited = true;
           return Response.json({ id: 123, body: "updated" });
@@ -190,9 +188,7 @@ describe("web issue routes", () => {
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
         forge.get("/api/v1/repos/owner/w/issues/7", () => Response.json(forgejoIssue()));
-        forge.get("/api/v1/repos/owner/w/issues/7/comments", () =>
-          Response.json([{ id: 456, body: "other", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }]),
-        );
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/8", body: "other", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.delete("/api/v1/repos/owner/w/issues/comments/123", () => {
           deleted = true;
           return new Response(null, { status: 204 });

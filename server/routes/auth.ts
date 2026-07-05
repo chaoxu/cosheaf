@@ -7,7 +7,7 @@ import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { deleteCookie, getCookie } from "hono/cookie";
 import { deleteApiToken, mintApiToken } from "../api-tokens.js";
-import { AUTH_COOKIE, bearerToken, invalidateBearerCache, resolveAuth } from "../middleware.js";
+import { AUTH_COOKIE, bearerToken, invalidateBearerCache, requireAuth, resolveAuth } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { bad, unauthorized } from "./responses.js";
 import { rejectCrossOriginMutation, setAuthCookie } from "./web-context.js";
@@ -323,6 +323,14 @@ auth.post("/logout", (c) => {
 });
 
 auth.get("/version", (c) => c.json({ version: "cosheaf" }));
+
+auth.get("/users/search", requireAuth, async (c) => {
+  const q = c.req.query("q")?.trim() ?? "";
+  const rawLimit = Number(c.req.query("limit") ?? 10);
+  const limit = Number.isInteger(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 10;
+  const users = q ? await c.get("fjUser").searchUsers(q, limit) : [];
+  return c.json({ users: users.map((user) => ({ login: user.login })).filter((user) => user.login) });
+});
 
 auth.get("/user", async (c) => {
   const a = await resolveAuth(c);

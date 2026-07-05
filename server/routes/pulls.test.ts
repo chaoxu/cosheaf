@@ -1434,22 +1434,6 @@ describe("pulls + branches routes", () => {
   });
 
   describe("line comments", () => {
-    const reviewComment = (overrides: Record<string, unknown> = {}) => ({
-      id: 123,
-      pull_request_review_id: 9,
-      path: "new.md",
-      body: "note",
-      position: 1,
-      original_position: 1,
-      commit_id: "c",
-      original_commit_id: "c",
-      diff_hunk: "",
-      user: { id: 2, login: "bob" },
-      created_at: "2026-05-20T00:00:00Z",
-      updated_at: "2026-05-20T00:00:00Z",
-      ...overrides,
-    });
-
     it("does not hide Forgejo failures as an empty comments list", async () => {
       const db = freshDb();
       seedWorkspace(db);
@@ -1491,7 +1475,8 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       let editedBody: unknown = null;
       fetchMock.mockImplementation(fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment()]));
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ number: 7, state: "open", merged: false, head: { ref: "head" }, base: { ref: "main" }, labels: [] }));
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/7", body: "note", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.patch("/api/v1/repos/owner/w/issues/comments/123", async (c) => {
           editedBody = await c.req.json();
           return Response.json({ id: 123, body: "updated" });
@@ -1514,7 +1499,8 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       let edited = false;
       fetchMock.mockImplementation(fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ id: 456 })]));
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ number: 7, state: "open", merged: false, head: { ref: "head" }, base: { ref: "main" }, labels: [] }));
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/8", body: "note", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.patch("/api/v1/repos/owner/w/issues/comments/123", () => {
           edited = true;
           return Response.json({ id: 123, body: "updated" });
@@ -1537,7 +1523,8 @@ describe("pulls + branches routes", () => {
       const token = seedUser(db, 1, "alice", "write");
       let deleted = false;
       fetchMock.mockImplementation(fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ pull_request_review_id: 9 })]));
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ number: 7, state: "open", merged: false, head: { ref: "head" }, base: { ref: "main" }, labels: [] }));
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/7", body: "note", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.delete("/api/v1/repos/owner/w/pulls/7/reviews/9/comments/123", () => {
           deleted = true;
           return new Response(null, { status: 204 });
@@ -1557,12 +1544,12 @@ describe("pulls + branches routes", () => {
       const db = freshDb();
       seedWorkspace(db);
       const token = seedUser(db, 1, "alice", "write");
-      let deleted = false;
+      const deleted = false;
       fetchMock.mockImplementation(fakeForgejo((forge) => {
-        forge.get("/api/v1/repos/owner/w/pulls/7/comments", () => Response.json([reviewComment({ pull_request_review_id: 9 })]));
+        forge.get("/api/v1/repos/owner/w/pulls/7", () => Response.json({ number: 7, state: "open", merged: false, head: { ref: "head" }, base: { ref: "main" }, labels: [] }));
+        forge.get("/api/v1/repos/owner/w/issues/comments/123", () => Response.json({ id: 123, issue_url: "http://forgejo.test/owner/w/issues/7", body: "note", user: { login: "bob" }, created_at: "2026-05-20T00:00:00Z", updated_at: "2026-05-20T00:00:00Z" }));
         forge.delete("/api/v1/repos/owner/w/pulls/7/reviews/11/comments/123", () => {
-          deleted = true;
-          return new Response(null, { status: 204 });
+          return new Response(null, { status: 404 });
         });
       }));
 
@@ -1571,7 +1558,7 @@ describe("pulls + branches routes", () => {
         headers: { authorization: `Bearer ${token}` },
       });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(404);
       expect(deleted).toBe(false);
     });
   });

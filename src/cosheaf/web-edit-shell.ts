@@ -350,9 +350,10 @@ function ensureEditor(host: HTMLElement, state: WorkbenchState): Promise<WebEdit
   const root = editorRoot(host);
   if (!root) return Promise.resolve(null);
   state.editorReady = (async () => {
+    const editorModule = import("./web-editor");
     const fastRead = await state.fastReadReady;
     fastRead?.dispose();
-    const mod: typeof import("./web-editor") = await import("./web-editor");
+    const mod: typeof import("./web-editor") = await editorModule;
     const mount = mod.mountWebEditor(root, {
       onDirtyChange: (dirty) => {
         host.dataset.dirty = dirty ? "1" : "0";
@@ -435,15 +436,15 @@ if (host) {
   if (urlSourcePosition) state.sourcePosition = urlSourcePosition;
   setVisibleMode(host, mode);
   setUrlMode(mode, true, { keepSourceAnchor: Boolean(urlSourcePosition) });
-  void ensureFastRead(host, state).then(() => {
-    if (mode === "read") {
+  if (mode === "read") {
+    void ensureFastRead(host, state).then(() => {
       applyFastSourcePosition(host, state.sourcePosition);
-      return;
-    }
+    });
+  } else {
     void ensureEditor(host, state).then((mount) => {
       if (!mount) return;
       mount.setReadOnly(false);
       applyEditorSourcePosition(mount, state.sourcePosition);
     });
-  });
+  }
 }

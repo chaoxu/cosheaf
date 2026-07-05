@@ -73,6 +73,7 @@ export interface IssueDetail {
 
 export interface IssueComment {
   id: number;
+  issue_number?: number;
   body: string;
   author_username: string;
   author?: UserRef;

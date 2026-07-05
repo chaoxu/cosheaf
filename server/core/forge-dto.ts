@@ -90,8 +90,10 @@ export function forgeIssueToDetail(i: ForgejoIssue): IssueDetail {
 }
 
 export function forgeIssueCommentToDto(cm: ForgejoIssueComment): IssueComment {
+  const issueNumber = cm.issue_url?.match(/\/issues\/(\d+)(?:$|[?#/])/)?.[1];
   return {
     id: cm.id,
+    ...(issueNumber ? { issue_number: Number(issueNumber) } : {}),
     body: cm.body,
     author_username: userLogin(cm.user),
     author: userRef(cm.user),
@@ -216,10 +218,6 @@ export function forgeReviewToDto(r: ForgejoReview): ReviewDto {
     comment: r.body || null,
     created_at: toEpochMs(r.submitted_at),
   };
-}
-
-export function forgePullFileToStatus(file: ForgejoPullFile): PrFileStatus {
-  return normalizePrFileStatus(file.status);
 }
 
 export function forgePullFileToDto(file: ForgejoPullFile, patch = ""): PrFile {

@@ -199,6 +199,10 @@ export class OriginCollaborationClient {
     return r.comments ?? [];
   }
 
+  async getIssueComment(owner: string, repo: string, id: number): Promise<IssueComment> {
+    return this.get<IssueComment>(this.repoPath(owner, repo, `/issues/comments/${id}`));
+  }
+
   async listIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineEvent[]> {
     const r = await this.get<{ events: TimelineEvent[] }>(this.repoPath(owner, repo, `/issues/${number}/timeline`));
     return r.events ?? [];
@@ -277,6 +281,14 @@ export class OriginCollaborationClient {
       });
     }
     return detail ?? this.getIssue(owner, repo, number);
+  }
+
+  async setIssueState(owner: string, repo: string, number: number, state: "open" | "closed"): Promise<"open" | "closed"> {
+    const r = await this.patch<{ state: "open" | "closed" }>(
+      this.repoPath(owner, repo, `/issues/${number}/state`),
+      { state },
+    );
+    return r.state;
   }
 
   async createIssueComment(owner: string, repo: string, number: number, body: string): Promise<IssueComment> {
@@ -479,6 +491,10 @@ export class OriginCollaborationClient {
     return fetched;
   }
 
+  async setPullState(owner: string, repo: string, index: number, state: "open" | "closed"): Promise<void> {
+    await this.post(this.repoPath(owner, repo, `/pulls/${index}/${state === "closed" ? "close" : "reopen"}`), {});
+  }
+
   async mergePull(
     owner: string,
     repo: string,
@@ -612,12 +628,20 @@ export class OriginCollaborationClient {
   }
 
   async searchUsers(query: string, limit = 10): Promise<Array<{ login: string }>> {
+    const searched = await this.get<{ users?: Array<{ login: string }> }>("/api/v1/users/search", { q: query, limit }).catch((err) => {
+      if (err instanceof RemoteCosheafError && err.status === 404) return null;
+      throw err;
+    });
+    if (searched) return (searched.users ?? []).slice(0, limit);
+
     const needle = query.toLowerCase();
     const repos: { workspaces?: Array<{ owner?: string; repo?: string }> } = await this.get<{ workspaces?: Array<{ owner?: string; repo?: string }> }>("/api/v1/workspaces").catch(() => ({}));
     const seen = new Set<string>();
-    for (const workspace of repos.workspaces ?? []) {
-      if (!workspace.owner || !workspace.repo) continue;
-      const collaborators = await this.listCollaborators(workspace.owner, workspace.repo).catch(() => []);
+    const workspaces = (repos.workspaces ?? []).filter((workspace) => workspace.owner && workspace.repo).slice(0, 8);
+    const collaboratorSets = await Promise.all(
+      workspaces.map((workspace) => this.listCollaborators(workspace.owner as string, workspace.repo as string).catch(() => [])),
+    );
+    for (const collaborators of collaboratorSets) {
       for (const collaborator of collaborators) {
         if (collaborator.login.toLowerCase().includes(needle)) seen.add(collaborator.login);
       }

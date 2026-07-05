@@ -659,17 +659,24 @@ export class Forgejo {
       labels?: number[];
       milestone?: number;
       poster?: string;
+      limit?: number;
       sort?: "oldest" | "recentupdate" | "recentclose" | "leastupdate" | "mostcomment" | "leastcomment" | "priority";
     } | "open" | "closed" | "all" = {},
   ): Promise<ForgejoPull[]> {
     const options = typeof opts === "string" ? { state: opts } : opts;
-    return this.pagedList<ForgejoPull>(this.repoPath(owner, repo, `pulls`), {
+    const query = {
       state: options.state ?? "open",
       sort: options.sort ?? "recentupdate",
       milestone: options.milestone,
       poster: options.poster,
       labels: options.labels?.join(","),
-    });
+    };
+    if (options.limit && options.limit > 0) {
+      return this.req<ForgejoPull[]>(this.repoPath(owner, repo, `pulls`), {
+        query: { ...query, page: 1, limit: options.limit },
+      });
+    }
+    return this.pagedList<ForgejoPull>(this.repoPath(owner, repo, `pulls`), query);
   }
 
   async editPull(owner: string, repo: string, index: number, patch: { title?: string; body?: string; state?: "open" | "closed"; labels?: number[]; milestone?: number }): Promise<ForgejoPull> {
@@ -898,6 +905,10 @@ export class Forgejo {
 
   async listIssueComments(owner: string, repo: string, number: number): Promise<ForgejoIssueComment[]> {
     return this.pagedList<ForgejoIssueComment>(this.repoPath(owner, repo, `issues/${number}/comments`));
+  }
+
+  async getIssueComment(owner: string, repo: string, id: number): Promise<ForgejoIssueComment> {
+    return this.req<ForgejoIssueComment>(this.repoPath(owner, repo, `issues/comments/${id}`));
   }
 
   async createIssueComment(

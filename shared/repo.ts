@@ -7,11 +7,3 @@ export interface RepoCollaborator {
   login: string;
   permission: string | null;
 }
-
-export interface RepoCollaborators {
-  collaborators: RepoCollaborator[];
-}
-
-export interface RepoTopics {
-  topics: string[];
-}

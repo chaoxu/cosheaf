@@ -1,5 +1,4 @@
 import DOMPurify from "dompurify";
-import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml";
 
 export const REF_PAGE_CLASS = "cosheaf-ref-page";
 export const REF_BUTTON_CLASS = "cosheaf-ref-button";
@@ -11,10 +10,6 @@ export const REF_BUTTON_CLASS = "cosheaf-ref-button";
 const BARE_REF_RE =
   /(^|[\s(])([\w./-]+\.md(?:#L\d+(?:-\d+)?|#[\w-]+)?|#\d+)(?=\b|[\s).,;:!?]|$)/g;
 
-export function sanitizeAndRewriteRefs(rendered: string): string {
-  return fragmentToHtml(sanitizeAndRewriteRefsFragment(rendered));
-}
-
 export function sanitizeAndRewriteRefsFragment(rendered: string): DocumentFragment {
   const fragment = DOMPurify.sanitize(rendered, {
     RETURN_DOM_FRAGMENT: true,
@@ -24,19 +19,6 @@ export function sanitizeAndRewriteRefsFragment(rendered: string): DocumentFragme
   rewriteRefsInFragment(fragment);
   injectPageRefTestIds(fragment);
   return fragment;
-}
-
-export function plainTextToRefHtml(text: string): string {
-  const fragment = document.createDocumentFragment();
-  fragment.append(document.createTextNode(parseFrontmatterYaml(text).body));
-  rewriteRefsInFragment(fragment);
-  return fragmentToHtml(fragment);
-}
-
-function fragmentToHtml(fragment: DocumentFragment): string {
-  const host = document.createElement("div");
-  host.append(fragment);
-  return host.innerHTML;
 }
 
 function rewriteRefsInFragment(root: DocumentFragment): void {

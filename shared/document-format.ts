@@ -19,10 +19,6 @@ export function normalizeDocumentFormatId(value: unknown): DocumentFormatId {
 // as a Cosheaf/Coflat workspace, but there is no selectable Markdown mode.
 const FORMAT_TOPIC_PREFIX = "cosheaf-format-";
 
-export function topicForDocumentFormat(id: DocumentFormatId): string {
-  return `${FORMAT_TOPIC_PREFIX}${id}`;
-}
-
 export function documentFormatFromTopics(topics: readonly string[]): DocumentFormatId {
   void topics;
   return COFLAT_FORMAT_ID;

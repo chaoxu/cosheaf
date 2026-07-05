@@ -1,10 +1,14 @@
-// Reset the dev workspace + seed a fresh in-review PR before each test
-// run, so e2e specs don't accumulate files in the Forgejo repo across runs.
+// Reset the dev workspace + seed a fresh in-review PR for full e2e runs.
+// Focused read-only specs may set COSHEAF_E2E_RESET=0; the setup still writes
+// a reusable authenticated storage state so specs do not have to log in via UI.
 
 import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
 
 const webBase = defaultWebUrl();
+const authStatePath = process.env.COSHEAF_E2E_STORAGE_STATE ?? ".playwright/cosheaf-chao-state.json";
 
 function run(label: string, cmd: string, args: string[]): void {
   const r = spawnSync(cmd, args, { stdio: "inherit", cwd: process.cwd() });
@@ -12,9 +16,12 @@ function run(label: string, cmd: string, args: string[]): void {
 }
 
 export default async function globalSetup(): Promise<void> {
-  run("workspace rm", "pnpm", ["cli", "workspace", "rm", "chao/flushing-coin"]);
-  run("setup:dev:review", "pnpm", ["setup:dev:review"]);
-  await seedReviewablePr();
+  if (process.env.COSHEAF_E2E_RESET !== "0") {
+    run("workspace rm", "pnpm", ["cli", "workspace", "rm", "chao/flushing-coin"]);
+    run("setup:dev:review", "pnpm", ["setup:dev:review"]);
+    await seedReviewablePr();
+  }
+  await writeAuthStorageState();
 }
 
 async function loginForPat(username: string, password: string): Promise<string> {
@@ -76,4 +83,36 @@ async function seedReviewablePr(): Promise<void> {
     );
     if (!cmt.ok) throw new Error(`seedReviewablePr comment ${comment.path}: ${cmt.status}`);
   }
+}
+
+async function writeAuthStorageState(): Promise<void> {
+  let pat: string;
+  try {
+    pat = await loginForPat("chao", "Cosheaf123!");
+  } catch (error) {
+    if (process.env.COSHEAF_E2E_RESET === "0") {
+      run("setup:dev:review", "pnpm", ["setup:dev:review"]);
+      pat = await loginForPat("chao", "Cosheaf123!");
+    } else {
+      throw error;
+    }
+  }
+  const url = new URL(webBase);
+  mkdirSync(path.dirname(authStatePath), { recursive: true });
+  writeFileSync(authStatePath, JSON.stringify({
+    cookies: [{
+      name: "cosheaf_pat",
+      value: pat,
+      domain: url.hostname,
+      path: "/",
+      expires: -1,
+      httpOnly: true,
+      secure: url.protocol === "https:",
+      sameSite: "Lax",
+    }],
+    origins: [{
+      origin: url.origin,
+      localStorage: [],
+    }],
+  }, null, 2));
 }

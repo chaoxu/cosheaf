@@ -12,9 +12,6 @@ import type {
   EditorScrollToSourcePositionOptions,
 } from "@chaoxu/coflat";
 import {
-  formatUploadedAssetMarkdown,
-} from "@chaoxu/coflat";
-import {
   createReaderCitationClusterPreviewBody,
   type DocumentContext,
   type FileEntry,
@@ -30,7 +27,6 @@ import { type AssetPreviewPaths, pdfDisplaySuffix, previewAssetPath } from "../.
 import {
   userBranchPrefix,
 } from "../../shared/conventions";
-import { DEFAULT_DOCUMENT_FORMAT_ID, type DocumentFormatId } from "../../shared/document-format";
 import {
   documentRailModel,
 } from "../../shared/document-rail";
@@ -42,6 +38,7 @@ import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
 import {
   LOCAL_ANNOTATION_CLICK_EVENT,
+  coflatDocumentContextSignature,
   loadCoflatDocumentContext,
   localAnnotationIdFromRef,
 } from "./coflat-document-context";
@@ -75,7 +72,6 @@ interface EditorConfig {
   readBranch: string;
   username: string;
   role: "admin" | "write" | "read";
-  formatId: DocumentFormatId;
   baseSha: string | null;
   sourceSha: string | null;
   resetEditBranch: boolean;
@@ -199,7 +195,6 @@ function readConfig(): { config: EditorConfig; content: string } {
       readBranch: mount.dataset.readBranch ?? "main",
       username: mount.dataset.username ?? "",
       role: (mount.dataset.role ?? "read") as EditorConfig["role"],
-      formatId: (mount.dataset.formatId as DocumentFormatId) ?? DEFAULT_DOCUMENT_FORMAT_ID,
       baseSha: mount.dataset.baseSha || null,
       sourceSha: mount.dataset.sourceSha || null,
       resetEditBranch: mount.dataset.resetEditBranch === "1",
@@ -291,6 +286,9 @@ function WebEditor({
   const ignoredChangeTimersRef = useRef<number[]>([]);
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
   const contextLoadedRef = useRef(false);
+  const contextSignatureRef = useRef<string | null>(null);
+  const documentContextRef = useRef<DocumentContext | null>(null);
+  const documentContextLoadRef = useRef<{ signature: string; promise: Promise<DocumentContext> } | null>(null);
   const localAnnotationsEnabled = config.writeMode === "direct";
   const suggestingEnabled = config.writeMode === "direct";
   branchRef.current = branch;
@@ -347,8 +345,8 @@ function WebEditor({
     sourceCacheRef.current.reset(next);
     setContent(next);
     setContextSource(next);
-    setSuggestingSource(next);
-  }, []);
+    if (suggestingEnabled && suggestingBase) setSuggestingSource(next);
+  }, [suggestingBase, suggestingEnabled]);
 
   const scheduleContextSourceSync = useCallback(() => {
     if (contextSourceTimerRef.current !== null) window.clearTimeout(contextSourceTimerRef.current);
@@ -370,11 +368,11 @@ function WebEditor({
     // The document-context source is refreshed from an incremental Text cache
     // after typing pauses, without calling editor.getDoc().
     sourceCacheRef.current.apply(change);
-    setSuggestingSource(sourceCacheRef.current.source());
+    if (suggestingEnabled && suggestingBase) setSuggestingSource(sourceCacheRef.current.source());
     scheduleContextSourceSync();
     setUncommitted(true);
     setSaveError(null);
-  }, [scheduleContextSourceSync]);
+  }, [scheduleContextSourceSync, suggestingBase, suggestingEnabled]);
 
   useEffect(
     () => () => {
@@ -437,6 +435,7 @@ function WebEditor({
         currentSha: base.current_sha,
       };
       setSuggestingBase(next);
+      setSuggestingSource(sourceCacheRef.current.source());
       setAcceptedSuggestingHunks(new Set());
       setSuggestingError(null);
       return next;
@@ -528,8 +527,6 @@ function WebEditor({
 
   useEffect(() => {
     let cancelled = false;
-    if (!contextLoadedRef.current) setDocumentContextReady(false);
-    const sourceVersion = sourceCacheRef.current.version();
     const payload = {
       source: contextSource,
       owner: config.owner,
@@ -542,11 +539,27 @@ function WebEditor({
       ...(config.bibliography ? { bibliography: config.bibliography } : {}),
       ...(config.csl ? { csl: config.csl } : {}),
     };
-    void loadCoflatDocumentContext(payload).then((ctx) => {
-      if (cancelled || !sourceCacheRef.current.isCurrent(sourceVersion)) return;
+    const signature = coflatDocumentContextSignature(payload);
+    if (contextSignatureRef.current === signature && documentContextRef.current) {
+      setDocumentContextReady(true);
+      return;
+    }
+    contextSignatureRef.current = signature;
+    setDocumentContextReady(false);
+    let load = documentContextLoadRef.current?.signature === signature
+      ? documentContextLoadRef.current.promise
+      : null;
+    if (!load) {
+      load = loadCoflatDocumentContext(payload);
+      documentContextLoadRef.current = { signature, promise: load };
+    }
+    void load.then((ctx) => {
+      if (cancelled || contextSignatureRef.current !== signature) return;
       setDocumentContext(ctx);
+      documentContextRef.current = ctx;
       contextLoadedRef.current = true;
       setDocumentContextReady(true);
+      if (documentContextLoadRef.current?.signature === signature) documentContextLoadRef.current = null;
     });
     return () => {
       cancelled = true;
@@ -593,9 +606,21 @@ function WebEditor({
       queued = true;
       window.requestAnimationFrame(reconcile);
     };
+    const refSelector = "[data-ref-key], .cf-citation";
+    const nodeMayContainRefs = (node: Node): boolean => {
+      if (!(node instanceof HTMLElement)) return false;
+      return node.matches(refSelector) || Boolean(node.querySelector(refSelector));
+    };
     schedule();
-    const observer = new MutationObserver(schedule);
-    observer.observe(root, { childList: true, subtree: true });
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) =>
+        (mutation.type === "attributes" && nodeMayContainRefs(mutation.target)) ||
+        [...mutation.addedNodes].some(nodeMayContainRefs)
+      )) {
+        schedule();
+      }
+    });
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-ref-key"] });
     return () => {
       observer.disconnect();
       cleanupHoverPreviews();
@@ -651,7 +676,7 @@ function WebEditor({
         return display ? `${url}${pdfDisplaySuffix(assetPath)}` : url;
       },
     };
-  }, [config.assetPreviewPaths, config.branch, config.formatId, config.owner, config.repo]);
+  }, [config.assetPreviewPaths, config.branch, config.owner, config.repo]);
 
   // Autosave (#162): persist the in-progress source to a local draft. No
   // network, no commit, no branch creation — so it can never clobber the
@@ -871,6 +896,7 @@ function WebEditor({
       try {
         const writeBranch = branchForWrite();
         const snippets: string[] = [];
+        const { formatUploadedAssetMarkdown } = await import("@chaoxu/coflat");
         for (const file of picked) {
           const rejection = sizeAssetRejection(file);
           if (rejection?.reject) {
@@ -1265,19 +1291,26 @@ function WebEditor({
   // branch actions are hidden entirely.
   const branchActions = config.canOpenPull && branch && branch !== "main";
   const canDiscardDefaultEditBranch = branchExists && branch === `${userBranchPrefix(config.username)}web-edit`;
-  const railModel = documentRailModel({
-    mode: "edit",
-    readHref,
-    editHref: window.location.href,
-    controls: false,
-    outline: outline.map((entry) => ({
+  const railOutline = useMemo(
+    () => outline.map((entry) => ({
       key: entry.key,
       level: entry.level,
       label: entry.markdown,
       html: (entry as OutlineEntry & { html?: string }).html,
       line: entry.line,
     })),
-  });
+    [outline],
+  );
+  const railModel = useMemo(
+    () => documentRailModel({
+      mode: "edit",
+      readHref,
+      editHref: window.location.href,
+      controls: false,
+      outline: railOutline,
+    }),
+    [railOutline, readHref],
+  );
 
   useEffect(() => {
     const rail = railRef.current;

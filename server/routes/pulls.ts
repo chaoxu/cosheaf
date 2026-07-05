@@ -27,7 +27,6 @@
 // Branches live in routes/branches.ts.
 
 import { type Context, Hono, type MiddlewareHandler } from "hono";
-import type { LineComment } from "../../shared/comments.js";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { RepoCollaborator } from "../../shared/repo.js";
 import type { MergeFailure, MergeFailureReason, PrMeta, PrState, ReviewDto } from "../../shared/review.js";
@@ -90,13 +89,7 @@ function teaPullShape(pull: PrMeta) {
 }
 
 // Latest-per-user approval count, ignoring older reviews from the same user.
-async function approvalCounts(
-  collab: CollaborationClient,
-  owner: string,
-  repo: string,
-  prNumber: number,
-): Promise<{ approvals: number; rejections: number }> {
-  const reviews = await collab.listReviews(owner, repo, prNumber);
+function approvalCountsFromReviews(reviews: readonly ReviewDto[]): { approvals: number; rejections: number } {
   const latestByUser = new Map<string, ReviewDto>();
   const ordered = [...reviews].sort((a, b) => {
     const at = a.created_at;
@@ -122,6 +115,15 @@ async function approvalCounts(
     else if (r.decision === "request_changes") rejections++;
   }
   return { approvals, rejections };
+}
+
+async function approvalCounts(
+  collab: CollaborationClient,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<{ approvals: number; rejections: number }> {
+  return approvalCountsFromReviews(await collab.listReviews(owner, repo, prNumber));
 }
 
 // Forgejo can return 405 "try again later" right after an approve lands and
@@ -439,7 +441,7 @@ pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
   const { collab, owner, repo } = repoCtxCollab(c);
-  await collab.editPull(owner, repo, n, { state: "closed" });
+  await collab.setPullState(owner, repo, n, "closed");
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "closed" });
   return c.json({ ok: true });
 });
@@ -449,7 +451,7 @@ pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
   if (n === null) return c.json(...bad("bad pull number"));
   const ws = c.get("workspace");
   const { collab, owner, repo } = repoCtxCollab(c);
-  await collab.editPull(owner, repo, n, { state: "open" });
+  await collab.setPullState(owner, repo, n, "open");
   c.get("sse").publish(ws.slug, { type: "pull", number: n, action: "reopened" });
   return c.json({ ok: true });
 });
@@ -484,9 +486,12 @@ pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
     return c.json(...bad("side must be base or head"));
   const { backend } = c.get("repoCtx");
   const { collab, owner, repo } = repoCtxCollab(c);
-  const pull = await collab.getPull(owner, repo, n);
+  const [pull, previousPath] = await Promise.all([
+    collab.getPull(owner, repo, n),
+    side === "base" ? previousPathFor(collab, owner, repo, n, path) : Promise.resolve(undefined),
+  ]);
   if (!pull) return c.json(...notFound());
-  const file = { path, previous_path: side === "base" ? await previousPathFor(collab, owner, repo, n, path) : undefined };
+  const file = { path, previous_path: previousPath };
   const read = prSideRefAndPath(pull, file, side);
   try {
     const content = await backend.getRawFile(owner, repo, read.ref, read.path);
@@ -546,7 +551,7 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
         (r.decision === "pending" && r.username === me),
     )
     .map((r) => r);
-  const counts = await approvalCounts(collab, owner, repo, n);
+  const counts = approvalCountsFromReviews(reviews);
   return c.json({ reviews: out, approvals: counts.approvals, rejections: counts.rejections });
 });
 
@@ -662,17 +667,6 @@ async function resolveLinePosition(
   return pos;
 }
 
-async function requirePullComment(
-  collab: CollaborationClient,
-  owner: string,
-  repo: string,
-  pullNumber: number,
-  commentId: number,
-): Promise<LineComment | null> {
-  const comments = await collab.listPullComments(owner, repo, pullNumber);
-  return comments.find((comment) => comment.id === commentId) ?? null;
-}
-
 pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
   const n = parsePositiveIntId(c.req.param("n"));
   if (n === null) return c.json(...bad("bad pull number"));
@@ -721,9 +715,16 @@ pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
   const { collab, owner, repo } = repoCtxCollab(c);
-  const comment = await requirePullComment(collab, owner, repo, n, cid);
-  if (!comment) return c.json(...notFound("comment not found"));
-  await collab.editIssueComment(owner, repo, cid, text);
+  const pull = await collab.getPull(owner, repo, n);
+  if (!pull) return c.json(...notFound());
+  try {
+    const comment = await collab.getIssueComment(owner, repo, cid);
+    if (comment.issue_number !== undefined && comment.issue_number !== n) return c.json(...notFound("comment not found"));
+    await collab.editIssueComment(owner, repo, cid, text);
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("comment not found"));
+    throw err;
+  }
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
 });
@@ -736,10 +737,16 @@ pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
   if (cid === null) return c.json(...bad("bad comment id"));
   if (rid === null) return c.json(...bad("bad review id"));
   const { collab, owner, repo } = repoCtxCollab(c);
-  const comment = await requirePullComment(collab, owner, repo, n, cid);
-  if (!comment) return c.json(...notFound("comment not found"));
-  if (comment.review_id !== rid) return c.json(...bad("review id does not match comment"));
-  await collab.deleteReviewComment(owner, repo, n, rid, cid);
+  const pull = await collab.getPull(owner, repo, n);
+  if (!pull) return c.json(...notFound());
+  try {
+    const comment = await collab.getIssueComment(owner, repo, cid);
+    if (comment.issue_number !== undefined && comment.issue_number !== n) return c.json(...notFound("comment not found"));
+    await collab.deleteReviewComment(owner, repo, n, rid, cid);
+  } catch (err) {
+    if (is404(err)) return c.json(...notFound("comment not found"));
+    throw err;
+  }
   c.get("sse").publish(c.get("workspace").slug, { type: "pull", number: n, action: "commented" });
   return c.json({ ok: true });
 });

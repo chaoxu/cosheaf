@@ -1,5 +1,4 @@
 import type { ForgejoLabel } from "../forgejo-types.js";
-export { toLabel } from "../core/forge-dto.js";
 
 type LabelLike = Pick<ForgejoLabel, "id" | "name"> & Partial<Pick<ForgejoLabel, "exclusive" | "is_archived">> & { scope?: string | null };
 

@@ -250,7 +250,6 @@ describe("requireMembership", () => {
     invalidateWorkspaceCaches("owner", "w");
     fetchMock
       .mockResolvedValueOnce(ok({ permission: "read" }))
-      .mockResolvedValueOnce(ok({ topics: [] }))
       .mockResolvedValueOnce(ok({ description: "New title" }));
 
     const res = await appFor(db).request("/repos/owner/w/probe", {
@@ -261,10 +260,9 @@ describe("requireMembership", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, role: "read" });
     expect(title).toBe("New title");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/collaborators/alice/permission");
-    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w/topics");
-    expect(String(fetchMock.mock.calls[2][0])).toBe("http://forgejo.test/api/v1/repos/owner/w");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("http://forgejo.test/api/v1/repos/owner/w");
   });
 });
 

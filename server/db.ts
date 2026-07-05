@@ -313,12 +313,14 @@ function migrateDropWorkspacesTable(db: Database.Database): void {
           workspace_slug TEXT NOT NULL,
           forgejo_id TEXT NOT NULL,
           title TEXT,
+          excerpt TEXT,
+          fts_rowid INTEGER,
           created_at INTEGER NOT NULL,
           PRIMARY KEY (workspace_slug, cosheaf_id),
           UNIQUE (workspace_slug, forgejo_id)
         );
-        INSERT INTO doc_map_new (cosheaf_id, workspace_slug, forgejo_id, title, created_at)
-          SELECT d.cosheaf_id, w.slug, d.forgejo_id, d.title, d.created_at
+        INSERT INTO doc_map_new (cosheaf_id, workspace_slug, forgejo_id, title, excerpt, fts_rowid, created_at)
+          SELECT d.cosheaf_id, w.slug, d.forgejo_id, d.title, NULL, NULL, d.created_at
           FROM doc_map d JOIN workspaces w ON w.id = d.workspace_id;
         DROP TABLE doc_map;
         ALTER TABLE doc_map_new RENAME TO doc_map;
@@ -384,32 +386,6 @@ function migrateDropWorkspacesTable(db: Database.Database): void {
   }
 }
 
-// Workspace identity moved from the bare Forgejo repo name to the
-// `owner/repo` full name. Legacy rows carry bare slugs (no '/'); prefix them
-// with the pre-multi-tenant owner. COSHEAF_FORGEJO_OWNER is read here ONLY —
-// it is no longer part of Config, and exists solely so a pre-migration
-// sidecar lands under the right owner. Sidecar is rebuildable either way
-// (`pnpm cli workspace reindex <owner>/<repo>` or rm db.sqlite + setup:dev).
-function migrateOwnerQualifySlugs(db: Database.Database): void {
-  const legacyOwner = process.env.COSHEAF_FORGEJO_OWNER ?? "cosheaf-admin";
-  const tables = ["doc_map", "backlinks", "xref_targets", "xref_target_duplicates", "citation_targets", "page_tags", "notes_fts"];
-  const existing = new Set(
-    (db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all() as Array<{ name: string }>)
-      .map((t) => t.name),
-  );
-  for (const table of tables) {
-    if (!existing.has(table)) continue;
-    // Skip the table-wide UPDATE on an already-migrated sidecar (the common
-    // case on every startup) — only rewrite if a legacy bare slug remains.
-    const hasLegacy = db
-      .prepare(`SELECT 1 FROM ${table} WHERE workspace_slug NOT LIKE '%/%' LIMIT 1`)
-      .get();
-    if (!hasLegacy) continue;
-    db.prepare(`UPDATE ${table} SET workspace_slug = ? || '/' || workspace_slug WHERE workspace_slug NOT LIKE '%/%'`)
-      .run(legacyOwner);
-  }
-}
-
 // #148: login_tokens gained a `scopes` column recording the scope set a cached
 // PAT was minted with. schema.sql's CREATE IF NOT EXISTS won't add the column
 // to an existing table, so add it here. Pre-existing rows get NULL, which never
@@ -422,11 +398,40 @@ function migrateAddLoginTokenScopes(db: Database.Database): void {
   if (!hasScopes) db.exec("ALTER TABLE login_tokens ADD COLUMN scopes TEXT");
 }
 
+function collapseExcerpt(body: string | null, maxLength = 220): string | null {
+  const text = (body ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > maxLength ? `${text.slice(0, maxLength).trimEnd()}…` : text;
+}
+
+// #368/#371: existing sidecars predate doc_map.excerpt and doc_map.fts_rowid.
+// Add the columns and populate them once from notes_fts so future deletes can
+// key by rowid and the repo landing page never scans FTS bodies.
+function migrateAddDocMapExcerptAndFtsRowid(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info(doc_map)").all() as Array<{ name: string }>;
+  const hasCol = (name: string): boolean => cols.some((col) => col.name === name);
+  if (!hasCol("excerpt")) db.exec("ALTER TABLE doc_map ADD COLUMN excerpt TEXT");
+  if (!hasCol("fts_rowid")) db.exec("ALTER TABLE doc_map ADD COLUMN fts_rowid INTEGER");
+  const hasNotesFts = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notes_fts'")
+    .get();
+  if (!hasNotesFts) return;
+  const rows = db
+    .prepare("SELECT rowid AS rowid, workspace_slug, cosheaf_id, body FROM notes_fts")
+    .all() as Array<{ rowid: number; workspace_slug: string; cosheaf_id: string; body: string | null }>;
+  const update = db.prepare("UPDATE doc_map SET fts_rowid = ?, excerpt = COALESCE(excerpt, ?) WHERE workspace_slug = ? AND cosheaf_id = ?");
+  const tx = db.transaction(() => {
+    for (const row of rows) update.run(row.rowid, collapseExcerpt(row.body), row.workspace_slug, row.cosheaf_id);
+  });
+  tx();
+}
+
 export function getDb(config: Config): Database.Database {
   if (dbInstance) return dbInstance;
   const dbPath = path.join(config.dataDir, "db.sqlite");
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
   // Pre-schema migration: rewrite legacy `workspace_id INTEGER` tables to
   // `workspace_slug TEXT` before schema.sql's CREATE IF NOT EXISTS would
@@ -435,7 +440,7 @@ export function getDb(config: Config): Database.Database {
   const schema = readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
   bootstrapSiteAdmins(db);
-  migrateOwnerQualifySlugs(db);
+  migrateAddDocMapExcerptAndFtsRowid(db);
   migrateAddLoginTokenScopes(db);
   dbInstance = db;
   return db;

@@ -41,6 +41,7 @@ export interface ForgejoIssue {
 
 export interface ForgejoIssueComment {
   id: number;
+  issue_url?: string;
   body: string;
   user: ForgejoUser | null;
   created_at: string;

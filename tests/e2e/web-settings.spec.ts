@@ -1,16 +1,13 @@
 import { expect, type Locator, test } from "@playwright/test";
 import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { defaultWebUrl } from "../../scripts/lib/env-dev.mjs";
+import { ensureSignedIn } from "./auth";
 
 const webBase = defaultWebUrl();
 const repoBase = `${webBase}/chao/flushing-coin`;
 
 test("sidebar identity links to profiles and settings gear opens settings", async ({ page }) => {
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
 
   const identity = page.locator(".sidebar-identity-link");
   await expect(identity).toContainText("chao");
@@ -38,11 +35,7 @@ test("account preferences are separate from repository settings", async ({ page 
   const favicon = await page.request.get(`${webBase}/favicon.svg`);
   expect(favicon.ok()).toBe(true);
 
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
 
   await expect(page.locator(".sidebar-identity-link")).toHaveAttribute("href", "/users/chao");
   await page.locator(".sidebar-identity-link").click();
@@ -98,11 +91,7 @@ test("username autocomplete opens on every repo username field", async ({ page }
     });
   });
 
-  await page.goto(`${webBase}/login`);
-  await page.locator('input[name="username"]').fill("chao");
-  await page.locator('input[name="password"]').fill("Cosheaf123!");
-  await page.locator('button:has-text("Sign in")').click();
-  await expect(page).toHaveURL(`${webBase}/`);
+  await ensureSignedIn(page, webBase);
 
   await page.goto(`${repoBase}/settings`);
   await page.locator("details.add-disclosure", { hasText: "Add collaborator" }).locator("summary").click();

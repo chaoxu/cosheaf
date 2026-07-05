@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS doc_map (
   workspace_slug TEXT NOT NULL,
   forgejo_id TEXT NOT NULL,  -- repo-relative path of the markdown file
   title TEXT,
+  excerpt TEXT,
+  fts_rowid INTEGER,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_slug, cosheaf_id),
   UNIQUE (workspace_slug, forgejo_id)

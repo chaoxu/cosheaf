@@ -65,6 +65,10 @@ export interface WsFileMeta {
   size: number;
 }
 
+export interface WsFileRead extends WsFileMeta {
+  content: string;
+}
+
 // Result of a content write: the new blob sha (null when the backend can't
 // report one) and the commit it landed in.
 export interface WsFileWrite {
@@ -148,6 +152,7 @@ export interface WorkspaceBackend {
   getRawFile(owner: string, repo: string, ref: string, filepath: string): Promise<string>;
   getRawFileBytes(owner: string, repo: string, ref: string, filepath: string): Promise<Buffer>;
   getFileMeta(owner: string, repo: string, ref: string, filepath: string): Promise<WsFileMeta | null>;
+  readFile(owner: string, repo: string, ref: string, filepath: string): Promise<WsFileRead | null>;
   // writes
   putFile(owner: string, repo: string, opts: WsPutFile): Promise<WsFileWrite>;
   putFileBytes(owner: string, repo: string, opts: WsPutFileBytes): Promise<WsFileWrite>;
@@ -159,7 +164,7 @@ export interface WorkspaceBackend {
   deleteBranch(owner: string, repo: string, branch: string): Promise<void>;
   // repo meta + pulls
   getRepo(owner: string, repo: string): Promise<WsRepo | null>;
-  listPulls(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<WsPull[]>;
+  listPulls(owner: string, repo: string, state: "open" | "closed" | "all", opts?: { limit?: number }): Promise<WsPull[]>;
   // commit detail (null when the sha is unknown to the backend)
   getCommit(owner: string, repo: string, sha: string): Promise<WsCommit | null>;
 }
