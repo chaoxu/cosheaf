@@ -11,6 +11,7 @@ import {
   type WorkspaceBackend,
 } from "../workspace-backend.js";
 import { validBranchName } from "../branch-path.js";
+import { isRetiredDefaultEditBranch } from "../edit-branch-retirement.js";
 import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
@@ -250,11 +251,14 @@ async function ensureBranch(
 }
 
 async function retiredDefaultEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {
-  if (branch !== `${userBranchPrefix(c.get("user").username)}web-edit`) return false;
   const { backend, owner, repo } = c.get("repoCtx");
-  const pulls = await backend.listPulls(owner, repo, "closed", { limit: 50 }).catch(() => []);
-  const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
-  return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
+  return isRetiredDefaultEditBranch({
+    backend,
+    owner,
+    repo,
+    branch,
+    defaultEditBranch: `${userBranchPrefix(c.get("user").username)}web-edit`,
+  });
 }
 
 async function resetRetiredEditBranch(c: import("hono").Context<AppEnv>, branch: string): Promise<boolean> {

@@ -6,6 +6,7 @@ import { rasterizePdfFirstPage } from "../pdf-raster.js";
 import { fileKindForPath, type FileKind, isEditableTextFile } from "../../shared/file-kind.js";
 import { resolveBranchPath, resolveBranchPathFromNames, validBranchName } from "../branch-path.js";
 import { repositoryRawHeadersForPath } from "../content-type.js";
+import { isRetiredDefaultEditBranch } from "../edit-branch-retirement.js";
 import {
   WorkspaceBackendError,
   onWorkspaceNotFound,
@@ -198,11 +199,17 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
     requestedMode === "read" || requestedMode === "edit"
       ? requestedMode
       : requestedMode === undefined && !sourceView && kind === "markdown" && ctx.coflat
-        ? "auto"
+        ? "read"
         : null;
   if (workbenchMode && editableFileKind(kind) && ws.role !== "read") {
     const editBranchParam = c.req.query("edit_branch");
-    const editBranch = directWrite ? resolved.branch : editBranchFor(ctx.user, editBranchParam ?? resolved.branch);
+    const editBranch = directWrite
+      ? resolved.branch
+      : requestedMode === "edit"
+        ? editBranchFor(ctx.user, editBranchParam ?? resolved.branch)
+        : requestedMode === "read" && editBranchParam !== undefined
+          ? editBranchFor(ctx.user, editBranchParam)
+          : resolved.branch;
     if (!directWrite && !validBranchName(editBranch)) return badRequestPage(ctx.user, "Valid branch name is required.");
     return editPageResponse(ctx, {
       branch: editBranch,
@@ -677,8 +684,11 @@ async function repoReadme(ctx: WebCtx, branch: string, files: readonly ForgejoTr
 }
 
 async function retiredDefaultEditBranch(ctx: WebCtx, branch: string): Promise<boolean> {
-  if (branch !== userDefaultEditBranch(ctx.user)) return false;
-  const pulls = await ctx.backend.listPulls(ctx.owner, ctx.repo, "closed", { limit: 50 }).catch(() => []);
-  const unmerged = pulls.filter((pull) => pull.head.ref === branch && pull.base.ref === "main" && !pull.merged);
-  return unmerged.length > 0 && unmerged.every((pull) => pull.state === "closed");
+  return isRetiredDefaultEditBranch({
+    backend: ctx.backend,
+    owner: ctx.owner,
+    repo: ctx.repo,
+    branch,
+    defaultEditBranch: userDefaultEditBranch(ctx.user),
+  });
 }

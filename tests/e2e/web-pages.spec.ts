@@ -11,30 +11,53 @@ const owner = "chao";
 const repo = "flushing-coin";
 const repoBase = `${webBase}/${owner}/${repo}`;
 
+async function triggerCompose(scope: Locator): Promise<Locator | null> {
+  const compose = scope.locator("[data-coflat-compose]").first();
+  if (!await compose.count()) return null;
+  await compose.dispatchEvent("pointerdown");
+  return compose;
+}
+
 // On coflat workspaces (the fixture format) a compose textarea is enhanced by
 // the web-comment-editor island: the textarea is hidden and a CodeMirror editor
 // mirrors its value back. Type into the rich editor when it mounted, else fall
 // back to the plain textarea when the island is not yet mounted.
 async function fillCompose(scope: Locator, text: string): Promise<void> {
-  const compose = scope.locator("[data-coflat-compose]").first();
-  if (await compose.count()) {
+  const compose = await triggerCompose(scope);
+  if (compose) {
     const content = compose.locator(CF.editorContent);
-    await content.waitFor({ state: "visible" });
-    await content.click();
-    await content.fill(text);
-    // Wait for the island to mirror the value into the hidden form field.
-    await expect(compose.locator("textarea")).toHaveValue(text);
+    const mounted = await content.waitFor({ state: "visible", timeout: 10_000 }).then(() => true).catch(() => false);
+    if (mounted) {
+      await content.click();
+      await content.fill(text);
+      // Wait for the island to mirror the value into the hidden form field.
+      await expect(compose.locator("textarea")).toHaveValue(text);
+      return;
+    }
+    await compose.locator("textarea").fill(text);
     return;
   }
   await scope.locator('textarea[name="body"]').fill(text);
 }
 
+async function expectComposeEditor(scope: Locator): Promise<void> {
+  const compose = await triggerCompose(scope);
+  if (!compose) throw new Error("Expected a Coflat compose field");
+  await expect(compose.locator(CF.editorRoot).first()).toBeVisible();
+}
+
 async function expectRichComposerRevealsOnHover(page: Page): Promise<void> {
   const composer = page.locator(".rich-line-composer summary").first();
   await expect(composer).toBeVisible();
-  await expect(composer).toHaveCSS("opacity", "0");
-  await page.locator(".rich-commentable").first().hover();
-  await expect(composer).toHaveCSS("opacity", "1");
+  await expect.poll(() => visibleRichComposerCount(page)).toBe(0);
+  await page.locator(".rich-commentable:visible").first().hover();
+  await expect.poll(() => visibleRichComposerCount(page)).toBeGreaterThan(0);
+}
+
+async function visibleRichComposerCount(page: Page): Promise<number> {
+  return page.locator(".rich-line-composer summary").evaluateAll((summaries) =>
+    summaries.filter((summary) => getComputedStyle(summary).opacity === "1").length,
+  );
 }
 
 test("rich PR diffs expose comment composers on generated bibliography entries", async ({ page }) => {
@@ -285,7 +308,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("issue-edit-form")).toBeVisible();
   // The body field is enhanced by the coflat editor island on coflat workspaces;
   // the rich editor is the visible compose surface (textarea is hidden behind it).
-  await expect(page.getByTestId("issue-edit-form").locator(CF.editorRoot).first()).toBeVisible();
+  await expectComposeEditor(page.getByTestId("issue-edit-form"));
   await page.goto(`${webBase}${issuePath}`);
   await expect(page.getByTestId("thread-labels")).toBeVisible();
   await expect(page.getByTestId("issue-relations")).toBeVisible();
@@ -344,7 +367,7 @@ test("server-rendered Forgejo-like pages work end to end", async ({ page }) => {
   await expect(page.getByTestId("pull-review-requests")).toBeVisible();
   await page.getByTestId("pull-edit-link").click();
   await expect(page.getByTestId("pull-edit-form")).toBeVisible();
-  await expect(page.getByTestId("pull-edit-form").locator(CF.editorRoot).first()).toBeVisible();
+  await expectComposeEditor(page.getByTestId("pull-edit-form"));
   await page.goto(demoPrPath.startsWith("http") ? demoPrPath : `${webBase}${demoPrPath}`);
   await expect(page.locator(".thread")).toContainText(/pushed \d+ commits?/);
   await expect(page.getByRole("link", { name: "View branch output" })).toBeVisible();

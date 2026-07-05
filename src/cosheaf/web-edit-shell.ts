@@ -431,11 +431,12 @@ if (host) {
   };
   installModeClicks(host, state);
   installPopstate(host, state);
+  const urlMode = activeModeFromUrl();
   const mode = initialMode(host);
   const urlSourcePosition = sourcePositionFromUrl();
   if (urlSourcePosition) state.sourcePosition = urlSourcePosition;
   setVisibleMode(host, mode);
-  setUrlMode(mode, true, { keepSourceAnchor: Boolean(urlSourcePosition) });
+  if (urlMode || mode === "edit") setUrlMode(mode, true, { keepSourceAnchor: Boolean(urlSourcePosition) });
   if (mode === "read") {
     void ensureFastRead(host, state).then(() => {
       applyFastSourcePosition(host, state.sourcePosition);

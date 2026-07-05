@@ -1602,9 +1602,14 @@ describe("files concurrent-write conflicts (#92)", () => {
     const calls: string[] = [];
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/pulls", (c) => {
-        expect(c.req.query("state")).toBe("closed");
+        const state = c.req.query("state");
         expect(c.req.query("limit")).toBe("50");
-        calls.push("list-pulls");
+        if (state === "open") {
+          calls.push("list-open-pulls");
+          return c.json([]);
+        }
+        expect(state).toBe("closed");
+        calls.push("list-closed-pulls");
         return c.json([
           { number: 7, state: "closed", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
         ]);
@@ -1649,7 +1654,42 @@ describe("files concurrent-write conflicts (#92)", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, commit: "new-commit", sha: "new-blob" });
-    expect(calls).toEqual(["list-pulls", "delete-branch", "get-branch", "create-branch", "write-file"]);
+    expect(calls).toEqual(["list-open-pulls", "list-closed-pulls", "delete-branch", "get-branch", "create-branch", "write-file"]);
+  });
+
+  it("does not reset a default edit branch while a matching pull request is open", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const calls: string[] = [];
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/pulls", (c) => {
+        expect(c.req.query("state")).toBe("open");
+        expect(c.req.query("limit")).toBe("50");
+        calls.push("list-open-pulls");
+        return c.json([
+          { number: 8, state: "open", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
+        ]);
+      });
+      forge.delete("/api/v1/repos/owner/w/branches/:name", () => {
+        calls.push("delete-branch");
+        return new Response(null, { status: 204 });
+      });
+    }));
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/web-edit", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        content: "# Notes\n",
+        expected_sha: null,
+        expected_source_sha: "main-loaded",
+        reset_edit_branch: true,
+      }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "edit branch is active; reload and retry" });
+    expect(calls).toEqual(["list-open-pulls"]);
   });
 
   it("compare-and-set: rejects malformed expected_sha instead of disabling CAS", async () => {

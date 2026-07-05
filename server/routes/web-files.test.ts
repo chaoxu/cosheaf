@@ -165,10 +165,10 @@ describe("web file editor route", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain('data-edit-shell data-initial-mode="auto" data-mode="auto"');
+    expect(body).toContain('data-edit-shell data-initial-mode="read" data-mode="read"');
     expect(body).toContain('id="web-editor-root"');
-    expect(body).toContain('data-branch="user/alice/web-edit"');
-    expect(body).toContain('data-read-branch="user/alice/web-edit"');
+    expect(body).toContain('data-branch="main"');
+    expect(body).toContain('data-read-branch="main"');
     // Hosted edit pages keep the branch-based write model (lazy wip-branch + PR
     // affordances); the local Workbench is the only writeMode="direct" surface.
     expect(body).toContain('data-write-mode="branch"');
@@ -883,8 +883,10 @@ describe("web file editor route", () => {
         forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
         forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
         forge.get("/api/v1/repos/owner/w/pulls", (c) => {
-          expect(c.req.query("state")).toBe("closed");
+          const state = c.req.query("state");
           expect(c.req.query("limit")).toBe("50");
+          if (state === "open") return c.json([]);
+          expect(state).toBe("closed");
           return c.json([
             { number: 7, state: "closed", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
           ]);
@@ -916,6 +918,60 @@ describe("web file editor route", () => {
     expect(body).toContain('data-base-sha="main-sha"');
     expect(body).toContain('data-reset-edit-branch="1"');
     expect(body).toContain("# Main Notes\\n");
+  });
+
+  it("keeps the default edit branch active while a matching pull request is open", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const calls: string[] = [];
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }, { name: "user/alice/web-edit" }]));
+        forge.get("/api/v1/repos/owner/w/branches/*", (c) => {
+          const branch = decodeURIComponent(c.req.path.split("/branches/")[1] ?? "");
+          if (branch === "main") return c.json({ name: "main", commit: { id: "main-head" } });
+          expect(branch).toBe("user/alice/web-edit");
+          return c.json({ name: branch, commit: { id: "branch-head" } });
+        });
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("# Workspace\n"));
+        forge.get("/api/v1/repos/owner/w/pulls", (c) => {
+          expect(c.req.query("state")).toBe("open");
+          expect(c.req.query("limit")).toBe("50");
+          calls.push("list-open-pulls");
+          return c.json([
+            { number: 8, state: "open", merged: false, head: { ref: "user/alice/web-edit" }, base: { ref: "main" } },
+          ]);
+        });
+        forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => {
+          expect(c.req.query("ref")).toBe("branch-head");
+          return c.json({ sha: "branch-sha" });
+        });
+        forge.get("/api/v1/repos/owner/w/raw/notes.md", (c) => {
+          expect(c.req.query("ref")).toBe("branch-head");
+          return c.text("# Branch Notes\n");
+        });
+        forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
+          expect(c.req.param("ref")).toBe("user/alice/web-edit");
+          return c.json({ tree: [{ path: "notes.md", type: "blob" }], truncated: false });
+        });
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/src/branch/main/notes.md?mode=edit&edit_branch=user%2Falice%2Fweb-edit", {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-branch="user/alice/web-edit"');
+    expect(body).toContain('data-branch-exists="1"');
+    expect(body).toContain('data-read-branch="user/alice/web-edit"');
+    expect(body).toContain('data-base-sha="branch-sha"');
+    expect(body).not.toContain('data-reset-edit-branch="1"');
+    expect(body).toContain("# Branch Notes\\n");
+    expect(calls).toEqual(["list-open-pulls"]);
   });
 
   it("uses the main blob sha as CAS base when a missing edit branch will be created from main", async () => {
