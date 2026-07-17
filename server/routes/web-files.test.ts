@@ -480,7 +480,7 @@ describe("web file editor route", () => {
     expect(defaultsSeen).toBe("toc: true\nnumber-sections: true\n");
   });
 
-  it("rejects an export defaults file that sets a denylisted key (#389)", async () => {
+  it("rejects an export defaults file that sets a file-reading key (#389)", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
@@ -493,7 +493,8 @@ describe("web file editor route", () => {
         forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
           Response.json({ tree: [{ path: "docs/main.md", type: "blob" }, { path: ".cosheaf/export/bad.yaml", type: "blob" }], truncated: false }));
         forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () => new Response("# Printable\n"));
-        forge.get("/api/v1/repos/owner/w/raw/.cosheaf/export/bad.yaml", () => new Response("output: hacked.pdf\n"));
+        // metadata-file would make pandoc read an arbitrary server file into the PDF.
+        forge.get("/api/v1/repos/owner/w/raw/.cosheaf/export/bad.yaml", () => new Response("metadata-file: /etc/passwd\n"));
         forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () =>
           new Response("export:\n  profiles:\n    journal:\n      defaults: .cosheaf/export/bad.yaml\n"));
       }),
@@ -501,7 +502,7 @@ describe("web file editor route", () => {
 
     const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md?profile=journal", { headers: authHeaders(token) });
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain("may not set 'output'");
+    expect(await res.text()).toContain("'metadata-file' is not allowed");
     expect(ran).toBe(false);
   });
 

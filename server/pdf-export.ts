@@ -49,13 +49,20 @@ interface PandocExportBase {
   readonly defaultsContent?: string;
 }
 
-// Keys a passthrough defaults file must NOT set: Coflat already passes these as
-// explicit CLI args (double-specifying confuses citeproc / redirects output),
-// or they would let a defaults file escape the sandbox. Selectors go through the
-// structured profile fields instead. (#389)
-const DEFAULTS_DENYLIST = new Set([
-  "input-file", "input-files", "output", "output-file", "from", "reader", "to", "writer",
-  "template", "csl", "bibliography", "resource-path", "lua-filter", "filters", "pdf-engine",
+// A passthrough defaults file is default-deny (#389): only these formatting keys
+// are honored. An allowlist (not a denylist) is the safe choice — many pandoc
+// defaults keys read arbitrary server files (metadata-file, include-in-header,
+// data-dir, nested defaults, reference-doc, css, …) or run programs (filters,
+// pdf-engine), which a write-collaborator could use to exfiltrate server files
+// into the PDF. Selectors Coflat owns (bibliography/csl/template) go through the
+// structured profile fields; arbitrary/file-referencing keys are a later phase.
+const DEFAULTS_ALLOWLIST = new Set([
+  "toc", "table-of-contents", "toc-depth", "lof", "list-of-figures", "lot", "list-of-tables",
+  "number-sections", "number-offset", "top-level-division", "shift-heading-level-by",
+  "section-divs", "identifier-prefix", "title-prefix", "strip-comments", "reference-location",
+  "markdown-headings", "block-headings", "wrap", "columns", "dpi", "eol", "tab-stop",
+  "preserve-tabs", "ascii", "link-citations", "link-bibliography", "notes-after-punctuation",
+  "metadata", "variables",
 ]);
 
 function assertDefaultsAllowed(content: string): void {
@@ -67,8 +74,8 @@ function assertDefaultsAllowed(content: string): void {
   }
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) return;
   for (const key of Object.keys(doc as Record<string, unknown>)) {
-    if (DEFAULTS_DENYLIST.has(key)) {
-      throw new PdfExportError(400, `Export defaults file may not set '${key}' — use the profile's fields.`);
+    if (!DEFAULTS_ALLOWLIST.has(key)) {
+      throw new PdfExportError(400, `Export defaults file key '${key}' is not allowed.`);
     }
   }
 }
