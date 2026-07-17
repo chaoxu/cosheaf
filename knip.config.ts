@@ -16,6 +16,9 @@ const config: KnipConfig = {
   ignoreDependencies: [
     // Loaded via @tailwindcss/vite, not imported directly.
     "tailwindcss",
+    // Provided for @chaoxu/coflat's bundled editor island (rich paste), which
+    // externalizes it; cosheaf resolves it at build time but never imports it.
+    "turndown",
   ],
   ignoreExportsUsedInFile: true,
   include: ["files", "dependencies", "unlisted", "exports", "types"],
