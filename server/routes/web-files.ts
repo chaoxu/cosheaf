@@ -700,6 +700,13 @@ async function writeFile(
       throw err;
     }
   }
+  // Move the local-annotation sidecar to the new path adjacent to the rename,
+  // before the (blocking, SQLite-committing) index write below, so no external
+  // reader observes the renamed-away file with an unmoved annotation through the
+  // index-commit window (#395 rename/move atomicity).
+  if (localAnnotationEntry && previousRel) {
+    moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
+  }
   // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
   // the plan for frontmatter/id rewriting, but must not publish unmerged branch
   // content into search/backlinks/tree doc metadata.
@@ -707,9 +714,6 @@ async function writeFile(
   // main). Local Workbench (direct write-mode) is the exception — see
   // indexLocalWrite — indexing now to keep search/backlinks live.
   indexLocalWrite(ctx.writeMode === "direct", ctx.db, ctx.ws.slug, plan, previousRel && previousRel !== rel ? previousRel : undefined);
-  if (localAnnotationEntry && previousRel) {
-    moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
-  }
   // #182: a cosheaf.yaml edit through the editor busts its cached config for
   // this branch (read-after-write for config, independent of sidecar indexing).
   if (rel === REPO_CONFIG_PATH || previousRel === REPO_CONFIG_PATH) bustRepoConfig(ctx.db, ctx.ws.slug, branch);

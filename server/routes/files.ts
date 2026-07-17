@@ -607,12 +607,11 @@ files.put("/:owner/:repo/file", async (c) => {
       return c.json(...(await staleShaConflict(backend, owner, repo, branch, previousRel as string, expectedSha)));
     }
   }
-  // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
-  // the plan for frontmatter/id rewriting and response metadata, but must not
-  // publish unmerged branch content into search/backlinks/tree doc metadata
-  // (webhooks/reindex reconcile main). Local Workbench is the exception — see
-  // indexLocalWrite — committing now and cleaning up a renamed-away page.
-  indexLocalWrite(isLocalMode(c), db, ws.slug, plan, isRename && previousRel && previousRel !== rel ? previousRel : undefined);
+  // Move the local-annotation sidecar to the new path adjacent to the rename,
+  // before the (blocking, SQLite-committing) index write below. The old file is
+  // already deleted on disk at this point, so doing the move first ensures no
+  // external reader observes the renamed-away file with an unmoved annotation
+  // through the index-commit window (#395 rename/move atomicity).
   if (localAnnotationEntry && previousRel) {
     const moved = moveLocalAnnotationsPath(localAnnotationEntry, previousRel, rel);
     if (moved > 0) publishLocalAnnotationEvent(c, localAnnotationEntry, {
@@ -622,6 +621,12 @@ files.put("/:owner/:repo/file", async (c) => {
       count: moved,
     });
   }
+  // The sidecar is branchless and mirrors Forgejo main. Branch writes still use
+  // the plan for frontmatter/id rewriting and response metadata, but must not
+  // publish unmerged branch content into search/backlinks/tree doc metadata
+  // (webhooks/reindex reconcile main). Local Workbench is the exception — see
+  // indexLocalWrite — committing now and cleaning up a renamed-away page.
+  indexLocalWrite(isLocalMode(c), db, ws.slug, plan, isRename && previousRel && previousRel !== rel ? previousRel : undefined);
   // #182: a cosheaf.yaml write through the typed route busts its cached config
   // for this branch so the change is read-after-write consistent (the webhook
   // only reconciles main; external non-main pushes reconcile on reindex).
