@@ -6,6 +6,11 @@ canonical Coflat document format:
 - [Coflat](https://github.com/chaoxu/coflat)
 - [Coflat `FORMAT.md`](https://github.com/chaoxu/coflat/blob/main/FORMAT.md)
 
+Agents writing Cosheaf pages should load the "Rules for Agents" section at the
+top of Coflat's `FORMAT.md` first; it lists the habit-breaking deltas from
+GitHub-flavored Markdown (one paragraph per source line, no `>` blockquotes,
+fenced divs for theorem-like blocks, and so on).
+
 Cosheaf is the Forgejo-backed host around that format. It adds repository,
 branch, issue, pull-request, review, rendering, and indexing behavior, but it
 should not duplicate Coflat's parser or syntax contract.

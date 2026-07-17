@@ -159,6 +159,14 @@ depend on Forgejo response fields. Cosheaf validates workspace membership,
 applies Coflat frontmatter/id handling, emits browser events, and keeps merge
 safety checks on its typed routes.
 
+Workspace pages are Coflat Markdown, not GitHub-flavored Markdown. Before
+writing or editing page content, load the "Rules for Agents" section at the top
+of Coflat's FORMAT.md
+(https://github.com/chaoxu/coflat/blob/main/FORMAT.md). The headline deltas:
+one paragraph per source line (never hard-wrap prose), no `>` blockquotes,
+fenced divs with stable ids for theorem-like blocks, and `$...$`/`$$...$$` for
+math. Do not add YAML frontmatter to pages; Cosheaf's typed file route owns it.
+
 For page edits that should become a PR, prefer the repo-local CLI:
 
 `pnpm cosheaf:tea -- --workspace <owner>/<repo> pr-from-files --branch <branch> --title <title> --file <workspace-path=local-path>`
