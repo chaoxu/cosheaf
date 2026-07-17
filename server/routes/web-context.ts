@@ -398,7 +398,19 @@ export function queryText(c: Context<AppEnv>, name: string): string {
 }
 
 export function htmlResponse(body: string, status = 200): Response {
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response(body, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // #385: dynamic authed pages must revalidate. With no freshness header a
+      // browser heuristically caches this HTML and serves the stale repo/page
+      // state on a normal reload after a push; `no-cache` forces revalidation
+      // (which returns fresh 200s here) while keeping bfcache. `private` keeps
+      // per-user HTML out of any shared cache. Static /assets/* are a separate
+      // code path (staticFileHeaders) and keep their immutable long-cache.
+      "cache-control": "private, no-cache",
+    },
+  });
 }
 
 export function redirect(location: string): Response {

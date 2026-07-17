@@ -164,6 +164,9 @@ describe("web file editor route", () => {
     const res = await appFor(db).request("/owner/w/src/branch/main/notes.md", { headers: authHeaders(token) });
 
     expect(res.status).toBe(200);
+    // #385: dynamic page HTML must revalidate so a push is visible on a normal
+    // reload rather than being served from heuristic browser cache.
+    expect(res.headers.get("cache-control")).toBe("private, no-cache");
     const body = await res.text();
     expect(body).toContain('data-edit-shell data-initial-mode="read" data-mode="read"');
     expect(body).toContain('id="web-editor-root"');

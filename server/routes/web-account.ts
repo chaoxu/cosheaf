@@ -26,6 +26,9 @@ async function accountSettingsResponse(c: Context<AppEnv>, auth: GlobalWebAuth, 
   const keySaved = c.req.query("ssh_key") === "1";
   const error = c.req.query("error") ?? undefined;
   const t = c.get("t");
+  // #385: this page renders via c.html (not the shared htmlResponse), so set the
+  // same revalidation header here to keep account settings from serving stale.
+  c.header("cache-control", "private, no-cache");
   return c.html(
     pageShell({
       title: t("settings.account_settings"),
