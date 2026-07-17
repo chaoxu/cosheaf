@@ -25,7 +25,7 @@ const IDENTITY: LocalWorkspaceIdentity = {
   originId: "local-test-origin",
 };
 
-function localApp(seed: Record<string, string> = {}, options: { sse?: SSEHub } = {}): { app: Hono<AppEnv>; dir: string } {
+function localApp(seed: Record<string, string> = {}, options: { sse?: SSEHub } = {}): { app: Hono<AppEnv>; dir: string; registry: WorkspaceRegistry } {
   const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-app-"));
   for (const [path, content] of Object.entries(seed)) {
     mkdirSync(join(dir, path, ".."), { recursive: true });
@@ -34,8 +34,9 @@ function localApp(seed: Record<string, string> = {}, options: { sse?: SSEHub } =
   const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
   const db = freshTestDb("cosheaf-local-app-db-");
   const backend = new LocalGitWorkspaceBackend(dir);
-  const app = createApp({ config, db, localRegistry: testLocalRegistry(db, backend, IDENTITY, dir), sse: options.sse });
-  return { app, dir };
+  const registry = testLocalRegistry(db, backend, IDENTITY, dir);
+  const app = createApp({ config, db, localRegistry: registry, sse: options.sse });
+  return { app, dir, registry };
 }
 
 function git(dir: string, args: string[]): string {
@@ -546,6 +547,91 @@ describe("local Workbench app (Tier 0)", () => {
     // The connect gate intercepts before ctx.collab is called (no NoCoreConnectedError).
     expect(body).toContain("no connected Cosheaf server");
     expect(body).toContain('data-testid="connect-form"');
+  });
+
+  it("renders saved remote server API keys on the Workbench remotes page and connect prompt", async () => {
+    const { app, registry } = localApp({ "hello.md": "# Hello\n" });
+    registry.saveRemote({
+      url: "https://core.example",
+      token: "tok",
+      username: "alice",
+      label: "Alice prod",
+    });
+
+    const page = await app.request("/_remotes");
+    expect(page.status).toBe(200);
+    const body = await page.text();
+    expect(body).toContain("Remote servers");
+    expect(body).toContain('data-testid="remote-list"');
+    expect(body).toContain("core.example");
+    expect(body).toContain("Alice prod");
+
+    const prompt = await app.request("/me/notes/pulls");
+    expect(prompt.status).toBe(200);
+    const promptBody = await prompt.text();
+    expect(promptBody).toContain('data-testid="connect-saved-form"');
+    expect(promptBody).toContain('data-testid="connect-saved-remote"');
+    expect(promptBody).toContain("Alice prod (alice)");
+  });
+
+  it("saves a validated remote key from the Workbench remotes page", async () => {
+    const { app, registry } = localApp();
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => Response.json({ user: { username: "alice" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const form = new URLSearchParams({
+      url: "https://core.example/",
+      token: "tok",
+      label: "Alice prod",
+    });
+    const res = await app.request("/_remotes/add", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: form,
+    });
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain("Saved%20core.example");
+    expect(registry.getSavedRemotes()).toHaveLength(1);
+    expect(registry.getSavedRemotes()[0]).toMatchObject({
+      url: "https://core.example",
+      token: "tok",
+      username: "alice",
+      label: "Alice prod",
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://core.example/api/v1/me");
+  });
+
+  it("connects a local workspace using a saved remote key", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-local-saved-remote-"));
+    writeFileSync(join(dir, "hello.md"), "# Hello\n");
+    const config = buildLocalConfig({ dataDir: join(dir, ".cosheaf"), port: 0 });
+    const db = freshTestDb("cosheaf-local-saved-remote-db-");
+    const registry = new WorkspaceRegistry(db, { user: "me" });
+    const entry = await registry.addFolder(dir);
+    const saved = registry.saveRemote({
+      url: "https://core.example",
+      token: "tok",
+      username: "alice",
+      label: "Alice prod",
+    });
+    const app = createApp({ config, db, localRegistry: registry });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ user: { username: "alice" } })));
+
+    const form = new URLSearchParams({ remote_id: saved?.id ?? "" });
+    const res = await app.request(`/${entry.identity.owner}/${entry.identity.repo}/connect`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: "http://localhost" },
+      body: form,
+    });
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain(`/${entry.identity.owner}/${entry.identity.repo}/pulls`);
+    expect(JSON.parse(readFileSync(join(dir, ".cosheaf", "remote.json"), "utf8"))).toEqual({
+      url: "https://core.example",
+      token: "tok",
+    });
+    expect(registry.get(entry.slug)?.remote).toEqual({ url: "https://core.example", token: "tok" });
   });
 
   it("maps disconnected typed collaboration API requests to a stable not-found envelope", async () => {

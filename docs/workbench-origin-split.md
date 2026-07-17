@@ -53,11 +53,15 @@ content backend**:
 | Local Workbench + core | local folder | `remote` (Origin API) |
 | Local Workbench, bare | local folder | `none` |
 
-The local Workbench is inherently multi-core (each folder binds its own core via
-`.cosheaf/remote.json`, scoped by `origin_id`). It carries two identities: how a
-client authenticates *to* the Workbench (the optional `COSHEAF_WORKBENCH_TOKEN`
-access gate) and how the Workbench authenticates *to* a core (the per-core Origin
-token in `remote.json`).
+The local Workbench is inherently multi-core (each folder binds its selected
+core via `.cosheaf/remote.json`, scoped by `origin_id`). It may also keep a
+central user-local list of saved Cosheaf server API keys so the same credential
+can be selected for multiple folders without repasting; already-connected
+folders may contribute their current `remote.json` as selectable workspace keys
+without copying those tokens into the central list. It carries two identities:
+how a client authenticates *to* the Workbench (the optional
+`COSHEAF_WORKBENCH_TOKEN` access gate) and how the Workbench authenticates *to*
+a core (the selected per-core Origin token).
 
 ## Current Mapping
 
@@ -166,8 +170,13 @@ Cosheaf authority.
 - A configured workspace server binding must make the target server and
   workspace visible enough that publishing a PR cannot silently go to the wrong
   server.
-- Credential storage must be scoped by both `origin_id` and workspace where
-  practical; never assume a single global server token in multi-server code.
+- Selected workspace server bindings stay per-folder and `origin_id`-scoped.
+  A central saved-key list may exist only as user-local Workbench client config
+  for reusing credentials across folders; server-backed objects must still be
+  scoped by their owning `origin_id` and workspace. Workspace-derived selectable
+  keys are read-through conveniences from existing `.cosheaf/remote.json`
+  bindings, not a second collaboration authority. Never assume a single global
+  server token in multi-server code.
 
 ## Migration Rules
 

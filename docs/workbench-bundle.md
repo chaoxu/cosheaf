@@ -122,8 +122,12 @@ The Workbench is a local editor, not a local copy of hosted Cosheaf.
   live proxy views through the typed Cosheaf API (`OriginCollaborationClient`). The
   Workbench stores no local issues, PRs, reviews, merge state, notifications,
   labels, milestones, or permissions.
-- The only per-folder remote state is the gitignored `.cosheaf/remote.json`
-  connection token and URL. Different folders may point at different Cosheaf
+- The selected per-folder remote state is the gitignored `.cosheaf/remote.json`
+  connection token and URL. The Workbench may also keep a central saved list of
+  Cosheaf server API keys in its user-local Workbench config so the same key can
+  be selected for more than one folder. Existing per-folder `remote.json`
+  connections are also shown as selectable workspace keys without copying them
+  into the central list. Different folders may point at different Cosheaf
   remotes, and folders with no remote stay local-only.
 
 This boundary is intentional: local features should go through the

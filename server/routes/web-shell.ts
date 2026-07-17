@@ -92,7 +92,7 @@ function coflatVendorCssVersion(exportPath: "document-surface.css" | "themes/blu
 }
 
 export function globalSidebar(
-  active: "workspaces" | "account" | "notifications" | "admin" | "help",
+  active: "workspaces" | "account" | "notifications" | "admin" | "help" | "remotes",
   user?: string,
   avatarSrc: string | null = null,
   t: T = enT,
@@ -102,6 +102,7 @@ export function globalSidebar(
     <nav class="repo-tabs">
       <a class="${active === "workspaces" ? "active" : ""}" href="/">${t("nav.workspaces")}</a>
       ${opts.profile ? html`<a class="${active === "account" ? "active" : ""}" href="/_profile">Profile</a>` : emptyHtml}
+      ${opts.local ? html`<a class="${active === "remotes" ? "active" : ""}" href="/_remotes">Remote servers</a>` : emptyHtml}
       ${opts.siteAdmin ? html`<a class="${active === "admin" ? "active" : ""}" href="/admin">Admin</a>` : emptyHtml}
       ${opts.signOut ? html`<a href="/logout" data-testid="workbench-signout">Sign out</a>` : emptyHtml}
     </nav>`;

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -98,5 +98,93 @@ describe("WorkspaceRegistry profile", () => {
     const reg = new WorkspaceRegistry(freshTestDb("cosheaf-prof-db3-"), { configPath: cfg });
     reg.setProfile({ name: "  ", email: "" });
     expect(reg.getProfile()).toBeNull();
+  });
+});
+
+describe("WorkspaceRegistry saved remotes", () => {
+  it("persists saved remote server API keys and reloads them from the config file", async () => {
+    const cfg = join(mkdtempSync(join(tmpdir(), "cosheaf-reg-remotes-")), "workspaces.json");
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-remotes-db-"), { configPath: cfg });
+    await reg.load();
+    const saved = reg.saveRemote({
+      url: "https://core.example/",
+      token: "cosheaf_token",
+      username: "alice",
+      label: "Alice",
+    });
+    expect(saved).toMatchObject({
+      url: "https://core.example",
+      token: "cosheaf_token",
+      username: "alice",
+      label: "Alice",
+    });
+
+    const raw = JSON.parse(readFileSync(cfg, "utf8")) as { remotes?: Array<Record<string, unknown>> };
+    expect(raw.remotes).toHaveLength(1);
+    expect(raw.remotes?.[0]).not.toHaveProperty("source");
+    expect(raw.remotes?.[0]).not.toHaveProperty("workspaceSlug");
+    expect(statSync(cfg).mode & 0o777).toBe(0o600);
+
+    const reg2 = new WorkspaceRegistry(freshTestDb("cosheaf-remotes-db2-"), { configPath: cfg });
+    await reg2.load();
+    expect(reg2.getSavedRemotes()).toHaveLength(1);
+    expect(reg2.getSavedRemote(saved?.id ?? "")).toMatchObject({
+      url: "https://core.example",
+      username: "alice",
+      label: "Alice",
+    });
+  });
+
+  it("replaces the same server/token entry and can remove it", () => {
+    const cfg = join(mkdtempSync(join(tmpdir(), "cosheaf-reg-remotes2-")), "workspaces.json");
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-remotes-db3-"), { configPath: cfg });
+    const first = reg.saveRemote({ url: "https://core.example", token: "tok", username: "alice", label: "Old" });
+    const second = reg.saveRemote({ url: "https://core.example/", token: "tok", username: "alice", label: "New" });
+    expect(second?.id).toBe(first?.id);
+    expect(reg.getSavedRemotes()).toHaveLength(1);
+    expect(reg.getSavedRemotes()[0]?.label).toBe("New");
+
+    expect(reg.removeSavedRemote(second?.id ?? "")).toBe(true);
+    expect(reg.getSavedRemotes()).toEqual([]);
+  });
+
+  it("ignores malformed saved remotes in the config file", async () => {
+    const cfg = join(mkdtempSync(join(tmpdir(), "cosheaf-reg-remotes3-")), "workspaces.json");
+    writeFileSync(cfg, JSON.stringify({
+      remotes: [
+        { url: "ftp://core.example", token: "tok", username: "alice" },
+        { url: "https://core.example", token: "", username: "alice" },
+        { url: "https://ok.example", token: "tok", username: "bob" },
+      ],
+    }));
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-remotes-db4-"), { configPath: cfg });
+    await reg.load();
+    expect(reg.getSavedRemotes()).toHaveLength(1);
+    expect(reg.getSavedRemotes()[0]?.url).toBe("https://ok.example");
+  });
+
+  it("lists already-connected workspace remotes without copying them into central saved config", async () => {
+    const cfg = join(mkdtempSync(join(tmpdir(), "cosheaf-reg-remotes4-")), "workspaces.json");
+    const dir = mkdtempSync(join(tmpdir(), "cosheaf-reg-connected-"));
+    mkdirSync(join(dir, ".cosheaf"), { recursive: true });
+    writeFileSync(join(dir, ".cosheaf", "remote.json"), JSON.stringify({ url: "https://core.example", token: "existing_token" }));
+    writeFileSync(join(dir, "a.md"), "# A\n");
+
+    const reg = new WorkspaceRegistry(freshTestDb("cosheaf-remotes-db5-"), { configPath: cfg });
+    const entry = await reg.addFolder(dir);
+    const remote = reg.getSavedRemotes()[0];
+
+    expect(remote).toMatchObject({
+      url: "https://core.example",
+      token: "existing_token",
+      username: null,
+      label: `${entry.slug} current key`,
+      source: "workspace",
+      workspaceSlug: entry.slug,
+    });
+    expect(reg.getSavedRemote(remote?.id ?? "")).toMatchObject({ token: "existing_token" });
+
+    const raw = JSON.parse(readFileSync(cfg, "utf8")) as { remotes?: unknown[] };
+    expect(raw.remotes).toBeUndefined();
   });
 });

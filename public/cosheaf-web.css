@@ -273,10 +273,18 @@ select{appearance:none;-webkit-appearance:none;background-image:url("data:image/
 .browse-item__open{margin-left:auto}
 .browse-back{margin-top:14px}
 /* workbench: profile / connect / pull-requests / sync */
-.profile-form,.connect-form{display:grid;gap:11px;max-width:460px;margin-top:16px}
-.profile-form label,.connect-form label{display:grid;gap:5px;font-size:13px;color:var(--cf-muted)}
-.profile-form input,.connect-form input{width:100%;min-width:0}
+.profile-form,.connect-form,.remote-form{display:grid;gap:11px;max-width:460px;margin-top:16px}
+.profile-form h2,.connect-form h2,.remote-form h2{font-size:14px;margin:0;color:var(--cf-fg)}
+.profile-form label,.connect-form label,.remote-form label{display:grid;gap:5px;font-size:13px;color:var(--cf-muted)}
+.profile-form input,.connect-form input,.connect-form select,.remote-form input{width:100%;min-width:0}
 .connect-form>.muted{margin:0;font-size:12px}
+.connect-form--saved{border-bottom:1px solid var(--cf-border);padding-bottom:14px}
+.connect-form label.checkbox-row{display:flex;grid-template-columns:none;align-items:center;gap:8px;color:var(--cf-fg)}.connect-form label.checkbox-row input{width:auto;min-width:0}
+.remote-list{list-style:none;margin:18px 0 0;padding:0;display:grid;gap:8px;max-width:640px}
+.remote-card{display:flex;align-items:center;gap:10px;border:1px solid var(--cf-border);border-radius:var(--cf-radius-sm);padding:10px 12px;background:var(--cf-bg)}
+.remote-card__main{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0;font-size:13px}
+.remote-card__main strong{font-weight:600}.remote-card__main code{background:var(--cf-hover);padding:1px 5px;border-radius:var(--cf-radius-xs);font-size:11.5px}
+.remote-card__remove{margin-left:auto;flex:none}.remote-card__remove button{font-size:12px;padding:2px 8px}
 .form-warning{border:1px solid var(--cf-border-strong);border-radius:var(--cf-radius-sm);background:var(--cf-surface);color:var(--cf-fg);padding:8px 10px;font-size:12.5px;margin:0}
 .connect-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0;font-size:13px}
 .connect-reconnect{margin-top:20px;border-top:1px solid var(--cf-border);padding-top:12px}

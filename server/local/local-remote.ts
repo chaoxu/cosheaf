@@ -26,7 +26,8 @@ import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { writeRemote } from "./local-workspace.js";
 import { OriginCollaborationClient } from "./origin-collaboration-client.js";
-import type { WorkspaceEntry } from "./workspace-registry.js";
+import { remoteHostLabel, savedRemoteDisplayLabel } from "./saved-remotes.js";
+import type { SelectableRemoteCredential, WorkspaceEntry } from "./workspace-registry.js";
 
 function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
   return ctx.backend as LocalGitWorkspaceBackend;
@@ -35,32 +36,64 @@ function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
 // The Connect form — shared by the not-connected state (shown prominently) and
 // the connected state (inside a "Reconnect" disclosure). Pre-fills the URL from
 // the git upstream's host so the common case is one paste (the token).
-function connectForm(ctx: WebCtx, entry: WorkspaceEntry | undefined, submitLabel: string): Html {
+function connectForm(ctx: WebCtx, entry: WorkspaceEntry | undefined, savedRemotes: readonly SelectableRemoteCredential[], submitLabel: string): Html {
   const defaultUrl = entry?.gitRemote ? `https://${entry.gitRemote.host}` : "";
   const noGitRemote = !entry?.gitRemote;
-  return html`<form class="connect-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/connect")}" data-testid="connect-form">
+  return html`${savedRemotes.length > 0 ? savedConnectForm(ctx, savedRemotes) : emptyHtml}
+  <form class="connect-form" method="post" action="${repoHref(ctx.owner, ctx.repo, "/connect")}" data-testid="connect-form">
+    <h2>New API key</h2>
     <label>Cosheaf URL
       <input name="url" type="url" required placeholder="https://cosheaf.example" value="${defaultUrl}" autocomplete="off" spellcheck="false" data-testid="connect-url">
     </label>
     <label>API token
       <input name="token" type="password" required placeholder="opaque Cosheaf token" autocomplete="off" spellcheck="false" data-testid="connect-token">
     </label>
-    <p class="muted">Stored in <code>.cosheaf/remote.json</code> (gitignored) — never committed. Create a token in your Cosheaf account settings.</p>
+    <label>Key label
+      <input name="label" placeholder="Work account" autocomplete="off" spellcheck="false" data-testid="connect-label">
+    </label>
+    <label class="checkbox-row">
+      <input name="save_remote" type="checkbox" value="1" checked data-testid="connect-save-remote">
+      <span>Save this server/API key</span>
+    </label>
+    <p class="muted">The selected workspace connection is written to <code>.cosheaf/remote.json</code> (gitignored).</p>
     ${noGitRemote ? html`<p class="form-warning" data-testid="connect-no-git-remote">Local git step blocked: this folder has no git remote, so pushes have nowhere to go. Add one with <code>git remote add origin &lt;url&gt;</code> before opening a remote pull request.</p>` : emptyHtml}
     <div class="form-actions"><button class="button primary" type="submit">${submitLabel}</button></div>
   </form>`;
+}
+
+function savedConnectForm(ctx: WebCtx, savedRemotes: readonly SelectableRemoteCredential[]): Html {
+  return html`<form class="connect-form connect-form--saved" method="post" action="${repoHref(ctx.owner, ctx.repo, "/connect")}" data-testid="connect-saved-form">
+    <h2>Saved API key</h2>
+    <label>Server/API key
+      <select name="remote_id" required data-testid="connect-saved-remote">
+        ${groupedSavedRemoteOptions(savedRemotes)}
+      </select>
+    </label>
+    <div class="form-actions"><button class="button primary" type="submit">Connect saved key</button></div>
+  </form>`;
+}
+
+function groupedSavedRemoteOptions(savedRemotes: readonly SelectableRemoteCredential[]): Html {
+  const byServer = new Map<string, SelectableRemoteCredential[]>();
+  for (const remote of savedRemotes) {
+    const label = remoteHostLabel(remote.url);
+    byServer.set(label, [...(byServer.get(label) ?? []), remote]);
+  }
+  return html`${[...byServer.entries()].map(([server, remotes]) => html`<optgroup label="${server}">
+        ${remotes.map((remote) => html`<option value="${remote.id}">${savedRemoteDisplayLabel(remote)}</option>`)}
+  </optgroup>`)}`;
 }
 
 // The not-connected Connect body, rendered by the local web router's connect gate
 // for any collaboration surface (issues/pulls/notifications/activity/settings)
 // when the workspace has no connected core. The shared collaboration routes take
 // over once a core is connected (#268).
-export function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined, notice: string | null): Html {
+export function notConnectedBody(ctx: WebCtx, entry: WorkspaceEntry | undefined, savedRemotes: readonly SelectableRemoteCredential[], notice: string | null): Html {
   return html`
     <div class="page-title compact"><div><h1>Remote pull requests</h1></div></div>
     ${notice ? html`<p class="muted" data-testid="pulls-notice">${notice}</p>` : emptyHtml}
     <div class="empty" data-testid="pulls-disconnected">Local git state only: no connected Cosheaf server. Connect a workspace server to push branches and open remote pull requests from here.</div>
-    ${connectForm(ctx, entry, "Connect")}`;
+    ${connectForm(ctx, entry, savedRemotes, "Connect")}`;
 }
 
 export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
@@ -71,8 +104,10 @@ export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
     "/:owner/:repo/connect",
     webRouteForWrite(async (c, ctx) => {
       const form = await c.req.parseBody();
-      const url = stringField(form.url)?.trim();
-      const token = stringField(form.token)?.trim();
+      const registry = c.get("localRegistry");
+      const saved = registry.getSavedRemote(stringField(form.remote_id)?.trim() ?? "");
+      const url = saved?.url ?? stringField(form.url)?.trim();
+      const token = saved?.token ?? stringField(form.token)?.trim();
       if (!url || !token) return badRequestPage(ctx.user, "Both a Cosheaf URL and an API token are required.");
       let parsed: URL;
       try {
@@ -93,7 +128,10 @@ export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
       const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
       if (!entry) return badRequestPage(ctx.user, "Workspace not found.");
       writeRemote(entry.path, { url, token });
-      c.get("localRegistry").rebuild(entry.slug);
+      if (!saved && stringField(form.save_remote) === "1") {
+        registry.saveRemote({ url, token, username: who.username, label: stringField(form.label) });
+      }
+      registry.rebuild(entry.slug);
       return redirect(`${repoHref(ctx.owner, ctx.repo, "/pulls")}?toast=${encodeURIComponent(`Connected as ${who.username}.`)}`);
     }),
   );

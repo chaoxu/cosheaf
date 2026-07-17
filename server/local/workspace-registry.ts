@@ -9,7 +9,7 @@
 // rebuildable index, scoped by the workspace_slug column the schema already has.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import { workspaceSlug } from "../../shared/conventions.js";
@@ -18,6 +18,7 @@ import { indexCitationFile, indexPage, pruneWorkspaceIndex } from "../indexer.js
 import type { LocalWorkspaceIdentity } from "../types.js";
 import { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import { type LocalGitRemote, type LocalRemote, type WorkbenchProfile, deriveLocalWorkspace } from "./local-workspace.js";
+import { compareSavedRemotes } from "./saved-remotes.js";
 
 // The fixed single user every local workspace is served as. The Workbench is
 // single-person; this handle only colours the sidebar identity and any branch
@@ -36,6 +37,20 @@ export interface WorkspaceEntry {
   remote: LocalRemote | null;
   // Working-tree git upstream (display + push target), or null for local-only.
   gitRemote: LocalGitRemote | null;
+}
+
+export interface PersistedRemoteCredential {
+  id: string;
+  url: string;
+  token: string;
+  username: string | null;
+  label: string;
+  updatedAt: number;
+}
+
+export interface SelectableRemoteCredential extends PersistedRemoteCredential {
+  source: "saved" | "workspace";
+  workspaceSlug?: string;
 }
 
 // Ensure `<dir>/.cosheaf/.gitignore` exists and ignores everything, so a
@@ -65,6 +80,47 @@ function normalizeProfile(name: unknown, email: unknown): WorkbenchProfile | nul
   return n && e ? { name: n, email: e } : null;
 }
 
+function normalizeUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch (_err) {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return trimmed.replace(/\/+$/, "");
+}
+
+function normalizeNonBlank(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function savedRemoteId(url: string, token: string): string {
+  return `remote-${createHash("sha256").update(`${url}\0${token}`).digest("hex").slice(0, 16)}`;
+}
+
+function normalizeSavedRemote(raw: {
+  url?: unknown;
+  token?: unknown;
+  username?: unknown;
+  label?: unknown;
+  updatedAt?: unknown;
+}): PersistedRemoteCredential | null {
+  const url = normalizeUrl(raw.url);
+  const token = normalizeNonBlank(raw.token);
+  if (!url || !token) return null;
+  const username = normalizeNonBlank(raw.username);
+  const label = normalizeNonBlank(raw.label) ?? username;
+  if (!label) return null;
+  const updatedAt = typeof raw.updatedAt === "number" && Number.isFinite(raw.updatedAt) && raw.updatedAt > 0
+    ? raw.updatedAt
+    : Date.now();
+  return { id: savedRemoteId(url, token), url, token, username, label, updatedAt };
+}
+
 function originIdForPath(path: string): string {
   return `local-${createHash("sha256").update(path).digest("hex").slice(0, 16)}`;
 }
@@ -74,6 +130,7 @@ export class WorkspaceRegistry {
   // The Workbench user's git authorship identity, loaded from the config and set
   // on the Profile page. Backends read it lazily as a commit-time fallback.
   private profile: WorkbenchProfile | null = null;
+  private savedRemotes: PersistedRemoteCredential[] = [];
 
   constructor(
     private readonly db: Database.Database,
@@ -93,6 +150,46 @@ export class WorkspaceRegistry {
   setProfile(profile: WorkbenchProfile | null): void {
     this.profile = normalizeProfile(profile?.name, profile?.email);
     this.persist();
+  }
+
+  getSavedRemotes(): SelectableRemoteCredential[] {
+    const remotes = new Map(this.savedRemotes.map((remote) => [remote.id, selectableSavedRemote(remote)]));
+    for (const entry of this.entries.values()) {
+      const remote = workspaceSavedRemote(entry);
+      if (remote && !remotes.has(remote.id)) remotes.set(remote.id, remote);
+    }
+    return [...remotes.values()].sort(compareSavedRemotes);
+  }
+
+  getSavedRemote(id: string): SelectableRemoteCredential | null {
+    return this.getSavedRemotes().find((remote) => remote.id === id) ?? null;
+  }
+
+  saveRemote(input: { url: string; token: string; username: string; label?: string | null }): SelectableRemoteCredential | null {
+    const saved = normalizeSavedRemote({
+      url: input.url,
+      token: input.token,
+      username: input.username,
+      label: input.label,
+      updatedAt: Date.now(),
+    });
+    if (!saved) return null;
+    this.savedRemotes = [
+      ...this.savedRemotes.filter((remote) => remote.id !== saved.id),
+      saved,
+    ];
+    this.persist();
+    return selectableSavedRemote(saved);
+  }
+
+  removeSavedRemote(id: string): boolean {
+    const next = this.savedRemotes.filter((remote) => remote.id !== id);
+    const removed = next.length !== this.savedRemotes.length;
+    if (removed) {
+      this.savedRemotes = next;
+      this.persist();
+    }
+    return removed;
   }
 
   get(slug: string): WorkspaceEntry | undefined {
@@ -223,8 +320,18 @@ export class WorkspaceRegistry {
       const raw = JSON.parse(readFileSync(file, "utf8")) as {
         workspaces?: Array<{ path?: unknown }>;
         profile?: { name?: unknown; email?: unknown };
+        remotes?: Array<{
+          url?: unknown;
+          token?: unknown;
+          username?: unknown;
+          label?: unknown;
+          updatedAt?: unknown;
+        }>;
       };
       this.profile = normalizeProfile(raw.profile?.name, raw.profile?.email);
+      this.savedRemotes = (raw.remotes ?? [])
+        .map(normalizeSavedRemote)
+        .filter((remote): remote is PersistedRemoteCredential => remote !== null);
       return (raw.workspaces ?? []).map((w) => w.path).filter((path): path is string => typeof path === "string");
     } catch (_err) {
       return [];
@@ -235,10 +342,31 @@ export class WorkspaceRegistry {
     const file = this.opts.configPath;
     if (!file) return;
     mkdirSync(dirname(file), { recursive: true });
-    const config: { workspaces: { path: string }[]; profile?: WorkbenchProfile } = {
+    const config: { workspaces: { path: string }[]; profile?: WorkbenchProfile; remotes?: PersistedRemoteCredential[] } = {
       workspaces: this.list().map((e) => ({ path: e.path })),
     };
     if (this.profile) config.profile = this.profile;
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+    const remotes = [...this.savedRemotes].sort(compareSavedRemotes);
+    if (remotes.length > 0) config.remotes = remotes;
+    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    chmodSync(file, 0o600);
   }
+}
+
+function selectableSavedRemote(remote: PersistedRemoteCredential): SelectableRemoteCredential {
+  return { ...remote, source: "saved" };
+}
+
+function workspaceSavedRemote(entry: WorkspaceEntry): SelectableRemoteCredential | null {
+  if (!entry.remote) return null;
+  return {
+    id: savedRemoteId(entry.remote.url, entry.remote.token),
+    url: entry.remote.url,
+    token: entry.remote.token,
+    username: null,
+    label: `${entry.slug} current key`,
+    updatedAt: 0,
+    source: "workspace",
+    workspaceSlug: entry.slug,
+  };
 }

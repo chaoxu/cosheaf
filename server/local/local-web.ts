@@ -27,9 +27,12 @@ import type { AppEnv } from "../types.js";
 import { registerLocalAgentSessionRoutes } from "./local-agent-sessions.js";
 import { hasWorkbenchAccess, localAuthGate, tokenMatches, WORKBENCH_COOKIE } from "./local-auth.js";
 import { registerLocalCommitRoutes } from "./local-commit.js";
+import { friendlyLine } from "./git-errors.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
 import { notConnectedBody, registerLocalRemoteRoutes } from "./local-remote.js";
-import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
+import { OriginCollaborationClient } from "./origin-collaboration-client.js";
+import { remoteHostLabel } from "./saved-remotes.js";
+import type { SelectableRemoteCredential, WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
 // A compact path for the card: abbreviate the home dir to ~ and elide a deep
 // middle so it stays readable; the full path is kept in the title tooltip.
@@ -46,7 +49,7 @@ function shortPath(full: string): string {
 function workspaceCard(entry: WorkspaceEntry): Html {
   const href = repoHref(entry.identity.owner, entry.identity.repo);
   const remote = entry.gitRemote;
-  const cosheafServer = entry.remote ? serverLabel(entry.remote.url) : null;
+  const cosheafServer = entry.remote ? remoteHostLabel(entry.remote.url) : null;
   const remoteRow = remote
     ? html`<div class="workspace-card__remote" data-testid="workspace-remote">
         <span class="badge">git remote</span>
@@ -68,14 +71,6 @@ function workspaceCard(entry: WorkspaceEntry): Html {
       <button class="button subtle" type="submit" title="Forget this workspace (does not delete files)">Remove</button>
     </form>
   </li>`;
-}
-
-function serverLabel(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch (_err) {
-    return url;
-  }
 }
 
 // --- Folder picker -------------------------------------------------------
@@ -221,6 +216,53 @@ function profilePage(registry: WorkspaceRegistry, user: string, notice: string |
   return pageShell({ title: "Profile", user, sidebar: globalSidebar("account", user, null, undefined, { profile: true, signOut, local: true }), body });
 }
 
+function remoteCard(remote: SelectableRemoteCredential): Html {
+  return html`<li class="remote-card" data-testid="remote-card">
+    <div class="remote-card__main">
+      <strong>${remoteHostLabel(remote.url)}</strong>
+      <span class="muted">${remote.url}</span>
+      <span class="badge">${remote.source === "workspace" ? "Workspace key" : "API key"}</span>
+      <span>${remote.label}</span>
+      ${remote.username ? html`<span class="muted">user <code>${remote.username}</code></span>` : emptyHtml}
+      ${remote.workspaceSlug ? html`<span class="muted">from <code>${remote.workspaceSlug}</code></span>` : emptyHtml}
+    </div>
+    ${remote.source === "saved"
+      ? html`<form class="remote-card__remove" method="post" action="/_remotes/remove">
+        <input type="hidden" name="id" value="${remote.id}">
+        <button class="button subtle" type="submit">Remove</button>
+      </form>`
+      : emptyHtml}
+  </li>`;
+}
+
+function remoteServersPage(registry: WorkspaceRegistry, user: string, notice: string | null, signOut: boolean): string {
+  const remotes = registry.getSavedRemotes();
+  const body = html`<main class="page workbench-home">
+    <div class="page-title compact"><div><h1>Remote servers</h1></div></div>
+    <p class="workbench-subtitle">Saved and current workspace Cosheaf server API keys.</p>
+    ${notice ? html`<p class="muted" data-testid="remote-notice">${notice}</p>` : emptyHtml}
+    ${
+      remotes.length === 0
+        ? html`<div class="empty" data-testid="remote-empty">No saved or workspace API keys yet.</div>`
+        : html`<ul class="remote-list" data-testid="remote-list">${remotes.map(remoteCard)}</ul>`
+    }
+    <form class="remote-form" method="post" action="/_remotes/add" data-testid="remote-add-form">
+      <h2>Add API key</h2>
+      <label>Cosheaf URL
+        <input name="url" type="url" required placeholder="https://cosheaf.example" autocomplete="off" spellcheck="false" data-testid="remote-url">
+      </label>
+      <label>API token
+        <input name="token" type="password" required placeholder="opaque Cosheaf token" autocomplete="off" spellcheck="false" data-testid="remote-token">
+      </label>
+      <label>Key label
+        <input name="label" placeholder="Work account" autocomplete="off" spellcheck="false" data-testid="remote-label">
+      </label>
+      <div class="form-actions"><button class="button primary" type="submit">Save API key</button></div>
+    </form>
+  </main>`;
+  return pageShell({ title: "Remote servers", user, sidebar: globalSidebar("remotes", user, null, undefined, { profile: true, signOut, local: true }), body });
+}
+
 // The Workbench access-token sign-in page, shown only when COSHEAF_WORKBENCH_TOKEN
 // is set (the operator exposed the Workbench beyond loopback). A single token
 // field; no username — the Workbench is single-user. `next` is a same-site path
@@ -267,7 +309,7 @@ function coreConnectGate(active: RepoTab, titleLabel?: string): MiddlewareHandle
     // titleLabel overrides the tab→title map for surfaces (e.g. branches) that
     // share a tab with a differently-named page.
     const title = `${titleLabel ?? CONNECT_TITLES[active] ?? active} - ${ctx.repo}`;
-    return htmlResponse(repoPageShell(ctx, active, title, notConnectedBody(ctx, entry, c.req.query("toast") ?? null)));
+    return htmlResponse(repoPageShell(ctx, active, title, notConnectedBody(ctx, entry, c.get("localRegistry").getSavedRemotes(), c.req.query("toast") ?? null)));
   };
 }
 
@@ -343,6 +385,49 @@ export function createLocalWebRouter(): Hono<AppEnv> {
       if (!name || !email) return redirect(`/_profile?toast=${encodeURIComponent("Both a name and email are required.")}`);
       c.get("localRegistry").setProfile({ name, email });
       return redirect(`/_profile?toast=${encodeURIComponent("Profile saved.")}`);
+    }),
+  );
+
+  localWeb.get(
+    "/_remotes",
+    globalRoute((c) => htmlResponse(remoteServersPage(c.get("localRegistry"), c.get("user").username, c.req.query("toast") ?? null, Boolean(c.get("config").accessToken)))),
+  );
+  localWeb.post(
+    "/_remotes/add",
+    globalRoute(async (c) => {
+      const form = await c.req.parseBody();
+      const url = stringField(form.url)?.trim();
+      const token = stringField(form.token)?.trim();
+      if (!url || !token) return redirect(`/_remotes?toast=${encodeURIComponent("Both a Cosheaf URL and an API token are required.")}`);
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("bad protocol");
+      } catch (_err) {
+        return redirect(`/_remotes?toast=${encodeURIComponent("The Cosheaf URL must start with http:// or https://.")}`);
+      }
+      let who: { username: string } | null;
+      try {
+        who = await new OriginCollaborationClient(url, token).whoami();
+      } catch (err) {
+        return redirect(`/_remotes?toast=${encodeURIComponent(`Couldn't reach that Cosheaf: ${friendlyLine(err)}`)}`);
+      }
+      if (!who) return redirect(`/_remotes?toast=${encodeURIComponent("The Cosheaf rejected that token.")}`);
+      const saved = c.get("localRegistry").saveRemote({
+        url,
+        token,
+        username: who.username,
+        label: stringField(form.label),
+      });
+      return redirect(`/_remotes?toast=${encodeURIComponent(saved ? `Saved ${remoteHostLabel(saved.url)} as ${saved.label}.` : "Could not save that API key.")}`);
+    }),
+  );
+  localWeb.post(
+    "/_remotes/remove",
+    globalRoute(async (c) => {
+      const form = await c.req.parseBody();
+      const id = stringField(form.id)?.trim();
+      const removed = id ? c.get("localRegistry").removeSavedRemote(id) : false;
+      return redirect(`/_remotes?toast=${encodeURIComponent(removed ? "Removed API key." : "No API key removed.")}`);
     }),
   );
 
