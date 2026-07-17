@@ -11,8 +11,9 @@ import type { Role } from "../../shared/roles.js";
 import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import type { AppEnv } from "../types.js";
+import { classifyMergeFailure } from "../merge-failure.js";
 import { branches } from "./branches.js";
-import { classifyMergeFailure, pulls } from "./pulls.js";
+import { pulls } from "./pulls.js";
 import {
   fakeForgejo,
   fakeWorkspaceBackend,
