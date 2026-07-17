@@ -25,8 +25,7 @@ import {
 } from "../../shared/document-rail";
 import { isEditableTextFile } from "../../shared/file-kind";
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
-import { suggestingHunkFingerprint, suggestingHunks, type SuggestingHunk } from "../../shared/suggesting-diff";
-import { repoBranchFileHref, repoHref, workspaceApiPath } from "../../shared/url";
+import { repoBranchFileHref, repoHref } from "../../shared/url";
 import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
 import {
@@ -42,22 +41,18 @@ import {
   liveEditorSource,
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
-import { clearDraft, writeDraft } from "./editor-draft";
-import { editorExternalDiffHasVisibleChanges, editorExternalDiffRows } from "./editor-external-diff";
+import { clearDraft } from "./editor-draft";
 import { readonlyFileSystemBase } from "./coflat-readonly-filesystem";
 import { useCoflatDocumentContext } from "./web-editor-document-context";
 import { useLocalDrafts } from "./web-editor-drafts";
+import { useExternalFileChange } from "./web-editor-external-change";
 import { fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
 import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
+import { useSuggestingMode } from "./web-editor-suggesting";
 import { referenceSuggestExtension } from "./reference-suggest-source";
-import { createSuggestingModeController } from "./suggesting-mode";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
-
-function acceptedSuggestingHunkKey(baseText: string, currentText: string, hunk: SuggestingHunk): string {
-  return `${hunk.id}\0${suggestingHunkFingerprint(baseText, currentText, hunk)}`;
-}
 
 // A ref kept in sync with a render value: `.current` is updated during render on
 // every pass, so handlers read the latest value without re-subscribing. Only for
@@ -109,13 +104,6 @@ interface ValidationSummary {
   orphanLabels: number;
 }
 
-interface SuggestingBase {
-  path: string;
-  baseText: string;
-  headSha: string;
-  currentSha: string | null;
-}
-
 export interface WebEditorPreviewEvent {
   source: string;
   branch: string;
@@ -126,16 +114,6 @@ export interface WebEditorPreviewEvent {
 }
 
 type WebEditorSourcePosition = EditorSourcePosition | EditorScrollToSourcePositionOptions;
-type ExternalFileChange = {
-  path: string;
-  type: "change" | "remove";
-  compareOpen: boolean;
-  loading: boolean;
-  latestContent?: string;
-  latestSha?: string | null;
-  error?: string;
-  staleSave?: boolean;
-};
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 const ActiveMarkdownEditor = lazy(() => import("./editor").then((m) => ({ default: m.MarkdownEditor })));
 
@@ -145,28 +123,6 @@ function insertAnchorIntoSource(source: string, anchor: string): string {
   if (source.endsWith("\n\n")) return `${source}${anchor}\n`;
   if (source.endsWith("\n")) return `${source}\n${anchor}\n`;
   return `${source} ${anchor}`;
-}
-
-function renderExternalCompareCell(
-  line: number | "",
-  text: string,
-  marker: "+" | "-" | "",
-  note?: string,
-): ReactNode {
-  const markerLabel = marker === "+" ? "Added line" : marker === "-" ? "Removed line" : undefined;
-  return (
-    <>
-      <span className="editor-external-compare-line-number">{line}</span>
-      <span
-        className="editor-external-compare-marker"
-        {...(markerLabel ? { "aria-label": markerLabel } : { "aria-hidden": true })}
-      >
-        {marker || " "}
-      </span>
-      <span>{text}</span>
-      {note ? <em className="editor-external-compare-note">{note}</em> : null}
-    </>
-  );
 }
 
 export interface WebEditorCallbacks {
@@ -241,7 +197,6 @@ function WebEditor({
 }) {
   const [content, setContent] = useState(initialContent);
   const [contextSource, setContextSource] = useState(initialContent);
-  const [suggestingSource, setSuggestingSource] = useState(initialContent);
   const [currentPath, setCurrentPath] = useState(config.path);
   const [savedPath, setSavedPath] = useState(config.path);
   const [branch, setBranch] = useState(config.branch);
@@ -268,10 +223,6 @@ function WebEditor({
   const [readOnly, setReadOnly] = useState(Boolean(initialReadOnly));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
-  const [suggestingBase, setSuggestingBase] = useState<SuggestingBase | null>(null);
-  const [acceptedSuggestingHunks, setAcceptedSuggestingHunks] = useState<ReadonlySet<string>>(() => new Set());
-  const [suggestingError, setSuggestingError] = useState<string | null>(null);
-  const [externalFileChange, setExternalFileChange] = useState<ExternalFileChange | null>(null);
   const [outline, setOutline] = useState<readonly OutlineEntry[]>([]);
   const editorRef = useRef<MountedEditor | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -292,8 +243,20 @@ function WebEditor({
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
   const pathDirtyRef = useSyncedRef(pathDirty);
   const resetEditBranchRef = useRef(config.resetEditBranch);
-  const ignoredChangePathsRef = useRef(new Set<string>());
-  const ignoredChangeTimersRef = useRef<number[]>([]);
+  // Late-bound wires that break the render-order cycles between the editor core,
+  // the external-change hook, and the suggesting hook (each defined after a
+  // callback the earlier one needs). Populated once the real functions exist
+  // below; every reader is an event handler/effect that runs after render, so
+  // the ref is always current by call time.
+  const applySuggestingSourceRef = useRef<(next: string) => void>(() => {});
+  const loadSuggestingBaseRef = useRef<(path: string) => void>(() => {});
+  const saveRef = useRef<() => void>(() => {});
+  const reloadSuggestingBase = useCallback((path: string) => {
+    loadSuggestingBaseRef.current(path);
+  }, []);
+  const onCheckpoint = useCallback(() => {
+    saveRef.current();
+  }, []);
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
   const localAnnotationsEnabled = config.writeMode === "direct";
   const suggestingEnabled = config.writeMode === "direct";
@@ -348,8 +311,8 @@ function WebEditor({
     sourceCacheRef.current.reset(next);
     setContent(next);
     setContextSource(next);
-    if (suggestingEnabled && suggestingBase) setSuggestingSource(next);
-  }, [suggestingBase, suggestingEnabled]);
+    applySuggestingSourceRef.current(next);
+  }, []);
 
   const replaceEditorDocument = useCallback((next: string) => {
     const editor = editorRef.current;
@@ -387,19 +350,6 @@ function WebEditor({
   const pendingDraft = drafts.pendingDraft;
   const setPendingDraft = drafts.setPendingDraft;
 
-  const resolveIdenticalWorkspaceContent = useCallback((path: string, latest: { content: string; sha: string | null }): boolean => {
-    const source = liveEditorSource(editorRef.current, sourceCacheRef.current.source());
-    if (editorExternalDiffHasVisibleChanges(editorExternalDiffRows(source, latest.content))) return false;
-    savedShaRef.current = latest.sha;
-    sourceShaRef.current = undefined;
-    if (path === currentPathRef.current) {
-      setSaveError(null);
-      if (!pathDirtyRef.current) setUncommitted(false);
-    }
-    setExternalFileChange(null);
-    return true;
-  }, []);
-
   const scheduleContextSourceSync = useCallback(() => {
     if (contextSourceTimerRef.current !== null) window.clearTimeout(contextSourceTimerRef.current);
     contextSourceTimerRef.current = window.setTimeout(() => {
@@ -407,9 +357,9 @@ function WebEditor({
       const source = sourceCacheRef.current.source();
       setContent(source);
       setContextSource(source);
-      if (suggestingEnabled && suggestingBase) setSuggestingSource(source);
+      applySuggestingSourceRef.current(source);
     }, 700);
-  }, [suggestingBase, suggestingEnabled]);
+  }, []);
 
   const handleEditorStringChange = useCallback((next: string) => {
     setEditorContent(next);
@@ -441,125 +391,55 @@ function WebEditor({
       outlineUnsubscribeRef.current = null;
       cursorUnsubscribeRef.current?.();
       cursorUnsubscribeRef.current = null;
-      for (const timer of ignoredChangeTimersRef.current) window.clearTimeout(timer);
-      ignoredChangeTimersRef.current = [];
     },
     [],
   );
 
-  const ignoreOwnChangeEvents = useCallback((paths: string[]) => {
-    for (const path of paths) {
-      if (!path) continue;
-      ignoredChangePathsRef.current.add(path);
+  const copyCurrentBuffer = useCallback(() => {
+    const buffer = liveEditorSource(editorRef.current, content);
+    if (!navigator.clipboard) {
+      toast("Copy unavailable; select the editor buffer manually", "error");
+      return;
     }
-    const timer = window.setTimeout(() => {
-      for (const path of paths) ignoredChangePathsRef.current.delete(path);
-      ignoredChangeTimersRef.current = ignoredChangeTimersRef.current.filter((item) => item !== timer);
-    }, 5_000);
-    ignoredChangeTimersRef.current.push(timer);
-  }, []);
-
-  const loadSuggestingBase = useCallback(async (path: string) => {
-    if (!suggestingEnabled) return null;
-    try {
-      const base = await api.suggestingBase(config.owner, config.repo, path);
-      const next = {
-        path: base.path,
-        baseText: base.base_text,
-        headSha: base.head_sha,
-        currentSha: base.current_sha,
-      };
-      setSuggestingBase(next);
-      setSuggestingSource(sourceCacheRef.current.source());
-      setAcceptedSuggestingHunks(new Set());
-      setSuggestingError(null);
-      return next;
-    } catch (err) {
-      setSuggestingBase(null);
-      setAcceptedSuggestingHunks(new Set());
-      setSuggestingError(err instanceof ApiError ? err.message : "Suggesting mode unavailable");
-      return null;
-    }
-  }, [config.owner, config.repo, suggestingEnabled]);
-
-  useEffect(() => {
-    if (!suggestingEnabled) return;
-    void loadSuggestingBase(savedPathRef.current);
-  }, [loadSuggestingBase, savedPath, suggestingEnabled]);
-
-  useEffect(() => {
-    if (typeof EventSource === "undefined") return;
-    const stream = new EventSource(`${workspaceApiPath(config.owner, config.repo)}/events`);
-    stream.onmessage = (event) => {
-      let data: unknown;
-      try {
-        data = JSON.parse(event.data) as unknown;
-      } catch (_err) {
-        return;
-      }
-      if (!data || typeof data !== "object") return;
-      const payload = data as { type?: unknown; action?: unknown; path?: unknown; previous_path?: unknown };
-      if (typeof payload.path !== "string") return;
-      let type: ExternalFileChange["type"] | null = null;
-      if (payload.type === "change") type = "change";
-      if (payload.type === "remove") type = "remove";
-      if (payload.type === "file_changed") {
-        if (payload.action === "changed" || payload.action === "moved") type = "change";
-        if (payload.action === "removed") type = "remove";
-      }
-      if (!type) return;
-      const current = currentPathRef.current.trim() || config.path;
-      const saved = savedPathRef.current;
-      const previousPath = typeof payload.previous_path === "string" ? payload.previous_path : null;
-      if (payload.path !== current && payload.path !== saved && previousPath !== current && previousPath !== saved) return;
-      const ignoredPath = ignoredChangePathsRef.current.has(payload.path)
-        ? payload.path
-        : previousPath && ignoredChangePathsRef.current.has(previousPath) ? previousPath : null;
-      if (ignoredPath) {
-        ignoredChangePathsRef.current.delete(payload.path);
-        if (previousPath) ignoredChangePathsRef.current.delete(previousPath);
-        return;
-      }
-      setExternalFileChange({
-        path: payload.path,
-        type,
-        compareOpen: false,
-        loading: type === "change",
-      });
-    };
-    return () => stream.close();
-  }, [config.owner, config.path, config.repo]);
-
-  useEffect(() => {
-    if (!externalFileChange || externalFileChange.type !== "change" || !externalFileChange.loading) return;
-    let cancelled = false;
-    const readBranch = branchRef.current || savedReadBranchRef.current || config.branch;
-    void api.getFile(config.owner, config.repo, externalFileChange.path, readBranch).then((latest) => {
-      if (cancelled) return;
-      if (resolveIdenticalWorkspaceContent(externalFileChange.path, latest)) return;
-      setExternalFileChange((current) => current && current.path === externalFileChange.path
-        ? {
-            ...current,
-            loading: false,
-            latestContent: latest.content,
-            latestSha: latest.sha,
-            error: undefined,
-          }
-        : current);
-    }).catch((err) => {
-      if (cancelled) return;
-      setExternalFileChange((current) => current && current.path === externalFileChange.path
-        ? {
-            ...current,
-            loading: false,
-            error: err instanceof Error ? err.message : "Unable to read latest file",
-          }
-        : current);
+    void navigator.clipboard.writeText(buffer).then(() => {
+      toast("Copied current editor buffer");
+    }).catch(() => {
+      toast("Copy failed; select the editor buffer manually", "error");
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [config.branch, config.owner, config.repo, externalFileChange, resolveIdenticalWorkspaceContent]);
+  }, [content]);
+
+  const external = useExternalFileChange({
+    owner: config.owner,
+    repo: config.repo,
+    path: config.path,
+    branch: config.branch,
+    content,
+    busy,
+    uncommitted,
+    pathDirty,
+    draftScope,
+    editorRef,
+    sourceCacheRef,
+    branchRef,
+    savedReadBranchRef,
+    currentPathRef,
+    savedPathRef,
+    savedShaRef,
+    sourceShaRef,
+    pathDirtyRef,
+    setSaveError,
+    setUncommitted,
+    setBusy,
+    setCurrentPath,
+    setSavedPath,
+    setPathDirty,
+    replaceEditorDocument,
+    localDraftForSource,
+    setPendingDraft,
+    reloadSuggestingBase,
+    copyCurrentBuffer,
+  });
+  const { setExternalFileChange, ignoreOwnChangeEvents } = external;
 
   const { documentContext, editorContextReady } = useCoflatDocumentContext({
     source: contextSource,
@@ -703,67 +583,44 @@ function WebEditor({
     [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, replaceEditorDocument],
   );
 
-  const checkpointSuggestingFile = useCallback(async (path: string): Promise<{ ok: true; commitSha: string | null } | { ok: false; error: string }> => {
-    if (!suggestingEnabled) return { ok: true, commitSha: null };
-    try {
-      if (!suggestingBase || suggestingBase.path !== path) {
-        return { ok: false, error: "suggesting base unavailable; reload and retry" };
-      }
-      const checkpoint = await api.checkpointSuggestingFile(config.owner, config.repo, path, {
-        headSha: suggestingBase.headSha,
-        currentSha: savedShaRef.current ?? suggestingBase.currentSha,
-      });
-      setSuggestingBase({
-        path: checkpoint.path,
-        baseText: checkpoint.base_text,
-        headSha: checkpoint.head_sha,
-        currentSha: checkpoint.current_sha,
-      });
-      savedShaRef.current = checkpoint.current_sha;
-      setAcceptedSuggestingHunks(new Set());
-      setSuggestingError(null);
-      return { ok: true, commitSha: checkpoint.commit_sha };
-    } catch (err) {
-      const error = err instanceof ApiError ? err.message : "checkpoint failed";
-      if (err instanceof ApiError && err.status === 409) {
-        setExternalFileChange({
-          path,
-          type: "change",
-          compareOpen: true,
-          loading: true,
-          staleSave: true,
-        });
-      }
-      setSuggestingError(error);
-      return { ok: false, error };
-    }
-  }, [config.owner, config.repo, suggestingBase, suggestingEnabled]);
-
-  const commitManualSource = useCallback(
-    async (source: string): Promise<{ ok: true; branch: string; path: string } | { ok: false; error: string }> => {
-      const committed = await commitSource(source);
-      if (!committed.ok) return committed;
-      if (!suggestingEnabled || !suggestingBase || suggestingBase.path !== committed.path) return committed;
-      const checkpoint = await checkpointSuggestingFile(committed.path);
-      if (!checkpoint.ok) return { ok: false, error: checkpoint.error };
-      return committed;
-    },
-    [commitSource, checkpointSuggestingFile, suggestingBase, suggestingEnabled],
-  );
-
-  const suggestingHunksForSource = useMemo(
-    () => suggestingBase ? suggestingHunks(suggestingBase.baseText, suggestingSource) : [],
-    [suggestingBase, suggestingSource],
-  );
-  const unresolvedSuggestingHunkCount = useMemo(
-    () => suggestingBase
-      ? suggestingHunksForSource.filter((hunk) =>
-          !acceptedSuggestingHunks.has(acceptedSuggestingHunkKey(suggestingBase.baseText, suggestingSource, hunk))
-        ).length
-      : 0,
-    [acceptedSuggestingHunks, suggestingBase, suggestingHunksForSource, suggestingSource],
-  );
-  const hasCheckpointChanges = suggestingEnabled && suggestingHunksForSource.length > 0;
+  const suggesting = useSuggestingMode({
+    enabled: suggestingEnabled,
+    owner: config.owner,
+    repo: config.repo,
+    initialContent,
+    savedPath,
+    content,
+    busy,
+    uncommitted,
+    pathDirty,
+    editorRef,
+    sourceCacheRef,
+    savedShaRef,
+    sourceShaRef,
+    savedPathRef,
+    currentPathRef,
+    setSaveError,
+    setBusy,
+    setSavedPath,
+    setCurrentPath,
+    setPathDirty,
+    setUncommitted,
+    replaceEditorDocument,
+    commitSource,
+    setExternalFileChange,
+    ignoreOwnChangeEvents,
+    onCheckpoint,
+  });
+  const {
+    checkpointSuggestingFile,
+    commitManualSource,
+    suggestingBase,
+    suggestingError,
+    unresolvedSuggestingHunkCount,
+    hasCheckpointChanges,
+  } = suggesting;
+  applySuggestingSourceRef.current = suggesting.applySource;
+  loadSuggestingBaseRef.current = suggesting.loadSuggestingBase;
 
   // Route Coflat saves by reason (#162): autosave → local draft (or nothing when
   // disabled, #158); manual/command (Save button, Cmd-S) → real commit.
@@ -928,101 +785,8 @@ function WebEditor({
       }
     });
   }, [busy, content, uncommitted, pathDirty, hasCheckpointChanges, checkpointSuggestingFile, commitManualSource]);
+  saveRef.current = save;
 
-  const acceptSuggestingHunk = useCallback((hunk: SuggestingHunk) => {
-    const base = suggestingBase;
-    if (!base) return;
-    const source = liveEditorSource(editorRef.current, suggestingSource);
-    const key = acceptedSuggestingHunkKey(base.baseText, source, hunk);
-    setSuggestingSource(source);
-    setAcceptedSuggestingHunks((previous) => {
-      const next = new Set(previous);
-      next.add(key);
-      return next;
-    });
-    toast("Hunk kept for the next checkpoint");
-  }, [suggestingBase, suggestingSource]);
-
-  const revertSuggestingHunk = useCallback(async (hunk: SuggestingHunk) => {
-    if (busy) return;
-    if (pathDirty) {
-      const error = "Rename pending: save or cancel the path change before reverting a hunk.";
-      setSaveError(error);
-      toast(error, "error");
-      return;
-    }
-    setBusy(true);
-    setSaveError(null);
-    try {
-      if (uncommitted) {
-        const committed = await commitSource(liveEditorSource(editorRef.current, content));
-        if (!committed.ok) throw new Error(committed.error);
-      }
-      const targetPath = savedPathRef.current;
-      ignoreOwnChangeEvents([targetPath]);
-      if (!suggestingBase || suggestingBase.path !== targetPath) {
-        throw new Error("suggesting base unavailable; reload and retry");
-      }
-      const result = await api.revertSuggestingHunk(config.owner, config.repo, targetPath, hunk, {
-        headSha: suggestingBase.headSha,
-        currentSha: savedShaRef.current ?? suggestingBase.currentSha,
-      });
-      replaceEditorDocument(result.content);
-      setSavedPath(result.path);
-      setCurrentPath(result.path);
-      savedPathRef.current = result.path;
-      currentPathRef.current = result.path;
-      savedShaRef.current = result.sha;
-      sourceShaRef.current = undefined;
-      setPathDirty(false);
-      setUncommitted(false);
-      setExternalFileChange(null);
-      setSuggestingBase({
-        path: result.path,
-        baseText: result.base_text,
-        headSha: result.head_sha,
-        currentSha: result.current_sha,
-      });
-      setAcceptedSuggestingHunks(new Set());
-      setSuggestingError(null);
-      toast("Reverted hunk");
-    } catch (err) {
-      const error = err instanceof ApiError ? err.message : err instanceof Error ? err.message : "revert failed";
-      if (err instanceof ApiError && err.status === 409) {
-        setExternalFileChange({
-          path: savedPathRef.current,
-          type: "change",
-          compareOpen: true,
-          loading: true,
-          staleSave: true,
-        });
-      }
-      setSaveError(error);
-      toast(`Revert failed: ${error}`, "error");
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, uncommitted, pathDirty, commitSource, content, config.owner, config.repo, ignoreOwnChangeEvents, replaceEditorDocument, suggestingBase]);
-
-  const acceptSuggestingHunkRef = useRef(acceptSuggestingHunk);
-  const revertSuggestingHunkRef = useRef(revertSuggestingHunk);
-  const saveCheckpointRef = useRef(save);
-  acceptSuggestingHunkRef.current = acceptSuggestingHunk;
-  revertSuggestingHunkRef.current = revertSuggestingHunk;
-  saveCheckpointRef.current = save;
-
-  const suggestingController = useMemo(
-    () =>
-      suggestingEnabled
-        ? createSuggestingModeController({
-            baseText: null,
-            onAccept: (hunk) => acceptSuggestingHunkRef.current(hunk),
-            onRevert: (hunk) => revertSuggestingHunkRef.current(hunk),
-            onCheckpoint: () => saveCheckpointRef.current(),
-          })
-        : null,
-    [suggestingEnabled],
-  );
   const referenceSuggestExt = useMemo(
     // branch/path are read live via refs, so the extension stays stable for the
     // editor's lifetime (owner/repo never change without a full remount).
@@ -1036,15 +800,11 @@ function WebEditor({
   );
   const suggestingExtensions = useMemo<readonly Extension[]>(
     () => [
-      ...(suggestingController ? [suggestingController.extension] : []),
+      ...(suggesting.suggestingController ? [suggesting.suggestingController.extension] : []),
       referenceSuggestExt,
     ],
-    [suggestingController, referenceSuggestExt],
+    [suggesting.suggestingController, referenceSuggestExt],
   );
-
-  useEffect(() => {
-    suggestingController?.setBaseText(suggestingBase?.baseText ?? null);
-  }, [suggestingBase?.baseText, suggestingController]);
 
   const captureEditorCursor = useCallback(() => {
     const context = editorRef.current?.cursorContext.get();
@@ -1205,59 +965,6 @@ function WebEditor({
     documentTheme === "blueprint-book"
       ? "web-editor-shell cf-theme-scope cf-theme-blueprint-book"
       : "web-editor-shell cf-theme-scope";
-  const copyCurrentBuffer = useCallback(() => {
-    const buffer = liveEditorSource(editorRef.current, content);
-    if (!navigator.clipboard) {
-      toast("Copy unavailable; select the editor buffer manually", "error");
-      return;
-    }
-    void navigator.clipboard.writeText(buffer).then(() => {
-      toast("Copied current editor buffer");
-    }).catch(() => {
-      toast("Copy failed; select the editor buffer manually", "error");
-    });
-  }, [content]);
-  const loadLatestFile = useCallback(() => {
-    const change = externalFileChange;
-    if (!change || change.type !== "change" || busy) return;
-    const hasLocalEdits = uncommitted || pathDirty;
-    if (hasLocalEdits && !window.confirm("Load the latest workspace file and keep your current editor buffer as a local draft?")) return;
-    const recoveryDraft = hasLocalEdits ? localDraftForSource(liveEditorSource(editorRef.current, content)) : null;
-    if (recoveryDraft) {
-      writeDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, recoveryDraft, draftScope);
-    }
-    setBusy(true);
-    setSaveError(null);
-    const readBranch = branchRef.current || savedReadBranchRef.current || config.branch;
-    const load = change.latestContent !== undefined
-      ? Promise.resolve({ content: change.latestContent, sha: change.latestSha })
-      : api.getFile(config.owner, config.repo, change.path, readBranch).then((latest) => ({
-          content: latest.content,
-          sha: latest.sha,
-        }));
-    void load.then((latest) => {
-      replaceEditorDocument(latest.content);
-      setCurrentPath(change.path);
-      setSavedPath(change.path);
-      currentPathRef.current = change.path;
-      savedPathRef.current = change.path;
-      savedShaRef.current = latest.sha;
-      sourceShaRef.current = undefined;
-      setPathDirty(false);
-      setUncommitted(false);
-      setExternalFileChange(null);
-      if (recoveryDraft) setPendingDraft(recoveryDraft);
-      if (suggestingEnabled) void loadSuggestingBase(change.path);
-      toast("Loaded latest workspace file");
-    }).catch((err) => {
-      const error = err instanceof ApiError ? err.message : "Unable to load latest file";
-      setExternalFileChange((current) => current && current.path === change.path ? { ...current, loading: false, error } : current);
-      setSaveError(error);
-      toast(error, "error");
-    }).finally(() => {
-      setBusy(false);
-    });
-  }, [busy, config.branch, config.owner, config.repo, content, draftScope, externalFileChange, loadSuggestingBase, localDraftForSource, pathDirty, replaceEditorDocument, suggestingEnabled, uncommitted]);
 
   // Reader/Cancel return to the last saved file as it is actually viewable. For
   // a lazy edit branch, that may still be main until the first successful save.
@@ -1305,11 +1012,6 @@ function WebEditor({
     );
   }, [outlineMathMacros, railModel]);
 
-  const externalCompareRows = externalFileChange?.latestContent !== undefined
-    ? editorExternalDiffRows(liveEditorSource(editorRef.current, content), externalFileChange.latestContent)
-    : [];
-  const externalCompareHasVisibleChanges = editorExternalDiffHasVisibleChanges(externalCompareRows);
-
   return (
     <div className={readerClass} ref={shellRef}>
       {pendingDraft ? (
@@ -1323,78 +1025,7 @@ function WebEditor({
           </button>
         </div>
       ) : null}
-      {externalFileChange ? (
-        <div className="editor-draft-banner editor-external-change-banner" data-testid="editor-external-change-banner" role="alert">
-          <span>
-            {externalFileChange.staleSave
-              ? "Save blocked because this editor buffer is stale."
-              : externalFileChange.type === "remove" ? "This file was removed outside this editor." : "This file changed outside this editor."}
-            {externalFileChange.type === "remove" ? " Copy the buffer before leaving this editor." : " Compare or load the latest file before saving."}
-          </span>
-          {externalFileChange.type === "change" ? (
-            <button
-              type="button"
-              className="button small"
-              data-testid="editor-external-change-compare"
-              onClick={() => setExternalFileChange((current) => current ? { ...current, compareOpen: !current.compareOpen } : current)}
-            >
-              {externalFileChange.compareOpen ? "Hide compare" : "Compare"}
-            </button>
-          ) : null}
-          {externalFileChange.type === "change" ? (
-            <button type="button" className="button small" data-testid="editor-external-change-reload" onClick={loadLatestFile} disabled={busy}>
-              Load latest
-            </button>
-          ) : null}
-          <button type="button" className="button small subtle" data-testid="editor-external-change-copy" onClick={copyCurrentBuffer}>
-            Copy buffer
-          </button>
-          <button
-            type="button"
-            className="button small subtle"
-            data-testid="editor-external-change-keep-editing"
-            onClick={() => setExternalFileChange((current) => current ? { ...current, compareOpen: false } : current)}
-          >
-            Keep editing stale buffer
-          </button>
-        </div>
-      ) : null}
-      {externalFileChange?.compareOpen ? (
-        <section className="editor-external-compare" data-testid="editor-external-compare" aria-label="External change compare">
-          <header>
-            <strong>Editor buffer vs latest workspace file</strong>
-            <span>{externalFileChange.path}</span>
-          </header>
-          {externalFileChange.loading ? (
-            <p>Loading latest file...</p>
-          ) : externalFileChange.error ? (
-            <p>{externalFileChange.error}</p>
-          ) : externalFileChange.type === "remove" ? (
-            <p>The workspace file no longer exists. Copy the buffer before leaving this editor.</p>
-          ) : !externalCompareHasVisibleChanges ? (
-            <p>The latest workspace file has the same content as the editor buffer.</p>
-          ) : (
-            <div className="editor-external-compare-grid">
-              <div className="editor-external-compare-heading">Current editor buffer</div>
-              <div className="editor-external-compare-heading">Latest workspace file</div>
-              {externalCompareRows.map((row) => (
-                <div className={`editor-external-compare-row editor-external-compare-row--${row.kind}`} key={row.key}>
-                  <pre>
-                    {row.kind === "add"
-                      ? renderExternalCompareCell("", " ", "")
-                      : renderExternalCompareCell(row.bufferLine, row.buffer, row.kind === "remove" ? "-" : "", row.kind === "remove" ? row.bufferNote : undefined)}
-                  </pre>
-                  <pre>
-                    {row.kind === "remove"
-                      ? renderExternalCompareCell("", " ", "")
-                      : renderExternalCompareCell(row.latestLine, row.latest, row.kind === "add" ? "+" : "", row.kind === "add" ? row.latestNote : undefined)}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
+      {external.banner}
       <div className="doc-with-toc">
         <div className="doc-main">
           <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
