@@ -13,6 +13,17 @@ export function pageSearchForm(owner: string, repo: string): Html {
   </form>`;
 }
 
+// A tag pill linking to the tag browse page (#388). `sizeRem` scales the cloud
+// chips by IDF; `count` shows the page count. The href/escaping/class contract
+// lives here so the cloud, per-tag, and read-view chips stay consistent.
+export function tagChip(ctx: WebCtx, tag: string, opts: { count?: number; sizeRem?: number } = {}): Html {
+  return html`<a
+    class="tag-chip"
+    style="${opts.sizeRem ? `font-size:${opts.sizeRem.toFixed(2)}rem` : ""}"
+    href="${repoHref(ctx.owner, ctx.repo, `/tags/${encodeURIComponent(tag)}`)}"
+  >${tag}${opts.count !== undefined ? html`<span class="tag-count">${opts.count}</span>` : emptyHtml}</a>`;
+}
+
 export function searchResultRow(ctx: WebCtx, r: PageSearchResult): Html {
   return html`<a class="list-row search-result" ${defaultFileLinkAttrs(ctx.owner, ctx.repo, ctx.user, "main", r.path, ctx.ws.role !== "read")}>
     <span class="search-result-head"><strong>${r.title || r.path}</strong> <small class="muted">${r.path}</small></span>

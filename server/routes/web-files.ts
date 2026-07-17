@@ -16,7 +16,7 @@ import type { ForgejoTreeEntry } from "../forgejo-types.js";
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { assertLocalAnnotationsReadable, localAnnotationSidecarConflict, moveLocalAnnotationsPath } from "../local/local-annotations.js";
 import { publishLocalFileMutationEvents } from "../local/local-events.js";
-import { searchWorkspacePages, workspacePageTitles } from "../page-search.js";
+import { documentTags, searchWorkspacePages, workspacePageTitles, workspacePagesByTag, workspaceTagCloud } from "../page-search.js";
 import { bustRepoConfig, loadRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
@@ -46,7 +46,7 @@ import { coflatReaderPayload, renderMarkdown } from "./web-markdown.js";
 import { repoPageShell } from "./web-page.js";
 import { pdfExportOptionsHref, registerPdfExportRoutes } from "./web-pdf-export.js";
 import { clonePanel, sshCloneUrl } from "./web-repo-clone.js";
-import { pageSearchForm, repoHomeHeader, repoLanding, searchResultRow } from "./web-repo-landing.js";
+import { pageSearchForm, repoHomeHeader, repoLanding, searchResultRow, tagChip } from "./web-repo-landing.js";
 import { webEditShellAssets, webEditorAssets } from "./web-shell.js";
 
 function hasFileContent(file: unknown): file is { content: string } {
@@ -125,13 +125,7 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
 // #388: browse surface for the page_tags index. Tag cloud ranked by IDF (rare
 // tags larger), each chip linking to the pages carrying it. Tags are main-only.
 web.get("/:owner/:repo/tags", webRoute(async (_c, ctx) => {
-  const rows = ctx.db
-    .prepare("SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? GROUP BY tag")
-    .all(ctx.ws.slug) as Array<{ tag: string; count: number }>;
-  const total = (ctx.db.prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?").get(ctx.ws.slug) as { n: number }).n;
-  const tags = rows
-    .map((r) => ({ ...r, idf: r.count > 0 && total > 0 ? Math.log(total / r.count) : 0 }))
-    .sort((a, b) => b.idf - a.idf || a.tag.localeCompare(b.tag));
+  const tags = workspaceTagCloud(ctx.db, ctx.ws.slug);
   const maxIdf = tags.reduce((m, t) => Math.max(m, t.idf), 0) || 1;
   return htmlResponse(
     repoPageShell(ctx, "files", `Tags - ${ctx.repo}`, html`
@@ -139,25 +133,16 @@ web.get("/:owner/:repo/tags", webRoute(async (_c, ctx) => {
         ${
           tags.length === 0
             ? html`<div class="empty">No tags yet. Add a <code>tags:</code> list to a page's frontmatter.</div>`
-            : html`<div class="tag-cloud" data-testid="tag-cloud">${tags.map((t) => html`<a
-                class="tag-chip"
-                style="font-size:${(0.85 + 0.5 * (t.idf / maxIdf)).toFixed(2)}rem"
-                href="${repoHref(ctx.owner, ctx.repo, `/tags/${encodeURIComponent(t.tag)}`)}"
-              >${t.tag}<span class="tag-count">${t.count}</span></a>`)}</div>`
+            : html`<div class="tag-cloud" data-testid="tag-cloud">${tags.map((t) =>
+                tagChip(ctx, t.tag, { count: t.count, sizeRem: 0.85 + 0.5 * (t.idf / maxIdf) }))}</div>`
         }
       `),
   );
 }));
 
 web.get("/:owner/:repo/tags/:tag", webRoute(async (c, ctx) => {
-  const tag = c.req.param("tag");
-  const pages = ctx.db
-    .prepare(
-      "SELECT d.cosheaf_id AS id, d.title, d.forgejo_id AS path FROM page_tags pt " +
-        "JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
-        "WHERE pt.workspace_slug = ? AND pt.tag = ? ORDER BY d.title IS NULL, d.title, d.forgejo_id",
-    )
-    .all(ctx.ws.slug, tag) as Array<{ id: string; title: string | null; path: string }>;
+  const tag = c.req.param("tag") ?? "";
+  const pages = workspacePagesByTag(ctx.db, ctx.ws.slug, tag);
   return htmlResponse(
     repoPageShell(ctx, "files", `#${tag} - ${ctx.repo}`, html`
         <div class="page-title compact">
@@ -299,16 +284,9 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   // from its live outline.
   // #388: this page's own tags (main-only, same gate as fileTitles), as chips
   // linking to the tag browse page.
-  const fileTags = resolved.branch === "main"
-    ? (ctx.db
-        .prepare(
-          "SELECT pt.tag FROM page_tags pt JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
-            "WHERE d.workspace_slug = ? AND d.forgejo_id = ? ORDER BY pt.tag",
-        )
-        .all(ws.slug, rel) as Array<{ tag: string }>).map((r) => r.tag)
-    : [];
+  const fileTags = resolved.branch === "main" ? documentTags(ctx.db, ws.slug, rel) : [];
   const tagChipsRow = fileTags.length > 0
-    ? html`<div class="tag-chips" data-testid="doc-tags">${fileTags.map((t) => html`<a class="tag-chip" href="${repoHref(owner, repo, `/tags/${encodeURIComponent(t)}`)}">${t}</a>`)}</div>`
+    ? html`<div class="tag-chips" data-testid="doc-tags">${fileTags.map((t) => tagChip(ctx, t))}</div>`
     : emptyHtml;
   const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
   const sourceRailPayload =

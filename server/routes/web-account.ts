@@ -5,7 +5,7 @@ import type { ForgejoSshKey, ForgejoUser } from "../forgejo-types.js";
 import type { AppEnv } from "../types.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
 import { avatarForUser, forgeAvatarSrc, hasCustomAvatar } from "./avatar.js";
-import { globalRoute, invalidateCurrentUserAvatar, positiveInt, redirect, setAuthCookie, stringField, textField } from "./web-context.js";
+import { DYNAMIC_HTML_CACHE_CONTROL, globalRoute, invalidateCurrentUserAvatar, positiveInt, redirect, setAuthCookie, stringField, textField } from "./web-context.js";
 import { emptyHtml, type Html, html } from "./web-html.js";
 import { addDisclosure, userPreferencesSection, userProfileSection } from "./web-page.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
@@ -26,9 +26,9 @@ async function accountSettingsResponse(c: Context<AppEnv>, auth: GlobalWebAuth, 
   const keySaved = c.req.query("ssh_key") === "1";
   const error = c.req.query("error") ?? undefined;
   const t = c.get("t");
-  // #385: this page renders via c.html (not the shared htmlResponse), so set the
-  // same revalidation header here to keep account settings from serving stale.
-  c.header("cache-control", "private, no-cache");
+  // This page renders via c.html (not the shared htmlResponse) so the cookies
+  // the handler sets on the context survive; stamp the same #385 header here.
+  c.header("cache-control", DYNAMIC_HTML_CACHE_CONTROL);
   return c.html(
     pageShell({
       title: t("settings.account_settings"),

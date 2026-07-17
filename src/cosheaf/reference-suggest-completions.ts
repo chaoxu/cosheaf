@@ -28,11 +28,12 @@ function referenceDetail(suggestion: ReferenceSuggestion): string | undefined {
 }
 
 export function referenceSuggestionToCompletion(suggestion: ReferenceSuggestion): Completion {
+  const detail = referenceDetail(suggestion);
   return {
     label: suggestion.id,
     apply: suggestion.insert,
     type: "reference",
-    ...(referenceDetail(suggestion) ? { detail: referenceDetail(suggestion) } : {}),
+    ...(detail ? { detail } : {}),
   };
 }
 

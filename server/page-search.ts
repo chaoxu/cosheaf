@@ -73,8 +73,56 @@ export function workspacePageExcerpts(
   return excerpts;
 }
 
-function likeEscape(s: string): string {
+export function likeEscape(s: string): string {
   return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+export interface TagCount {
+  tag: string;
+  count: number;
+  idf: number;
+}
+
+// Tag cloud for a workspace: each tag with its page count and IDF (rare tags
+// score higher). IDF is computed here, not in SQL, to stay independent of
+// SQLite's optional log() build. Shared by the tags API and the browse page.
+export function workspaceTagCloud(db: Database.Database, workspaceSlug: string): TagCount[] {
+  const rows = db
+    .prepare("SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? GROUP BY tag")
+    .all(workspaceSlug) as Array<{ tag: string; count: number }>;
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?").get(workspaceSlug) as { n: number }).n;
+  return rows
+    .map((r) => ({ tag: r.tag, count: r.count, idf: r.count > 0 && total > 0 ? Math.log(total / r.count) : 0 }))
+    .sort((a, b) => b.idf - a.idf || a.tag.localeCompare(b.tag));
+}
+
+export interface TaggedPage {
+  id: string;
+  title: string | null;
+  path: string;
+  excerpt: string | null;
+}
+
+// Pages carrying a tag, ordered title-first. Shared by the tags API (which
+// surfaces `excerpt`) and the browse page (which ignores it).
+export function workspacePagesByTag(db: Database.Database, workspaceSlug: string, tag: string): TaggedPage[] {
+  return db
+    .prepare(
+      "SELECT d.cosheaf_id AS id, d.title, d.forgejo_id AS path, d.excerpt FROM page_tags pt " +
+        "JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
+        "WHERE pt.workspace_slug = ? AND pt.tag = ? ORDER BY d.title IS NULL, d.title, d.forgejo_id",
+    )
+    .all(workspaceSlug, tag) as TaggedPage[];
+}
+
+// Tags on one document (by repo-relative path), for the read-view chips.
+export function documentTags(db: Database.Database, workspaceSlug: string, path: string): string[] {
+  return (db
+    .prepare(
+      "SELECT pt.tag FROM page_tags pt JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
+        "WHERE d.workspace_slug = ? AND d.forgejo_id = ? ORDER BY pt.tag",
+    )
+    .all(workspaceSlug, path) as Array<{ tag: string }>).map((r) => r.tag);
 }
 
 function searchTerms(q: string): string[] {

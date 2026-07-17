@@ -1146,13 +1146,15 @@ function WebEditor({
     [suggestingEnabled],
   );
   const referenceSuggestExt = useMemo(
+    // branch/path are read live via refs, so the extension stays stable for the
+    // editor's lifetime (owner/repo never change without a full remount).
     () => referenceSuggestExtension(() => ({
       owner: config.owner,
       repo: config.repo,
       branch: branchRef.current || config.branch,
       path: currentPathRef.current.trim() || config.path,
     })),
-    [config.owner, config.repo, config.branch, config.path],
+    [config.owner, config.repo],
   );
   const suggestingExtensions = useMemo<readonly Extension[]>(
     () => [

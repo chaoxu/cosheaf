@@ -274,7 +274,7 @@ async function runPandocPdfExport(
     sourceDir: layout.sourceDir,
   });
   // #389: a profile's CSL locale and passthrough defaults file. `--defaults`
-  // goes first so Coflat's explicit CLI args still win; the denylist keeps the
+  // goes first so Coflat's explicit CLI args still win; the allowlist keeps the
   // two mechanisms non-overlapping. The defaults file lands in the per-run
   // workDir mkdtemp, so its name is unique across concurrent runs by construction.
   const profileArgs: string[] = [];

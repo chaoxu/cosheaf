@@ -55,14 +55,18 @@ function parseExportProfiles(raw: Record<string, unknown>): { profiles: Record<s
     for (const [name, entry] of Object.entries(profilesRaw)) {
       const rec = recordValue(entry);
       if (!rec) continue;
-      const profile: ExportProfile = {
-        ...(stringValue(rec.bibliography) ? { bibliography: stringValue(rec.bibliography) } : {}),
-        ...(stringValue(rec.csl) ? { csl: stringValue(rec.csl) } : {}),
-        ...(stringValue(rec.template) ? { template: stringValue(rec.template) } : {}),
-        ...(stringValue(rec.cslLocale ?? rec["csl-locale"]) ? { cslLocale: stringValue(rec.cslLocale ?? rec["csl-locale"]) } : {}),
-        ...(stringValue(rec.defaults) ? { defaults: stringValue(rec.defaults) } : {}),
+      const bibliography = stringValue(rec.bibliography);
+      const csl = stringValue(rec.csl);
+      const template = stringValue(rec.template);
+      const cslLocale = stringValue(rec.cslLocale ?? rec["csl-locale"]);
+      const defaults = stringValue(rec.defaults);
+      profiles[name] = {
+        ...(bibliography ? { bibliography } : {}),
+        ...(csl ? { csl } : {}),
+        ...(template ? { template } : {}),
+        ...(cslLocale ? { cslLocale } : {}),
+        ...(defaults ? { defaults } : {}),
       };
-      profiles[name] = profile;
     }
   }
   const defaultProfile = stringValue(exportBlock.defaultProfile ?? exportBlock["default-profile"]);

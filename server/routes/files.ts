@@ -15,7 +15,7 @@ import { isRetiredDefaultEditBranch } from "../edit-branch-retirement.js";
 import { gitBlobHash } from "../git-object.js";
 import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
-import { searchWorkspacePages } from "../page-search.js";
+import { likeEscape, searchWorkspacePages, workspacePagesByTag, workspaceTagCloud } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
 import { workspaceSupportsXrefs, workspaceValidation } from "../workspace-validation.js";
 import {
@@ -755,7 +755,7 @@ files.get("/:owner/:repo/suggest", async (c) => {
   // `#` trigger completes frontmatter tags from the page_tags index (#388),
   // ranked by frequency. Tags are main-only, so branch is irrelevant here.
   if (trigger === "#") {
-    const tagTerm = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+    const tagTerm = `${likeEscape(prefix)}%`;
     const tagRows = c
       .get("db")
       .prepare(
@@ -774,7 +774,7 @@ files.get("/:owner/:repo/suggest", async (c) => {
   // live buffer, and both sources merge into one popup, so including them here
   // double-lists the same id.
   const excludePath = safeRel(c.req.query("path")?.trim() ?? "");
-  const term = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+  const term = `${likeEscape(prefix)}%`;
   const sqlLimit = branch !== "main" ? limit * 2 : limit;
   const pageRows = c
     .get("db")
@@ -818,35 +818,17 @@ files.get("/:owner/:repo/suggest", async (c) => {
 });
 
 // #388: read surface for the page_tags index (frontmatter `tags:`, main-only).
-// Tag cloud with counts, ranked by IDF so rare/specific tags outrank ubiquitous
-// ones. IDF is computed in JS to avoid depending on SQLite's optional log().
+// The tag-cloud + tag→pages queries are shared with the browse pages via
+// server/page-search.ts so the SQL and IDF ranking are defined once.
 files.get("/:owner/:repo/tags", (c) => {
-  const ws = c.get("workspace");
-  const db = c.get("db");
-  const rows = db
-    .prepare("SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? GROUP BY tag")
-    .all(ws.slug) as Array<{ tag: string; count: number }>;
-  const total = (db.prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?").get(ws.slug) as { n: number }).n;
-  const tags = rows
-    .map((r) => ({ tag: r.tag, count: r.count, idf: r.count > 0 && total > 0 ? Math.log(total / r.count) : 0 }))
-    .sort((a, b) => b.idf - a.idf || a.tag.localeCompare(b.tag));
-  return c.json({ tags });
+  return c.json({ tags: workspaceTagCloud(c.get("db"), c.get("workspace").slug) });
 });
 
 // Pages carrying a given tag.
 files.get("/:owner/:repo/tags/:tag", (c) => {
-  const ws = c.get("workspace");
   const tag = c.req.param("tag");
   if (!tag) return c.json(...bad("tag required"));
-  const pages = c
-    .get("db")
-    .prepare(
-      "SELECT d.cosheaf_id AS id, d.title, d.forgejo_id AS path, d.excerpt FROM page_tags pt " +
-        "JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
-        "WHERE pt.workspace_slug = ? AND pt.tag = ? ORDER BY d.title IS NULL, d.title, d.forgejo_id",
-    )
-    .all(ws.slug, tag) as Array<{ id: string; title: string | null; path: string; excerpt: string | null }>;
-  return c.json({ tag, pages });
+  return c.json({ tag, pages: workspacePagesByTag(c.get("db"), c.get("workspace").slug, tag) });
 });
 
 function mergeSuggestions(primary: readonly RefSuggestion[], secondary: readonly RefSuggestion[], limit: number): RefSuggestion[] {
