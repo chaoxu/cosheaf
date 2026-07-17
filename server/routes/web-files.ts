@@ -122,6 +122,60 @@ web.get("/:owner/:repo/search", webRoute(async (c, ctx) => {
   );
 }));
 
+// #388: browse surface for the page_tags index. Tag cloud ranked by IDF (rare
+// tags larger), each chip linking to the pages carrying it. Tags are main-only.
+web.get("/:owner/:repo/tags", webRoute(async (_c, ctx) => {
+  const rows = ctx.db
+    .prepare("SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? GROUP BY tag")
+    .all(ctx.ws.slug) as Array<{ tag: string; count: number }>;
+  const total = (ctx.db.prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?").get(ctx.ws.slug) as { n: number }).n;
+  const tags = rows
+    .map((r) => ({ ...r, idf: r.count > 0 && total > 0 ? Math.log(total / r.count) : 0 }))
+    .sort((a, b) => b.idf - a.idf || a.tag.localeCompare(b.tag));
+  const maxIdf = tags.reduce((m, t) => Math.max(m, t.idf), 0) || 1;
+  return htmlResponse(
+    repoPageShell(ctx, "files", `Tags - ${ctx.repo}`, html`
+        <div class="page-title compact"><div><h1>Tags</h1></div></div>
+        ${
+          tags.length === 0
+            ? html`<div class="empty">No tags yet. Add a <code>tags:</code> list to a page's frontmatter.</div>`
+            : html`<div class="tag-cloud" data-testid="tag-cloud">${tags.map((t) => html`<a
+                class="tag-chip"
+                style="font-size:${(0.85 + 0.5 * (t.idf / maxIdf)).toFixed(2)}rem"
+                href="${repoHref(ctx.owner, ctx.repo, `/tags/${encodeURIComponent(t.tag)}`)}"
+              >${t.tag}<span class="tag-count">${t.count}</span></a>`)}</div>`
+        }
+      `),
+  );
+}));
+
+web.get("/:owner/:repo/tags/:tag", webRoute(async (c, ctx) => {
+  const tag = c.req.param("tag");
+  const pages = ctx.db
+    .prepare(
+      "SELECT d.cosheaf_id AS id, d.title, d.forgejo_id AS path FROM page_tags pt " +
+        "JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
+        "WHERE pt.workspace_slug = ? AND pt.tag = ? ORDER BY d.title IS NULL, d.title, d.forgejo_id",
+    )
+    .all(ctx.ws.slug, tag) as Array<{ id: string; title: string | null; path: string }>;
+  return htmlResponse(
+    repoPageShell(ctx, "files", `#${tag} - ${ctx.repo}`, html`
+        <div class="page-title compact">
+          <div><h1>#${tag}</h1><p class="muted">${pages.length} page${pages.length === 1 ? "" : "s"}</p></div>
+          <a class="button subtle" href="${repoHref(ctx.owner, ctx.repo, "/tags")}">All tags</a>
+        </div>
+        ${
+          pages.length === 0
+            ? html`<div class="empty">No pages tagged <strong>${tag}</strong>.</div>`
+            : html`<div class="list" data-testid="tag-pages">${pages.map((p) => html`<a
+                class="list-row"
+                href="${readHref(ctx.owner, ctx.repo, "main", p.path)}"
+              ><span class="search-result-head"><strong>${p.title || p.path}</strong> <small class="muted">${p.path}</small></span></a>`)}</div>`
+        }
+      `),
+  );
+}));
+
 // "More" menu listing alternate representations of a Coflat document (PDF
 // export, raw source). Rendered identically in the read view and at the top of
 // the editor shell, so the export affordances are reachable in both.
@@ -243,6 +297,19 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
   // at the top and the table of contents below. The reader island fills the TOC
   // from Coflat's outline data, while the editor renders the same rail shape
   // from its live outline.
+  // #388: this page's own tags (main-only, same gate as fileTitles), as chips
+  // linking to the tag browse page.
+  const fileTags = resolved.branch === "main"
+    ? (ctx.db
+        .prepare(
+          "SELECT pt.tag FROM page_tags pt JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
+            "WHERE d.workspace_slug = ? AND d.forgejo_id = ? ORDER BY pt.tag",
+        )
+        .all(ws.slug, rel) as Array<{ tag: string }>).map((r) => r.tag)
+    : [];
+  const tagChipsRow = fileTags.length > 0
+    ? html`<div class="tag-chips" data-testid="doc-tags">${fileTags.map((t) => html`<a class="tag-chip" href="${repoHref(owner, repo, `/tags/${encodeURIComponent(t)}`)}">${t}</a>`)}</div>`
+    : emptyHtml;
   const preview = filePreview(ctx, resolved.branch, rel, previewKind, { rendered, source: content, sourceView });
   const sourceRailPayload =
     coflatMarkdownDocument && sourceView && content !== null
@@ -258,6 +325,7 @@ web.get("/:owner/:repo/src/branch/*", webRoute(async (c, ctx) => {
       ? html`<div class="doc-with-toc">
           <div class="doc-main">
             ${readerChrome}
+            ${tagChipsRow}
             ${preview}
           </div>
           <aside

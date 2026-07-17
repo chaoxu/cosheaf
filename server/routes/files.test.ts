@@ -717,6 +717,56 @@ describe("files suggest route", () => {
   });
 });
 
+describe("files tags route (#388)", () => {
+  function seedTagged(db: Database.Database): void {
+    // `alpha` is ubiquitous (3 pages), `rare` appears on one — IDF should rank rare first.
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "a.md", bodyText: "---\nid: a\ntitle: A\ntags: [alpha, rare]\n---\n# A\n", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "b.md", bodyText: "---\nid: b\ntitle: B\ntags: [alpha]\n---\n# B\n", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "c.md", bodyText: "---\nid: c\ntitle: C\ntags: [alpha]\n---\n# C\n", formatId: COFLAT_FORMAT_ID });
+    // A different workspace must not leak into owner/w results.
+    indexPage(db, { workspaceSlug: "owner/other", filePath: "z.md", bodyText: "---\nid: z\ntags: [rare]\n---\n# Z\n", formatId: COFLAT_FORMAT_ID });
+  }
+
+  it("lists tags with counts, ranked by IDF (rare before ubiquitous)", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedTagged(db);
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/tags", { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tags: Array<{ tag: string; count: number; idf: number }> };
+    expect(body.tags.map((t) => t.tag)).toEqual(["rare", "alpha"]);
+    expect(body.tags.find((t) => t.tag === "alpha")?.count).toBe(3);
+    expect(body.tags.find((t) => t.tag === "rare")?.count).toBe(1);
+    expect(body.tags[0].idf).toBeGreaterThan(body.tags[1].idf);
+  });
+
+  it("returns the pages carrying a tag, scoped to the workspace", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedTagged(db);
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/tags/rare", { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tag: string; pages: Array<{ id: string; title: string | null; path: string }> };
+    expect(body.tag).toBe("rare");
+    expect(body.pages.map((p) => p.id)).toEqual(["a"]);
+    expect(body.pages[0].path).toBe("a.md");
+  });
+
+  it("completes tags for the `#` trigger, most-frequent first", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedTagged(db);
+
+    const res = await appFor(db).request("/api/v1/repos/owner/w/suggest?trigger=%23&prefix=", { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { suggestions: Array<{ id: string; insert: string; display: string }> };
+    expect(body.suggestions[0]).toEqual({ id: "alpha", insert: "#alpha", display: "alpha (3)" });
+    expect(body.suggestions.map((s) => s.id)).toContain("rare");
+  });
+});
+
 describe("files read route", () => {
   it("returns the file content and blob sha for compare-and-set saves", async () => {
     const db = freshDb();

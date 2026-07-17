@@ -135,6 +135,34 @@ describe("web file editor route", () => {
     expect(listedPulls).toBe(false);
   });
 
+  it("renders the tag cloud and per-tag pages (#388)", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "a.md", bodyText: "---\nid: a\ntitle: A\ntags: [alpha, rare]\n---\n# A\n", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "b.md", bodyText: "---\nid: b\ntitle: B\ntags: [alpha]\n---\n# B\n", formatId: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/user", () => Response.json({ id: 1, login: "alice" }));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w", full_name: "owner/w" }));
+      }),
+    );
+
+    const cloud = await appFor(db).request("/owner/w/tags", { headers: authHeaders(token) });
+    expect(cloud.status).toBe(200);
+    const cloudBody = await cloud.text();
+    expect(cloudBody).toContain('data-testid="tag-cloud"');
+    expect(cloudBody).toContain("/owner/w/tags/alpha");
+    expect(cloudBody).toContain("/owner/w/tags/rare");
+
+    const tagPage = await appFor(db).request("/owner/w/tags/rare", { headers: authHeaders(token) });
+    expect(tagPage.status).toBe(200);
+    const tagBody = await tagPage.text();
+    expect(tagBody).toContain('data-testid="tag-pages"');
+    expect(tagBody).toContain("a.md");
+    expect(tagBody).not.toContain(">b.md<");
+  });
+
   it("opens bare editable Coflat Markdown files in the read/edit workbench", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });

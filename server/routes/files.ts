@@ -752,8 +752,22 @@ files.get("/:owner/:repo/suggest", async (c) => {
   const ws = c.get("workspace");
   const branch = c.req.query("branch")?.trim() || "main";
   if (!validRequestedBranch(branch)) return c.json(...bad("valid branch name required"));
+  // `#` trigger completes frontmatter tags from the page_tags index (#388),
+  // ranked by frequency. Tags are main-only, so branch is irrelevant here.
+  if (trigger === "#") {
+    const tagTerm = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
+    const tagRows = c
+      .get("db")
+      .prepare(
+        "SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? AND tag LIKE ? ESCAPE '\\' " +
+          "GROUP BY tag ORDER BY count DESC, tag LIMIT ?",
+      )
+      .all(ws.slug, tagTerm, limit) as Array<{ tag: string; count: number }>;
+    return c.json({
+      suggestions: tagRows.map((r): RefSuggestion => ({ id: r.tag, insert: `#${r.tag}`, display: `${r.tag} (${r.count})` })),
+    });
+  }
   // For `[@` trigger we suggest from doc_map (cross-ref ids + titles).
-  // Other triggers return empty until we add e.g. tag completion.
   if (trigger !== "[@") return c.json({ suggestions: [] });
   // #390: the caller passes the current document path so we can drop its own
   // cross-ref labels — Coflat's native `[@` popup already offers those from the
@@ -801,6 +815,38 @@ files.get("/:owner/:repo/suggest", async (c) => {
     ? await branchRefSuggestions(c, branch, prefix, limit, excludePath)
     : [];
   return c.json({ suggestions: mergeSuggestions(branchSuggestions, mainSuggestions, limit) });
+});
+
+// #388: read surface for the page_tags index (frontmatter `tags:`, main-only).
+// Tag cloud with counts, ranked by IDF so rare/specific tags outrank ubiquitous
+// ones. IDF is computed in JS to avoid depending on SQLite's optional log().
+files.get("/:owner/:repo/tags", (c) => {
+  const ws = c.get("workspace");
+  const db = c.get("db");
+  const rows = db
+    .prepare("SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? GROUP BY tag")
+    .all(ws.slug) as Array<{ tag: string; count: number }>;
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM doc_map WHERE workspace_slug = ?").get(ws.slug) as { n: number }).n;
+  const tags = rows
+    .map((r) => ({ tag: r.tag, count: r.count, idf: r.count > 0 && total > 0 ? Math.log(total / r.count) : 0 }))
+    .sort((a, b) => b.idf - a.idf || a.tag.localeCompare(b.tag));
+  return c.json({ tags });
+});
+
+// Pages carrying a given tag.
+files.get("/:owner/:repo/tags/:tag", (c) => {
+  const ws = c.get("workspace");
+  const tag = c.req.param("tag");
+  if (!tag) return c.json(...bad("tag required"));
+  const pages = c
+    .get("db")
+    .prepare(
+      "SELECT d.cosheaf_id AS id, d.title, d.forgejo_id AS path, d.excerpt FROM page_tags pt " +
+        "JOIN doc_map d ON d.workspace_slug = pt.workspace_slug AND d.cosheaf_id = pt.cosheaf_id " +
+        "WHERE pt.workspace_slug = ? AND pt.tag = ? ORDER BY d.title IS NULL, d.title, d.forgejo_id",
+    )
+    .all(ws.slug, tag) as Array<{ id: string; title: string | null; path: string; excerpt: string | null }>;
+  return c.json({ tag, pages });
 });
 
 function mergeSuggestions(primary: readonly RefSuggestion[], secondary: readonly RefSuggestion[], limit: number): RefSuggestion[] {
