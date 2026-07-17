@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createServer } from "node:net";
+import { COFLAT_BROWSER_SELECTORS as CF } from "@chaoxu/coflat/browser-test-utils";
 import { expect, test } from "@playwright/test";
 
 function git(dir: string, args: string[]): string {
@@ -97,13 +98,32 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     page.on("console", (msg) => {
       if (msg.type() === "error") browserErrors.push(msg.text());
     });
+    let delayedBase = false;
+    await page.route(/\/local-suggesting\/base(?:\?|$)/, async (route) => {
+      if (!delayedBase) {
+        delayedBase = true;
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+      await route.continue();
+    });
 
     await page.goto(`${baseUrl}/${owner}/${repo}/src/branch/main/paper.md?mode=edit`);
     await page.getByRole("button", { name: "Source" }).click();
     await expect(page.locator(".cm-gutters")).toBeHidden();
+    await page.locator(CF.editorContent).evaluate((el) => {
+      (window as Window & { __cosheafEditorContentNode?: Element }).__cosheafEditorContentNode = el;
+    });
     await page.getByText("Beta line.").click();
     await page.keyboard.press("End");
     await page.keyboard.type(" Browser accepted edit.");
+    await page.waitForTimeout(850);
+    await expect.poll(() =>
+      page.locator(CF.editorContent).evaluate((el) =>
+        el === (window as Window & { __cosheafEditorContentNode?: Element }).__cosheafEditorContentNode
+      )
+    ).toBe(true);
+    await expect(page.locator(CF.editorContent)).toContainText("Browser accepted edit.");
+    await expect(page.getByTestId("editor-suggesting-state")).toContainText("Changes 1");
 
     const accept = page.getByRole("button", { name: "Accept hunk" });
     const revert = page.getByRole("button", { name: "Revert hunk" });
@@ -137,6 +157,18 @@ test("workbench suggesting mode accepts checkpoint and reverts hunks @smoke-work
     expect(readFileSync(join(dir, "paper.md"), "utf8")).not.toContain("Browser reverted edit.");
     expect(git(dir, ["rev-parse", "--short", "HEAD"]).trim()).toBe(checkpointHead);
     expect(git(dir, ["status", "--porcelain"])).toBe("");
+
+    await page.getByText("Alpha line.").click();
+    await page.keyboard.press("End");
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl });
+    await page.evaluate(() => navigator.clipboard.writeText(" Clipboard paste survives reload."));
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+    await expect(page.locator(CF.editorContent)).toContainText("Clipboard paste survives reload.");
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("editor-draft-banner")).toBeVisible();
+    await page.getByTestId("editor-draft-restore").click();
+    await expect(page.locator(CF.editorContent)).toContainText("Clipboard paste survives reload.");
     expect(browserErrors).toEqual([]);
   } finally {
     if (child) await stopWorkbench(child);

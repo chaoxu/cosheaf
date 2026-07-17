@@ -1,4 +1,5 @@
 import { diffLines } from "diff";
+import { splitLinesPreserveEndings } from "./line-diff.js";
 
 export type SuggestingHunkKind = "insert" | "delete" | "change";
 
@@ -24,11 +25,6 @@ function hunkKind(oldLines: number, newLines: number): SuggestingHunkKind {
 
 function hunkId(oldStart: number, oldLines: number, newStart: number, newLines: number): string {
   return `${oldStart}:${oldLines}:${newStart}:${newLines}`;
-}
-
-export function splitLinesPreserveEndings(text: string): string[] {
-  if (text === "") return [];
-  return text.match(/[^\n]*\n|[^\n]+/g) ?? [];
 }
 
 export function suggestingHunks(baseText: string, currentText: string): SuggestingHunk[] {

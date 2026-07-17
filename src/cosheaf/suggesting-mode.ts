@@ -8,10 +8,15 @@ import {
 import { iconMarkup, lucideIcons } from "../../shared/lucide";
 
 interface SuggestingModeOptions {
-  baseText: string;
+  baseText?: string | null;
   onAccept: (hunk: SuggestingHunk) => void;
   onRevert: (hunk: SuggestingHunk) => void;
   onCheckpoint: () => void;
+}
+
+export interface SuggestingModeController {
+  extension: Extension;
+  setBaseText: (baseText: string | null) => void;
 }
 
 function hunkAnchorLine(hunk: SuggestingHunk, docLines: number): number {
@@ -57,9 +62,14 @@ function buildDecorations(state: EditorView["state"], hunks: readonly Suggesting
 }
 
 const acceptHunkEffect = StateEffect.define<string>();
+const setBaseTextEffect = StateEffect.define<string | null>();
 
 function acceptedHunkKey(baseText: string, currentText: string, hunk: SuggestingHunk): string {
   return `${hunk.id}\0${suggestingHunkFingerprint(baseText, currentText, hunk)}`;
+}
+
+function hasBaseTextEffect(effects: readonly StateEffect<unknown>[]): boolean {
+  return effects.some((effect) => effect.is(setBaseTextEffect));
 }
 
 class SuggestingSpacerMarker extends GutterMarker {
@@ -75,7 +85,7 @@ class SuggestingHunkMarker extends GutterMarker {
   constructor(
     private readonly hunk: SuggestingHunk,
     private readonly view: EditorView,
-    private readonly opts: SuggestingModeOptions,
+    private readonly opts: Pick<SuggestingModeOptions, "onAccept" | "onRevert"> & { baseText: () => string | null },
   ) {
     super();
   }
@@ -108,8 +118,10 @@ class SuggestingHunkMarker extends GutterMarker {
       event.preventDefault();
       event.stopPropagation();
       if (label === "Accept hunk") {
+        const baseText = this.opts.baseText();
+        if (baseText === null) return;
         this.view.dispatch({
-          effects: acceptHunkEffect.of(acceptedHunkKey(this.opts.baseText, this.view.state.doc.toString(), this.hunk)),
+          effects: acceptHunkEffect.of(acceptedHunkKey(baseText, this.view.state.doc.toString(), this.hunk)),
         });
       }
       action();
@@ -118,10 +130,22 @@ class SuggestingHunkMarker extends GutterMarker {
   }
 }
 
-export function suggestingModeExtension(opts: SuggestingModeOptions): Extension {
+export function createSuggestingModeController(opts: SuggestingModeOptions): SuggestingModeController {
+  let viewRef: EditorView | null = null;
+  let currentBaseText = opts.baseText ?? null;
+  const baseTextField = StateField.define<string | null>({
+    create: () => currentBaseText,
+    update: (value, transaction) => {
+      for (const effect of transaction.effects) {
+        if (effect.is(setBaseTextEffect)) return effect.value;
+      }
+      return value;
+    },
+  });
   const acceptedField = StateField.define<ReadonlySet<string>>({
     create: () => new Set<string>(),
     update: (value, transaction) => {
+      if (hasBaseTextEffect(transaction.effects)) return new Set<string>();
       const next = new Set(value);
       for (const effect of transaction.effects) {
         if (effect.is(acceptHunkEffect)) next.add(effect.value);
@@ -130,40 +154,52 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
     },
   });
   const hunkField = StateField.define<readonly SuggestingHunk[]>({
-    create: (state) => suggestingHunks(opts.baseText, state.doc.toString()),
-    update: (value, transaction) =>
-      transaction.docChanged ? suggestingHunks(opts.baseText, transaction.newDoc.toString()) : value,
+    create: (state) => currentBaseText === null ? [] : suggestingHunks(currentBaseText, state.doc.toString()),
+    update: (value, transaction) => {
+      if (!transaction.docChanged && !hasBaseTextEffect(transaction.effects)) return value;
+      const baseText = transaction.state.field(baseTextField);
+      return baseText === null ? [] : suggestingHunks(baseText, transaction.newDoc.toString());
+    },
   });
   const visibleHunksForState = (state: EditorView["state"]): readonly SuggestingHunk[] => {
     const source = state.doc.toString();
+    const baseText = state.field(baseTextField);
+    if (baseText === null) return [];
     const accepted = state.field(acceptedField);
-    return state.field(hunkField).filter((hunk) => !accepted.has(acceptedHunkKey(opts.baseText, source, hunk)));
+    return state.field(hunkField).filter((hunk) => !accepted.has(acceptedHunkKey(baseText, source, hunk)));
   };
   const visibleHunkField = StateField.define<readonly SuggestingHunk[]>({
     create: visibleHunksForState,
     update: (value, transaction) =>
-      transaction.docChanged || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
+      transaction.docChanged || hasBaseTextEffect(transaction.effects) || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
         ? visibleHunksForState(transaction.state)
         : value,
   });
   const decorations = StateField.define<DecorationSet>({
     create: (state) => buildDecorations(state, state.field(visibleHunkField)),
     update: (value, transaction) =>
-      transaction.docChanged || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
+      transaction.docChanged || hasBaseTextEffect(transaction.effects) || transaction.effects.some((effect) => effect.is(acceptHunkEffect))
         ? buildDecorations(transaction.state, transaction.state.field(visibleHunkField))
         : value,
     provide: (field) => EditorView.decorations.from(field),
   });
   const accessibleGutter = ViewPlugin.define((view) => {
+    viewRef = view;
     const expose = () => {
       const hasHunks = view.state.field(visibleHunkField).length > 0;
       view.dom.classList.toggle("cm-cosheaf-suggesting-has-hunks", hasHunks);
       view.dom.querySelector(".cm-gutters")?.setAttribute("aria-hidden", hasHunks ? "false" : "true");
     };
     expose();
-    return { update: expose };
+    return {
+      update: expose,
+      destroy: () => {
+        if (viewRef === view) viewRef = null;
+      },
+    };
   });
-  return [
+  const extension = [
+    baseTextField,
     acceptedField,
     hunkField,
     visibleHunkField,
@@ -178,9 +214,15 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
         const hunk = view.state.field(visibleHunkField).find((item) =>
           hunkAnchorLine(item, view.state.doc.lines) === lineNumber
         );
-        return hunk ? new SuggestingHunkMarker(hunk, view, opts) : null;
+        return hunk ? new SuggestingHunkMarker(hunk, view, {
+          onAccept: opts.onAccept,
+          onRevert: opts.onRevert,
+          baseText: () => view.state.field(baseTextField),
+        }) : null;
       },
-      lineMarkerChange: (update) => update.docChanged || update.transactions.some((tr) => tr.effects.some((effect) => effect.is(acceptHunkEffect))),
+      lineMarkerChange: (update) => update.docChanged || update.transactions.some((tr) =>
+        hasBaseTextEffect(tr.effects) || tr.effects.some((effect) => effect.is(acceptHunkEffect))
+      ),
     }),
     Prec.highest(keymap.of([{
       key: "Mod-s",
@@ -242,4 +284,13 @@ export function suggestingModeExtension(opts: SuggestingModeOptions): Extension 
       },
     }),
   ];
+  return {
+    extension,
+    setBaseText: (baseText: string | null) => {
+      currentBaseText = baseText;
+      const view = viewRef;
+      if (!view || view.state.field(baseTextField) === baseText) return;
+      view.dispatch({ effects: setBaseTextEffect.of(baseText) });
+    },
+  };
 }

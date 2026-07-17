@@ -52,9 +52,10 @@ import {
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
 import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
+import { editorExternalDiffHasVisibleChanges, editorExternalDiffRows } from "./editor-external-diff";
 import { fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
 import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
-import { suggestingModeExtension } from "./suggesting-mode";
+import { createSuggestingModeController } from "./suggesting-mode";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
 import "./globals.css";
@@ -134,25 +135,34 @@ type ExternalFileChange = {
 const MODE_SWITCH_VIEWPORT_RATIO = 0.5;
 const ActiveMarkdownEditor = lazy(() => import("./editor").then((m) => ({ default: m.MarkdownEditor })));
 
-function compareLines(buffer: string, latest: string): Array<{ index: number; buffer: string; latest: string; changed: boolean }> {
-  const bufferLines = buffer.split("\n");
-  const latestLines = latest.split("\n");
-  const count = Math.max(bufferLines.length, latestLines.length);
-  const rows: Array<{ index: number; buffer: string; latest: string; changed: boolean }> = [];
-  for (let i = 0; i < count; i++) {
-    const bufferLine = bufferLines[i] ?? "";
-    const latestLine = latestLines[i] ?? "";
-    rows.push({ index: i + 1, buffer: bufferLine, latest: latestLine, changed: bufferLine !== latestLine });
-  }
-  return rows;
-}
-
 function insertAnchorIntoSource(source: string, anchor: string): string {
   if (!source) return `${anchor}\n`;
   if (source.includes(anchor)) return source;
   if (source.endsWith("\n\n")) return `${source}${anchor}\n`;
   if (source.endsWith("\n")) return `${source}\n${anchor}\n`;
   return `${source} ${anchor}`;
+}
+
+function renderExternalCompareCell(
+  line: number | "",
+  text: string,
+  marker: "+" | "-" | "",
+  note?: string,
+): ReactNode {
+  const markerLabel = marker === "+" ? "Added line" : marker === "-" ? "Removed line" : undefined;
+  return (
+    <>
+      <span className="editor-external-compare-line-number">{line}</span>
+      <span
+        className="editor-external-compare-marker"
+        {...(markerLabel ? { "aria-label": markerLabel } : { "aria-hidden": true })}
+      >
+        {marker || " "}
+      </span>
+      <span>{text}</span>
+      {note ? <em className="editor-external-compare-note">{note}</em> : null}
+    </>
+  );
 }
 
 export interface WebEditorCallbacks {
@@ -257,7 +267,7 @@ function WebEditor({
   const [readOnly, setReadOnly] = useState(Boolean(initialReadOnly));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
-  const [documentContextReady, setDocumentContextReady] = useState(false);
+  const [editorContextReady, setEditorContextReady] = useState(false);
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [suggestingBase, setSuggestingBase] = useState<SuggestingBase | null>(null);
   const [acceptedSuggestingHunks, setAcceptedSuggestingHunks] = useState<ReadonlySet<string>>(() => new Set());
@@ -281,6 +291,7 @@ function WebEditor({
   const savedPathRef = useRef(savedPath);
   const savedShaRef = useRef<string | null | undefined>(config.baseSha);
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
+  const pathDirtyRef = useRef(pathDirty);
   const resetEditBranchRef = useRef(config.resetEditBranch);
   const ignoredChangePathsRef = useRef(new Set<string>());
   const ignoredChangeTimersRef = useRef<number[]>([]);
@@ -296,6 +307,7 @@ function WebEditor({
   savedReadBranchRef.current = savedReadBranch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
+  pathDirtyRef.current = pathDirty;
 
   useEffect(() => {
     callbacks.onDirtyChange?.(uncommitted || pathDirty);
@@ -348,13 +360,55 @@ function WebEditor({
     if (suggestingEnabled && suggestingBase) setSuggestingSource(next);
   }, [suggestingBase, suggestingEnabled]);
 
+  const replaceEditorDocument = useCallback((next: string) => {
+    const editor = editorRef.current;
+    if (editor && editor.getDoc() !== next) editor.setDoc(next);
+    setEditorContent(next);
+  }, [setEditorContent]);
+
+  const localDraftForSource = useCallback((source: string): EditorDraft => {
+    const baseSha = savedShaRef.current;
+    const sourceSha = sourceShaRef.current;
+    return {
+      source,
+      path: currentPathRef.current,
+      ...(baseSha === undefined ? {} : { baseSha, baseShaKnown: true as const }),
+      ...(sourceSha === undefined ? {} : { sourceSha, sourceShaKnown: true as const }),
+      savedAt: Date.now(),
+    };
+  }, []);
+
+  const writeLocalDraft = useCallback((source: string): void => {
+    writeDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, localDraftForSource(source), draftScope);
+  }, [config.owner, config.repo, draftScope, localDraftForSource]);
+
+  const writeLiveLocalDraft = useCallback(() => {
+    writeLocalDraft(liveEditorSource(editorRef.current, sourceCacheRef.current.source()));
+  }, [writeLocalDraft]);
+
+  const resolveIdenticalWorkspaceContent = useCallback((path: string, latest: { content: string; sha: string | null }): boolean => {
+    const source = liveEditorSource(editorRef.current, sourceCacheRef.current.source());
+    if (editorExternalDiffHasVisibleChanges(editorExternalDiffRows(source, latest.content))) return false;
+    savedShaRef.current = latest.sha;
+    sourceShaRef.current = undefined;
+    if (path === currentPathRef.current) {
+      setSaveError(null);
+      if (!pathDirtyRef.current) setUncommitted(false);
+    }
+    setExternalFileChange(null);
+    return true;
+  }, []);
+
   const scheduleContextSourceSync = useCallback(() => {
     if (contextSourceTimerRef.current !== null) window.clearTimeout(contextSourceTimerRef.current);
     contextSourceTimerRef.current = window.setTimeout(() => {
       contextSourceTimerRef.current = null;
-      setContextSource(sourceCacheRef.current.source());
+      const source = sourceCacheRef.current.source();
+      setContent(source);
+      setContextSource(source);
+      if (suggestingEnabled && suggestingBase) setSuggestingSource(source);
     }, 700);
-  }, []);
+  }, [suggestingBase, suggestingEnabled]);
 
   const handleEditorStringChange = useCallback((next: string) => {
     setEditorContent(next);
@@ -368,11 +422,10 @@ function WebEditor({
     // The document-context source is refreshed from an incremental Text cache
     // after typing pauses, without calling editor.getDoc().
     sourceCacheRef.current.apply(change);
-    if (suggestingEnabled && suggestingBase) setSuggestingSource(sourceCacheRef.current.source());
     scheduleContextSourceSync();
     setUncommitted(true);
     setSaveError(null);
-  }, [scheduleContextSourceSync, suggestingBase, suggestingEnabled]);
+  }, [scheduleContextSourceSync]);
 
   useEffect(
     () => () => {
@@ -384,12 +437,21 @@ function WebEditor({
   useEffect(() => {
     const handler = (event: BeforeUnloadEvent) => {
       if (!uncommitted && !pathDirty) return;
+      writeLiveLocalDraft();
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [uncommitted, pathDirty]);
+  }, [pathDirty, uncommitted, writeLiveLocalDraft]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (uncommitted || pathDirty) writeLiveLocalDraft();
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [pathDirty, uncommitted, writeLiveLocalDraft]);
 
   // Offer a local draft from a previous session if it differs from the loaded
   // file (#162). Runs once on mount; the banner lets the user restore or discard
@@ -501,6 +563,7 @@ function WebEditor({
     const readBranch = branchRef.current || savedReadBranchRef.current || config.branch;
     void api.getFile(config.owner, config.repo, externalFileChange.path, readBranch).then((latest) => {
       if (cancelled) return;
+      if (resolveIdenticalWorkspaceContent(externalFileChange.path, latest)) return;
       setExternalFileChange((current) => current && current.path === externalFileChange.path
         ? {
             ...current,
@@ -523,7 +586,7 @@ function WebEditor({
     return () => {
       cancelled = true;
     };
-  }, [config.branch, config.owner, config.repo, externalFileChange]);
+  }, [config.branch, config.owner, config.repo, externalFileChange, resolveIdenticalWorkspaceContent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -541,11 +604,11 @@ function WebEditor({
     };
     const signature = coflatDocumentContextSignature(payload);
     if (contextSignatureRef.current === signature && documentContextRef.current) {
-      setDocumentContextReady(true);
+      setEditorContextReady(true);
       return;
     }
     contextSignatureRef.current = signature;
-    setDocumentContextReady(false);
+    if (!contextLoadedRef.current) setEditorContextReady(false);
     let load = documentContextLoadRef.current?.signature === signature
       ? documentContextLoadRef.current.promise
       : null;
@@ -558,7 +621,11 @@ function WebEditor({
       setDocumentContext(ctx);
       documentContextRef.current = ctx;
       contextLoadedRef.current = true;
-      setDocumentContextReady(true);
+      setEditorContextReady(true);
+      if (documentContextLoadRef.current?.signature === signature) documentContextLoadRef.current = null;
+    }).catch(() => {
+      if (cancelled || contextSignatureRef.current !== signature) return;
+      if (!contextLoadedRef.current) setEditorContextReady(false);
       if (documentContextLoadRef.current?.signature === signature) documentContextLoadRef.current = null;
     });
     return () => {
@@ -683,18 +750,10 @@ function WebEditor({
   // selection (#161) or produce commit noise. Synchronous, so it returns ok.
   const saveDraft = useCallback(
     (source: string): { ok: true } => {
-      const baseSha = savedShaRef.current;
-      const sourceSha = sourceShaRef.current;
-      writeDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, {
-        source,
-        path: currentPathRef.current,
-        ...(baseSha === undefined ? {} : { baseSha, baseShaKnown: true as const }),
-        ...(sourceSha === undefined ? {} : { sourceSha, sourceShaKnown: true as const }),
-        savedAt: Date.now(),
-      }, draftScope);
+      writeLocalDraft(source);
       return { ok: true };
     },
-    [config.owner, config.repo, draftScope],
+    [writeLocalDraft],
   );
 
   // Explicit commit (Save / Cmd-S): the real Forgejo write. Creates the edit
@@ -726,7 +785,7 @@ function WebEditor({
         // now happens only on an explicit commit (rare), never every autosave
         // tick — so it no longer resets the doc and clobbers the selection (#161).
         const savedSource = result.content ?? source;
-        setEditorContent(savedSource);
+        replaceEditorDocument(savedSource);
         setBranch(result.branch);
         setBranchExists(true);
         setSavedReadBranch(result.branch);
@@ -744,19 +803,25 @@ function WebEditor({
         return { ok: true, branch: result.branch, path: nextPath };
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
+          const conflictPath = typeof err.details?.path === "string" && err.details.path.trim()
+            ? err.details.path.trim()
+            : nextPath;
+          const readBranch = branchRef.current || savedReadBranchRef.current || config.branch;
+          const latest = await api.getFile(config.owner, config.repo, conflictPath, readBranch).catch(() => null);
           setExternalFileChange({
-            path: nextPath,
+            path: conflictPath,
             type: "change",
             compareOpen: true,
-            loading: true,
+            loading: !latest,
+            ...(latest ? { latestContent: latest.content, latestSha: latest.sha } : {}),
             staleSave: true,
           });
-          return { ok: false, error: "Stale buffer: this file changed outside the editor. Compare or reload before saving." };
+          return { ok: false, error: "Stale buffer: this file changed outside the editor. Compare or load the latest file before saving." };
         }
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, setEditorContent],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, replaceEditorDocument],
   );
 
   const checkpointSuggestingFile = useCallback(async (path: string): Promise<{ ok: true; commitSha: string | null } | { ok: false; error: string }> => {
@@ -918,7 +983,8 @@ function WebEditor({
           const source = liveEditorSource(editorRef.current, content);
           const separator = source.length === 0 ? "" : source.endsWith("\n\n") ? "" : source.endsWith("\n") ? "\n" : "\n\n";
           const next = `${source}${separator}${snippets.join("\n")}\n`;
-          setEditorContent(next);
+          replaceEditorDocument(next);
+          if (autosave.enabled) writeLocalDraft(next);
           setUncommitted(true);
           setBranch(writeBranch);
           setBranchExists(true);
@@ -931,7 +997,7 @@ function WebEditor({
         if (assetInputRef.current) assetInputRef.current.value = "";
       }
     },
-    [branchForWrite, busy, config.owner, config.path, config.repo, content, setEditorContent],
+    [autosave.enabled, branchForWrite, busy, config.owner, config.path, config.repo, content, replaceEditorDocument, writeLocalDraft],
   );
 
   const requestHandler = useMemo<RequestHandler>(
@@ -1022,7 +1088,7 @@ function WebEditor({
         headSha: suggestingBase.headSha,
         currentSha: savedShaRef.current ?? suggestingBase.currentSha,
       });
-      setEditorContent(result.content);
+      replaceEditorDocument(result.content);
       setSavedPath(result.path);
       setCurrentPath(result.path);
       savedPathRef.current = result.path;
@@ -1057,7 +1123,7 @@ function WebEditor({
     } finally {
       setBusy(false);
     }
-  }, [busy, uncommitted, pathDirty, commitSource, content, config.owner, config.repo, ignoreOwnChangeEvents, setEditorContent, suggestingBase]);
+  }, [busy, uncommitted, pathDirty, commitSource, content, config.owner, config.repo, ignoreOwnChangeEvents, replaceEditorDocument, suggestingBase]);
 
   const acceptSuggestingHunkRef = useRef(acceptSuggestingHunk);
   const revertSuggestingHunkRef = useRef(revertSuggestingHunk);
@@ -1066,20 +1132,26 @@ function WebEditor({
   revertSuggestingHunkRef.current = revertSuggestingHunk;
   saveCheckpointRef.current = save;
 
-  const suggestingExtensions = useMemo<readonly Extension[]>(
+  const suggestingController = useMemo(
     () =>
-      suggestingEnabled && suggestingBase
-        ? [
-            suggestingModeExtension({
-              baseText: suggestingBase.baseText,
-              onAccept: (hunk) => acceptSuggestingHunkRef.current(hunk),
-              onRevert: (hunk) => revertSuggestingHunkRef.current(hunk),
-              onCheckpoint: () => saveCheckpointRef.current(),
-            }),
-          ]
-        : [],
-    [suggestingBase, suggestingEnabled],
+      suggestingEnabled
+        ? createSuggestingModeController({
+            baseText: null,
+            onAccept: (hunk) => acceptSuggestingHunkRef.current(hunk),
+            onRevert: (hunk) => revertSuggestingHunkRef.current(hunk),
+            onCheckpoint: () => saveCheckpointRef.current(),
+          })
+        : null,
+    [suggestingEnabled],
   );
+  const suggestingExtensions = useMemo<readonly Extension[]>(
+    () => suggestingController ? [suggestingController.extension] : [],
+    [suggestingController],
+  );
+
+  useEffect(() => {
+    suggestingController?.setBaseText(suggestingBase?.baseText ?? null);
+  }, [suggestingBase?.baseText, suggestingController]);
 
   const captureEditorCursor = useCallback(() => {
     const context = editorRef.current?.cursorContext.get();
@@ -1099,22 +1171,22 @@ function WebEditor({
       return;
     }
     const next = insertAnchorIntoSource(source, annotation.anchor);
-    setEditorContent(next);
+    replaceEditorDocument(next);
+    if (autosave.enabled) writeLocalDraft(next);
     setUncommitted(true);
     setSaveError(null);
-  }, [captureEditorCursor, content, setEditorContent]);
+  }, [autosave.enabled, captureEditorCursor, content, replaceEditorDocument, writeLocalDraft]);
 
   const removeLocalAnnotationAnchor = useCallback((annotation: LocalAnnotation) => {
     const cached = sourceCacheRef.current.source();
     const source = cached.includes(annotation.anchor) ? cached : liveEditorSource(editorRef.current, content);
     if (!source.includes(annotation.anchor)) return;
     const next = source.split(annotation.anchor).join("");
-    sourceCacheRef.current.reset(next);
-    editorRef.current?.setDoc(next);
-    setEditorContent(next);
+    replaceEditorDocument(next);
+    if (autosave.enabled) writeLocalDraft(next);
     setUncommitted(true);
     setSaveError(null);
-  }, [content, setEditorContent]);
+  }, [autosave.enabled, content, replaceEditorDocument, writeLocalDraft]);
 
   const localAnnotations = useLocalAnnotationsController({
     enabled: localAnnotationsEnabled,
@@ -1178,17 +1250,19 @@ function WebEditor({
       setCurrentPath(pendingDraft.path);
       setPathDirty(pendingDraft.path !== savedPathRef.current);
     }
-    setEditorContent(pendingDraft.source);
+    replaceEditorDocument(pendingDraft.source);
     setUncommitted(true);
     setSaveError(null);
     toast("Restored local draft");
     setPendingDraft(null);
-  }, [pendingDraft, setEditorContent]);
+  }, [pendingDraft, replaceEditorDocument]);
 
   const discardDraft = useCallback(() => {
     clearDraft(config.owner, config.repo, config.branch, config.path, draftScope);
+    clearDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, draftScope);
+    if (pendingDraft?.path) clearDraft(config.owner, config.repo, branchRef.current, pendingDraft.path, draftScope);
     setPendingDraft(null);
-  }, [config.owner, config.repo, config.branch, config.path, draftScope]);
+  }, [config.owner, config.repo, config.branch, config.path, draftScope, pendingDraft?.path]);
 
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {
@@ -1276,9 +1350,47 @@ function WebEditor({
       toast("Copy failed; select the editor buffer manually", "error");
     });
   }, [content]);
-  const reloadLatestFile = useCallback(() => {
-    window.location.href = `${repoBranchFileHref(config.owner, config.repo, savedReadBranchRef.current, savedPathRef.current)}?mode=edit`;
-  }, [config.owner, config.repo]);
+  const loadLatestFile = useCallback(() => {
+    const change = externalFileChange;
+    if (!change || change.type !== "change" || busy) return;
+    const hasLocalEdits = uncommitted || pathDirty;
+    if (hasLocalEdits && !window.confirm("Load the latest workspace file and keep your current editor buffer as a local draft?")) return;
+    const recoveryDraft = hasLocalEdits ? localDraftForSource(liveEditorSource(editorRef.current, content)) : null;
+    if (recoveryDraft) {
+      writeDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, recoveryDraft, draftScope);
+    }
+    setBusy(true);
+    setSaveError(null);
+    const readBranch = branchRef.current || savedReadBranchRef.current || config.branch;
+    const load = change.latestContent !== undefined
+      ? Promise.resolve({ content: change.latestContent, sha: change.latestSha })
+      : api.getFile(config.owner, config.repo, change.path, readBranch).then((latest) => ({
+          content: latest.content,
+          sha: latest.sha,
+        }));
+    void load.then((latest) => {
+      replaceEditorDocument(latest.content);
+      setCurrentPath(change.path);
+      setSavedPath(change.path);
+      currentPathRef.current = change.path;
+      savedPathRef.current = change.path;
+      savedShaRef.current = latest.sha;
+      sourceShaRef.current = undefined;
+      setPathDirty(false);
+      setUncommitted(false);
+      setExternalFileChange(null);
+      if (recoveryDraft) setPendingDraft(recoveryDraft);
+      if (suggestingEnabled) void loadSuggestingBase(change.path);
+      toast("Loaded latest workspace file");
+    }).catch((err) => {
+      const error = err instanceof ApiError ? err.message : "Unable to load latest file";
+      setExternalFileChange((current) => current && current.path === change.path ? { ...current, loading: false, error } : current);
+      setSaveError(error);
+      toast(error, "error");
+    }).finally(() => {
+      setBusy(false);
+    });
+  }, [busy, config.branch, config.owner, config.repo, content, draftScope, externalFileChange, loadSuggestingBase, localDraftForSource, pathDirty, replaceEditorDocument, suggestingEnabled, uncommitted]);
 
   // Reader/Cancel return to the last saved file as it is actually viewable. For
   // a lazy edit branch, that may still be main until the first successful save.
@@ -1327,8 +1439,9 @@ function WebEditor({
   }, [outlineMathMacros, railModel]);
 
   const externalCompareRows = externalFileChange?.latestContent !== undefined
-    ? compareLines(liveEditorSource(editorRef.current, content), externalFileChange.latestContent)
+    ? editorExternalDiffRows(liveEditorSource(editorRef.current, content), externalFileChange.latestContent)
     : [];
+  const externalCompareHasVisibleChanges = editorExternalDiffHasVisibleChanges(externalCompareRows);
 
   return (
     <div className={readerClass} ref={shellRef}>
@@ -1349,7 +1462,7 @@ function WebEditor({
             {externalFileChange.staleSave
               ? "Save blocked because this editor buffer is stale."
               : externalFileChange.type === "remove" ? "This file was removed outside this editor." : "This file changed outside this editor."}
-            {" "}Compare or reload before continuing.
+            {externalFileChange.type === "remove" ? " Copy the buffer before leaving this editor." : " Compare or load the latest file before saving."}
           </span>
           {externalFileChange.type === "change" ? (
             <button
@@ -1361,9 +1474,11 @@ function WebEditor({
               {externalFileChange.compareOpen ? "Hide compare" : "Compare"}
             </button>
           ) : null}
-          <button type="button" className="button small" data-testid="editor-external-change-reload" onClick={reloadLatestFile}>
-            Reload
-          </button>
+          {externalFileChange.type === "change" ? (
+            <button type="button" className="button small" data-testid="editor-external-change-reload" onClick={loadLatestFile} disabled={busy}>
+              Load latest
+            </button>
+          ) : null}
           <button type="button" className="button small subtle" data-testid="editor-external-change-copy" onClick={copyCurrentBuffer}>
             Copy buffer
           </button>
@@ -1388,15 +1503,25 @@ function WebEditor({
           ) : externalFileChange.error ? (
             <p>{externalFileChange.error}</p>
           ) : externalFileChange.type === "remove" ? (
-            <p>The workspace file no longer exists. Copy the buffer or reload to resolve.</p>
+            <p>The workspace file no longer exists. Copy the buffer before leaving this editor.</p>
+          ) : !externalCompareHasVisibleChanges ? (
+            <p>The latest workspace file has the same content as the editor buffer.</p>
           ) : (
             <div className="editor-external-compare-grid">
               <div className="editor-external-compare-heading">Current editor buffer</div>
               <div className="editor-external-compare-heading">Latest workspace file</div>
               {externalCompareRows.map((row) => (
-                <div className={`editor-external-compare-row ${row.changed ? "changed" : ""}`} key={row.index}>
-                  <pre><span>{row.index}</span>{row.buffer || " "}</pre>
-                  <pre><span>{row.index}</span>{row.latest || " "}</pre>
+                <div className={`editor-external-compare-row editor-external-compare-row--${row.kind}`} key={row.key}>
+                  <pre>
+                    {row.kind === "add"
+                      ? renderExternalCompareCell("", " ", "")
+                      : renderExternalCompareCell(row.bufferLine, row.buffer, row.kind === "remove" ? "-" : "", row.kind === "remove" ? row.bufferNote : undefined)}
+                  </pre>
+                  <pre>
+                    {row.kind === "remove"
+                      ? renderExternalCompareCell("", " ", "")
+                      : renderExternalCompareCell(row.latestLine, row.latest, row.kind === "add" ? "+" : "", row.kind === "add" ? row.latestNote : undefined)}
+                  </pre>
                 </div>
               ))}
             </div>
@@ -1406,9 +1531,8 @@ function WebEditor({
       <div className="doc-with-toc">
         <div className="doc-main">
           <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
-            {documentContextReady ? (
+            {editorContextReady ? (
               <ActiveMarkdownEditor
-                key={`${savedPath}:${suggestingBase?.headSha ?? "no-suggesting-base"}`}
                 value={content}
                 mode={readOnly ? "rich" : mode}
                 readOnly={readOnly}

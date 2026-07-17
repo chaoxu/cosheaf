@@ -214,6 +214,21 @@ test("workbench local annotation anchor inserts at selected source position @smo
     expect(exportBody).toContain(`[@local:${id}] (open`);
     expect(exportBody).not.toContain(`[@local:${id}] (missing`);
 
+    const identicalWriteStatus = await page.evaluate(
+      async ({ owner, repo, renamed }) => {
+        const res = await fetch(`/api/v1/repos/${owner}/${repo}/file?path=renamed.md&branch=main`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: renamed }),
+        });
+        return res.status;
+      },
+      { owner, repo, renamed },
+    );
+    expect(identicalWriteStatus).toBe(200);
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("editor-external-change-banner")).toHaveCount(0);
+
     const externalWriteStatus = await page.evaluate(
       async ({ owner, repo, renamed }) => {
         const res = await fetch(`/api/v1/repos/${owner}/${repo}/file?path=renamed.md&branch=main`, {
@@ -231,20 +246,37 @@ test("workbench local annotation anchor inserts at selected source position @smo
     await expect(page.getByTestId("editor-external-compare")).toContainText("Current editor buffer");
     await expect(page.getByTestId("editor-external-compare")).toContainText("Latest workspace file");
     await expect(page.getByTestId("editor-external-compare")).toContainText("External agent edit.");
+    const externalAddRow = page.locator(".editor-external-compare-row--add", { hasText: "External agent edit." });
+    await expect(externalAddRow).toHaveCount(1);
+    await expect(externalAddRow.locator("pre").first().locator(".editor-external-compare-line-number")).toHaveText("");
+    await expect(externalAddRow.locator("[aria-label='Added line']")).toHaveText("+");
 
     await page.locator(CF.editorContent).fill(`${renamed}\nHuman stale edit.\n`);
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByTestId("editor-external-change-banner")).toContainText("Save blocked because this editor buffer is stale.");
     await expect(page.getByTestId("editor-save-state")).toHaveAttribute(
       "title",
-      "Stale buffer: this file changed outside the editor. Compare or reload before saving.",
+      "Stale buffer: this file changed outside the editor. Compare or load the latest file before saving.",
     );
+    const staleRemoveRow = page.locator(".editor-external-compare-row--remove", { hasText: "Human stale edit." });
+    await expect(staleRemoveRow).toHaveCount(1);
+    await expect(staleRemoveRow.locator("pre").last().locator(".editor-external-compare-line-number")).toHaveText("");
+    await expect(staleRemoveRow.locator("[aria-label='Removed line']")).toHaveText("-");
     expect(readFileSync(join(dir, "renamed.md"), "utf8")).toContain("External agent edit.");
     expect(readFileSync(join(dir, "renamed.md"), "utf8")).not.toContain("Human stale edit.");
 
+    page.once("dialog", (dialog) => {
+      expect(dialog.message()).toContain("Load the latest workspace file");
+      void dialog.accept();
+    });
     await page.getByTestId("editor-external-change-reload").click();
     await expect(page.locator(CF.editorContent)).toContainText("External agent edit.");
     await expect(page.locator(CF.editorContent)).not.toContainText("Human stale edit.");
+    await expect(page.getByTestId("editor-draft-banner")).toBeVisible();
+    await page.getByTestId("editor-draft-restore").click();
+    await expect(page.locator(CF.editorContent)).toContainText("Human stale edit.");
+    expect(readFileSync(join(dir, "renamed.md"), "utf8")).toContain("External agent edit.");
+    expect(readFileSync(join(dir, "renamed.md"), "utf8")).not.toContain("Human stale edit.");
   } finally {
     if (child) await stopWorkbench(child);
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });

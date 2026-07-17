@@ -116,6 +116,7 @@ export function MarkdownEditor({
   const modeRef = useRef(mode);
   const onChangeRef = useRef(onChange);
   const onDocumentChangeRef = useRef(onDocumentChange);
+  const fromRef = useRef(from);
   // Host APIs are captured by refs and dispatched through stable wrappers,
   // so prop updates don't force a remount of the underlying editor.
   const saveRef = useRef(saveHandler);
@@ -126,6 +127,7 @@ export function MarkdownEditor({
   onDocumentChangeRef.current = onDocumentChange;
   const effectiveMode = coflatEditorMode(mode, readOnly);
   modeRef.current = effectiveMode;
+  fromRef.current = from;
   saveRef.current = saveHandler;
   statusRef.current = statusEvents;
   requestHandlerRef.current = requestHandler;
@@ -164,7 +166,7 @@ export function MarkdownEditor({
     };
     const stableAssetUploader: AssetUploader = {
       upload: (file, env) =>
-        assetRef.current?.upload(file, env) ??
+        assetRef.current?.upload(file, { ...env, from: env.from ?? fromRef.current }) ??
         Promise.resolve({ error: "no uploader" as const }),
       accept: (file) => assetRef.current?.accept?.(file) ?? null,
       cancel: (file) => assetRef.current?.cancel?.(file),
@@ -212,7 +214,11 @@ export function MarkdownEditor({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (lastValueRef.current === value && editor.getDoc() === value) return;
+    if (editor.getDoc() === value) {
+      lastValueRef.current = value;
+      return;
+    }
+    if (lastValueRef.current === value) return;
     lastValueRef.current = value;
     editor.setDoc(value);
   }, [value]);
@@ -228,6 +234,13 @@ export function MarkdownEditor({
     if (!editor || !documentContext) return;
     editor.setContext(documentContext);
   }, [documentContext]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const setPath = (editor as MountedEditor & { setPath?: (path?: string) => void }).setPath;
+    setPath?.call(editor, from);
+  }, [from]);
 
   return <div ref={containerRef} data-testid={testId} className="cm-host" />;
 }
