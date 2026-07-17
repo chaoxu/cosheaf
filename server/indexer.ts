@@ -305,6 +305,46 @@ export function indexPage(db: Database.Database, p: PageIngest): IngestPlan {
   return plan;
 }
 
+// Index a batch of already-fetched page bodies. The two-pass ordering invariant
+// lives here so every batch caller (full-tree reindex and incremental push)
+// shares it: build every page's plan and commit it FIRST, making all doc ids
+// and xref targets visible, THEN — only when the batch has more than one page —
+// run a backlinks-only second pass so cross-file `[@...]` links resolve against
+// the ids/targets the first pass just wrote (without reparsing or rewriting the
+// FTS/doc rows). A single-page batch needs no second pass; its own commit
+// already wrote its backlinks. Callers pre-filter fetch failures — every body
+// passed here is committed. Returns the committed paths in input order.
+export function indexPageBatch(
+  db: Database.Database,
+  workspaceSlug: string,
+  bodies: readonly { path: string; body: string }[],
+): string[] {
+  const plans = bodies.map(({ path, body }) => ({
+    path,
+    plan: planIndexPage(db, { workspaceSlug, filePath: path, bodyText: body }),
+  }));
+  for (const { plan } of plans) plan.commit();
+  if (plans.length > 1) {
+    for (const { plan } of plans) plan.commitBacklinksOnly();
+  }
+  return plans.map((p) => p.path);
+}
+
+// Index a batch of already-fetched `.bib` bodies. A thin loop over
+// indexCitationFile, kept beside indexPageBatch so both reindex callers share
+// one batch shape. Callers pre-filter fetch failures. Returns the paths in
+// input order.
+export function indexCitationBatch(
+  db: Database.Database,
+  workspaceSlug: string,
+  bodies: readonly { path: string; body: string }[],
+): string[] {
+  for (const { path, body } of bodies) {
+    indexCitationFile(db, { workspaceSlug, filePath: path, bodyText: body });
+  }
+  return bodies.map((b) => b.path);
+}
+
 function deletePageRows(db: Database.Database, workspaceSlug: string, cosheafId: string): void {
   const doc = prep(db, "SELECT fts_rowid FROM doc_map WHERE workspace_slug = ? AND cosheaf_id = ?")
     .get(workspaceSlug, cosheafId) as { fts_rowid: number | null } | undefined;

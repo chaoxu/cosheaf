@@ -1,6 +1,12 @@
 import type Database from "better-sqlite3";
 import type { WorkspaceValidation } from "../shared/validation.js";
 
+// These three reads are validation-only: they correlate backlinks against
+// doc_map / xref_targets / citation_targets (broken refs), doc_map against
+// backlinks (orphan labels), and xref_targets against xref_target_duplicates
+// (duplicate xrefs). They have no other caller, so — unlike the shared
+// autocomplete/resolve/backlinks reads in page-search.ts — moving them there
+// would not remove any duplicated schema-shape knowledge; they stay here.
 export function workspaceValidation(
   db: Database.Database,
   workspaceSlug: string,

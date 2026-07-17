@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { notificationChannel, parseWorkspaceSlug, workspaceSlug } from "../../shared/conventions.js";
 import type { DocumentFormatId } from "../../shared/document-format.js";
 import type { ForgejoIssue } from "../forgejo.js";
-import { deleteCitationFile, deletePage, indexCitationFile, planIndexPage } from "../indexer.js";
+import { deleteCitationFile, deletePage, indexCitationBatch, indexPageBatch } from "../indexer.js";
 import { invalidateWorkspaceCaches } from "../middleware.js";
 import { bustRepoConfig, REPO_CONFIG_PATH } from "../repo-config.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
@@ -205,37 +205,22 @@ webhooks.post("/forgejo", async (c) => {
         );
         const failures: string[] = [];
         for (const r of bibResults) {
-          if (r.error) {
-            failures.push(`${r.path}: ${r.error}`);
-            continue;
-          }
-          indexCitationFile(db, {
-            workspaceSlug: ws.slug,
-            filePath: r.path,
-            bodyText: r.body,
-          });
+          if (r.error) failures.push(`${r.path}: ${r.error}`);
         }
-        const indexed: Array<{ path: string; plan: ReturnType<typeof planIndexPage> }> = [];
+        indexCitationBatch(
+          db,
+          ws.slug,
+          bibResults.filter((r) => !r.error).map((r) => ({ path: r.path, body: r.body })),
+        );
         for (const r of results) {
-          if (r.error) {
-            failures.push(`${r.path}: ${r.error}`);
-            continue;
-          }
-          const plan = planIndexPage(db, {
-            workspaceSlug: ws.slug,
-            filePath: r.path,
-            bodyText: r.body,
-          });
-          indexed.push({ path: r.path, plan });
-          plan.commit();
+          if (r.error) failures.push(`${r.path}: ${r.error}`);
         }
-        if (indexed.length > 1) {
-          // First pass makes all page ids/xref targets visible; the second pass
-          // resolves same-push links without reparsing or rewriting FTS/doc rows.
-          for (const r of indexed) {
-            r.plan.commitBacklinksOnly();
-          }
-        }
+        // The two-pass map→commit→backlinks ordering lives in indexPageBatch.
+        indexPageBatch(
+          db,
+          ws.slug,
+          results.filter((r) => !r.error).map((r) => ({ path: r.path, body: r.body })),
+        );
         for (const path of removed) {
           if (path.endsWith(".bib")) deleteCitationFile(db, ws.slug, path);
         }

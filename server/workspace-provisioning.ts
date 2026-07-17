@@ -9,7 +9,7 @@ import { isCoverifyChatEnabled } from "./coverify-cli.js";
 import type { Config } from "./db.js";
 import type { Forgejo } from "./forgejo.js";
 import { ForgejoError } from "./forgejo.js";
-import { indexCitationFile, planIndexPage, pruneWorkspaceIndex } from "./indexer.js";
+import { indexCitationBatch, indexPageBatch, pruneWorkspaceIndex } from "./indexer.js";
 import { clearRepoConfig } from "./repo-config.js";
 import { getCachedTree, setCachedTree } from "./tree-cache.js";
 import type { User } from "./users.js";
@@ -372,30 +372,11 @@ export async function reindexWorkspaceFromForgejo(
       .getRawFile(workspace.owner, workspace.repo, "main", path)
       .then((body) => ({ path, body })),
   );
-  for (const { path, body } of bibBodies) {
-    indexCitationFile(db, {
-      workspaceSlug: workspace.slug,
-      filePath: path,
-      bodyText: body,
-    });
+  for (const path of indexCitationBatch(db, workspace.slug, bibBodies)) {
     seenCitations.add(path);
   }
-  const plans = bodies.map(({ path, body }) => ({
-    path,
-    plan: planIndexPage(db, {
-      workspaceSlug: workspace.slug,
-      filePath: path,
-      bodyText: body,
-    }),
-  }));
-  for (const { path, plan } of plans) {
-    plan.commit();
+  for (const path of indexPageBatch(db, workspace.slug, bodies)) {
     seenMarkdown.add(path);
-  }
-  if (plans.length > 1) {
-    // First pass makes every page id/xref target visible; the second pass
-    // resolves cross-file links without reparsing or rewriting FTS/doc rows.
-    for (const { plan } of plans) plan.commitBacklinksOnly();
   }
 
   pruneWorkspaceIndex(db, workspace.slug, seenMarkdown, seenCitations);

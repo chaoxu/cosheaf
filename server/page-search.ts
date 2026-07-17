@@ -125,6 +125,179 @@ export function documentTags(db: Database.Database, workspaceSlug: string, path:
     .all(workspaceSlug, path) as Array<{ tag: string }>).map((r) => r.tag);
 }
 
+// Sidecar reads for the reference autocomplete / resolve / backlinks routes
+// (server/routes/files-refs.ts). Kept here so which columns live on which
+// sidecar table (doc_map, xref_targets, xref_target_duplicates, page_tags,
+// backlinks) is defined once, not spread across the route handlers.
+
+export interface TagSuggestionRow {
+  tag: string;
+  count: number;
+}
+
+// `#` tag autocomplete: tags matching a prefix, most-frequent first (#388).
+export function workspaceTagSuggestions(
+  db: Database.Database,
+  workspaceSlug: string,
+  prefix: string,
+  limit: number,
+): TagSuggestionRow[] {
+  const tagTerm = `${likeEscape(prefix)}%`;
+  return db
+    .prepare(
+      "SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? AND tag LIKE ? ESCAPE '\\' " +
+        "GROUP BY tag ORDER BY count DESC, tag LIMIT ?",
+    )
+    .all(workspaceSlug, tagTerm, limit) as TagSuggestionRow[];
+}
+
+export interface PageRefMatch {
+  id: string;
+  title: string | null;
+}
+
+// `[@` autocomplete over indexed pages (doc_map): id/title prefix match,
+// shortest id first.
+export function workspacePageRefMatches(
+  db: Database.Database,
+  workspaceSlug: string,
+  prefix: string,
+  limit: number,
+): PageRefMatch[] {
+  const term = `${likeEscape(prefix)}%`;
+  return db
+    .prepare(
+      "SELECT cosheaf_id AS id, title FROM doc_map " +
+        "WHERE workspace_slug = ? AND " +
+        "(cosheaf_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') " +
+        "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
+    )
+    .all(workspaceSlug, term, term, limit) as PageRefMatch[];
+}
+
+export interface XrefMatch {
+  id: string;
+  title: string;
+  path: string;
+}
+
+// `[@` autocomplete over Coflat cross-ref labels (xref_targets): id/label
+// prefix match, shortest id first.
+export function workspaceXrefMatches(
+  db: Database.Database,
+  workspaceSlug: string,
+  prefix: string,
+  limit: number,
+): XrefMatch[] {
+  const term = `${likeEscape(prefix)}%`;
+  return db
+    .prepare(
+      "SELECT target_id AS id, display_label AS title, source_path AS path FROM xref_targets " +
+        "WHERE workspace_slug = ? AND " +
+        "(target_id LIKE ? ESCAPE '\\' OR display_label LIKE ? ESCAPE '\\') " +
+        "ORDER BY length(target_id), target_id LIMIT ?",
+    )
+    .all(workspaceSlug, term, term, limit) as XrefMatch[];
+}
+
+export interface PageRefRow {
+  id: string;
+  path: string;
+  label: string;
+}
+
+// /refs resolve over pages (doc_map): the requested ids that name a page.
+export function workspacePageRefs(
+  db: Database.Database,
+  workspaceSlug: string,
+  ids: readonly string[],
+): PageRefRow[] {
+  const placeholders = ids.map(() => "?").join(",");
+  return db
+    .prepare(
+      `SELECT cosheaf_id AS id, forgejo_id AS path, COALESCE(title, cosheaf_id) AS label
+         FROM doc_map
+        WHERE workspace_slug = ? AND cosheaf_id IN (${placeholders})`,
+    )
+    .all(workspaceSlug, ...ids) as PageRefRow[];
+}
+
+export interface XrefRefRow {
+  id: string;
+  path: string;
+  kind: string;
+  label: string;
+  line: number | null;
+}
+
+// /refs resolve over Coflat cross-ref labels (xref_targets).
+export function workspaceXrefRefs(
+  db: Database.Database,
+  workspaceSlug: string,
+  ids: readonly string[],
+): XrefRefRow[] {
+  const placeholders = ids.map(() => "?").join(",");
+  return db
+    .prepare(
+      `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
+         FROM xref_targets
+        WHERE workspace_slug = ? AND target_id IN (${placeholders})
+        ORDER BY source_path`,
+    )
+    .all(workspaceSlug, ...ids) as XrefRefRow[];
+}
+
+export interface XrefDuplicateRow {
+  id: string;
+  path: string;
+  count: number;
+}
+
+// /refs resolve of same-file duplicate cross-ref definitions
+// (xref_target_duplicates).
+export function workspaceXrefDuplicates(
+  db: Database.Database,
+  workspaceSlug: string,
+  ids: readonly string[],
+): XrefDuplicateRow[] {
+  const placeholders = ids.map(() => "?").join(",");
+  return db
+    .prepare(
+      `SELECT target_id AS id, source_path AS path, count
+         FROM xref_target_duplicates
+        WHERE workspace_slug = ? AND target_id IN (${placeholders})
+        ORDER BY source_path`,
+    )
+    .all(workspaceSlug, ...ids) as XrefDuplicateRow[];
+}
+
+export interface BacklinkRow {
+  src_id: string;
+  src_path: string;
+  src_title: string | null;
+  target_label: string | null;
+}
+
+// /backlinks: pages linking to a target id, joined to the source page title.
+export function workspaceBacklinks(
+  db: Database.Database,
+  workspaceSlug: string,
+  targetId: string,
+): BacklinkRow[] {
+  return db
+    .prepare(
+      `SELECT backlinks.src_id AS src_id, backlinks.src_path AS src_path,
+              doc_map.title AS src_title, backlinks.target_label AS target_label
+         FROM backlinks
+         LEFT JOIN doc_map
+           ON doc_map.workspace_slug = backlinks.workspace_slug
+          AND doc_map.cosheaf_id = backlinks.src_id
+        WHERE backlinks.workspace_slug = ? AND backlinks.target_id = ?
+        ORDER BY backlinks.src_path`,
+    )
+    .all(workspaceSlug, targetId) as BacklinkRow[];
+}
+
 function searchTerms(q: string): string[] {
   return q
     .split(/\s+/)

@@ -11,7 +11,18 @@ import type { Hono } from "hono";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
-import { likeEscape, searchWorkspacePages, workspacePagesByTag, workspaceTagCloud } from "../page-search.js";
+import {
+  searchWorkspacePages,
+  workspaceBacklinks,
+  workspacePageRefMatches,
+  workspacePageRefs,
+  workspacePagesByTag,
+  workspaceTagCloud,
+  workspaceTagSuggestions,
+  workspaceXrefDuplicates,
+  workspaceXrefMatches,
+  workspaceXrefRefs,
+} from "../page-search.js";
 import { getCachedTree, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";
@@ -82,14 +93,7 @@ export function registerFileRefRoutes(files: Hono<AppEnv>): void {
     // `#` trigger completes frontmatter tags from the page_tags index (#388),
     // ranked by frequency. Tags are main-only, so branch is irrelevant here.
     if (trigger === "#") {
-      const tagTerm = `${likeEscape(prefix)}%`;
-      const tagRows = c
-        .get("db")
-        .prepare(
-          "SELECT tag, COUNT(*) AS count FROM page_tags WHERE workspace_slug = ? AND tag LIKE ? ESCAPE '\\' " +
-            "GROUP BY tag ORDER BY count DESC, tag LIMIT ?",
-        )
-        .all(ws.slug, tagTerm, limit) as Array<{ tag: string; count: number }>;
+      const tagRows = workspaceTagSuggestions(c.get("db"), ws.slug, prefix, limit);
       return c.json({
         suggestions: tagRows.map((r): RefSuggestion => ({ id: r.tag, insert: `#${r.tag}`, display: `${r.tag} (${r.count})` })),
       });
@@ -101,29 +105,12 @@ export function registerFileRefRoutes(files: Hono<AppEnv>): void {
     // live buffer, and both sources merge into one popup, so including them here
     // double-lists the same id.
     const excludePath = safeRel(c.req.query("path")?.trim() ?? "");
-    const term = `${likeEscape(prefix)}%`;
     const sqlLimit = branch !== "main" ? limit * 2 : limit;
-    const pageRows = c
-      .get("db")
-      .prepare(
-        "SELECT cosheaf_id AS id, title FROM doc_map " +
-          "WHERE workspace_slug = ? AND " +
-          "(cosheaf_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\') " +
-          "ORDER BY length(cosheaf_id), cosheaf_id LIMIT ?",
-      )
-      .all(ws.slug, term, term, sqlLimit) as Array<{ id: string; title: string | null }>;
+    const pageRows = workspacePageRefMatches(c.get("db"), ws.slug, prefix, sqlLimit);
     const remaining = Math.max(0, sqlLimit - pageRows.length);
     const xrefRows = remaining === 0
       ? []
-      : c
-          .get("db")
-          .prepare(
-            "SELECT target_id AS id, display_label AS title, source_path AS path FROM xref_targets " +
-              "WHERE workspace_slug = ? AND " +
-              "(target_id LIKE ? ESCAPE '\\' OR display_label LIKE ? ESCAPE '\\') " +
-              "ORDER BY length(target_id), target_id LIMIT ?",
-          )
-          .all(ws.slug, term, term, remaining) as Array<{ id: string; title: string; path: string }>;
+      : workspaceXrefMatches(c.get("db"), ws.slug, prefix, remaining);
     const visibleXrefRows = excludePath ? xrefRows.filter((r) => r.path !== excludePath) : xrefRows;
     const mainSuggestions: RefSuggestion[] = [
         ...pageRows.map((r): RefSuggestion => ({
@@ -174,33 +161,9 @@ export function registerFileRefRoutes(files: Hono<AppEnv>): void {
       if (!validRequestedBranch(ref)) return c.json(...bad("valid ref required"));
       if (ref !== "main") return c.json(await branchRefs(c, ref, ids));
     }
-    const placeholders = ids.map(() => "?").join(",");
-    const pageRows = c
-      .get("db")
-      .prepare(
-        `SELECT cosheaf_id AS id, forgejo_id AS path, COALESCE(title, cosheaf_id) AS label
-           FROM doc_map
-          WHERE workspace_slug = ? AND cosheaf_id IN (${placeholders})`,
-      )
-      .all(ws.slug, ...ids) as Array<{ id: string; path: string; label: string }>;
-    const xrefRows = c
-      .get("db")
-      .prepare(
-        `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
-           FROM xref_targets
-          WHERE workspace_slug = ? AND target_id IN (${placeholders})
-          ORDER BY source_path`,
-      )
-      .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>;
-    const sameFileDuplicates = c
-      .get("db")
-      .prepare(
-        `SELECT target_id AS id, source_path AS path, count
-           FROM xref_target_duplicates
-          WHERE workspace_slug = ? AND target_id IN (${placeholders})
-          ORDER BY source_path`,
-      )
-      .all(ws.slug, ...ids) as Array<{ id: string; path: string; count: number }>;
+    const pageRows = workspacePageRefs(c.get("db"), ws.slug, ids);
+    const xrefRows = workspaceXrefRefs(c.get("db"), ws.slug, ids);
+    const sameFileDuplicates = workspaceXrefDuplicates(c.get("db"), ws.slug, ids);
     const xrefGroups = new Map<string, typeof xrefRows>();
     for (const row of xrefRows) xrefGroups.set(row.id, [...(xrefGroups.get(row.id) ?? []), row]);
     const duplicateIds = new Set(sameFileDuplicates.map((row) => row.id));
@@ -256,19 +219,7 @@ export function registerFileRefRoutes(files: Hono<AppEnv>): void {
     const id = c.req.query("id");
     if (!id) return c.json(...bad("id required"));
     const ws = c.get("workspace");
-    const rows = c
-      .get("db")
-      .prepare(
-        `SELECT backlinks.src_id AS src_id, backlinks.src_path AS src_path,
-                doc_map.title AS src_title, backlinks.target_label AS target_label
-           FROM backlinks
-           LEFT JOIN doc_map
-             ON doc_map.workspace_slug = backlinks.workspace_slug
-            AND doc_map.cosheaf_id = backlinks.src_id
-          WHERE backlinks.workspace_slug = ? AND backlinks.target_id = ?
-          ORDER BY backlinks.src_path`,
-      )
-      .all(ws.slug, id);
+    const rows = workspaceBacklinks(c.get("db"), ws.slug, id);
     return c.json({ backlinks: rows });
   });
 
