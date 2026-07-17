@@ -55,6 +55,7 @@ import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeD
 import { editorExternalDiffHasVisibleChanges, editorExternalDiffRows } from "./editor-external-diff";
 import { fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
 import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
+import { referenceSuggestExtension } from "./reference-suggest-source";
 import { createSuggestingModeController } from "./suggesting-mode";
 import "@chaoxu/coflat/style.css";
 import "@chaoxu/coflat/themes/blueprint-book.css";
@@ -1144,9 +1145,20 @@ function WebEditor({
         : null,
     [suggestingEnabled],
   );
+  const referenceSuggestExt = useMemo(
+    () => referenceSuggestExtension(() => ({
+      owner: config.owner,
+      repo: config.repo,
+      branch: branchRef.current || config.branch,
+    })),
+    [config.owner, config.repo, config.branch],
+  );
   const suggestingExtensions = useMemo<readonly Extension[]>(
-    () => suggestingController ? [suggestingController.extension] : [],
-    [suggestingController],
+    () => [
+      ...(suggestingController ? [suggestingController.extension] : []),
+      referenceSuggestExt,
+    ],
+    [suggestingController, referenceSuggestExt],
   );
 
   useEffect(() => {
