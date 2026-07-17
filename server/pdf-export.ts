@@ -29,11 +29,9 @@ export interface PdfExportResult {
   readonly filename: string;
 }
 
-interface ExportCoflatPdfOptions {
+interface PandocExportBase {
   readonly source: string;
   readonly sourcePath: string;
-  readonly files: readonly PdfProjectFile[];
-  readonly rateLimitKey?: string;
   readonly defaults?: {
     readonly bibliography?: string;
     readonly csl?: string;
@@ -46,8 +44,41 @@ interface ExportCoflatPdfOptions {
   };
 }
 
+interface ExportCoflatPdfOptions extends PandocExportBase {
+  readonly files: readonly PdfProjectFile[];
+  readonly rateLimitKey?: string;
+}
+
+// Local Workbench export: pandoc runs directly against the on-disk working tree
+// at `rootDir` instead of a materialized copy of the repo, so a big repo no
+// longer has to be snapshotted into a temp dir just to render one document.
+interface ExportCoflatPdfInPlaceOptions extends PandocExportBase {
+  readonly rootDir: string;
+}
+
+// Where pandoc reads, resolves, and writes for one export. The two export modes
+// differ only in how these paths are anchored: the hosted copy points them all
+// at a temp materialization root; the local in-place mode anchors resolution at
+// the real working tree and keeps only the preprocessed input + output in temp.
+interface PandocPdfLayout {
+  // pandoc cwd; base for relative template/csl resolution.
+  readonly sourceDir: string;
+  // resource-path project root (searched for images/includes/bibliography).
+  readonly projectRoot: string;
+  // absolute path to write the preprocessed source before invoking pandoc.
+  readonly inputFile: string;
+  // absolute path pandoc writes the PDF to.
+  readonly outputFile: string;
+  // Isolated scratch dir: holds the preprocessed input + output PDF, is the
+  // dependency-probe cwd, and anchors LaTeX scratch (HOME/TMPDIR/TEXMFOUTPUT).
+  readonly workDir: string;
+}
+
 interface CommandOptions {
   readonly cwd: string;
+  // Directory used to anchor HOME/TMPDIR/TEXMFOUTPUT for the child (so LaTeX
+  // scratch stays here, not under cwd). Defaults to cwd.
+  readonly scratchDir?: string;
   readonly timeoutMs?: number;
 }
 
@@ -126,51 +157,102 @@ async function exportCoflatMarkdownPdfUnbounded(options: ExportCoflatPdfOptions)
 
   const root = await mkdtemp(path.join(tmpdir(), "cosheaf-pdf-"));
   try {
-    await checkPdfDependencies(root);
     await materializeProject(root, options.files);
-
-    const sourceFile = path.join(root, sourceRel);
-    const preprocessed = await preprocessWithReadFile(options.source);
-    await mkdir(path.dirname(sourceFile), { recursive: true });
-    await writeFile(sourceFile, preprocessed, "utf8");
-
-    const outputFile = path.join(root, `${path.basename(sourceRel, path.extname(sourceRel))}.pdf`);
-    const sourceDir = path.dirname(sourceFile);
-    const latexDir = path.dirname(fileURLToPath(import.meta.resolve("@chaoxu/coflat/latex/filter.lua")));
-    const config = latexConfigWithDefaults(parseLatexFrontmatterConfig(options.source), options.defaults);
-    const exportOptions = resolveLatexExportOptions({ config, flags: options.flags ?? {} });
-    const template = resolveTemplatePath(exportOptions.template, {
-      latexDir,
-      root,
-      sourceDir,
-    });
-    const csl = resolveCslPath(exportOptions.csl, {
-      latexDir,
-      root,
-      sourceDir,
-    });
-    const args = [
-      ...buildLatexPandocArgs({
-        bibliography: exportOptions.bibliography,
-        cslPath: csl,
-        filterPath: path.join(latexDir, "filter.lua"),
-        format: "pdf",
-        output: outputFile,
-        resourcePath: buildPandocResourcePath(root, sourceDir),
-        template,
-      }),
-      sourceFile,
-    ];
-
-    await runCommand("pandoc", args, { cwd: sourceDir, timeoutMs: PDF_EXPORT_TIMEOUT_MS });
-    const pdf = await readFile(outputFile);
-    if (pdf.byteLength > MAX_PDF_OUTPUT_BYTES) {
-      throw new PdfExportError(413, "PDF export is too large.");
-    }
-    return { pdf, filename: pdfFilename(sourceRel) };
+    const inputFile = path.join(root, sourceRel);
+    return await runPandocPdfExport(
+      {
+        projectRoot: root,
+        sourceDir: path.dirname(inputFile),
+        inputFile,
+        outputFile: path.join(root, `${path.basename(sourceRel, path.extname(sourceRel))}.pdf`),
+        workDir: root,
+      },
+      options,
+      sourceRel,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+}
+
+// Render a single document from the local working tree without copying the
+// repo. pandoc runs with cwd/resource-path anchored at the real tree so
+// relative images, includes, bibliography, and templates resolve on disk; only
+// the preprocessed input and the output PDF live in a scratch dir.
+export async function exportCoflatMarkdownPdfInPlace(
+  options: ExportCoflatPdfInPlaceOptions,
+): Promise<PdfExportResult> {
+  const sourceRel = safeRel(options.sourcePath);
+  if (!sourceRel) {
+    throw new PdfExportError(400, "Invalid document path.");
+  }
+
+  const projectRoot = path.resolve(options.rootDir);
+  const sourceDir = path.dirname(path.join(projectRoot, sourceRel));
+  const work = await mkdtemp(path.join(tmpdir(), "cosheaf-pdf-"));
+  try {
+    return await runPandocPdfExport(
+      {
+        projectRoot,
+        sourceDir,
+        inputFile: path.join(work, path.basename(sourceRel)),
+        outputFile: path.join(work, `${path.basename(sourceRel, path.extname(sourceRel))}.pdf`),
+        workDir: work,
+      },
+      options,
+      sourceRel,
+    );
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
+async function runPandocPdfExport(
+  layout: PandocPdfLayout,
+  options: PandocExportBase,
+  sourceRel: string,
+): Promise<PdfExportResult> {
+  await checkPdfDependencies(layout.workDir);
+
+  const preprocessed = await preprocessWithReadFile(options.source);
+  await mkdir(path.dirname(layout.inputFile), { recursive: true });
+  await writeFile(layout.inputFile, preprocessed, "utf8");
+
+  const latexDir = path.dirname(fileURLToPath(import.meta.resolve("@chaoxu/coflat/latex/filter.lua")));
+  const config = latexConfigWithDefaults(parseLatexFrontmatterConfig(options.source), options.defaults);
+  const exportOptions = resolveLatexExportOptions({ config, flags: options.flags ?? {} });
+  const template = resolveTemplatePath(exportOptions.template, {
+    latexDir,
+    root: layout.projectRoot,
+    sourceDir: layout.sourceDir,
+  });
+  const csl = resolveCslPath(exportOptions.csl, {
+    latexDir,
+    root: layout.projectRoot,
+    sourceDir: layout.sourceDir,
+  });
+  const args = [
+    ...buildLatexPandocArgs({
+      bibliography: exportOptions.bibliography,
+      cslPath: csl,
+      filterPath: path.join(latexDir, "filter.lua"),
+      format: "pdf",
+      output: layout.outputFile,
+      resourcePath: buildPandocResourcePath(layout.projectRoot, layout.sourceDir),
+      template,
+    }),
+    layout.inputFile,
+  ];
+
+  // cwd stays at the real source dir so relative resources resolve, but LaTeX
+  // scratch (tex2pdf.*, aux files) is anchored at the isolated work dir so it
+  // never lands in — or is orphaned in — the user's working tree.
+  await runCommand("pandoc", args, { cwd: layout.sourceDir, scratchDir: layout.workDir, timeoutMs: PDF_EXPORT_TIMEOUT_MS });
+  const pdf = await readFile(layout.outputFile);
+  if (pdf.byteLength > MAX_PDF_OUTPUT_BYTES) {
+    throw new PdfExportError(413, "PDF export is too large.");
+  }
+  return { pdf, filename: pdfFilename(sourceRel) };
 }
 
 function pdfExportLimiterConfig(): AsyncJobLimiterConfig {
@@ -267,7 +349,7 @@ async function runCommand(command: string, args: readonly string[], options: Com
     const child = spawn(command, [...args], {
       cwd: options.cwd,
       detached: process.platform !== "win32",
-      env: pdfExportCommandEnv(options.cwd),
+      env: pdfExportCommandEnv(options.scratchDir ?? options.cwd),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout: Buffer[] = [];

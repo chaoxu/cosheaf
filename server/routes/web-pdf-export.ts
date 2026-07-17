@@ -7,7 +7,7 @@ import { resolveLocalWorkspace } from "../local/local-mode.js";
 import { isLocalMode } from "../middleware.js";
 import { onWorkspaceNotFound, type WorkspaceBackend } from "../workspace-backend.js";
 import type { ForgejoTreeEntry } from "../forgejo-types.js";
-import { exportCoflatMarkdownPdf, PdfExportError, type PdfProjectFile, withPdfExportLimit } from "../pdf-export.js";
+import { exportCoflatMarkdownPdf, exportCoflatMarkdownPdfInPlace, PdfExportError, type PdfProjectFile, withPdfExportLimit } from "../pdf-export.js";
 import { loadRepoConfig } from "../repo-config.js";
 import type { AppEnv } from "../types.js";
 import { safeRel } from "./files.js";
@@ -86,51 +86,50 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
         const meta = await ctx.backend.getFileMeta(ctx.owner, ctx.repo, resolved.branch, rel).catch(onWorkspaceNotFound(null));
         if (!meta) throw new PdfExportError(404, "not found");
 
-        const [source, files] = await Promise.all([
-          ctx.backend.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel),
-          repoFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch),
-        ]);
-        if (isLocalMode(c)) {
-          const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
-          if (entry) {
-            let localIssues;
-            try {
-              localIssues = localAnchorPreflightIssues(entry, rel, source);
-            } catch (err) {
-              const sidecar = localAnnotationSidecarConflict(err);
-              if (sidecar) {
-                throw new PdfExportError(422, "PDF export blocked by local annotations.", sidecar.details);
-              }
-              throw err;
+        const localEntry = isLocalMode(c)
+          ? resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry
+          : undefined;
+        const source = await ctx.backend.getRawFile(ctx.owner, ctx.repo, resolved.branch, rel);
+        if (localEntry) {
+          let localIssues;
+          try {
+            localIssues = localAnchorPreflightIssues(localEntry, rel, source);
+          } catch (err) {
+            const sidecar = localAnnotationSidecarConflict(err);
+            if (sidecar) {
+              throw new PdfExportError(422, "PDF export blocked by local annotations.", sidecar.details);
             }
-            if (localIssues.length > 0) {
-              throw new PdfExportError(
-                422,
-                "PDF export blocked by local annotations.",
-                localIssues.map((issue) =>
-                  `${issue.anchor} (${issue.status}${issue.line ? `, line ${issue.line}` : ""})`,
-                ).join("\n"),
-              );
-            }
+            throw err;
+          }
+          if (localIssues.length > 0) {
+            throw new PdfExportError(
+              422,
+              "PDF export blocked by local annotations.",
+              localIssues.map((issue) =>
+                `${issue.anchor} (${issue.status}${issue.line ? `, line ${issue.line}` : ""})`,
+              ).join("\n"),
+            );
           }
         }
         const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
+        const defaults = {
+          bibliography: repoConfig.pdfBibliography,
+          csl: repoConfig.pdfCsl,
+          template: repoConfig.pdfTemplate,
+        };
+        const flags = {
+          bibliography: queryOverride(c, "bibliography"),
+          csl: queryOverride(c, "csl"),
+          template: queryOverride(c, "template"),
+        };
+        // Local Workbench: render straight from the working tree so a repo with
+        // more than PDF_EXPORT_MAX_FILES files can still export a single doc.
+        if (localEntry) {
+          return exportCoflatMarkdownPdfInPlace({ rootDir: localEntry.path, source, sourcePath: rel, defaults, flags });
+        }
+        const files = await repoFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch);
         const projectFiles = await collectPdfProjectFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
-        return exportCoflatMarkdownPdf({
-          source,
-          sourcePath: rel,
-          files: projectFiles,
-          defaults: {
-            bibliography: repoConfig.pdfBibliography,
-            csl: repoConfig.pdfCsl,
-            template: repoConfig.pdfTemplate,
-          },
-          flags: {
-            bibliography: queryOverride(c, "bibliography"),
-            csl: queryOverride(c, "csl"),
-            template: queryOverride(c, "template"),
-          },
-        });
+        return exportCoflatMarkdownPdf({ source, sourcePath: rel, files: projectFiles, defaults, flags });
       });
       return new Response(result.pdf, {
         headers: {

@@ -8,7 +8,7 @@ import { workspaceSlug } from "../../shared/conventions.js";
 import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { createApp } from "../app.js";
 import { buildLocalConfig } from "../db.js";
-import { _resetPdfExportLimiterForTest } from "../pdf-export.js";
+import { _resetPdfExportLimiterForTest, _setPdfExportCommandRunnerForTest } from "../pdf-export.js";
 import { freshTestDb } from "../routes/test-fixtures.js";
 import { type SSEEvent, SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
@@ -485,6 +485,41 @@ describe("local Workbench annotations", () => {
     const body = await res.text();
     expect(body).toContain("PDF export blocked by local annotations.");
     expect(body).toContain("local annotations sidecar is not valid JSON");
+  });
+
+  it("exports a local PDF in place without copying the whole repo", async () => {
+    const { dir, app } = workspace();
+    // A big working tree that would trip the hosted PDF_EXPORT_MAX_FILES cap.
+    for (let i = 0; i < 600; i += 1) writeFileSync(join(dir, `note-${i}.md`), `# Note ${i}\n`);
+    writeFileSync(join(dir, "refs.bib"), "@book{x, title={X}}\n");
+    writeFileSync(join(dir, "paper.md"), "---\nbibliography: refs.bib\n---\n# Paper\n");
+
+    const commands: Array<{ command: string; args: readonly string[]; cwd: string; scratchDir?: string }> = [];
+    _setPdfExportCommandRunnerForTest(async (command, args, options) => {
+      commands.push({ command, args, cwd: options.cwd, scratchDir: options.scratchDir });
+      if (command !== "pandoc") return;
+      const output = args.find((arg) => arg.startsWith("--output="));
+      if (output) writeFileSync(output.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+
+    try {
+      const res = await app.request("/me/paper/export/pdf/branch/main/paper.md");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/pdf");
+
+      // The export invocation (not the `pandoc --version` dependency probe).
+      const pandoc = commands.find((c) => c.command === "pandoc" && c.args.some((a) => a.startsWith("--output=")));
+      // In-place: pandoc runs in the real working tree, not a temp copy dir.
+      expect(pandoc?.cwd).toBe(dir);
+      const resourcePath = pandoc?.args.find((arg) => arg.startsWith("--resource-path="));
+      expect(resourcePath).toContain(dir);
+      // LaTeX scratch is anchored outside the working tree, so temp/aux files
+      // never land in the user's folder.
+      expect(pandoc?.scratchDir).toBeTruthy();
+      expect(pandoc?.scratchDir?.startsWith(dir)).toBe(false);
+    } finally {
+      _setPdfExportCommandRunnerForTest(null);
+    }
   });
 
   it("reports open annotations whose anchor is missing from the source", async () => {
