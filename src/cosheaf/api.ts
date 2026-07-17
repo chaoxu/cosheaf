@@ -99,6 +99,22 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+function post<T>(url: string, body: unknown): Promise<T> {
+  return jsonFetch<T>(url, { method: "POST", body: JSON.stringify(body) });
+}
+
+function patch<T>(url: string, body: unknown): Promise<T> {
+  return jsonFetch<T>(url, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+function put<T>(url: string, body: unknown): Promise<T> {
+  return jsonFetch<T>(url, { method: "PUT", body: JSON.stringify(body) });
+}
+
+function del<T>(url: string): Promise<T> {
+  return jsonFetch<T>(url, { method: "DELETE" });
+}
+
 async function apiErrorFromResponse(res: Response, fallback: string): Promise<ApiError> {
   const body = (await res.json().catch(() => ({}))) as ErrorBody;
   if (
@@ -131,10 +147,10 @@ export const api = {
     expectedSourceSha?: string,
     resetEditBranch?: boolean,
   ) =>
-    jsonFetch<PutFileResult>(`${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`, {
-      method: "PUT",
-      body: JSON.stringify(putFileBody(content, previousPath, expectedSha, expectedSourceSha, resetEditBranch)),
-    }),
+    put<PutFileResult>(
+      `${workspaceApiPath(owner, repo)}/file${queryString({ path, branch })}`,
+      putFileBody(content, previousPath, expectedSha, expectedSourceSha, resetEditBranch),
+    ),
 
   uploadAsset: async (owner: string, repo: string, branch: string, file: File): Promise<{ path: string }> => {
     const form = new FormData();
@@ -176,14 +192,11 @@ export const api = {
     hunk: SuggestingHunk,
     expected: { headSha: string; currentSha: string | null },
   ) =>
-    jsonFetch<SuggestingRevertResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/revert`, {
-      method: "POST",
-      body: JSON.stringify({
-        path,
-        hunk,
-        expected_head_sha: expected.headSha,
-        expected_sha: expected.currentSha,
-      }),
+    post<SuggestingRevertResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/revert`, {
+      path,
+      hunk,
+      expected_head_sha: expected.headSha,
+      expected_sha: expected.currentSha,
     }),
 
   checkpointSuggestingFile: (
@@ -193,14 +206,11 @@ export const api = {
     expected: { headSha: string; currentSha: string | null },
     message?: string,
   ) =>
-    jsonFetch<SuggestingCheckpointResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/checkpoint`, {
-      method: "POST",
-      body: JSON.stringify({
-        path,
-        ...(message ? { message } : {}),
-        expected_head_sha: expected.headSha,
-        expected_sha: expected.currentSha,
-      }),
+    post<SuggestingCheckpointResult>(`${workspaceApiPath(owner, repo)}/local-suggesting/checkpoint`, {
+      path,
+      ...(message ? { message } : {}),
+      expected_head_sha: expected.headSha,
+      expected_sha: expected.currentSha,
     }),
 
   listLocalAnnotations: (
@@ -226,10 +236,7 @@ export const api = {
     repo: string,
     payload: { path: string; kind: LocalAnnotationKind; body: string },
   ) =>
-    jsonFetch<{ annotation: LocalAnnotation }>(`${workspaceApiPath(owner, repo)}/local-annotations`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    post<{ annotation: LocalAnnotation }>(`${workspaceApiPath(owner, repo)}/local-annotations`, payload),
 
   updateLocalAnnotation: (
     owner: string,
@@ -237,10 +244,7 @@ export const api = {
     id: string,
     payload: { status?: LocalAnnotationStatus; path?: string },
   ) =>
-    jsonFetch<{ annotation: LocalAnnotation }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
+    patch<{ annotation: LocalAnnotation }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`, payload),
 
   addLocalAnnotationMessage: (
     owner: string,
@@ -248,18 +252,13 @@ export const api = {
     id: string,
     payload: { body: string },
   ) =>
-    jsonFetch<{ annotation: LocalAnnotation }>(
+    post<{ annotation: LocalAnnotation }>(
       `${workspaceApiPath(owner, repo)}/local-annotations/${id}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
+      payload,
     ),
 
   deleteLocalAnnotation: (owner: string, repo: string, id: string) =>
-    jsonFetch<{ ok: true }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`, {
-      method: "DELETE",
-    }),
+    del<{ ok: true }>(`${workspaceApiPath(owner, repo)}/local-annotations/${id}`),
 
   listLocalAgentSessions: (
     owner: string,
@@ -275,10 +274,7 @@ export const api = {
     repo: string,
     payload: { title?: string; touched_files?: string[]; linked_annotations?: string[]; summary?: string; message?: string },
   ) =>
-    jsonFetch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    post<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions`, payload),
 
   updateLocalAgentSession: (
     owner: string,
@@ -286,10 +282,7 @@ export const api = {
     id: string,
     payload: { status?: LocalAgentSessionStatus; title?: string; touched_files?: string[]; linked_annotations?: string[]; summary?: string; message?: string },
   ) =>
-    jsonFetch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
+    patch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions/${id}`, payload),
 
   completeLocalAgentSession: (
     owner: string,
@@ -297,16 +290,10 @@ export const api = {
     id: string,
     payload: { summary?: string; message?: string } = {},
   ) =>
-    jsonFetch<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions/${id}/complete`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    post<{ session: LocalAgentSession }>(`${workspaceApiPath(owner, repo)}/agent-sessions/${id}/complete`, payload),
 
   openPull: (owner: string, repo: string, payload: { head: string; base?: string; title?: string; body?: string }) =>
-    jsonFetch<OpenPullResult>(`${workspaceApiPath(owner, repo)}/pulls`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+    post<OpenPullResult>(`${workspaceApiPath(owner, repo)}/pulls`, payload),
 
   mergePull: (
     owner: string,
@@ -314,8 +301,8 @@ export const api = {
     prNumber: number,
     opts: { Do?: "squash" | "merge" | "rebase"; force?: boolean } = {},
   ) =>
-    jsonFetch<{ ok: true }>(`${workspaceApiPath(owner, repo)}/pulls/${prNumber}/merge`, {
-      method: "POST",
-      body: JSON.stringify({ Do: opts.Do ?? "squash", force: opts.force ?? false }),
+    post<{ ok: true }>(`${workspaceApiPath(owner, repo)}/pulls/${prNumber}/merge`, {
+      Do: opts.Do ?? "squash",
+      force: opts.force ?? false,
     }),
 };

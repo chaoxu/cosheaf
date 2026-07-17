@@ -1,15 +1,16 @@
-import type { CitationFormatter } from "@chaoxu/coflat/citeproc";
-import ieeeCslXml from "@chaoxu/coflat/latex/csl/ieee.csl?raw";
 import {
   analyzeReferences,
   extractReferences,
   parseFrontmatter,
-  resolveMarkdownReferencePathFromDocument,
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
-import { pdfDisplaySuffix, previewAssetPath, type AssetPreviewPaths } from "../../shared/asset-previews";
+import { type AssetPreviewPaths } from "../../shared/asset-previews";
 import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
-import { rawRepoBranchFileHref, repoBranchFileHref } from "../../shared/url";
+import { repoBranchFileHref } from "../../shared/url";
+import { type CoflatCitations, loadCitations } from "./coflat-citations";
+import { coflatLinkResolver, resolveRawRepoAssetPath } from "./coflat-repo-links";
+import { readonlyFileSystemBase } from "./coflat-readonly-filesystem";
+import { localAnnotationIdFromRef, localAnnotationReference } from "./local-annotation-refs";
 
 export interface CoflatDocumentPayload {
   source: string;
@@ -91,24 +92,6 @@ export interface CoflatDocumentRefs {
   citations: CoflatCitations | null;
 }
 
-// Paper-citation state, built from the document's `bibliography` .bib via
-// Coflat's own citeproc (single source of truth for BibTeX parsing + CSL
-// formatting). `formatter` produces the inline label (IEEE numeric, e.g. [1])
-// and the bibliography entries; `keys` is every entry id in the .bib (used to
-// tell a citation [@cormen2009] from a workspace crossref [@eq:gaussian]).
-// Both are handed to Coflat's reader on the DocumentContext; the reader emits
-// the References list itself, so the cited-key order lives only locally as the
-// formatter's registration order.
-export interface CoflatCitations {
-  formatter: CitationFormatter;
-  keys: ReadonlySet<string>;
-}
-
-interface CitationCluster {
-  readonly ids: readonly string[];
-  readonly locators?: readonly (string | undefined)[];
-}
-
 export interface RenderedCrossref {
   label: string;
   href?: string;
@@ -121,116 +104,6 @@ interface WorkspaceRef {
   label: string;
   fragment?: string;
   line?: number | null;
-}
-
-const BUILTIN_CSL_XML = new Map<string, string>([
-  ["ieee", ieeeCslXml],
-]);
-const LOCAL_ANNOTATION_ID_RE = /^la_[a-z0-9]{12}$/;
-const LOCAL_ANNOTATION_REF_PREFIX = "local:";
-export const LOCAL_ANNOTATION_CLICK_EVENT = "cosheaf:local-annotation-click";
-
-export function localAnnotationIdFromRef(key: string): string | null {
-  if (!key.startsWith(LOCAL_ANNOTATION_REF_PREFIX)) return null;
-  const id = key.slice(LOCAL_ANNOTATION_REF_PREFIX.length);
-  return LOCAL_ANNOTATION_ID_RE.test(id) ? id : null;
-}
-
-function localAnnotationReference(key: string): { content: string; className: string; onClick: (event: MouseEvent) => void } | null {
-  const id = localAnnotationIdFromRef(key);
-  if (!id) return null;
-  return {
-    content: "local note",
-    className: "cf-local-annotation",
-    onClick(event) {
-      event.preventDefault();
-      if (typeof window === "undefined") return;
-      window.dispatchEvent(new CustomEvent(LOCAL_ANNOTATION_CLICK_EVENT, { detail: { id } }));
-    },
-  };
-}
-
-export function resolveRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
-  const clean = href.trim();
-  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
-    return null;
-  }
-  const [withoutHash, hash = ""] = clean.split("#", 2);
-  const normalized = normalizeRepoPath(payload, withoutHash);
-  if (!normalized || normalized.split("/").includes("..")) return null;
-  const sourceView = isLineFragment(hash) ? "?view=source" : "";
-  return `${repoBranchFileHref(payload.owner, payload.repo, payload.branch, normalized)}${sourceView}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
-}
-
-export function resolveRawRepoLink(payload: CoflatDocumentPayload, href: string): string | null {
-  const clean = href.trim();
-  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
-    return null;
-  }
-  const [withoutHash, hash = ""] = clean.split("#", 2);
-  const normalized = normalizeRepoPath(payload, withoutHash);
-  if (!normalized || normalized.split("/").includes("..")) return null;
-  return `${rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), normalized)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
-}
-
-export function resolveRawRepoDisplayAssetLink(payload: CoflatDocumentPayload, href: string): string | null {
-  const clean = href.trim();
-  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
-    return null;
-  }
-  const [withoutHash, hash = ""] = clean.split("#", 2);
-  const normalized = normalizeRepoPath(payload, withoutHash);
-  if (!normalized || normalized.split("/").includes("..")) return null;
-  const assetPath = previewAssetPath(normalized, payload.assetPreviewPaths);
-  return `${rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), assetPath)}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
-}
-
-function resolveRawRepoAssetPath(payload: CoflatDocumentPayload, path: string, purpose: "source" | "display"): string | null {
-  const clean = path.trim();
-  if (!clean || clean.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("/")) {
-    return null;
-  }
-  const [withoutHash, hash = ""] = clean.split("#", 2);
-  const decodedPath = decodeMarkdownPathHref(withoutHash);
-  if (!decodedPath || decodedPath.split("/").includes("..")) return null;
-  const assetPath = purpose === "display" ? previewAssetPath(decodedPath, payload.assetPreviewPaths) : decodedPath;
-  const url = rawRepoBranchFileHref(payload.owner, payload.repo, rawResourceBranch(payload), assetPath);
-  // A PDF figure with no sibling raster is served as a rendered PNG for display.
-  const preview = purpose === "display" ? pdfDisplaySuffix(assetPath) : "";
-  return `${url}${preview}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
-}
-
-function rawResourceBranch(payload: CoflatDocumentPayload): string {
-  return payload.branchExists === false ? "main" : payload.branch;
-}
-
-function normalizeRepoPath(payload: CoflatDocumentPayload, href: string): string {
-  return resolveMarkdownReferencePathFromDocument(payload.path, decodeMarkdownPathHref(href));
-}
-
-function decodeMarkdownPathHref(href: string): string {
-  try {
-    return decodeURI(href);
-  } catch (_error) {
-    return href;
-  }
-}
-
-function isLineFragment(hash: string): boolean {
-  return /^L\d+(?:-(?:L)?\d+)?$/.test(hash);
-}
-
-// The coflat link resolver shared by the full reader context and the link-only
-// compose island (#20): turns a relative repo link into a same-origin href, and
-// returns null for a non-resolvable link — both surfaces must agree on that null
-// contract, so it lives in one place.
-export function coflatLinkResolver(payload: CoflatDocumentPayload): DocumentContext["linkResolver"] {
-  return {
-    resolve: (href) => {
-      const resolved = resolveRepoLink(payload, href);
-      return resolved ? { href: resolved } : null;
-    },
-  };
 }
 
 // Repo-wide macros (payload.mathMacros) as the base, the document's own
@@ -282,35 +155,15 @@ export function coflatDocumentContext(payload: CoflatDocumentPayload, refs: Cofl
   const mathMacros = resolveMathMacros(payload);
   return {
     linkResolver: coflatLinkResolver(payload),
-    fileSystem: {
-      listTree: async () => ({ name: "", path: "", isDirectory: true, children: [] }),
+    fileSystem: readonlyFileSystemBase({
       readFile: async () => {
         throw new Error("Reader context does not provide text file reads.");
-      },
-      writeFile: async () => {
-        throw new Error("Reader context is read-only.");
-      },
-      createFile: async () => {
-        throw new Error("Reader context is read-only.");
-      },
-      exists: async () => false,
-      renameFile: async () => {
-        throw new Error("Reader context is read-only.");
-      },
-      createDirectory: async () => {
-        throw new Error("Reader context is read-only.");
-      },
-      deleteFile: async () => {
-        throw new Error("Reader context is read-only.");
-      },
-      writeFileBinary: async () => {
-        throw new Error("Reader context is read-only.");
       },
       readFileBinary: async () => {
         throw new Error("Reader context does not provide binary file reads.");
       },
       resolveAssetUrl: (path, options) => resolveRawRepoAssetPath(payload, path, options?.purpose ?? "display") ?? path,
-    },
+    }),
     refResolver: {
       resolve: (key, _mode, env) => {
         const localAnnotation = localAnnotationReference(key);
@@ -426,106 +279,3 @@ function escapeHtml(value: string): string {
   });
 }
 
-async function loadCitations(
-  payload: CoflatDocumentPayload,
-  frontmatter: Record<string, unknown>,
-  isLocalTarget: (id: string) => boolean,
-): Promise<CoflatCitations | null> {
-  const bibliography = typeof frontmatter.bibliography === "string"
-    ? frontmatter.bibliography
-    : payload.bibliography ?? null;
-  if (!bibliography) return null;
-  const bibText = await fetchBibliography(payload, bibliography);
-  if (bibText === null) return null;
-  const csl = typeof frontmatter.csl === "string" ? frontmatter.csl : payload.csl ?? null;
-  const cslXml = csl ? BUILTIN_CSL_XML.get(csl) ?? await fetchProjectText(payload, csl) : null;
-  try {
-    // Coflat owns BibTeX parsing, citation/crossref precedence, cluster
-    // registration order, and CSL formatting. Cosheaf only fetches repo files.
-    const { CslProcessor, createCslCitationFormatter, parseBibTeX } = await import("@chaoxu/coflat/citeproc");
-    const entries = parseBibTeX(bibText).filter((entry) => !isLocalTarget(entry.id));
-    if (entries.length === 0) return null;
-    const processor = await CslProcessor.create(entries, cslXml ?? undefined);
-    const keys = new Set(entries.map((entry) => entry.id));
-    const formatter = createCslCitationFormatter(processor);
-    const clusters = citationClusters(payload.source, keys, isLocalTarget);
-    formatter.registerCitations(clusters);
-    return {
-      formatter: fullDocumentCitationFormatter(formatter, clusters),
-      keys,
-    };
-  } catch (_error) {
-    // A citeproc/bibliography failure must never break the rest of the render.
-    return null;
-  }
-}
-
-function fullDocumentCitationFormatter(formatter: CitationFormatter, fullClusters: readonly CitationCluster[]): CitationFormatter {
-  const fullRegistrationKey = citationRegistrationKey(fullClusters);
-  return {
-    cite: (ids, locators) => formatter.cite(ids, locators),
-    citeNarrative: (id) => formatter.citeNarrative(id),
-    bibliographyEntries: (citedIds) => formatter.bibliographyEntries(citedIds),
-    registerCitations: (clusters) => {
-      const key = citationRegistrationKey(clusters);
-      if (key !== fullRegistrationKey || formatter.citationRegistrationKey === fullRegistrationKey) return;
-      formatter.registerCitations(clusters);
-    },
-    get citationRegistrationKey() {
-      return fullRegistrationKey;
-    },
-    get revision() {
-      return formatter.revision;
-    },
-  };
-}
-
-function citationRegistrationKey(clusters: readonly CitationCluster[]): string {
-  return clusters
-    .map((cluster) => cluster.ids.map((id, index) =>
-      `${id}\0${cluster.locators?.[index] ?? ""}`).join("\u0001"))
-    .join("\u0002");
-}
-
-function citationClusters(
-  source: string,
-  keys: ReadonlySet<string>,
-  isLocalTarget: (id: string) => boolean,
-): CitationCluster[] {
-  const clusters: Array<{ ids: string[]; locators: Array<string | undefined> }> = [];
-  for (const ref of analyzeReferences(source).references) {
-    const ids: string[] = [];
-    const locators: Array<string | undefined> = [];
-    ref.ids.forEach((id, index) => {
-      if (!keys.has(id) || isLocalTarget(id)) return;
-      ids.push(id);
-      locators.push(ref.locators[index]);
-    });
-    if (ids.length > 0) clusters.push({ ids, locators });
-  }
-  return clusters;
-}
-
-// Fetch the raw .bib text, trying the document's branch then falling back to
-// main (the bib may only exist on main for a fresh edit branch).
-async function fetchBibliography(payload: CoflatDocumentPayload, bibliography: string): Promise<string | null> {
-  return fetchProjectText(payload, bibliography);
-}
-
-// Fetch a repo-relative text resource, trying the document's branch then
-// falling back to main (the file may only exist on main for a fresh edit branch).
-async function fetchProjectText(payload: CoflatDocumentPayload, relPath: string): Promise<string | null> {
-  const rawUrls = [
-    payload.branchExists === false ? null : resolveRawRepoLink(payload, relPath),
-    payload.branch === "main" ? null : resolveRawRepoLink({ ...payload, branch: "main" }, relPath),
-  ].filter((value): value is string => Boolean(value));
-  try {
-    for (const url of rawUrls) {
-      const response = await fetch(url, { credentials: "same-origin" });
-      if (response.ok) return await response.text();
-    }
-  } catch (_error) {
-    return null;
-  }
-  return null;
-}

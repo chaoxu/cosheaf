@@ -11,14 +11,7 @@ import type {
   RequestHandler,
   EditorScrollToSourcePositionOptions,
 } from "@chaoxu/coflat";
-import {
-  createReaderCitationClusterPreviewBody,
-  type DocumentContext,
-  type FileEntry,
-  type FileSystem,
-  hydrateReaderHoverPreviews,
-  hydrateReferences,
-} from "@chaoxu/coflat/reader";
+import type { FileSystem } from "@chaoxu/coflat/reader";
 import type { ReactNode, Ref } from "react";
 import { createRef, lazy, StrictMode, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -38,10 +31,8 @@ import { ApiError, api, type LocalAnnotation } from "./api";
 import { createBibliographyPicker } from "./bibliography-picker";
 import {
   LOCAL_ANNOTATION_CLICK_EVENT,
-  coflatDocumentContextSignature,
-  loadCoflatDocumentContext,
   localAnnotationIdFromRef,
-} from "./coflat-document-context";
+} from "./local-annotation-refs";
 import { renderDocumentRail } from "./document-rail-dom";
 import type { DocumentThemeId } from "./document-theme";
 import { readAutosave, readDocumentTheme, readEditorMode, writeEditorMode } from "./document-theme";
@@ -51,8 +42,11 @@ import {
   liveEditorSource,
   routeEditorChangeHandlers,
 } from "./editor-change-routing";
-import { clearDraft, type EditorDraft, readDraft, restoredDraftFreshness, writeDraft } from "./editor-draft";
+import { clearDraft, writeDraft } from "./editor-draft";
 import { editorExternalDiffHasVisibleChanges, editorExternalDiffRows } from "./editor-external-diff";
+import { readonlyFileSystemBase } from "./coflat-readonly-filesystem";
+import { useCoflatDocumentContext } from "./web-editor-document-context";
+import { useLocalDrafts } from "./web-editor-drafts";
 import { fetchRawRepoFile, nowTime, rawRepoFileHref, relativeAssetPath, saveState, shortId, sizeAssetRejection, toast } from "./web-editor-helpers";
 import { LocalAnnotationsDrawer, useLocalAnnotationsController } from "./web-editor-local-annotations";
 import { referenceSuggestExtension } from "./reference-suggest-source";
@@ -63,6 +57,15 @@ import "./globals.css";
 
 function acceptedSuggestingHunkKey(baseText: string, currentText: string, hunk: SuggestingHunk): string {
   return `${hunk.id}\0${suggestingHunkFingerprint(baseText, currentText, hunk)}`;
+}
+
+// A ref kept in sync with a render value: `.current` is updated during render on
+// every pass, so handlers read the latest value without re-subscribing. Only for
+// values written solely from render — not refs that are also mutated mid-handler.
+function useSyncedRef<T>(value: T) {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
 }
 
 interface EditorConfig {
@@ -260,15 +263,10 @@ function WebEditor({
   const [pathDirty, setPathDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [autosave] = useState(() => readAutosave(config.username));
-  // A local draft found on mount that differs from the loaded file — offered for
-  // restore (don't silently override the committed file).
-  const [pendingDraft, setPendingDraft] = useState<EditorDraft | null>(null);
   const lastReasonRef = useRef<"manual" | "command" | "autosave">("manual");
   const [mode, setMode] = useState<"rich" | "source">(() => readEditorMode(config.username));
   const [readOnly, setReadOnly] = useState(Boolean(initialReadOnly));
   const [documentTheme] = useState<DocumentThemeId>(() => readDocumentTheme(config.username));
-  const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null);
-  const [editorContextReady, setEditorContextReady] = useState(false);
   const [validationSummary, setValidationSummary] = useState<ValidationSummary | null>(null);
   const [suggestingBase, setSuggestingBase] = useState<SuggestingBase | null>(null);
   const [acceptedSuggestingHunks, setAcceptedSuggestingHunks] = useState<ReadonlySet<string>>(() => new Set());
@@ -285,30 +283,22 @@ function WebEditor({
   const outlineUnsubscribeRef = useRef<(() => void) | null>(null);
   const cursorUnsubscribeRef = useRef<(() => void) | null>(null);
   const lastCursorFromRef = useRef<number | null>(null);
-  const branchRef = useRef(branch);
-  const branchExistsRef = useRef(branchExists);
-  const savedReadBranchRef = useRef(savedReadBranch);
+  const branchRef = useSyncedRef(branch);
+  const branchExistsRef = useSyncedRef(branchExists);
+  const savedReadBranchRef = useSyncedRef(savedReadBranch);
   const currentPathRef = useRef(currentPath);
   const savedPathRef = useRef(savedPath);
   const savedShaRef = useRef<string | null | undefined>(config.baseSha);
   const sourceShaRef = useRef<string | undefined>(config.sourceSha ?? undefined);
-  const pathDirtyRef = useRef(pathDirty);
+  const pathDirtyRef = useSyncedRef(pathDirty);
   const resetEditBranchRef = useRef(config.resetEditBranch);
   const ignoredChangePathsRef = useRef(new Set<string>());
   const ignoredChangeTimersRef = useRef<number[]>([]);
   const draftScope = useMemo(() => config.originId ? { originId: config.originId } : undefined, [config.originId]);
-  const contextLoadedRef = useRef(false);
-  const contextSignatureRef = useRef<string | null>(null);
-  const documentContextRef = useRef<DocumentContext | null>(null);
-  const documentContextLoadRef = useRef<{ signature: string; promise: Promise<DocumentContext> } | null>(null);
   const localAnnotationsEnabled = config.writeMode === "direct";
   const suggestingEnabled = config.writeMode === "direct";
-  branchRef.current = branch;
-  branchExistsRef.current = branchExists;
-  savedReadBranchRef.current = savedReadBranch;
   currentPathRef.current = currentPath;
   savedPathRef.current = savedPath;
-  pathDirtyRef.current = pathDirty;
 
   useEffect(() => {
     callbacks.onDirtyChange?.(uncommitted || pathDirty);
@@ -367,25 +357,35 @@ function WebEditor({
     setEditorContent(next);
   }, [setEditorContent]);
 
-  const localDraftForSource = useCallback((source: string): EditorDraft => {
-    const baseSha = savedShaRef.current;
-    const sourceSha = sourceShaRef.current;
-    return {
-      source,
-      path: currentPathRef.current,
-      ...(baseSha === undefined ? {} : { baseSha, baseShaKnown: true as const }),
-      ...(sourceSha === undefined ? {} : { sourceSha, sourceShaKnown: true as const }),
-      savedAt: Date.now(),
-    };
-  }, []);
+  const getLiveDraftSource = useCallback(
+    () => liveEditorSource(editorRef.current, sourceCacheRef.current.source()),
+    [],
+  );
 
-  const writeLocalDraft = useCallback((source: string): void => {
-    writeDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, localDraftForSource(source), draftScope);
-  }, [config.owner, config.repo, draftScope, localDraftForSource]);
-
-  const writeLiveLocalDraft = useCallback(() => {
-    writeLocalDraft(liveEditorSource(editorRef.current, sourceCacheRef.current.source()));
-  }, [writeLocalDraft]);
+  const drafts = useLocalDrafts({
+    owner: config.owner,
+    repo: config.repo,
+    branch: config.branch,
+    path: config.path,
+    draftScope,
+    initialContent,
+    getLiveSource: getLiveDraftSource,
+    uncommitted,
+    pathDirty,
+    savedShaRef,
+    sourceShaRef,
+    currentPathRef,
+    savedPathRef,
+    branchRef,
+    replaceEditorDocument,
+    setCurrentPath,
+    setPathDirty,
+    setUncommitted,
+    setSaveError,
+  });
+  const { localDraftForSource, writeLocalDraft, saveDraft, restoreDraft, discardDraft } = drafts;
+  const pendingDraft = drafts.pendingDraft;
+  const setPendingDraft = drafts.setPendingDraft;
 
   const resolveIdenticalWorkspaceContent = useCallback((path: string, latest: { content: string; sha: string | null }): boolean => {
     const source = liveEditorSource(editorRef.current, sourceCacheRef.current.source());
@@ -434,34 +434,6 @@ function WebEditor({
     },
     [],
   );
-
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => {
-      if (!uncommitted && !pathDirty) return;
-      writeLiveLocalDraft();
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [pathDirty, uncommitted, writeLiveLocalDraft]);
-
-  useEffect(() => {
-    const flush = () => {
-      if (uncommitted || pathDirty) writeLiveLocalDraft();
-    };
-    window.addEventListener("pagehide", flush);
-    return () => window.removeEventListener("pagehide", flush);
-  }, [pathDirty, uncommitted, writeLiveLocalDraft]);
-
-  // Offer a local draft from a previous session if it differs from the loaded
-  // file (#162). Runs once on mount; the banner lets the user restore or discard
-  // so the committed file is never silently overwritten.
-  useEffect(() => {
-    const draft = readDraft(config.owner, config.repo, config.branch, config.path, draftScope);
-    if (draft && (draft.source !== initialContent || (draft.path && draft.path !== config.path))) setPendingDraft(draft);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(
     () => () => {
@@ -589,50 +561,18 @@ function WebEditor({
     };
   }, [config.branch, config.owner, config.repo, externalFileChange, resolveIdenticalWorkspaceContent]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const payload = {
-      source: contextSource,
-      owner: config.owner,
-      repo: config.repo,
-      branch,
-      branchExists,
-      path: currentPath.trim() || config.path,
-      mathMacros: config.mathMacros,
-      assetPreviewPaths: config.assetPreviewPaths,
-      ...(config.bibliography ? { bibliography: config.bibliography } : {}),
-      ...(config.csl ? { csl: config.csl } : {}),
-    };
-    const signature = coflatDocumentContextSignature(payload);
-    if (contextSignatureRef.current === signature && documentContextRef.current) {
-      setEditorContextReady(true);
-      return;
-    }
-    contextSignatureRef.current = signature;
-    if (!contextLoadedRef.current) setEditorContextReady(false);
-    let load = documentContextLoadRef.current?.signature === signature
-      ? documentContextLoadRef.current.promise
-      : null;
-    if (!load) {
-      load = loadCoflatDocumentContext(payload);
-      documentContextLoadRef.current = { signature, promise: load };
-    }
-    void load.then((ctx) => {
-      if (cancelled || contextSignatureRef.current !== signature) return;
-      setDocumentContext(ctx);
-      documentContextRef.current = ctx;
-      contextLoadedRef.current = true;
-      setEditorContextReady(true);
-      if (documentContextLoadRef.current?.signature === signature) documentContextLoadRef.current = null;
-    }).catch(() => {
-      if (cancelled || contextSignatureRef.current !== signature) return;
-      if (!contextLoadedRef.current) setEditorContextReady(false);
-      if (documentContextLoadRef.current?.signature === signature) documentContextLoadRef.current = null;
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [branch, branchExists, config.assetPreviewPaths, config.bibliography, config.csl, config.mathMacros, config.owner, config.path, config.repo, contextSource, currentPath]);
+  const { documentContext, editorContextReady } = useCoflatDocumentContext({
+    source: contextSource,
+    owner: config.owner,
+    repo: config.repo,
+    branch,
+    branchExists,
+    path: currentPath.trim() || config.path,
+    mathMacros: config.mathMacros,
+    assetPreviewPaths: config.assetPreviewPaths,
+    ...(config.bibliography ? { bibliography: config.bibliography } : {}),
+    ...(config.csl ? { csl: config.csl } : {}),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -650,50 +590,6 @@ function WebEditor({
       cancelled = true;
     };
   }, [config.owner, config.repo]);
-
-  useEffect(() => {
-    if (!documentContext) return;
-    const root = document.getElementById("web-editor-root");
-    if (!root) return;
-    let queued = false;
-    const cleanupHoverPreviews = hydrateReaderHoverPreviews(root, {
-      source: contextSource,
-      context: documentContext,
-      previewForReference: (key) => createReaderCitationClusterPreviewBody(key, documentContext),
-    });
-    const reconcile = () => {
-      queued = false;
-      hydrateReferences(root, documentContext, {
-        documentPath: currentPath.trim() || config.path,
-        source: contextSource,
-        surface: "editor",
-      });
-    };
-    const schedule = () => {
-      if (queued) return;
-      queued = true;
-      window.requestAnimationFrame(reconcile);
-    };
-    const refSelector = "[data-ref-key], .cf-citation";
-    const nodeMayContainRefs = (node: Node): boolean => {
-      if (!(node instanceof HTMLElement)) return false;
-      return node.matches(refSelector) || Boolean(node.querySelector(refSelector));
-    };
-    schedule();
-    const observer = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) =>
-        (mutation.type === "attributes" && nodeMayContainRefs(mutation.target)) ||
-        [...mutation.addedNodes].some(nodeMayContainRefs)
-      )) {
-        schedule();
-      }
-    });
-    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-ref-key"] });
-    return () => {
-      observer.disconnect();
-      cleanupHoverPreviews();
-    };
-  }, [config.path, contextSource, currentPath, documentContext]);
 
   const branchForWrite = useCallback(() => {
     const current = branchRef.current;
@@ -715,14 +611,19 @@ function WebEditor({
       const buffer = await fetchRawRepoFile(config.owner, config.repo, readExistingBranch(), path).then((res) => res.arrayBuffer());
       return new Uint8Array(buffer);
     };
-    const unsupportedWrite = async (): Promise<void> => {
-      throw new Error("Repository writes must go through Cosheaf save or upload actions.");
-    };
     return {
-      listTree: async (): Promise<FileEntry> => ({ name: "", path: "", isDirectory: true, children: [] }),
-      readFile,
-      writeFile: unsupportedWrite,
-      createFile: unsupportedWrite,
+      ...readonlyFileSystemBase({
+        readFile,
+        readFileBinary,
+        resolveAssetUrl: (path: string, options?: { purpose?: "source" | "display" }): string => {
+          const display = options?.purpose !== "source";
+          const assetPath = display ? displayAssetPath(path) : path;
+          const url = rawRepoFileHref(config.owner, config.repo, readExistingBranch(), assetPath);
+          // A PDF figure with no sibling raster renders to a PNG for display.
+          return display ? `${url}${pdfDisplaySuffix(assetPath)}` : url;
+        },
+        writeRejection: "Repository writes must go through Cosheaf save or upload actions.",
+      }),
       exists: async (path: string): Promise<boolean> => {
         try {
           await fetchRawRepoFile(config.owner, config.repo, readExistingBranch(), path);
@@ -731,31 +632,8 @@ function WebEditor({
           return false;
         }
       },
-      renameFile: unsupportedWrite,
-      createDirectory: unsupportedWrite,
-      deleteFile: unsupportedWrite,
-      writeFileBinary: unsupportedWrite,
-      readFileBinary,
-      resolveAssetUrl: (path: string, options?: { purpose?: "source" | "display" }): string => {
-        const display = options?.purpose !== "source";
-        const assetPath = display ? displayAssetPath(path) : path;
-        const url = rawRepoFileHref(config.owner, config.repo, readExistingBranch(), assetPath);
-        // A PDF figure with no sibling raster renders to a PNG for display.
-        return display ? `${url}${pdfDisplaySuffix(assetPath)}` : url;
-      },
     };
   }, [config.assetPreviewPaths, config.branch, config.owner, config.repo]);
-
-  // Autosave (#162): persist the in-progress source to a local draft. No
-  // network, no commit, no branch creation — so it can never clobber the
-  // selection (#161) or produce commit noise. Synchronous, so it returns ok.
-  const saveDraft = useCallback(
-    (source: string): { ok: true } => {
-      writeLocalDraft(source);
-      return { ok: true };
-    },
-    [writeLocalDraft],
-  );
 
   // Explicit commit (Save / Cmd-S): the real Forgejo write. Creates the edit
   // branch lazily on this first commit, reconciles the server-injected
@@ -1252,32 +1130,6 @@ function WebEditor({
       window.removeEventListener("keydown", onLocalAnnotationMarkerKeydown, true);
     };
   }, [focusLocalAnnotation, localAnnotationsEnabled]);
-
-  const restoreDraft = useCallback(() => {
-    if (!pendingDraft) return;
-    const freshness = restoredDraftFreshness(
-      { baseSha: savedShaRef.current, sourceSha: sourceShaRef.current },
-      pendingDraft,
-    );
-    savedShaRef.current = freshness.baseSha;
-    sourceShaRef.current = freshness.sourceSha;
-    if (pendingDraft.path && pendingDraft.path !== currentPathRef.current) {
-      setCurrentPath(pendingDraft.path);
-      setPathDirty(pendingDraft.path !== savedPathRef.current);
-    }
-    replaceEditorDocument(pendingDraft.source);
-    setUncommitted(true);
-    setSaveError(null);
-    toast("Restored local draft");
-    setPendingDraft(null);
-  }, [pendingDraft, replaceEditorDocument]);
-
-  const discardDraft = useCallback(() => {
-    clearDraft(config.owner, config.repo, config.branch, config.path, draftScope);
-    clearDraft(config.owner, config.repo, branchRef.current, savedPathRef.current, draftScope);
-    if (pendingDraft?.path) clearDraft(config.owner, config.repo, branchRef.current, pendingDraft.path, draftScope);
-    setPendingDraft(null);
-  }, [config.owner, config.repo, config.branch, config.path, draftScope, pendingDraft?.path]);
 
   const openPullRequest = useCallback(
     async (directMerge: boolean) => {

@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   coflatDocumentContext,
-  LOCAL_ANNOTATION_CLICK_EVENT,
   type CoflatDocumentPayload,
   loadCoflatRefs,
-  localAnnotationIdFromRef,
   resolveMathMacros,
+} from "./coflat-document-context";
+import {
   resolveRawRepoDisplayAssetLink,
   resolveRawRepoLink,
   resolveRepoLink,
-} from "./coflat-document-context";
+} from "./coflat-repo-links";
+import {
+  LOCAL_ANNOTATION_CLICK_EVENT,
+  localAnnotationIdFromRef,
+} from "./local-annotation-refs";
 
 const payload: CoflatDocumentPayload = {
   source: "",
