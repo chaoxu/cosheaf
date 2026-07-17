@@ -10,7 +10,8 @@ import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { gitBlobHash } from "../git-object.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";
-import { _clearBranchRefCacheForTests, files, safeRel } from "./files.js";
+import { _clearBranchRefCacheForTests } from "./files-refs.js";
+import { files, safeRel } from "./files.js";
 import {
   fakeForgejo,
   fakeWorkspaceBackend,
