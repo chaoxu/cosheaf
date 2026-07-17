@@ -6,14 +6,13 @@ import type { LocaleId, MessageKey, T } from "../../shared/i18n/index.js";
 import type { NotificationRow } from "../../shared/issues.js";
 import { mintApiToken } from "../api-tokens.js";
 import { ForgejoError } from "../forgejo.js";
-import type { ForgejoUser } from "../forgejo-types.js";
 import { AUTH_COOKIE } from "../middleware.js";
 import { FixedWindowRateLimiter } from "../rate-limit.js";
 import { effectiveRegistrationOpen, isSiteAdmin, registrationInviteForToken, releaseRegistrationInvite, reserveRegistrationInvite } from "../site-admin.js";
 import type { AppEnv } from "../types.js";
 import { provisionWorkspace } from "../workspace-provisioning.js";
 import { exchangeForgejoCredsForPat } from "./auth.js";
-import { avatarForUser, avatarLinkForUser, isForgeAvatarPath } from "./avatar.js";
+import { isForgeAvatarPath } from "./avatar.js";
 import { mapThreads } from "./notifications.js";
 import { registerNotificationActivityRoutes } from "./web-activity.js";
 import { registerAccountRoutes } from "./web-account.js";
@@ -23,16 +22,16 @@ import { registerChatPageRoutes } from "./web-chat-pages.js";
 import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, nonNegativeInt, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField, webRoute } from "./web-context.js";
 import { registerDiagnosticsRoutes } from "./web-diagnostics.js";
 import { registerFileRoutes } from "./web-files.js";
+import { registerHelpRoutes } from "./web-help.js";
 import { emptyHtml, type Html, html } from "./web-html.js";
 import { registerIssueRoutes } from "./web-issues.js";
 import { registerPullRoutes } from "./web-pulls.js";
 import { registerSettingsRoutes } from "./web-settings.js";
 import { globalSidebar, pageShell } from "./web-shell.js";
+import { registerUserRoutes } from "./web-users.js";
 
 export const web = new Hono<AppEnv>();
 web.use("*", compress());
-
-type GlobalWebAuth = Parameters<Parameters<typeof globalRoute>[0]>[1];
 
 // Shared chrome for the sign-in / sign-up cards: the same `.auth-page` >
 // `.auth-card` shell with a username + password pair; only the action, button
@@ -300,85 +299,7 @@ web.get("/", globalRoute(async (c, auth) => {
   );
 }));
 
-web.get("/help", globalRoute(async (c, auth) => {
-  const t = c.get("t");
-  const avatarSrc = await currentUserAvatarSrc(c.get("fjUser"), auth.forgejoToken);
-  return htmlResponse(
-    pageShell({
-      title: t("nav.help"),
-      user: auth.user.username,
-      locale: c.get("locale"),
-      sidebar: globalSidebar("help", auth.user.username, avatarSrc, t, { siteAdmin: isSiteAdmin(c.get("db"), auth.user.username) }),
-      statusPath: [{ label: t("nav.help") }],
-      body: helpPage(),
-    }),
-  );
-}));
-
-function helpPage(): Html {
-  return html`<main class="page help-page" data-testid="help-page">
-    <div class="page-title compact">
-      <div>
-        <h1>How Cosheaf works</h1>
-        <p class="muted">The short version of the account, workspace, page, review, and agent model.</p>
-      </div>
-    </div>
-
-    <section class="help-hero">
-      <div>
-        <h2>Use it like a focused repository</h2>
-        <p>Cosheaf is a web interface for writing and reviewing Markdown knowledge bases. Files live in Forgejo repositories. Cosheaf adds page rendering, search, backlinks, review screens, and a simpler browser workflow.</p>
-      </div>
-      <ol class="help-steps">
-        <li><strong>Find a workspace.</strong> Open any repository you can access.</li>
-        <li><strong>Edit on a branch.</strong> Changes stay private to that branch until reviewed.</li>
-        <li><strong>Open a pull request.</strong> Ask collaborators to review the branch.</li>
-        <li><strong>Merge to main.</strong> The merged Markdown becomes the canonical knowledge base.</li>
-      </ol>
-    </section>
-
-    <section class="help-grid" aria-label="Cosheaf terms">
-      ${helpCard("Account", "Your Cosheaf account is your Forgejo account. Your username, profile, repository access, SSH keys, and notifications come from the forge.")}
-      ${helpCard("Workspace", "A workspace is one repository, such as owner/repo. If you can read the repository in Forgejo, it can appear in Cosheaf.")}
-      ${helpCard("Page", "A page is a Coflat Markdown file. Pages may have math, citations, cross-references, and stable frontmatter ids.")}
-      ${helpCard("Branch", "A branch is where unfinished edits live. Branches let people and agents work without changing the published main branch.")}
-      ${helpCard("Pull request", "A pull request is the review record for a branch. Use it to compare changes, comment, approve, request changes, and merge.")}
-      ${helpCard("Issue", "An issue tracks work or discussion. Issues can carry labels, milestones, comments, dependencies, and notifications.")}
-      ${helpCard("Review", "A review is a durable approval or change request on a pull request. Cosheaf uses Forgejo's review state as the source of truth.")}
-      ${helpCard("Agent", "An agent is just another collaborator with repository access. It writes branches, opens pull requests, comments, and reviews through the Cosheaf API.")}
-    </section>
-
-    <section class="help-section">
-      <h2>Common workflows</h2>
-      <div class="help-workflows">
-        ${workflow("Write a new page", ["Open a workspace.", "Use Files to create or edit a .md file.", "Save on a named branch.", "Open a pull request when the branch is ready."])}
-        ${workflow("Review a change", ["Open Pull requests.", "Inspect the changed files in source or rich view.", "Comment where the wording or math needs work.", "Approve or request changes."])}
-        ${workflow("Find related knowledge", ["Search from the workspace files view.", "Open a page and follow its references.", "Use backlinks to see what points at the current page.", "Use issues when the missing knowledge should become work."])}
-        ${workflow("Invite someone", ["Open repository Settings.", "Grant repository access to a username.", "Tell them to sign in and open the workspace.", "Use issues or pull requests to coordinate the first task."])}
-      </div>
-    </section>
-
-    <section class="help-section">
-      <h2>What is durable?</h2>
-      <p>Repository files, branches, pull requests, reviews, issues, comments, labels, milestones, memberships, and notifications live in Forgejo. Cosheaf's database is a rebuildable sidecar for search, backlinks, document metadata, webhook dedupe, and browser login tokens.</p>
-      <p>That means the safe mental model is simple: if a fact must be permanent, put it in a Markdown file, issue, pull request, review, or comment.</p>
-    </section>
-  </main>`;
-}
-
-function helpCard(title: string, body: string): Html {
-  return html`<article class="help-card">
-    <h2>${title}</h2>
-    <p>${body}</p>
-  </article>`;
-}
-
-function workflow(title: string, steps: readonly string[]): Html {
-  return html`<article class="help-workflow">
-    <h3>${title}</h3>
-    <ol>${steps.map((step) => html`<li>${step}</li>`)}</ol>
-  </article>`;
-}
+registerHelpRoutes(web);
 
 // Cross-repo unread inbox on the home page. Each row links to the cosheaf
 // issue/PR route and carries a subtle mark-read action. Rendered only when
@@ -503,132 +424,7 @@ web.get("/account/notifications", globalRoute(async (c, auth) => {
   );
 }));
 
-web.get("/users", globalRoute(async (c, auth) => usersIndexResponse(c, auth)));
-web.get("/users/", globalRoute(async (c, auth) => usersIndexResponse(c, auth)));
-
-async function usersIndexResponse(c: Context<AppEnv>, auth: GlobalWebAuth): Promise<Response> {
-  const fj = c.get("fjUser");
-  const [users, avatarSrc] = await Promise.all([
-    fj.listUsers(),
-    currentUserAvatarSrc(fj, auth.forgejoToken),
-  ]);
-  const sorted = [...users].sort((a, b) => a.login.localeCompare(b.login, undefined, { sensitivity: "base" }));
-  return htmlResponse(
-    pageShell({
-      title: "Users",
-      user: auth.user.username,
-      locale: c.get("locale"),
-      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, c.get("t")),
-      statusPath: [{ label: "users" }],
-      body: usersIndexPage(sorted),
-    }),
-  );
-}
-
-function usersIndexPage(users: readonly ForgejoUser[]): Html {
-  return html`<main class="page users-page" data-testid="users-page">
-    <div class="page-title">
-      <h1>Users</h1>
-    </div>
-    ${
-      users.length === 0
-        ? html`<div class="empty">No users found.</div>`
-        : html`<div class="list users-list">
-          ${users.map((user) => {
-            const displayName = user.full_name?.trim() || user.login;
-            return html`<a class="list-row user-row" href="${`/users/${encodeURIComponent(user.login)}`}">
-              ${avatarForUser(user)}
-              <span class="list-row-main">
-                <strong>${displayName}</strong>
-                <small>${user.login}</small>
-                ${user.description ? html`<span class="muted">${user.description}</span>` : emptyHtml}
-              </span>
-            </a>`;
-          })}
-        </div>`
-    }
-  </main>`;
-}
-
-web.get("/users/:username", globalRoute(async (c, auth) => {
-  const username = c.req.param("username");
-  if (!username || !FORGEJO_NAME_RE.test(username)) return notFoundPage(auth.user.username, "User not found");
-  const fj = c.get("fjUser");
-  const [profile, repos, avatarSrc] = await Promise.all([
-    fj.getUserByName(username),
-    fj.listUserRepos(username).catch(() => []),
-    currentUserAvatarSrc(fj, auth.forgejoToken),
-  ]);
-  if (!profile) return notFoundPage(auth.user.username, "User not found");
-  const website = profile.website ? normalizedExternalHref(profile.website) : null;
-  const displayName = profile.full_name?.trim() || profile.login;
-  const repoCount = repos.length;
-  return htmlResponse(
-    pageShell({
-      title: `${displayName} - Cosheaf`,
-      user: auth.user.username,
-      locale: c.get("locale"),
-      sidebar: globalSidebar("workspaces", auth.user.username, avatarSrc, c.get("t")),
-      statusPath: [{ label: "users" }, { label: profile.login }],
-      body: html`<main class="page user-page" data-testid="user-page">
-        <section class="settings-section user-profile-card">
-          <div class="user-profile-header">
-            <div class="user-profile-main">
-              <div class="user-profile-avatar">${avatarLinkForUser(profile, false)}</div>
-              <div class="user-profile-identity">
-                <h1>${displayName}</h1>
-                <p>${profile.login}</p>
-                <div class="profile-badges">
-                  <span>${repoCount} ${repoCount === 1 ? "repository" : "repositories"}</span>
-                  ${profile.active === false ? html`<span>Inactive</span>` : html`<span>Active</span>`}
-                  ${profile.is_admin ? html`<span>Site admin</span>` : emptyHtml}
-                </div>
-              </div>
-            </div>
-            ${profile.login === auth.user.username ? html`<a class="button user-profile-edit" href="/account/settings">Edit profile</a>` : emptyHtml}
-          </div>
-          ${profile.description ? html`<p>${profile.description}</p>` : emptyHtml}
-          ${
-            profile.location || website
-              ? html`<dl class="meta-list">
-                ${profile.location ? html`<div><dt>Location</dt><dd>${profile.location}</dd></div>` : emptyHtml}
-                ${website ? html`<div><dt>Website</dt><dd><a href="${website}" rel="nofollow noreferrer">${website}</a></dd></div>` : emptyHtml}
-              </dl>`
-              : emptyHtml
-          }
-        </section>
-        <section class="settings-section">
-          <div class="settings-section-header">
-            <h2>Repositories</h2>
-            <p>${repoCount} Forgejo ${repoCount === 1 ? "repository" : "repositories"} visible to you.</p>
-          </div>
-          ${
-            repos.length === 0
-              ? html`<div class="empty">No visible repositories.</div>`
-              : html`<div class="list">${repos.map((repo) => html`
-                <a class="list-row" href="${repoHref(repo.owner.login, repo.name)}">
-                  <span class="list-row-main">
-                    <strong>${repo.full_name || `${repo.owner.login}/${repo.name}`}</strong>
-                    ${repo.description ? html`<span class="muted">${repo.description}</span>` : emptyHtml}
-                    <small>${repo.private ? "Private" : "Visible"}${repo.default_branch ? ` · ${repo.default_branch}` : ""}</small>
-                  </span>
-                </a>
-              `)}</div>`
-          }
-        </section>
-      </main>`,
-    }),
-  );
-}));
-
-function normalizedExternalHref(raw: string): string | null {
-  try {
-    const url = new URL(raw);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
-  } catch (_err) {
-    return null;
-  }
-}
+registerUserRoutes(web);
 
 // Same-origin avatar route (#177): a transparent pass-through to Forgejo's
 // content-addressed avatar paths, so cosheaf can emit <img src="/forge-avatars/…">
