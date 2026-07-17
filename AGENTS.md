@@ -469,12 +469,14 @@ proxies `/api/*` to the server (see `vite.config.ts`).
 
 ## Data model
 
-- `doc_map(workspace_slug, cosheaf_id, forgejo_id, title, created_at)` — pages only.
+- `doc_map(workspace_slug, cosheaf_id, forgejo_id, title, excerpt, fts_rowid, created_at)` — pages only; `excerpt`/`fts_rowid` are the indexer-maintained body snippet + FTS link.
 - `backlinks(workspace_slug, src_id, src_path, target_id, target_label, line)`
 - `xref_targets(workspace_slug, target_id, source_path, kind, display_label, line)` — rebuildable Coflat heading/equation/block labels for cross-file `[@...]` resolution.
+- `xref_target_duplicates(workspace_slug, target_id, source_path, count)` — rebuildable record of ids defined more than once, so validation can flag ambiguous `[@...]` targets.
 - `citation_targets(workspace_slug, target_id, source_path)` — rebuildable BibTeX citation keys from `.bib` companion files so diagnostics can distinguish paper citations from missing page ids or Coflat labels.
 - `notes_fts` — FTS5 virtual table over title + body, keyed by `workspace_slug`.
-- `page_tags(workspace_slug, cosheaf_id, tag)`
+- `page_tags(workspace_slug, cosheaf_id, tag)` — rebuildable frontmatter `tags:` index.
+- `repo_config(workspace_slug, branch, config_json, updated_at)` — cached parse of the branch's `cosheaf.yaml`; rebuildable, busted on a `cosheaf.yaml` push (like `doc_map`).
 - `webhook_log(delivery_id, delivered_at, event_type)` — coflat-only dedupe.
 - `workspace_locks(workspace_slug, holder, acquired_at)` — ephemeral
   cross-process lock rows for sidecar rebuilds; disposable coordination state,
