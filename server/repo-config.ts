@@ -10,6 +10,17 @@ import { WorkspaceBackendError, type WorkspaceBackend } from "./workspace-backen
 // placement now share the same branch-scoped config surface.
 export const REPO_CONFIG_PATH = "cosheaf.yaml";
 
+// A named PDF export profile (#389): the cosheaf-managed selectors, plus an
+// optional pointer to an in-repo pandoc defaults file for passthrough keys.
+export interface ExportProfile {
+  bibliography?: string;
+  csl?: string;
+  template?: string;
+  cslLocale?: string;
+  // Repo-relative path to a pandoc defaults YAML consumed via `--defaults`.
+  defaults?: string;
+}
+
 export interface RepoConfig {
   // KaTeX macro map from the file's `math:` key (e.g. { "\\R": "\\mathbb{R}" }).
   mathMacros: Record<string, string>;
@@ -22,13 +33,41 @@ export interface RepoConfig {
   pdfBibliography?: string;
   pdfCsl?: string;
   pdfTemplate?: string;
+  // Named export profiles from `export.profiles`, and the default one.
+  exportProfiles: Record<string, ExportProfile>;
+  defaultProfile?: string;
   // Parsed for visibility/future handoff; Coflat currently reads block config
   // from document frontmatter, so Cosheaf does not inject these into the editor.
   blockDefinitions: Record<string, unknown>;
 }
 
 const DEFAULT_ASSET_FOLDER = "assets";
-const EMPTY: RepoConfig = { mathMacros: {}, assetFolder: DEFAULT_ASSET_FOLDER, blockDefinitions: {} };
+const EMPTY: RepoConfig = { mathMacros: {}, assetFolder: DEFAULT_ASSET_FOLDER, exportProfiles: {}, blockDefinitions: {} };
+
+// Parse `export.profiles` into a map of named ExportProfiles, keeping only the
+// recognized string fields (unknown keys ignored). Non-object entries are dropped.
+function parseExportProfiles(raw: Record<string, unknown>): { profiles: Record<string, ExportProfile>; defaultProfile?: string } {
+  const exportBlock = recordValue(raw.export);
+  if (!exportBlock) return { profiles: {} };
+  const profilesRaw = recordValue(exportBlock.profiles);
+  const profiles: Record<string, ExportProfile> = {};
+  if (profilesRaw) {
+    for (const [name, entry] of Object.entries(profilesRaw)) {
+      const rec = recordValue(entry);
+      if (!rec) continue;
+      const profile: ExportProfile = {
+        ...(stringValue(rec.bibliography) ? { bibliography: stringValue(rec.bibliography) } : {}),
+        ...(stringValue(rec.csl) ? { csl: stringValue(rec.csl) } : {}),
+        ...(stringValue(rec.template) ? { template: stringValue(rec.template) } : {}),
+        ...(stringValue(rec.cslLocale ?? rec["csl-locale"]) ? { cslLocale: stringValue(rec.cslLocale ?? rec["csl-locale"]) } : {}),
+        ...(stringValue(rec.defaults) ? { defaults: stringValue(rec.defaults) } : {}),
+      };
+      profiles[name] = profile;
+    }
+  }
+  const defaultProfile = stringValue(exportBlock.defaultProfile ?? exportBlock["default-profile"]);
+  return { profiles, ...(defaultProfile && profiles[defaultProfile] ? { defaultProfile } : {}) };
+}
 
 function stringMap(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -85,6 +124,7 @@ export function parseRepoConfig(yamlText: string): RepoConfig {
   const pdfBibliography = stringValue(pdf?.bibliography) ?? stringValue(latex?.bibliography) ?? bibliography;
   const pdfCsl = stringValue(pdf?.csl) ?? stringValue(latex?.csl) ?? csl;
   const pdfTemplate = stringValue(pdf?.template) ?? stringValue(latex?.template) ?? stringValue(raw.template);
+  const { profiles: exportProfiles, defaultProfile } = parseExportProfiles(raw);
   return {
     mathMacros: stringMap(raw.math),
     assetFolder: assetFolderFrom(raw),
@@ -93,6 +133,8 @@ export function parseRepoConfig(yamlText: string): RepoConfig {
     ...(pdfBibliography ? { pdfBibliography } : {}),
     ...(pdfCsl ? { pdfCsl } : {}),
     ...(pdfTemplate ? { pdfTemplate } : {}),
+    exportProfiles,
+    ...(defaultProfile ? { defaultProfile } : {}),
     blockDefinitions: recordValue(raw.blocks) ?? {},
   };
 }

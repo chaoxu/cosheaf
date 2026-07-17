@@ -74,6 +74,36 @@ describe("parseRepoConfig", () => {
     expect(parseRepoConfig(": : :").mathMacros).toEqual({});
     expect(parseRepoConfig("- a\n- b\n").mathMacros).toEqual({});
   });
+
+  it("parses named export profiles and honors a valid defaultProfile (#389)", () => {
+    const cfg = parseRepoConfig([
+      "export:",
+      "  defaultProfile: journal",
+      "  profiles:",
+      "    journal:",
+      "      bibliography: refs/main.bib",
+      "      csl: ieee",
+      "      template: lipics",
+      "      cslLocale: en-US",
+      "      defaults: .cosheaf/export/journal.yaml",
+      "    plain: {}",
+      "",
+    ].join("\n"));
+    expect(cfg.exportProfiles.journal).toEqual({
+      bibliography: "refs/main.bib",
+      csl: "ieee",
+      template: "lipics",
+      cslLocale: "en-US",
+      defaults: ".cosheaf/export/journal.yaml",
+    });
+    expect(cfg.exportProfiles.plain).toEqual({});
+    expect(cfg.defaultProfile).toBe("journal");
+  });
+
+  it("drops a defaultProfile that names no existing profile, and empty export block", () => {
+    expect(parseRepoConfig("export:\n  defaultProfile: ghost\n  profiles:\n    real: {}\n").defaultProfile).toBeUndefined();
+    expect(parseRepoConfig("other: 1\n").exportProfiles).toEqual({});
+  });
 });
 
 describe("loadRepoConfig", () => {

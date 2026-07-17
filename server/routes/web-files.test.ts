@@ -419,6 +419,92 @@ describe("web file editor route", () => {
     expect(body).not.toContain('name="template" value=');
   });
 
+  it("renders the export profile selector from export.profiles (#389)", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () =>
+          new Response("export:\n  defaultProfile: journal\n  profiles:\n    journal:\n      csl: ieee\n    plain: {}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("nf", { status: 404 }));
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ description: "Workspace" }));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/options/branch/main/docs/main.md", { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('data-testid="pdf-export-profile"');
+    expect(body).toContain('<option value="journal" selected>journal</option>');
+    expect(body).toContain('<option value="plain" >plain</option>');
+  });
+
+  it("applies a selected export profile: selectors, CSL locale, and defaults file (#389)", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    const commands: Array<{ command: string; args: readonly string[] }> = [];
+    let defaultsSeen: string | null = null;
+    _setPdfExportCommandRunnerForTest(async (command, args) => {
+      commands.push({ command, args });
+      if (command !== "pandoc") return;
+      const defaultsArg = args.find((a) => a.startsWith("--defaults="));
+      if (defaultsArg) defaultsSeen = await readFile(defaultsArg.slice("--defaults=".length), "utf8");
+      const outputArg = args.find((a) => a.startsWith("--output="));
+      if (outputArg) await writeFile(outputArg.slice("--output=".length), Buffer.from("%PDF-test\n"));
+    });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({ tree: [{ path: "docs/main.md", type: "blob" }, { path: "refs/main.bib", type: "blob" }, { path: ".cosheaf/export/journal.yaml", type: "blob" }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () => new Response("# Printable\n"));
+        forge.get("/api/v1/repos/owner/w/raw/refs/main.bib", () => new Response("@book{x, title={X}}\n"));
+        forge.get("/api/v1/repos/owner/w/raw/.cosheaf/export/journal.yaml", () => new Response("toc: true\nnumber-sections: true\n"));
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () =>
+          new Response("export:\n  profiles:\n    journal:\n      bibliography: refs/main.bib\n      csl: ieee\n      cslLocale: en-US\n      defaults: .cosheaf/export/journal.yaml\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md?profile=journal", { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const pandoc = commands.at(-1);
+    expect(pandoc?.args).toContain("--metadata=bibliography=refs/main.bib");
+    expect(pandoc?.args).toContain("--metadata=lang=en-US");
+    expect(pandoc?.args.some((a) => a.startsWith("--csl=") && a.endsWith("/latex/csl/ieee.csl"))).toBe(true);
+    expect(pandoc?.args.some((a) => a.startsWith("--defaults="))).toBe(true);
+    expect(defaultsSeen).toBe("toc: true\nnumber-sections: true\n");
+  });
+
+  it("rejects an export defaults file that sets a denylisted key (#389)", async () => {
+    const db = freshTestDb("cosheaf-web-files-");
+    seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
+    const token = seedAuthUser(db, config, { username: "alice", role: "write" });
+    let ran = false;
+    _setPdfExportCommandRunnerForTest(async (command) => { if (command === "pandoc") ran = true; });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/branches", () => Response.json([{ name: "main" }]));
+        forge.get("/api/v1/repos/owner/w/contents/docs/main.md", () => Response.json({ sha: "current-sha" }));
+        forge.get("/api/v1/repos/owner/w/git/trees/main", () =>
+          Response.json({ tree: [{ path: "docs/main.md", type: "blob" }, { path: ".cosheaf/export/bad.yaml", type: "blob" }], truncated: false }));
+        forge.get("/api/v1/repos/owner/w/raw/docs/main.md", () => new Response("# Printable\n"));
+        forge.get("/api/v1/repos/owner/w/raw/.cosheaf/export/bad.yaml", () => new Response("output: hacked.pdf\n"));
+        forge.get("/api/v1/repos/owner/w/raw/cosheaf.yaml", () =>
+          new Response("export:\n  profiles:\n    journal:\n      defaults: .cosheaf/export/bad.yaml\n"));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/export/pdf/branch/main/docs/main.md?profile=journal", { headers: authHeaders(token) });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("may not set 'output'");
+    expect(ran).toBe(false);
+  });
+
   it("uses cosheaf.yaml PDF defaults when document frontmatter is silent", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });

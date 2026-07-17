@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import {
   buildLatexPandocArgs,
   buildPandocResourcePath,
@@ -42,6 +43,34 @@ interface PandocExportBase {
     readonly csl?: unknown;
     readonly template?: unknown;
   };
+  // #389 export profile extras: a CSL locale injected as `--metadata=lang`, and
+  // the content of a pandoc defaults file passed via `--defaults`.
+  readonly cslLocale?: string;
+  readonly defaultsContent?: string;
+}
+
+// Keys a passthrough defaults file must NOT set: Coflat already passes these as
+// explicit CLI args (double-specifying confuses citeproc / redirects output),
+// or they would let a defaults file escape the sandbox. Selectors go through the
+// structured profile fields instead. (#389)
+const DEFAULTS_DENYLIST = new Set([
+  "input-file", "input-files", "output", "output-file", "from", "reader", "to", "writer",
+  "template", "csl", "bibliography", "resource-path", "lua-filter", "filters", "pdf-engine",
+]);
+
+function assertDefaultsAllowed(content: string): void {
+  let doc: unknown;
+  try {
+    doc = parseYaml(content);
+  } catch (_err) {
+    throw new PdfExportError(400, "Export defaults file is not valid YAML.");
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return;
+  for (const key of Object.keys(doc as Record<string, unknown>)) {
+    if (DEFAULTS_DENYLIST.has(key)) {
+      throw new PdfExportError(400, `Export defaults file may not set '${key}' — use the profile's fields.`);
+    }
+  }
 }
 
 interface ExportCoflatPdfOptions extends PandocExportBase {
@@ -212,6 +241,12 @@ async function runPandocPdfExport(
   options: PandocExportBase,
   sourceRel: string,
 ): Promise<PdfExportResult> {
+  // Validate a passthrough defaults file before probing dependencies / spawning
+  // anything, so a bad profile fails fast. (#389)
+  if (options.defaultsContent !== undefined) {
+    if (options.defaultsContent.length > 64 * 1024) throw new PdfExportError(413, "Export defaults file is too large.");
+    assertDefaultsAllowed(options.defaultsContent);
+  }
   await checkPdfDependencies(layout.workDir);
 
   const preprocessed = await preprocessWithReadFile(options.source);
@@ -231,7 +266,19 @@ async function runPandocPdfExport(
     root: layout.projectRoot,
     sourceDir: layout.sourceDir,
   });
+  // #389: a profile's CSL locale and passthrough defaults file. `--defaults`
+  // goes first so Coflat's explicit CLI args still win; the denylist keeps the
+  // two mechanisms non-overlapping. The defaults file lands in the per-run
+  // workDir mkdtemp, so its name is unique across concurrent runs by construction.
+  const profileArgs: string[] = [];
+  if (options.cslLocale) profileArgs.push(`--metadata=lang=${options.cslLocale}`);
+  if (options.defaultsContent !== undefined) {
+    const defaultsFile = path.join(layout.workDir, "cosheaf-export-defaults.yaml");
+    await writeFile(defaultsFile, options.defaultsContent, "utf8");
+    profileArgs.push(`--defaults=${defaultsFile}`);
+  }
   const args = [
+    ...profileArgs,
     ...buildLatexPandocArgs({
       bibliography: exportOptions.bibliography,
       cslPath: csl,

@@ -46,6 +46,19 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
             <p>Defaults come from cosheaf.yaml and can be overridden for this export.</p>
           </div>
           <form class="settings-form" method="get" action="${pdfExportHref(ctx.owner, ctx.repo, resolved.branch, rel)}">
+            ${
+              Object.keys(repoConfig.exportProfiles).length > 0
+                ? html`<label class="settings-row">
+              <span>Profile</span>
+              <select name="profile" data-testid="pdf-export-profile">
+                <option value="">Custom (fields below)</option>
+                ${Object.keys(repoConfig.exportProfiles).sort().map((name) =>
+                  html`<option value="${name}" ${name === repoConfig.defaultProfile ? "selected" : ""}>${name}</option>`,
+                )}
+              </select>
+            </label>`
+                : ""
+            }
             <label class="settings-row">
               <span>Bibliography</span>
               <input name="bibliography" placeholder="${repoConfig.pdfBibliography ?? "refs.bib"}">
@@ -112,24 +125,38 @@ export function registerPdfExportRoutes(web: Hono<AppEnv>): void {
           }
         }
         const repoConfig = await loadRepoConfig(ctx.db, ctx.backend, ctx.owner, ctx.repo, resolved.branch);
+        // #389: a named export profile supplies selectors + optional passthrough
+        // defaults file; profile fields override cosheaf.yaml, query flags still win.
+        const profileName = c.req.query("profile")?.trim();
+        const profile = profileName ? repoConfig.exportProfiles[profileName] : undefined;
+        if (profileName && !profile) throw new PdfExportError(400, `Unknown export profile '${profileName}'.`);
         const defaults = {
-          bibliography: repoConfig.pdfBibliography,
-          csl: repoConfig.pdfCsl,
-          template: repoConfig.pdfTemplate,
+          bibliography: profile?.bibliography ?? repoConfig.pdfBibliography,
+          csl: profile?.csl ?? repoConfig.pdfCsl,
+          template: profile?.template ?? repoConfig.pdfTemplate,
         };
         const flags = {
           bibliography: queryOverride(c, "bibliography"),
           csl: queryOverride(c, "csl"),
           template: queryOverride(c, "template"),
         };
+        const cslLocale = profile?.cslLocale;
+        let defaultsContent: string | undefined;
+        if (profile?.defaults) {
+          const defaultsRel = safeRel(profile.defaults);
+          if (!defaultsRel) throw new PdfExportError(400, "Invalid export defaults path.");
+          defaultsContent = await ctx.backend
+            .getRawFile(ctx.owner, ctx.repo, resolved.branch, defaultsRel)
+            .catch(() => { throw new PdfExportError(400, `Export defaults file not found: ${defaultsRel}`); });
+        }
         // Local Workbench: render straight from the working tree so a repo with
         // more than PDF_EXPORT_MAX_FILES files can still export a single doc.
         if (localEntry) {
-          return exportCoflatMarkdownPdfInPlace({ rootDir: localEntry.path, source, sourcePath: rel, defaults, flags });
+          return exportCoflatMarkdownPdfInPlace({ rootDir: localEntry.path, source, sourcePath: rel, defaults, flags, cslLocale, defaultsContent });
         }
         const files = await repoFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch);
         const projectFiles = await collectPdfProjectFiles(ctx.backend, ctx.owner, ctx.repo, resolved.branch, rel, source, files);
-        return exportCoflatMarkdownPdf({ source, sourcePath: rel, files: projectFiles, defaults, flags });
+        return exportCoflatMarkdownPdf({ source, sourcePath: rel, files: projectFiles, defaults, flags, cslLocale, defaultsContent });
       });
       return new Response(result.pdf, {
         headers: {
