@@ -150,13 +150,14 @@ export const api = {
     return (await res.json()) as { path: string };
   },
 
-  suggest: (owner: string, repo: string, params: { trigger: string; prefix: string; branch?: string; limit?: number }) =>
+  suggest: (owner: string, repo: string, params: { trigger: string; prefix: string; branch?: string; limit?: number; path?: string }) =>
     jsonFetch<{ suggestions: Array<{ id: string; insert: string; display: string }> }>(
       `${workspaceApiPath(owner, repo)}/suggest${queryString({
         trigger: params.trigger,
         prefix: params.prefix,
         branch: params.branch,
         limit: params.limit,
+        path: params.path,
       })}`,
     ),
 

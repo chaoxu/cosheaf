@@ -15,6 +15,9 @@ export interface ReferenceSuggestContext {
   readonly owner: string;
   readonly repo: string;
   readonly branch: string;
+  // Repo-relative path of the document being edited, so the server can drop
+  // this file's own labels (Coflat's native source already provides them). #390
+  readonly path: string;
 }
 
 // The context is read live (branch changes as the user switches edit branches),
@@ -25,10 +28,10 @@ export function referenceSuggestExtension(getContext: () => ReferenceSuggestCont
     // Only bracketed `[@…]` refs: `/suggest` inserts `[@id]`, which is wrong for
     // the narrative `@…` form Coflat's native source already handles.
     if (!match || match.kind !== "bracketed") return null;
-    const { owner, repo, branch } = getContext();
+    const { owner, repo, branch, path } = getContext();
     let suggestions;
     try {
-      ({ suggestions } = await api.suggest(owner, repo, { trigger: "[@", prefix: match.query, branch }));
+      ({ suggestions } = await api.suggest(owner, repo, { trigger: "[@", prefix: match.query, branch, path }));
     } catch (_err) {
       return null;
     }

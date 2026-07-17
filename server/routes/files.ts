@@ -755,6 +755,11 @@ files.get("/:owner/:repo/suggest", async (c) => {
   // For `[@` trigger we suggest from doc_map (cross-ref ids + titles).
   // Other triggers return empty until we add e.g. tag completion.
   if (trigger !== "[@") return c.json({ suggestions: [] });
+  // #390: the caller passes the current document path so we can drop its own
+  // cross-ref labels — Coflat's native `[@` popup already offers those from the
+  // live buffer, and both sources merge into one popup, so including them here
+  // double-lists the same id.
+  const excludePath = safeRel(c.req.query("path")?.trim() ?? "");
   const term = `${prefix.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
   const sqlLimit = branch !== "main" ? limit * 2 : limit;
   const pageRows = c
@@ -779,20 +784,21 @@ files.get("/:owner/:repo/suggest", async (c) => {
             "ORDER BY length(target_id), target_id LIMIT ?",
         )
         .all(ws.slug, term, term, remaining) as Array<{ id: string; title: string; path: string }>;
+  const visibleXrefRows = excludePath ? xrefRows.filter((r) => r.path !== excludePath) : xrefRows;
   const mainSuggestions: RefSuggestion[] = [
       ...pageRows.map((r): RefSuggestion => ({
         id: r.id,
         insert: `[@${r.id}]`,
         display: r.title ? `${r.id} — ${r.title}` : r.id,
       })),
-      ...xrefRows.map((r): RefSuggestion => ({
+      ...visibleXrefRows.map((r): RefSuggestion => ({
         id: r.id,
         insert: `[@${r.id}]`,
         display: `${r.id} — ${r.title} (${r.path})`,
       })),
     ];
   const branchSuggestions = branch !== "main" && supportsXrefs
-    ? await branchRefSuggestions(c, branch, prefix, limit)
+    ? await branchRefSuggestions(c, branch, prefix, limit, excludePath)
     : [];
   return c.json({ suggestions: mergeSuggestions(branchSuggestions, mainSuggestions, limit) });
 });
@@ -821,6 +827,7 @@ async function branchRefSuggestions(
   branch: string,
   prefix: string,
   limit: number,
+  excludePath: string | null,
 ): Promise<RefSuggestion[]> {
   const { backend, owner, repo } = c.get("repoCtx");
   let tree = getCachedTree(owner, repo, branch);
@@ -845,6 +852,7 @@ async function branchRefSuggestions(
   const suggestions: RefSuggestion[] = [];
   const seen = new Set<string>();
   for (const entry of branchRefs) {
+    if (excludePath && entry.path === excludePath) continue;
     addBranchSuggestion(suggestions, seen, entry.id, entry.title, entry.path, prefix, limit);
     if (suggestions.length >= limit) break;
   }

@@ -1150,8 +1150,9 @@ function WebEditor({
       owner: config.owner,
       repo: config.repo,
       branch: branchRef.current || config.branch,
+      path: currentPathRef.current.trim() || config.path,
     })),
-    [config.owner, config.repo, config.branch],
+    [config.owner, config.repo, config.branch, config.path],
   );
   const suggestingExtensions = useMemo<readonly Extension[]>(
     () => [

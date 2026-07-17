@@ -598,6 +598,25 @@ describe("files suggest route", () => {
     });
   });
 
+  it("omits the current file's own xref labels so the native popup does not double-list them (#390)", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
+    seedStaleXrefs(db);
+
+    const excluded = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=thm&path=stale.md", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(await excluded.json()).toEqual({ suggestions: [] });
+
+    // A different file still sees stale.md's label.
+    const other = await appFor(db).request("/api/v1/repos/owner/w/suggest?prefix=thm&path=other.md", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(((await other.json()) as { suggestions: Array<{ id: string }> }).suggestions.map((s) => s.id)).toEqual([
+      "thm:stale",
+    ]);
+  });
+
   it("adds branch-local page ids and Coflat labels that are not indexed on main", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "read" });
