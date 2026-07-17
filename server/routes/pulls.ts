@@ -238,6 +238,21 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
       if (pull) return c.json(classifyMergeFailure(pull, null, result.transientExhausted), 409);
       return c.json(...notFound("this pull request no longer exists"));
     }
+    // A backend 5xx during a squash is usually an empty commit: the PR's content
+    // is already in the base branch, so `git commit` has nothing to commit and
+    // Forgejo 500s. Detect that (base..head diff has no files) and return an
+    // actionable 409 instead of the misleading "merge service unavailable" (#401).
+    // Guarded: if listPullFiles also errors (genuine backend outage), fall
+    // through to the 502 rather than mislabeling it "empty".
+    if (result.status >= 500) {
+      const files = await collab.listPullFiles(owner, repo, n).catch(() => null);
+      if (files && files.length === 0) {
+        return c.json({
+          error: "This pull request has no changes to merge — its content is already in the base branch. Close it instead.",
+          code: "empty",
+        }, 409);
+      }
+    }
     const code = result.status === 502 ? "upstream" : result.status === 500 ? "internal" : "conflict";
     return c.json({ error: mergeStatusMessage(result.status), code }, result.status as 502 | 500 | 401 | 403 | 422 | 429);
   }

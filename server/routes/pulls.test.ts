@@ -1073,6 +1073,42 @@ describe("pulls + branches routes", () => {
       expect(await res.json()).toMatchObject({ code: "conflict", reason: "conflict", mergeable: false, head_sha: "h", base_sha: "b", state: "open", merged: false });
     });
 
+    it("POST /pulls/:n/merge returns an actionable 'empty' 409 when a 5xx squash has no changes to merge (#401)", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
+        .mockResolvedValueOnce(new Response("git commit: exit status 1", { status: 500 })) // empty squash 500s
+        .mockResolvedValueOnce(ok([])); // listPullFiles: no changed files → PR already in base
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "squash" }),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { code: string; error: string };
+      expect(body.code).toBe("empty");
+      expect(body.error).toContain("no changes to merge");
+    });
+
+    it("POST /pulls/:n/merge still reports a 5xx as upstream unavailable when the PR is not empty", async () => {
+      const db = freshDb();
+      seedWorkspace(db);
+      const token = seedUser(db, 1, "alice", "admin");
+      fetchMock
+        .mockResolvedValueOnce(ok({ permission: "admin" })) // requireAdminFresh
+        .mockResolvedValueOnce(new Response("boom", { status: 500 })) // backend sick
+        .mockResolvedValueOnce(ok([{ filename: "a.md", status: "modified", additions: 1, deletions: 0 }])); // real changes
+      const res = await appFor(db).request("/api/v1/repos/owner/w/pulls/7/merge", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ Do: "squash" }),
+      });
+      expect(res.status).toBe(502);
+      expect((await res.json()) as { code: string }).toMatchObject({ code: "upstream" });
+    });
+
     it("POST /pulls/:n/merge classifies a needs-approval block structurally, not by message text", async () => {
       const db = freshDb();
       seedWorkspace(db);
