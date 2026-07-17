@@ -241,7 +241,15 @@ direction.
 - **Web**: Server-rendered Hono pages with narrowly scoped React/Vite islands
   in `src/cosheaf/web-*.tsx?`.
 - **Editor**: `@chaoxu/coflat` from a sibling checkout or public
-  package; do not vendor it back into this repo.
+  package; do not vendor it back into this repo. Coflat's built island
+  **externalizes its runtime deps** (CodeMirror, Lezer, `turndown`, …) and
+  expects the host to provide them: cosheaf mirrors those in its own
+  `dependencies` so the Vite bundle resolves them and uses one CodeMirror
+  instance. When coflat bumps CM6/Lezer or adds a runtime dep, cosheaf must
+  match the peer versions and add the new dep (knip-ignore it if cosheaf never
+  imports it directly) or the build breaks — `pnpm check:local` catches this.
+  Prod/staging build coflat from committed `origin/main`, so a coflat change
+  only reaches them once pushed.
 - **Document format**: Pandoc-flavored markdown per Coflat's canonical
   `FORMAT.md`; Cosheaf's local `FORMAT.md` is only host-specific notes. YAML
   frontmatter for `id`, `title`, `type`, `status`, `target`.
