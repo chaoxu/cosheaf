@@ -5,15 +5,14 @@
 import { resolveMarkdownReferencePathFromDocument } from "@chaoxu/coflat/parse";
 import type Database from "better-sqlite3";
 import { extractBibTeXCitationKeys } from "./citations.js";
+import { coflatMarkdownFormat } from "./document-format/coflat.js";
 import type { DocumentLink, ParsedDocument } from "./document-format/types.js";
-import { getDocumentFormat } from "./format-registry.js";
 import { generateDocId } from "./ids.js";
 
 export interface PageIngest {
   workspaceSlug: string;
   filePath: string;
   bodyText: string; // raw file content (frontmatter + body)
-  formatId?: string;
   // Existing path being canonically replaced by this write. Used by typed
   // branch-only renames so a stable page id can move paths without being treated
   // as a duplicate of itself.
@@ -88,7 +87,7 @@ function replaceBacklinks(
 }
 
 export function planIndexPage(db: Database.Database, p: PageIngest): IngestPlan {
-  const format = getDocumentFormat(p.formatId);
+  const format = coflatMarkdownFormat;
   const parsed = format.parseDocument(p.bodyText);
   const links = format.extractLinks(p.bodyText);
   const fmId = typeof parsed.frontmatter.id === "string" && parsed.frontmatter.id.length > 0

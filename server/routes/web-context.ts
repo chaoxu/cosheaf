@@ -14,7 +14,7 @@ import { DELETED_USER_LOGIN } from "../forgejo-types.js";
 import { resolveLocalWorkspace } from "../local/local-mode.js";
 import type { WorkspaceEntry } from "../local/workspace-registry.js";
 import { localCollaborationClient, localMemberSetter } from "../local/origin-collaboration-client.js";
-import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceFormat, resolveWorkspaceTitle } from "../middleware.js";
+import { AUTH_COOKIE, resolveAuth, resolveRepoRole, resolveWorkspaceTitle } from "../middleware.js";
 import { workspaceReadmeTitle } from "../page-search.js";
 import { TTLCache } from "../ttl-cache.js";
 import type { AppEnv, WorkspaceContext } from "../types.js";
@@ -241,8 +241,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
   // Cosheaf is a frontend over the forge: any repo the caller can read is a
   // valid workspace. Markdown is Coflat; the format marker no longer controls
   // visibility.
-  const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
-  const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat };
+  const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role, defaultMdFormat: COFLAT_FORMAT_ID };
   c.set("workspace", ws);
   const backend = new ForgejoWorkspaceBackend(fj);
   const collab = forgeCoreCollaborationClient(fj);

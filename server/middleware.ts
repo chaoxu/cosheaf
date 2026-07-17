@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import { FORGEJO_NAME_RE, workspaceSlug } from "../shared/conventions.js";
-import { COFLAT_FORMAT_ID, type DocumentFormatId } from "../shared/document-format.js";
+import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
 import type { Role } from "../shared/roles.js";
 import { type ResolvedApiToken, resolveApiToken } from "./api-tokens.js";
 import type { CollaborationClient } from "./collaboration-client.js";
@@ -201,8 +201,7 @@ export const requireMembership = (): MiddlewareHandler<AppEnv> => async (c, next
   if (role === "none")
     return c.json({ error: "workspace not found", code: "not_found" }, 404);
 
-  const defaultMdFormat = await resolveWorkspaceFormat(fj, owner, repo);
-  c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat, role });
+  c.set("workspace", { owner, repo, slug: workspaceSlug(owner, repo), defaultMdFormat: COFLAT_FORMAT_ID, role });
   c.set("repoCtx", { backend: new ForgejoWorkspaceBackend(fj), fj, collab: forgeCoreCollaborationClient(fj), owner, repo });
   await next();
 };
@@ -220,27 +219,6 @@ export function repoCtxCollab(c: Context<AppEnv>): { collab: CollaborationClient
   return { collab, owner, repo };
 }
 
-export function _resetFormatCacheForTests(): void {
-  // Historical no-op: Cosheaf markdown is Coflat-only.
-}
-
-export function _seedFormatCacheForTests(owner: string, repo: string, formatId: string): void {
-  void owner;
-  void repo;
-  void formatId;
-}
-
-export async function resolveWorkspaceFormat(
-  fj: Forgejo,
-  owner: string,
-  repo: string,
-): Promise<DocumentFormatId> {
-  void fj;
-  void owner;
-  void repo;
-  return COFLAT_FORMAT_ID;
-}
-
 // Cached workspace title (the Forgejo repo description) for the web chrome's
 // Read-mode workspace identity (#147). Empty string when the repo has no
 // description, so the chrome falls back to the owner/repo slug. Web-only — the
@@ -255,7 +233,6 @@ export function _resetTitleCacheForTests(): void {
 export function _resetMiddlewareCachesForTests(): void {
   _resetBearerAuthCacheForTests();
   _resetPermCacheForTests();
-  _resetFormatCacheForTests();
   _resetTitleCacheForTests();
 }
 

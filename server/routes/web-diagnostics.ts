@@ -8,7 +8,7 @@ import { repoPageShell } from "./web-page.js";
 
 export function registerDiagnosticsRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/diagnostics", webRoute(async (_c, ctx) => {
-    const validation = workspaceValidation(ctx.db, ctx.ws.slug, ctx.ws.defaultMdFormat);
+    const validation = workspaceValidation(ctx.db, ctx.ws.slug);
     return htmlResponse(
       repoPageShell(ctx, "diagnostics", `Diagnostics - ${ctx.repo}`, html`
         <div class="page-title compact">

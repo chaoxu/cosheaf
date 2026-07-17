@@ -199,19 +199,16 @@ describe("files validation route", () => {
       workspaceSlug: "owner/w",
       filePath: "source.md",
       bodyText: "---\nid: source\n---\n# Source\n\nSee [@target], [@thm:target], [@missing], and [Gone](gone.md).\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "target.md",
       bodyText: "---\nid: target\n---\n# Target\n\n::: {#thm:target .theorem}\nTarget theorem.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "orphan.md",
       bodyText: "---\nid: orphan\n---\n# Orphan\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
@@ -267,7 +264,6 @@ describe("files validation route", () => {
         "See [@BoysenKW19], [@missing-page], and [@thm:missing].",
         "",
       ].join("\n"),
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
@@ -303,13 +299,11 @@ describe("files validation route", () => {
       workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "b.md",
       bodyText: "---\nid: b\n---\n# B\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
@@ -342,7 +336,6 @@ describe("files validation route", () => {
         ":::",
         "",
       ].join("\n"),
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/validation", {
@@ -378,7 +371,6 @@ describe("files refs route", () => {
       workspaceSlug: "owner/w",
       filePath: "target.md",
       bodyText: "---\nid: target\n---\n# Target\n\n::: {#thm:target .theorem}\nTarget theorem.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=target,thm:target,missing", {
@@ -403,7 +395,6 @@ describe("files refs route", () => {
         workspaceSlug: "owner/w",
         filePath,
         bodyText: `---\nid: ${filePath[0]}\n---\n# ${filePath[0].toUpperCase()}\n\n::: {#thm:dup .theorem}\nDuplicate.\n:::\n`,
-        formatId: COFLAT_FORMAT_ID,
       });
     }
 
@@ -425,7 +416,6 @@ describe("files refs route", () => {
       workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const res = await appFor(db).request("/api/v1/repos/owner/w/refs?ids=thm:dup", {
@@ -464,7 +454,6 @@ describe("files refs route", () => {
       workspaceSlug: "owner/w",
       filePath: "main.md",
       bodyText: "---\nid: main-page\n---\n# Main\n\n::: {#thm:main .theorem}\nMain theorem.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {
@@ -564,7 +553,6 @@ describe("files suggest route", () => {
         workspaceSlug: "owner/w",
         filePath: `note-${i}.md`,
         bodyText: `---\nid: alpha-${i}\n---\n# Alpha ${i}\n`,
-        formatId: COFLAT_FORMAT_ID,
       });
     }
 
@@ -670,7 +658,6 @@ describe("files suggest route", () => {
         workspaceSlug: "owner/w",
         filePath: `main-${i}.md`,
         bodyText: `---\nid: alpha-main-${i}\n---\n# Alpha Main ${i}\n`,
-        formatId: COFLAT_FORMAT_ID,
       });
     }
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -720,11 +707,11 @@ describe("files suggest route", () => {
 describe("files tags route (#388)", () => {
   function seedTagged(db: Database.Database): void {
     // `alpha` is ubiquitous (3 pages), `rare` appears on one — IDF should rank rare first.
-    indexPage(db, { workspaceSlug: "owner/w", filePath: "a.md", bodyText: "---\nid: a\ntitle: A\ntags: [alpha, rare]\n---\n# A\n", formatId: COFLAT_FORMAT_ID });
-    indexPage(db, { workspaceSlug: "owner/w", filePath: "b.md", bodyText: "---\nid: b\ntitle: B\ntags: [alpha]\n---\n# B\n", formatId: COFLAT_FORMAT_ID });
-    indexPage(db, { workspaceSlug: "owner/w", filePath: "c.md", bodyText: "---\nid: c\ntitle: C\ntags: [alpha]\n---\n# C\n", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "a.md", bodyText: "---\nid: a\ntitle: A\ntags: [alpha, rare]\n---\n# A\n" });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "b.md", bodyText: "---\nid: b\ntitle: B\ntags: [alpha]\n---\n# B\n" });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "c.md", bodyText: "---\nid: c\ntitle: C\ntags: [alpha]\n---\n# C\n" });
     // A different workspace must not leak into owner/w results.
-    indexPage(db, { workspaceSlug: "owner/other", filePath: "z.md", bodyText: "---\nid: z\ntags: [rare]\n---\n# Z\n", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/other", filePath: "z.md", bodyText: "---\nid: z\ntags: [rare]\n---\n# Z\n" });
   }
 
   it("lists tags with counts, ranked by IDF (rare before ubiquitous)", async () => {
@@ -1088,7 +1075,6 @@ describe("files mutation gates", () => {
       workspaceSlug: "owner/w",
       filePath: "notes.md",
       bodyText: "---\nid: notes\n---\n# Main Notes\n\nmain body\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
@@ -1121,7 +1107,6 @@ describe("files mutation gates", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -1161,7 +1146,6 @@ describe("files mutation gates", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     let written = "";
 
@@ -1244,7 +1228,6 @@ describe("files mutation gates", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     let written = "";
 
@@ -1355,7 +1338,6 @@ describe("files non-markdown text files (#178)", () => {
       workspaceSlug: "owner/w",
       filePath: "gone.md",
       bodyText: "---\nid: gone\n---\n# Gone\n\nSee [@missing].\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const events: unknown[] = [];
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -1390,7 +1372,6 @@ describe("files non-markdown text files (#178)", () => {
       workspaceSlug: "owner/w",
       filePath: "branch-only.md",
       bodyText: "---\nid: branch-only\n---\n# Branch only\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name") }));
@@ -1890,7 +1871,6 @@ describe("files concurrent-write conflicts (#92)", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     let putCalled = false;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -1927,7 +1907,6 @@ describe("files concurrent-write conflicts (#92)", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const calls: string[] = [];
     const backend = fakeWorkspaceBackend({
@@ -1971,7 +1950,6 @@ describe("files concurrent-write conflicts (#92)", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const calls: string[] = [];
     const backend = fakeWorkspaceBackend({
@@ -2010,7 +1988,6 @@ describe("files concurrent-write conflicts (#92)", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const calls: string[] = [];
     const backend = fakeWorkspaceBackend({
@@ -2066,7 +2043,6 @@ describe("files tree cache", () => {
       workspaceSlug: "owner/w",
       filePath: "notes.md",
       bodyText: "---\nid: notes\n---\n# Main title\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/git/trees/:ref", (c) => {

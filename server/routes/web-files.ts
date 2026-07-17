@@ -656,7 +656,6 @@ async function writeFile(
         workspaceSlug: ctx.ws.slug,
         filePath: rel,
         bodyText: content,
-        formatId: ctx.ws.defaultMdFormat,
         replacePath,
       })
     : null;

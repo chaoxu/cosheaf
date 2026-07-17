@@ -17,7 +17,7 @@ import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { likeEscape, searchWorkspacePages, workspacePagesByTag, workspaceTagCloud } from "../page-search.js";
 import { getCachedTree, invalidateBranchTree, setCachedTree } from "../tree-cache.js";
-import { workspaceSupportsXrefs, workspaceValidation } from "../workspace-validation.js";
+import { workspaceValidation } from "../workspace-validation.js";
 import {
   MAX_ASSET_BYTES,
   MAX_ASSET_DISPLAY,
@@ -382,7 +382,6 @@ async function writeContentsCompat(c: import("hono").Context<AppEnv>, createdSta
         workspaceSlug: ws.slug,
         filePath: rel,
         bodyText: content,
-        formatId: ws.defaultMdFormat,
       })
     : null;
   const finalContent = plan?.rewrittenContent ?? content;
@@ -565,7 +564,6 @@ files.put("/:owner/:repo/file", async (c) => {
         workspaceSlug: ws.slug,
         filePath: rel,
         bodyText: body.content,
-        formatId: ws.defaultMdFormat,
         replacePath,
       })
     : null;
@@ -786,8 +784,7 @@ files.get("/:owner/:repo/suggest", async (c) => {
     )
     .all(ws.slug, term, term, sqlLimit) as Array<{ id: string; title: string | null }>;
   const remaining = Math.max(0, sqlLimit - pageRows.length);
-  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
-  const xrefRows = remaining === 0 || !supportsXrefs
+  const xrefRows = remaining === 0
     ? []
     : c
         .get("db")
@@ -811,7 +808,7 @@ files.get("/:owner/:repo/suggest", async (c) => {
         display: `${r.id} — ${r.title} (${r.path})`,
       })),
     ];
-  const branchSuggestions = branch !== "main" && supportsXrefs
+  const branchSuggestions = branch !== "main"
     ? await branchRefSuggestions(c, branch, prefix, limit, excludePath)
     : [];
   return c.json({ suggestions: mergeSuggestions(branchSuggestions, mainSuggestions, limit) });
@@ -960,12 +957,10 @@ files.get("/:owner/:repo/refs", async (c) => {
   ];
   if (ids.length === 0) return c.json({ refs: [] });
   const ws = c.get("workspace");
-  const supportsXrefs = workspaceSupportsXrefs(ws.defaultMdFormat);
   const ref = c.req.query("ref")?.trim();
   if (ref) {
     if (!validRequestedBranch(ref)) return c.json(...bad("valid ref required"));
-    if (ref !== "main" && supportsXrefs) return c.json(await branchRefs(c, ref, ids));
-    if (ref !== "main") return c.json({ refs: [], ambiguous_refs: [] });
+    if (ref !== "main") return c.json(await branchRefs(c, ref, ids));
   }
   const placeholders = ids.map(() => "?").join(",");
   const pageRows = c
@@ -976,28 +971,24 @@ files.get("/:owner/:repo/refs", async (c) => {
         WHERE workspace_slug = ? AND cosheaf_id IN (${placeholders})`,
     )
     .all(ws.slug, ...ids) as Array<{ id: string; path: string; label: string }>;
-  const xrefRows = supportsXrefs
-    ? c
-        .get("db")
-        .prepare(
-          `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
-             FROM xref_targets
-            WHERE workspace_slug = ? AND target_id IN (${placeholders})
-            ORDER BY source_path`,
-        )
-        .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>
-    : [];
-  const sameFileDuplicates = supportsXrefs
-    ? c
-        .get("db")
-        .prepare(
-          `SELECT target_id AS id, source_path AS path, count
-             FROM xref_target_duplicates
-            WHERE workspace_slug = ? AND target_id IN (${placeholders})
-            ORDER BY source_path`,
-        )
-        .all(ws.slug, ...ids) as Array<{ id: string; path: string; count: number }>
-    : [];
+  const xrefRows = c
+    .get("db")
+    .prepare(
+      `SELECT target_id AS id, source_path AS path, kind, display_label AS label, line
+         FROM xref_targets
+        WHERE workspace_slug = ? AND target_id IN (${placeholders})
+        ORDER BY source_path`,
+    )
+    .all(ws.slug, ...ids) as Array<{ id: string; path: string; kind: string; label: string; line: number | null }>;
+  const sameFileDuplicates = c
+    .get("db")
+    .prepare(
+      `SELECT target_id AS id, source_path AS path, count
+         FROM xref_target_duplicates
+        WHERE workspace_slug = ? AND target_id IN (${placeholders})
+        ORDER BY source_path`,
+    )
+    .all(ws.slug, ...ids) as Array<{ id: string; path: string; count: number }>;
   const xrefGroups = new Map<string, typeof xrefRows>();
   for (const row of xrefRows) xrefGroups.set(row.id, [...(xrefGroups.get(row.id) ?? []), row]);
   const duplicateIds = new Set(sameFileDuplicates.map((row) => row.id));
@@ -1188,7 +1179,7 @@ files.get("/:owner/:repo/backlinks", (c) => {
 
 files.get("/:owner/:repo/validation", (c) => {
   const ws = c.get("workspace");
-  return c.json(workspaceValidation(c.get("db"), ws.slug, ws.defaultMdFormat) satisfies WorkspaceValidation);
+  return c.json(workspaceValidation(c.get("db"), ws.slug) satisfies WorkspaceValidation);
 });
 
 files.get("/:owner/:repo/events", (c) => streamHubChannel(c, c.get("sse"), c.get("workspace").slug));

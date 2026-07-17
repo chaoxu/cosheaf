@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   _resetMiddlewareCachesForTests,
-  _seedFormatCacheForTests,
 } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { fakeForgejo, freshTestDb, responseOk, testApp, testConfig } from "./test-fixtures.js";
@@ -491,7 +490,6 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
   it("lets a workspace admin set a reviewer role and keeps admin direct-push whitelist unchanged", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     const calls: Array<{ url: string; method: string; body: unknown }> = [];
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -525,7 +523,6 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
   it("adds admin members to the direct-push whitelist", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     let whitelistPatch: unknown = null;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -556,7 +553,6 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
   it("rejects non-admin callers", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "write", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
@@ -575,7 +571,6 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
   it("rejects invalid roles", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockResolvedValueOnce(responseOk({ permission: "admin" }));
 
@@ -591,7 +586,6 @@ describe("PUT /api/v1/repos/:owner/:repo/members/:username", () => {
   it("rejects invalid member usernames before mutating collaborators", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
     let mutated = false;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
@@ -618,7 +612,6 @@ describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
   it("lets a workspace admin remove a collaborator", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     let removed = false;
     fetchMock.mockImplementation(fakeForgejo((forge) => {
@@ -643,7 +636,6 @@ describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
   it("is idempotent when the collaborator is already gone", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "admin", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));
@@ -663,7 +655,6 @@ describe("DELETE /api/v1/repos/:owner/:repo/members/:username", () => {
   it("rejects non-admin callers", async () => {
     const { app, db } = appFor();
     const token = seedAuthUser(db, config, { username: "chao", role: "write", owner: "owner", repo: "w" });
-    _seedFormatCacheForTests("owner", "w", "coflat");
 
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/topics", () => responseOk({ topics: ["cosheaf-format-coflat"] }));

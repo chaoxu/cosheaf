@@ -129,7 +129,6 @@ localSuggesting.post("/:owner/:repo/local-suggesting/revert", async (c) => {
             workspaceSlug: entry.slug,
             filePath: path,
             bodyText: next,
-            formatId: entry.identity.defaultMdFormat,
           })
         : null;
       return plan?.rewrittenContent ?? next;

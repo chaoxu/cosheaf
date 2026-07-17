@@ -18,7 +18,6 @@ import { makeT } from "../../shared/i18n/index.js";
 import type { LocalGitWorkspaceBackend } from "../local/local-git-backend.js";
 import { WorkspaceRegistry } from "../local/workspace-registry.js";
 import { resolveLocale } from "../locale.js";
-import { _seedFormatCacheForTests } from "../middleware.js";
 import { SSEHub } from "../sse.js";
 import type { AppEnv, LocalWorkspaceIdentity } from "../types.js";
 import type { WorkspaceBackend } from "../workspace-backend.js";
@@ -57,21 +56,20 @@ interface WorkspaceSeed {
 }
 
 // Register a test workspace with the middleware. The `workspaces` table is
-// gone (#62); the only thing that needs setup now is the in-process format
-// cache so requireMembership can resolve `defaultMdFormat` without an actual
-// Forgejo round-trip. The default identity is owner "owner" / repo "w" so
-// route tests hit /api/v1/repos/owner/w/... and the fake Forgejo upstream
-// paths stay http://forgejo.test/api/v1/repos/owner/w/....
+// gone (#62) and workspace format resolves to Coflat unconditionally, so there
+// is nothing to seed: this now just returns the canonical owner/repo/slug. The
+// default identity is owner "owner" / repo "w" so route tests hit
+// /api/v1/repos/owner/w/... and the fake Forgejo upstream paths stay
+// http://forgejo.test/api/v1/repos/owner/w/....
 export function seedTestWorkspace(
   db: Database.Database,
   init: WorkspaceSeed = {},
 ): { owner: string; repo: string; slug: string } {
   const owner = init.owner ?? "owner";
   const repo = init.repo ?? "w";
-  const formatId = init.default_md_format ?? DEFAULT_DOCUMENT_FORMAT_ID;
-  _seedFormatCacheForTests(owner, repo, formatId);
-  // `db` is intentionally unused: there is no SQLite row to seed anymore.
-  // Kept in the signature so test callers don't need to change.
+  // `db` and `init.default_md_format` are intentionally unused: there is no
+  // SQLite row or format cache to seed anymore. Kept in the signature so test
+  // callers don't need to change.
   void db;
   return { owner, repo, slug: workspaceSlug(owner, repo) };
 }

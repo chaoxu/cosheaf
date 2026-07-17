@@ -1,6 +1,5 @@
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { COFLAT_FORMAT_ID } from "../shared/document-format.js";
 import { parseFrontmatterYaml as parseDocument } from "../shared/frontmatter-yaml.js";
 import { deleteCitationFile, deletePage, indexCitationFile, indexPage } from "./indexer.js";
 import { freshTestDb } from "./routes/test-fixtures.js";
@@ -16,7 +15,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "hello.md",
       bodyText: "# Hello\n\nbody.",
-      formatId: COFLAT_FORMAT_ID,
     });
     expect(r.cosheafId).toMatch(/^[a-z0-9]{8}$/);
     expect(r.title).toBe("Hello");
@@ -43,7 +41,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "foo.md",
       bodyText: source,
-      formatId: COFLAT_FORMAT_ID,
     });
 
     expect(r.rewrittenContent).toBe([
@@ -65,7 +62,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: same\n---\n# A\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const source = [
       "---",
@@ -82,7 +78,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "b.md",
       bodyText: source,
-      formatId: COFLAT_FORMAT_ID,
     });
 
     expect(r.cosheafId).not.toBe("same");
@@ -104,7 +99,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "page.md",
       bodyText: "# Page\n\nbody.",
-      formatId: COFLAT_FORMAT_ID,
     });
     if (first.rewrittenContent === null) throw new Error("expected rewritten content");
     // Simulate a subsequent put_note carrying the rewritten content.
@@ -112,7 +106,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "page.md",
       bodyText: first.rewrittenContent,
-      formatId: COFLAT_FORMAT_ID,
     });
     expect(second.cosheafId).toBe(first.cosheafId);
     // Already had id in frontmatter, so no rewrite needed.
@@ -125,7 +118,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "explicit.md",
       bodyText: "---\nid: abcd1234\n---\n# Explicit\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     expect(r.cosheafId).toBe("abcd1234");
   });
@@ -149,7 +141,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "paper.md",
       bodyText: source,
-      formatId: COFLAT_FORMAT_ID,
     });
 
     expect(r.rewrittenContent).toBeNull();
@@ -162,13 +153,11 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "page.md",
       bodyText: "---\nid: one\n---\n# One\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "page.md",
       bodyText: "---\nid: two\n---\n# Two\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const rows = db
@@ -183,13 +172,11 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: same\n---\n# A\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const second = indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "b.md",
       bodyText: "---\nid: same\n---\n# B\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     expect(second.cosheafId).not.toBe("same");
@@ -208,7 +195,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath,
       bodyText: `---\nid: same\n---\n# ${filePath}\n`,
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, ingest("a.md"));
     const first = indexPage(db, ingest("b.md"));
@@ -226,7 +212,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "src.md",
       bodyText: "---\ntags:\n  - geometry\n  - lemma\n---\n# Source\n\n[@targetid] and [link](other.md#sec:part) and [[ignored]].\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const ftsRow = db
       .prepare("SELECT path, body FROM notes_fts WHERE workspace_slug = 'owner/w'")
@@ -254,7 +239,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "src.md",
       bodyText: "# Source\n\n[@targetid] and [link](other.md).\n",
-      formatId: "coflat",
     });
     const labels = (db
       .prepare("SELECT target_label FROM backlinks WHERE workspace_slug = 'owner/w' ORDER BY target_label")
@@ -268,19 +252,16 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "docs/target.md",
       bodyText: "---\nid: nested\n---\n# Nested\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "target.md",
       bodyText: "---\nid: root\n---\n# Root\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "docs/source.md",
       bodyText: "# Source\n\n[near](./target.md)\n[root](/target.md)\n",
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const links = db
@@ -310,7 +291,6 @@ describe("indexPage", () => {
         ":::",
         "",
       ].join("\n"),
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const targets = db
@@ -376,7 +356,6 @@ describe("indexPage", () => {
         "Target.",
         ":::",
       ].join("\n"),
-      formatId: COFLAT_FORMAT_ID,
     });
 
     const targets = db
@@ -395,7 +374,6 @@ describe("indexPage", () => {
       workspaceSlug: "owner/w",
       filePath: "cjk.md",
       bodyText: "# 紧性\n\n这是一个紧性定理。\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const row = db
       .prepare("SELECT path FROM notes_fts WHERE workspace_slug = 'owner/w' AND notes_fts MATCH ?")
@@ -405,7 +383,7 @@ describe("indexPage", () => {
 
   it("deletePage removes doc_map row and sidecar entries", () => {
     const db = freshDb();
-    indexPage(db, { workspaceSlug: "owner/w", filePath: "gone.md", bodyText: "# Gone", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "gone.md", bodyText: "# Gone" });
     expect(db.prepare("SELECT count(*) AS c FROM doc_map").get()).toEqual({ c: 1 });
     deletePage(db, "owner/w", "gone.md");
     expect(db.prepare("SELECT count(*) AS c FROM doc_map").get()).toEqual({ c: 0 });

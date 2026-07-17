@@ -36,19 +36,16 @@ describe("web diagnostics route", () => {
       workspaceSlug: "owner/w",
       filePath: "source.md",
       bodyText: "---\nid: source\n---\n# Source\n\nSee [@missing].\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "a.md",
       bodyText: "---\nid: a\n---\n# A\n\n::: {#thm:dup .theorem}\nA.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     indexPage(db, {
       workspaceSlug: "owner/w",
       filePath: "b.md",
       bodyText: "---\nid: b\n---\n# B\n\n::: {#thm:dup .theorem}\nB.\n:::\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/raw/README.md", () => new Response("not found", { status: 404 }));

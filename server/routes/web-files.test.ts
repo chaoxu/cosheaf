@@ -69,7 +69,6 @@ describe("web file editor route", () => {
       workspaceSlug: "owner/w",
       filePath: "README.md",
       bodyText: "---\nid: readme\n---\n# Read Me\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     let listedPulls = false;
@@ -138,8 +137,8 @@ describe("web file editor route", () => {
   it("renders the tag cloud and per-tag pages (#388)", async () => {
     const db = freshTestDb("cosheaf-web-files-");
     seedTestWorkspace(db, { default_md_format: COFLAT_FORMAT_ID });
-    indexPage(db, { workspaceSlug: "owner/w", filePath: "a.md", bodyText: "---\nid: a\ntitle: A\ntags: [alpha, rare]\n---\n# A\n", formatId: COFLAT_FORMAT_ID });
-    indexPage(db, { workspaceSlug: "owner/w", filePath: "b.md", bodyText: "---\nid: b\ntitle: B\ntags: [alpha]\n---\n# B\n", formatId: COFLAT_FORMAT_ID });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "a.md", bodyText: "---\nid: a\ntitle: A\ntags: [alpha, rare]\n---\n# A\n" });
+    indexPage(db, { workspaceSlug: "owner/w", filePath: "b.md", bodyText: "---\nid: b\ntitle: B\ntags: [alpha]\n---\n# B\n" });
     const token = seedAuthUser(db, config, { username: "alice", role: "read" });
     fetchMock.mockImplementation(
       fakeForgejo((forge) => {
@@ -1530,7 +1529,6 @@ describe("web file editor route", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: old\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
@@ -1576,7 +1574,6 @@ describe("web file editor route", () => {
       workspaceSlug: "owner/w",
       filePath: "old.md",
       bodyText: "---\nid: stable\n---\n# Old\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(
@@ -1782,7 +1779,6 @@ describe("web file editor route", () => {
       workspaceSlug: "owner/w",
       filePath: "notes.md",
       bodyText: "---\nid: notes\n---\n# Notes\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     const token = seedAuthUser(db, config, { username: "alice", role: "write" });
     fetchMock.mockImplementation(

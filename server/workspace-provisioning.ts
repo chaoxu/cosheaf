@@ -386,7 +386,6 @@ export async function reindexWorkspaceFromForgejo(
       workspaceSlug: workspace.slug,
       filePath: path,
       bodyText: body,
-      formatId: workspace.defaultMdFormat,
     }),
   }));
   for (const { path, plan } of plans) {

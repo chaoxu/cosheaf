@@ -225,7 +225,6 @@ webhooks.post("/forgejo", async (c) => {
             workspaceSlug: ws.slug,
             filePath: r.path,
             bodyText: r.body,
-            formatId: ws.defaultMdFormat,
           });
           indexed.push({ path: r.path, plan });
           plan.commit();

@@ -1,7 +1,6 @@
 import type Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { COFLAT_FORMAT_ID } from "../../shared/document-format.js";
 import { indexPage } from "../indexer.js";
 import {
   _resetMiddlewareCachesForTests,
@@ -187,7 +186,6 @@ describe("web repository settings", () => {
       workspaceSlug: "owner/w",
       filePath: "notes.md",
       bodyText: "---\nid: notes\n---\n# Notes\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     db.prepare(`
       INSERT INTO issue_claims (
@@ -227,7 +225,6 @@ describe("web repository settings", () => {
       workspaceSlug: "owner/w",
       filePath: "notes.md",
       bodyText: "---\nid: notes\n---\n# Notes\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/collaborators/:user/permission", () => Response.json({ permission: "admin" }));
@@ -255,7 +252,6 @@ describe("web repository settings", () => {
       workspaceSlug: "owner/w",
       filePath: "notes.md",
       bodyText: "---\nid: notes\n---\n# Notes\n",
-      formatId: COFLAT_FORMAT_ID,
     });
     fetchMock.mockImplementation(fakeForgejo((forge) => {
       forge.get("/api/v1/repos/owner/w/collaborators/:user/permission", () => new Response("not found", { status: 404 }));

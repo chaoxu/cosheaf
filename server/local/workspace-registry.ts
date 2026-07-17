@@ -241,7 +241,7 @@ export class WorkspaceRegistry {
   // Index a workspace's markdown + bib files into the shared sidecar, scoped by
   // its slug. Idempotent: re-indexing replaces the workspace's rows.
   async index(entry: WorkspaceEntry): Promise<{ pages: number; bibs: number }> {
-    const { owner, repo, defaultMdFormat } = entry.identity;
+    const { owner, repo } = entry.identity;
     const tree = await entry.backend.getTree(owner, repo, "main", true);
     const seenMarkdown = new Set<string>();
     const seenCitations = new Set<string>();
@@ -251,7 +251,7 @@ export class WorkspaceRegistry {
       if (node.type !== "blob") continue;
       if (fileKindForPath(node.path) === "markdown") {
         const content = await entry.backend.getRawFile(owner, repo, "main", node.path);
-        indexPage(this.db, { workspaceSlug: entry.slug, filePath: node.path, bodyText: content, formatId: defaultMdFormat });
+        indexPage(this.db, { workspaceSlug: entry.slug, filePath: node.path, bodyText: content });
         seenMarkdown.add(node.path);
         pages++;
       } else if (node.path.toLowerCase().endsWith(".bib")) {
