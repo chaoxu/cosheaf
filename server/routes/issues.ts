@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import type { IssueComment, IssueDetail, IssueRow } from "../../shared/issues.js";
 import { is404 } from "../forgejo-errors.js";
@@ -10,10 +10,10 @@ import {
   heartbeatClaim,
   releaseClaim,
 } from "../issue-claims.js";
-import { repoCtxCollab, requireAuth, requireMembership, requireWriteOnMutation } from "../middleware.js";
+import { repoCtxCollab, requireAuth, requireMembership, writeOnMutationExcept } from "../middleware.js";
 import type { AppEnv } from "../types.js";
 import { normalizeLabelColor, parsePositiveLabelIds, validateLabelSelection } from "./label-utils.js";
-import { parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
+import { intParam, parseBoundedPositiveInt, parseListState, parsePositiveIntId, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
 import { bad, conflict, notFound } from "./responses.js";
 import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
 
@@ -76,19 +76,10 @@ function parseIssueSort(value: string | undefined): IssueSort | undefined {
 
 const issueCommentMutationRe = /\/issues\/(?:\d+\/comments(?:\/\d+)?|comments\/\d+)$/;
 
-const requireIssueWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const method = c.req.method.toUpperCase();
-  if ((method === "POST" || method === "PATCH" || method === "DELETE") && issueCommentMutationRe.test(c.req.path)) {
-    await next();
-    return;
-  }
-  return requireWriteOnMutation(c, next);
-};
-
 export const issues = new Hono<AppEnv>();
 issues.use("*", requireAuth);
 issues.use("/:owner/:repo/*", requireMembership());
-issues.use("/:owner/:repo/*", requireIssueWriteOnMutation);
+issues.use("/:owner/:repo/*", writeOnMutationExcept(issueCommentMutationRe));
 
 // Typed because the public API needs an issue-only row shape and "mine"
 // composes two Forgejo filters (created_by OR assigned_by).
@@ -167,8 +158,8 @@ issues.get("/:owner/:repo/issues/pinned", async (c) => {
 // deleted-user fallback and normalized timestamps.
 issues.get("/:owner/:repo/issues/:number", async (c) => {
   const { collab, owner, repo } = repoCtxCollab(c);
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   try {
     const issue = await collab.getIssue(owner, repo, number);
     const detail: IssueDetail = { ...issue };
@@ -189,8 +180,8 @@ issues.get("/:owner/:repo/issues/:number", async (c) => {
 // can avoid duplicate work (#95). This is local coordination state, not durable
 // issue ownership or cross-server collaboration authority.
 issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const runnerName = typeof body.runner_name === "string" ? body.runner_name.trim() : "";
   if (!runnerName) return c.json(...bad("runner_name required"));
@@ -212,8 +203,8 @@ issues.post("/:owner/:repo/issues/:number/claim", async (c) => {
 });
 
 issues.patch("/:owner/:repo/issues/:number/claim/:id/heartbeat", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const now = Date.now();
   const target = await requireTypedIssue(c, number);
@@ -230,8 +221,8 @@ issues.patch("/:owner/:repo/issues/:number/claim/:id/heartbeat", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/claim/:id", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const released = releaseClaim(c.get("db"), {
     slug: c.get("workspace").slug,
     issueNumber: number,
@@ -267,8 +258,8 @@ issues.post("/:owner/:repo/issues", async (c) => {
 
 issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
   const ws = c.get("workspace");
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   if (body?.state !== "open" && body?.state !== "closed") return c.json(...bad("state must be open or closed"));
   const { collab, owner, repo } = repoCtxCollab(c);
@@ -281,8 +272,8 @@ issues.patch("/:owner/:repo/issues/:number/state", async (c) => {
 
 issues.patch("/:owner/:repo/issues/:number", async (c) => {
   const ws = c.get("workspace");
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const parsed = parseTitleBodyPatch(body);
   if (!parsed.ok) return c.json(...bad(parsed.message));
@@ -310,16 +301,16 @@ issues.patch("/:owner/:repo/issues/:number", async (c) => {
 });
 
 issues.get("/:owner/:repo/issues/:number/comments", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const { collab, owner, repo } = repoCtxCollab(c);
   const comments = await collab.listIssueComments(owner, repo, number);
   return c.json({ comments });
 });
 
 issues.get("/:owner/:repo/issues/comments/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad comment id"));
+  const id = intParam(c, "id", "bad comment id");
+  if (id instanceof Response) return id;
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
     return c.json(await collab.getIssueComment(owner, repo, id));
@@ -330,8 +321,8 @@ issues.get("/:owner/:repo/issues/comments/:id", async (c) => {
 });
 
 issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
@@ -344,10 +335,10 @@ issues.post("/:owner/:repo/issues/:number/comments", async (c) => {
 });
 
 issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (number === null) return c.json(...bad("bad number"));
-  if (id === null) return c.json(...bad("bad comment id"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
+  const id = intParam(c, "id", "bad comment id");
+  if (id instanceof Response) return id;
   const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
@@ -359,10 +350,10 @@ issues.patch("/:owner/:repo/issues/:number/comments/:id", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (number === null) return c.json(...bad("bad number"));
-  if (id === null) return c.json(...bad("bad comment id"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
+  const id = intParam(c, "id", "bad comment id");
+  if (id instanceof Response) return id;
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireIssueComment(c, number, id);
   if (target instanceof Response) return target;
@@ -377,8 +368,8 @@ issues.delete("/:owner/:repo/issues/:number/comments/:id", async (c) => {
 // the cross-issue safety check; here Forgejo enforces author/admin rights on the
 // mutation and that the comment belongs to this repo.
 issues.patch("/:owner/:repo/issues/comments/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad comment id"));
+  const id = intParam(c, "id", "bad comment id");
+  if (id instanceof Response) return id;
   const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const { collab, owner, repo } = repoCtxCollab(c);
@@ -392,8 +383,8 @@ issues.patch("/:owner/:repo/issues/comments/:id", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/comments/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad comment id"));
+  const id = intParam(c, "id", "bad comment id");
+  if (id instanceof Response) return id;
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
     await collab.deleteIssueComment(owner, repo, id);
@@ -427,8 +418,8 @@ issues.post("/:owner/:repo/labels", async (c) => {
 });
 
 issues.patch("/:owner/:repo/labels/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad label id"));
+  const id = intParam(c, "id", "bad label id");
+  if (id instanceof Response) return id;
   const body = await readJsonObject(c.req);
   const patch: { name?: string; color?: string; description?: string; exclusive?: boolean } = {};
   if (typeof body?.name === "string") {
@@ -450,8 +441,8 @@ issues.patch("/:owner/:repo/labels/:id", async (c) => {
 });
 
 issues.delete("/:owner/:repo/labels/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad label id"));
+  const id = intParam(c, "id", "bad label id");
+  if (id instanceof Response) return id;
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
     await collab.deleteLabel(owner, repo, id);
@@ -463,8 +454,8 @@ issues.delete("/:owner/:repo/labels/:id", async (c) => {
 });
 
 issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const labelIds = parsePositiveLabelIds(body.labels);
   if (labelIds === null) {
@@ -481,8 +472,8 @@ issues.put("/:owner/:repo/issues/:number/labels", async (c) => {
 });
 
 issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
@@ -491,8 +482,8 @@ issues.post("/:owner/:repo/issues/:number/pin", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/pin", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const { collab, owner, repo } = repoCtxCollab(c);
   const target = await requireTypedIssue(c, number);
   if (target instanceof Response) return target;
@@ -520,8 +511,8 @@ issues.post("/:owner/:repo/milestones", async (c) => {
 });
 
 issues.patch("/:owner/:repo/milestones/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad milestone id"));
+  const id = intParam(c, "id", "bad milestone id");
+  if (id instanceof Response) return id;
   const body = await readJsonObject(c.req);
   const patch: { title?: string; description?: string; state?: "open" | "closed" } = {};
   if (typeof body?.title === "string") {
@@ -538,8 +529,8 @@ issues.patch("/:owner/:repo/milestones/:id", async (c) => {
 });
 
 issues.delete("/:owner/:repo/milestones/:id", async (c) => {
-  const id = parsePositiveIntId(c.req.param("id"));
-  if (id === null) return c.json(...bad("bad milestone id"));
+  const id = intParam(c, "id", "bad milestone id");
+  if (id instanceof Response) return id;
   const { collab, owner, repo } = repoCtxCollab(c);
   try {
     await collab.deleteMilestone(owner, repo, id);
@@ -551,8 +542,8 @@ issues.delete("/:owner/:repo/milestones/:id", async (c) => {
 });
 
 issues.patch("/:owner/:repo/issues/:number/milestone", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const milestoneId = body.id === null ? 0 : typeof body.id === "number" ? parsePositiveIntId(body.id) : null;
   if (milestoneId === null) return c.json(...bad("milestone id must be a positive integer or null"));
@@ -574,24 +565,24 @@ issues.post("/:owner/:repo/markdown/render", async (c) => {
 // Typed because Forgejo's dependency mutation body redundantly requires the
 // owner/repo, which clients should not know.
 issues.get("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listIssueDependencies(owner, repo, number);
   return c.json({ issues: list });
 });
 
 issues.get("/:owner/:repo/issues/:number/blocks", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const { collab, owner, repo } = repoCtxCollab(c);
   const list = await collab.listIssueBlocks(owner, repo, number);
   return c.json({ issues: list });
 });
 
 issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const index = parsePositiveIntId(body.index);
   if (index === null) {
@@ -606,8 +597,8 @@ issues.post("/:owner/:repo/issues/:number/dependencies", async (c) => {
 });
 
 issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const index = parsePositiveIntId(body.index);
   if (index === null) {
@@ -624,8 +615,8 @@ issues.delete("/:owner/:repo/issues/:number/dependencies", async (c) => {
 // issue number in the body); the forge's removeIssueBlock returns void, so the
 // response is a bare ok.
 issues.delete("/:owner/:repo/issues/:number/blocks", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const body = await readJsonObject(c.req);
   const index = parsePositiveIntId(body.index);
   if (index === null) {
@@ -647,8 +638,8 @@ issues.get("/:owner/:repo/activities", async (c) => {
 // Typed because public API clients use a narrowed event DTO with normalized
 // label/milestone/dependency references.
 issues.get("/:owner/:repo/issues/:number/timeline", async (c) => {
-  const number = parsePositiveIntId(c.req.param("number"));
-  if (number === null) return c.json(...bad("bad number"));
+  const number = intParam(c, "number", "bad number");
+  if (number instanceof Response) return number;
   const { collab, owner, repo } = repoCtxCollab(c);
   const events = await collab.listIssueTimeline(owner, repo, number);
   // Forgejo returns null instead of [] for some empty issue timelines.

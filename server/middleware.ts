@@ -161,6 +161,22 @@ export const requireWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next)
   await next();
 };
 
+// On a mutation (POST/PATCH/DELETE) whose path matches `allowRe`, allow it with
+// membership only — the route runs its own author/permission gate (e.g. a
+// write-access member can comment or review). Every other mutation defers to
+// requireWriteOnMutation. GET/HEAD/OPTIONS also fall through to it (which lets
+// them pass). Used by the pull/issue discussion routes.
+export function writeOnMutationExcept(allowRe: RegExp): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const method = c.req.method.toUpperCase();
+    if ((method === "POST" || method === "PATCH" || method === "DELETE") && allowRe.test(c.req.path)) {
+      await next();
+      return;
+    }
+    return requireWriteOnMutation(c, next);
+  };
+}
+
 // Cached collaborator-role lookup. Shared by requireMembership and the
 // server-rendered web path (resolveWebRepo) so both surfaces see the same
 // role within the same TTL window.

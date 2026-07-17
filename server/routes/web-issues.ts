@@ -40,6 +40,7 @@ import {
   renderIssueTimeline,
   resolveMutableIssue,
   threadDescription,
+  threadHeader,
   threadLayout,
   threadListRow,
   threadParticipantsBar,
@@ -162,28 +163,25 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
   return htmlResponse(
     repoPageShell(ctx, "issues", `#${issue.number} ${issue.title}`, html`
         <article class="thread">
-          <header class="thread-header">
-            <span class="state ${issue.state}">${issue.state}</span>
-            <div class="thread-title-row">
-              <h1>${issue.title} <span>#${issue.number}</span></h1>
-              ${
-                canEditIssue
-                  ? html`<div class="toolbar-actions">
-                      <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}" data-testid="issue-edit-button">Edit issue</a>
-                      <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
-                        <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
-                        <button class="button" type="submit" data-testid="issue-toggle-pin">${isPinned ? "Unpin" : "Pin issue"}</button>
-                      </form>
-                      <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/state`)}">
-                        <input type="hidden" name="state" value="${nextIssueState}">
-                        <button class="button" type="submit" data-testid="issue-toggle-state">${stateActionLabel}</button>
-                      </form>
-                    </div>`
-                  : ""
-              }
-            </div>
-            <p>${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.author?.login ?? issue.author_username, ctx.local)} - ${timeEl(issue.created_at)}</p>
-          </header>
+          ${threadHeader({
+            state: issue.state,
+            title: issue.title,
+            number: issue.number,
+            actions: canEditIssue
+              ? html`<div class="toolbar-actions">
+                  <a class="button" href="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/edit`)}" data-testid="issue-edit-button">Edit issue</a>
+                  <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/pin`)}">
+                    <input type="hidden" name="pinned" value="${isPinned ? "false" : "true"}">
+                    <button class="button" type="submit" data-testid="issue-toggle-pin">${isPinned ? "Unpin" : "Pin issue"}</button>
+                  </form>
+                  <form method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/state`)}">
+                    <input type="hidden" name="state" value="${nextIssueState}">
+                    <button class="button" type="submit" data-testid="issue-toggle-state">${stateActionLabel}</button>
+                  </form>
+                </div>`
+              : emptyHtml,
+            byline: html`${isPinned ? html`<span class="meta-pill">pinned</span> ` : ""}by ${userLink(issue.author?.login ?? issue.author_username, ctx.local)} - ${timeEl(issue.created_at)}`,
+          })}
           ${chatBackedIssue ? html`<div class="chat-readonly-notice">This chat-backed issue is read-only in the issue UI.</div>` : ""}
           ${threadLayout(main, railPanels)}
         </article>

@@ -26,7 +26,7 @@
 //
 // Branches live in routes/branches.ts.
 
-import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { type Context, Hono } from "hono";
 import { isDocumentFormatId, normalizeDocumentFormatId } from "../../shared/document-format.js";
 import type { RepoCollaborator } from "../../shared/repo.js";
 import type { MergeFailure, MergeFailureReason, PrMeta, PrState, ReviewDto } from "../../shared/review.js";
@@ -43,14 +43,14 @@ import {
   requireAdminFresh,
   requireAuth,
   requireMembership,
-  requireWriteOnMutation,
+  writeOnMutationExcept,
 } from "../middleware.js";
 import { prSideRefAndPath } from "../pr-side.js";
 import { invalidateRepoTrees } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
 import { safeRel } from "./files.js";
 import { parsePositiveLabelIds, validateLabelSelection } from "./label-utils.js";
-import { parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
+import { intParam, parseListState, parsePositiveInt, parsePositiveIntId, parsePositiveIntList, parseTitleBodyPatch, readJsonBody, readJsonObject, requireCommentBody } from "./query-params.js";
 import { scrubBackendUrls, wantsTeaShape } from "./tea-compat.js";
 
 export const pulls = new Hono<AppEnv>();
@@ -59,16 +59,7 @@ pulls.use("/:owner/:repo/*", requireMembership());
 
 const pullDiscussionMutationRe = /\/pulls\/\d+\/(?:reviews|comments(?:\/\d+)?)$/;
 
-const requirePullWriteOnMutation: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const method = c.req.method.toUpperCase();
-  if ((method === "POST" || method === "PATCH" || method === "DELETE") && pullDiscussionMutationRe.test(c.req.path)) {
-    await next();
-    return;
-  }
-  return requireWriteOnMutation(c, next);
-};
-
-pulls.use("/:owner/:repo/*", requirePullWriteOnMutation);
+pulls.use("/:owner/:repo/*", writeOnMutationExcept(pullDiscussionMutationRe));
 
 import { bad, conflict, forbidden, notFound } from "./responses.js";
 
@@ -280,8 +271,8 @@ pulls.get("/:owner/:repo/pulls", async (c) => {
 });
 
 pulls.get("/:owner/:repo/pulls/:n", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
@@ -335,8 +326,8 @@ pulls.post("/:owner/:repo/pulls", async (c) => {
 });
 
 pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const body = await readJsonObject(c.req);
   const parsed = parseTitleBodyPatch(body);
   if (!parsed.ok) return c.json(...bad(parsed.message));
@@ -359,8 +350,8 @@ pulls.patch("/:owner/:repo/pulls/:n", async (c) => {
 });
 
 pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const body = await readJsonObject(c.req);
   const labelIds = parsePositiveLabelIds(body.labels);
   if (labelIds === null) {
@@ -381,8 +372,8 @@ pulls.put("/:owner/:repo/pulls/:n/labels", async (c) => {
 
 
 pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const body = await readJsonObject(c.req);
   const { collab, owner, repo } = repoCtxCollab(c);
   // Admins can bypass the required-approvals branch protection rule by
@@ -437,8 +428,8 @@ pulls.post("/:owner/:repo/pulls/:n/merge", requireAdminFresh, async (c) => {
 });
 
 pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const ws = c.get("workspace");
   const { collab, owner, repo } = repoCtxCollab(c);
   await collab.setPullState(owner, repo, n, "closed");
@@ -447,8 +438,8 @@ pulls.post("/:owner/:repo/pulls/:n/close", async (c) => {
 });
 
 pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const ws = c.get("workspace");
   const { collab, owner, repo } = repoCtxCollab(c);
   await collab.setPullState(owner, repo, n, "open");
@@ -459,24 +450,24 @@ pulls.post("/:owner/:repo/pulls/:n/reopen", async (c) => {
 // ---------- diff + raw file at a side ----------
 
 pulls.get("/:owner/:repo/pulls/:n/files", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const files = await collab.listPullFiles(owner, repo, n);
   return c.json({ files });
 });
 
 pulls.get("/:owner/:repo/pulls/:n/commits", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const commits = await collab.listPullCommits(owner, repo, n);
   return c.json({ commits });
 });
 
 pulls.get("/:owner/:repo/pulls/:n/file", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   // Apply the same repo-path safety check the file route uses (rejects
   // absolute, traversal, encoded-traversal, backslash, control chars).
   const path = safeRel(c.req.query("path"));
@@ -529,8 +520,8 @@ function parseOptionalReviewBody(value: unknown): { ok: true; body: string } | {
 }
 
 pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const reviews = await collab.listReviews(owner, repo, n);
   // Include the caller's OWN pending (draft) review. This lets the staged
@@ -556,8 +547,8 @@ pulls.get("/:owner/:repo/pulls/:n/reviews", async (c) => {
 });
 
 pulls.post("/:owner/:repo/pulls/:n/reviews", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const payload = await readJsonObject(c.req);
   const event = typeof payload.event === "string" ? payload.event : undefined;
   if (!event || !Object.hasOwn(EVENT_MAP, event))
@@ -592,8 +583,8 @@ function parseReviewers(raw: unknown): string[] | null {
 }
 
 pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const [pull, reviewers] = await Promise.all([
     collab.getPull(owner, repo, n),
@@ -608,8 +599,8 @@ pulls.get("/:owner/:repo/pulls/:n/review-requests", async (c) => {
 });
 
 pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const body = await readJsonObject(c.req);
   const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
@@ -622,8 +613,8 @@ pulls.post("/:owner/:repo/pulls/:n/review-requests", async (c) => {
 });
 
 pulls.delete("/:owner/:repo/pulls/:n/review-requests", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const body = await readJsonObject(c.req);
   const reviewers = parseReviewers(body.reviewers);
   if (!reviewers) return c.json(...bad("reviewers required"));
@@ -668,16 +659,16 @@ async function resolveLinePosition(
 }
 
 pulls.get("/:owner/:repo/pulls/:n/comments", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const comments = await collab.listPullComments(owner, repo, n);
   return c.json({ comments });
 });
 
 pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   // Validate the body BEFORE touching Forgejo so malformed requests don't
   // burn a getPull call.
   const input = parseCommentInput(await readJsonBody(c.req));
@@ -707,10 +698,10 @@ pulls.post("/:owner/:repo/pulls/:n/comments", async (c) => {
 });
 
 pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  const cid = parsePositiveIntId(c.req.param("cid"));
-  if (n === null) return c.json(...bad("bad pull number"));
-  if (cid === null) return c.json(...bad("bad comment id"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
+  const cid = intParam(c, "cid", "bad comment id");
+  if (cid instanceof Response) return cid;
   const parsed = requireCommentBody(await readJsonBody(c.req));
   if (!parsed.ok) return c.json(...bad(parsed.message));
   const text = parsed.text;
@@ -730,11 +721,11 @@ pulls.patch("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
 });
 
 pulls.delete("/:owner/:repo/pulls/:n/comments/:cid", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  const cid = parsePositiveIntId(c.req.param("cid"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
+  const cid = intParam(c, "cid", "bad comment id");
+  if (cid instanceof Response) return cid;
   const rid = parsePositiveIntId(c.req.query("review_id"));
-  if (n === null) return c.json(...bad("bad pull number"));
-  if (cid === null) return c.json(...bad("bad comment id"));
   if (rid === null) return c.json(...bad("bad review id"));
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
@@ -792,8 +783,8 @@ async function requireOwnPendingReview(
 }
 
 pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  if (n === null) return c.json(...bad("bad pull number"));
+  const n = intParam(c, "n", "bad pull number");
+  if (n instanceof Response) return n;
   const { collab, owner, repo } = repoCtxCollab(c);
   const pull = await collab.getPull(owner, repo, n);
   if (!pull) return c.json(...notFound());
@@ -804,9 +795,10 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review", async (c) => {
 });
 
 pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  const rid = parsePositiveIntId(c.req.param("rid"));
-  if (n === null || rid === null) return c.json(...bad("bad ids"));
+  const n = intParam(c, "n", "bad ids");
+  if (n instanceof Response) return n;
+  const rid = intParam(c, "rid", "bad ids");
+  if (rid instanceof Response) return rid;
   const ws = c.get("workspace");
   const input = parseCommentInput(await readJsonBody(c.req));
   if (!input) return c.json(...bad("path, line, side, body required"));
@@ -830,9 +822,10 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/comments", async (c) => {
 // skips the local line→position resolution and hands the positions straight to
 // addCommentToReview. The same own-pending-review gate applies.
 pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/review-comments", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  const rid = parsePositiveIntId(c.req.param("rid"));
-  if (n === null || rid === null) return c.json(...bad("bad ids"));
+  const n = intParam(c, "n", "bad ids");
+  if (n instanceof Response) return n;
+  const rid = intParam(c, "rid", "bad ids");
+  if (rid instanceof Response) return rid;
   const ws = c.get("workspace");
   const body = await readJsonObject(c.req);
   const path = typeof body.path === "string" ? safeRel(body.path) : null;
@@ -858,9 +851,10 @@ pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/review-comments", async (
 });
 
 pulls.post("/:owner/:repo/pulls/:n/pending-review/:rid/submit", async (c) => {
-  const n = parsePositiveIntId(c.req.param("n"));
-  const rid = parsePositiveIntId(c.req.param("rid"));
-  if (n === null || rid === null) return c.json(...bad("bad ids"));
+  const n = intParam(c, "n", "bad ids");
+  if (n instanceof Response) return n;
+  const rid = intParam(c, "rid", "bad ids");
+  if (rid instanceof Response) return rid;
   const body = await readJsonObject(c.req);
   const event = typeof body.event === "string" ? body.event : undefined;
   if (!event) return c.json(...bad("event required"));

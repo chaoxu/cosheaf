@@ -164,6 +164,32 @@ export function threadLayout(main: Html, railPanels: readonly Html[]): Html {
   </div>`;
 }
 
+// The shared thread header: state badge + title row (h1 + #number + caller-owned
+// actions), an optional byline <p>, and optional subtabs. The issue thread, the
+// PR conversation, and the PR files-changed page all render through this.
+// `state` is both the badge class suffix and its text. `actions` is dropped
+// straight into the title row after the <h1> — the caller owns any
+// `.toolbar-actions` wrapper (the files-changed header has none). `byline` and
+// `subtabs`, when omitted, drop their whole element.
+export function threadHeader(opts: {
+  state: string;
+  title: string;
+  number: number;
+  actions: Html;
+  byline?: Html;
+  subtabs?: Html;
+}): Html {
+  return html`<header class="thread-header">
+    <span class="state ${opts.state}">${opts.state}</span>
+    <div class="thread-title-row">
+      <h1>${opts.title} <span>#${opts.number}</span></h1>
+      ${opts.actions}
+    </div>
+    ${opts.byline ? html`<p>${opts.byline}</p>` : emptyHtml}
+    ${opts.subtabs ? html`<nav class="subtabs">${opts.subtabs}</nav>` : emptyHtml}
+  </header>`;
+}
+
 // The issue/PR description block. Renders the body markdown, or — when the body
 // is empty — a muted "No description." rather than an empty reader island that
 // would show as a tall bordered band (#135). The `.issue-document` class is

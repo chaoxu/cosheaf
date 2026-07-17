@@ -11,7 +11,6 @@ import {
   redirect,
   repoHref,
   stringField,
-  type WebCtx,
   webRoute,
   webRouteForWrite,
 } from "../routes/web-context.js";
@@ -19,13 +18,7 @@ import { emptyHtml, html } from "../routes/web-html.js";
 import { repoPageShell } from "../routes/web-page.js";
 import { friendlyLine } from "./git-errors.js";
 import { publishLocalGitEvent } from "./local-events.js";
-import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
-
-// The web ctx's backend is always the resolved workspace's LocalGitWorkspaceBackend
-// in local mode (resolveWebRepo sets it); narrow to reach the Tier-1 git ops.
-function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
-  return ctx.backend as LocalGitWorkspaceBackend;
-}
+import { localBackend } from "./local-mode.js";
 
 export function registerLocalCommitRoutes(web: Hono<AppEnv>): void {
   web.get("/:owner/:repo/commit", webRoute(async (c, ctx) => {

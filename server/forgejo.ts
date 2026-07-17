@@ -218,6 +218,21 @@ export class Forgejo {
     return out;
   }
 
+  // Like pagedList, but for Forgejo *search* endpoints that wrap each page in
+  // `{ data: T[] }` instead of returning a bare array. Same page-walk + 50-page
+  // runaway guard; the limit query param is always `limit` for these.
+  private async pagedListWrapped<T>(p: string, query: RequestOpts["query"] = {}): Promise<T[]> {
+    const out: T[] = [];
+    for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
+      const res = await this.req<{ data?: T[] }>(p, { query: { ...query, page, limit: FORGEJO_PAGE_SIZE } });
+      const batch = res.data ?? [];
+      if (batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < FORGEJO_PAGE_SIZE) break;
+    }
+    return out;
+  }
+
   // Compose a repo-scoped Forgejo URL. All repo-bound methods share this so
   // a rename of Forgejo's path shape (or a future owner-encoding tweak)
   // changes one place.
@@ -262,17 +277,7 @@ export class Forgejo {
   }
 
   async listUsers(): Promise<ForgejoUser[]> {
-    const out: ForgejoUser[] = [];
-    for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
-      const result = await this.req<ForgejoUserSearchResponse>("/api/v1/users/search", {
-        query: { q: "", page, limit: FORGEJO_PAGE_SIZE },
-      });
-      const batch = result.data ?? [];
-      if (batch.length === 0) break;
-      out.push(...batch);
-      if (batch.length < FORGEJO_PAGE_SIZE) break;
-    }
-    return out;
+    return this.pagedListWrapped<ForgejoUser>("/api/v1/users/search", { q: "" });
   }
 
   // Set the authenticated user's avatar (#150). `image` is the base64 of the
@@ -376,17 +381,7 @@ export class Forgejo {
   // discovery shows every accessible repo, not only `cosheaf-format-*` tagged
   // ones; Cosheaf markdown is always Coflat.
   async searchAllAccessibleRepos(): Promise<ForgejoRepo[]> {
-    const out: ForgejoRepo[] = [];
-    for (let page = 1; page <= FORGEJO_MAX_PAGES; page++) {
-      const res = await this.req<{ data?: ForgejoRepo[] }>("/api/v1/repos/search", {
-        query: { page, limit: FORGEJO_PAGE_SIZE },
-      });
-      const batch = res.data ?? [];
-      if (batch.length === 0) break;
-      out.push(...batch);
-      if (batch.length < FORGEJO_PAGE_SIZE) break;
-    }
-    return out;
+    return this.pagedListWrapped<ForgejoRepo>("/api/v1/repos/search");
   }
 
   async getRepo(owner: string, repo: string): Promise<ForgejoRepo | null> {

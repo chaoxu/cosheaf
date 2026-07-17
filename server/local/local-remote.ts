@@ -22,15 +22,38 @@ import { emptyHtml, type Html, html } from "../routes/web-html.js";
 import type { AppEnv } from "../types.js";
 import { friendlyLine } from "./git-errors.js";
 import { publishLocalGitEvent } from "./local-events.js";
-import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
-import { resolveLocalWorkspace } from "./local-mode.js";
+import { localBackend, resolveLocalWorkspace } from "./local-mode.js";
 import { writeRemote } from "./local-workspace.js";
 import { OriginCollaborationClient } from "./origin-collaboration-client.js";
 import { remoteHostLabel, savedRemoteDisplayLabel } from "./saved-remotes.js";
 import type { SelectableRemoteCredential, WorkspaceEntry } from "./workspace-registry.js";
 
-function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
-  return ctx.backend as LocalGitWorkspaceBackend;
+// Validate a pasted Cosheaf URL + token: parse the URL, require http/https, and
+// probe it with a whoami. The kind lets each caller keep its own exact wording
+// and response type (badRequestPage vs redirect toast); `detail` carries the
+// friendly reachability line for the "unreachable" case.
+export type RemoteProbe =
+  | { ok: true; username: string }
+  | { ok: false; kind: "invalid_url" | "bad_protocol" | "unreachable" | "rejected"; detail: string };
+
+export async function probeRemote(url: string, token: string): Promise<RemoteProbe> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch (_err) {
+    return { ok: false, kind: "invalid_url", detail: "" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, kind: "bad_protocol", detail: "" };
+  }
+  let who: { username: string } | null;
+  try {
+    who = await new OriginCollaborationClient(url, token).whoami();
+  } catch (err) {
+    return { ok: false, kind: "unreachable", detail: friendlyLine(err) };
+  }
+  if (!who) return { ok: false, kind: "rejected", detail: "" };
+  return { ok: true, username: who.username };
 }
 
 // The Connect form — shared by the not-connected state (shown prominently) and
@@ -109,22 +132,19 @@ export function registerLocalRemoteRoutes(web: Hono<AppEnv>): void {
       const url = saved?.url ?? stringField(form.url)?.trim();
       const token = saved?.token ?? stringField(form.token)?.trim();
       if (!url || !token) return badRequestPage(ctx.user, "Both a Cosheaf URL and an API token are required.");
-      let parsed: URL;
-      try {
-        parsed = new URL(url);
-      } catch (_err) {
-        return badRequestPage(ctx.user, "That doesn't look like a valid URL.");
+      const probe = await probeRemote(url, token);
+      if (!probe.ok) {
+        const message =
+          probe.kind === "invalid_url"
+            ? "That doesn't look like a valid URL."
+            : probe.kind === "bad_protocol"
+              ? "The Cosheaf URL must start with http:// or https://."
+              : probe.kind === "unreachable"
+                ? `Couldn't reach that Cosheaf: ${probe.detail}`
+                : "The Cosheaf rejected that token. Double-check it and try again.";
+        return badRequestPage(ctx.user, message);
       }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        return badRequestPage(ctx.user, "The Cosheaf URL must start with http:// or https://.");
-      }
-      let who: { username: string } | null;
-      try {
-        who = await new OriginCollaborationClient(url, token).whoami();
-      } catch (err) {
-        return badRequestPage(ctx.user, `Couldn't reach that Cosheaf: ${friendlyLine(err)}`);
-      }
-      if (!who) return badRequestPage(ctx.user, "The Cosheaf rejected that token. Double-check it and try again.");
+      const who = { username: probe.username };
       const entry = resolveLocalWorkspace(c.get("localRegistry"), ctx.owner, ctx.repo)?.entry;
       if (!entry) return badRequestPage(ctx.user, "Workspace not found.");
       writeRemote(entry.path, { url, token });

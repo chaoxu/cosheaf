@@ -38,7 +38,7 @@ import {
   webRouteForAdmin,
   webRouteForWrite,
 } from "./web-context.js";
-import { type Html, html } from "./web-html.js";
+import { emptyHtml, type Html, html } from "./web-html.js";
 import { composeField } from "./web-markdown.js";
 import { branchOptions, filterPanel, repoPageShell, selected, sortField, stateToggle, USERNAME_DATALIST_ID } from "./web-page.js";
 import {
@@ -66,6 +66,7 @@ import {
   reviewersPanel,
   reviewForms,
   threadDescription,
+  threadHeader,
   threadLayout,
   threadListRow,
   threadParticipantsBar,
@@ -224,8 +225,8 @@ web.post("/:owner/:repo/pulls/new", webRouteForWrite(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  const pull = await resolvePull(ctx, c.req.param("number"));
+  if (pull instanceof Response) return pull;
   const canRequestReview = ctx.ws.role !== "read" && pull.state !== "closed";
   const [issueComments, reviews, comments, timeline, commits, availableReviewers, allLabels] = await Promise.all([
     ctx.collab.listIssueComments(ctx.owner, ctx.repo, pull.number),
@@ -255,11 +256,11 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
       `#${pull.number} ${pull.title}`,
       html`
         <article class="thread">
-          <header class="thread-header">
-            <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
-            <div class="thread-title-row">
-              <h1>${pull.title} <span>#${pull.number}</span></h1>
-              <div class="toolbar-actions">
+          ${threadHeader({
+            state: pull.merged ? "merged" : pull.state,
+            title: pull.title,
+            number: pull.number,
+            actions: html`<div class="toolbar-actions">
                 ${
                   ctx.ws.role === "read" || pull.state === "closed"
                     ? ""
@@ -267,14 +268,11 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
                 }
                 ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head_ref)}">View branch output</a>`}
                 ${pullStateForm(ctx, pull)}
-              </div>
-            </div>
-            <p>by ${userLink(pull.author_username, ctx.local)}${pull.base_ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base_ref}</code>` : ""}</p>
-            <nav class="subtabs">
-              <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
-              <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
-            </nav>
-          </header>
+              </div>`,
+            byline: html`by ${userLink(pull.author_username, ctx.local)}${pull.base_ref !== "main" ? html` · into <code class="branch-ref">${branchIcon({ size: 12 })}${pull.base_ref}</code>` : ""}`,
+            subtabs: html`<a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
+              <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>`,
+          })}
           ${threadLayout(
             html`${threadParticipantsBar({ login: pull.author_username }, conversation, ctx.local)}
               ${await threadDescription(ctx, pull.body ?? "")}
@@ -295,9 +293,8 @@ web.get("/:owner/:repo/pulls/:number", webRoute(async (c, ctx) => {
 }));
 
 web.get("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+  if (pull instanceof Response) return pull;
   const [allLabels, milestones] = await Promise.all([
     ctx.collab.listLabels(ctx.owner, ctx.repo),
     ctx.collab.listMilestones(ctx.owner, ctx.repo, "all"),
@@ -308,9 +305,8 @@ web.get("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
 }));
 
 web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+  if (pull instanceof Response) return pull;
   const form = await c.req.parseBody({ all: true });
   const title = stringField(form.title);
   const body = textField(form.body);
@@ -331,8 +327,8 @@ web.post("/:owner/:repo/pulls/:number/edit", webRouteForWrite(async (c, ctx) => 
 web.post("/:owner/:repo/pulls/:number/labels", webRouteForWrite(async (c, ctx) => {
   // Inline label editing from the rail Labels panel (#110): set the selected
   // label ids via Forgejo and return to the PR thread.
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  const pull = await resolvePull(ctx, c.req.param("number"));
+  if (pull instanceof Response) return pull;
   const labelPatch = await labelSelectionPatch(ctx, await c.req.parseBody({ all: true }), pull.labels ?? []);
   if (!labelPatch.ok) return badRequestPage(ctx.user, labelPatch.message);
   if (labelPatch.labels) await ctx.collab.editPull(ctx.owner, ctx.repo, pull.number, { labels: labelPatch.labels });
@@ -341,9 +337,8 @@ web.post("/:owner/:repo/pulls/:number/labels", webRouteForWrite(async (c, ctx) =
 }));
 
 web.post("/:owner/:repo/pulls/:number/state", webRouteForWrite(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.merged) return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectMerged: true });
+  if (pull instanceof Response) return pull;
   const state = stringField((await c.req.parseBody()).state);
   if (state !== "open" && state !== "closed") return badRequestPage(ctx.user, "State must be open or closed.");
   await ctx.collab.setPullState(ctx.owner, ctx.repo, pull.number, state);
@@ -352,9 +347,8 @@ web.post("/:owner/:repo/pulls/:number/state", webRouteForWrite(async (c, ctx) =>
 }));
 
 web.post("/:owner/:repo/pulls/:number/review-requests", webRouteForWrite(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+  if (pull instanceof Response) return pull;
   const form = await c.req.parseBody({ all: true });
   const reviewers = stringFields(form.reviewers);
   if (reviewers.length === 0) return badRequestPage(ctx.user, "At least one reviewer is required.");
@@ -363,9 +357,8 @@ web.post("/:owner/:repo/pulls/:number/review-requests", webRouteForWrite(async (
 }));
 
 web.post("/:owner/:repo/pulls/:number/review-requests/delete", webRouteForWrite(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+  if (pull instanceof Response) return pull;
   const reviewer = stringField((await c.req.parseBody()).reviewer);
   if (!reviewer) return badRequestPage(ctx.user, "Reviewer is required.");
   await ctx.collab.deletePullReviewRequests(ctx.owner, ctx.repo, pull.number, [reviewer]);
@@ -373,9 +366,8 @@ web.post("/:owner/:repo/pulls/:number/review-requests/delete", webRouteForWrite(
 }));
 
 web.post("/:owner/:repo/pulls/:number/reviews", webRoute(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+  if (pull instanceof Response) return pull;
   const form = await c.req.parseBody();
   const event = stringField(form.event);
   const body = stringField(form.body) ?? "";
@@ -443,9 +435,8 @@ web.post("/:owner/:repo/pulls/:number/issue-comments/:id/delete", webRoute(async
 }));
 
 web.post("/:owner/:repo/pulls/:number/comments", webRoute(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
-  if (pull.state === "closed") return forbiddenPage(ctx.user);
+  const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+  if (pull instanceof Response) return pull;
   const form = await c.req.parseBody();
   const path = safeRel(stringField(form.path) ?? "");
   const side = stringField(form.side);
@@ -480,8 +471,8 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
   // the workspace admin and the core enforces admin on the proxied merge.
   const fresh = ctx.local ? ctx.ws.role : await ctx.collab.getRepoPermission(ctx.owner, ctx.repo, ctx.user);
   if (fresh !== "admin") return notFoundPage(ctx.user, "Repository not found");
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  const pull = await resolvePull(ctx, c.req.param("number"));
+  if (pull instanceof Response) return pull;
   const prHref = repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`);
   // "Merge anyway" submits force=true: an explicit, admin-only bypass of the
   // required-approvals branch protection. #180 keeps the implicit/editor path
@@ -525,8 +516,8 @@ web.post("/:owner/:repo/pulls/:number/merge", webRouteForAdmin(async (c, ctx) =>
 }));
 
 web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
-  const pull = await pullForParam(ctx, c.req.param("number"));
-  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  const pull = await resolvePull(ctx, c.req.param("number"));
+  if (pull instanceof Response) return pull;
   const [files, allComments] = await Promise.all([
     pullFiles(ctx, pull.number),
     ctx.collab.listPullComments(ctx.owner, ctx.repo, pull.number),
@@ -558,17 +549,14 @@ web.get("/:owner/:repo/pulls/:number/files", webRoute(async (c, ctx) => {
       "pulls",
       `Files #${pull.number} - ${ctx.repo}`,
       html`
-        <header class="thread-header">
-          <span class="state ${pull.merged ? "merged" : pull.state}">${pull.merged ? "merged" : pull.state}</span>
-          <div class="thread-title-row">
-            <h1>${pull.title} <span>#${pull.number}</span></h1>
-            ${pull.merged ? "" : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head_ref)}">View branch output</a>`}
-          </div>
-          <nav class="subtabs">
-            <a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
-            <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>
-          </nav>
-        </header>
+        ${threadHeader({
+          state: pull.merged ? "merged" : pull.state,
+          title: pull.title,
+          number: pull.number,
+          actions: pull.merged ? emptyHtml : html`<a class="button" href="${repoHref(ctx.owner, ctx.repo, "/src/branch")}/${urlPath(pull.head_ref)}">View branch output</a>`,
+          subtabs: html`<a href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}`)}">Conversation</a>
+            <a class="active" href="${repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/files`)}">Files changed</a>`,
+        })}
         <script src="/cosheaf-pr-diff-defaults.js" data-rich-diff="${richOk ? "1" : ""}"></script>
         <div class="review-page">
           <main class="review-main">
@@ -614,6 +602,25 @@ async function pullForParam(ctx: WebCtx, raw: string | undefined): Promise<PrMet
   const number = positiveInt(raw);
   if (!number) return null;
   return ctx.collab.getPull(ctx.owner, ctx.repo, number);
+}
+
+// The shared preamble for PR handlers (mirrors resolveMutableIssue): resolve the
+// :number param to a PR (404 "Pull request not found" on missing), then apply the
+// per-handler state gate. `rejectClosed` forbids a closed PR, `rejectMerged`
+// forbids a merged PR — the two gates differ across handlers, so they are
+// separate opts and must not be collapsed. Callers do:
+//   const pull = await resolvePull(ctx, c.req.param("number"), { rejectClosed: true });
+//   if (pull instanceof Response) return pull;
+async function resolvePull(
+  ctx: WebCtx,
+  raw: string | undefined,
+  opts: { rejectClosed?: boolean; rejectMerged?: boolean } = {},
+): Promise<PrMeta | Response> {
+  const pull = await pullForParam(ctx, raw);
+  if (!pull) return notFoundPage(ctx.user, "Pull request not found");
+  if (opts.rejectClosed && pull.state === "closed") return forbiddenPage(ctx.user);
+  if (opts.rejectMerged && pull.merged) return forbiddenPage(ctx.user);
+  return pull;
 }
 
 async function pullFiles(ctx: WebCtx, number: number) {

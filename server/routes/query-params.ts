@@ -1,6 +1,10 @@
 // Shared query-string parsers used by both the typed API routes and the
 // server-rendered web routes.
 
+import type { Context } from "hono";
+import type { AppEnv } from "../types.js";
+import { bad } from "./responses.js";
+
 export type ListState = "open" | "closed" | "all";
 
 export async function readJsonBody(req: { json(): Promise<unknown> }, fallback: unknown = null): Promise<unknown> {
@@ -40,6 +44,15 @@ export function parsePositiveIntId(value: unknown): number | null {
   if (typeof value === "string" && !/^\d+$/.test(value.trim())) return null;
   const n = typeof value === "string" ? Number(value.trim()) : value;
   return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// Parse a positive-integer path param, or return a 400 Response with `msg`.
+// Route call sites do `const n = intParam(c, "n", "bad pull number"); if (n
+// instanceof Response) return n;` — one line replacing the parse + null-guard.
+export function intParam(c: Context<AppEnv>, name: string, msg: string): number | Response {
+  const n = parsePositiveIntId(c.req.param(name));
+  if (n === null) return c.json(...bad(msg));
+  return n;
 }
 
 // The {title?, body?} edit body shared by PATCH issue and PATCH pull: title is

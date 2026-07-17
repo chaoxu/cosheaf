@@ -125,6 +125,18 @@ export class OriginCollaborationClient {
     return this.request<T>("GET", path, { query });
   }
 
+  // GET a `{ [key]: T[] }`-wrapped list and return the unwrapped array (or [] if
+  // the key is absent). Pins the one "read the wrapper key, default to empty"
+  // shape the many list methods share.
+  private async getList<T>(
+    path: string,
+    key: string,
+    query?: Record<string, string | number | undefined>,
+  ): Promise<T[]> {
+    const r = await this.get<Record<string, T[]>>(path, query);
+    return r[key] ?? [];
+  }
+
   // For resources the forge client returns as `T | null` on a 404 (getPull,
   // getRepo): swallow the status-bearing 404 into null, re-throw anything else.
   private async getOrNull<T>(
@@ -175,7 +187,7 @@ export class OriginCollaborationClient {
   }
 
   async listIssues(owner: string, repo: string, opts: IssueListOpts = {}): Promise<IssueRow[]> {
-    const r = await this.get<{ issues: IssueRow[] }>(this.repoPath(owner, repo, "/issues"), {
+    return this.getList<IssueRow>(this.repoPath(owner, repo, "/issues"), "issues", {
       state: opts.state,
       q: opts.q,
       labels: opts.labels,
@@ -187,7 +199,6 @@ export class OriginCollaborationClient {
       page: opts.page,
       limit: opts.limit,
     });
-    return r.issues ?? [];
   }
 
   async getIssue(owner: string, repo: string, number: number): Promise<IssueDetail> {
@@ -195,8 +206,7 @@ export class OriginCollaborationClient {
   }
 
   async listIssueComments(owner: string, repo: string, number: number): Promise<IssueComment[]> {
-    const r = await this.get<{ comments: IssueComment[] }>(this.repoPath(owner, repo, `/issues/${number}/comments`));
-    return r.comments ?? [];
+    return this.getList<IssueComment>(this.repoPath(owner, repo, `/issues/${number}/comments`), "comments");
   }
 
   async getIssueComment(owner: string, repo: string, id: number): Promise<IssueComment> {
@@ -204,33 +214,27 @@ export class OriginCollaborationClient {
   }
 
   async listIssueTimeline(owner: string, repo: string, number: number): Promise<TimelineEvent[]> {
-    const r = await this.get<{ events: TimelineEvent[] }>(this.repoPath(owner, repo, `/issues/${number}/timeline`));
-    return r.events ?? [];
+    return this.getList<TimelineEvent>(this.repoPath(owner, repo, `/issues/${number}/timeline`), "events");
   }
 
   async listLabels(owner: string, repo: string): Promise<Label[]> {
-    const r = await this.get<{ labels: Label[] }>(this.repoPath(owner, repo, "/labels"));
-    return r.labels ?? [];
+    return this.getList<Label>(this.repoPath(owner, repo, "/labels"), "labels");
   }
 
   async listMilestones(owner: string, repo: string, state: "open" | "closed" | "all"): Promise<Milestone[]> {
-    const r = await this.get<{ milestones: Milestone[] }>(this.repoPath(owner, repo, "/milestones"), { state });
-    return r.milestones ?? [];
+    return this.getList<Milestone>(this.repoPath(owner, repo, "/milestones"), "milestones", { state });
   }
 
   async listPinnedIssues(owner: string, repo: string): Promise<IssueRow[]> {
-    const r = await this.get<{ issues: IssueRow[] }>(this.repoPath(owner, repo, "/issues/pinned"));
-    return r.issues ?? [];
+    return this.getList<IssueRow>(this.repoPath(owner, repo, "/issues/pinned"), "issues");
   }
 
   async listIssueDependencies(owner: string, repo: string, number: number): Promise<DependencyRow[]> {
-    const r = await this.get<{ issues: DependencyRow[] }>(this.repoPath(owner, repo, `/issues/${number}/dependencies`));
-    return r.issues ?? [];
+    return this.getList<DependencyRow>(this.repoPath(owner, repo, `/issues/${number}/dependencies`), "issues");
   }
 
   async listIssueBlocks(owner: string, repo: string, number: number): Promise<DependencyRow[]> {
-    const r = await this.get<{ issues: DependencyRow[] }>(this.repoPath(owner, repo, `/issues/${number}/blocks`));
-    return r.issues ?? [];
+    return this.getList<DependencyRow>(this.repoPath(owner, repo, `/issues/${number}/blocks`), "issues");
   }
 
   // ---- issue writes ----
@@ -400,7 +404,7 @@ export class OriginCollaborationClient {
       | "all" = {},
   ): Promise<PrMeta[]> {
     const o = typeof opts === "string" ? { state: opts } : opts;
-    const r = await this.get<{ pulls: PrMeta[] }>(this.repoPath(owner, repo, "/pulls"), {
+    return this.getList<PrMeta>(this.repoPath(owner, repo, "/pulls"), "pulls", {
       state: o.state,
       sort: "sort" in o ? o.sort : undefined,
       milestone: "milestone" in o ? o.milestone : undefined,
@@ -408,7 +412,6 @@ export class OriginCollaborationClient {
       author: "poster" in o ? o.poster : undefined,
       labels: "labels" in o ? o.labels?.join(",") : undefined,
     });
-    return r.pulls ?? [];
   }
 
   async getPull(owner: string, repo: string, index: number): Promise<PrMeta | null> {
@@ -428,23 +431,19 @@ export class OriginCollaborationClient {
   }
 
   async listPullFiles(owner: string, repo: string, index: number): Promise<PrFile[]> {
-    const r = await this.get<{ files: PrFile[] }>(this.repoPath(owner, repo, `/pulls/${index}/files`));
-    return r.files ?? [];
+    return this.getList<PrFile>(this.repoPath(owner, repo, `/pulls/${index}/files`), "files");
   }
 
   async listPullCommits(owner: string, repo: string, index: number): Promise<PrCommit[]> {
-    const r = await this.get<{ commits: PrCommit[] }>(this.repoPath(owner, repo, `/pulls/${index}/commits`));
-    return r.commits ?? [];
+    return this.getList<PrCommit>(this.repoPath(owner, repo, `/pulls/${index}/commits`), "commits");
   }
 
   async listPullComments(owner: string, repo: string, index: number): Promise<LineComment[]> {
-    const r = await this.get<{ comments: LineComment[] }>(this.repoPath(owner, repo, `/pulls/${index}/comments`));
-    return r.comments ?? [];
+    return this.getList<LineComment>(this.repoPath(owner, repo, `/pulls/${index}/comments`), "comments");
   }
 
   async listReviews(owner: string, repo: string, index: number): Promise<ReviewDto[]> {
-    const r = await this.get<{ reviews: ReviewDto[] }>(this.repoPath(owner, repo, `/pulls/${index}/reviews`));
-    return r.reviews ?? [];
+    return this.getList<ReviewDto>(this.repoPath(owner, repo, `/pulls/${index}/reviews`), "reviews");
   }
 
   // ---- pull / review writes ----
@@ -610,10 +609,11 @@ export class OriginCollaborationClient {
   }
 
   async listCollaborators(owner: string, repo: string): Promise<Array<{ login: string }>> {
-    const r = await this.get<{ collaborators: Array<{ login: string; permission: string }> }>(
+    const collaborators = await this.getList<{ login: string; permission: string }>(
       this.repoPath(owner, repo, "/collaborators"),
+      "collaborators",
     );
-    return (r.collaborators ?? []).map((m) => ({ login: m.login }));
+    return collaborators.map((m) => ({ login: m.login }));
   }
 
   // Available reviewers for a PR = the repo's collaborators (the forge's
@@ -621,10 +621,11 @@ export class OriginCollaborationClient {
   // endpoint, so source it from /collaborators and map to the user shape the
   // PR page's reviewer picker reads (login only).
   async listPullReviewers(owner: string, repo: string): Promise<Array<{ login: string }>> {
-    const r = await this.get<{ collaborators: Array<{ login: string; permission: string }> }>(
+    const collaborators = await this.getList<{ login: string; permission: string }>(
       this.repoPath(owner, repo, "/collaborators"),
+      "collaborators",
     );
-    return (r.collaborators ?? []).map((m) => ({ login: m.login }));
+    return collaborators.map((m) => ({ login: m.login }));
   }
 
   async searchUsers(query: string, limit = 10): Promise<Array<{ login: string }>> {
@@ -651,8 +652,7 @@ export class OriginCollaborationClient {
   }
 
   async listRepoTopics(owner: string, repo: string): Promise<string[]> {
-    const r = await this.get<{ topics: string[] }>(this.repoPath(owner, repo, "/topics"));
-    return r.topics ?? [];
+    return this.getList<string>(this.repoPath(owner, repo, "/topics"), "topics");
   }
 
   // Replace the full topic set. The core's PUT /topics route forwards to the
@@ -758,15 +758,13 @@ export class OriginCollaborationClient {
     repo: string,
     _opts: { statusTypes?: readonly string[]; subjectTypes?: readonly string[] } = {},
   ): Promise<NotificationRow[]> {
-    const r = await this.get<{ notifications: NotificationRow[] }>(this.repoPath(owner, repo, "/notifications"));
-    return r.notifications ?? [];
+    return this.getList<NotificationRow>(this.repoPath(owner, repo, "/notifications"), "notifications");
   }
 
   async listRepoActivities(owner: string, repo: string, opts: { limit?: number } = {}): Promise<ActivityRow[]> {
-    const r = await this.get<{ activities: ActivityRow[] }>(this.repoPath(owner, repo, "/activities"), {
+    return this.getList<ActivityRow>(this.repoPath(owner, repo, "/activities"), "activities", {
       limit: opts.limit,
     });
-    return r.activities ?? [];
   }
 
   // ---- notification writes ----

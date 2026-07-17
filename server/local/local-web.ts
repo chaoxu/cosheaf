@@ -27,10 +27,8 @@ import type { AppEnv } from "../types.js";
 import { registerLocalAgentSessionRoutes } from "./local-agent-sessions.js";
 import { hasWorkbenchAccess, localAuthGate, tokenMatches, WORKBENCH_COOKIE } from "./local-auth.js";
 import { registerLocalCommitRoutes } from "./local-commit.js";
-import { friendlyLine } from "./git-errors.js";
 import { resolveLocalWorkspace } from "./local-mode.js";
-import { notConnectedBody, registerLocalRemoteRoutes } from "./local-remote.js";
-import { OriginCollaborationClient } from "./origin-collaboration-client.js";
+import { notConnectedBody, probeRemote, registerLocalRemoteRoutes } from "./local-remote.js";
 import { remoteHostLabel } from "./saved-remotes.js";
 import type { SelectableRemoteCredential, WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
 
@@ -399,19 +397,17 @@ export function createLocalWebRouter(): Hono<AppEnv> {
       const url = stringField(form.url)?.trim();
       const token = stringField(form.token)?.trim();
       if (!url || !token) return redirect(`/_remotes?toast=${encodeURIComponent("Both a Cosheaf URL and an API token are required.")}`);
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("bad protocol");
-      } catch (_err) {
-        return redirect(`/_remotes?toast=${encodeURIComponent("The Cosheaf URL must start with http:// or https://.")}`);
+      const probe = await probeRemote(url, token);
+      if (!probe.ok) {
+        const message =
+          probe.kind === "unreachable"
+            ? `Couldn't reach that Cosheaf: ${probe.detail}`
+            : probe.kind === "rejected"
+              ? "The Cosheaf rejected that token."
+              : "The Cosheaf URL must start with http:// or https://.";
+        return redirect(`/_remotes?toast=${encodeURIComponent(message)}`);
       }
-      let who: { username: string } | null;
-      try {
-        who = await new OriginCollaborationClient(url, token).whoami();
-      } catch (err) {
-        return redirect(`/_remotes?toast=${encodeURIComponent(`Couldn't reach that Cosheaf: ${friendlyLine(err)}`)}`);
-      }
-      if (!who) return redirect(`/_remotes?toast=${encodeURIComponent("The Cosheaf rejected that token.")}`);
+      const who = { username: probe.username };
       const saved = c.get("localRegistry").saveRemote({
         url,
         token,

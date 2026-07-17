@@ -27,8 +27,8 @@ import { friendlyLine } from "./git-errors.js";
 import { KeyedQueue } from "./keyed-queue.js";
 import { localAnnotationSidecarConflict, readLocalAnnotations, setLocalAnnotationStatus } from "./local-annotations.js";
 import { publishLocalAgentActivityEvent, publishLocalAnnotationEvent, publishLocalGitEvent } from "./local-events.js";
-import type { LocalFileDiff, LocalGitWorkspaceBackend } from "./local-git-backend.js";
-import { resolveLocalWorkspace } from "./local-mode.js";
+import type { LocalFileDiff } from "./local-git-backend.js";
+import { localBackend, resolveLocalWorkspace } from "./local-mode.js";
 import type { WorkspaceEntry } from "./workspace-registry.js";
 
 interface LocalAgentSessionFile {
@@ -391,10 +391,6 @@ localAgentSessions.post("/:owner/:repo/agent-sessions/:id/complete", async (c) =
     return c.json({ session });
   });
 });
-
-function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
-  return ctx.backend as LocalGitWorkspaceBackend;
-}
 
 function statusLabel(status: LocalAgentSessionStatus): string {
   if (status === "waiting_for_review") return "waiting for review";

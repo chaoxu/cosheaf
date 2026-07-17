@@ -7,8 +7,18 @@
 // fixed local user without any forge call. Forge-free by construction.
 
 import { workspaceSlug } from "../../shared/conventions.js";
+import type { WebCtx } from "../routes/web-context.js";
 import type { WorkspaceContext } from "../types.js";
+import type { LocalGitWorkspaceBackend } from "./local-git-backend.js";
 import type { WorkspaceEntry, WorkspaceRegistry } from "./workspace-registry.js";
+
+// The web ctx's backend is always the resolved workspace's
+// LocalGitWorkspaceBackend in local mode (resolveWebRepo sets it); narrow to
+// reach the Tier-0/1 git ops. Shared by the local commit / remote / agent-session
+// routers.
+export function localBackend(ctx: WebCtx): LocalGitWorkspaceBackend {
+  return ctx.backend as LocalGitWorkspaceBackend;
+}
 
 // Resolve a request's owner/repo to a registered workspace + its WorkspaceContext,
 // or null when no folder is registered under that slug (the caller turns that
