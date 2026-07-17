@@ -12,6 +12,7 @@ import {
 } from "../workspace-backend.js";
 import { validBranchName } from "../branch-path.js";
 import { isRetiredDefaultEditBranch } from "../edit-branch-retirement.js";
+import { gitBlobHash } from "../git-object.js";
 import { REPO_CONFIG_PATH, bustRepoConfig, loadRepoConfig } from "../repo-config.js";
 import { indexLocalDelete, indexLocalWrite, planIndexPage } from "../indexer.js";
 import { searchWorkspacePages } from "../page-search.js";
@@ -569,6 +570,28 @@ files.put("/:owner/:repo/file", async (c) => {
       })
     : null;
   const finalContent = plan?.rewrittenContent ?? body.content;
+  const finalContentSha = gitBlobHash(Buffer.from(finalContent, "utf8"));
+  const successBody = (sha: string | null, commit?: string | null) => ({
+    ok: true as const,
+    branch,
+    meta: { id: plan?.cosheafId ?? null, title: plan?.title },
+    content: plan?.rewrittenContent ?? undefined,
+    ...(commit !== undefined ? { commit } : {}),
+    sha,
+  });
+  const readCurrentMetaForAlreadyApplied = async () =>
+    backend.getFileMeta(owner, repo, branch, rel).catch((err: unknown) => {
+      if (err instanceof WorkspaceBackendError && (err.code === "not_found" || err.code === "ref_missing")) return null;
+      throw err;
+    });
+  const currentWriteAlreadyApplied = (current: { sha: string } | null): Response | null => {
+    if (isRename || current?.sha !== finalContentSha) return null;
+    indexLocalWrite(isLocalMode(c), db, ws.slug, plan);
+    if (rel === REPO_CONFIG_PATH) bustRepoConfig(db, ws.slug, branch);
+    invalidateBranchReadCaches(owner, repo, branch);
+    if (isLocalMode(c)) publishLocalFileMutationEvents(c, ws.slug, { action: "changed", path: rel });
+    return c.json(successBody(current.sha, null));
+  };
   const localAnnotationEntry = isLocalMode(c) && isRename && previousRel && previousRel !== rel
     ? resolveLocalWorkspace(c.get("localRegistry"), owner, repo)?.entry ?? null
     : null;
@@ -588,6 +611,8 @@ files.put("/:owner/:repo/file", async (c) => {
   const casMeta = isRename ? previous : existing;
   const casPath = isRename ? (previousRel as string) : rel;
   if (expectedSha !== undefined && (casMeta?.sha ?? null) !== expectedSha) {
+    const alreadyApplied = currentWriteAlreadyApplied(casMeta);
+    if (alreadyApplied) return alreadyApplied;
     return c.json(...(await staleShaConflict(backend, owner, repo, branch, casPath, expectedSha)));
   }
   if (expectedSourceSha !== undefined && !casMeta?.sha) {
@@ -617,6 +642,8 @@ files.put("/:owner/:repo/file", async (c) => {
     // putFile. The backend reports that as `stale_sha`; surface a typed,
     // recoverable conflict instead of a bare 502 (#92).
     if (isStaleShaConflict(err)) {
+      const alreadyApplied = currentWriteAlreadyApplied(await readCurrentMetaForAlreadyApplied());
+      if (alreadyApplied) return alreadyApplied;
       return c.json(...(await staleShaConflict(backend, owner, repo, branch, rel, expectedSha)));
     }
     throw err;
@@ -670,14 +697,7 @@ files.put("/:owner/:repo/file", async (c) => {
     hub.publish(ws.slug, { type: "change", path: rel });
   }
   const writtenSha = r.content?.sha ?? (await backend.getFileMeta(owner, repo, branch, rel).catch(() => null))?.sha ?? null;
-  return c.json({
-    ok: true,
-    branch,
-    meta: { id: plan?.cosheafId ?? null, title: plan?.title },
-    content: plan?.rewrittenContent ?? undefined,
-    commit: r.commit?.sha,
-    sha: writtenSha,
-  });
+  return c.json(successBody(writtenSha, r.commit?.sha));
 });
 
 files.post("/:owner/:repo/assets", async (c) => {

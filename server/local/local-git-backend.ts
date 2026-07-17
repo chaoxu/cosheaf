@@ -18,6 +18,7 @@ import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile 
 import { join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { splitUnifiedDiff } from "../diff-splitter.js";
+import { gitBlobHash } from "../git-object.js";
 import { isCommitSha } from "../branch-path.js";
 import {
   type WorkspaceBackend,
@@ -54,13 +55,7 @@ const WORKTREE_REF = "WORKTREE";
 // own sidecar dir.
 const SKIP_DIRS = new Set([".git", ".cosheaf"]);
 
-// git blob hash: sha1("blob " + bytelength + "\0" + bytes). Equals `git
-// hash-object` for the same content, so an unchanged tracked file's meta sha
-// matches its committed blob id.
-export function gitBlobHash(bytes: Buffer): string {
-  const header = Buffer.from(`blob ${bytes.length}\0`, "utf8");
-  return createHash("sha1").update(header).update(bytes).digest("hex");
-}
+export { gitBlobHash };
 
 const execFileP = promisify(execFile);
 

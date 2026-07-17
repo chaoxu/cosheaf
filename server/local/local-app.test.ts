@@ -163,6 +163,40 @@ describe("local Workbench app (Tier 0)", () => {
     expect(readFileSync(join(dir, "hello.md"), "utf8")).toContain("# External");
   });
 
+  it("treats a stale editor save as ok when the desired content is already current", async () => {
+    const initial = "---\nid: hello\n---\n# Hello\n";
+    const target = "---\nid: hello\n---\n# Shared target\n";
+    const sse = new SSEHub();
+    const events: SSEEvent[] = [];
+    const unsubscribe = sse.subscribe("me/notes", (event) => events.push(event));
+    const { app, dir } = localApp({ "hello.md": initial }, { sse });
+    const loaded = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };
+    const external = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ content: target }),
+    });
+    expect(external.status).toBe(200);
+    events.length = 0;
+
+    const staleSameSave = await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main", {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "http://localhost" },
+      body: JSON.stringify({ content: target, expected_sha: loaded.sha }),
+    });
+    expect(staleSameSave.status).toBe(200);
+    await expect(staleSameSave.json()).resolves.toMatchObject({
+      ok: true,
+      commit: null,
+      sha: gitBlobHash(Buffer.from(target)),
+    });
+    expect(readFileSync(join(dir, "hello.md"), "utf8")).toBe(target);
+    unsubscribe();
+    expect(events).toContainEqual({ type: "file_changed", action: "changed", path: "hello.md" });
+    expect(events).toContainEqual({ type: "git_changed", action: "status_changed", paths: ["hello.md"] });
+    expect(events).toContainEqual({ type: "change", path: "hello.md" });
+  });
+
   it("reindexes the sidecar on save so search finds the new content", async () => {
     const { app } = localApp({ "hello.md": "---\nid: hello\n---\n# Hello\n" });
     const read = (await (await app.request("/api/v1/repos/me/notes/file?path=hello.md&branch=main")).json()) as { sha: string };

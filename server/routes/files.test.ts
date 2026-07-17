@@ -8,6 +8,7 @@ import { _resetMiddlewareCachesForTests } from "../middleware.js";
 import { seedAuthUser } from "../test-helpers.js";
 import { _clearTreeCacheForTests } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
+import { gitBlobHash } from "../git-object.js";
 import { WorkspaceBackendError } from "../workspace-backend.js";
 import { _clearBranchRefCacheForTests, files, safeRel } from "./files.js";
 import {
@@ -1503,6 +1504,32 @@ describe("files concurrent-write conflicts (#92)", () => {
     expect(body.details).toMatchObject({ path: "notes.md", branch: "user/alice/wip", head_sha: "head-now", current_sha: "sha-now", branch_moved: true });
   });
 
+  it("treats a stale-sha race as ok when the target content is already current", async () => {
+    const db = freshDb();
+    const target = "---\nid: notes\n---\n# Notes\n";
+    const targetSha = gitBlobHash(Buffer.from(target, "utf8"));
+    let metaReads = 0;
+    const backend = fakeWorkspaceBackend({
+      getBranch: async () => ({ name: "user/alice/wip", commit: { id: "head-now" } }),
+      getFileMeta: async () => {
+        metaReads += 1;
+        return metaReads === 1 ? { sha: "old-sha", size: 8 } : { sha: targetSha, size: target.length };
+      },
+      putFile: async () => {
+        throw new WorkspaceBackendError(409, "stale_sha", "branch head moved");
+      },
+    });
+
+    const res = await localFilesAppFor(db, backend).request("/api/v1/repos/owner/w/file?path=notes.md&branch=user/alice/wip", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: target }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, commit: null, sha: targetSha });
+    expect(metaReads).toBe(2);
+  });
+
   it("compare-and-set: rejects before writing when expected_sha is stale", async () => {
     const db = freshDb();
     const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
@@ -1518,6 +1545,27 @@ describe("files concurrent-write conflicts (#92)", () => {
     expect(putCalled).toBe(false);
     const conflictBody = (await res.json()) as { details: Record<string, unknown> };
     expect(conflictBody.details).toMatchObject({ expected_sha: "based-on-old", current_sha: "current", branch_moved: true });
+  });
+
+  it("compare-and-set: succeeds without writing when stale expected_sha already matches target content", async () => {
+    const db = freshDb();
+    const token = seedAuthUser(db, config, { id: 1, username: "alice", role: "write" });
+    const target = "---\nid: notes\n---\n# Notes\n";
+    const targetSha = gitBlobHash(Buffer.from(target, "utf8"));
+    let putCalled = false;
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w/branches/:name", (c) => c.json({ name: c.req.param("name"), commit: { id: "head-now" } }));
+      forge.get("/api/v1/repos/owner/w/contents/notes.md", (c) => c.json({ sha: targetSha }));
+      forge.put("/api/v1/repos/owner/w/contents/notes.md", () => {
+        putCalled = true;
+        return Response.json({ commit: { sha: "x" }, content: { sha: "y" } });
+      });
+    }));
+
+    const res = await writeReq(db, token, { content: target, expected_sha: "based-on-old" });
+    expect(res.status).toBe(200);
+    expect(putCalled).toBe(false);
+    expect(await res.json()).toMatchObject({ ok: true, commit: null, sha: targetSha });
   });
 
   it("compare-and-set: proceeds and returns the new blob sha when expected_sha matches", async () => {
