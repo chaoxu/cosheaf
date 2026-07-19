@@ -19,7 +19,7 @@ import { registerAccountRoutes } from "./web-account.js";
 import { registerAdminRoutes } from "./web-admin.js";
 import { registerBranchRoutes } from "./web-branches.js";
 import { registerChatPageRoutes } from "./web-chat-pages.js";
-import { badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, nonNegativeInt, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, safeWebRedirect, setAuthCookie, stringField, webRoute } from "./web-context.js";
+import { anonymousForgejo, badRequestPage, clientIp, configReposForUser, currentUserAvatarSrc, globalRoute, htmlResponse, nonNegativeInt, notFoundPage, positiveInt, redirect, rejectCrossOriginMutation, repoHref, resolveWebAuth, safeWebRedirect, setAuthCookie, stringField, webRoute } from "./web-context.js";
 import { registerDiagnosticsRoutes } from "./web-diagnostics.js";
 import { registerFileRoutes } from "./web-files.js";
 import { registerHelpRoutes } from "./web-help.js";
@@ -250,7 +250,54 @@ web.post("/register", async (c) => {
   return c.redirect("/", 303);
 });
 
-web.get("/", globalRoute(async (c, auth) => {
+// Home is the one global page that also serves logged-out visitors: signed in,
+// it's the personal repo + inbox dashboard (globalRoute below); logged out, it's
+// a public-repo browse list (no inbox, no "new repo", a Sign in affordance).
+web.get("/", async (c) => {
+  const auth = await resolveWebAuth(c);
+  if (!auth) return renderPublicHome(c);
+  // globalRoute re-resolves auth itself (bearer lookup is cached) and folds the
+  // signed-in dashboard's shared preamble.
+  return authedHome(c);
+});
+
+async function renderPublicHome(c: Context<AppEnv>): Promise<Response> {
+  const t = c.get("t");
+  const config = c.get("config");
+  // Tokenless client → Forgejo returns only publicly-visible repos, the exact
+  // set a logged-out visitor may browse.
+  const repos = await anonymousForgejo(config).searchAllAccessibleRepos().catch(() => []);
+  return htmlResponse(
+    pageShell({
+      title: t("home.public_repos"),
+      user: "",
+      locale: c.get("locale"),
+      sidebar: globalSidebar("workspaces", "", null, t),
+      body: html`
+        <main class="page">
+          <div class="page-title"><h1>${t("home.public_repos")}</h1></div>
+          <div class="list">
+            ${repos.length === 0
+              ? html`<div class="empty">${t("home.no_public_repos")}</div>`
+              : repos.map(
+                  (repo) => html`
+                  <a class="list-row repo-row" href="${repoHref(repo.owner.login, repo.name)}">
+                    <span class="repo-row-main">
+                      <strong class="ws-slug">${repo.full_name}</strong>
+                      ${repo.description ? html`<span class="ws-title">${repo.description}</span>` : emptyHtml}
+                    </span>
+                    <small>${t("common.public")}</small>
+                  </a>
+                `,
+                )}
+          </div>
+        </main>
+      `,
+    }),
+  );
+}
+
+const authedHome = globalRoute(async (c, auth) => {
   const [repos, notificationResult, avatarSrc] = await Promise.all([
     configReposForUser(c),
     // Forgejo's account-level notifications are already cross-repo — the daily
@@ -297,7 +344,7 @@ web.get("/", globalRoute(async (c, auth) => {
       `,
     }),
   );
-}));
+});
 
 registerHelpRoutes(web);
 

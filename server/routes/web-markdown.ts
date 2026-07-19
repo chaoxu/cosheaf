@@ -77,6 +77,10 @@ type CoflatReaderPayload = {
   sourcePositions?: boolean;
   reviewComments?: SurfaceOpts["reviewComments"];
   reviewCommentForm?: SurfaceOpts["reviewCommentForm"];
+  // Logged-out visitor: the crossref-resolution endpoint (/api/v1/.../refs) stays
+  // auth-gated, so the reader skips that fetch rather than emit a 401 (citation
+  // sources come from the /raw web route, which does serve anonymous public reads).
+  anonymous?: boolean;
 };
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
@@ -122,6 +126,7 @@ export function coflatReaderPayload(ctx: WebCtx, source: string, opts: SurfaceOp
     ...(opts.sourcePositions ? { sourcePositions: true } : {}),
     ...(opts.reviewComments?.length ? { reviewComments: opts.reviewComments } : {}),
     ...(opts.reviewCommentForm && opts.reviewCommentForm.lines.length ? { reviewCommentForm: opts.reviewCommentForm } : {}),
+    ...(ctx.anonymous ? { anonymous: true } : {}),
   };
 }
 

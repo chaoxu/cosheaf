@@ -153,6 +153,40 @@ describe("web issue routes", () => {
     expect(commentBody).toEqual({ body: "question" });
   });
 
+  it("shows the comment composer to a read-role member (read members may comment)", async () => {
+    const db = freshTestDb("cosheaf-web-issues-");
+    seedTestWorkspace(db);
+    const token = seedAuthUser(db, config, { username: "alice", role: "read" });
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w/issues/7", () => Response.json(forgejoIssue()));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/issues/7", { headers: { cookie: `cosheaf_pat=${token}` } });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("comment-form");
+  });
+
+  it("hides the comment composer from a logged-out visitor on a public repo", async () => {
+    const db = freshTestDb("cosheaf-web-issues-");
+    seedTestWorkspace(db);
+    // No cookie → resolveAnonymousWebRepo; the public repo mock lets the tokenless
+    // getRepo succeed so the issue renders as an anonymous read-only page.
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w", () => Response.json({ name: "w", full_name: "owner/w", description: "Public", private: false }));
+        forge.get("/api/v1/repos/owner/w/issues/7", () => Response.json(forgejoIssue()));
+      }),
+    );
+
+    const res = await appFor(db).request("/owner/w/issues/7");
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain("comment-form");
+  });
+
   it("does not edit comments outside the requested issue", async () => {
     const db = freshTestDb("cosheaf-web-issues-");
     seedTestWorkspace(db);

@@ -818,7 +818,10 @@ function reviewDecisionToStateLabel(decision: ReviewDto["decision"]): string {
 }
 
 export function reviewForms(ctx: WebCtx, pull: PrMeta, redirectTo?: string): Html {
-  if (pull.state === "closed") return emptyHtml;
+  // A logged-out visitor has no identity to review/comment/merge with; hide the
+  // whole panel rather than offer controls whose POST bounces to /login. Read
+  // members keep the comment-only form (they may comment on pulls).
+  if (ctx.anonymous || pull.state === "closed") return emptyHtml;
   const isAuthor = pull.author_username === ctx.user;
   const canVerdict = ctx.ws.role !== "read" && !isAuthor;
   return html`<div>

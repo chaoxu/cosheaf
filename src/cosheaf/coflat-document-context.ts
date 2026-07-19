@@ -21,6 +21,9 @@ export interface CoflatDocumentPayload {
   /** False when the branch has not been created yet (e.g. a fresh edit page);
    * skips raw fetches against the missing branch and goes straight to main. */
   branchExists?: boolean;
+  /** True for a logged-out visitor reading a public repo. The crossref endpoint
+   * (/api/v1/.../refs) is auth-gated, so the reader skips it rather than 401. */
+  anonymous?: boolean;
   /** PR diff surface only: source line numbers changed on this side. The reader
    * renders with sourceLineAttribution and marks blocks intersecting them (#113). */
   markedLines?: readonly number[];
@@ -225,6 +228,10 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
 async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string, localKeys: ReadonlySet<string>): Promise<Map<string, RenderedCrossref>> {
   const keys = referencedKeys(source).filter((key) => !localKeys.has(key) && !localAnnotationIdFromRef(key));
   if (keys.length === 0) return new Map();
+  // The crossref endpoint is auth-gated; a logged-out visitor would only get a
+  // 401 (logged as a failed resource in the browser console). Skip it and render
+  // bare refs — citation sources still resolve via the /raw web route.
+  if (payload.anonymous) return new Map();
   try {
     const params = new URLSearchParams({ ids: keys.join(",") });
     if (payload.branchExists !== false && payload.branch !== "main") params.set("ref", payload.branch);

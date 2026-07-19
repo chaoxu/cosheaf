@@ -27,6 +27,26 @@ function repo(name: string, page: number): ForgejoRepo {
   };
 }
 
+describe("auth header", () => {
+  it("sends a token header for a credentialed client", async () => {
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w", (c) => c.json({ name: "w", full_name: "owner/w" }));
+    }));
+    await client().getRepo("owner", "w");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>).authorization).toBe("token t");
+  });
+
+  it("omits the authorization header entirely for a tokenless (anonymous) client", async () => {
+    fetchMock.mockImplementation(fakeForgejo((forge) => {
+      forge.get("/api/v1/repos/owner/w", (c) => c.json({ name: "w", full_name: "owner/w" }));
+    }));
+    await new Forgejo({ baseUrl: "http://forgejo.test", token: "" }).getRepo("owner", "w");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>).authorization).toBeUndefined();
+  });
+});
+
 describe("editRepo", () => {
   it("PATCHes /repos/{owner}/{repo} forwarding only the sent fields", async () => {
     let method = "";

@@ -33,6 +33,8 @@ export const zh = {
   "home.title": "仓库",
   "home.new_repo": "新建仓库",
   "home.no_repos": "暂无可用仓库。",
+  "home.public_repos": "公开仓库",
+  "home.no_public_repos": "暂无公开仓库。",
   "home.inbox": "收件箱",
   "home.unread": "{count} 条未读",
   "home.mark_all_read": "全部标为已读",

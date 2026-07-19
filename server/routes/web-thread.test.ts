@@ -71,4 +71,14 @@ describe("reviewForms merge controls (#180 admin bypass)", () => {
     expect(html).not.toContain("Request changes");
     expect(render("admin", "someone-else", "closed")).toBe("");
   });
+
+  it("renders no review panel at all for a logged-out visitor", () => {
+    const html = String(
+      reviewForms(
+        { ws: { role: "read" }, user: "", anonymous: true, owner: "chao", repo: "w" } as unknown as WebCtx,
+        { number: 7, state: "open", merged: false, author_username: "someone-else" } as unknown as PrMeta,
+      ),
+    );
+    expect(html).toBe("");
+  });
 });

@@ -37,6 +37,8 @@ export const en = {
   "home.title": "Repositories",
   "home.new_repo": "New repository",
   "home.no_repos": "No repositories available.",
+  "home.public_repos": "Public repositories",
+  "home.no_public_repos": "No public repositories available.",
   "home.inbox": "Inbox",
   "home.unread": "{count} unread",
   "home.mark_all_read": "Mark all read",

@@ -211,6 +211,39 @@ COSHEAF_STORAGE_STATE=.playwright/cosheaf-chao-state.json \
 pnpm dev:login-state
 ```
 
+## Anonymous public read
+
+Logged-out visitors can read **public** repos over the server-rendered web
+routes: the home page lists public repos, and repository/file/issue/pull/
+activity/branch pages render read-only (a "Sign in" affordance replaces the
+signed-in chrome; every write affordance is hidden). Private and missing repos
+redirect an anonymous visitor to `/login` — identical responses, so visibility
+cannot be enumerated. The typed `/api/v1/*` surface stays fully auth-gated.
+
+Cosheaf serves these reads through a **tokenless** Forgejo client, so Forgejo
+itself enforces visibility (a tokenless request 404s a private repo). That
+means the backing Forgejo must allow anonymous viewing:
+
+```ini
+[service]
+REQUIRE_SIGNIN_VIEW = false
+```
+
+- **Local dev** Forgejo config lives at
+  `/opt/homebrew/var/forgejo/custom/conf/app.ini` (restart with
+  `brew services restart forgejo` after editing).
+- **Staging / production** Forgejo instances are managed in `fleet-infra`; the
+  same `REQUIRE_SIGNIN_VIEW = false` must be set there for anonymous read to be
+  live. With it left `true`, the feature is **inert but safe** — the tokenless
+  probe fails closed and every anonymous request redirects to `/login`.
+
+Known v1 limitation: cross-file `[@id]` crossref resolution needs the
+auth-gated `/api/v1/.../refs` endpoint, which anonymous readers don't call, so
+a logged-out reader sees bare (unlinked) cross-file references where a signed-in
+reader sees resolved ones. Same-file refs, citations (served from `/raw`), math,
+and rendering are unaffected. Opening that one GET to anonymous public reads is
+the follow-up if resolved crossrefs matter for the public audience.
+
 ## Route-To-File Map
 
 - Server-rendered web route assembly: `server/routes/web.ts`

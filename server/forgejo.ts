@@ -151,9 +151,13 @@ export class Forgejo {
       }
     }
     const headers: Record<string, string> = {
-      authorization: `token ${this.cfg.token}`,
       accept: "application/json",
     };
+    // A tokenless client (cfg.token === "") makes a genuinely anonymous request:
+    // Forgejo serves public repos and 404s private ones, which is exactly the
+    // visibility boundary the logged-out web read path leans on. Sending an
+    // empty `token ` header instead would be a malformed credential.
+    if (this.cfg.token) headers.authorization = `token ${this.cfg.token}`;
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 
     const method = opts.method ?? "GET";

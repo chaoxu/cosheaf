@@ -27,6 +27,9 @@ function appFor(db: Database.Database, appConfig = config): Hono<AppEnv> {
     // Probe routes that echo the resolved role on success; the HOF short-circuits
     // to the resolver's response (404/redirect) on failure.
     app.get("/:owner/:repo/probe-read", webRoute((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
+    // A plain webRoute mutation (mirrors the issue/PR comment POST routes, which
+    // are readable-member-writable, not webRouteForWrite).
+    app.post("/:owner/:repo/probe-read", webRoute((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-write", webRouteForWrite((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-admin", webRouteForAdmin((_c, ctx) => new Response(`ok:${ctx.ws.role}`)));
     app.get("/:owner/:repo/probe-title", webRoute((_c, ctx) => new Response(ctx.wsTitle)));
@@ -201,10 +204,72 @@ describe("web workspace title", () => {
 });
 
 describe("unauthenticated web access redirects to login", () => {
-  it("redirects (303) when no credential is present", async () => {
+  it("redirects (303) when no credential is present and the repo is not publicly readable", async () => {
+    // The beforeEach stub does not serve GET /api/v1/repos/owner/w, so the
+    // tokenless visibility probe fails closed → /login (same as a private/missing repo).
     const db = freshTestDb("cosheaf-webctx-");
     seedTestWorkspace(db);
     const res = await appFor(db).request("/owner/w/probe-read");
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+});
+
+describe("anonymous read of public repos", () => {
+  // A tokenless Forgejo client is what resolveAnonymousWebRepo builds; the fake
+  // ignores the (absent) credential and answers by path, so serving the repo
+  // endpoint as public is what a real anonymous getRepo would see.
+  function servePublicRepo(priv: boolean): void {
+    fetchMock.mockImplementation(
+      fakeForgejo((forge) => {
+        forge.get("/api/v1/repos/owner/w", () =>
+          Response.json({ name: "w", full_name: "owner/w", description: "Public Repo", private: priv }),
+        );
+      }),
+    );
+  }
+
+  it("serves a read-only context (role read) to a logged-out visitor on a public repo", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    servePublicRepo(false);
+    const res = await appFor(db).request("/owner/w/probe-read");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok:read");
+  });
+
+  it("redirects a logged-out visitor to /login on a private repo (no enumeration)", async () => {
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    servePublicRepo(true);
+    const res = await appFor(db).request("/owner/w/probe-read");
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("redirects a logged-out visitor to /login (not 404) when they hit a write route on a public repo", async () => {
+    // Distinct from a signed-in read-only member, who gets 404: an anonymous
+    // visitor is offered a login so "log in to edit/comment" works.
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    servePublicRepo(false);
+    const res = await appFor(db).request("/owner/w/probe-write");
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login");
+  });
+
+  it("redirects a logged-out same-origin POST to /login even on a plain read route (webRoute mutation)", async () => {
+    // Some mutation routes (issue/PR comments) are plain webRoute, not
+    // webRouteForWrite; a logged-out POST must still land on /login rather than
+    // fall into the handler and attempt a tokenless write. Same-origin so CSRF
+    // passes and the anonymous-mutation guard is what produces the redirect.
+    const db = freshTestDb("cosheaf-webctx-");
+    seedTestWorkspace(db);
+    servePublicRepo(false);
+    const res = await appFor(db).request("/owner/w/probe-read", {
+      method: "POST",
+      headers: { origin: "http://cosheaf.test", host: "cosheaf.test" },
+    });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe("/login");
   });

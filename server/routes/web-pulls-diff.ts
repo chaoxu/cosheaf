@@ -517,7 +517,9 @@ function commentFormOptions(
   mode: DiffMode,
   shape: DiffShape,
 ): LineCommentFormOptions | null {
-  if (pull.state === "closed") return null;
+  // No inline-comment composer for logged-out visitors — its POST bounces to
+  // /login. Read members keep it (pull comments are readable-member-writable).
+  if (ctx.anonymous || pull.state === "closed") return null;
   return {
     action: repoHref(ctx.owner, ctx.repo, `/pulls/${pull.number}/comments`),
     path: filePath,

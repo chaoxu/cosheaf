@@ -147,7 +147,11 @@ web.get("/:owner/:repo/issues/:number", webRoute(async (c, ctx) => {
     ${await threadDescription(ctx, bodyText)}
     ${await renderIssueTimeline(ctx, issue.number, comments, timeline ?? [])}
     ${
-      chatBackedIssue
+      // Read-role members may comment (the POST route is webRoute, not
+      // write-gated), so they keep the composer. A logged-out visitor has no
+      // identity to comment with — hide it rather than offer a box that bounces
+      // to /login on submit.
+      chatBackedIssue || ctx.anonymous
         ? ""
         : html`<form class="comment-form" method="post" action="${repoHref(ctx.owner, ctx.repo, `/issues/${issue.number}/comments`)}">
              ${composeField(ctx, { placeholder: "Leave a comment", required: true })}

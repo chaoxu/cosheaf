@@ -7,6 +7,7 @@ import type { LocaleId, T } from "../../shared/i18n/index.js";
 import { canWrite, type Role } from "../../shared/roles.js";
 import { repoHref, urlPath, userHref } from "../../shared/url.js";
 import type { CollaborationClient } from "../collaboration-client.js";
+import type { Config } from "../db.js";
 import { forgeCoreCollaborationClient } from "../core/collaboration.js";
 import { Forgejo } from "../forgejo.js";
 import { ForgejoWorkspaceBackend } from "../forgejo-backend.js";
@@ -57,6 +58,12 @@ export interface WebCtx {
   // "am I local" flag the page modules branch on, derived once here so call sites
   // read `ctx.local` instead of re-deriving `ctx.writeMode === "direct"`.
   local: boolean;
+  // Whether this request is a logged-out visitor reading a public repo. The
+  // backing forge client is tokenless, so it can only ever read a repo Forgejo
+  // itself exposes anonymously; role is "read" and every write affordance is
+  // already gated on role. Pages use this only where an anonymous visitor needs
+  // a "log in" affordance instead of a signed-in one.
+  anonymous: boolean;
   // Whether the workspace renders with Coflat. Cosheaf is Coflat-only today;
   // the flag keeps older page/render helper signatures narrow until they are
   // simplified.
@@ -173,6 +180,15 @@ function decodePathPart(value: string): string {
   }
 }
 
+// The one place an anonymous-public-read Forgejo client is built. The empty
+// token is security-load-bearing: Forgejo enforces visibility for a tokenless
+// caller (public repos 200, private repos 404), so no anonymous read ever runs
+// under a privileged credential. Route it through here (never inline a
+// `new Forgejo({..., token: ""})`) so the boundary stays auditable in one spot.
+export function anonymousForgejo(config: Config): Forgejo {
+  return new Forgejo({ baseUrl: config.forgejoUrl, token: "" });
+}
+
 export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<ReturnType<typeof resolveAuth>>> {
   // Local Workbench: the fixed local user, no token, no Forgejo client.
   if (c.get("config").mode === "local") {
@@ -191,7 +207,10 @@ export async function resolveWebAuth(c: Context<AppEnv>): Promise<Awaited<Return
 
 export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult> {
   const auth = await resolveWebAuth(c);
-  if (!auth) return { ok: false, response: redirect("/login") };
+  // Hosted, logged out: try to serve the repo as a public read-only workspace.
+  // (Local mode's resolveWebAuth always returns the fixed user, so a null auth
+  // here is always hosted-anonymous.)
+  if (!auth) return resolveAnonymousWebRepo(c);
   const owner = c.req.param("owner");
   const repo = c.req.param("repo");
   const config = c.get("config");
@@ -229,6 +248,7 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
       setMember: localMemberSetter(entry, owner, repo),
       originId: entry.identity.originId,
       localEntry: entry,
+      anonymous: false,
       locale: c.get("locale"),
       t: c.get("t"),
     };
@@ -252,7 +272,79 @@ export async function resolveWebRepo(c: Context<AppEnv>): Promise<WebRepoResult>
     currentUserAvatarSrc(fj, auth.forgejoToken),
   ]);
   const setMember = (username: string, role: Role) => setWorkspaceMember({ forgejo: fj, owner, repo, username, role });
-  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID, canOpenPull: true, setMember, locale: c.get("locale"), t: c.get("t") };
+  return { ok: true, owner, repo, user: auth.user.username, backend, fj, collab, ws, db, wsTitle, userAvatarSrc, writeMode: "branch", local: false, coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID, canOpenPull: true, setMember, anonymous: false, locale: c.get("locale"), t: c.get("t") };
+}
+
+// Hosted logged-out read path. A tokenless Forgejo client sees exactly the
+// repos Forgejo exposes anonymously: getRepo returns the repo when it is public
+// and null (404) when it is private or missing. That 404→/login fallback is the
+// whole security boundary — a logged-out visitor cannot tell a private repo from
+// a missing one, so this never enumerates private repos, and no read ever runs
+// under a privileged client. The resulting context is read-only (role "read",
+// which already gates every write affordance) with an empty user (the chrome
+// renders a "Sign in" link) and no open-PR affordance.
+async function resolveAnonymousWebRepo(c: Context<AppEnv>): Promise<WebRepoResult> {
+  // Anonymous is a read-only identity. Before this path existed, `!auth`
+  // redirected every method to /login; some mutation routes are plain `webRoute`
+  // (issue/PR comments are readable-member-writable, not `webRouteForWrite`), so
+  // without this guard a logged-out POST would fall into the handler and attempt
+  // a tokenless write. Send any non-safe method to /login, preserving the old
+  // "logged-out mutation → sign in" invariant for the whole web surface.
+  const method = c.req.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+    return { ok: false, response: redirect("/login") };
+  }
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  const config = c.get("config");
+  // An invalid name or a non-public repo both fall through to /login: never a
+  // distinct 404, which would confirm a name exists (matches the authed path's
+  // "same response for absent as for private" enumeration guard).
+  if (!owner || !repo || !FORGEJO_NAME_RE.test(owner) || !FORGEJO_NAME_RE.test(repo)) {
+    return { ok: false, response: redirect("/login") };
+  }
+  const anon = anonymousForgejo(config);
+  // Fail closed: getRepo already maps 404 (private or missing, anonymously) to
+  // null; catching other errors (forge 5xx/network) to null too means an
+  // unconfirmable repo redirects to /login rather than 500-ing a public page.
+  // The `.private` guard is belt-and-suspenders — Forgejo already 404s a private
+  // repo to a tokenless caller, so this only fires if that ever changes.
+  const repoInfo = await anon.getRepo(owner, repo).catch(() => null);
+  if (!repoInfo || repoInfo.private) return { ok: false, response: redirect("/login") };
+  // Seed the request context the way resolveWebAuth would for a signed-in user,
+  // so shared helpers that read c.get("user")/"fjUser" see a coherent anonymous
+  // identity rather than an unset variable.
+  c.set("user", { username: "" });
+  c.set("forgejoToken", "");
+  c.set("fjUser", anon);
+  const ws: WorkspaceContext = { owner, repo, slug: workspaceSlug(owner, repo), role: "read", defaultMdFormat: COFLAT_FORMAT_ID };
+  c.set("workspace", ws);
+  const backend = new ForgejoWorkspaceBackend(anon);
+  const collab = forgeCoreCollaborationClient(anon);
+  c.set("repoCtx", { backend, fj: anon, collab, owner, repo });
+  const db = c.get("db");
+  const wsTitle = await resolveWorkspaceDisplayTitle(db, anon, ws);
+  return {
+    ok: true,
+    owner,
+    repo,
+    user: "",
+    backend,
+    fj: anon,
+    collab,
+    ws,
+    db,
+    wsTitle,
+    userAvatarSrc: null,
+    writeMode: "branch",
+    local: false,
+    coflat: ws.defaultMdFormat === COFLAT_FORMAT_ID,
+    canOpenPull: false,
+    setMember: () => Promise.reject(new Error("anonymous visitor cannot set members")),
+    anonymous: true,
+    locale: c.get("locale"),
+    t: c.get("t"),
+  };
 }
 
 async function resolveWorkspaceDisplayTitle(
@@ -274,7 +366,13 @@ async function resolveWithMinRole(
 ): Promise<WebRepoResult> {
   const ctx = await resolveWebRepo(c);
   if (!ctx.ok) return ctx;
-  if (!allow(ctx.ws.role)) return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
+  // A logged-out visitor reached a write/admin surface on a public repo: send
+  // them to /login (so "log in to edit/comment" works) rather than the 404 a
+  // signed-in but under-privileged member gets.
+  if (!allow(ctx.ws.role)) {
+    if (ctx.anonymous) return { ok: false, response: redirect("/login") };
+    return { ok: false, response: await notFoundPage(ctx.user, "Repository not found") };
+  }
   return ctx;
 }
 
