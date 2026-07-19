@@ -237,12 +237,14 @@ REQUIRE_SIGNIN_VIEW = false
   live. With it left `true`, the feature is **inert but safe** — the tokenless
   probe fails closed and every anonymous request redirects to `/login`.
 
-Known v1 limitation: cross-file `[@id]` crossref resolution needs the
-auth-gated `/api/v1/.../refs` endpoint, which anonymous readers don't call, so
-a logged-out reader sees bare (unlinked) cross-file references where a signed-in
-reader sees resolved ones. Same-file refs, citations (served from `/raw`), math,
-and rendering are unaffected. Opening that one GET to anonymous public reads is
-the follow-up if resolved crossrefs matter for the public audience.
+Cross-file `[@id]` crossrefs resolve for logged-out readers on the main
+document view: the server pre-resolves them from the SQLite sidecar and embeds
+them in the reader payload (`web-markdown.ts` → `resolveWorkspaceCrossrefs`), so
+the reader renders resolved refs without the auth-gated `/api/v1/.../refs`
+fetch — which also saves signed-in readers a round-trip. Remaining edge: a
+logged-out reader viewing a file on a **non-main branch** still sees bare
+cross-file refs (branch resolution needs the tree parse, which stays behind the
+auth-gated endpoint); same-file refs, citations, and math are unaffected.
 
 ## Route-To-File Map
 

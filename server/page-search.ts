@@ -271,6 +271,69 @@ export function workspaceXrefDuplicates(
     .all(workspaceSlug, ...ids) as XrefDuplicateRow[];
 }
 
+export interface ResolvedRef {
+  id: string;
+  path: string;
+  kind: "page" | "block" | "equation" | "heading";
+  label: string;
+  fragment?: string;
+  line?: number | null;
+}
+
+export interface ResolvedWorkspaceRefs {
+  refs: ResolvedRef[];
+  ambiguous_refs: Array<{ id: string; paths: string[] }>;
+}
+
+// Resolve `[@id]` cross-reference ids against the SQLite sidecar (doc_map pages
+// + xref_targets labels), separating unambiguous hits from ids defined in more
+// than one place. Shared by the GET /refs route and the reader render path,
+// which embeds the result in the payload so a logged-out public read resolves
+// cross-file refs without the auth-gated /refs fetch. The sidecar reflects
+// `main`; branch-specific resolution stays in files-refs.ts.
+export function resolveWorkspaceCrossrefs(
+  db: Database.Database,
+  workspaceSlug: string,
+  ids: readonly string[],
+): ResolvedWorkspaceRefs {
+  const pageRows = workspacePageRefs(db, workspaceSlug, ids);
+  const xrefRows = workspaceXrefRefs(db, workspaceSlug, ids);
+  const sameFileDuplicates = workspaceXrefDuplicates(db, workspaceSlug, ids);
+  const xrefGroups = new Map<string, XrefRefRow[]>();
+  for (const row of xrefRows) xrefGroups.set(row.id, [...(xrefGroups.get(row.id) ?? []), row]);
+  const duplicateIds = new Set(sameFileDuplicates.map((row) => row.id));
+  const unambiguousXrefs = [...xrefGroups.entries()]
+    .filter(([id, rows]) => rows.length === 1 && !duplicateIds.has(id))
+    .flatMap(([, rows]) => rows);
+  const ambiguous_refs = [...xrefGroups.entries()]
+    .filter(([id, rows]) => rows.length > 1 || duplicateIds.has(id))
+    .map(([id, rows]) => ({
+      id,
+      paths: [
+        ...new Set([
+          ...rows
+            .filter((row) => !sameFileDuplicates.some((duplicate) => duplicate.id === id && duplicate.path === row.path))
+            .map((row) => row.path),
+          ...sameFileDuplicates.filter((row) => row.id === id).map((row) => `${row.path} (${row.count} definitions)`),
+        ]),
+      ],
+    }));
+  return {
+    refs: [
+      ...pageRows.map((r): ResolvedRef => ({ id: r.id, path: r.path, kind: "page", label: r.label })),
+      ...unambiguousXrefs.map((r): ResolvedRef => ({
+        id: r.id,
+        path: r.path,
+        kind: r.kind as "block" | "equation" | "heading",
+        label: r.label,
+        fragment: r.id,
+        line: r.line,
+      })),
+    ],
+    ambiguous_refs,
+  };
+}
+
 export interface BacklinkRow {
   src_id: string;
   src_path: string;

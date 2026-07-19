@@ -1,11 +1,10 @@
 import {
   analyzeReferences,
-  extractReferences,
   parseFrontmatter,
 } from "@chaoxu/coflat/parse";
 import type { DocumentContext } from "@chaoxu/coflat/reader";
 import { type AssetPreviewPaths } from "../../shared/asset-previews";
-import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs";
+import { extractCoflatXrefTargets, referencedCrossrefKeys } from "../../shared/coflat-xrefs";
 import { repoBranchFileHref } from "../../shared/url";
 import { type CoflatCitations, loadCitations } from "./coflat-citations";
 import { coflatLinkResolver, resolveRawRepoAssetPath } from "./coflat-repo-links";
@@ -24,6 +23,10 @@ export interface CoflatDocumentPayload {
   /** True for a logged-out visitor reading a public repo. The crossref endpoint
    * (/api/v1/.../refs) is auth-gated, so the reader skips it rather than 401. */
   anonymous?: boolean;
+  /** Cross-file `[@id]` refs the server pre-resolved from the sidecar (main
+   * document reader only). When present the reader renders resolved crossrefs
+   * without calling /refs, so logged-out reads resolve them too. */
+  crossrefs?: WorkspaceRef[];
   /** PR diff surface only: source line numbers changed on this side. The reader
    * renders with sourceLineAttribution and marks blocks intersecting them (#113). */
   markedLines?: readonly number[];
@@ -129,7 +132,7 @@ export function coflatDocumentContextSignature(payload: CoflatDocumentPayload): 
   const localTargets = extractCoflatXrefTargets(payload.source)
     .map((target) => [target.id, target.kind, target.label, target.line ?? null])
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])) || String(a[1]).localeCompare(String(b[1])));
-  const referenceKeys = referencedKeys(payload.source).sort();
+  const referenceKeys = referencedCrossrefKeys(payload.source).sort();
   const citationReferences = analyzeReferences(payload.source).references.map((ref) =>
     ref.ids.map((id, index) => [id, ref.locators[index] ?? ""]),
   );
@@ -213,7 +216,7 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
   const citationLocalTargets = new Set([
     ...localKeys,
     ...workspaceRefs.keys(),
-    ...referencedKeys(payload.source).filter((key) => localAnnotationIdFromRef(key)),
+    ...referencedCrossrefKeys(payload.source).filter((key) => localAnnotationIdFromRef(key)),
   ]);
   return {
     workspaceCrossrefs: workspaceRefs,
@@ -226,11 +229,16 @@ export async function loadCoflatRefs(payload: CoflatDocumentPayload): Promise<Co
 }
 
 async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string, localKeys: ReadonlySet<string>): Promise<Map<string, RenderedCrossref>> {
-  const keys = referencedKeys(source).filter((key) => !localKeys.has(key) && !localAnnotationIdFromRef(key));
+  const keys = referencedCrossrefKeys(source).filter((key) => !localKeys.has(key) && !localAnnotationIdFromRef(key));
   if (keys.length === 0) return new Map();
-  // The crossref endpoint is auth-gated; a logged-out visitor would only get a
-  // 401 (logged as a failed resource in the browser console). Skip it and render
-  // bare refs — citation sources still resolve via the /raw web route.
+  // Prefer crossrefs the server pre-resolved from the sidecar and embedded in
+  // the payload (present for the main document reader): resolve with no network
+  // round-trip, and — crucially — resolve for logged-out public reads, which
+  // can't call the auth-gated /refs endpoint.
+  if (payload.crossrefs) return crossrefMap(payload, payload.crossrefs, keys);
+  // No embed (a branch view): /refs is auth-gated, so a logged-out visitor would
+  // only get a 401 (logged as a failed resource). Skip it and render bare refs;
+  // a signed-in reader fetches. Citation sources still come from the /raw route.
   if (payload.anonymous) return new Map();
   try {
     const params = new URLSearchParams({ ids: keys.join(",") });
@@ -240,28 +248,24 @@ async function workspaceCrossrefs(payload: CoflatDocumentPayload, source: string
     });
     if (!response.ok) return new Map();
     const body = (await response.json()) as { refs?: WorkspaceRef[] };
-    const refs = new Map<string, RenderedCrossref>();
-    for (const ref of body.refs ?? []) {
-      if (refs.has(ref.id)) continue;
-      refs.set(ref.id, {
-        label: ref.label,
-        href: refHref(payload, ref),
-      });
-    }
-    return refs;
+    return crossrefMap(payload, body.refs ?? [], keys);
   } catch (_error) {
     return new Map();
   }
 }
 
-function referencedKeys(source: string): string[] {
-  return [
-    ...new Set(
-      extractReferences(source)
-        .filter((ref) => ref.kind === "crossref" && ref.key)
-        .map((ref) => ref.key as string),
-    ),
-  ];
+// Build the id → rendered-crossref map from a list of resolved refs, keeping only
+// the requested (non-local) keys. Shared by the embedded and fetched paths so
+// both render identically; the server embeds every referenced key, so the
+// `wanted` filter drops same-file ids the reader resolves locally.
+function crossrefMap(payload: CoflatDocumentPayload, list: readonly WorkspaceRef[], keys: readonly string[]): Map<string, RenderedCrossref> {
+  const wanted = new Set(keys);
+  const refs = new Map<string, RenderedCrossref>();
+  for (const ref of list) {
+    if (!wanted.has(ref.id) || refs.has(ref.id)) continue;
+    refs.set(ref.id, { label: ref.label, href: refHref(payload, ref) });
+  }
+  return refs;
 }
 
 function refHref(payload: CoflatDocumentPayload, ref: WorkspaceRef): string {

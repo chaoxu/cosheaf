@@ -4,7 +4,9 @@ import {
   coflatReaderIslandClass,
   coflatReaderSurfaceClass,
 } from "../../shared/coflat-reader-surface.js";
+import { referencedCrossrefKeys } from "../../shared/coflat-xrefs.js";
 import { parseFrontmatterYaml } from "../../shared/frontmatter-yaml.js";
+import { type ResolvedRef, resolveWorkspaceCrossrefs } from "../page-search.js";
 import { loadRepoConfig } from "../repo-config.js";
 import type { WebCtx } from "./web-context.js";
 import { emptyHtml, type Html, html, jsonScript, raw } from "./web-html.js";
@@ -81,6 +83,11 @@ type CoflatReaderPayload = {
   // auth-gated, so the reader skips that fetch rather than emit a 401 (citation
   // sources come from the /raw web route, which does serve anonymous public reads).
   anonymous?: boolean;
+  // Cross-file `[@id]` refs pre-resolved from the sidecar and embedded for the
+  // primary document reader on main, so the island renders resolved crossrefs
+  // without the auth-gated /refs fetch (works logged-out; also saves signed-in
+  // readers a round-trip). Absent on branch views, which keep the client fetch.
+  crossrefs?: ResolvedRef[];
 };
 
 export async function renderMarkdown(ctx: WebCtx, source: string, opts: SurfaceOpts = {}): Promise<Html> {
@@ -135,6 +142,26 @@ function coflatReaderIsland(ctx: WebCtx, source: string, opts: SurfaceOpts, repo
   const className = coflatReaderIslandClass(opts.surface ?? "document");
   const resourceRef = payload.branchExists === false ? "main" : payload.branch;
   const fallbackRefs = resourceRef === "main" ? "main" : `${resourceRef},main`;
+  // Pre-resolve cross-file refs from the sidecar (which reflects main) and embed
+  // them for the primary document reader — renderTitle marks the file/README
+  // view. Gate on branch === "main" (not resourceRef): the sidecar reflects
+  // main and the island builds hrefs against payload.branch, so embedding only
+  // when actually on main keeps links pointing at a branch that exists. The
+  // island then renders resolved crossrefs without the auth-gated /refs fetch,
+  // so a logged-out public read gets them too. Branch views keep the fetch path.
+  if (opts.renderTitle && payload.branch === "main" && payload.branchExists !== false) {
+    const keys = referencedCrossrefKeys(source);
+    if (keys.length > 0) {
+      try {
+        const { refs } = resolveWorkspaceCrossrefs(ctx.db, ctx.ws.slug, keys);
+        if (refs.length > 0) payload.crossrefs = refs;
+      } catch (_error) {
+        // A sidecar read error (e.g. SQLITE_BUSY during a concurrent reindex)
+        // must not 500 the page. Skip the embed; the island falls back to the
+        // authed /refs fetch, or bare refs when logged out — the prior behavior.
+      }
+    }
+  }
   return html`<div
     class="${className}"
     data-reader-branch="${payload.branch}"

@@ -12,16 +12,14 @@ import { extractCoflatXrefTargets } from "../../shared/coflat-xrefs.js";
 import { fileKindForPath } from "../../shared/file-kind.js";
 import type { WorkspaceValidation } from "../../shared/validation.js";
 import {
+  resolveWorkspaceCrossrefs,
   searchWorkspacePages,
   workspaceBacklinks,
   workspacePageRefMatches,
-  workspacePageRefs,
   workspacePagesByTag,
   workspaceTagCloud,
   workspaceTagSuggestions,
-  workspaceXrefDuplicates,
   workspaceXrefMatches,
-  workspaceXrefRefs,
 } from "../page-search.js";
 import { getCachedTree, setCachedTree } from "../tree-cache.js";
 import type { AppEnv } from "../types.js";
@@ -161,47 +159,7 @@ export function registerFileRefRoutes(files: Hono<AppEnv>): void {
       if (!validRequestedBranch(ref)) return c.json(...bad("valid ref required"));
       if (ref !== "main") return c.json(await branchRefs(c, ref, ids));
     }
-    const pageRows = workspacePageRefs(c.get("db"), ws.slug, ids);
-    const xrefRows = workspaceXrefRefs(c.get("db"), ws.slug, ids);
-    const sameFileDuplicates = workspaceXrefDuplicates(c.get("db"), ws.slug, ids);
-    const xrefGroups = new Map<string, typeof xrefRows>();
-    for (const row of xrefRows) xrefGroups.set(row.id, [...(xrefGroups.get(row.id) ?? []), row]);
-    const duplicateIds = new Set(sameFileDuplicates.map((row) => row.id));
-    const unambiguousXrefs = [...xrefGroups.entries()]
-      .filter(([id, rows]) => rows.length === 1 && !duplicateIds.has(id))
-      .flatMap(([, rows]) => rows);
-    const ambiguousRefs = [...xrefGroups.entries()]
-      .filter(([id, rows]) => rows.length > 1 || duplicateIds.has(id))
-      .map(([id, rows]) => ({
-        id,
-        paths: [
-          ...new Set([
-            ...rows
-              .filter((row) => !sameFileDuplicates.some((duplicate) => duplicate.id === id && duplicate.path === row.path))
-              .map((row) => row.path),
-            ...sameFileDuplicates.filter((row) => row.id === id).map((row) => `${row.path} (${row.count} definitions)`),
-          ]),
-        ],
-      }));
-    return c.json({
-      refs: [
-        ...pageRows.map((r) => ({
-          id: r.id,
-          path: r.path,
-          kind: "page",
-          label: r.label,
-        })),
-        ...unambiguousXrefs.map((r) => ({
-          id: r.id,
-          path: r.path,
-          kind: r.kind,
-          label: r.label,
-          fragment: r.id,
-          line: r.line,
-        })),
-      ],
-      ambiguous_refs: ambiguousRefs,
-    });
+    return c.json(resolveWorkspaceCrossrefs(c.get("db"), ws.slug, ids));
   });
 
   files.get("/:owner/:repo/search", (c) => {
