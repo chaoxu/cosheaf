@@ -196,6 +196,12 @@ function WebEditor({
   initialReadOnly?: boolean;
 }) {
   const [content, setContent] = useState(initialContent);
+  // The editor's `value` prop, updated only when something outside the editor
+  // replaces the document (load, save reconcile, draft restore, revert). It is
+  // deliberately NOT the typing-driven `content` above: that one is refreshed
+  // from a debounced snapshot of the editor's own text, and pushing such a
+  // snapshot back in overwrites whatever was typed after it was taken.
+  const [editorValue, setEditorValue] = useState(initialContent);
   const [contextSource, setContextSource] = useState(initialContent);
   const [currentPath, setCurrentPath] = useState(config.path);
   const [savedPath, setSavedPath] = useState(config.path);
@@ -310,6 +316,7 @@ function WebEditor({
   const setEditorContent = useCallback((next: string) => {
     sourceCacheRef.current.reset(next);
     setContent(next);
+    setEditorValue(next);
     setContextSource(next);
     applySuggestingSourceRef.current(next);
   }, []);
@@ -544,7 +551,15 @@ function WebEditor({
         // now happens only on an explicit commit (rare), never every autosave
         // tick — so it no longer resets the doc and clobbers the selection (#161).
         const savedSource = result.content ?? source;
-        replaceEditorDocument(savedSource);
+        // Reconcile only when the server actually rewrote the source and the
+        // buffer still holds exactly what we sent. Typing continues during the
+        // round-trip, so replacing unconditionally would discard every
+        // character entered while the request was in flight.
+        if (savedSource !== source && (editorRef.current?.getDoc() ?? source) === source) {
+          replaceEditorDocument(savedSource);
+        } else {
+          setEditorContent(editorRef.current?.getDoc() ?? savedSource);
+        }
         setBranch(result.branch);
         setBranchExists(true);
         setSavedReadBranch(result.branch);
@@ -580,7 +595,7 @@ function WebEditor({
         return { ok: false, error: err instanceof ApiError ? err.message : "save failed" };
       }
     },
-    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, replaceEditorDocument],
+    [branchForWrite, config.owner, config.repo, config.branch, config.path, draftScope, ignoreOwnChangeEvents, replaceEditorDocument, setEditorContent],
   );
 
   const suggesting = useSuggestingMode({
@@ -1031,7 +1046,7 @@ function WebEditor({
           <Suspense fallback={<div className="web-editor-loading">Loading editor...</div>}>
             {editorContextReady ? (
               <ActiveMarkdownEditor
-                value={content}
+                value={editorValue}
                 mode={readOnly ? "rich" : mode}
                 readOnly={readOnly}
                 from={currentPath}
