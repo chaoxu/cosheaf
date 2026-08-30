@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appProviderCapabilities, createApp } from "./app.js";
 import { seedAuthUser } from "./test-helpers.js";
@@ -65,6 +66,27 @@ describe("createApp API route assembly", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(res.headers.get("set-cookie")).toContain("cosheaf_pat=");
+  });
+
+  it("routes signed Forgejo webhooks before global notification authentication", async () => {
+    const config = testConfig("app-webhook-assembly");
+    const db = freshTestDb("cosheaf-app-webhook-assembly-");
+    const app = createApp({ config, db });
+    const body = JSON.stringify({ repository: { full_name: "" } });
+    const signature = createHmac("sha256", config.webhookSecret).update(body).digest("hex");
+
+    const res = await app.request("/api/v1/webhooks/forgejo", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forgejo-event": "push",
+        "x-forgejo-signature": signature,
+      },
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, ignored: "unknown_repo" });
   });
 
   it("does not expose git-over-HTTPS clone endpoints from Cosheaf", async () => {

@@ -180,8 +180,11 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
     app.route("/api/v1/repos", branches);
     app.route("/api/v1/repos", issues);
     app.route("/api/v1/repos", notifications);
-    app.route("/api/v1", globalNotifications);
+    // Mount the unauthenticated, signature-authenticated webhook before the
+    // broad global-notification router. Its `use("*", requireAuth)` middleware
+    // applies to later routes under /api/v1 as well as its own endpoints.
     app.route("/api/v1/webhooks", webhooks);
+    app.route("/api/v1", globalNotifications);
   }
 
   const appRoot = resolveAppRoot();
