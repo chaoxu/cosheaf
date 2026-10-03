@@ -4,8 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkCoflatRef, DEFAULT_COFLAT_REF } from "../check-coflat-ref.mjs";
-import { output, run } from "./run.mjs";
+import { checkCoflatRef, DEFAULT_COFLAT_REF, nestedGitEnv } from "../check-coflat-ref.mjs";
+import { output as commandOutput, run as runCommand } from "./run.mjs";
+
+// Git hooks export repository-local variables that override nested -C/cwd.
+const output = (command, args, options = {}) => commandOutput(command, args, { ...options, env: nestedGitEnv(options.env) });
+const run = (command, args, options = {}) => runCommand(command, args, { ...options, env: nestedGitEnv(options.env) });
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const COFLAT_DIR = resolve(REPO_ROOT, "..", "coflat");
@@ -41,8 +45,8 @@ export function hasGitStatusEntries(status) {
   return status.trim().length > 0;
 }
 
-function coflatWorkingTreeDirty() {
-  return hasGitStatusEntries(output("git", ["-C", COFLAT_DIR, "status", "--porcelain"], { allowFailure: true }));
+export function coflatWorkingTreeDirty(coflatDir = COFLAT_DIR, env = process.env) {
+  return hasGitStatusEntries(output("git", ["-C", coflatDir, "status", "--porcelain"], { env }));
 }
 
 export async function runIsolatedPinnedGate({
@@ -95,7 +99,7 @@ async function runParallel(commands, options = {}) {
       console.log(`$ ${[command, ...args].join(" ")}`);
       const child = spawn(command, args, {
         cwd: options.cwd,
-        env: options.env ?? process.env,
+        env: nestedGitEnv(options.env),
         stdio: "inherit",
         shell: false,
       });

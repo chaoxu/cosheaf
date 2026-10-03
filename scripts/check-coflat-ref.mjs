@@ -32,7 +32,7 @@ function envCoflatRef(env = process.env) {
   return ref || DEFAULT_COFLAT_REF;
 }
 
-function nestedGitEnv(env = process.env) {
+export function nestedGitEnv(env = process.env) {
   const next = { ...env };
   for (const key of Object.keys(next)) {
     if (key.startsWith("GIT_")) delete next[key];
