@@ -113,6 +113,9 @@
   },
   "license": "MIT",
   "pnpm": {
+    "patchedDependencies": {
+      "katex@0.19.0": "../coflat/patches/katex@0.19.0.patch"
+    },
     "onlyBuiltDependencies": [
       "better-sqlite3",
       "esbuild",
@@ -142,7 +145,7 @@
     "diff": "^9.0.0",
     "dompurify": "^3.4.16",
     "hono": "^4.13.12",
-    "katex": "^0.16.38",
+    "katex": "0.19.0",
     "lucide": "^1.18.0",
     "open": "^11.0.0",
     "parse-diff": "^0.12.0",
