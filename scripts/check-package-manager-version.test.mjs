@@ -23,7 +23,7 @@ describe("package manager version check", () => {
   });
 
   it("passes when local pnpm matches packageManager", () => {
-    const pnpmDir = makeFakePnpm("10.33.0");
+    const pnpmDir = makeFakePnpm("10.34.5");
     const result = spawnSync(
       process.execPath,
       ["scripts/check-package-manager-version.mjs"],

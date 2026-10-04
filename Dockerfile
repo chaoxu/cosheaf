@@ -4,7 +4,7 @@ ARG COSHEAF_RUNTIME_BASE=node:24-bookworm-slim
 
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS build-base
 
-ARG PNPM_VERSION=10.33.0
+ARG PNPM_VERSION=10.34.5
 ARG NPM_CONFIG_REGISTRY=
 ENV PNPM_HOME=/pnpm
 ENV PNPM_STORE_DIR=/pnpm/store
@@ -74,7 +74,7 @@ RUN echo "cosheaf ${COSHEAF_GIT_SHA}"
 
 FROM --platform=$TARGETPLATFORM node:24-bookworm-slim AS deps-base
 
-ARG PNPM_VERSION=10.33.0
+ARG PNPM_VERSION=10.34.5
 ARG NPM_CONFIG_REGISTRY=
 ENV PNPM_HOME=/pnpm
 ENV PNPM_STORE_DIR=/pnpm/store
