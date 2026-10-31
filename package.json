@@ -11,7 +11,7 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.34.5",
+  "packageManager": "pnpm@10.34.8",
   "scripts": {
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
